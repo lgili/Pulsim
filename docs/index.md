@@ -1,185 +1,44 @@
-# PulsimCore Documentation
+# Pulsim — User Guide
 
-<div class="pulsim-hero">
-  <h1>PulsimCore Backend</h1>
-  <p>High-performance power-electronics simulation backend with a <strong>Python-first runtime</strong>, versioned YAML netlists, mixed electrical-and-control domains, and a 50-bench closed-loop regression dashboard.</p>
-  <p>Recommended surface: <code>import pulsim</code> + <code>schema: pulsim-v1</code>.</p>
-  <div class="pulsim-hero-actions">
-    <a class="md-button md-button--primary" href="getting-started/">Get Started</a>
-    <a class="md-button" href="components-reference/">Components Reference</a>
-    <a class="md-button" href="control-blocks-reference/">Control Blocks</a>
-    <a class="md-button" href="api-reference/">API</a>
-  </div>
-</div>
+Pulsim is a header-only C++23 circuit simulator with a Python frontend, designed for **power electronics and SMPS** workloads. The whole solver lives in a few `.hpp` files; the engine pre-factors every reachable switch configuration into a piecewise-linear state-space cache, then steps through time at near-machine-speed.
 
-## What's in the box
+If you've used SPICE before, the mental model is similar but the implementation is very different — see [the mental model page](mental-model.md) for the one-page summary.
 
-<div class="grid cards" markdown>
+## When to use Pulsim
 
-- :material-circle-multiple-outline: **30+ electrical components**
+- You're building **power-electronics converters** (buck, boost, flyback, full-bridge, 3-φ VSI, LDO, …).
+- You want a **scriptable, Python-first** workflow with full access to the solver internals.
+- You need to **run thousands of duty-cycle / load-line sweeps** quickly — the kernel's PWL cache makes each switch combo essentially free after the first solve.
+- You're OK driving things from a `CircuitBuilder` (Python or C++) or YAML — there is no schematic GUI yet.
 
-    ---
+## When NOT to use Pulsim
 
-    Resistors, capacitors, inductors, mosfets (smooth Shichman-Hodges),
-    IGBTs, diodes, transformers, coupled inductors, saturable inductors,
-    fuses, breakers, relays, thyristors, triacs — every parameter,
-    default, and unit documented.
+- You need a full SPICE language frontend with `.MODEL` cards — Pulsim has its own device catalogue, not SPICE-compatible.
+- You're doing **RF / high-frequency PCB** simulations with distributed elements — Pulsim is lumped-only.
+- You need built-in convergence retries that mask physically dubious circuits — the kernel's Newton is principled but unforgiving; expect to think about your circuit.
 
-    [Components Reference](components-reference.md)
+## Reading order
 
-- :material-graph-outline: **30+ virtual control blocks**
+1. [**Getting started**](getting-started.md) — install, run the first transient, see a plot.
+2. [**Mental model**](mental-model.md) — what the Graph, DevicePool, PwlStateSpaceCache, and Newton refresh do.
+3. **Tutorials** — six walk-throughs from simplest to most involved:
+   - [01 — RC charging from a pulse source](tutorials/01-rc-charging.md)
+   - [02 — Buck converter (YAML + switch_fn)](tutorials/02-buck-converter.md)
+   - [03 — Isolated flyback (transformer + commutation)](tutorials/03-flyback-isolated.md)
+   - [04 — Three-phase voltage-source inverter (SPWM)](tutorials/04-3phase-vsi.md)
+   - [05 — LDO with op-amp feedback (VCVS + MOSFET)](tutorials/05-ldo-feedback.md)
+   - [06 — IGBT boost with realistic gate drive](tutorials/06-igbt-boost.md)
+4. [**API reference**](api-reference.md) — Python surface, one page.
+5. [**Gotchas**](gotchas.md) — Newton convergence corner cases and the workarounds that ship in 1.0.
 
-    ---
+## Where the source lives
 
-    PWM generators, PI / PID, integrators, Schmitt triggers,
-    state-machines, lookup tables, transfer functions, Clarke / Park /
-    PLL / SVM — all mixable in the same netlist, all addressable as
-    channels (`chan:PI.output`, `chan:PLL.theta`, …).
-
-    [Control Blocks Reference](control-blocks-reference.md)
-
-- :material-file-code-outline: **Versioned YAML netlists**
-
-    ---
-
-    Schema `pulsim-v1` is stable, validated, diffable, and round-trips
-    through every backend (transient / shooting / harmonic balance / AC
-    / FRA). YAML is the source of truth for the benchmark suite.
-
-    [Netlist YAML Format](netlist-format.md)
-
-- :material-sine-wave: **Mixed-domain runtime**
-
-    ---
-
-    Stamping electrical solver (MNA + trapezoidal / TR-BDF2 / Rosenbrock)
-    runs alongside the control-block scheduler in a single simulator
-    object. Switch events, duty callbacks, channel feedback — all in one
-    Newton iteration.
-
-    [Backend Architecture](backend-architecture.md)
-
-- :material-chart-bell-curve: **AC sweep + FRA**
-
-    ---
-
-    Linearize around a periodic operating point, sweep frequency
-    analytically (`run_ac_sweep`) or via transient injection
-    (`run_fra_sweep`). Both produce LinearSystem outputs you can
-    compare to analytical Bode models.
-
-    [AC Analysis](ac-analysis.md) / [FRA](fra.md)
-
-- :material-thermometer: **Electrothermal coupling**
-
-    ---
-
-    MOSFET / IGBT / BJT carry a `thermal:` port; the runtime computes
-    junction temperature alongside electrical state, and KPI helpers
-    derive `T_j_max`, `Δ_T_j`, and full Foster-network responses.
-
-    [Electrothermal Workflow](electrothermal-workflow.md)
-
-- :material-magnet: **Magnetic fidelity**
-
-    ---
-
-    Saturable inductors with soft-knee L(I), SPICE-style mutual
-    coupling, ideal transformers, and Steinmetz core-loss KPI for B(t)
-    traces — all callable from YAML.
-
-    [Magnetic Models](magnetic-models.md)
-
-- :material-speedometer: **Quantitative KPIs**
-
-    ---
-
-    THD, power factor, efficiency, ripple p-p, rise/settling/overshoot,
-    ZVS%, ZCS%, conduction + switching loss, Steinmetz core loss, and
-    junction temperature — all wired into the benchmark runner with CI
-    gates.
-
-    [KPI Reference](kpi-reference.md)
-
-- :material-cog-transfer-outline: **Real-time codegen + FMI**
-
-    ---
-
-    Export a circuit as a C99 step function (`pulsim.codegen`) or as
-    an FMI 2.0 Co-Simulation FMU — for HIL targets, model exchange, or
-    integration with Simulink / OpenModelica.
-
-    [Code Generation](code-generation.md) / [FMI Export](fmi-export.md)
-
-- :material-circuit-board: **Domain libraries**
-
-    ---
-
-    Vendor MOSFET / IGBT presets, converter templates (buck / boost /
-    full-bridge / LLC), seven motor families (DC, PMSM, PMSM-FOC,
-    BLDC, 3φ and 1φ induction, mechanical), refrigeration compressor
-    loads (Reciprocating / Rotary / Scroll, with a curated refrigerant
-    table for R600a / R134a / R290 / R32 / R744), and three-phase grid
-    primitives (sources, PLLs, grid-following + grid-forming inverters).
-
-    [Catalog Devices](catalog-devices.md) · [Converter Templates](converter-templates.md) · [Motor Models](motor-models.md) · [Compressor + Refrigerant Load](compressor-and-refrigerant-load.md) · [Three-Phase Grid](three-phase-grid.md)
-
-- :material-shield-check-outline: **Benchmark dashboards**
-
-    ---
-
-    50 closed-loop benches, 80+ stress benches, ngspice/LTspice parity
-    matrices, and a live SPICE parity dashboard — Pulsim is regression-
-    tested on real topologies, not toy circuits.
-
-    [Benchmarks and Parity](benchmarks-and-parity.md) · [SPICE Parity Dashboard](spice-parity-dashboard.md)
-
-- :material-tools: **Pro tooling**
-
-    ---
-
-    Parameter sweeps, property-based tests, automatic differentiation,
-    a linear-solver cache, JFNK / GMRES / KLU / Pardiso solvers, and
-    robust convergence policies.
-
-    [Parameter Sweep](parameter-sweep.md) · [Property-Based Testing](property-based-testing.md) · [Automatic Differentiation](automatic-differentiation.md) · [Linear-Solver Cache](linear-solver-cache.md)
-
-</div>
-
-## One-command sanity check
-
-```bash
-python3 -c "import pulsim as ps; print(ps.__version__)"
-```
-
-If that prints a version string, you're set. Otherwise see
-[Getting Started](getting-started.md) → "Installation" or
-[Troubleshooting](troubleshooting.md).
-
-## Recommended learning path
-
-1. [Getting Started](getting-started.md) — install, run an RC step, see the output CSV.
-2. [Numerical Configuration](numerical-configuration.md) — the four presets (`Auto`/`Fast`/`Robust`/`HighFidelity`) that materialise a full tuning profile in one call.
-3. [User Guide](user-guide.md) — the canonical runtime flow.
-4. [Netlist YAML Format](netlist-format.md) — schema for your first real circuit.
-5. [Components Reference](components-reference.md) + [Control Blocks Reference](control-blocks-reference.md) — every block at your disposal.
-6. [Examples and Results](examples-and-results.md) — run shipped scripts end-to-end.
-7. [KPI Reference](kpi-reference.md) — score what you've built.
-8. [Benchmarks and Parity](benchmarks-and-parity.md) — wire it into CI.
-9. [API Reference](api-reference.md) — when you need to drop down past YAML.
-
-## Topic shortcuts
-
-| If you're doing... | Read |
+| Tree | What's inside |
 |---|---|
-| First simulation — what numerical knobs to set | [Numerical Configuration](numerical-configuration.md) |
-| Buck / boost / LLC / FB converter | [Converter Templates](converter-templates.md), [Catalog Devices](catalog-devices.md) |
-| Multilevel (NPC, T-type, flying-cap, MMC) | [Multilevel Converters](multilevel-converters.md), [Numerical Configuration](numerical-configuration.md) |
-| Three-phase / motor drives / vector control | [Three-Phase Grid](three-phase-grid.md), [Motor Models](motor-models.md), [Control Blocks](control-blocks-reference.md) |
-| Refrigeration / fridge / freezer compressor (CC convencional or inverter VCC) | [Compressor + Refrigerant Load](compressor-and-refrigerant-load.md), [Motor Models](motor-models.md) |
-| Magnetics design (saturation, core loss) | [Magnetic Models](magnetic-models.md), [KPI Reference](kpi-reference.md) |
-| Thermal margin sizing | [Electrothermal Workflow](electrothermal-workflow.md), [KPI Reference](kpi-reference.md) |
-| Closed-loop tuning | [AC Analysis](ac-analysis.md), [FRA](fra.md) |
-| HIL / embedded export | [Code Generation](code-generation.md), [FMI Export](fmi-export.md) |
-| Comparing to PSIM / PLECS / ngspice / LTspice | [Benchmarks and Parity](benchmarks-and-parity.md), [SPICE Parity Dashboard](spice-parity-dashboard.md), [GUI Backend Parity](gui-component-parity.md) |
-| Solver convergence problems | [Convergence Tuning](convergence-tuning-guide.md), [Troubleshooting](troubleshooting.md) |
+| `core/include/pulsim/` | The entire C++23 solver (header-only) |
+| `core/tests/` | Catch2 unit + integration tests |
+| `python/pulsim/__init__.py` | Python re-export module + `simulate()` helper |
+| `python/bindings.cpp` | pybind11 bindings |
+| `examples/*.yaml` | YAML showcases referenced from these tutorials |
+| `openspec/specs/pulsim-*` | Authoritative capability specs |
+| `openspec/changes/pulsim-*` | Historical change proposals |

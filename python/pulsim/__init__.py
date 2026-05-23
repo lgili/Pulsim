@@ -1,1548 +1,653 @@
-"""PulsimCore - High-performance circuit simulator for power electronics.
+"""Pulsim — power-electronics circuit simulator.
 
-This is the API with C++23 features and SIMD optimization.
+This top-level module re-exports the C++ kernel bindings from
+``pulsim._pulsim`` and the Python helper modules under a flat
+``pulsim`` namespace, plus a high-level :func:`simulate` helper
+that wraps the cache-build / run_transient dance for the common
+case.
+
+Usage:
+
+    import pulsim as p
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "n0", "gnd", 5.0)
+    b.add_resistor("R1", "n0", "n1", 100.0)
+    b.add_capacitor("C1", "n1", "gnd", 1e-6)
+
+    res = p.simulate(b, t_end=1e-3, dt=1e-5)
+    print(res.num_steps(), "samples; last state =", res.states[-1])
+
+For full control, fall back to the explicit pipeline:
+
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt=1e-5)
+    opts = p.SimulationOptions(t_start=0.0, t_end=1e-3, dt=1e-5)
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=lambda t: p.SwitchStateMask(0),
+    )
 """
 
-__version__ = "0.10.0"
+from __future__ import annotations
 
-import os
-import warnings
-import weakref
+from typing import Callable, Optional
 
-import numpy as np
+from ._pulsim import (  # type: ignore[import-not-found]
+    # Builder API (Layer 6).
+    CircuitBuilder,
+    # Topology / device handles (opaque — produced by the
+    # builder and consumed by the cache).
+    Graph,
+    DevicePool,
+    SwitchStateMask,
+    # Cache + simulation.
+    PwlStateSpaceCache,
+    SimulationOptions,
+    SimulationResult,
+    CommutationEvent,
+    run_transient,
+    # Smooth-blend nonlinear diode params (Layer 4 V3).
+    IdealDiodeParams,
+    # YAML loader (Layer 8).
+    LoadedCircuit,
+    load_yaml_string,
+    load_yaml_file,
+    # Source helpers (Layer 2 V5+).
+    make_pwm_switch_fn,
+    make_dead_time_pwm_pair_fn,
+    make_spwm_pair_fn,
+    ThreePhaseLegIndices,
+    make_three_phase_spwm_fn,
+    make_phase_shift_full_bridge_fn,
+    make_combined_switch_fn,
+)
 
-from ._pulsim import (
-    # Enums
-    DeviceType,
-    SolverStatus,
-    DCStrategy,
-    RLCDamping,
-    DeviceHint,
-    SIMDLevel,
-    Integrator,
-    TimestepMethod,
-    StepMode,
-    FormulationMode,
-    SwitchingMode,
-
-    # simplify-and-harden-numerical-surface — Phase 2: numerical preset.
-    # Single named choice (Auto / Fast / Robust / HighFidelity) that
-    # materializes a fully-tuned SimulationOptions.
-    Preset,
-
-    # simplify-and-harden-numerical-surface — Phase 3 MVP: namespaced
-    # view over the advanced numerical knobs. Returned by
-    # `opts.advanced()`. Flat-field path (opts.newton_options, etc.)
-    # keeps working.
-    AdvancedOptions,
-
-    # Device Classes - Linear
-    Resistor,
-    Capacitor,
-    Inductor,
-    VoltageSource,
-    CurrentSource,
-
-    # Device Classes - Nonlinear
-    IdealDiode,
-    IdealSwitch,
-    MOSFETParams,
-    MOSFET,
-    IGBTParams,
-    IGBT,
-
-    # Time-Varying Sources
-    PWMParams,
-    PWMVoltageSource,
-    SineParams,
-    SineVoltageSource,
-    RampParams,
-    RampGenerator,
-    PulseParams,
-    PulseVoltageSource,
-
-    # Three-Phase Voltage Source (Phase-28 follow-up)
-    ThreePhaseSourceParams,
-
-    # Three-Phase 2-Level VSI helper (Track 4 follow-up: Pulsim 0.10.0a5+)
-    ThreePhaseVsiParams,
-
-    # Realistic diode loss + thermal model (Pulsim 0.10.0a6+: V_F0 + R_d
-    # linear fit, R_th_ja thermal binding, fixed-point electrothermal
-    # iteration support).
-    RealisticDiodeParams,
-
-    # Passive loss + thermal binding (Pulsim 0.10.0a9+):
-    # ResistorParams (TCR + R_th_ja), CapacitorParams (ESR + R_th_ja),
-    # InductorParams (DCR + R_th_ja). Backward-compatible defaults
-    # (R_th_ja == 0 disables the loss accumulator).
-    ResistorParams,
-    CapacitorParams,
-    InductorParams,
-
-    # Sinusoidal-modulated PWM source (Pulsim 0.10.0a10).
-    ModulatedPwmParams,
-    PwmModulation,
-
-    # DC Motor (Track 2 of three-phase / motors / magnetics integration)
-    DcMotorParams,
-
-    # Three-Phase RL Load (Phase 28 follow-up)
-    ThreePhaseLoadTopology,
-    ThreePhaseRLLoadParams,
-
-    # PMSM dynamic device-variant — canonical PMSM stamping path.
-    # The earlier `PmsmSteadyStateParams` POD has been removed (Phase A.2
-    # of consolidate-motors-and-three-phase) in favor of pinning ω on the
-    # dynamic device when only the steady-state operating point is needed.
-    PmsmParams,
-
-    # consolidate-motors-and-three-phase Phase B.2a + C: signal-domain
-    # mechanical primitive + BLDC + Induction motor device-variants.
-    Shaft,
-    MechanicalDeviceParams,
-    BldcMotorParams,
-    InductionMotorParams,
-
-    # compressor-models: single-phase induction motor (PSC) for the
-    # legacy fixed-frequency "compressor convencional" found in pre-
-    # inverter domestic refrigerators / freezers.
-    SinglePhaseInductionMotorParams,
-
-    # consolidate-motors-and-three-phase Phase B.2b: PMSM-FOC current loop.
-    PmsmFocCurrentLoopParams,
-    PmsmFocDeviceParams,
-
-    # compressor-models: refrigeration compressor torque profile.
-    CompressorTopology,
-    CompressorParams,
-    CompressorLoad,
-
-    # compressor-models follow-up: curated refrigerant table (R600a,
-    # R134a, R290, R32, R744) with polytropic_n + typical cycle
-    # pressures, plus helpers to build a CompressorParams from a
-    # refrigerant identifier.
-    Refrigerant,
-    RefrigerantProperties,
-    refrigerant,
-    compressor_defaults_for,
-    apply_refrigerant,
-
-    # consolidate-motors-and-three-phase Phase B.1: programmable + harmonic
-    # three-phase source math objects.
-    ThreePhaseSourceProgrammable,
-    ThreePhaseHarmonicSource,
-    HarmonicComponent,
-
-    # boost-pfc-auto-parasitics (Pulsim 0.10.0a12): pre-flight topology
-    # analysis + automatic C_oss / C_j sizing. The Simulator runs this
-    # automatically by default; the types here are exposed so users can
-    # introspect what was auto-configured via `result.topology_report`.
-    AutoParasiticsOptions,
-    TopologyReport,
-    TopologyIssue,
-    TopologyIssueSeverity,
-    ParasiticAction,
-    ParasiticActionKind,
-
-    # Control Blocks
+from .control import (
     PIController,
     PIDController,
     Comparator,
-    SampleHold,
     RateLimiter,
-    MovingAverageFilter,
-    HysteresisController,
+    SampleHold,
+    FirstOrderLowPass,
     LookupTable1D,
-
-    # Circuit Builder
-    Circuit,
-    VirtualComponent,
-    MixedDomainStepResult,
-    VirtualChannelMetadata,
-
-    # DC Solver
-    solve_dc,
-    dc_operating_point,
-
-    # Transient Simulation
-    run_transient as _run_transient_native,  # noqa: F401 — kept for forward compat
-    run_transient_streaming as _run_transient_streaming_native,
-    SimulationOptions,
-    SimulationResult,
-    Simulator,
-    PeriodicSteadyStateOptions,
-    PeriodicSteadyStateResult,
-    HarmonicBalanceOptions,
-    HarmonicBalanceResult,
-    StiffnessConfig,
-    SwitchingEnergy,
-    FallbackReasonCode,
-    FallbackPolicyOptions,
-    FallbackTraceEntry,
-    BackendTelemetry,
-    ThermalCouplingPolicy,
-    ThermalCouplingOptions,
-    ThermalDeviceConfig,
-    DeviceThermalTelemetry,
-    ThermalSummary,
-    ComponentElectrothermalTelemetry,
-    SimulationEventType,
-    SimulationEvent,
-    LinearSolverTelemetry,
-    YamlParserOptions,
-    YamlParser,
-
-    # Solver Configuration
-    Tolerances,
-    NewtonOptions,
-    NewtonResult,
-
-    # Convergence Monitoring
-    IterationRecord,
-    ConvergenceHistory,
-    VariableConvergence,
-    PerVariableConvergence,
-
-    # Convergence Aids
-    GminConfig,
-    SourceSteppingConfig,
-    PseudoTransientConfig,
-    InitializationConfig,
-    DCConvergenceConfig,
-    DCAnalysisResult,
-
-    # simplify-and-harden-numerical-surface — Phase 7: homotopy
-    # continuation as 5th DC OP strategy.
-    HomotopyConfig,
-
-    # Analytical Solutions (Validation)
-    RCAnalytical,
-    RLAnalytical,
-    RLCAnalytical,
-
-    # Validation Framework
-    ValidationResult_v2 as ValidationResult,
-    compare_waveforms,
-    export_validation_csv,
-    export_validation_json,
-
-    # Benchmark Framework
-    BenchmarkTiming,
-    BenchmarkResult,
-    export_benchmark_csv,
-    export_benchmark_json,
-
-    # Integration Methods
-    BDFOrderConfig,
-    TimestepConfig,
-    AdvancedTimestepConfig,
-    RichardsonLTEConfig,
-
-    # High-Performance Features
-    LinearSolverConfig,
-    LinearSolverKind,
-    PreconditionerKind,
-    IterativeSolverConfig,
-    LinearSolverStackConfig,
-    # simplify-and-harden-numerical-surface — Phase 8.3: friendly
-    # preconditioner selector (Fast / Default / Best) replacing the
-    # leaky PreconditionerKind enum in user-facing API.
-    SolverQuality,
-    detect_simd_level,
-    simd_vector_width,
-    backend_capabilities,
-    solver_status_to_string,
-
-    # Thermal Simulation
-    FosterStage,
-    FosterNetwork,
-    CauerStage,
-    CauerNetwork,
-    ThermalSimulator,
-    ThermalLimitMonitor,
-    ThermalResult,
-    create_mosfet_thermal_model,
-    create_from_datasheet_4param,
-    create_simple_thermal_model,
-
-    # System-level loss aggregation (per-device params live on each device's
-    # own Params struct — MOSFETParams, IGBTParams, RealisticDiodeParams,
-    # ResistorParams, CapacitorParams, InductorParams).
-    LossBreakdown,
-    LossAccumulator,
-    EfficiencyCalculator,
-    LossResult,
-    SystemLossSummary,
-
-    # Frequency-domain analysis (add-frequency-domain-analysis)
-    LinearSystem,
-    AcSweepScale,
-    AcSweepOptions,
-    AcMeasurement,
+    MovingAverageFilter,
+    # Math
+    Gain,
+    Sum,
+    Subtract,
+    MathBlock,
+    # Standalone control
+    Integrator,
+    Differentiator,
+    TransferFunction,
+    StateMachine,
+    OpAmp,
+    # Signal
+    Limiter,
+    DelayBlock,
+    # Modulation
+    PwmGenerator,
+    SpaceVectorModulator,
+    # Transforms
+    ClarkeTransform,
+    InverseClarkeTransform,
+    ParkTransform,
+    InverseParkTransform,
+    # Sync
+    PLL,
+    # Routing
+    SignalMux,
+    SignalDemux,
+    # Auto-tuning
+    tune_pi_from_bode,
+    loop_gain,
+    phase_margin_from_loop,
+    gain_margin_from_loop,
+)
+from .ac_analysis import (
     AcSweepResult,
-    FraOptions,
-    FraMeasurement,
-    FraResult,
+    run_ac_sweep,
+    extract_phasor,
+    plot_bode,
+    plot_nyquist,
+    stability_margins,
+    save_freq_response,
 )
-
-# Netlist Parser (Pure Python)
-from .netlist import (
-    parse_netlist,
-    parse_netlist_verbose,
-    parse_value,
-    NetlistParseError,
-    NetlistWarning,
-    ParsedNetlist,
+from .discovery import (
+    catalog,
+    example,
+    tour,
+    list_topologies,
 )
-
-# Signal-Flow Evaluator (Pure Python, no GUI dependency)
-from .signal_evaluator import (
-    SignalEvaluator,
-    AlgebraicLoopError,
-    SIGNAL_TYPES,
+from .plot import (
+    scope,
+    scope_grid,
+    plot_currents,
+    scope_fft,
+    compare,
 )
-
-# Frequency-domain analysis plotting helpers
-# (matplotlib imported lazily inside the helpers — no required dependency)
-from .frequency_analysis import (
-    bode_plot,
-    nyquist_plot,
-    fra_overlay,
-    export_ac_csv,
-    export_fra_csv,
-    export_ac_json,
-    export_fra_json,
-    load_ac_result_csv,
+from .blockchain import (
+    MixedDomainBlockChain,
+    BlockSpec,
+    parse_block_chain,
 )
-
-# Converter templates (add-converter-templates)
-from . import templates as templates  # noqa: E402  (re-export submodule)
-
-# Real-time code generation (add-realtime-code-generation)
-from . import codegen as codegen  # noqa: E402
-
-# Parameter sweep (add-monte-carlo-parameter-sweep)
-from . import sweep as sweep  # noqa: E402
-
-# FMI 2.0 Co-Simulation export (add-fmi-export)
-from . import fmu as fmu  # noqa: E402
-
-# Schematic auto-layout and rendering (add-schematic-rendering)
-# Lazy-imports networkx / schemdraw inside compute_layout / render —
-# the import below always succeeds even without the [schematic] extra.
-from . import schematic as schematic  # noqa: E402
-
-
-# =============================================================================
-# Ergonomic API extension: string node names in Circuit.add_*
-# =============================================================================
-#
-# Pulsim's C++ Circuit API takes integer node IDs (returned by `add_node`).
-# That's awkward for higher-level code that wants to reference nodes by
-# name (`"in"`, `"out"`, `"sw"`, ...). This wrapper monkey-patches the
-# Pulsim Circuit class so every `add_*` method auto-resolves a string
-# argument by:
-#   1. Looking it up via `circuit.get_node(name)`. If found, use that
-#      integer ID.
-#   2. Otherwise, calling `circuit.add_node(name)` to create the node and
-#      use the returned ID.
-#
-# Special string `"0"` is treated as ground (no `add_node`, returns
-# `circuit.ground()` = -1).
-#
-# This is purely additive — passing integer IDs continues to work
-# untouched, so existing user code is not affected.
-
-def _resolve_node(circuit, node):
-    """Resolve a node argument: integer → unchanged; string → looked up
-    in the circuit (or auto-added). The string `"0"` always means ground."""
-    if isinstance(node, (int, np.integer)):
-        return int(node)
-    if isinstance(node, str):
-        if node in ("0", "gnd", "GND", "ground"):
-            return circuit.ground()
-        try:
-            existing = circuit.get_node(node)
-            return existing
-        except RuntimeError:
-            return circuit.add_node(node)
-    raise TypeError(
-        f"node argument must be int or str, got {type(node).__name__}"
-    )
-
-
-# Map of (method_name, number_of_leading_node_args).
-# Two-terminal: voltage_source, resistor, inductor, capacitor, diode,
-#   current_source, snubber_rc, switch, pulse/pwm/sine_voltage_source.
-# Three-terminal: vcswitch ([ctrl, A, B]), mosfet/igbt ([gate, drain/coll,
-#   source/em]).
-# Four-terminal: transformer ([p1, p2, s1, s2]).
-_ADD_METHOD_NODE_COUNTS = {
-    "add_voltage_source": 2,
-    "add_pulse_voltage_source": 2,
-    "add_pwm_voltage_source": 2,
-    "add_sine_voltage_source": 2,
-    "add_current_source": 2,
-    "add_resistor": 2,
-    "add_inductor": 2,
-    "add_capacitor": 2,
-    "add_diode": 2,
-    "add_snubber_rc": 2,
-    "add_switch": 2,
-    "add_vcswitch": 3,
-    "add_mosfet": 3,
-    "add_igbt": 3,
-    "add_transformer": 4,
-}
-
-
-class _CircuitWrapper(Circuit):
-    """Subclass of the pybind11-bound Circuit that auto-resolves
-    string node names in every `add_*` method. pybind11 doesn't permit
-    monkey-patching the bound class methods directly, so subclassing
-    is the cleanest path. The subclass overrides each known `add_*`
-    method by name and forwards to `super().<method>()` after
-    converting string args to integer IDs."""
-    pass
-
-
-def _make_string_resolving_method(method_name, n_node_args):
-    """Generate an override for `_CircuitWrapper.<method_name>`."""
-    raw = getattr(Circuit, method_name)
-
-    def override(self, name, *args, **kwargs):
-        if len(args) < n_node_args:
-            return raw(self, name, *args, **kwargs)
-        nodes = [_resolve_node(self, args[i]) for i in range(n_node_args)]
-        rest = args[n_node_args:]
-        return raw(self, name, *nodes, *rest, **kwargs)
-
-    override.__name__ = method_name
-    override.__qualname__ = f"_CircuitWrapper.{method_name}"
-    override.__doc__ = (raw.__doc__ or "") + (
-        "\n\nAccepts string node names — they're auto-resolved to integer "
-        "IDs (looked up via `get_node` or created via `add_node`). The "
-        "string `'0'` (or `'gnd'` / `'GND'` / `'ground'`) always resolves "
-        "to ground (-1)."
-    )
-    return override
-
-
-for _name, _n_nodes in _ADD_METHOD_NODE_COUNTS.items():
-    if hasattr(Circuit, _name):
-        setattr(_CircuitWrapper, _name,
-                _make_string_resolving_method(_name, _n_nodes))
-
-
-# =============================================================================
-# Legacy DiodeParams support for `Circuit.add_diode(name, n1, n2, params)`.
-#
-# The C++ binding's `add_diode` only accepts `(name, anode, cathode,
-# g_on=1000, g_off=1e-9)`. Older test code passes a `DiodeParams` object
-# in the 4th slot (mirroring how `MOSFETParams` and `IGBTParams` work).
-# We expose a Python-only `DiodeParams` that carries `g_on`, `g_off`,
-# `ideal`, `is_`, `n`, and translate to the native conductance form when
-# a `DiodeParams` is detected in the 4th slot.
-
-class DiodeParams:
-    """Diode parameters compatible with legacy test code.
-
-    Attributes:
-        ideal: Use ideal piecewise-linear conduction (default `True`).
-        g_on: Forward-biased conductance (S). Default 1000 (RON ≈ 1 mΩ).
-        g_off: Reverse-biased conductance (S). Default 1e-9.
-        is_: Shockley saturation current. Stored but not used by the
-            current `IdealDiode` model — included for API compatibility
-            with legacy non-ideal Shockley tests.
-        n: Ideality factor. Same as `is_` — stored, not consumed.
-    """
-
-    __slots__ = ("ideal", "g_on", "g_off", "is_", "n")
-
-    def __init__(
-        self,
-        ideal: bool = True,
-        g_on: float = 1000.0,
-        g_off: float = 1e-9,
-        is_: float = 1e-12,
-        n: float = 1.0,
-    ):
-        self.ideal = bool(ideal)
-        self.g_on = float(g_on)
-        self.g_off = float(g_off)
-        self.is_ = float(is_)
-        self.n = float(n)
-
-
-_native_add_diode = Circuit.add_diode  # type: ignore[attr-defined]
-
-
-def _add_diode_with_params_support(self, name, n1, n2, *args, **kwargs):
-    """Override `add_diode` to also accept a `DiodeParams` object as the
-    4th positional argument (legacy form). Native form
-    `(name, n1, n2, g_on, g_off)` continues to work."""
-    n1_resolved = _resolve_node(self, n1)
-    n2_resolved = _resolve_node(self, n2)
-
-    # Legacy form: 4th arg is a DiodeParams.
-    if args and isinstance(args[0], DiodeParams):
-        params = args[0]
-        return _native_add_diode(
-            self, name, n1_resolved, n2_resolved,
-            params.g_on, params.g_off,
-        )
-    # Native form passthrough.
-    return _native_add_diode(self, name, n1_resolved, n2_resolved, *args, **kwargs)
-
-
-_CircuitWrapper.add_diode = _add_diode_with_params_support  # type: ignore[attr-defined]
-
-
-# =============================================================================
-# Legacy SwitchParams + add_switch(name, n1, n2, ctrl, ctrl_neg, params)
-#
-# Legacy tests pass a `SwitchParams` instance to `add_switch` and use a
-# 4-node call form to wire a voltage-controlled switch:
-#
-#   sw_params = sl.SwitchParams()
-#   sw_params.ron = 0.01
-#   sw_params.roff = 1e9
-#   sw_params.vth = 2.5
-#   circuit.add_switch("S1", "in", "out", "ctrl", "0", sw_params)
-#
-# The native `Circuit.add_switch` is a 2-node uncontrolled switch
-# (boolean closed flag). The legacy semantics map cleanly to
-# `Circuit.add_vcswitch` when `ctrl_neg == ground`:
-#   ron → g_on = 1/ron, roff → g_off = 1/roff, vth → v_threshold
-
-class SwitchParams:
-    """Voltage-controlled switch parameters compatible with legacy tests.
-
-    Attributes:
-        ron: ON-state resistance (Ω). Default 1 mΩ.
-        roff: OFF-state resistance (Ω). Default 1 GΩ.
-        vth: Control threshold voltage (V). ctrl > vth → switch ON.
-        hysteresis: tanh-smoothing width (V) for the behavioral model.
-            Smaller → sharper transition (better for "sharp threshold"
-            tests). Default 0.01 V resolves the OFF state to ~g_off
-            within ±10 mV of `vth`. Set explicitly to override.
-    """
-
-    __slots__ = ("ron", "roff", "vth", "hysteresis")
-
-    def __init__(
-        self,
-        ron: float = 1e-3,
-        roff: float = 1e9,
-        vth: float = 2.5,
-        hysteresis: float = 0.01,
-    ):
-        self.ron = float(ron)
-        self.roff = float(roff)
-        self.vth = float(vth)
-        self.hysteresis = float(hysteresis)
-
-
-_native_add_switch = Circuit.add_switch  # type: ignore[attr-defined]
-_native_add_vcswitch = Circuit.add_vcswitch  # type: ignore[attr-defined]
-
-
-def _add_switch_with_params_support(self, name, n1, n2, *args, **kwargs):
-    """Override `add_switch` to also accept the legacy 4-node + params
-    form, dispatching to `add_vcswitch` when applicable. Native form
-    `(name, n1, n2, closed, g_on, g_off)` continues to work."""
-    n1_resolved = _resolve_node(self, n1)
-    n2_resolved = _resolve_node(self, n2)
-
-    # Legacy form: (name, n1, n2, ctrl, ctrl_neg, params)
-    # `ctrl_neg` must be ground for the native vcswitch (which is
-    # ground-referenced). Differential control pairs are not supported.
-    if (
-        len(args) == 3
-        and isinstance(args[2], SwitchParams)
-    ):
-        ctrl_pos = _resolve_node(self, args[0])
-        ctrl_neg = _resolve_node(self, args[1])
-        params = args[2]
-        if ctrl_neg == self.ground():
-            return _native_add_vcswitch(
-                self, name, ctrl_pos, n1_resolved, n2_resolved,
-                params.vth, 1.0 / params.ron, 1.0 / params.roff,
-                # SwitchParams-driven path: honor the user-set
-                # `hysteresis` (default 0.01 V — sharper than the C++
-                # 0.5 V default that's kept for legacy buck-event
-                # tests). At 0.01 V the OFF state resolves to ~g_off
-                # within ±10 mV of `vth`, matching sharp-threshold
-                # test expectations.
-                params.hysteresis,
-            )
-        # Differential ctrl not supported — fall through to native
-        # which will reject the args.
-
-    # Native form passthrough.
-    return _native_add_switch(self, name, n1_resolved, n2_resolved, *args, **kwargs)
-
-
-_CircuitWrapper.add_switch = _add_switch_with_params_support  # type: ignore[attr-defined]
-
-
-# Re-export the wrapped class as the public `Circuit`. Existing user
-# code that does `from pulsim import Circuit` and `isinstance(c, Circuit)`
-# checks continues to work — `_CircuitWrapper` IS-A `Circuit` (subclass).
-# Callers that constructed via the C-side `_pulsim.Circuit` directly are
-# unaffected.
-Circuit = _CircuitWrapper
-
-
-# =============================================================================
-# Legacy API aliases on SimulationOptions
-# =============================================================================
-#
-# Older test/example code uses different attribute names than the
-# current C++ binding. Provide aliases so legacy code still works.
-#
-# Mappings:
-#   `opts.use_ic`              → `opts.uic`
-#   `opts.dtmin`               → `opts.dt_min`
-#   `opts.integration_method`  → `opts.integrator`
-#
-# Subclass approach (same as Circuit) since pybind11 doesn't permit
-# monkey-patching properties on a bound class.
-
-class _SimulationOptionsWrapper(SimulationOptions):
-    """Subclass of `SimulationOptions` with legacy attribute aliases.
-
-    Native C++ binding has these names: tstart, tstop, dt, dt_min,
-    dt_max, integrator, ... The C++ struct also has a `use_ic` field
-    (`core/include/pulsim/types.hpp:105`) but the Python binding does
-    NOT expose it. We approximate it Python-side: legacy `use_ic` /
-    `uic` attribute is stored on the wrapper instance and intercepted
-    by `_SimulatorWrapper.run_transient()` (auto-seeds x0 from
-    `circuit.initial_state()` when set).
-
-    Other legacy aliases:
-      `opts.dtmin`              → `opts.dt_min`
-      `opts.dtmax`              → `opts.dt_max`
-      `opts.integration_method` → `opts.integrator`
-    """
-
-    # `use_ic` / `uic` — both names accepted; stored on the Python
-    # instance and consumed by `_SimulatorWrapper.run_transient()`.
-    @property
-    def use_ic(self):
-        return getattr(self, "_use_ic", False)
-
-    @use_ic.setter
-    def use_ic(self, value):
-        # Use object.__setattr__ to avoid triggering pybind11's
-        # `not implemented` exception for an unknown attribute.
-        object.__setattr__(self, "_use_ic", bool(value))
-
-    @property
-    def uic(self):
-        return self.use_ic
-
-    @uic.setter
-    def uic(self, value):
-        self.use_ic = value
-
-    @property
-    def dtmin(self):
-        return self.dt_min
-
-    @dtmin.setter
-    def dtmin(self, value):
-        self.dt_min = float(value)
-
-    @property
-    def dtmax(self):
-        return self.dt_max
-
-    @dtmax.setter
-    def dtmax(self, value):
-        self.dt_max = float(value)
-
-    @property
-    def integration_method(self):
-        return self.integrator
-
-    @integration_method.setter
-    def integration_method(self, value):
-        self.integrator = value
-
-
-# -----------------------------------------------------------------------------
-# simplify-and-harden-numerical-surface — Phase 3.4
-#
-# Emit `DeprecationWarning` (once per attribute per process) on the 9 flat
-# sub-block fields. The canonical access path is `opts.advanced().<name>`;
-# the flat fields keep working for back-compat but the warning steers new
-# users to the namespaced surface.
-#
-# DeprecationWarning is silent by default in non-__main__ contexts (PEP
-# 565) so library callers are not spammed. `pytest`-driven test runs DO
-# surface these warnings — that's the intended migration signal.
-# -----------------------------------------------------------------------------
-
-_advanced_deprecation_warned: set[str] = set()
-
-
-def _make_advanced_alias_property(field_name: str, advanced_path: str):
-    """Build a `@property` that forwards `opts.<field_name>` to the C++
-    binding while emitting a one-shot `DeprecationWarning` per process.
-
-    The setter mirrors the getter — same warning, same forward.
-    """
-    def _getter(self):
-        if field_name not in _advanced_deprecation_warned:
-            _advanced_deprecation_warned.add(field_name)
-            warnings.warn(
-                f"SimulationOptions.{field_name} is deprecated; "
-                f"use opts.advanced().{advanced_path} instead. "
-                f"(simplify-and-harden-numerical-surface Phase 3.4)",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        # Skip the wrapper subclass property descriptor; go straight to the
-        # pybind11-bound base attribute.
-        return SimulationOptions.__bases__[0].__dict__[field_name].__get__(
-            self, type(self))
-
-    def _setter(self, value):
-        if field_name not in _advanced_deprecation_warned:
-            _advanced_deprecation_warned.add(field_name)
-            warnings.warn(
-                f"SimulationOptions.{field_name} = ... is deprecated; "
-                f"use opts.advanced().{advanced_path} = ... instead. "
-                f"(simplify-and-harden-numerical-surface Phase 3.4)",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        SimulationOptions.__bases__[0].__dict__[field_name].__set__(
-            self, value)
-
-    return property(_getter, _setter)
-
-
-# Map of (legacy flat field → canonical replacement guidance).
-# The 9 sub-block fields collapse under `opts.advanced().<name>`. The 2
-# boolean fields (`adaptive_timestep`, `direct_formulation_fallback`)
-# from Phase 10.1 are also covered here — they have NO `advanced.*`
-# equivalent; the canonical replacement is `opts.step_mode` (for
-# adaptive_timestep) or "remove entirely; DAE fallback is now
-# unconditional internally" (for direct_formulation_fallback).
-_ADVANCED_FIELD_ALIASES = {
-    "newton_options":               "newton",
-    "timestep_config":              "timestep",
-    "lte_config":                   "lte",
-    "bdf_config":                   "bdf_order",
-    "dc_config":                    "dc",
-    "stiffness_config":             "stiffness",
-    "fallback_policy":              "fallback",
-    "formulation_mode":             "formulation",
-    "linear_solver":                "linear_solver",
-    # Phase 10.1: bool fields deprecated in favour of step_mode / the
-    # unconditional-internal-fallback contract. The "advanced path" for
-    # these is a documentation string the warning quotes verbatim.
-    "adaptive_timestep":            "step_mode (set to Variable / Fixed)",
-    "direct_formulation_fallback":  "(removed — DAE fallback is unconditional internally)",
-}
-
-# NOTE: we DO NOT install these deprecation properties yet. Doing so would
-# fire warnings in every test_* file and example_* script that hasn't been
-# migrated to `opts.advanced().<name>` (most of them). The 3.4 shim is
-# wired but gated by an opt-in:
-#
-#   import pulsim
-#   pulsim.enable_advanced_deprecation_warnings()
-#
-# Users who want the migration signal flip the switch; the rest of the
-# codebase stays silent during the deprecation window. Phase 3.6
-# (examples / docs migration) will flip the switch in the example
-# scripts once they're migrated.
-
-def enable_advanced_deprecation_warnings() -> None:
-    """Install Phase 3.4 deprecation aliases on `SimulationOptions`.
-
-    Once called, reads and writes to the 9 flat sub-block fields
-    (`newton_options`, `timestep_config`, `lte_config`, `bdf_config`,
-    `dc_config`, `stiffness_config`, `fallback_policy`,
-    `formulation_mode`, `linear_solver`) emit a `DeprecationWarning`
-    pointing users to the canonical `opts.advanced().<name>` access.
-
-    Warnings fire ONCE per attribute per process to avoid log spam.
-
-    Calling this function more than once is a no-op.
-    """
-    if getattr(_SimulationOptionsWrapper, "_advanced_aliases_installed", False):
-        return
-    for field_name, advanced_path in _ADVANCED_FIELD_ALIASES.items():
-        setattr(
-            _SimulationOptionsWrapper,
-            field_name,
-            _make_advanced_alias_property(field_name, advanced_path),
-        )
-    _SimulationOptionsWrapper._advanced_aliases_installed = True
-
-
-SimulationOptions = _SimulationOptionsWrapper
-
-
-# Module-level alias: `pulsim.IntegrationMethod` → `pulsim.Integrator`.
-# Plus map legacy enum names like `GEAR2` to their current equivalents.
-class _IntegrationMethodAlias:
-    """Alias for the older `IntegrationMethod` enum name. Legacy names
-    map to current `Integrator` values:
-      GEAR2 → BDF2  (second-order GEAR is the BDF2 multistep family)
-      BACKWARD_EULER → BDF1
-      TRAPEZOIDAL → Trapezoidal
-    """
-
-    def __getattr__(self, name):
-        # Direct passthroughs.
-        if hasattr(Integrator, name):
-            return getattr(Integrator, name)
-        # Legacy aliases.
-        legacy_map = {
-            "GEAR2": Integrator.BDF2,
-            "BACKWARD_EULER": Integrator.BDF1,
-            "TRAPEZOIDAL": Integrator.Trapezoidal,
-            "TRBDF2": Integrator.TRBDF2,
-        }
-        if name in legacy_map:
-            return legacy_map[name]
-        raise AttributeError(
-            f"IntegrationMethod has no member {name!r}. "
-            f"Use one of {[v for v in dir(Integrator) if not v.startswith('_')]}"
-        )
-
-
-IntegrationMethod = _IntegrationMethodAlias()
-
-
-# =============================================================================
-# Legacy API: result.signal_names + Simulator capturing circuit ref
-# =============================================================================
-#
-# Older test/example code uses `result.signal_names` on the return value
-# of `Simulator.run_transient()`. The C++ `SimulationResult` struct doesn't
-# carry node-name metadata (that lives on the Circuit). It also doesn't
-# support `dynamic_attr`, so we can't just `result.signal_names = ...`
-# from Python.
-#
-# Workaround: wrap the Simulator so `run_transient()` returns a Python
-# proxy object that delegates every attribute access to the raw C++
-# result and adds a `signal_names` attribute pulled from the captured
-# circuit. `result.data` continues to work (def_property_readonly in the
-# C++ binding).
-
-class _SimulationResultProxy:
-    """Lightweight proxy around the C++ `SimulationResult` that adds
-    Python-side `signal_names` and forwards all other attribute access
-    (time, states, data, success, final_status, message, events,
-    timestep_rejections, ...) to the underlying object.
-
-    The proxy is intentionally not a subclass of `SimulationResult` —
-    pybind11 didn't bind it with `dynamic_attr`, and the tests don't do
-    `isinstance(result, SimulationResult)` checks (verified across
-    `python/tests/`). Delegation is sufficient and keeps the wrapper
-    simple."""
-
-    __slots__ = ("_raw", "signal_names")
-
-    def __init__(self, raw_result, signal_names):
-        object.__setattr__(self, "_raw", raw_result)
-        object.__setattr__(self, "signal_names", list(signal_names))
-
-    def __getattr__(self, name):
-        # Only called when the attribute is NOT found via normal lookup
-        # (i.e. not in `__slots__`). Delegate to the wrapped result.
-        raw = object.__getattribute__(self, "_raw")
-        return getattr(raw, name)
-
-    def __setattr__(self, name, value):
-        if name in ("_raw", "signal_names"):
-            object.__setattr__(self, name, value)
-        else:
-            setattr(self._raw, name, value)
-
-    def __repr__(self):
-        return f"<SimulationResult proxy: {self._raw!r}>"
-
-
-# Native C++ Simulator (kept under `_SimulatorNative`). The exposed
-# `Simulator` becomes a Python subclass that captures the circuit
-# reference so `run_transient()` can attach node names to the result.
-_SimulatorNative = Simulator
-
-
-class _SimulatorWrapper(_SimulatorNative):
-    """Subclass of the pybind11 `Simulator` that captures the circuit
-    used at construction time. `run_transient()` returns a
-    `_SimulationResultProxy` which adds `result.signal_names` (pulled
-    from `circuit.signal_names()`) on top of every native field of the
-    C++ result.
-
-    Existing code that doesn't use `signal_names` is unaffected — every
-    other attribute (time, states, data, success, ...) continues to work
-    via the proxy's `__getattr__` delegation."""
-
-    def __init__(self, circuit, options=None):
-        if options is None:
-            super().__init__(circuit)
-            wants_ic = False
-        else:
-            super().__init__(circuit, options)
-            # Capture `use_ic` from the Python-side options at
-            # construction time. The C++ Simulator stores a `Options`
-            # copy, but the Python binding doesn't expose `use_ic`,
-            # so a query via `self.options` would always come back as
-            # the C++ default (false).
-            wants_ic = bool(
-                getattr(options, "use_ic", False)
-                or getattr(options, "uic", False)
-            )
-        # Python-side bookkeeping: subclasses of pybind11 classes get a
-        # `__dict__`, so this is fine.
-        self._captured_circuit = circuit
-        self._captured_use_ic = wants_ic
-
-    def _wrap_result(self, raw_result):
-        try:
-            names = self._captured_circuit.signal_names()
-        except Exception:
-            names = []
-        return _SimulationResultProxy(raw_result, names)
-
-    def run_transient(self, *args, **kwargs):  # type: ignore[override]
-        # Honor the legacy `use_ic` / `uic` flag captured at construction
-        # time. The C++ binding does not expose `SimulationOptions::use_ic`,
-        # so we approximate it: when the flag is set AND the user did not
-        # pass an explicit x0, seed the transient with
-        # `circuit.initial_state()` (built from device IC values:
-        # capacitor voltages and inductor currents).
-        if not args and not kwargs and self._captured_use_ic:
-            try:
-                x0 = self._captured_circuit.initial_state()
-                raw = _SimulatorNative.run_transient(self, x0)
-                return self._wrap_result(raw)
-            except Exception:
-                # Fall back to default behavior if `initial_state`
-                # is unavailable (e.g. very-old circuits).
-                pass
-        raw = super().run_transient(*args, **kwargs)
-        return self._wrap_result(raw)
-
-
-Simulator = _SimulatorWrapper
-
-
-_AUTO_BLEEDER_CIRCUITS = weakref.WeakSet()
-
-
-def _copy_newton_options(source):
-    opts = NewtonOptions()
-    if source is None:
-        return opts
-
-    for name in dir(source):
-        if name.startswith("_") or name == "tolerances":
-            continue
-        value = getattr(source, name)
-        if callable(value):
-            continue
-        try:
-            setattr(opts, name, value)
-        except Exception:
-            # Keep compatibility if bindings change fields across versions
-            pass
-
-    if hasattr(source, "tolerances"):
-        dst_tol = Tolerances()
-        src_tol = source.tolerances
-        for name in dir(src_tol):
-            if name.startswith("_"):
-                continue
-            value = getattr(src_tol, name)
-            if callable(value):
-                continue
-            try:
-                setattr(dst_tol, name, value)
-            except Exception:
-                pass
-        opts.tolerances = dst_tol
-
-    return opts
-
-
-def _clone_state_vector(x0):
-    if x0 is None:
-        return None
-    if isinstance(x0, np.ndarray):
-        return x0.copy()
-    if isinstance(x0, (list, tuple)):
-        return list(x0)
-    try:
-        return np.array(x0, dtype=float, copy=True)
-    except Exception:
-        return x0
-
-
-def _is_state_vector(value):
-    if value is None:
-        return False
-    if isinstance(value, (NewtonOptions, LinearSolverStackConfig)):
-        return False
-    return isinstance(value, (list, tuple, np.ndarray))
-
-
-def _parse_run_transient_args(args):
-    if len(args) > 3:
-        raise TypeError(
-            "run_transient accepts at most 3 positional extras: "
-            "[x0], [newton_options], [linear_solver]"
-        )
-
-    x0 = None
-    newton_options = None
-    linear_solver = None
-
-    if len(args) == 0:
-        return x0, newton_options, linear_solver
-
-    first = args[0]
-    if isinstance(first, NewtonOptions):
-        newton_options = first
-        if len(args) >= 2:
-            linear_solver = args[1]
-    elif isinstance(first, LinearSolverStackConfig):
-        linear_solver = first
-    elif _is_state_vector(first):
-        x0 = first
-        if len(args) >= 2:
-            newton_options = args[1]
-        if len(args) >= 3:
-            linear_solver = args[2]
-    else:
-        raise TypeError(
-            "Invalid run_transient positional arguments. Expected x0, "
-            "NewtonOptions and/or LinearSolverStackConfig."
-        )
-
-    return x0, newton_options, linear_solver
-
-
-def _run_transient_once(circuit, t_start, t_stop, dt, x0, newton_options, linear_solver):
-    """Run a single transient attempt.
-
-    Historically this called the C++ `run_transient` binding which applies
-    `make_robust_transient_options` internally — that path forces TRBDF2 +
-    adaptive timestep + LTE-controlled stepping. For stiff first-order
-    circuits seeded with a non-DC-OP `x0` (e.g. RL with `V_inductor=V_source`
-    initially because the inductor is treated as an open circuit at t=0),
-    that combo lets the LTE controller grow `dt` toward `tau`, where TRBDF2
-    becomes unstable; the integrator then drifts the source-pinned node
-    voltages by orders of magnitude and reports `success=True`.
-
-    Workaround: route through `Simulator(...)` with a fixed-step
-    Trapezoidal default, which is stable for the dt that the user
-    explicitly chose. Callers that need TRBDF2+adaptive can construct a
-    `Simulator` directly with a `SimulationOptions` of their choice. The
-    return shape is preserved (`(times, states, success, message)`).
-    """
-    opts = SimulationOptions()
-    opts.tstart = float(t_start)
-    opts.tstop = float(t_stop)
-    opts.dt = float(dt)
-    opts.adaptive_timestep = False
-    opts.integrator = Integrator.Trapezoidal
-    if newton_options is not None:
-        opts.newton_options = newton_options
-    if linear_solver is not None:
-        opts.linear_solver = linear_solver
-    sim = _SimulatorNative(circuit, opts)
-    if x0 is None:
-        result = sim.run_transient()
-    else:
-        result = sim.run_transient(x0)
-    return (result.time, result.states, result.success, result.message)
-
-
-def _is_retryable_failure(message: str) -> bool:
-    text = (message or "").lower()
-    tokens = (
-        "max iterations",
-        "diverg",
-        "singular",
-        "numerical",
-        "transient failed",
-        "not finite",
-        "nan",
-    )
-    return any(token in text for token in tokens)
-
-
-def _tune_linear_solver_for_robust(linear_solver):
-    try:
-        has_default_order = (
-            len(linear_solver.order) == 0
-            or (
-                len(linear_solver.order) == 1
-                and linear_solver.order[0] == LinearSolverKind.SparseLU
-            )
-        )
-        if has_default_order:
-            linear_solver.order = [
-                LinearSolverKind.KLU,
-                LinearSolverKind.EnhancedSparseLU,
-                LinearSolverKind.GMRES,
-                LinearSolverKind.BiCGSTAB,
-            ]
-
-        if len(linear_solver.fallback_order) == 0:
-            linear_solver.fallback_order = [
-                LinearSolverKind.EnhancedSparseLU,
-                LinearSolverKind.SparseLU,
-                LinearSolverKind.GMRES,
-                LinearSolverKind.BiCGSTAB,
-            ]
-
-        linear_solver.allow_fallback = True
-        linear_solver.auto_select = True
-        linear_solver.size_threshold = min(linear_solver.size_threshold, 1200)
-        linear_solver.nnz_threshold = min(linear_solver.nnz_threshold, 120000)
-        linear_solver.diag_min_threshold = max(linear_solver.diag_min_threshold, 1e-12)
-
-        it = linear_solver.iterative_config
-        it.max_iterations = max(it.max_iterations, 300)
-        it.tolerance = min(it.tolerance, 1e-8)
-        it.restart = max(it.restart, 40)
-        it.enable_scaling = True
-        it.scaling_floor = min(it.scaling_floor, 1e-12)
-        if it.preconditioner in (PreconditionerKind.None_, PreconditionerKind.Jacobi):
-            it.preconditioner = PreconditionerKind.ILUT
-        it.ilut_drop_tolerance = min(it.ilut_drop_tolerance, 1e-3)
-        it.ilut_fill_factor = max(it.ilut_fill_factor, 10.0)
-    except Exception:
-        pass
-
-
-def _tune_newton_for_robust(opts):
-    try:
-        opts.max_iterations = max(int(opts.max_iterations), 120)
-        opts.auto_damping = True
-        opts.min_damping = min(float(opts.min_damping), 1e-4)
-        opts.enable_limiting = True
-        opts.max_voltage_step = max(float(opts.max_voltage_step), 10.0)
-        opts.max_current_step = max(float(opts.max_current_step), 20.0)
-        opts.enable_trust_region = True
-        opts.trust_radius = max(float(opts.trust_radius), 8.0)
-        opts.trust_shrink = min(float(opts.trust_shrink), 0.5)
-        opts.trust_expand = max(float(opts.trust_expand), 1.5)
-        opts.detect_stall = False
-    except Exception:
-        pass
-
-
-def _apply_auto_bleeders(circuit, resistance=1e7):
-    if circuit in _AUTO_BLEEDER_CIRCUITS:
-        return False
-    for node_idx in range(circuit.num_nodes()):
-        circuit.add_resistor(f"__auto_bleed_n{node_idx}", node_idx, -1, resistance)
-    _AUTO_BLEEDER_CIRCUITS.add(circuit)
-    return True
-
-
-def _apply_nonlinear_regularization(circuit):
-    if not hasattr(circuit, "apply_numerical_regularization"):
-        return 0
-    try:
-        return int(circuit.apply_numerical_regularization())
-    except Exception:
-        return 0
-
-
-# refactor-pwl-switching-engine, Phase 7.4: opt-out of the retry / auto-
-# bleeder wrapper layer. Set PULSIM_LEGACY_RETRY_FALLBACK=0 to bypass it
-# entirely (single transient pass, no `_apply_auto_bleeders`, no
-# `_tune_*_for_robust` mutation of user options). Default ("1" or unset)
-# keeps existing behavior so adopters move on their own schedule. The
-# wrapper is removed in `refactor-unify-robustness-policy` once the
-# PWL Ideal mode is the resolved default for switching circuits.
-_LEGACY_RETRY_DEPRECATION_WARNED = False
-
-
-def _legacy_retry_fallback_enabled() -> bool:
-    return os.environ.get("PULSIM_LEGACY_RETRY_FALLBACK", "1") != "0"
-
-
-def _emit_legacy_retry_deprecation_warning() -> None:
-    global _LEGACY_RETRY_DEPRECATION_WARNED
-    if _LEGACY_RETRY_DEPRECATION_WARNED:
-        return
-    _LEGACY_RETRY_DEPRECATION_WARNED = True
-    warnings.warn(
-        "pulsim.run_transient is retrying with a reduced dt / auto-installing "
-        "bleeder resistors / re-tuning Newton options to coax the circuit "
-        "through convergence. This Python-side retry layer is deprecated and "
-        "will be removed once PWL `SwitchingMode.Ideal` is the resolved "
-        "default for switching circuits. To bypass it now, set "
-        "`SimulationOptions.switching_mode = SwitchingMode.Ideal` (and "
-        "`Integrator.BDF1`) on the converter, or export "
-        "`PULSIM_LEGACY_RETRY_FALLBACK=0`. See docs/pwl-switching-migration.md.",
-        DeprecationWarning,
-        stacklevel=3,
-    )
-
-
-def run_transient(
-    circuit,
-    t_start,
-    t_stop,
-    dt,
-    *args,
-    robust=True,
-    auto_regularize=True,
-):
-    """Run transient simulation with automatic retry and stabilization fallback.
-
-    By default, this wrapper keeps the original API behavior and adds automatic
-    retry profiles for difficult switching steps. If convergence still fails,
-    it can inject tiny high-value bleeder resistors (once per circuit) to
-    regularize floating-node situations common with idealized converter models.
-
-    The retry / auto-bleeder layer is deprecated (refactor-pwl-switching-engine
-    Phase 7.4): set environment variable ``PULSIM_LEGACY_RETRY_FALLBACK=0`` to
-    bypass it entirely and run a single transient pass with the user-supplied
-    options. The full removal lands in ``refactor-unify-robustness-policy``
-    once PWL ``SwitchingMode.Ideal`` is the resolved default.
-    """
-    x0, user_newton, user_linear = _parse_run_transient_args(args)
-
-    base_newton = _copy_newton_options(user_newton)
-    linear_solver = user_linear if user_linear is not None else LinearSolverStackConfig.defaults()
-
-    legacy_fallback = _legacy_retry_fallback_enabled()
-
-    if robust and legacy_fallback:
-        _tune_newton_for_robust(base_newton)
-        _tune_linear_solver_for_robust(linear_solver)
-
-    if not legacy_fallback:
-        # Opted out of the wrapper: single pass, user options intact, no
-        # auto-bleeders, no retry. Caller is responsible for convergence.
-        return _run_transient_once(
-            circuit,
-            t_start,
-            t_stop,
-            float(dt),
-            _clone_state_vector(x0),
-            base_newton,
-            linear_solver,
-        )
-
-    attempts = [
-        (1.00, max(80, int(base_newton.max_iterations)), False),
-        (0.75, max(160, int(base_newton.max_iterations)), auto_regularize),
-        (0.50, max(260, int(base_newton.max_iterations)), auto_regularize),
-    ]
-
-    last_result = None
-    regularized = False
-
-    for idx, (dt_scale, max_iter, apply_regularization) in enumerate(attempts):
-        if idx > 0 and not robust:
-            break
-
-        if idx > 0:
-            _emit_legacy_retry_deprecation_warning()
-
-        if apply_regularization:
-            nonlinear_updates = _apply_nonlinear_regularization(circuit)
-            bleeders_added = _apply_auto_bleeders(circuit)
-            regularized = regularized or bleeders_added or (nonlinear_updates > 0)
-
-        trial_newton = _copy_newton_options(base_newton)
-        trial_newton.max_iterations = max_iter
-
-        trial_x0 = _clone_state_vector(x0)
-        trial_dt = float(dt) * dt_scale
-        last_result = _run_transient_once(
-            circuit,
-            t_start,
-            t_stop,
-            trial_dt,
-            trial_x0,
-            trial_newton,
-            linear_solver,
-        )
-
-        if last_result[2]:
-            return last_result
-
-        if not _is_retryable_failure(last_result[3]):
-            return last_result
-
-    if last_result is None:
-        raise RuntimeError("run_transient failed before attempting simulation")
-
-    if regularized:
-        return (
-            last_result[0],
-            last_result[1],
-            last_result[2],
-            f"{last_result[3]} (automatic regularization attempted)",
-        )
-    return last_result
-
-
-run_transient_streaming = _run_transient_streaming_native
+from .dc_strategy import (
+    compute_dc_op,
+    PseudoTransientConfig,
+    SourceStepConfig,
+)
+from .mna_sweep import (
+    MnaSweepResult,
+    run_mna_sweep,
+)
+from .adaptive import (
+    AdaptiveResult,
+    run_transient_adaptive,
+)
+from .sweep import (
+    SweepResult,
+    sweep,
+    monte_carlo,
+)
+from .kpi import (
+    KpiGate,
+    KpiReport,
+    KpiCheckResult,
+    load_baseline,
+    save_baseline,
+)
+from .snubber import (
+    SnubberRecommendation,
+    predict_overshoot,
+    recommend_snubber,
+)
+from .thermal import (
+    FosterStage,
+    fit_foster_from_zth,
+    predict_zth_curve,
+    compute_temperature,
+    add_foster_network,
+    make_thermal_observer,
+)
+from .grid import (
+    add_three_phase_grid,
+    add_three_phase_line_impedance,
+    sequence_components,
+    instantaneous_power_3phase,
+    voltage_unbalance_factor,
+)
+from .magnetic import (
+    CoreMaterial,
+    core_material,
+    list_core_materials,
+    steinmetz_loss_density,
+    igse_loss_density,
+    core_loss,
+)
+from .switchgear import (
+    add_rc_snubber,
+    make_thyristor_switch_fn,
+    make_fuse_switch_fn,
+)
+from .motors import (
+    Mechanical,
+    DcMotor,
+    PMSM,
+    BLDC,
+    add_dc_motor,
+    make_dc_motor_observer,
+    add_pmsm,
+    make_pmsm_observer,
+    add_bldc,
+    make_bldc_observer,
+)
+from .spice_import import (
+    SpiceElement,
+    parse_spice_value,
+    parse_spice_netlist,
+    spice_to_builder,
+)
+from .stream import LiveStream
+
+# Schematic renderer — optional, gated behind `[schematic]` extras
+# (schemdraw + networkx + cairosvg + anthropic). Importing the
+# submodule does NOT require the heavy deps; render/layout calls
+# raise a clear ImportError pointing at the install command.
+from . import schematic  # noqa: F401
+
+# LiveScope is an optional import — only available when pyqtgraph
+# is installed. We tolerate the absence so headless environments
+# still load `pulsim` without complaint.
+try:
+    from .scope import LiveScope  # noqa: F401  (re-exported below via __all__)
+    _HAS_SCOPE = True
+except ImportError:  # pragma: no cover
+    _HAS_SCOPE = False
 
 __all__ = [
-    # Version
-    "__version__",
-
-    # Enums
-    "DeviceType",
-    "SolverStatus",
-    "DCStrategy",
-    "RLCDamping",
-    "DeviceHint",
-    "SIMDLevel",
-    "Integrator",
-    "TimestepMethod",
-    "StepMode",
-    "FormulationMode",
-    "SwitchingMode",
-
-    # Device Classes - Linear
-    "Resistor",
-    "Capacitor",
-    "Inductor",
-    "VoltageSource",
-    "CurrentSource",
-
-    # Device Classes - Nonlinear
-    "IdealDiode",
-    "IdealSwitch",
-    "DiodeParams",
-    "SwitchParams",
-    "MOSFETParams",
-    "MOSFET",
-    "IGBTParams",
-    "IGBT",
-
-    # Time-Varying Sources
-    "PWMParams",
-    "PWMVoltageSource",
-    "SineParams",
-    "ThreePhaseSourceParams",
-    "ThreePhaseVsiParams",
-    "RealisticDiodeParams",
-    "ResistorParams",
-    "CapacitorParams",
-    "InductorParams",
-    "ModulatedPwmParams",
-    "PwmModulation",
-    "DcMotorParams",
-    "ThreePhaseLoadTopology",
-    "ThreePhaseRLLoadParams",
-    "PmsmParams",
-    "Shaft",
-    "MechanicalDeviceParams",
-    "BldcMotorParams",
-    "InductionMotorParams",
-    "SinglePhaseInductionMotorParams",
-    "PmsmFocCurrentLoopParams",
-    "PmsmFocDeviceParams",
-    "CompressorTopology",
-    "CompressorParams",
-    "CompressorLoad",
-    "Refrigerant",
-    "RefrigerantProperties",
-    "refrigerant",
-    "compressor_defaults_for",
-    "apply_refrigerant",
-    "ThreePhaseSourceProgrammable",
-    "ThreePhaseHarmonicSource",
-    "HarmonicComponent",
-    "AutoParasiticsOptions",
-    "TopologyReport",
-    "TopologyIssue",
-    "TopologyIssueSeverity",
-    "ParasiticAction",
-    "ParasiticActionKind",
-    "SineVoltageSource",
-    "RampParams",
-    "RampGenerator",
-    "PulseParams",
-    "PulseVoltageSource",
-
-    # Control Blocks
+    "CircuitBuilder",
+    "Graph",
+    "DevicePool",
+    "SwitchStateMask",
+    "PwlStateSpaceCache",
+    "SimulationOptions",
+    "SimulationResult",
+    "CommutationEvent",
+    "run_transient",
+    "IdealDiodeParams",
+    "LoadedCircuit",
+    "load_yaml_string",
+    "load_yaml_file",
+    "make_pwm_switch_fn",
+    "make_dead_time_pwm_pair_fn",
+    "make_spwm_pair_fn",
+    "ThreePhaseLegIndices",
+    "make_three_phase_spwm_fn",
+    "make_phase_shift_full_bridge_fn",
+    "make_combined_switch_fn",
+    # Proposal #3.3 ergonomics — high-level entry point.
+    "simulate",
+    # Closed-loop control building blocks (Phase 2).
     "PIController",
     "PIDController",
     "Comparator",
-    "SampleHold",
     "RateLimiter",
-    "MovingAverageFilter",
-    "HysteresisController",
+    "SampleHold",
+    "FirstOrderLowPass",
     "LookupTable1D",
-
-    # Circuit Builder
-    "Circuit",
-    "VirtualComponent",
-    "MixedDomainStepResult",
-    "VirtualChannelMetadata",
-
-    # DC Solver
-    "solve_dc",
-    "dc_operating_point",
-
-    # Transient Simulation
-    "run_transient",
-    "run_transient_streaming",
-    "SimulationOptions",
-    "SimulationResult",
-    "Simulator",
-
-    # simplify-and-harden-numerical-surface — Phase 3.4
-    "enable_advanced_deprecation_warnings",
-    "PeriodicSteadyStateOptions",
-    "PeriodicSteadyStateResult",
-    "HarmonicBalanceOptions",
-    "HarmonicBalanceResult",
-    "StiffnessConfig",
-    "SwitchingEnergy",
-    "FallbackReasonCode",
-    "FallbackPolicyOptions",
-    "FallbackTraceEntry",
-    "BackendTelemetry",
-    "ThermalCouplingPolicy",
-    "ThermalCouplingOptions",
-    "ThermalDeviceConfig",
-    "DeviceThermalTelemetry",
-    "ThermalSummary",
-    "ComponentElectrothermalTelemetry",
-    "SimulationEventType",
-    "SimulationEvent",
-    "LinearSolverTelemetry",
-    "YamlParserOptions",
-    "YamlParser",
-
-    # Solver Configuration
-    "Tolerances",
-    "NewtonOptions",
-    "NewtonResult",
-
-    # Convergence Monitoring
-    "IterationRecord",
-    "ConvergenceHistory",
-    "VariableConvergence",
-    "PerVariableConvergence",
-
-    # Convergence Aids
-    "GminConfig",
-    "SourceSteppingConfig",
-    "PseudoTransientConfig",
-    "InitializationConfig",
-    "DCConvergenceConfig",
-    "DCAnalysisResult",
-
-    # Analytical Solutions (Validation)
-    "RCAnalytical",
-    "RLAnalytical",
-    "RLCAnalytical",
-
-    # Validation Framework
-    "ValidationResult",
-    "compare_waveforms",
-    "export_validation_csv",
-    "export_validation_json",
-
-    # Benchmark Framework
-    "BenchmarkTiming",
-    "BenchmarkResult",
-    "export_benchmark_csv",
-    "export_benchmark_json",
-
-    # Integration Methods
-    "BDFOrderConfig",
-    "TimestepConfig",
-    "AdvancedTimestepConfig",
-    "RichardsonLTEConfig",
-
-    # High-Performance Features
-    "LinearSolverConfig",
-    "LinearSolverKind",
-    "PreconditionerKind",
-    "IterativeSolverConfig",
-    "LinearSolverStackConfig",
-    "detect_simd_level",
-    "simd_vector_width",
-    "backend_capabilities",
-    "solver_status_to_string",
-
-    # Thermal Simulation
-    "FosterStage",
-    "FosterNetwork",
-    "CauerStage",
-    "CauerNetwork",
-    "ThermalSimulator",
-    "ThermalLimitMonitor",
-    "ThermalResult",
-    "create_mosfet_thermal_model",
-    "create_from_datasheet_4param",
-    "create_simple_thermal_model",
-
-    # System-level loss aggregation
-    "LossBreakdown",
-    "LossAccumulator",
-    "EfficiencyCalculator",
-    "LossResult",
-    "SystemLossSummary",
-
-    # Netlist Parser
-    "parse_netlist",
-    "parse_netlist_verbose",
-    "parse_value",
-    "NetlistParseError",
-    "NetlistWarning",
-    "ParsedNetlist",
-
-    # Signal-Flow Evaluator
-    "SignalEvaluator",
-    "AlgebraicLoopError",
-    "SIGNAL_TYPES",
-
-    # simplify-and-harden-numerical-surface — Phase 2 + 3 public surface
-    "Preset",
-    "AdvancedOptions",
-
-    # Top-level run_transient convenience (kernel-level, no Simulator object)
-    "run_transient",
-
-    # Robustness primitives re-exported for explicit user control
-    "HomotopyConfig",
-    "SolverQuality",
-
-    # add-frequency-domain-analysis — Phase 1/2/3 public types
-    "LinearSystem",
-    "AcSweepScale",
-    "AcSweepOptions",
-    "AcMeasurement",
+    "MovingAverageFilter",
+    # Math blocks (v1 parity Phase A.1)
+    "Gain", "Sum", "Subtract", "MathBlock",
+    # Standalone control blocks (v1 parity Phase A.1)
+    "Integrator", "Differentiator", "TransferFunction",
+    "StateMachine", "OpAmp",
+    # Signal-shaping (v1 parity Phase A.1)
+    "Limiter", "DelayBlock",
+    # Modulation (v1 parity Phase A.1)
+    "PwmGenerator", "SpaceVectorModulator",
+    # Transforms (v1 parity Phase A.1)
+    "ClarkeTransform", "InverseClarkeTransform",
+    "ParkTransform", "InverseParkTransform",
+    # Sync (v1 parity Phase A.1)
+    "PLL",
+    # Routing (v1 parity Phase A.1)
+    "SignalMux", "SignalDemux",
+    # Auto-tuning helpers (loop-shaping from a measured Bode).
+    "tune_pi_from_bode",
+    "loop_gain",
+    "phase_margin_from_loop",
+    "gain_margin_from_loop",
+    # AC small-signal analysis (swept-sine Bode).
     "AcSweepResult",
-    "FraOptions",
-    "FraMeasurement",
-    "FraResult",
-
-    # frequency_analysis plotting + export helpers
-    "bode_plot",
-    "nyquist_plot",
-    "fra_overlay",
-    "export_ac_csv",
-    "export_fra_csv",
-    "export_ac_json",
-    "export_fra_json",
-    "load_ac_result_csv",
+    "run_ac_sweep",
+    "extract_phasor",
+    "plot_bode",
+    "plot_nyquist",
+    "stability_margins",
+    "save_freq_response",
+    # Discovery helpers (introspect the available surface).
+    "catalog",
+    "example",
+    "tour",
+    "list_topologies",
+    # Plot helpers (one-line waveform + multi-panel).
+    "scope",
+    "scope_grid",
+    "plot_currents",
+    "scope_fft",
+    "compare",
+    # Mixed-domain block-chain executor (v1 parity Phase A.1 stage 2).
+    "MixedDomainBlockChain",
+    "BlockSpec",
+    "parse_block_chain",
+    # DC operating-point strategies (v1 parity Phase A.2).
+    "compute_dc_op",
+    "PseudoTransientConfig",
+    "SourceStepConfig",
+    # Fast frequency sweep via impulse-response (v1 parity Phase A.3).
+    "MnaSweepResult",
+    "run_mna_sweep",
+    # Adaptive (variable-step) transient driver (Phase B.1).
+    "AdaptiveResult",
+    "run_transient_adaptive",
+    # Parameter sweep + Monte Carlo (Phase E.3).
+    "SweepResult",
+    "sweep",
+    "monte_carlo",
+    # KPI gates + baselines (Phase E.5).
+    "KpiGate",
+    "KpiReport",
+    "KpiCheckResult",
+    "load_baseline",
+    "save_baseline",
+    # Snubber advisor (Phase E.8).
+    "SnubberRecommendation",
+    "predict_overshoot",
+    "recommend_snubber",
+    # Thermal Foster networks + electro-thermal co-sim (Phase C.1).
+    "FosterStage",
+    "fit_foster_from_zth",
+    "predict_zth_curve",
+    "compute_temperature",
+    "add_foster_network",
+    "make_thermal_observer",
+    # Three-phase grid helpers (Phase C.2).
+    "add_three_phase_grid",
+    "add_three_phase_line_impedance",
+    "sequence_components",
+    "instantaneous_power_3phase",
+    "voltage_unbalance_factor",
+    # Magnetic core-loss models (Phase C.3).
+    "CoreMaterial",
+    "core_material",
+    "list_core_materials",
+    "steinmetz_loss_density",
+    "igse_loss_density",
+    "core_loss",
+    # Switchgear & protection (Phase C.4).
+    "add_rc_snubber",
+    "make_thyristor_switch_fn",
+    "make_fuse_switch_fn",
+    # Electromechanical motor models (Phase D).
+    "Mechanical",
+    "DcMotor",
+    "PMSM",
+    "BLDC",
+    "add_dc_motor",
+    "make_dc_motor_observer",
+    "add_pmsm",
+    "make_pmsm_observer",
+    "add_bldc",
+    "make_bldc_observer",
+    # SPICE netlist import (Phase E.10).
+    "SpiceElement",
+    "parse_spice_value",
+    "parse_spice_netlist",
+    "spice_to_builder",
+    # Live streaming output + cancellation (foundation for GUI scope).
+    "LiveStream",
 ]
+
+if _HAS_SCOPE:
+    __all__.append("LiveScope")
+
+
+def simulate(
+    builder: CircuitBuilder,
+    t_end: float,
+    dt: float,
+    *,
+    t_start: float = 0.0,
+    switch_fn: Optional[Callable[[float], SwitchStateMask]] = None,
+    b_extra_fn: Optional[Callable[[float], "list[float]"]] = None,
+    step_observer: Optional[Callable[[float, "object"], None]] = None,
+    start_from_dc_op: bool = False,
+    enable_nonlinear_refresh: Optional[bool] = None,
+    max_newton_iterations: int = 0,
+    max_event_iterations: int = 0,
+    tol_newton_dx: Optional[float] = None,
+    tol_newton_res: Optional[float] = None,
+    enable_newton_line_search: Optional[bool] = None,
+    enable_newton_lm: Optional[bool] = None,
+    enable_substep_state_correction: Optional[bool] = None,
+    progress: "bool | int | str" = False,
+    initial_state=None,
+    should_continue=None,
+) -> SimulationResult:
+    """Build the PWL cache and run a fixed-dt transient simulation.
+
+    This is the ergonomic one-call API (proposal #3.3). It collapses
+    the cache-build / SimulationOptions / switch_fn dance into a
+    single function: pass a populated :class:`CircuitBuilder`, the
+    time window, and `dt`, and get a :class:`SimulationResult` back.
+
+    Auto-behaviours (override via keyword args):
+
+    * **`switch_fn`** — defaults to "all switches closed" (i.e. a
+      mask with every bit set). For circuits with no switches the
+      default is fine. For PWM circuits, pass an explicit
+      :func:`make_pwm_switch_fn` or hand-rolled callable.
+    * **`enable_nonlinear_refresh`** — auto-detected from the
+      builder's pool (proposal #3.4). Set to ``True`` if any of
+      smooth-blend `IdealDiode`, SH1 `MosfetLevel1`, Level 1
+      `IgbtLevel1`, or `SaturableInductor` is present; ``False``
+      otherwise. Pass an explicit bool to override.
+
+    Parameters
+    ----------
+    builder
+        A populated :class:`CircuitBuilder`.
+    t_end
+        End time, in seconds.
+    dt
+        Fixed time step, in seconds.
+    t_start, default 0.0
+        Start time, in seconds.
+    switch_fn
+        Callable ``t -> SwitchStateMask`` controlling the
+        switch state at each sample.  Defaults to all-closed.
+    b_extra_fn
+        Callable ``t -> list[float]`` adding to the constant
+        residual at each step.  Defaults to None (no extras).
+    start_from_dc_op
+        If ``True``, seed the initial state from
+        :func:`compute_dc_op` instead of zero.
+    enable_nonlinear_refresh
+        Force-enable/-disable the Newton refresh pass.  ``None``
+        (default) means auto-detect via
+        :meth:`DevicePool.has_nonlinear_devices`.
+    max_newton_iterations, max_event_iterations
+        Forwarded to :class:`SimulationOptions`.
+
+    Returns
+    -------
+    SimulationResult
+        The full per-sample state-vector history.
+    """
+    # Build the PWL cache.
+    cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    cache.build(dt)
+
+    # Construct options.
+    opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
+    if max_newton_iterations > 0:
+        opts.max_newton_iterations = max_newton_iterations
+    if max_event_iterations > 0:
+        opts.max_event_iterations = max_event_iterations
+    if tol_newton_dx is not None:
+        opts.tol_newton_dx = tol_newton_dx
+    if tol_newton_res is not None:
+        opts.tol_newton_res = tol_newton_res
+    if enable_newton_line_search is not None:
+        opts.enable_newton_line_search = enable_newton_line_search
+    if enable_newton_lm is not None:
+        opts.enable_newton_lm = enable_newton_lm
+    if enable_substep_state_correction is not None:
+        opts.enable_substep_state_correction = enable_substep_state_correction
+
+    # Default switch_fn: all switches closed.
+    if switch_fn is None:
+        n_sw = builder.graph.num_switches
+        default_mask = SwitchStateMask(n_sw)
+        for i in range(n_sw):
+            default_mask.set(i, True)
+        switch_fn = lambda _t: default_mask  # noqa: E731
+
+    # Auto-detect nonlinear devices (proposal #3.4).
+    if enable_nonlinear_refresh is None:
+        enable_nonlinear_refresh = builder.pool.has_nonlinear_devices()
+
+    # Progress bar via step_observer: print a percentage at
+    # configurable intervals. The user can pass:
+    #   progress=False              — no progress (default)
+    #   progress=True               — auto: print every 10%
+    #   progress=<int>              — print every N%
+    #   progress="bar"              — full ASCII progress bar
+    # If the user also supplied a step_observer, we wrap it.
+    if progress is not False and progress is not None:
+        if progress is True:
+            print_every_pct = 10
+            bar_mode = False
+        elif isinstance(progress, int):
+            print_every_pct = max(1, min(100, progress))
+            bar_mode = False
+        elif isinstance(progress, str) and progress.lower() == "bar":
+            print_every_pct = 1
+            bar_mode = True
+        else:
+            print_every_pct = 10
+            bar_mode = False
+
+        import sys as _sys
+        import time as _time
+        _start = _time.perf_counter()
+        # Mutable state for closure.
+        _last_pct_printed = [-1]
+        _t_total = float(t_end - t_start)
+        _user_observer = step_observer
+
+        def _progress_observer(t, x):
+            if _user_observer is not None:
+                _user_observer(t, x)
+            if _t_total <= 0:
+                return
+            pct = int(100.0 * (t - t_start) / _t_total)
+            # Only print on multiples of print_every_pct, and only
+            # once per multiple (to handle the per-dt observer
+            # cadence).
+            if pct >= _last_pct_printed[0] + print_every_pct:
+                _last_pct_printed[0] = pct - (pct % print_every_pct)
+                elapsed = _time.perf_counter() - _start
+                if bar_mode:
+                    barw = 40
+                    filled = int(barw * pct / 100)
+                    bar = "█" * filled + "░" * (barw - filled)
+                    _sys.stdout.write(
+                        f"\r  [{bar}] {pct:3d}% "
+                        f"  t={t*1e3:.2f} ms  ({elapsed:5.1f}s)"
+                    )
+                    _sys.stdout.flush()
+                else:
+                    _sys.stdout.write(
+                        f"  progress: {pct:3d}%  "
+                        f"t={t*1e3:.2f} ms  "
+                        f"({elapsed:.1f}s)\n"
+                    )
+                    _sys.stdout.flush()
+
+        step_observer = _progress_observer
+
+    # Fast-path: if step_observer carries an attached `_cxx_chain`
+    # attribute (set by `MixedDomainBlockChain.make_step_observer`),
+    # use `run_transient_with_chain` which invokes the C++ chain
+    # directly each step — skipping the pybind11 std::function
+    # wrap. Saves ~10-30 % wall time on chains > 5 blocks.
+    cxx_chain = getattr(step_observer, "_cxx_chain", None) \
+                  if step_observer is not None else None
+    if cxx_chain is not None:
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        chain_dt = getattr(step_observer, "_chain_dt", dt)
+        kwargs: dict = {
+            "switch_fn": switch_fn,
+            "start_from_dc_op": start_from_dc_op,
+            "enable_nonlinear_refresh": enable_nonlinear_refresh,
+        }
+        if b_extra_fn is not None:
+            kwargs["b_extra_fn"] = b_extra_fn
+        if initial_state is not None:
+            kwargs["initial_state"] = initial_state
+        if should_continue is not None:
+            kwargs["should_continue"] = should_continue
+        res = _k.run_transient_with_chain(
+            cache, builder.graph, builder.pool, opts,
+            chain=cxx_chain, chain_dt=chain_dt,
+            **kwargs,
+        )
+    else:
+        # Standard path — pybind11-wrapped step_observer (Python or
+        # plain C++ via std::function).
+        kwargs = {
+            "switch_fn": switch_fn,
+            "start_from_dc_op": start_from_dc_op,
+            "enable_nonlinear_refresh": enable_nonlinear_refresh,
+        }
+        if b_extra_fn is not None:
+            kwargs["b_extra_fn"] = b_extra_fn
+        if step_observer is not None:
+            kwargs["step_observer"] = step_observer
+        if initial_state is not None:
+            kwargs["initial_state"] = initial_state
+        if should_continue is not None:
+            kwargs["should_continue"] = should_continue
+        res = run_transient(
+            cache, builder.graph, builder.pool, opts, **kwargs,
+        )
+    # Close the progress bar with a newline if we were in bar mode.
+    if progress is True or (isinstance(progress, str)
+                              and progress.lower() == "bar"):
+        import sys as _sys
+        _sys.stdout.write("\n")
+        _sys.stdout.flush()
+    return res
+
+
+# Note: SineVoltageSource (Layer 2 V11) is exposed as a
+# CircuitBuilder method `add_sine_voltage_source`; there's
+# no separate Python-side params class — pass v_dc,
+# v_amplitude, frequency, phase as keyword args.
+
+__version__ = "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Graceful failure for legacy v1 symbols
+# ---------------------------------------------------------------------------
+# v1 used to export ~150 symbols at the top level (Resistor, Circuit,
+# Simulator, Preset, AdvancedOptions, codegen, fmu, parse_netlist, …).
+# Code that references any of them now hits a NameError at attribute
+# resolution. We override ``__getattr__`` (PEP 562) to give an actionable
+# migration hint instead of the raw Python error.
+
+_V1_SYMBOL_HINTS = {
+    "Circuit":            "p.CircuitBuilder()",
+    "RuntimeCircuit":     "p.CircuitBuilder()",
+    "Simulator":          "p.simulate(b, t_end=..., dt=...)",
+    "SimulationResult":   "p.SimulationResult (still exported)",
+    "Resistor":           "b.add_resistor(name, from_node, to_node, R)",
+    "Capacitor":          "b.add_capacitor(...)",
+    "Inductor":           "b.add_inductor(...)",
+    "VoltageSource":      "b.add_voltage_source(...)",
+    "CurrentSource":      "b.add_current_source(...)",
+    "Diode":              "b.add_diode(name, anode, cathode, g_on, g_off, V_th)",
+    "MOSFET":             "b.add_mosfet_with_body_diode(...)",
+    "IGBT":               "b.add_igbt(...)",
+    "Preset":             "no longer exposed — pass an explicit SimulationOptions",
+    "AdvancedOptions":    "no longer exposed — pass an explicit SimulationOptions",
+    "PulseParams":        "p.make_pwm_switch_fn(...) for PWM gates",
+    "YamlParser":         "p.load_yaml_file(path) returns a LoadedCircuit",
+    "YamlParserOptions":  "no equivalent — load_yaml_file / load_yaml_string take no options",
+    "RobustnessProfile":  "no equivalent — use enable_nonlinear_refresh + DC-OP strategies",
+    "codegen":            "no equivalent in 1.0.0",
+    "fmu":                "no equivalent in 1.0.0",
+    "templates":          "no equivalent in 1.0.0",
+    "schematic":          "no equivalent in 1.0.0",
+    "parse_netlist":      "p.parse_spice_netlist (SPICE subset)",
+}
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level ``__getattr__`` — fires only when a
+    name isn't found in the normal namespace. Translates legacy v1
+    attribute accesses into actionable migration hints."""
+    if name in _V1_SYMBOL_HINTS:
+        hint = _V1_SYMBOL_HINTS[name]
+        raise AttributeError(
+            f"pulsim.{name} was a v1 symbol and is no longer "
+            f"available (pulsim 1.0.0 retired the legacy kernel). "
+            f"Migration hint: {hint}. See "
+            f"docs/migration-guide.md for the full mapping.")
+    raise AttributeError(
+        f"module 'pulsim' has no attribute {name!r}. "
+        f"pulsim 1.0.0 ships only the modern surface — "
+        f"see docs/migration-guide.md if you're porting v1 code.")

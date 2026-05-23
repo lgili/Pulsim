@@ -601,7 +601,7 @@ same average behavior the small-signal model assumes.
     cells.append(code(r"""
 # Try importing pulsim — the rest of the cell skips gracefully if it isn't built.
 try:
-    import pulsim.v2 as p
+    import pulsim as p
     HAVE_PULSIM = True
 except ImportError as exc:
     print(f"Skipping Pulsim cross-validation: {exc}")

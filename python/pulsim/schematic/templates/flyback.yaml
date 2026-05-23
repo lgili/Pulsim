@@ -1,0 +1,49 @@
+# =============================================================================
+# Flyback converter — canonical layout
+# =============================================================================
+#
+# Topology (single-switch flyback):
+#
+#     Primary:    Vin ──[Lp]── sw ──[Q]── gnd
+#     Secondary:  Ls in parallel with D (test netlist), feeding Cout ‖ Rload
+#                                       └──[Cout]── gnd
+#
+# Ls and D are drawn VERTICAL side-by-side so the vsec / vout nets each
+# become a single short horizontal wire across the tops/bottoms of the
+# two devices — no wires crossing through the body of either. The
+# transformer-coupling glyph (||) lands between Lp and Ls.
+
+name: flyback
+quality: polished
+canvas:
+  width:  220
+  height: 130
+slots:
+  source:
+    x: 0.07
+    y: 0.50
+    rotation: 0
+  transformer_primary:
+    x: 0.30
+    y: 0.30
+    rotation: 0
+  switch_primary:
+    x: 0.30
+    y: 0.78
+    rotation: 0
+  transformer_secondary:
+    x: 0.55
+    y: 0.30
+    rotation: 0
+  rectifier_diode:
+    x: 0.70
+    y: 0.30
+    rotation: 0       # vertical, anode (top) at vsec, cathode (bottom) at vout
+  output_capacitor:
+    x: 0.85
+    y: 0.50
+    rotation: 0
+  load_resistor:
+    x: 0.95
+    y: 0.50
+    rotation: 0

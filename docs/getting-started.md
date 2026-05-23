@@ -1,99 +1,84 @@
-# Getting Started
-
-This guide takes you from a clean checkout to your first backend simulation.
+# Getting started
 
 ## Prerequisites
 
-- Python 3.10+
-- CMake 3.20+
-- Ninja
-- A C++ toolchain compatible with project requirements
-
-## Option A: Build From Source (Recommended for backend development)
-
-```bash
-cmake -S . -B build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DPULSIM_BUILD_PYTHON=ON
-cmake --build build -j
-```
-
-Confirm that the package is importable from the local build tree:
+- **macOS or Linux** (Windows is best-effort via WSL2)
+- **CMake ≥ 3.24**, **Ninja**
+- **Clang 16+** or **GCC 13+** (we use C++23)
+- **Python 3.11+** with `pip`
+- A package manager for the third-party dependencies: KLU (SuiteSparse), Eigen, yaml-cpp, Catch2, pybind11. On macOS, install via Homebrew.
 
 ```bash
-PYTHONPATH=build/python python3 -c "import pulsim as ps; print(ps.__version__)"
+brew install cmake ninja llvm suite-sparse eigen yaml-cpp catch2 pybind11
 ```
 
-## Option B: Install Package
+## Build the C++ core + Python bindings
 
 ```bash
-python3 -m pip install --upgrade pip
-python3 -m pip install pulsim
+git clone https://github.com/lgili/pulsim
+cd pulsim
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-## First Simulation (RC Step)
+A successful build produces:
+- `build/core/pulsim_core_*_tests` — Catch2 binaries (run with `ctest --output-on-failure`).
+- `build/python/pulsim/_pulsim.cpython-3X-darwin.so` — the Python extension.
 
-The recommended starting pattern uses `SimulationOptions.from_preset(...)`
-to materialise a fully-tuned configuration with one decision — see
-[Numerical Configuration](numerical-configuration.md) for the full
-preset menu.
+For local Python development without `pip install`:
 
 ```bash
-PYTHONPATH=build/python python3 - <<'PY'
-import pulsim as ps
-
-# Build (or load) a circuit
-parser = ps.YamlParser(ps.YamlParserOptions())
-circuit, _ = parser.load("benchmarks/circuits/rc_step.yaml")
-
-# One-call numerical configuration. `Preset.Auto` is a good default
-# for new circuits; pick `Preset.Fast` for pure-switching converters,
-# `Preset.HighFidelity` for parity validation runs.
-options = ps.SimulationOptions.from_preset(ps.Preset.Auto,
-                                            dt=1e-6, tstop=1e-3)
-options.newton_options.num_nodes    = int(circuit.num_nodes())
-options.newton_options.num_branches = int(circuit.num_branches())
-
-sim = ps.Simulator(circuit, options)
-result = sim.run_transient(circuit.initial_state())
-
-print("success:", result.success)
-print("steps:", result.total_steps)
-print("samples:", len(result.time))
-PY
+export PYTHONPATH="$(pwd)/build/python:$PYTHONPATH"
+python -c "import pulsim as p; print(p.__version__)"
 ```
 
-Expected outcome:
+## Your first transient — a 3-line RC
 
-- `success: True`
-- non-zero `steps` and `samples`
-- monotonic RC charging behavior on `V(out)`
+```python
+import pulsim as p
 
-The same preset is available via YAML:
+b = p.CircuitBuilder()
+b.add_voltage_source("Vin", "n0", "gnd", 5.0)
+b.add_resistor       ("R",  "n0", "vc",  1000.0)   # 1 kΩ
+b.add_capacitor      ("C",  "vc", "gnd", 1e-6)     # 1 µF; τ = 1 ms
 
-```yaml
-simulation:
-  preset: auto         # auto | fast | robust | high_fidelity
-  tstop: 1e-3
-  dt: 1e-6
+res = p.simulate(b, t_end=5e-3, dt=1e-5)
+vc_idx = b.node_id_of("vc")
+
+# Print v_C at t = 1τ (should be ≈ V·(1 − 1/e) ≈ 3.16 V).
+k_1tau = int(1e-3 / 1e-5)
+print(f"v_C(1τ) = {res.states[k_1tau][vc_idx]:.3f} V")
 ```
 
-## Run Core Validation Commands
-
-```bash
-# Python runtime tests
-PYTHONPATH=build/python pytest python/tests -v --ignore=python/tests/validation
-
-# C++ core tests (if build already includes tests)
-ctest --test-dir build --output-on-failure
+Expected output:
+```
+v_C(1τ) = 3.162 V
 ```
 
-## Next Steps
+That's the entire flow. `simulate()` (proposal #3.3) hides:
+1. Building the PWL state-space cache (`PwlStateSpaceCache`).
+2. Constructing the `SimulationOptions`.
+3. Defaulting the `switch_fn` to "all switches closed" (here there are no switches, so it's a no-op).
+4. Auto-detecting nonlinear devices and enabling the Newton refresh if needed.
+5. Calling `run_transient`.
 
-1. Read [Numerical Configuration](numerical-configuration.md) to
-   understand the four presets and when to override individual fields.
-2. Read [User Guide](user-guide.md) for canonical backend usage patterns.
-3. Use [Examples and Results](examples-and-results.md) for converter scenarios.
-4. Add CI quality checks from [Benchmarks and Parity](benchmarks-and-parity.md).
-5. For multilevel converters (NPC, MMC, flying-cap), see
-   [Multilevel Converters](multilevel-converters.md).
+## Plotting
+
+`SimulationResult` has parallel `times` and `states` arrays. You can hand them to matplotlib:
+
+```python
+import matplotlib.pyplot as plt
+
+times = res.times                      # list[float], length N
+v_c   = [s[vc_idx] for s in res.states]
+plt.plot(times, v_c)
+plt.xlabel("t [s]"); plt.ylabel("v_C [V]")
+plt.show()
+```
+
+For circuits with **branch-current unknowns** (voltage sources, inductors), the corresponding indices are obtained via `pool.branch_var_id_for_source(branch_id, graph)` or `branch_var_id_for_inductor(...)`.
+
+## Where to go next
+
+- [Mental model](mental-model.md) — what `Graph`, `DevicePool`, `PwlStateSpaceCache` actually are.
+- [Tutorial 01 — RC charging from a pulse source](tutorials/01-rc-charging.md) — same example, but driven by `PulseVoltageSource` (V12).

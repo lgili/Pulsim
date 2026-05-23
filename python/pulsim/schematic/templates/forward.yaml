@@ -1,0 +1,30 @@
+# Forward converter — single-switch with reset diode + freewheel diode +
+# output choke + filter cap + load.
+#
+# Pin convention: every device is oriented so the CONNECTED pin faces
+# its downstream neighbor naturally. The forward-rectifier diode
+# (Dfwd) has its FLOATING anode (= unused vsec node) on the LEFT and
+# its cathode (vmid) on the RIGHT, exiting toward Lout / Dfw — that
+# stops the cathode wire from being forced to cross BACK through the
+# diode body.
+#
+# Likewise:
+#   - Lout: vmid (pin 0) LEFT, vout (pin 1) RIGHT → matches Cout to
+#     the right.
+#   - Dfw: anode (gnd) at BOTTOM, cathode (vmid) at TOP → conventional
+#     freewheel orientation, current flows UPWARD.
+
+name: forward
+quality: draft
+canvas:
+  width:  260
+  height: 140
+slots:
+  source:               { x: 0.06, y: 0.50, rotation: 0   }
+  transformer_primary:  { x: 0.22, y: 0.32, rotation: 0   }
+  switch_primary:       { x: 0.22, y: 0.78, rotation: 0   }
+  rectifier_diode:      { x: 0.46, y: 0.32, rotation: 270 } # cathode on RIGHT
+  freewheel_diode:      { x: 0.55, y: 0.72, rotation: 180 } # cathode at TOP
+  output_inductor:      { x: 0.70, y: 0.32, rotation: 270 } # vmid LEFT, vout RIGHT
+  output_capacitor:     { x: 0.83, y: 0.52, rotation: 0   }
+  load_resistor:        { x: 0.96, y: 0.52, rotation: 0   }

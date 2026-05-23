@@ -11,7 +11,7 @@ Usage::
 What it converts automatically
 ------------------------------
 * ``import pulsim`` / ``import pulsim as ps`` →
-  ``import pulsim.v2 as p`` (and rewrites the binding name).
+  ``import pulsim as p`` (and rewrites the binding name).
 * ``ps.RuntimeCircuit()`` → ``p.CircuitBuilder()`` + a
   pattern-matched ``b = ...`` rename. (Falls back to ``builder``
   on existing name conflicts.)
@@ -143,17 +143,17 @@ def _migrate_text(src: str) -> Tuple[str, List[str]]:
 
     # Process the file line-by-line so we can SKIP import lines when
     # doing the alias substitution (otherwise ``pulsim.`` in the
-    # rewritten import line ``import pulsim.v2 as p`` would itself
+    # rewritten import line ``import pulsim as p`` would itself
     # match the substitution and break to ``import p.v2 as p``).
     new_lines: List[str] = []
     for line in text.splitlines():
         # Rewrite the line ITSELF if it's a pulsim import.
         rewritten_import = re.sub(
             r"^(\s*)import\s+pulsim\s+as\s+\w+\s*$",
-            r"\1import pulsim.v2 as p", line)
+            r"\1import pulsim as p", line)
         rewritten_import = re.sub(
             r"^(\s*)import\s+pulsim\s*$",
-            r"\1import pulsim.v2 as p", rewritten_import)
+            r"\1import pulsim as p", rewritten_import)
         if rewritten_import != line:
             new_lines.append(rewritten_import)
             continue
@@ -172,7 +172,7 @@ def _migrate_text(src: str) -> Tuple[str, List[str]]:
         warnings.append(
             "TODO[v2-migrate]: `from pulsim import ...` found — "
             "the v1 symbol set doesn't map 1-to-1 to v2. Replace "
-            "with `import pulsim.v2 as p`.")
+            "with `import pulsim as p`.")
 
     # 2. RuntimeCircuit() / Circuit() → CircuitBuilder().
     text = re.sub(

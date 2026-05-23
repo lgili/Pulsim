@@ -238,3 +238,61 @@ class SchematicLayout:
             canvas=canvas,
             schema_version=version,
         )
+
+    # -------------------------------------------------------------------
+    # Jupyter inline display (Phase 5)
+    # -------------------------------------------------------------------
+    #
+    # Returning a `SchematicLayout` from a Jupyter cell auto-renders
+    # the schematic without a user-visible `.render()` call. The
+    # implementation defers to `render.render_layout` so the inline
+    # output matches the file-export output exactly.
+    #
+    # `_repr_svg_` is preferred (vector, zoomable, lightweight);
+    # `_repr_html_` falls back to a `<pre>` describing the layout so
+    # nothing breaks if `schemdraw` isn't installed.
+
+    def _repr_svg_(self) -> str | None:
+        try:
+            from .render import render_layout
+        except ImportError:
+            return None
+        import tempfile
+        from pathlib import Path
+        try:
+            with tempfile.NamedTemporaryFile(
+                    "w", suffix=".svg", delete=False) as fh:
+                tmp = Path(fh.name)
+            try:
+                render_layout(self, tmp, format="svg")
+                return tmp.read_text(encoding="utf-8")
+            finally:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        except Exception:
+            return None
+
+    def _repr_html_(self) -> str:
+        svg = self._repr_svg_()
+        if svg:
+            return svg
+        # Fallback: brief tabular summary so the Jupyter cell still
+        # shows *something* when schemdraw isn't installed.
+        rows = "".join(
+            f"<tr><td>{name}</td><td>{p.kind}</td>"
+            f"<td>{p.x:.1f}</td><td>{p.y:.1f}</td>"
+            f"<td>{p.rotation}°</td></tr>"
+            for name, p in sorted(self.components.items())
+        )
+        return (
+            "<table style='border-collapse:collapse;font-family:monospace;'>"
+            "<thead><tr style='border-bottom:1px solid #999;'>"
+            "<th>name</th><th>kind</th><th>x (mm)</th>"
+            "<th>y (mm)</th><th>rot</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            "<p style='font-size:0.85em;color:#666;'>"
+            "Install <code>pip install pulsim[schematic]</code> for "
+            "inline SVG rendering.</p>"
+        )

@@ -7,8 +7,8 @@ without fingers crossed.
 
 Usage::
 
-    python3 scripts/build_bench.py --build-dir build --target pulsim_tests
-    python3 scripts/build_bench.py --build-dir build --target pulsim_tests --json out.json
+    python3 scripts/build_bench.py --build-dir build --target pulsim_layer5_v4_tests
+    python3 scripts/build_bench.py --build-dir build --target pulsim_layer5_v4_tests --json out.json
 
 The script:
   1. Runs `cmake --build <dir> --clean-first` and times it (baseline
@@ -48,8 +48,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", default="build",
                         help="CMake build directory (default: build)")
-    parser.add_argument("--target", default="pulsim_tests",
-                        help="CMake target to build (default: pulsim_tests)")
+    parser.add_argument("--target", default="pulsim_layer5_v4_tests",
+                        help="CMake target to build (default: pulsim_layer5_v4_tests)")
     parser.add_argument("--touch-file",
                         default="core/include/pulsim/v1/numeric_types.hpp",
                         help="File to touch between clean and incremental "

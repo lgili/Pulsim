@@ -156,6 +156,14 @@ def _draw_wire(d, elm_module, wire: Wire, placements: dict[str, ComponentPlaceme
 def render_layout(layout: SchematicLayout, path: Any, format: str | None = None) -> Path:
     """Render a pre-computed layout to a file.
 
+    Phase 8 default: native SVG renderer (``svg_renderer.render_svg``)
+    where each component's symbol is drawn so its terminals land
+    exactly at the ``terminal_anchors`` from the layout — guarantees
+    visual connectivity. Set ``PULSIM_SCHEMATIC_RENDERER=schemdraw``
+    to fall back to the legacy schemdraw-based pipeline (analog skin,
+    prettier symbols, but with the connectivity issues Phase 8
+    addresses).
+
     Args:
         layout: A :class:`SchematicLayout` (typically from
             :func:`compute_layout`).
@@ -165,13 +173,8 @@ def render_layout(layout: SchematicLayout, path: Any, format: str | None = None)
 
     Returns:
         The resolved :class:`pathlib.Path` of the written file.
-
-    Raises:
-        ImportError: If ``schemdraw`` is not installed.
-        ValueError: If the format cannot be inferred and ``format=`` is
-            not passed.
     """
-    schemdraw, elm = _require_schemdraw()
+    import os as _os
     out_path = Path(path)
     fmt = format or _infer_format(out_path)
     if fmt not in _SUPPORTED_FORMATS:
@@ -180,6 +183,21 @@ def render_layout(layout: SchematicLayout, path: Any, format: str | None = None)
             f"expected one of {sorted(_SUPPORTED_FORMATS)}"
         )
 
+    renderer = _os.environ.get(
+        "PULSIM_SCHEMATIC_RENDERER", "svg").strip().lower()
+
+    # Default path — native SVG renderer with guaranteed-connected
+    # symbols.
+    if renderer == "svg":
+        from .svg_renderer import render_svg, render_png
+        if fmt == "svg":
+            return render_svg(layout, out_path)
+        if fmt == "png":
+            return render_png(layout, out_path)
+        # For pdf/jpg, fall through to schemdraw (it has those exporters).
+
+    # Schemdraw fallback / opt-in legacy path.
+    schemdraw, elm = _require_schemdraw()
     with schemdraw.Drawing(show=False) as d:
         for placement in layout.components.values():
             factory = get_symbol_factory(placement.kind)
@@ -194,12 +212,6 @@ def render_layout(layout: SchematicLayout, path: Any, format: str | None = None)
             _draw_wire(d, elm, wire, layout.components)
         for jx, jy in layout.junctions:
             d.add(elm.Dot().at(_to_canvas(jx, jy)))
-
-        # Use get_imagedata + write_bytes (rather than d.save(path)) so
-        # the caller's `format=` argument is authoritative — schemdraw's
-        # save() infers format from the path extension and refuses
-        # unknown extensions like ".bin", which would prevent the spec
-        # scenario "format='svg' overrides the extension".
         image_bytes = d.get_imagedata(fmt=fmt)
 
     out_path.write_bytes(image_bytes)

@@ -64,7 +64,7 @@ def simulate_buck_v2(bp,
         Two numpy arrays, parallel. ``v_out`` is the voltage at the
         ``"out"`` node sampled at the simulation dt.
     """
-    import pulsim.v2 as pv2  # noqa: F401 (local import, skip-friendly)
+    import pulsim as pv2  # noqa: F401 (local import, skip-friendly)
 
     b = pv2.CircuitBuilder()
     b.add_voltage_source("Vdc", "vin", "gnd", float(bp.V_g))
@@ -135,7 +135,7 @@ def simulate_buck_v2_with_step(bp,
     Returns ``(times, v_out)`` for comparison with the analytical
     ``signal.step(Gvd, …)`` prediction.
     """
-    import pulsim.v2 as pv2
+    import pulsim as pv2
 
     b = pv2.CircuitBuilder()
     b.add_voltage_source("Vdc", "vin", "gnd", float(bp.V_g))

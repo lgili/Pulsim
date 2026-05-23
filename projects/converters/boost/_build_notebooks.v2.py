@@ -523,7 +523,7 @@ than a buck).
 
     cells.append(code(r"""
 try:
-    import pulsim.v2 as p
+    import pulsim as p
     HAVE_PULSIM = True
 except ImportError as exc:
     print(f"Skipping Pulsim cross-validation: {exc}")
@@ -533,7 +533,7 @@ except ImportError as exc:
     cells.append(code(r"""
 def build_pulsim_boost(p: BoostParams, duty: float):
     '''Pulsim boost: V_g → L → (S to gnd) → D → C ∥ R → gnd.'''
-    import pulsim.v2 as p
+    import pulsim as p
 
     b = ps.Circuit()
     # [v2-migrate] removed add_node call  (v2 uses node names directly)

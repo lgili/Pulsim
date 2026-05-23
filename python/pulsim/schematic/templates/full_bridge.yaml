@@ -1,0 +1,11 @@
+name: full_bridge
+quality: draft
+canvas:
+  width:  220
+  height: 160
+slots:
+  source:        { x: 0.08, y: 0.50, rotation: 0 }
+  switch_a_high: { x: 0.40, y: 0.25, rotation: 0 }
+  switch_a_low:  { x: 0.40, y: 0.75, rotation: 0 }
+  switch_b_high: { x: 0.70, y: 0.25, rotation: 0 }
+  switch_b_low:  { x: 0.70, y: 0.75, rotation: 0 }
