@@ -112,15 +112,19 @@ def test_template_layout_places_buck_at_template_slots():
 
 def test_template_layout_wires_match_connectivity():
     """Wires emitted by the instantiator connect terminals that share
-    a node."""
+    a node. Phase 7 adds synthetic wires for the ground rail (from
+    a component terminal to a virtual ``<gnd-rail>`` endpoint or
+    rail-to-rail segments) — those are skipped here; only the
+    component-to-component wires must respect the netlist."""
     b = _build_buck()
     recognized = recognize(b)
     layout = template_layout(b, recognized)
     assert layout is not None
 
-    # Every wire's two endpoints must be component terminals belonging
-    # to the SAME node id.
     for wire in layout.wires:
+        if (wire.from_.component == "<gnd-rail>"
+                or wire.to.component == "<gnd-rail>"):
+            continue
         a = layout.components[wire.from_.component]
         b_pl = layout.components[wire.to.component]
         a_node = a.terminal_anchors[wire.from_.terminal].node
@@ -158,12 +162,17 @@ def test_compute_layout_uses_template_for_recognized(topo, builder):
     b = builder()
     layout = sch.compute_layout(b)
 
-    # Canvas dimensions must match the template exactly (force-
-    # directed produces variable canvases).
+    # Canvas WIDTH must match the template exactly. HEIGHT is
+    # extended by ~15 mm (Phase 7) to fit the ground rail drawn at
+    # the bottom — accept both the template height and template+15.
     template = load_template(topo)
     assert template is not None
     assert layout.canvas.width == pytest.approx(template.canvas_width, abs=0.5)
-    assert layout.canvas.height == pytest.approx(template.canvas_height, abs=0.5)
+    height_min = template.canvas_height - 0.5
+    height_max = template.canvas_height + 16.0
+    assert height_min <= layout.canvas.height <= height_max, (
+        f"canvas height {layout.canvas.height} not in "
+        f"[{height_min}, {height_max}]")
 
 
 def test_compute_layout_falls_back_for_unrecognized():
