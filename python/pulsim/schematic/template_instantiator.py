@@ -294,11 +294,38 @@ def _orthogonal_l_path(
             (mid_x, a_out[1]), (mid_x, b_out[1]),
             b_out, (bx, by),
         )
+    # Mixed v-h: single-corner L. The corner sits at (a_x, b_y) for a
+    # v-axis A endpoint, or (b_x, a_y) for an h-axis A. That guarantees
+    # the wire turns exactly once, perpendicular at the corner.
     if a_axis == "v":
-        corner = (a_out[0], b_out[1])
+        corner = (ax, by)
     else:
-        corner = (b_out[0], a_out[1])
-    return ((ax, ay), a_out, corner, b_out, (bx, by))
+        corner = (bx, ay)
+    # Side-direction stubs (a_out / b_out) only help when the corner
+    # lies in the SAME direction as the natural side exit. Otherwise
+    # they walk backward then forward, producing a visible zigzag that
+    # makes the wire look disconnected. Use a single signed-product
+    # test: positive ⇒ corner ahead of anchor along side direction ⇒
+    # emit stub; non-positive ⇒ skip.
+    def _stub_helps(anchor_v: float, corner_v: float, side_dir: float
+                    ) -> bool:
+        return (corner_v - anchor_v) * side_dir > 0
+    pts: list[tuple[float, float]] = [(ax, ay)]
+    if a_axis == "v":
+        if _stub_helps(ay, corner[1], da[1]):
+            pts.append(a_out)
+    else:
+        if _stub_helps(ax, corner[0], da[0]):
+            pts.append(a_out)
+    pts.append(corner)
+    if b_axis == "v":
+        if _stub_helps(by, corner[1], db[1]):
+            pts.append(b_out)
+    else:
+        if _stub_helps(bx, corner[0], db[0]):
+            pts.append(b_out)
+    pts.append((bx, by))
+    return tuple(pts)
 
 
 def _vertical_stub(ax: float, ay: float, target_y: float

@@ -179,7 +179,11 @@ def _draw_resistor(p: ComponentPlacement) -> str:
         pts.append((x, y))
     pts.append(e)
     mask = _body_mask(mx, my, body_len + 1.0, amp * 2 + 1.0, ux, uy)
-    leads = [_line(ax, ay, s[0], s[1]), _line(e[0], e[1], bx, by)]
+    leads = []
+    if _is_connected(p, 0):
+        leads.append(_line(ax, ay, s[0], s[1]))
+    if _is_connected(p, 1):
+        leads.append(_line(e[0], e[1], bx, by))
     body = _polyline(pts)
     label = _label_outside(p, amp + 4.0)
     return "<g>" + mask + "".join(leads + [body, label]) + "</g>"
@@ -209,8 +213,11 @@ def _draw_capacitor(p: ComponentPlacement) -> str:
     p2a = (mid_b[0] + px * plate_w / 2.0, mid_b[1] + py * plate_w / 2.0)
     p2b = (mid_b[0] - px * plate_w / 2.0, mid_b[1] - py * plate_w / 2.0)
     mask = _body_mask(mx, my, gap + 2.0, plate_w + 1.0, ux, uy)
-    leads = [_line(ax, ay, mid_a[0], mid_a[1]),
-             _line(mid_b[0], mid_b[1], bx, by)]
+    leads = []
+    if _is_connected(p, 0):
+        leads.append(_line(ax, ay, mid_a[0], mid_a[1]))
+    if _is_connected(p, 1):
+        leads.append(_line(mid_b[0], mid_b[1], bx, by))
     plates = [_line(p1a[0], p1a[1], p1b[0], p1b[1], width=plate_stroke),
               _line(p2a[0], p2a[1], p2b[0], p2b[1], width=plate_stroke)]
     label = _label_outside(p, plate_w / 2.0 + 2.5)
@@ -238,8 +245,11 @@ def _draw_inductor(p: ComponentPlacement) -> str:
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
     angle_deg = math.degrees(math.atan2(uy, ux))
     mask = _body_mask(mx, my, body_len + 1.0, bump_r * 2 + 1.5, ux, uy)
-    leads = [_line(ax, ay, s[0], s[1]),
-             _line(s[0] + ux * body_len, s[1] + uy * body_len, bx, by)]
+    leads = []
+    if _is_connected(p, 0):
+        leads.append(_line(ax, ay, s[0], s[1]))
+    if _is_connected(p, 1):
+        leads.append(_line(s[0] + ux * body_len, s[1] + uy * body_len, bx, by))
     parts: list[str] = [f"M {_fmt(s[0])} {_fmt(s[1])}"]
     for i in range(n_bumps):
         nx = s[0] + ux * bump_r * 2 * (i + 1)
@@ -287,8 +297,11 @@ def _draw_diode(p: ComponentPlacement) -> str:
     bar_b = (apex_tip[0] - px * body_w / 2.0,
              apex_tip[1] - py * body_w / 2.0)
     mask = _body_mask(mx, my, body_len + 1.0, body_w + 1.0, ux, uy)
-    leads = [_line(ax, ay, apex_back[0], apex_back[1]),
-             _line(apex_tip[0], apex_tip[1], bx, by)]
+    leads = []
+    if _is_connected(p, 0):
+        leads.append(_line(ax, ay, apex_back[0], apex_back[1]))
+    if _is_connected(p, 1):
+        leads.append(_line(apex_tip[0], apex_tip[1], bx, by))
     tri_pts = " ".join(f"{_fmt(p[0])},{_fmt(p[1])}"
                        for p in (tri_a, tri_b, apex_tip))
     triangle = (
@@ -425,7 +438,11 @@ def _draw_switch(p: ComponentPlacement) -> str:
         s[1] + uy * arm_along + py * arm_perp,
     )
     mask = _body_mask(mx, my, body_len + 1.0, arm_perp * 2 + 2.0, ux, uy)
-    leads = [_line(ax, ay, s[0], s[1]), _line(e[0], e[1], bx, by)]
+    leads = []
+    if _is_connected(p, 0):
+        leads.append(_line(ax, ay, s[0], s[1]))
+    if _is_connected(p, 1):
+        leads.append(_line(e[0], e[1], bx, by))
     contact = [
         _line(s[0], s[1], arm_end[0], arm_end[1]),
         _circle(s[0], s[1], 1.2, fill="white"),
@@ -590,11 +607,15 @@ def _draw_circle_source(p: ComponentPlacement, *,
 
 def _source_leads(p: ComponentPlacement, r: float) -> list[str]:
     """Stub leads from each terminal anchor to the edge of the source
-    body (a circle of radius r centered between the two anchors)."""
+    body (a circle of radius r centered between the two anchors).
+    Skips floating terminals so the source's circle doesn't grow a
+    stub into empty space."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
     out = []
     for t in (a, b):
+        if not _is_connected(p, t.index):
+            continue
         dx, dy = t.x - cx, t.y - cy
         n = math.hypot(dx, dy)
         if n < 1e-6 or n <= r:
@@ -642,6 +663,18 @@ _DRAWERS = {
     "saturable_inductor":   _draw_inductor,
     "transformer":          _draw_transformer,
 }
+
+
+_CONNECTED: dict[str, set[int]] = {}
+
+
+def _is_connected(p: ComponentPlacement, terminal: int) -> bool:
+    """Return True iff terminal ``terminal`` of component ``p`` has at
+    least one wire endpoint touching it. Used by the drawers to suppress
+    leads that would otherwise dangle in midair (e.g. forward's Dfwd
+    anode without a secondary winding)."""
+    s = _CONNECTED.get(p.name)
+    return s is not None and terminal in s
 
 
 def _draw_component(p: ComponentPlacement) -> str:
@@ -802,6 +835,16 @@ def render_svg(layout: SchematicLayout, path: Any) -> Path:
     resolved path. Pure Python — no schemdraw dependency."""
     out = Path(path)
     bbox = layout.canvas
+    # Build the (component, terminal) connectivity set so drawers can
+    # suppress dangling leads. A terminal is "connected" iff some wire
+    # endpoint references it. Synthetic <gnd-rail> endpoints are
+    # ignored — they aren't real components.
+    _CONNECTED.clear()
+    for w in layout.wires:
+        if w.from_.component != "<gnd-rail>":
+            _CONNECTED.setdefault(w.from_.component, set()).add(w.from_.terminal)
+        if w.to.component != "<gnd-rail>":
+            _CONNECTED.setdefault(w.to.component, set()).add(w.to.terminal)
     # Add a generous margin around the canvas for labels.
     margin = 10.0
     vb_x = bbox.x - margin

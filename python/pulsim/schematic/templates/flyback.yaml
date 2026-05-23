@@ -5,11 +5,13 @@
 # Topology (single-switch flyback):
 #
 #     Primary:    Vin ──[Lp]── sw ──[Q]── gnd
-#     Secondary:  (Ls + D) ──── vout ──┬──[Rload]── gnd
+#     Secondary:  Ls in parallel with D (test netlist), feeding Cout ‖ Rload
 #                                       └──[Cout]── gnd
 #
-# Primary on the LEFT half, secondary on the RIGHT half. Transformer
-# windings stacked vertically to show coupling.
+# Ls and D are drawn VERTICAL side-by-side so the vsec / vout nets each
+# become a single short horizontal wire across the tops/bottoms of the
+# two devices — no wires crossing through the body of either. The
+# transformer-coupling glyph (||) lands between Lp and Ls.
 
 name: flyback
 quality: polished
@@ -20,28 +22,28 @@ slots:
   source:
     x: 0.07
     y: 0.50
-    rotation: 0       # vertical battery
+    rotation: 0
   transformer_primary:
     x: 0.30
     y: 0.30
-    rotation: 0       # vertical primary winding (Lp)
+    rotation: 0
   switch_primary:
     x: 0.30
     y: 0.78
-    rotation: 0       # vertical low-side switch
+    rotation: 0
   transformer_secondary:
     x: 0.55
     y: 0.30
-    rotation: 0       # vertical secondary winding (Ls)
+    rotation: 0
   rectifier_diode:
-    x: 0.72
+    x: 0.70
     y: 0.30
-    rotation: 90      # horizontal diode (anode @ Ls+, cathode @ vout)
+    rotation: 0       # vertical, anode (top) at vsec, cathode (bottom) at vout
   output_capacitor:
     x: 0.85
     y: 0.50
-    rotation: 0       # vertical
+    rotation: 0
   load_resistor:
     x: 0.95
     y: 0.50
-    rotation: 0       # vertical
+    rotation: 0
