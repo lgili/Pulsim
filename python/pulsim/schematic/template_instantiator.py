@@ -248,6 +248,16 @@ def _orthogonal_l_path(
     """L- or Z-shape polyline from terminal A to terminal B respecting
     each one's exit direction. Wire leaves each body perpendicular to
     its side, turns once or twice before arriving at the other end.
+
+    Routing rules:
+      * Both endpoints exit the SAME direction (e.g. both north): route
+        OVER (or UNDER, or AROUND) both stubs by going past the more
+        extreme of the two stub points. A naive midpoint produces a
+        zig-zag that overshoots one endpoint.
+      * Opposite directions (one N + one S): use a Z-shape via the
+        average mid-line — both stubs face each other, so meeting in
+        the middle is clean.
+      * Mixed axis (one vertical + one horizontal): single L corner.
     """
     da = _SIDE_DIR.get(a_side, (0, -1))
     db = _SIDE_DIR.get(b_side, (0,  1))
@@ -257,6 +267,14 @@ def _orthogonal_l_path(
     b_axis = "v" if b_side in ("N", "S") else "h"
 
     if a_axis == "v" and b_axis == "v":
+        # Same vertical-exit direction → route past the more extreme y.
+        if da[1] < 0 and db[1] < 0:
+            top_y = min(a_out[1], b_out[1])
+            return ((ax, ay), (ax, top_y), (bx, top_y), (bx, by))
+        if da[1] > 0 and db[1] > 0:
+            bot_y = max(a_out[1], b_out[1])
+            return ((ax, ay), (ax, bot_y), (bx, bot_y), (bx, by))
+        # Opposite vertical exits (one N, one S) — Z-shape via midline.
         mid_y = (a_out[1] + b_out[1]) / 2.0
         return (
             (ax, ay), a_out,
@@ -264,6 +282,12 @@ def _orthogonal_l_path(
             b_out, (bx, by),
         )
     if a_axis == "h" and b_axis == "h":
+        if da[0] < 0 and db[0] < 0:
+            left_x = min(a_out[0], b_out[0])
+            return ((ax, ay), (left_x, ay), (left_x, by), (bx, by))
+        if da[0] > 0 and db[0] > 0:
+            right_x = max(a_out[0], b_out[0])
+            return ((ax, ay), (right_x, ay), (right_x, by), (bx, by))
         mid_x = (a_out[0] + b_out[0]) / 2.0
         return (
             (ax, ay), a_out,
