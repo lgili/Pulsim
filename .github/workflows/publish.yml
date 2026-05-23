@@ -70,9 +70,17 @@ jobs:
           # manylinux2014 ships GCC 10, which is not enough for full C++23.
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
 
-          # macOS deployment target
+          # macOS deployment target — bumped to 13.3 because C++23
+          # `<format>` formats floats via std::to_chars, which libc++
+          # only exposes from macOS 13.3 (Ventura) onward. The wheel
+          # build under MACOSX_DEPLOYMENT_TARGET=11.0 was failing with:
+          #   'to_chars' is unavailable: introduced in macOS 13.3
+          #   (in formatter_floating_point.h)
+          # Apple Silicon Macs were released with macOS 11, but 13.3
+          # has been GA since March 2023 — acceptable floor for pulsim
+          # 1.0.0.
           CIBW_ENVIRONMENT_MACOS: >-
-            MACOSX_DEPLOYMENT_TARGET=11.0
+            MACOSX_DEPLOYMENT_TARGET=13.3
 
           # Linux: Install build tools
           CIBW_BEFORE_ALL_LINUX: |
