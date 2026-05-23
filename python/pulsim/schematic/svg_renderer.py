@@ -120,36 +120,40 @@ def _terminal_axis(p0: tuple[float, float], p1: tuple[float, float]
 
 
 def _draw_resistor(p: ComponentPlacement) -> str:
-    """IEC-style rectangle resistor with leads at both terminals.
+    """ANSI-style zigzag resistor — 6 alternating peaks.
 
-    Body length = 8 mm, body width = 3 mm centered on the line
-    between the two terminal anchors.
+    Layout along the lead axis: short stub-in, then 6 triangular
+    teeth (3 up + 3 down alternating perpendicular to axis), then
+    short stub-out. Tooth amplitude = 2 mm, tooth length each = 1.6 mm.
+    Total body length ≈ 10 mm.
     """
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
-    # Vector from a→b and its perpendicular, both normalized.
     dx, dy = bx - ax, by - ay
     length = math.hypot(dx, dy)
     if length < 1e-6:
         return ""
     ux, uy = dx / length, dy / length
-    px, py = -uy, ux  # perpendicular unit
-    body_len = min(8.0, length * 0.6)
-    body_w   = 3.0
-    # Start of body along axis from midpoint
+    px, py = -uy, ux
+    body_len = min(10.4, length * 0.7)
+    amp = 1.8
+    n_teeth = 6
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
-    e = (mx + ux * body_len / 2.0, my + uy * body_len / 2.0)
-    # Rectangle corners
-    c1 = (s[0] + px * body_w / 2.0, s[1] + py * body_w / 2.0)
-    c2 = (s[0] - px * body_w / 2.0, s[1] - py * body_w / 2.0)
-    c3 = (e[0] - px * body_w / 2.0, e[1] - py * body_w / 2.0)
-    c4 = (e[0] + px * body_w / 2.0, e[1] + py * body_w / 2.0)
-    # Lead lines from each terminal to the body edge.
+    # Build zigzag polyline: walk along axis, alternating ± amp per step.
+    step = body_len / (n_teeth + 1)
+    pts: list[tuple[float, float]] = [s]
+    for i in range(1, n_teeth + 1):
+        side = 1.0 if (i % 2 == 1) else -1.0
+        x = s[0] + ux * step * i + px * amp * side
+        y = s[1] + uy * step * i + py * amp * side
+        pts.append((x, y))
+    e = (s[0] + ux * body_len, s[1] + uy * body_len)
+    pts.append(e)
     leads = [_line(ax, ay, s[0], s[1]), _line(e[0], e[1], bx, by)]
-    body = _polyline([c1, c2, c3, c4, c1])
-    label = _label_outside(p, body_w + 4.0)
+    body = _polyline(pts)
+    label = _label_outside(p, amp + 5.0)
     return "<g>" + "".join(leads + [body, label]) + "</g>"
 
 
@@ -186,7 +190,12 @@ def _draw_capacitor(p: ComponentPlacement) -> str:
 
 
 def _draw_inductor(p: ComponentPlacement) -> str:
-    """Inductor — three semi-circle bumps along the lead axis."""
+    """Inductor — four full half-circle bumps along the lead axis,
+    drawn as a single continuous polyline so the SVG joins are
+    smooth.
+
+    Body length ≈ 12 mm; each bump radius = 1.5 mm; arc curves to the
+    "above" side of the axis (perpendicular)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
@@ -195,31 +204,32 @@ def _draw_inductor(p: ComponentPlacement) -> str:
     if length < 1e-6:
         return ""
     ux, uy = dx / length, dy / length
-    body_len = min(12.0, length * 0.6)
-    bump_r = body_len / 6.0
+    body_len = min(12.0, length * 0.65)
+    n_bumps = 4
+    bump_r = body_len / (2 * n_bumps)
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
-    # Angle of body axis (CCW from +x in SVG coords)
     angle_deg = math.degrees(math.atan2(uy, ux))
     leads = [_line(ax, ay, s[0], s[1]),
              _line(s[0] + ux * body_len, s[1] + uy * body_len, bx, by)]
-    # Three arcs along the body — each arc covers 180° and has radius bump_r.
-    arcs = []
-    for i in range(3):
-        start = (s[0] + ux * bump_r * (2 * i),
-                 s[1] + uy * bump_r * (2 * i))
-        end   = (s[0] + ux * bump_r * (2 * i + 2),
-                 s[1] + uy * bump_r * (2 * i + 2))
-        # Sweep flag chosen so the bump goes ABOVE the axis (perpendicular)
-        arcs.append(
-            f'<path d="M {_fmt(start[0])} {_fmt(start[1])} '
-            f'A {_fmt(bump_r)} {_fmt(bump_r)} {_fmt(angle_deg)} 0 1 '
-            f'{_fmt(end[0])} {_fmt(end[1])}" '
-            f'fill="none" stroke="{_STROKE}" '
-            f'stroke-width="{_fmt(_STROKE_WIDTH)}"/>'
+    # Single SVG path with N arc segments — sweep=1 keeps every bump
+    # on the same side of the axis (above, perpendicular to ux,uy).
+    parts: list[str] = [f"M {_fmt(s[0])} {_fmt(s[1])}"]
+    for i in range(n_bumps):
+        nx = s[0] + ux * bump_r * 2 * (i + 1)
+        ny = s[1] + uy * bump_r * 2 * (i + 1)
+        parts.append(
+            f"A {_fmt(bump_r)} {_fmt(bump_r)} {_fmt(angle_deg)} "
+            f"0 1 {_fmt(nx)} {_fmt(ny)}"
         )
-    label = _label_outside(p, bump_r + 4.0)
-    return "<g>" + "".join(leads + arcs + [label]) + "</g>"
+    path_d = " ".join(parts)
+    body = (
+        f'<path d="{path_d}" fill="none" stroke="{_STROKE}" '
+        f'stroke-width="{_fmt(_STROKE_WIDTH)}" '
+        f'stroke-linejoin="round"/>'
+    )
+    label = _label_outside(p, bump_r + 5.0)
+    return "<g>" + "".join(leads + [body, label]) + "</g>"
 
 
 def _draw_diode(p: ComponentPlacement) -> str:
@@ -329,7 +339,9 @@ def _draw_current_source(p: ComponentPlacement) -> str:
 
 
 def _draw_switch(p: ComponentPlacement) -> str:
-    """Open-switch symbol: two small circles + a tilted bar between them."""
+    """Open-switch symbol: two larger contact dots with a tilted arm
+    pivoting on the first contact and reaching past the second contact
+    (open-position convention)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
@@ -339,50 +351,103 @@ def _draw_switch(p: ComponentPlacement) -> str:
         return ""
     ux, uy = dx / length, dy / length
     px, py = -uy, ux
-    body_len = min(7.0, length * 0.5)
+    body_len = min(8.0, length * 0.55)
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
     e = (mx + ux * body_len / 2.0, my + uy * body_len / 2.0)
-    # Tilted contact arm — endpoint pushed perpendicular.
-    arm_end = (e[0] + px * 2.5, e[1] + py * 2.5)
+    # The open contact arm starts at `s` and reaches just past `e` at
+    # ~30° off the axis (perpendicular component of 35 % of body_len).
+    arm_perp = body_len * 0.35
+    arm_along = body_len * 0.9
+    arm_end = (
+        s[0] + ux * arm_along + px * arm_perp,
+        s[1] + uy * arm_along + py * arm_perp,
+    )
     leads = [_line(ax, ay, s[0], s[1]), _line(e[0], e[1], bx, by)]
     contact = [
-        _circle(s[0], s[1], 1.0, fill="white"),
-        _circle(e[0], e[1], 1.0, fill="white"),
+        _circle(s[0], s[1], 1.5, fill="white"),
+        _circle(e[0], e[1], 1.5, fill="white"),
         _line(s[0], s[1], arm_end[0], arm_end[1]),
     ]
-    label = _label_outside(p, 4.0)
+    label = _label_outside(p, body_len * 0.5 + 4.0)
     return "<g>" + "".join(leads + contact + [label]) + "</g>"
 
 
 def _draw_mosfet(p: ComponentPlacement) -> str:
-    """3-terminal MOSFET: gate (pin 0) on one side, drain (pin 1) +
-    source (pin 2) on opposite sides. Body is a small box with the
-    channel line."""
+    """N-channel MOSFET symbol: gate bar (perpendicular to channel),
+    channel line with the 3 short tick marks indicating the enhancement
+    zone, source arrow showing current direction. Pin 0 = gate,
+    Pin 1 = drain, Pin 2 = source."""
     if len(p.terminal_anchors) < 3:
         return _draw_generic(p)
     g, d, s = (p.terminal_anchors[0], p.terminal_anchors[1],
                p.terminal_anchors[2])
-    # Center between drain and source.
-    cx, cy = (d.x + s.x) / 2.0, (d.y + s.y) / 2.0
-    # Channel line: from drain to source via center (already vertical
-    # because anchor sides made it so).
-    leads = [_line(d.x, d.y, cx, cy), _line(cx, cy, s.x, s.y)]
-    # Gate stub: from gate anchor to a perpendicular offset close to center.
-    gx_in = cx + (g.x - cx) * 0.3
-    gy_in = cy + (g.y - cy) * 0.3
-    leads.append(_line(g.x, g.y, gx_in, gy_in))
-    # Gate bar (perpendicular to channel)
-    chan_dx = d.x - s.x
-    chan_dy = d.y - s.y
+
+    # Channel axis from drain to source.
+    chan_dx = s.x - d.x
+    chan_dy = s.y - d.y
     cn = math.hypot(chan_dx, chan_dy) or 1.0
     cux, cuy = chan_dx / cn, chan_dy / cn
-    gate_bar_half = 3.5
-    gba = (gx_in + cux * gate_bar_half, gy_in + cuy * gate_bar_half)
-    gbb = (gx_in - cux * gate_bar_half, gy_in - cuy * gate_bar_half)
-    leads.append(_line(gba[0], gba[1], gbb[0], gbb[1]))
-    label = _text(cx + 6.0, cy - 6.0, p.name, anchor="start")
-    return "<g>" + "".join(leads + [label]) + "</g>"
+    # Perpendicular = gate-side direction.
+    pgx, pgy = -cuy, cux
+
+    cx, cy = (d.x + s.x) / 2.0, (d.y + s.y) / 2.0
+    # Channel line slightly inset from the drain/source pins so the
+    # ticks have room.
+    inset = cn * 0.18
+    chan_d = (d.x + cux * inset, d.y + cuy * inset)
+    chan_s = (s.x - cux * inset, s.y - cuy * inset)
+
+    # Gate-side line offset PERPENDICULAR to the channel toward gate.
+    # First figure out which side the gate is on.
+    gate_dot = (g.x - cx) * pgx + (g.y - cy) * pgy
+    side = 1.0 if gate_dot > 0 else -1.0
+    gx = cx + pgx * side * 2.5
+    gy = cy + pgy * side * 2.5
+
+    # Gate bar — perpendicular to channel, slightly shorter than channel.
+    bar_half = cn * 0.35
+    bar_a = (gx + cux * bar_half, gy + cuy * bar_half)
+    bar_b = (gx - cux * bar_half, gy - cuy * bar_half)
+
+    # Three enhancement-region ticks between gate bar and channel
+    # (parallel to gate bar, shorter, 3 segments).
+    tick_half = bar_half * 0.7
+    ticks: list[str] = []
+    for frac in (-0.5, 0.0, 0.5):
+        tx = gx + cux * bar_half * frac
+        ty = gy + cuy * bar_half * frac
+        tx_close = tx - pgx * side * 1.0
+        ty_close = ty - pgy * side * 1.0
+        ticks.append(_line(tx, ty, tx_close, ty_close))
+
+    leads = [
+        _line(d.x, d.y, chan_d[0], chan_d[1]),
+        _line(chan_d[0], chan_d[1], chan_s[0], chan_s[1]),
+        _line(chan_s[0], chan_s[1], s.x, s.y),
+        _line(g.x, g.y, gx, gy),
+        _line(bar_a[0], bar_a[1], bar_b[0], bar_b[1]),
+    ] + ticks
+
+    # Source arrow: small triangle near the source end pointing INTO
+    # the channel (for N-MOSFET).
+    arrow_len = 1.8
+    arrow_perp = 1.2
+    apex = (chan_s[0], chan_s[1])
+    tail = (chan_s[0] - cux * arrow_len, chan_s[1] - cuy * arrow_len)
+    a1 = (tail[0] + pgx * side * arrow_perp,
+          tail[1] + pgy * side * arrow_perp)
+    arrow = [
+        _polyline([a1, apex, tail, a1])
+    ]
+
+    # Label off to the OPPOSITE side from the gate bar so it doesn't
+    # collide with the gate driver wire.
+    lbl_x = cx - pgx * side * (bar_half + 4.0)
+    lbl_y = cy - pgy * side * (bar_half + 4.0)
+    anchor = "end" if (lbl_x < cx) else "start"
+    label = _text(lbl_x, lbl_y, p.name, anchor=anchor)
+    return "<g>" + "".join(leads + arrow + [label]) + "</g>"
 
 
 def _draw_igbt(p: ComponentPlacement) -> str:
@@ -439,23 +504,30 @@ def _draw_generic(p: ComponentPlacement) -> str:
 def _draw_circle_source(p: ComponentPlacement, *,
                           label_top: str = "+",
                           label_bot: str = "-") -> str:
-    """Generic circle source with optional polarity labels."""
+    """Generic circle voltage source with prominent ± markers and a
+    diameter line between them so the polarity reads at a glance."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 4.5
+    r = 5.0
     body = [_circle(cx, cy, r)]
-    # Identify which terminal is on top vs bottom (or left vs right).
+    # Identify the axis (vertical vs horizontal body).
     if abs(a.y - b.y) > abs(a.x - b.x):
-        top = a if a.y < b.y else b
-        bot = a if a.y > b.y else b
+        # Vertical: + at top, − at bottom, separated by a horizontal
+        # line inside the circle.
+        marker_offset = r * 0.55
         labels = [
-            _text(cx, top.y + (cy - top.y) * 0.35,
-                  label_top, size=4.5),
-            _text(cx, bot.y - (bot.y - cy) * 0.35,
-                  label_bot, size=4.5),
+            _text(cx, cy - marker_offset, label_top,
+                  size=5.5),
+            _text(cx, cy + marker_offset, label_bot,
+                  size=6.5),  # larger so the minus bar is visible
         ]
     else:
-        labels = [_text(cx, cy, label_top, size=4.0)]
+        # Horizontal: + on left, − on right.
+        marker_offset = r * 0.55
+        labels = [
+            _text(cx - marker_offset, cy, label_top, size=5.5),
+            _text(cx + marker_offset, cy, label_bot, size=6.5),
+        ]
     leads = _source_leads(p, r)
     name_lbl = _label_outside(p, r + 3.0)
     return "<g>" + "".join(leads + body + labels + [name_lbl]) + "</g>"

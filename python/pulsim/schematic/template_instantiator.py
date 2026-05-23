@@ -119,23 +119,27 @@ def list_available_templates() -> list[str]:
 # Component geometry (very simple — assumes default symbol sizes)
 # ---------------------------------------------------------------------------
 
-# Default body dimensions in mm. Width/height before rotation —
-# rotation rotates the box. Index by kind; falls back to (12, 18)
-# for unknown kinds.
+# Body dimensions in mm — interpretation is (perpendicular_width,
+# lead_to_lead_length). The default anchor placement puts pin 0 at
+# (cx, cy - h/2) and pin 1 at (cx, cy + h/2) — so the LONG axis goes
+# along the leads. Width is the short perpendicular extent of the
+# body (where the zigzag/plates/coils fit). Components with both
+# dims equal (switch, MOSFET) are roughly square because the symbol
+# is gate + body + arrows.
 _BODY_SIZE: dict[str, tuple[float, float]] = {
-    "resistor":            (16.0,  6.0),
-    "capacitor":           ( 8.0,  6.0),
-    "inductor":            (18.0,  8.0),
-    "diode":               (12.0,  8.0),
-    "nonlinear_diode":     (12.0,  8.0),
+    "resistor":            ( 6.0, 16.0),
+    "capacitor":           ( 6.0, 10.0),
+    "inductor":            ( 6.0, 18.0),
+    "diode":               ( 8.0, 14.0),
+    "nonlinear_diode":     ( 8.0, 14.0),
     "switch":              (14.0, 14.0),
     "mosfet_level1":       (14.0, 14.0),
     "igbt_level1":         (14.0, 14.0),
-    "voltage_source":      (10.0, 16.0),
-    "current_source":      (10.0, 16.0),
-    "sine_voltage_source": (10.0, 16.0),
-    "pwm_voltage_source":  (10.0, 16.0),
-    "pulse_voltage_source": (10.0, 16.0),
+    "voltage_source":      (12.0, 18.0),
+    "current_source":      (12.0, 18.0),
+    "sine_voltage_source": (12.0, 18.0),
+    "pwm_voltage_source":  (12.0, 18.0),
+    "pulse_voltage_source": (12.0, 18.0),
     "vcvs":                (18.0, 14.0),
 }
 _DEFAULT_BODY_SIZE = (12.0, 18.0)
