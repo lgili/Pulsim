@@ -1,0 +1,59 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: rlc_overdamped_step
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # ζ = R/2 · sqrt(C/L) = 200/2 · sqrt(1e-6/1e-3) = 100 · 0.0316 = 3.16
+      # → overdamped, two real roots, pure exponential.
+      # Initial inductor transient (V_n_l swings 0→6.7V→2.3V→0.95V in first
+      # 3 samples) is where Pulsim's fixed-step trap and ngspice's adaptive
+      # trap diverge most — ~120 mV on a 10 V swing (1.2%). Steady-state
+      # error drops to numerical noise.
+      max_error: 2e-1
+  validation:
+    type: analytical
+    model: rlc_step
+    observable: V(out)
+    params:
+      v0: 10.0
+      r: 200.0
+      l: 1e-3
+      c: 1e-6
+# Series RLC overdamped step response. Complements existing
+# rlc_step.yaml (underdamped, ζ=0.5). Tests the analytical_rlc_step
+# overdamped branch (s1, s2 real roots).
+simulation:
+  tstop: 5e-3
+  dt: 5e-6
+  uic: true
+components:
+  - type: voltage_source
+    name: Vp
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 10.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 10e-3
+      period: 20e-3
+  - type: resistor
+    name: R1
+    nodes: [in, n_l]
+    value: 200.0
+  - type: inductor
+    name: L1
+    nodes: [n_l, out]
+    value: 1e-3
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1e-6
+    ic: 0.0

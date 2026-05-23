@@ -101,6 +101,48 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
+  - path: circuits/current_source_rl_step.yaml
+    ngspice_netlist: ngspice/current_source_rl_step.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    # direct_trap (pure trapezoidal) rings on the DC-current-source +
+    # inductor UIC step — known trap weakness on stiff inductive
+    # discontinuities. trbdf2 (L-stable) handles it cleanly. ngspice
+    # has internal adaptive timestep that damps the equivalent.
+    scenarios: [gmres_trbdf2]
+  - path: circuits/rl_high_pass_sine.yaml
+    ngspice_netlist: ngspice/rl_high_pass_sine.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/rlc_overdamped_step.yaml
+    ngspice_netlist: ngspice/rlc_overdamped_step.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/two_stage_rc_lowpass.yaml
+    ngspice_netlist: ngspice/two_stage_rc_lowpass.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/lc_resonant_tank.yaml
+    ngspice_netlist: ngspice/lc_resonant_tank.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    # Lossless LC — needs trbdf2 (L-stable). Trap accumulates phase
+    # drift over many oscillation cycles.
+    scenarios: [gmres_trbdf2]
+  - path: circuits/current_divider_3way.yaml
+    ngspice_netlist: ngspice/current_divider_3way.cir
+    ngspice_observables:
+      - column: V(node)
+        spice_vector: v(node)
+    scenarios: [direct_trap]
   - path: circuits/pulse_voltage_rl.yaml
     ngspice_netlist: ngspice/pulse_voltage_rl.cir
     ngspice_observables:
