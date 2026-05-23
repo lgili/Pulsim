@@ -6,17 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
       
       
       
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/migration-guide/">
       
       
-        <link rel="prev" href="../gui-component-parity/">
+        <link rel="prev" href="../troubleshooting/">
       
       
-        <link rel="next" href="../configuration/">
+        <link rel="next" href="../versioning-and-release/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Migration Guide - PulsimCore</title>
+        <title>Migration Guide (legacy → 1.0) - Pulsim</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#migration-guide-python-only-v1-runtime" class="md-skip">
+        <a href="#migration-guide-pre-10-10" class="md-skip">
           Skip to content
         </a>
       
@@ -100,7 +100,7 @@
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href=".." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="../assets/images/pulsim-logo.svg" alt="logo">
 
@@ -113,13 +113,13 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            PulsimCore
+            Pulsim
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Migration Guide
+              Migration Guide (legacy → 1.0)
             
           </span>
         </div>
@@ -211,13 +211,30 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
     
       <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
-  Overview
+  User Guide
 
         </a>
       </li>
@@ -232,82 +249,10 @@
     
     
       <li class="md-tabs__item">
-        <a href="../v2/" class="md-tabs__link">
+        <a href="../internals/" class="md-tabs__link">
           
   
-  Pulsim v2 Guide
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../components-reference/" class="md-tabs__link">
-          
-  
-  Reference
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../examples-and-results/" class="md-tabs__link">
-          
-  
-  Guides
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../magnetic-models/" class="md-tabs__link">
-          
-  
-  Domain Libraries
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../benchmarks-and-parity/" class="md-tabs__link">
-          
-  
-  Quality Gates
+  Internals
 
         </a>
       </li>
@@ -324,25 +269,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../gui-component-parity/" class="md-tabs__link">
-          
-  
-  Compatibility
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../configuration/" class="md-tabs__link">
+        <a href="../build-system/" class="md-tabs__link">
           
   
   Operations
@@ -381,12 +308,12 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href=".." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="../assets/images/pulsim-logo.svg" alt="logo">
 
     </a>
-    PulsimCore
+    Pulsim
   </label>
   
     <div class="md-nav__source">
@@ -409,6 +336,26 @@
   
   
   
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
     
@@ -424,24 +371,24 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   <span class="md-ellipsis">
-    Overview
+    User Guide
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_1">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
-            Overview
+            User Guide
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -456,28 +403,7 @@
         
   
   <span class="md-ellipsis">
-    Documentation Home
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../backend-architecture/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend Architecture
+    Home
   </span>
   
 
@@ -515,119 +441,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Pulsim v2 Guide
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            Pulsim v2 Guide
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../v2/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../v2/getting-started/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../v2/mental-model/" class="md-nav__link">
+      <a href="../mental-model/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -648,7 +462,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/01-rc-charging/" class="md-nav__link">
+      <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -669,7 +483,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/02-buck-converter/" class="md-nav__link">
+      <a href="../tutorials/02-buck-converter/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -690,7 +504,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/03-flyback-isolated/" class="md-nav__link">
+      <a href="../tutorials/03-flyback-isolated/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -711,7 +525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/04-3phase-vsi/" class="md-nav__link">
+      <a href="../tutorials/04-3phase-vsi/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -732,7 +546,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/05-ldo-feedback/" class="md-nav__link">
+      <a href="../tutorials/05-ldo-feedback/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -753,7 +567,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/06-igbt-boost/" class="md-nav__link">
+      <a href="../tutorials/06-igbt-boost/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -774,7 +588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/api-reference/" class="md-nav__link">
+      <a href="../api-reference/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -795,7 +609,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/helpers/" class="md-nav__link">
+      <a href="../helpers/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -816,7 +630,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/gotchas/" class="md-nav__link">
+      <a href="../gotchas/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -865,7 +679,7 @@
             
   
   <span class="md-ellipsis">
-    Reference
+    Internals
   </span>
   
 
@@ -875,7 +689,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
-            Reference
+            Internals
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -886,11 +700,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../components-reference/" class="md-nav__link">
+      <a href="../internals/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Components Reference
+    Architecture (Layer-by-Layer)
   </span>
   
 
@@ -907,11 +721,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../control-blocks-reference/" class="md-nav__link">
+      <a href="../internals/layer0-numeric-and-sparse/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Control Blocks Reference
+    Layer 0 — Numeric + Sparse
   </span>
   
 
@@ -928,11 +742,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../kpi-reference/" class="md-nav__link">
+      <a href="../internals/layer1-topology-and-enumeration/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    KPI Reference
+    Layer 1 — Topology + Enumeration
   </span>
   
 
@@ -949,11 +763,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../netlist-format/" class="md-nav__link">
+      <a href="../internals/layer2-ad-and-device-models/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Netlist YAML Format
+    Layer 2 — AD + Device Models
   </span>
   
 
@@ -970,11 +784,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../device-models/" class="md-nav__link">
+      <a href="../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Device Models
+    Layer 2 V1 — MOSFET / IGBT
   </span>
   
 
@@ -991,11 +805,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../api-reference/" class="md-nav__link">
+      <a href="../internals/layer2-v2-transformer/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    API Reference
+    Layer 2 V2 — Transformer
   </span>
   
 
@@ -1012,81 +826,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../python-api/" class="md-nav__link">
+      <a href="../internals/layer3-stamping-pipeline/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Python API (Legacy Notes)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Guides
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
-            <span class="md-nav__icon md-icon"></span>
-            Guides
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../examples-and-results/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Examples and Results
+    Layer 3 — Stamping Pipeline
   </span>
   
 
@@ -1103,11 +847,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../notebooks/" class="md-nav__link">
+      <a href="../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Notebooks
+    Layer 4 — PWL State-Space Cache
   </span>
   
 
@@ -1124,11 +868,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../numerical-configuration/" class="md-nav__link">
+      <a href="../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Numerical Configuration
+    Layer 4 V1 — Trapezoidal Companion
   </span>
   
 
@@ -1145,634 +889,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../ac-analysis/" class="md-nav__link">
+      <a href="../internals/layer10-benchmarks/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    AC Analysis
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../fra/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Response Analysis (FRA)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../electrothermal-workflow/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Workflow
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../parameter-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Parameter Sweep
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../schematic-rendering/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Schematic Rendering
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../code-generation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Real-Time Code Generation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../fmi-export/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    FMI Export
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../automatic-differentiation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Automatic Differentiation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../pwl-switching-migration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PWL Switching Engine
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../component-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Component Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../thermal-and-loss-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Thermal + Loss Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../convergence-tuning-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Convergence Tuning
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../linear-solver-cache/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Linear-Solver Cache
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../robustness-policy/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Robustness Policy
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../troubleshooting/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Troubleshooting
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Domain Libraries
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            Domain Libraries
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../magnetic-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../motor-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Motor Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../compressor-and-refrigerant-load/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Compressor + Refrigerant Load
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../multilevel-converters/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Multilevel Converters
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../three-phase-grid/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Three-Phase Grid Library
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../catalog-devices/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Catalog Devices
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../converter-templates/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Converter Templates
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Quality Gates
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            Quality Gates
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../benchmarks-and-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Benchmarks and Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../spice-parity-dashboard/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    SPICE Parity Dashboard
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../property-based-testing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Property-Based Testing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../build-system/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Build System
+    Layer 10 — Benchmarks
   </span>
   
 
@@ -1813,24 +934,24 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   <span class="md-ellipsis">
-    Compatibility
+    Operations
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_7">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
-            Compatibility
+            Operations
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -1841,11 +962,53 @@
   
   
     <li class="md-nav__item">
-      <a href="../gui-component-parity/" class="md-nav__link">
+      <a href="../build-system/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    GUI Backend Parity
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
   </span>
   
 
@@ -1875,7 +1038,7 @@
           
   
   <span class="md-ellipsis">
-    Migration Guide
+    Migration Guide (legacy → 1.0)
   </span>
   
 
@@ -1886,7 +1049,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide
+    Migration Guide (legacy → 1.0)
   </span>
   
 
@@ -1908,28 +1071,55 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-what-changed" class="md-nav__link">
+  <a href="#at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
-      1. What Changed
+      At a glance
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="1. What Changed">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-level-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      Top-level objects
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Top-level objects">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#removed-unsupported-user-surfaces" class="md-nav__link">
+  <a href="#pulsimcircuit-pulsimcircuitbuilder" class="md-nav__link">
     <span class="md-ellipsis">
-      Removed / Unsupported User Surfaces
+      pulsim.Circuit → pulsim.CircuitBuilder
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#supported-user-surface" class="md-nav__link">
+  <a href="#pulsimsimulator-pulsimsimulate" class="md-nav__link">
     <span class="md-ellipsis">
-      Supported User Surface
+      pulsim.Simulator → pulsim.simulate(...)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pulsimyamlparser-pulsimload_yaml_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      pulsim.YamlParser → pulsim.load_yaml_file(...)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pulsimpreset-pulsimadvancedoptions-explicit-simulationoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      pulsim.Preset / pulsim.AdvancedOptions → explicit SimulationOptions
     </span>
   </a>
   
@@ -1941,236 +1131,56 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-netlist-migration-json-yaml" class="md-nav__link">
+  <a href="#device-models" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Netlist Migration (JSON -&gt; YAML)
+      Device models
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-runtime-migration" class="md-nav__link">
+  <a href="#control-surfaces" class="md-nav__link">
     <span class="md-ellipsis">
-      3. Runtime Migration
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Runtime Migration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#before-removed" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before (removed)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#after-supported" class="md-nav__link">
-    <span class="md-ellipsis">
-      After (supported)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#legacy-transient-backend-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      Legacy transient backend keys
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#beforeafter-legacy-backend-canonical-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before/After: legacy backend -&gt; canonical mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#schema-evolution-policy-v1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Schema Evolution Policy (v1)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#beforeafter-procedural-compatibility-and-canonical-runtime" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before/After: procedural compatibility and canonical runtime
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#beforeafter-expert-override-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before/After: expert override location
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-removed-apiworkflow-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      4. Removed API/Workflow Mapping
+      Control surfaces
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-versioned-deprecation-timeline" class="md-nav__link">
+  <a href="#analyses" class="md-nav__link">
     <span class="md-ellipsis">
-      5. Versioned Deprecation Timeline
+      Analyses
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-migration-notes-pulsimgui-converter-integration" class="md-nav__link">
+  <a href="#features-that-did-not-migrate" class="md-nav__link">
     <span class="md-ellipsis">
-      6. Migration Notes: PulsimGui Converter Integration
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="6. Migration Notes: PulsimGui Converter Integration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#canonicalizacao-de-tipos" class="md-nav__link">
-    <span class="md-ellipsis">
-      Canonicalização de tipos
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#regras-de-modelagem-no-backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      Regras de modelagem no backend
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#pinagem-e-validacao" class="md-nav__link">
-    <span class="md-ellipsis">
-      Pinagem e validação
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#gate-minimo-para-ci-do-conversor" class="md-nav__link">
-    <span class="md-ellipsis">
-      Gate mínimo para CI do conversor
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#7-upgrade-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      7. Upgrade Checklist
+      Features that did NOT migrate
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-numerical-surface-v010-v011" class="md-nav__link">
+  <a href="#a-note-on-the-pulsimv2-namespace" class="md-nav__link">
     <span class="md-ellipsis">
-      8. Numerical Surface — v0.10 → v0.11
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="8. Numerical Surface — v0.10 → v0.11">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#81-make_robust_options-simulationoptionsfrom_preset" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.1 make_robust_options(...) → SimulationOptions.from_preset(...)
+      A note on the pulsim.v2 namespace
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#82-adaptive_timestep-step_mode" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
-      8.2 adaptive_timestep → step_mode
+      See also
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#83-direct_formulation_fallback-just-remove-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.3 direct_formulation_fallback → just remove it
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#84-deprecated-integrators" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.4 Deprecated integrators
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#85-new-telemetry-counters-additive-no-migration-needed" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.5 New telemetry counters (additive — no migration needed)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#86-convergence-improvements-are-silent-no-migration-needed" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.6 Convergence improvements are silent (no migration needed)
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -2178,76 +1188,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Operations
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
-            <span class="md-nav__icon md-icon"></span>
-            Operations
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Configuration
-  </span>
-  
-
-      </a>
     </li>
   
 
@@ -2308,28 +1248,55 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-what-changed" class="md-nav__link">
+  <a href="#at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
-      1. What Changed
+      At a glance
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="1. What Changed">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-level-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      Top-level objects
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Top-level objects">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#removed-unsupported-user-surfaces" class="md-nav__link">
+  <a href="#pulsimcircuit-pulsimcircuitbuilder" class="md-nav__link">
     <span class="md-ellipsis">
-      Removed / Unsupported User Surfaces
+      pulsim.Circuit → pulsim.CircuitBuilder
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#supported-user-surface" class="md-nav__link">
+  <a href="#pulsimsimulator-pulsimsimulate" class="md-nav__link">
     <span class="md-ellipsis">
-      Supported User Surface
+      pulsim.Simulator → pulsim.simulate(...)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pulsimyamlparser-pulsimload_yaml_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      pulsim.YamlParser → pulsim.load_yaml_file(...)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pulsimpreset-pulsimadvancedoptions-explicit-simulationoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      pulsim.Preset / pulsim.AdvancedOptions → explicit SimulationOptions
     </span>
   </a>
   
@@ -2341,236 +1308,56 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-netlist-migration-json-yaml" class="md-nav__link">
+  <a href="#device-models" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Netlist Migration (JSON -&gt; YAML)
+      Device models
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-runtime-migration" class="md-nav__link">
+  <a href="#control-surfaces" class="md-nav__link">
     <span class="md-ellipsis">
-      3. Runtime Migration
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Runtime Migration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#before-removed" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before (removed)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#after-supported" class="md-nav__link">
-    <span class="md-ellipsis">
-      After (supported)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#legacy-transient-backend-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      Legacy transient backend keys
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#beforeafter-legacy-backend-canonical-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before/After: legacy backend -&gt; canonical mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#schema-evolution-policy-v1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Schema Evolution Policy (v1)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#beforeafter-procedural-compatibility-and-canonical-runtime" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before/After: procedural compatibility and canonical runtime
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#beforeafter-expert-override-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      Before/After: expert override location
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-removed-apiworkflow-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      4. Removed API/Workflow Mapping
+      Control surfaces
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-versioned-deprecation-timeline" class="md-nav__link">
+  <a href="#analyses" class="md-nav__link">
     <span class="md-ellipsis">
-      5. Versioned Deprecation Timeline
+      Analyses
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-migration-notes-pulsimgui-converter-integration" class="md-nav__link">
+  <a href="#features-that-did-not-migrate" class="md-nav__link">
     <span class="md-ellipsis">
-      6. Migration Notes: PulsimGui Converter Integration
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="6. Migration Notes: PulsimGui Converter Integration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#canonicalizacao-de-tipos" class="md-nav__link">
-    <span class="md-ellipsis">
-      Canonicalização de tipos
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#regras-de-modelagem-no-backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      Regras de modelagem no backend
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#pinagem-e-validacao" class="md-nav__link">
-    <span class="md-ellipsis">
-      Pinagem e validação
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#gate-minimo-para-ci-do-conversor" class="md-nav__link">
-    <span class="md-ellipsis">
-      Gate mínimo para CI do conversor
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#7-upgrade-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      7. Upgrade Checklist
+      Features that did NOT migrate
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-numerical-surface-v010-v011" class="md-nav__link">
+  <a href="#a-note-on-the-pulsimv2-namespace" class="md-nav__link">
     <span class="md-ellipsis">
-      8. Numerical Surface — v0.10 → v0.11
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="8. Numerical Surface — v0.10 → v0.11">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#81-make_robust_options-simulationoptionsfrom_preset" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.1 make_robust_options(...) → SimulationOptions.from_preset(...)
+      A note on the pulsim.v2 namespace
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#82-adaptive_timestep-step_mode" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
-      8.2 adaptive_timestep → step_mode
+      See also
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#83-direct_formulation_fallback-just-remove-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.3 direct_formulation_fallback → just remove it
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#84-deprecated-integrators" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.4 Deprecated integrators
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#85-new-telemetry-counters-additive-no-migration-needed" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.5 New telemetry counters (additive — no migration needed)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#86-convergence-improvements-are-silent-no-migration-needed" class="md-nav__link">
-    <span class="md-ellipsis">
-      8.6 Convergence improvements are silent (no migration needed)
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -2605,373 +1392,305 @@
   
 
 
-<h1 id="migration-guide-python-only-v1-runtime">Migration Guide: Python-Only v1 Runtime<a class="headerlink" href="#migration-guide-python-only-v1-runtime" title="Permanent link">&para;</a></h1>
-<p>This guide documents the migration to the unified v1 kernel with a Python-only user-facing runtime.</p>
-<h2 id="1-what-changed">1. What Changed<a class="headerlink" href="#1-what-changed" title="Permanent link">&para;</a></h2>
-<h3 id="removed-unsupported-user-surfaces">Removed / Unsupported User Surfaces<a class="headerlink" href="#removed-unsupported-user-surfaces" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Legacy CLI execution flow</li>
-<li>Legacy gRPC server/client workflow</li>
-<li>JSON netlist loading path</li>
-</ul>
-<h3 id="supported-user-surface">Supported User Surface<a class="headerlink" href="#supported-user-surface" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Python package <code>pulsim</code></li>
-<li>YAML netlists (<code>schema: pulsim-v1</code>)</li>
-<li>Python benchmark/parity/stress tooling in <code>benchmarks/</code></li>
-</ul>
-<h2 id="2-netlist-migration-json-yaml">2. Netlist Migration (JSON -&gt; YAML)<a class="headerlink" href="#2-netlist-migration-json-yaml" title="Permanent link">&para;</a></h2>
-<p>JSON loaders are no longer part of the supported runtime path.</p>
-<p>Use versioned YAML:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">schema</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulsim-v1</span>
-<span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
-<span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resistor</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">R1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1k</span>
-</code></pre></div>
-<h2 id="3-runtime-migration">3. Runtime Migration<a class="headerlink" href="#3-runtime-migration" title="Permanent link">&para;</a></h2>
-<h3 id="before-removed">Before (removed)<a class="headerlink" href="#before-removed" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>pulsim</code> CLI command flows</li>
-<li>Remote gRPC client/server product workflow</li>
-</ul>
-<h3 id="after-supported">After (supported)<a class="headerlink" href="#after-supported" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+<h1 id="migration-guide-pre-10-10">Migration Guide — pre-1.0 → 1.0<a class="headerlink" href="#migration-guide-pre-10-10" title="Permanent link">&para;</a></h1>
+<p>Pulsim 1.0.0 shipped a brand-new kernel. The pre-1.0 API surface
+(<code>Circuit</code>, <code>Simulator</code>, <code>YamlParser</code>, <code>Preset</code>, <code>codegen</code>,
+<code>fmu</code>, <code>schematic</code>, <code>templates</code>, <code>robust=True</code>, …) was
+retired during the 1.0 cycle.</p>
+<p>This guide maps every legacy idiom to its 1.0 equivalent. If you're
+hitting an <code>AttributeError: pulsim.Foo was a v1 symbol</code> at runtime,
+look up <code>Foo</code> below.</p>
+<h2 id="at-a-glance">At a glance<a class="headerlink" href="#at-a-glance" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Pre-1.0 (<code>v1</code>)</th>
+<th>1.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Top-level import</td>
+<td><code>import pulsim as ps</code></td>
+<td><code>import pulsim as p</code> (same alias works)</td>
+</tr>
+<tr>
+<td>Build a circuit</td>
+<td><code>ps.Circuit()</code> + <code>ps.Resistor()</code> + <code>ps.add_component(...)</code></td>
+<td><code>p.CircuitBuilder()</code> + <code>b.add_resistor(...)</code></td>
+</tr>
+<tr>
+<td>Run a transient</td>
+<td><code>ps.Simulator(ckt, opts).run_transient(x0)</code></td>
+<td><code>p.simulate(b, t_end=..., dt=...)</code></td>
+</tr>
+<tr>
+<td>Load from YAML</td>
+<td><code>ps.YamlParser(opts).load("foo.yaml")</code></td>
+<td><code>p.load_yaml_file("foo.yaml")</code></td>
+</tr>
+<tr>
+<td>AC sweep / Bode</td>
+<td><code>Simulator.run_ac_sweep(AcSweepOptions(...))</code></td>
+<td><code>p.run_ac_sweep(b, …)</code> (MNA, fast)</td>
+</tr>
+<tr>
+<td>Swept-sine FRA</td>
+<td><code>Simulator.run_fra(...)</code></td>
+<td><code>p.run_fra(b, …)</code> (closed-loop friendly)</td>
+</tr>
+<tr>
+<td>Closed-loop control</td>
+<td>Hand-rolled callbacks / <code>signal_evaluator.py</code></td>
+<td><code>p.MixedDomainBlockChain</code> + <code>PIController</code>, <code>PIDController</code>, …</td>
+</tr>
+<tr>
+<td>Plot</td>
+<td>matplotlib by hand</td>
+<td><code>p.scope(b, res, signals=[...])</code>, <code>p.plot_bode(...)</code></td>
+</tr>
+<tr>
+<td>Discovery</td>
+<td>n/a</td>
+<td><code>p.catalog()</code>, <code>p.example("buck_open_loop")</code></td>
+</tr>
+</tbody>
+</table>
+<p>The 1.0 surface is <strong>flat</strong> — there's no <code>pulsim.v2</code> namespace. All
+device builders, analyses, and helpers live directly on the
+<code>pulsim</code> module.</p>
+<h2 id="top-level-objects">Top-level objects<a class="headerlink" href="#top-level-objects" title="Permanent link">&para;</a></h2>
+<h3 id="pulsimcircuit-pulsimcircuitbuilder"><code>pulsim.Circuit</code> → <code>pulsim.CircuitBuilder</code><a class="headerlink" href="#pulsimcircuit-pulsimcircuitbuilder" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Pre-1.0</span>
+<span class="n">ckt</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="p">()</span>
+<span class="n">r1</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;n1&quot;</span><span class="p">)</span>          <span class="c1"># node names were integer IDs returned by add_node</span>
+<span class="n">gnd</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;gnd&quot;</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_component</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">Resistor</span><span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span> <span class="n">r1</span><span class="p">,</span> <span class="n">gnd</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">))</span>
 
+<span class="c1"># 1.0 — string node names; helpers per device kind</span>
+<span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span> <span class="s2">&quot;n1&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="pulsimsimulator-pulsimsimulate"><code>pulsim.Simulator</code> → <code>pulsim.simulate(...)</code><a class="headerlink" href="#pulsimsimulator-pulsimsimulate" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Pre-1.0</span>
+<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">(</span><span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
+<span class="n">sim</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">ckt</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">ckt</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
+
+<span class="c1"># 1.0</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
+</code></pre></div>
+<p>For full control over the cache/solver/options pipeline, the
+explicit form is still available:</p>
+<div class="highlight"><pre><span></span><code><span class="n">cache</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">PwlStateSpaceCache</span><span class="p">(</span><span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">pool</span><span class="p">)</span>
+<span class="n">cache</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
+<span class="n">opts</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">(</span><span class="n">t_start</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
+<span class="n">res</span>  <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">cache</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">pool</span><span class="p">,</span> <span class="n">opts</span><span class="p">,</span>
+                       <span class="n">switch_fn</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+</code></pre></div>
+<h3 id="pulsimyamlparser-pulsimload_yaml_file"><code>pulsim.YamlParser</code> → <code>pulsim.load_yaml_file(...)</code><a class="headerlink" href="#pulsimyamlparser-pulsimload_yaml_file" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Pre-1.0</span>
 <span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">())</span>
-<span class="n">circuit</span><span class="p">,</span> <span class="n">options</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;circuit.yaml&quot;</span><span class="p">)</span>
+<span class="n">ckt</span><span class="p">,</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;circuit.yaml&quot;</span><span class="p">)</span>
 
-<span class="n">options</span><span class="o">.</span><span class="n">newton_options</span><span class="o">.</span><span class="n">num_nodes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">num_nodes</span><span class="p">())</span>
-<span class="n">options</span><span class="o">.</span><span class="n">newton_options</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">num_branches</span><span class="p">())</span>
+<span class="c1"># 1.0</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;circuit.yaml&quot;</span><span class="p">)</span>
+<span class="n">b</span> <span class="o">=</span> <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=...</span><span class="p">,</span> <span class="n">dt</span><span class="o">=...</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="pulsimpreset-pulsimadvancedoptions-explicit-simulationoptions"><code>pulsim.Preset</code> / <code>pulsim.AdvancedOptions</code> → explicit <code>SimulationOptions</code><a class="headerlink" href="#pulsimpreset-pulsimadvancedoptions-explicit-simulationoptions" title="Permanent link">&para;</a></h3>
+<p>No global presets in 1.0. Set what you need on <code>SimulationOptions</code>
+directly. Solver kind, Newton tolerance, line-search globalization,
+event-bisection thresholds — all explicit knobs.</p>
+<h2 id="device-models">Device models<a class="headerlink" href="#device-models" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Pre-1.0</th>
+<th>1.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ps.Resistor("R", a, b, R)</code></td>
+<td><code>b.add_resistor("R", a, b, R)</code></td>
+</tr>
+<tr>
+<td><code>ps.Capacitor("C", a, b, C)</code></td>
+<td><code>b.add_capacitor("C", a, b, C)</code></td>
+</tr>
+<tr>
+<td><code>ps.Inductor("L", a, b, L)</code></td>
+<td><code>b.add_inductor("L", a, b, L)</code></td>
+</tr>
+<tr>
+<td><code>ps.VoltageSource("V", a, b, V)</code></td>
+<td><code>b.add_voltage_source("V", a, b, V)</code></td>
+</tr>
+<tr>
+<td><code>ps.CurrentSource("I", a, b, I)</code></td>
+<td><code>b.add_current_source("I", a, b, I)</code></td>
+</tr>
+<tr>
+<td><code>ps.Diode("D", a, k, ...)</code></td>
+<td><code>b.add_diode("D", anode, cathode, g_on=..., g_off=..., V_th=...)</code></td>
+</tr>
+<tr>
+<td><code>ps.MOSFET(...)</code></td>
+<td><code>b.add_mosfet_level1(...)</code> (Shichman-Hodges) or <code>b.add_mosfet_with_body_diode(...)</code></td>
+</tr>
+<tr>
+<td><code>ps.IGBT(...)</code></td>
+<td><code>b.add_igbt_level1(...)</code></td>
+</tr>
+<tr>
+<td><code>ps.VoltageControlledSwitch(...)</code></td>
+<td>gate via <code>p.SwitchStateMask</code> + <code>switch_fn(t)</code></td>
+</tr>
+<tr>
+<td><code>ps.Transformer(...)</code></td>
+<td><code>b.add_two_winding_transformer(...)</code> or <code>b.add_multi_winding_transformer(...)</code></td>
+</tr>
+<tr>
+<td><code>ps.SineParams(...)</code></td>
+<td><code>b.add_sine_voltage_source(...)</code></td>
+</tr>
+<tr>
+<td><code>ps.PulseParams(...)</code></td>
+<td><code>b.add_pulse_voltage_source(...)</code></td>
+</tr>
+<tr>
+<td><code>ps.PWMVoltageSource(...)</code></td>
+<td><code>b.add_pwm_voltage_source(...)</code></td>
+</tr>
+<tr>
+<td><code>ps.SaturableInductor(...)</code></td>
+<td><code>b.add_saturable_inductor(...)</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="control-surfaces">Control surfaces<a class="headerlink" href="#control-surfaces" title="Permanent link">&para;</a></h2>
+<p>The hand-rolled pre-1.0 step-callback / <code>signal_evaluator.py</code> flows
+are replaced by the <code>MixedDomainBlockChain</code> executor (runs in C++,
+no Python interpreter cost per step):</p>
+<div class="highlight"><pre><span></span><code><span class="n">chain</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">MixedDomainBlockChain</span><span class="p">()</span>
+<span class="n">pi</span>    <span class="o">=</span> <span class="n">chain</span><span class="o">.</span><span class="n">add_block</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">PIController</span><span class="p">(</span><span class="n">kp</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">ki</span><span class="o">=</span><span class="mf">1200.0</span><span class="p">))</span>
+<span class="n">chain</span><span class="o">.</span><span class="n">wire</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="n">pi</span><span class="o">.</span><span class="n">input</span><span class="p">)</span>
+<span class="n">chain</span><span class="o">.</span><span class="n">wire</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">pi</span><span class="o">.</span><span class="n">output</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="s2">&quot;duty&quot;</span><span class="p">)</span>
 
-<span class="n">sim</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
-</code></pre></div>
-<h3 id="legacy-transient-backend-keys">Legacy transient backend keys<a class="headerlink" href="#legacy-transient-backend-keys" title="Permanent link">&para;</a></h3>
-<p>No runtime suportado, a escolha de caminho transiente é canônica por modo:</p>
-<ul>
-<li><code>simulation.step_mode: fixed</code></li>
-<li><code>simulation.step_mode: variable</code></li>
-</ul>
-<p>As chaves legadas <code>simulation.backend</code> / <code>simulation.sundials</code> (e equivalentes em
-<code>simulation.advanced</code>) são tratadas apenas para diagnóstico de migração.</p>
-<h3 id="beforeafter-legacy-backend-canonical-mode">Before/After: legacy backend -&gt; canonical mode<a class="headerlink" href="#beforeafter-legacy-backend-canonical-mode" title="Permanent link">&para;</a></h3>
-<p>Before (legacy, removed in strict migration path):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<span class="w">  </span><span class="nt">sundials</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ida</span>
-<span class="w">  </span><span class="nt">adaptive_timestep</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-7</span>
-</code></pre></div>
-<p>After (canonical fixed-step native core):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fixed</span>
-<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-7</span>
-<span class="w">  </span><span class="nt">dt_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-9</span>
-<span class="w">  </span><span class="nt">dt_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-7</span>
-</code></pre></div>
-<p>After (canonical variable-step native core):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span>
-<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-7</span>
-<span class="w">  </span><span class="nt">dt_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-9</span>
-<span class="w">  </span><span class="nt">dt_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2e-6</span>
-<span class="w">  </span><span class="nt">timestep</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">preset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">power_electronics</span>
-</code></pre></div>
-<p>If <code>strict = True</code>, legacy backend keys produce parser diagnostic
-<code>PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND</code>.</p>
-<h3 id="schema-evolution-policy-v1">Schema Evolution Policy (v1)<a class="headerlink" href="#schema-evolution-policy-v1" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Deprecated (migration window): <code>simulation.adaptive_timestep</code></li>
-<li>Accepted in schema <code>pulsim-v1</code>, but emits warning
-    <code>PULSIM_YAML_W_DEPRECATED_FIELD</code> with replacement guidance to
-    <code>simulation.step_mode: fixed|variable</code>.</li>
-<li>Removed (strict migration path): <code>simulation.backend</code>,
-  <code>simulation.sundials</code>, <code>simulation.advanced.backend</code>,
-  <code>simulation.advanced.sundials</code></li>
-<li>In strict mode, parser fails deterministically with
-    <code>PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND</code> and migration guidance.</li>
-</ul>
-<h3 id="beforeafter-procedural-compatibility-and-canonical-runtime">Before/After: procedural compatibility and canonical runtime<a class="headerlink" href="#beforeafter-procedural-compatibility-and-canonical-runtime" title="Permanent link">&para;</a></h3>
-<p>Before (procedural path, still supported in migration window):</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
-
-<span class="n">times</span><span class="p">,</span> <span class="n">states</span><span class="p">,</span> <span class="n">ok</span><span class="p">,</span> <span class="n">msg</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span>
-    <span class="n">circuit</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">,</span> <span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">()</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">run_transient_with_chain</span><span class="p">(</span>
+    <span class="n">cache</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">pool</span><span class="p">,</span> <span class="n">opts</span><span class="p">,</span>
+    <span class="n">switch_fn</span><span class="p">,</span> <span class="n">chain</span><span class="p">,</span> <span class="n">chain_dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
-<p>After (canonical class/runtime surface):</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
-
-<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">()</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">tstart</span> <span class="o">=</span> <span class="mf">0.0</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">tstop</span> <span class="o">=</span> <span class="mf">1e-3</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">dt</span> <span class="o">=</span> <span class="mf">1e-6</span>
-
-<span class="n">sim</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
-</code></pre></div>
-<p>Both paths share the same v1 kernel semantics; prefer <code>Simulator</code> for new code.</p>
-<h3 id="beforeafter-expert-override-location">Before/After: expert override location<a class="headerlink" href="#beforeafter-expert-override-location" title="Permanent link">&para;</a></h3>
-<p>Before (mixed top-level knobs):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span>
-<span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span>
-<span class="w">  </span><span class="nt">solver</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">order</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gmres</span><span class="p p-Indicator">]</span>
-</code></pre></div>
-<p>After (canonical mode + explicit expert section):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span>
-<span class="w">  </span><span class="nt">advanced</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span>
-<span class="w">    </span><span class="nt">solver</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">order</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gmres</span><span class="p p-Indicator">]</span>
-<span class="w">      </span><span class="nt">iterative</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">preconditioner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ilut</span>
-<span class="w">        </span><span class="nt">max_iterations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
-<span class="w">        </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-8</span>
-</code></pre></div>
-<h2 id="4-removed-apiworkflow-mapping">4. Removed API/Workflow Mapping<a class="headerlink" href="#4-removed-apiworkflow-mapping" title="Permanent link">&para;</a></h2>
+<p>Available blocks: <code>PIController</code>, <code>PIDController</code>, <code>Comparator</code>,
+<code>RateLimiter</code>, <code>FirstOrderLowPass</code>, <code>Clarke</code>/<code>Park</code>/inverse,
+<code>ThyristorBlock</code>, <code>FuseBlock</code>, <code>FosterThermalNetwork</code>, ...</p>
+<h2 id="analyses">Analyses<a class="headerlink" href="#analyses" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Removed workflow</th>
-<th>Replacement</th>
+<th>Pre-1.0</th>
+<th>1.0</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>CLI <code>run/validate/info/sweep</code></td>
-<td>Python runtime + <code>benchmarks/*.py</code> runners</td>
+<td><code>Simulator.run_ac_sweep(...)</code></td>
+<td><code>p.run_ac_sweep(b, freqs=..., excite_fn=..., output_idx=...)</code> (swept-sine) or <code>p.run_mna_sweep(b, ...)</code> (linearised, faster)</td>
 </tr>
 <tr>
-<td>gRPC remote simulation docs</td>
-<td>Local Python runtime usage</td>
+<td><code>Simulator.run_fra(...)</code></td>
+<td><code>p.run_fra(...)</code> — swept-sine FRA (closed-loop and nonlinear-friendly)</td>
 </tr>
 <tr>
-<td>JSON netlist loader docs/tests</td>
-<td>YAML parser (<code>YamlParser</code>)</td>
+<td><code>Simulator.run_periodic_steady_state(...)</code></td>
+<td>not yet on 1.0 — file an issue if you need it</td>
 </tr>
 <tr>
-<td>Planned placeholder high-level suites</td>
-<td>Active runtime/benchmark/validation suites</td>
+<td><code>pulsim.sweep.run(...)</code> (Monte-Carlo / LHS / Cartesian)</td>
+<td><code>p.sweep(builder_factory, ...)</code> and <code>p.monte_carlo(...)</code></td>
 </tr>
 </tbody>
 </table>
-<h2 id="5-versioned-deprecation-timeline">5. Versioned Deprecation Timeline<a class="headerlink" href="#5-versioned-deprecation-timeline" title="Permanent link">&para;</a></h2>
+<h2 id="features-that-did-not-migrate">Features that did NOT migrate<a class="headerlink" href="#features-that-did-not-migrate" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Version</th>
-<th>Status</th>
-<th>Notes</th>
+<th>Feature</th>
+<th>Status on 1.0.0</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>v0.2.0</code></td>
-<td>Deprecation window</td>
-<td>Python-only surface declared; legacy docs marked stale</td>
+<td><code>pulsim.codegen</code> (C99 codegen)</td>
+<td>not on 1.0</td>
 </tr>
 <tr>
-<td><code>v0.3.0</code></td>
-<td>Removal</td>
-<td>Legacy CLI/gRPC/JSON user-facing guidance removed from primary docs</td>
+<td><code>pulsim.fmu</code> (FMI 2.0 CS export)</td>
+<td>not on 1.0</td>
 </tr>
 <tr>
-<td><code>v0.4.0</code></td>
-<td>Enforcement</td>
-<td>Supported workflows restricted to Python + YAML + benchmark/parity/stress toolchain</td>
+<td><code>pulsim.schematic</code> (ELK + netlistsvg auto-layout)</td>
+<td>not on 1.0</td>
+</tr>
+<tr>
+<td><code>pulsim.templates.{buck,boost,buckboost,…}</code> (converter auto-design)</td>
+<td>not on 1.0</td>
+</tr>
+<tr>
+<td><code>pulsim.Preset</code> / <code>AdvancedOptions</code> global presets</td>
+<td>replaced by explicit <code>SimulationOptions</code> knobs</td>
+</tr>
+<tr>
+<td><code>compressor_load</code> + R600a/R134a refrigerants</td>
+<td>not on 1.0</td>
+</tr>
+<tr>
+<td>MMC arm templates</td>
+<td>not on 1.0 (single-arm helper deferred)</td>
+</tr>
+<tr>
+<td><code>RobustnessProfile</code> retry-loop</td>
+<td>not on 1.0 (use <code>enable_nonlinear_refresh=True</code> + DC-OP strategies)</td>
+</tr>
+<tr>
+<td>Single-phase induction motor (PSC)</td>
+<td>not on 1.0 (DC motor, BLDC, PMSM, three-phase induction are)</td>
 </tr>
 </tbody>
 </table>
-<h2 id="6-migration-notes-pulsimgui-converter-integration">6. Migration Notes: PulsimGui Converter Integration<a class="headerlink" href="#6-migration-notes-pulsimgui-converter-integration" title="Permanent link">&para;</a></h2>
-<h3 id="canonicalizacao-de-tipos">Canonicalização de tipos<a class="headerlink" href="#canonicalizacao-de-tipos" title="Permanent link">&para;</a></h3>
-<p>O conversor do PulsimGui deve emitir tipos que o parser normaliza para IDs
-canônicos (ex.: <code>OP_AMP</code> -&gt; <code>op_amp</code>, <code>PI_CONTROLLER</code> -&gt; <code>pi_controller</code>,
-<code>CIRCUIT_BREAKER</code> -&gt; <code>circuit_breaker</code>).</p>
-<p>Recomendação: sempre serializar o tipo canônico em minúsculo para reduzir
-ambiguidade no pipeline GUI -&gt; YAML -&gt; backend.</p>
-<h3 id="regras-de-modelagem-no-backend">Regras de modelagem no backend<a class="headerlink" href="#regras-de-modelagem-no-backend" title="Permanent link">&para;</a></h3>
+<p>If you need any of these on 1.0, pin pulsim <code>0.10.x</code> or open an
+issue on the tracker — the 1.0 architecture supports each of them
+as a future increment, none was retired for technical reasons.</p>
+<h2 id="a-note-on-the-pulsimv2-namespace">A note on the <code>pulsim.v2</code> namespace<a class="headerlink" href="#a-note-on-the-pulsimv2-namespace" title="Permanent link">&para;</a></h2>
+<p>Versions <code>0.10.x</code> exposed a parallel <code>pulsim.v2</code> surface while the
+new kernel was being built next to the legacy one. With the legacy
+kernel retired and the new kernel becoming the default in 1.0.0,
+the <code>v2</code> prefix was dropped: <code>pulsim.v2.CircuitBuilder</code> is now
+<code>pulsim.CircuitBuilder</code>, <code>pulsim.v2.simulate</code> is <code>pulsim.simulate</code>,
+and so on. Code that used the <code>v2</code> prefix during the transition
+just needs:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Before</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pulsim.v2</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pulsim.v2</span><span class="w"> </span><span class="kn">import</span> <span class="n">CircuitBuilder</span><span class="p">,</span> <span class="n">simulate</span>
+
+<span class="c1"># After</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="kn">import</span> <span class="n">CircuitBuilder</span><span class="p">,</span> <span class="n">simulate</span>
+</code></pre></div>
+<p>The C++ side mirrors this: <code>pulsim::v2::Foo</code> is now <code>pulsim::Foo</code>,
+headers moved from <code>pulsim/v2/&lt;sub&gt;/&lt;file&gt;.hpp</code> to
+<code>pulsim/&lt;sub&gt;/&lt;file&gt;.hpp</code>, and the CMake alias renamed from
+<code>pulsim::v2</code> to <code>pulsim::core</code>.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>bjt_npn</code> e <code>bjt_pnp</code>: surrogate interno baseado em <code>mosfet</code>.</li>
-<li><code>thyristor</code>, <code>triac</code>, <code>fuse</code>, <code>circuit_breaker</code>: composição com <code>switch</code> e
-  controlador virtual/event-driven.</li>
-<li><code>relay</code>: composição com dois <code>switch</code> (<code>NO</code>/<code>NC</code>) + controlador virtual da bobina.</li>
-<li><code>saturable_inductor</code>: <code>inductor</code> elétrico + controlador virtual de indutância efetiva.</li>
-<li><code>coupled_inductor</code>: dois ramos <code>inductor</code> + controlador virtual de acoplamento.</li>
-<li><code>voltage_probe/current_probe/power_probe/scope/mux/demux</code>: componentes
-  virtuais (não estampam MNA).</li>
+<li><code>examples/scripts/</code> — 20 runnable reference scripts.</li>
+<li><code>docs/tutorials/</code> — six narrative tutorials.</li>
+<li><code>docs/api-reference.md</code> — the full surface in one page.</li>
+<li><code>docs/gotchas.md</code> — every footgun we've hit so far.</li>
 </ul>
-<h3 id="pinagem-e-validacao">Pinagem e validação<a class="headerlink" href="#pinagem-e-validacao" title="Permanent link">&para;</a></h3>
-<p>Ative strict mode no parser durante integração:</p>
-<div class="highlight"><pre><span></span><code><span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">()</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">strict</span> <span class="o">=</span> <span class="kc">True</span>
-<span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">opts</span><span class="p">)</span>
-</code></pre></div>
-<p>Isso garante diagnóstico estável para:</p>
-<ul>
-<li>pinagem inválida (ex.: <code>relay</code> sem <code>COM/NO/NC</code>);</li>
-<li>parâmetros fora de faixa (ex.: <code>duty_min &gt; duty_max</code>);</li>
-<li>blocos de controle com configuração inconsistente.</li>
-</ul>
-<h3 id="gate-minimo-para-ci-do-conversor">Gate mínimo para CI do conversor<a class="headerlink" href="#gate-minimo-para-ci-do-conversor" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span>python/tests/test_gui_component_parity.py
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span>python/tests/test_runtime_bindings.py
-./build-test/core/pulsim_simulation_tests<span class="w"> </span><span class="s2">&quot;[v1][yaml][gui-parity]&quot;</span>
-</code></pre></div>
-<h2 id="7-upgrade-checklist">7. Upgrade Checklist<a class="headerlink" href="#7-upgrade-checklist" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Replace any JSON netlist assets with YAML <code>pulsim-v1</code> netlists.</li>
-<li>Remove CLI automation and migrate to Python runners.</li>
-<li>Remove gRPC-dependent user scripts from active workflows.</li>
-<li>Update CI jobs to run Python benchmark/parity/stress scripts.</li>
-<li>Add GUI parity regression gate (<code>test_gui_component_parity.py</code>) in CI.</li>
-<li>Validate with <code>openspec validate refactor-python-only-v1-hardening --strict</code>.</li>
-</ol>
-<h2 id="8-numerical-surface-v010-v011">8. Numerical Surface — v0.10 → v0.11<a class="headerlink" href="#8-numerical-surface-v010-v011" title="Permanent link">&para;</a></h2>
-<p>The <code>simplify-and-harden-numerical-surface</code> change collapses the
-50-field tuning surface into a single <code>Preset</code> enum + four
-profiles, deprecates dead integrators + redundant booleans, and adds
-four automatic convergence aids (Armijo line search, simultaneous
-event coalescence, iterative refinement, homotopy continuation) that
-all engage by default.</p>
-<p>Full reference: <a href="../numerical-configuration/">Numerical Configuration</a>.
-The migration recipes below cover only the changes that affect
-existing user code.</p>
-<h3 id="81-make_robust_options-simulationoptionsfrom_preset">8.1 <code>make_robust_options(...)</code> → <code>SimulationOptions.from_preset(...)</code><a class="headerlink" href="#81-make_robust_options-simulationoptionsfrom_preset" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Before (still works):</span>
-<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">make_robust_options</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">,</span>
-                                <span class="n">ps</span><span class="o">.</span><span class="n">NewtonOptions</span><span class="p">(),</span>
-                                <span class="n">ps</span><span class="o">.</span><span class="n">LinearSolverStackConfig</span><span class="o">.</span><span class="n">defaults</span><span class="p">())</span>
-
-<span class="c1"># After (recommended):</span>
-<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="o">.</span><span class="n">from_preset</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">Preset</span><span class="o">.</span><span class="n">Robust</span><span class="p">,</span>
-                                          <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span> <span class="n">tstop</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)</span>
-</code></pre></div>
-<p>The two paths produce numerically identical configurations for the
-Robust profile. <code>from_preset()</code> adds three more named profiles
-(<code>Auto</code>, <code>Fast</code>, <code>HighFidelity</code>) on the same surface.</p>
-<h3 id="82-adaptive_timestep-step_mode">8.2 <code>adaptive_timestep</code> → <code>step_mode</code><a class="headerlink" href="#82-adaptive_timestep-step_mode" title="Permanent link">&para;</a></h3>
-<p>YAML:
-<div class="highlight"><pre><span></span><code><span class="c1"># Before (emits PULSIM_YAML_W_DEPRECATED_FIELD):</span>
-<span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">adaptive_timestep</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-
-<span class="c1"># After:</span>
-<span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span><span class="w">        </span><span class="c1"># or &quot;fixed&quot;</span>
-</code></pre></div></p>
-<p>Python:
-<div class="highlight"><pre><span></span><code><span class="c1"># Before (still works, will be removed in next major release):</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">adaptive_timestep</span> <span class="o">=</span> <span class="kc">True</span>
-
-<span class="c1"># After:</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">step_mode</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">StepMode</span><span class="o">.</span><span class="n">Variable</span>   <span class="c1"># or StepMode.Fixed</span>
-</code></pre></div></p>
-<h3 id="83-direct_formulation_fallback-just-remove-it">8.3 <code>direct_formulation_fallback</code> → just remove it<a class="headerlink" href="#83-direct_formulation_fallback-just-remove-it" title="Permanent link">&para;</a></h3>
-<p>The DAE fallback is now <strong>unconditionally on internally</strong>. The field
-is a no-op.</p>
-<p>YAML:
-<div class="highlight"><pre><span></span><code><span class="c1"># Before (emits PULSIM_YAML_W_DEPRECATED_FIELD):</span>
-<span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">direct_formulation_fallback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-
-<span class="c1"># After: just remove the field.</span>
-</code></pre></div></p>
-<h3 id="84-deprecated-integrators">8.4 Deprecated integrators<a class="headerlink" href="#84-deprecated-integrators" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Removed (warning in v0.11, error in next major)</th>
-<th>Replacement</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>Integrator.BDF3</code> / <code>BDF4</code> / <code>BDF5</code></td>
-<td><code>Integrator.BDF2</code>, <code>TRBDF2</code>, or <code>RosenbrockW</code></td>
-</tr>
-<tr>
-<td><code>Integrator.Gear</code></td>
-<td><code>Integrator.BDF2</code> (literal alias)</td>
-</tr>
-<tr>
-<td><code>Integrator.SDIRK2</code></td>
-<td><code>Integrator.TRBDF2</code></td>
-</tr>
-</tbody>
-</table>
-<p>YAML:
-<div class="highlight"><pre><span></span><code><span class="c1"># Before:</span>
-<span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bdf5</span>
-
-<span class="c1"># After:</span>
-<span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span><span class="w">     </span><span class="c1"># for stiff dynamics with order ≥ 2</span>
-<span class="w">  </span><span class="c1"># or: bdf2 / rosenbrockw</span>
-</code></pre></div></p>
-<h3 id="85-new-telemetry-counters-additive-no-migration-needed">8.5 New telemetry counters (additive — no migration needed)<a class="headerlink" href="#85-new-telemetry-counters-additive-no-migration-needed" title="Permanent link">&para;</a></h3>
-<p>Four new diagnostic counters appear in <code>result.backend_telemetry</code> /
-<code>result.linear_solver_telemetry</code> / <code>result.dc_result</code>:</p>
-<table>
-<thead>
-<tr>
-<th>Counter</th>
-<th>Where</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>simultaneous_event_groups</code></td>
-<td><code>backend_telemetry</code></td>
-<td>Steps where ≥ 2 PWL devices commuted atomically</td>
-</tr>
-<tr>
-<td><code>linear_refinement_steps</code></td>
-<td><code>linear_solver_telemetry</code></td>
-<td>Direct-solve residual exceeded threshold; one round of iterative refinement fired</td>
-</tr>
-<tr>
-<td><code>homotopy_steps</code></td>
-<td><code>dc_result</code></td>
-<td>Lambda increments executed in the homotopy continuation</td>
-</tr>
-<tr>
-<td><code>homotopy_ladder_completed</code></td>
-<td><code>dc_result</code></td>
-<td>True if homotopy reached <code>λ = 1</code></td>
-</tr>
-<tr>
-<td><code>line_search_backtracks</code></td>
-<td><code>newton_result.telemetry</code></td>
-<td>Already existed; now reflects Armijo backtracks</td>
-</tr>
-</tbody>
-</table>
-<p>If you have CI gates that pin telemetry-counter values, audit them
-against the new fields.</p>
-<h3 id="86-convergence-improvements-are-silent-no-migration-needed">8.6 Convergence improvements are silent (no migration needed)<a class="headerlink" href="#86-convergence-improvements-are-silent-no-migration-needed" title="Permanent link">&para;</a></h3>
-<p>The four convergence aids (Armijo line search inside Newton,
-simultaneous PWL event coalescence, KLU iterative refinement,
-homotopy DC OP) all engage <strong>automatically</strong> when their trigger
-conditions are met. No user-facing knobs to flip. Circuits that
-previously failed convergence on a cold-start may now succeed; that's
-the intended improvement.</p>
-<p>If a benchmark of yours regresses because the new behavior produces
-a numerically slightly-different trajectory, set
-<code>opts.newton_options.armijo_line_search = False</code> and
-<code>opts.dc_config.homotopy_config.enable = False</code> to reproduce the
-v0.10 behavior. Reach out via the issue tracker so we can pin the
-regression as a parity test.</p>
 
 
 
@@ -3007,7 +1726,7 @@ regression as a parity test.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../gui-component-parity/" class="md-footer__link md-footer__link--prev" aria-label="Previous: GUI Backend Parity">
+          <a href="../troubleshooting/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Troubleshooting">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -3017,20 +1736,20 @@ regression as a parity test.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                GUI Backend Parity
+                Troubleshooting
               </div>
             </div>
           </a>
         
         
           
-          <a href="../configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Configuration">
+          <a href="../versioning-and-release/" class="md-footer__link md-footer__link--next" aria-label="Next: Docs Versioning and Release">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Configuration
+                Docs Versioning and Release
               </div>
             </div>
             <div class="md-footer__button md-icon">

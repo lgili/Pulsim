@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
       
       
       
@@ -20,7 +20,7 @@
     
     
       
-        <title>Numerical Execution Modes — Audit & Simplification Plan - PulsimCore</title>
+        <title>Numerical Execution Modes — Audit & Simplification Plan - Pulsim</title>
       
     
     
@@ -96,7 +96,7 @@
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="../../assets/images/pulsim-logo.svg" alt="logo">
 
@@ -109,7 +109,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            PulsimCore
+            Pulsim
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -207,13 +207,30 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
     
       <li class="md-tabs__item">
         <a href="../.." class="md-tabs__link">
           
   
-  Overview
+  User Guide
 
         </a>
       </li>
@@ -228,10 +245,10 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../v2/" class="md-tabs__link">
+        <a href="../../internals/" class="md-tabs__link">
           
   
-  Pulsim v2 Guide
+  Internals
 
         </a>
       </li>
@@ -246,97 +263,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../components-reference/" class="md-tabs__link">
-          
-  
-  Reference
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../examples-and-results/" class="md-tabs__link">
-          
-  
-  Guides
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../magnetic-models/" class="md-tabs__link">
-          
-  
-  Domain Libraries
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../benchmarks-and-parity/" class="md-tabs__link">
-          
-  
-  Quality Gates
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../gui-component-parity/" class="md-tabs__link">
-          
-  
-  Compatibility
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../configuration/" class="md-tabs__link">
+        <a href="../../build-system/" class="md-tabs__link">
           
   
   Operations
@@ -375,12 +302,12 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="../../assets/images/pulsim-logo.svg" alt="logo">
 
     </a>
-    PulsimCore
+    Pulsim
   </label>
   
     <div class="md-nav__source">
@@ -403,6 +330,26 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
     
@@ -418,24 +365,24 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   <span class="md-ellipsis">
-    Overview
+    User Guide
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_1">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
-            Overview
+            User Guide
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -450,28 +397,7 @@
         
   
   <span class="md-ellipsis">
-    Documentation Home
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../backend-architecture/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend Architecture
+    Home
   </span>
   
 
@@ -509,119 +435,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Pulsim v2 Guide
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            Pulsim v2 Guide
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../v2/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../v2/getting-started/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../v2/mental-model/" class="md-nav__link">
+      <a href="../../mental-model/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -642,7 +456,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/tutorials/01-rc-charging/" class="md-nav__link">
+      <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -663,7 +477,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/tutorials/02-buck-converter/" class="md-nav__link">
+      <a href="../../tutorials/02-buck-converter/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -684,7 +498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/tutorials/03-flyback-isolated/" class="md-nav__link">
+      <a href="../../tutorials/03-flyback-isolated/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -705,7 +519,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/tutorials/04-3phase-vsi/" class="md-nav__link">
+      <a href="../../tutorials/04-3phase-vsi/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -726,7 +540,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/tutorials/05-ldo-feedback/" class="md-nav__link">
+      <a href="../../tutorials/05-ldo-feedback/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -747,7 +561,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/tutorials/06-igbt-boost/" class="md-nav__link">
+      <a href="../../tutorials/06-igbt-boost/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -768,7 +582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/api-reference/" class="md-nav__link">
+      <a href="../../api-reference/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -789,7 +603,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/helpers/" class="md-nav__link">
+      <a href="../../helpers/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -810,7 +624,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../v2/gotchas/" class="md-nav__link">
+      <a href="../../gotchas/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -859,7 +673,7 @@
             
   
   <span class="md-ellipsis">
-    Reference
+    Internals
   </span>
   
 
@@ -869,7 +683,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
-            Reference
+            Internals
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -880,11 +694,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../components-reference/" class="md-nav__link">
+      <a href="../../internals/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Components Reference
+    Architecture (Layer-by-Layer)
   </span>
   
 
@@ -901,11 +715,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../control-blocks-reference/" class="md-nav__link">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Control Blocks Reference
+    Layer 0 — Numeric + Sparse
   </span>
   
 
@@ -922,11 +736,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../kpi-reference/" class="md-nav__link">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    KPI Reference
+    Layer 1 — Topology + Enumeration
   </span>
   
 
@@ -943,11 +757,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../netlist-format/" class="md-nav__link">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Netlist YAML Format
+    Layer 2 — AD + Device Models
   </span>
   
 
@@ -964,11 +778,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../device-models/" class="md-nav__link">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Device Models
+    Layer 2 V1 — MOSFET / IGBT
   </span>
   
 
@@ -985,11 +799,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api-reference/" class="md-nav__link">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    API Reference
+    Layer 2 V2 — Transformer
   </span>
   
 
@@ -1006,11 +820,74 @@
   
   
     <li class="md-nav__item">
-      <a href="../../python-api/" class="md-nav__link">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Python API (Legacy Notes)
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
   </span>
   
 
@@ -1055,7 +932,7 @@
             
   
   <span class="md-ellipsis">
-    Guides
+    Operations
   </span>
   
 
@@ -1065,7 +942,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
-            Guides
+            Operations
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -1076,11 +953,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../examples-and-results/" class="md-nav__link">
+      <a href="../../build-system/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Examples and Results
+    Build System
   </span>
   
 
@@ -1097,326 +974,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebooks/" class="md-nav__link">
+      <a href="../../performance-tuning/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Notebooks
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../numerical-configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Numerical Configuration
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ac-analysis/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    AC Analysis
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../fra/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Response Analysis (FRA)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../electrothermal-workflow/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Workflow
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../parameter-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Parameter Sweep
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../schematic-rendering/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Schematic Rendering
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../code-generation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Real-Time Code Generation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../fmi-export/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    FMI Export
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../automatic-differentiation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Automatic Differentiation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../pwl-switching-migration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PWL Switching Engine
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../component-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Component Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../thermal-and-loss-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Thermal + Loss Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../convergence-tuning-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Convergence Tuning
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../linear-solver-cache/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Linear-Solver Cache
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../robustness-policy/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Robustness Policy
+    Performance Tuning
   </span>
   
 
@@ -1447,405 +1009,6 @@
 
               
             
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Domain Libraries
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            Domain Libraries
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../magnetic-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../motor-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Motor Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../compressor-and-refrigerant-load/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Compressor + Refrigerant Load
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../multilevel-converters/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Multilevel Converters
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../three-phase-grid/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Three-Phase Grid Library
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../catalog-devices/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Catalog Devices
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../converter-templates/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Converter Templates
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Quality Gates
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            Quality Gates
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../benchmarks-and-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Benchmarks and Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../spice-parity-dashboard/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    SPICE Parity Dashboard
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../property-based-testing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Property-Based Testing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../build-system/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Build System
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Compatibility
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
-            <span class="md-nav__icon md-icon"></span>
-            Compatibility
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../gui-component-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    GUI Backend Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
               
                 
   
@@ -1857,77 +1020,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Operations
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
-            <span class="md-nav__icon md-icon"></span>
-            Operations
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Configuration
+    Migration Guide (legacy → 1.0)
   </span>
   
 

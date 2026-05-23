@@ -6,17 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
       
       
       
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/build-system/">
       
       
-        <link rel="prev" href="../property-based-testing/">
+        <link rel="prev" href="../internals/layer10-benchmarks/">
       
       
-        <link rel="next" href="../gui-component-parity/">
+        <link rel="next" href="../performance-tuning/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Build System - PulsimCore</title>
+        <title>Build System - Pulsim</title>
       
     
     
@@ -100,7 +100,7 @@
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href=".." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="../assets/images/pulsim-logo.svg" alt="logo">
 
@@ -113,7 +113,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            PulsimCore
+            Pulsim
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -211,13 +211,30 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
     
       <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
-  Overview
+  User Guide
 
         </a>
       </li>
@@ -232,64 +249,10 @@
     
     
       <li class="md-tabs__item">
-        <a href="../v2/" class="md-tabs__link">
+        <a href="../internals/" class="md-tabs__link">
           
   
-  Pulsim v2 Guide
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../components-reference/" class="md-tabs__link">
-          
-  
-  Reference
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../examples-and-results/" class="md-tabs__link">
-          
-  
-  Guides
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../magnetic-models/" class="md-tabs__link">
-          
-  
-  Domain Libraries
+  Internals
 
         </a>
       </li>
@@ -306,43 +269,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../benchmarks-and-parity/" class="md-tabs__link">
-          
-  
-  Quality Gates
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../gui-component-parity/" class="md-tabs__link">
-          
-  
-  Compatibility
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../configuration/" class="md-tabs__link">
+        <a href="./" class="md-tabs__link">
           
   
   Operations
@@ -381,12 +308,12 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href=".." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="../assets/images/pulsim-logo.svg" alt="logo">
 
     </a>
-    PulsimCore
+    Pulsim
   </label>
   
     <div class="md-nav__source">
@@ -409,6 +336,26 @@
   
   
   
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
     
@@ -424,24 +371,24 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   <span class="md-ellipsis">
-    Overview
+    User Guide
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_1">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
-            Overview
+            User Guide
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -456,28 +403,7 @@
         
   
   <span class="md-ellipsis">
-    Documentation Home
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../backend-architecture/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend Architecture
+    Home
   </span>
   
 
@@ -515,119 +441,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Pulsim v2 Guide
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            Pulsim v2 Guide
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../v2/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../v2/getting-started/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../v2/mental-model/" class="md-nav__link">
+      <a href="../mental-model/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -648,7 +462,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/01-rc-charging/" class="md-nav__link">
+      <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -669,7 +483,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/02-buck-converter/" class="md-nav__link">
+      <a href="../tutorials/02-buck-converter/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -690,7 +504,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/03-flyback-isolated/" class="md-nav__link">
+      <a href="../tutorials/03-flyback-isolated/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -711,7 +525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/04-3phase-vsi/" class="md-nav__link">
+      <a href="../tutorials/04-3phase-vsi/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -732,7 +546,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/05-ldo-feedback/" class="md-nav__link">
+      <a href="../tutorials/05-ldo-feedback/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -753,7 +567,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/tutorials/06-igbt-boost/" class="md-nav__link">
+      <a href="../tutorials/06-igbt-boost/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -774,7 +588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/api-reference/" class="md-nav__link">
+      <a href="../api-reference/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -795,7 +609,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/helpers/" class="md-nav__link">
+      <a href="../helpers/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -816,7 +630,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../v2/gotchas/" class="md-nav__link">
+      <a href="../gotchas/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -865,7 +679,7 @@
             
   
   <span class="md-ellipsis">
-    Reference
+    Internals
   </span>
   
 
@@ -875,7 +689,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
-            Reference
+            Internals
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -886,11 +700,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../components-reference/" class="md-nav__link">
+      <a href="../internals/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Components Reference
+    Architecture (Layer-by-Layer)
   </span>
   
 
@@ -907,11 +721,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../control-blocks-reference/" class="md-nav__link">
+      <a href="../internals/layer0-numeric-and-sparse/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Control Blocks Reference
+    Layer 0 — Numeric + Sparse
   </span>
   
 
@@ -928,11 +742,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../kpi-reference/" class="md-nav__link">
+      <a href="../internals/layer1-topology-and-enumeration/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    KPI Reference
+    Layer 1 — Topology + Enumeration
   </span>
   
 
@@ -949,11 +763,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../netlist-format/" class="md-nav__link">
+      <a href="../internals/layer2-ad-and-device-models/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Netlist YAML Format
+    Layer 2 — AD + Device Models
   </span>
   
 
@@ -970,11 +784,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../device-models/" class="md-nav__link">
+      <a href="../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Device Models
+    Layer 2 V1 — MOSFET / IGBT
   </span>
   
 
@@ -991,11 +805,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../api-reference/" class="md-nav__link">
+      <a href="../internals/layer2-v2-transformer/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    API Reference
+    Layer 2 V2 — Transformer
   </span>
   
 
@@ -1012,81 +826,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../python-api/" class="md-nav__link">
+      <a href="../internals/layer3-stamping-pipeline/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Python API (Legacy Notes)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Guides
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
-            <span class="md-nav__icon md-icon"></span>
-            Guides
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../examples-and-results/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Examples and Results
+    Layer 3 — Stamping Pipeline
   </span>
   
 
@@ -1103,11 +847,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../notebooks/" class="md-nav__link">
+      <a href="../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Notebooks
+    Layer 4 — PWL State-Space Cache
   </span>
   
 
@@ -1124,11 +868,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../numerical-configuration/" class="md-nav__link">
+      <a href="../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Numerical Configuration
+    Layer 4 V1 — Trapezoidal Companion
   </span>
   
 
@@ -1145,501 +889,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../ac-analysis/" class="md-nav__link">
+      <a href="../internals/layer10-benchmarks/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    AC Analysis
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../fra/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Response Analysis (FRA)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../electrothermal-workflow/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Workflow
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../parameter-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Parameter Sweep
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../schematic-rendering/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Schematic Rendering
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../code-generation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Real-Time Code Generation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../fmi-export/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    FMI Export
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../automatic-differentiation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Automatic Differentiation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../pwl-switching-migration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PWL Switching Engine
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../component-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Component Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../thermal-and-loss-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Thermal + Loss Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../convergence-tuning-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Convergence Tuning
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../linear-solver-cache/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Linear-Solver Cache
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../robustness-policy/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Robustness Policy
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../troubleshooting/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Troubleshooting
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Domain Libraries
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            Domain Libraries
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../magnetic-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../motor-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Motor Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../compressor-and-refrigerant-load/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Compressor + Refrigerant Load
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../multilevel-converters/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Multilevel Converters
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../three-phase-grid/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Three-Phase Grid Library
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../catalog-devices/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Catalog Devices
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../converter-templates/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Converter Templates
+    Layer 10 — Benchmarks
   </span>
   
 
@@ -1680,89 +934,26 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   <span class="md-ellipsis">
-    Quality Gates
+    Operations
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
-            Quality Gates
+            Operations
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../benchmarks-and-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Benchmarks and Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../spice-parity-dashboard/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    SPICE Parity Dashboard
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../property-based-testing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Property-Based Testing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
             
               
                 
@@ -1817,45 +1008,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
+  <a href="#targets" class="md-nav__link">
     <span class="md-ellipsis">
-      TL;DR
+      Targets
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-in-baseline-today" class="md-nav__link">
+  <a href="#configure-build" class="md-nav__link">
     <span class="md-ellipsis">
-      What's in baseline today
+      Configure + build
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#running-the-bench" class="md-nav__link">
+  <a href="#build-options" class="md-nav__link">
     <span class="md-ellipsis">
-      Running the bench
+      Build options
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#limitations-follow-ups" class="md-nav__link">
+  <a href="#dependencies" class="md-nav__link">
     <span class="md-ellipsis">
-      Limitations / follow-ups
+      Dependencies
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
+  <a href="#toolchain" class="md-nav__link">
     <span class="md-ellipsis">
-      See also
+      Toolchain
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build performance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editable-python-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      Editable Python install
     </span>
   </a>
   
@@ -1870,54 +1079,26 @@
 
               
             
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
+              
+                
   
   
   
   
-    
-    
-    
-      
-      
+    <li class="md-nav__item">
+      <a href="../performance-tuning/" class="md-nav__link">
         
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
-            
   
   <span class="md-ellipsis">
-    Compatibility
+    Performance Tuning
   </span>
   
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
-            <span class="md-nav__icon md-icon"></span>
-            Compatibility
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1926,11 +1107,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../gui-component-parity/" class="md-nav__link">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    GUI Backend Parity
+    Troubleshooting
   </span>
   
 
@@ -1951,77 +1132,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Operations
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
-            <span class="md-nav__icon md-icon"></span>
-            Operations
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Configuration
+    Migration Guide (legacy → 1.0)
   </span>
   
 
@@ -2086,45 +1197,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
+  <a href="#targets" class="md-nav__link">
     <span class="md-ellipsis">
-      TL;DR
+      Targets
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-in-baseline-today" class="md-nav__link">
+  <a href="#configure-build" class="md-nav__link">
     <span class="md-ellipsis">
-      What's in baseline today
+      Configure + build
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#running-the-bench" class="md-nav__link">
+  <a href="#build-options" class="md-nav__link">
     <span class="md-ellipsis">
-      Running the bench
+      Build options
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#limitations-follow-ups" class="md-nav__link">
+  <a href="#dependencies" class="md-nav__link">
     <span class="md-ellipsis">
-      Limitations / follow-ups
+      Dependencies
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
+  <a href="#toolchain" class="md-nav__link">
     <span class="md-ellipsis">
-      See also
+      Toolchain
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build performance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editable-python-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      Editable Python install
     </span>
   </a>
   
@@ -2162,113 +1291,159 @@
 
 
 <h1 id="build-system">Build System<a class="headerlink" href="#build-system" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>Status: build-bench helper shipped. Full bindings.cpp + modular-
-CMake split is the mechanical follow-up that benefits from the
-baseline this change establishes.</p>
-</blockquote>
-<p><code>refactor-modular-build-split</code> Phase 1: a benchmark harness that
-measures Pulsim's clean + incremental rebuild wallclock so the
-mechanical bindings/modular-CMake split work that follows can prove
-a real wall-clock win.</p>
-<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>scripts/build_bench.py<span class="w"> </span>--build-dir<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_tests
-</code></pre></div>
-<p>Sample output on Apple Silicon / AppleClang 17 / Release+LTO baseline:</p>
-<div class="highlight"><pre><span></span><code>Clean:        39.16 s
-Incremental:  26.13 s
-Ratio:        66.7 %
-</code></pre></div>
-<p>The Phase 2 target is ≤ 10 % incremental ratio — touching one
-device-header should not trigger half a clean build. Today's 67 %
-ratio is the baseline against which the planned split work will be
-measured.</p>
-<h2 id="whats-in-baseline-today">What's in baseline today<a class="headerlink" href="#whats-in-baseline-today" title="Permanent link">&para;</a></h2>
+<p>Pulsim is built with CMake. The kernel itself is <strong>header-only</strong>, so
+everything except the Python extension is a chain of INTERFACE
+libraries + Catch2 test executables.</p>
+<h2 id="targets">Targets<a class="headerlink" href="#targets" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Target</th>
-<th>Translation units</th>
+<th>Kind</th>
 <th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>pulsim_core</code></td>
-<td>header-only</td>
-<td>All v1/v2 device classes + frequency analysis + magnetic + catalog + templates + motors + grid sit here</td>
+<td><code>pulsim::core</code> (alias for <code>pulsim_core</code>)</td>
+<td>INTERFACE</td>
+<td>The entire C++23 header tree under <code>core/include/pulsim/</code>. Carries the C++23 standard requirement plus <code>Eigen3::Eigen</code> + <code>yaml-cpp::yaml-cpp</code> + KLU (+ optional HYPRE) link lines.</td>
 </tr>
 <tr>
-<td><code>pulsim</code></td>
-<td>5 source files</td>
-<td><code>simulation.cpp</code>, <code>simulation_periodic.cpp</code>, <code>simulation_step.cpp</code>, <code>transient_services.cpp</code>, <code>yaml_parser.cpp</code> + <code>simulation_control.cpp</code></td>
+<td><code>pulsim_layer{0..5}_tests</code>, <code>pulsim_layer4_v{1..3}_tests</code>, <code>pulsim_layer5_v{1..4}_tests</code>, <code>pulsim_builder_tests</code>, <code>pulsim_yaml_tests</code>, <code>pulsim_showcase_tests</code>, <code>pulsim_sources_tests</code>, <code>pulsim_analysis_tests</code></td>
+<td>executable</td>
+<td>Catch2 test binaries, one per layer / layer-milestone. Each links only <code>pulsim::core</code> + <code>Catch2::Catch2WithMain</code>.</td>
 </tr>
 <tr>
-<td><code>pulsim_tests</code></td>
-<td>21 source files</td>
-<td>header-only tests (concepts, devices, stamps, frequency-analysis Phases 1-9, magnetic Phases 1-6, catalog Phases 1-8, motors, grid, robustness)</td>
-</tr>
-<tr>
-<td><code>pulsim_simulation_tests</code></td>
-<td>16 source files</td>
-<td>tests that need the compiled <code>pulsim</code> lib (transient/PWL/buck benchmarks/AC sweep)</td>
-</tr>
-<tr>
-<td><code>_pulsim</code> Python module</td>
-<td>1 source file (<code>bindings.cpp</code>, 2857 lines)</td>
-<td>the canonical bottleneck — touching anything that bindings.cpp includes triggers a 30+ s rebuild on its own</td>
+<td><code>_pulsim</code></td>
+<td>shared module</td>
+<td>The pybind11 binding (<code>python/bindings.cpp</code>). Links <code>pulsim::core</code>; loaded by Python as <code>pulsim._pulsim</code>.</td>
 </tr>
 </tbody>
 </table>
-<p>The largest leverage point is <code>bindings.cpp</code>: all category bindings
-(devices, control, simulation, parser, solver, frequency analysis,
-templates, motors, grid, ...) live in one TU. Splitting it into
-<code>bindings/devices.cpp</code>, <code>bindings/control.cpp</code>, etc., each calling
-into a <code>register_*(m)</code> function from a thin <code>bindings/main.cpp</code>,
-turns "edit one device → recompile bindings.cpp" (~35 s) into
-"recompile only the affected category file" (~5 s).</p>
-<h2 id="running-the-bench">Running the bench<a class="headerlink" href="#running-the-bench" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Baseline (touch a leaf header):</span>
-python3<span class="w"> </span>scripts/build_bench.py<span class="w"> </span>--build-dir<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_tests<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--touch-file<span class="w"> </span>core/include/pulsim/v1/numeric_types.hpp
+<p>Every test binary is registered with <code>catch_discover_tests(...)</code>, so
+<code>ctest</code> picks them up automatically.</p>
+<h2 id="configure-build">Configure + build<a class="headerlink" href="#configure-build" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Configure (Ninja recommended)</span>
+cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
 
-<span class="c1"># After a bindings split: touching just one category file</span>
-python3<span class="w"> </span>scripts/build_bench.py<span class="w"> </span>--build-dir<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>_pulsim<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--touch-file<span class="w"> </span>python/bindings/devices.cpp<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--json<span class="w"> </span>bench.json
+<span class="c1"># Build everything</span>
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
+
+<span class="c1"># Or build just one layer&#39;s test binary</span>
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_layer4_tests
+
+<span class="c1"># Run the full test harness</span>
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
 </code></pre></div>
-<p>The <code>--json</code> artifact is the CI-ratchet hook: regress past the
-recorded baseline by 10 % → fail the build. The CI integration is the
-deferred Phase 1.3 follow-up; the bench tool itself is final today.</p>
-<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
+<h2 id="build-options">Build options<a class="headerlink" href="#build-options" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PULSIM_BUILD_TESTS</code></td>
+<td><code>ON</code></td>
+<td>Build the layer-by-layer Catch2 test binaries.</td>
+</tr>
+<tr>
+<td><code>PULSIM_BUILD_PYTHON</code></td>
+<td><code>OFF</code></td>
+<td>Build the <code>_pulsim</code> pybind11 extension (in <code>build/python/pulsim/</code>).</td>
+</tr>
+<tr>
+<td><code>PULSIM_BUILD_BENCHMARKS</code></td>
+<td><code>OFF</code></td>
+<td>Add the <code>benchmark_compile_time</code> custom target (clean rebuild timing).</td>
+</tr>
+<tr>
+<td><code>PULSIM_ENABLE_LTO</code></td>
+<td><code>ON</code> (Release)</td>
+<td>Enable link-time optimization.</td>
+</tr>
+<tr>
+<td><code>PULSIM_ENABLE_NATIVE</code></td>
+<td><code>OFF</code></td>
+<td><code>-march=native -mtune=native</code> (don't ship binaries built with this).</td>
+</tr>
+<tr>
+<td><code>PULSIM_ENABLE_PGO_GENERATE</code> / <code>..._USE</code></td>
+<td><code>OFF</code></td>
+<td>Two-pass PGO workflow (see comments in <code>CMakeLists.txt</code>).</td>
+</tr>
+<tr>
+<td><code>PULSIM_SANITIZERS</code></td>
+<td><code>OFF</code></td>
+<td><code>-fsanitize=address,undefined</code> (works best with <code>Debug</code>).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
+<p>All managed through <code>find_package</code> first, then <code>FetchContent</code> as a
+last resort:</p>
 <ul>
-<li><strong>bindings.cpp split</strong> (Phases 2-3 of the proposal): mechanical
-  refactor of 2857 lines into category files. Requires care to keep
-  the pybind11 module entry point + every type registration in the
-  right order (some types reference others' bindings during
-  registration). The bench harness is the prerequisite that lets us
-  measure the wall-clock win — without a baseline number the split
-  is blind. Tracked as the next change.</li>
-<li><strong>Library-level split</strong> (Phases 4-6 of the proposal): split the
-  <code>pulsim</code> static library into <code>pulsim_core</code> (no compiled deps) +
-  <code>pulsim_simulation</code> (Newton-DAE + LTE) + <code>pulsim_periodic</code>
-  (shooting, harmonic balance) — the Newton-DAE consumers pull a
-  smaller graph than today's monolith. Same prerequisite: baseline
-  bench numbers.</li>
-<li><strong>CI ratchet</strong>: emit the JSON artifact on every PR build and fail
-  if the incremental ratio regresses past N %. Pairs with the splits
-  above so the gate has somewhere to land.</li>
-<li><strong>Unity builds opt-in</strong>: CMake <code>set(CMAKE_UNITY_BUILD ON)</code> for
-  release-build CI runs that don't care about incremental rebuild;
-  trades incremental friendliness for ~ 30 % faster clean build.</li>
+<li><strong>Eigen 3.4+</strong> — header-only matrix/vector library. Also provides
+  <code>Eigen::SparseLU</code>, the direct sparse solver used by every Pulsim
+  transient + DC solve. System install or fetched from
+  <code>https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz</code>.</li>
+<li><strong>yaml-cpp 0.8.0</strong> — fetched via <code>FetchContent</code>. Used only by the
+  YAML circuit loader (<code>pulsim/yaml/loader.hpp</code>). Forced to C++17 to
+  dodge GCC 14 + libstdc++ regressions when compiled in C++23 mode.</li>
+<li><strong>Catch2 v3.8.0+</strong> — fetched. Only built when <code>PULSIM_BUILD_TESTS=ON</code>.
+  Same C++17 forcing as yaml-cpp.</li>
+<li><strong>pybind11 ≥ 2.10</strong> — only needed when <code>PULSIM_BUILD_PYTHON=ON</code>.
+  Picks up <code>find_package(pybind11)</code> first (typical when building via
+  <code>pip install</code> or <code>scikit-build-core</code>); falls back to <code>FetchContent</code>
+  pinned at <code>v2.12.0</code>.</li>
 </ul>
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<p>Pulsim does <strong>not</strong> depend on SuiteSparse / KLU, HYPRE, BLAS, LAPACK,
+MKL, PETSc, SUNDIALS, or any other external solver library. The
+direct sparse path is <code>Eigen::SparseLU</code> (header-only).</p>
+<h2 id="toolchain">Toolchain<a class="headerlink" href="#toolchain" title="Permanent link">&para;</a></h2>
+<p>C++23 is non-negotiable. The detection in <code>CMakeLists.txt</code> warns
+(but does not fail) when:</p>
 <ul>
-<li><a href="../backend-architecture/"><code>backend-architecture.md</code></a> — the layered
-  TU graph the split work will follow.</li>
-<li>The <code>python/bindings.cpp</code> file itself — start of the largest TU
-  in the project.</li>
+<li>AppleClang &lt; 15.0 (Xcode 15+ recommended),</li>
+<li>LLVM Clang &lt; 17.0,</li>
+<li>GCC &lt; 13.0,</li>
+<li>MSVC &lt; 17.7.</li>
 </ul>
+<p>For an explicit Clang toolchain (auto-detects Homebrew LLVM on
+macOS, standard paths on Linux/Windows):</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DCMAKE_TOOLCHAIN_FILE<span class="o">=</span>cmake/toolchain-clang.cmake
+</code></pre></div>
+<h2 id="build-performance">Build performance<a class="headerlink" href="#build-performance" title="Permanent link">&para;</a></h2>
+<p>Two knobs that move the needle:</p>
+<ul>
+<li><strong>Ninja</strong> — parallel scheduler is far better than Make for
+  templated code.</li>
+<li><strong>LTO</strong> — on by default in Release. Disabled automatically for
+  Linux Python builds (pybind11 thread-local-storage interaction).</li>
+</ul>
+<p>A <code>PULSIM_BUILD_BENCHMARKS=ON</code> configure adds the
+<code>benchmark_compile_time</code> target, which times a clean rebuild of
+the heaviest test binary (Layer 5 V4 — Newton in run_transient
+pulls the full template tree).</p>
+<h2 id="editable-python-install">Editable Python install<a class="headerlink" href="#editable-python-install" title="Permanent link">&para;</a></h2>
+<p>For local Python development without <code>pip install</code>:</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
+<span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/build/python:</span><span class="nv">$PYTHONPATH</span><span class="s2">&quot;</span>
+python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as p; print(p.__version__)&quot;</span>
+</code></pre></div>
+<p>For a proper wheel build (used by <code>pip install .</code> and by CI):</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>scikit-build-core<span class="w"> </span>pybind11
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w">         </span><span class="c1"># editable; rebuilds on Python import</span>
+</code></pre></div>
+<p>The wheel is driven by <code>pyproject.toml</code> + <code>scikit-build-core</code>,
+which runs the same top-level <code>CMakeLists.txt</code> with <code>SKBUILD=ON</code>.</p>
 
 
 
@@ -2304,7 +1479,7 @@ deferred Phase 1.3 follow-up; the bench tool itself is final today.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../property-based-testing/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Property-Based Testing">
+          <a href="../internals/layer10-benchmarks/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Layer 10 — Benchmarks">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2314,20 +1489,20 @@ deferred Phase 1.3 follow-up; the bench tool itself is final today.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Property-Based Testing
+                Layer 10 — Benchmarks
               </div>
             </div>
           </a>
         
         
           
-          <a href="../gui-component-parity/" class="md-footer__link md-footer__link--next" aria-label="Next: GUI Backend Parity">
+          <a href="../performance-tuning/" class="md-footer__link md-footer__link--next" aria-label="Next: Performance Tuning">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                GUI Backend Parity
+                Performance Tuning
               </div>
             </div>
             <div class="md-footer__button md-icon">

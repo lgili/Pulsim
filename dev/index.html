@@ -6,15 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
       
       
       
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/">
       
       
+        <link rel="prev" href=".">
       
-        <link rel="next" href="backend-architecture/">
+      
+        <link rel="next" href="getting-started/">
       
       
       <link rel="icon" href="assets/images/pulsim-logo.svg">
@@ -22,7 +24,7 @@
     
     
       
-        <title>Documentation Home - PulsimCore</title>
+        <title>Home - Pulsim</title>
       
     
     
@@ -78,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#pulsimcore-documentation" class="md-skip">
+        <a href="#pulsim-user-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -98,7 +100,7 @@
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href="." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="assets/images/pulsim-logo.svg" alt="logo">
 
@@ -111,13 +113,13 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            PulsimCore
+            Pulsim
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Documentation Home
+              Home
             
           </span>
         </div>
@@ -211,13 +213,32 @@
     
   
   
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
     
     
       <li class="md-tabs__item md-tabs__item--active">
         <a href="." class="md-tabs__link">
           
   
-  Overview
+  User Guide
 
         </a>
       </li>
@@ -232,10 +253,10 @@
     
     
       <li class="md-tabs__item">
-        <a href="v2/" class="md-tabs__link">
+        <a href="internals/" class="md-tabs__link">
           
   
-  Pulsim v2 Guide
+  Internals
 
         </a>
       </li>
@@ -250,97 +271,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="components-reference/" class="md-tabs__link">
-          
-  
-  Reference
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="examples-and-results/" class="md-tabs__link">
-          
-  
-  Guides
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="magnetic-models/" class="md-tabs__link">
-          
-  
-  Domain Libraries
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="benchmarks-and-parity/" class="md-tabs__link">
-          
-  
-  Quality Gates
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="gui-component-parity/" class="md-tabs__link">
-          
-  
-  Compatibility
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="configuration/" class="md-tabs__link">
+        <a href="build-system/" class="md-tabs__link">
           
   
   Operations
@@ -379,12 +310,12 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+    <a href="." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
       
   <img src="assets/images/pulsim-logo.svg" alt="logo">
 
     </a>
-    PulsimCore
+    Pulsim
   </label>
   
     <div class="md-nav__source">
@@ -400,6 +331,102 @@
     </div>
   
   <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-pulsim" class="md-nav__link">
+    <span class="md-ellipsis">
+      When to use Pulsim
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-not-to-use-pulsim" class="md-nav__link">
+    <span class="md-ellipsis">
+      When NOT to use Pulsim
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reading order
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-source-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      Where the source lives
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
     
       
       
@@ -425,24 +452,24 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
-    Overview
+    User Guide
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_1">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
-            Overview
+            User Guide
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -466,7 +493,7 @@
           
   
   <span class="md-ellipsis">
-    Documentation Home
+    Home
   </span>
   
 
@@ -477,7 +504,7 @@
         
   
   <span class="md-ellipsis">
-    Documentation Home
+    Home
   </span>
   
 
@@ -499,36 +526,36 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-in-the-box" class="md-nav__link">
+  <a href="#when-to-use-pulsim" class="md-nav__link">
     <span class="md-ellipsis">
-      What's in the box
+      When to use Pulsim
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#one-command-sanity-check" class="md-nav__link">
+  <a href="#when-not-to-use-pulsim" class="md-nav__link">
     <span class="md-ellipsis">
-      One-command sanity check
+      When NOT to use Pulsim
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-learning-path" class="md-nav__link">
+  <a href="#reading-order" class="md-nav__link">
     <span class="md-ellipsis">
-      Recommended learning path
+      Reading order
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#topic-shortcuts" class="md-nav__link">
+  <a href="#where-the-source-lives" class="md-nav__link">
     <span class="md-ellipsis">
-      Topic shortcuts
+      Where the source lives
     </span>
   </a>
   
@@ -538,27 +565,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="backend-architecture/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend Architecture
-  </span>
-  
-
-      </a>
     </li>
   
 
@@ -592,119 +598,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Pulsim v2 Guide
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            Pulsim v2 Guide
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="v2/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="v2/getting-started/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="v2/mental-model/" class="md-nav__link">
+      <a href="mental-model/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -725,7 +619,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/tutorials/01-rc-charging/" class="md-nav__link">
+      <a href="tutorials/01-rc-charging/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -746,7 +640,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/tutorials/02-buck-converter/" class="md-nav__link">
+      <a href="tutorials/02-buck-converter/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -767,7 +661,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/tutorials/03-flyback-isolated/" class="md-nav__link">
+      <a href="tutorials/03-flyback-isolated/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -788,7 +682,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/tutorials/04-3phase-vsi/" class="md-nav__link">
+      <a href="tutorials/04-3phase-vsi/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -809,7 +703,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/tutorials/05-ldo-feedback/" class="md-nav__link">
+      <a href="tutorials/05-ldo-feedback/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -830,7 +724,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/tutorials/06-igbt-boost/" class="md-nav__link">
+      <a href="tutorials/06-igbt-boost/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -851,7 +745,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/api-reference/" class="md-nav__link">
+      <a href="api-reference/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -872,7 +766,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/helpers/" class="md-nav__link">
+      <a href="helpers/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -893,7 +787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="v2/gotchas/" class="md-nav__link">
+      <a href="gotchas/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -942,7 +836,7 @@
             
   
   <span class="md-ellipsis">
-    Reference
+    Internals
   </span>
   
 
@@ -952,7 +846,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
-            Reference
+            Internals
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -963,11 +857,11 @@
   
   
     <li class="md-nav__item">
-      <a href="components-reference/" class="md-nav__link">
+      <a href="internals/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Components Reference
+    Architecture (Layer-by-Layer)
   </span>
   
 
@@ -984,11 +878,11 @@
   
   
     <li class="md-nav__item">
-      <a href="control-blocks-reference/" class="md-nav__link">
+      <a href="internals/layer0-numeric-and-sparse/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Control Blocks Reference
+    Layer 0 — Numeric + Sparse
   </span>
   
 
@@ -1005,11 +899,11 @@
   
   
     <li class="md-nav__item">
-      <a href="kpi-reference/" class="md-nav__link">
+      <a href="internals/layer1-topology-and-enumeration/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    KPI Reference
+    Layer 1 — Topology + Enumeration
   </span>
   
 
@@ -1026,11 +920,11 @@
   
   
     <li class="md-nav__item">
-      <a href="netlist-format/" class="md-nav__link">
+      <a href="internals/layer2-ad-and-device-models/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Netlist YAML Format
+    Layer 2 — AD + Device Models
   </span>
   
 
@@ -1047,11 +941,11 @@
   
   
     <li class="md-nav__item">
-      <a href="device-models/" class="md-nav__link">
+      <a href="internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Device Models
+    Layer 2 V1 — MOSFET / IGBT
   </span>
   
 
@@ -1068,11 +962,11 @@
   
   
     <li class="md-nav__item">
-      <a href="api-reference/" class="md-nav__link">
+      <a href="internals/layer2-v2-transformer/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    API Reference
+    Layer 2 V2 — Transformer
   </span>
   
 
@@ -1089,11 +983,74 @@
   
   
     <li class="md-nav__item">
-      <a href="python-api/" class="md-nav__link">
+      <a href="internals/layer3-stamping-pipeline/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Python API (Legacy Notes)
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
   </span>
   
 
@@ -1138,7 +1095,7 @@
             
   
   <span class="md-ellipsis">
-    Guides
+    Operations
   </span>
   
 
@@ -1148,7 +1105,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
-            Guides
+            Operations
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -1159,11 +1116,11 @@
   
   
     <li class="md-nav__item">
-      <a href="examples-and-results/" class="md-nav__link">
+      <a href="build-system/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Examples and Results
+    Build System
   </span>
   
 
@@ -1180,326 +1137,11 @@
   
   
     <li class="md-nav__item">
-      <a href="notebooks/" class="md-nav__link">
+      <a href="performance-tuning/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Notebooks
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="numerical-configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Numerical Configuration
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="ac-analysis/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    AC Analysis
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="fra/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Response Analysis (FRA)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="electrothermal-workflow/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Workflow
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="parameter-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Parameter Sweep
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="schematic-rendering/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Schematic Rendering
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="code-generation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Real-Time Code Generation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="fmi-export/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    FMI Export
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="automatic-differentiation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Automatic Differentiation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="pwl-switching-migration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PWL Switching Engine
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="component-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Component Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="thermal-and-loss-models-audit/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Thermal + Loss Models Audit
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="convergence-tuning-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Convergence Tuning
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="linear-solver-cache/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Linear-Solver Cache
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="robustness-policy/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Robustness Policy
+    Performance Tuning
   </span>
   
 
@@ -1530,405 +1172,6 @@
 
               
             
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Domain Libraries
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            Domain Libraries
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="magnetic-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="motor-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Motor Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="compressor-and-refrigerant-load/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Compressor + Refrigerant Load
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="multilevel-converters/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Multilevel Converters
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="three-phase-grid/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Three-Phase Grid Library
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="catalog-devices/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Catalog Devices
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="converter-templates/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Converter Templates
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Quality Gates
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            Quality Gates
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="benchmarks-and-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Benchmarks and Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="spice-parity-dashboard/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    SPICE Parity Dashboard
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="property-based-testing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Property-Based Testing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="build-system/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Build System
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Compatibility
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
-            <span class="md-nav__icon md-icon"></span>
-            Compatibility
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="gui-component-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    GUI Backend Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
               
                 
   
@@ -1940,77 +1183,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Operations
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
-            <span class="md-nav__icon md-icon"></span>
-            Operations
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Configuration
+    Migration Guide (legacy → 1.0)
   </span>
   
 
@@ -2075,36 +1248,36 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-in-the-box" class="md-nav__link">
+  <a href="#when-to-use-pulsim" class="md-nav__link">
     <span class="md-ellipsis">
-      What's in the box
+      When to use Pulsim
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#one-command-sanity-check" class="md-nav__link">
+  <a href="#when-not-to-use-pulsim" class="md-nav__link">
     <span class="md-ellipsis">
-      One-command sanity check
+      When NOT to use Pulsim
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-learning-path" class="md-nav__link">
+  <a href="#reading-order" class="md-nav__link">
     <span class="md-ellipsis">
-      Recommended learning path
+      Reading order
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#topic-shortcuts" class="md-nav__link">
+  <a href="#where-the-source-lives" class="md-nav__link">
     <span class="md-ellipsis">
-      Topic shortcuts
+      Where the source lives
     </span>
   </a>
   
@@ -2141,198 +1314,72 @@
   
 
 
-<h1 id="pulsimcore-documentation">PulsimCore Documentation<a class="headerlink" href="#pulsimcore-documentation" title="Permanent link">&para;</a></h1>
-<div class="pulsim-hero">
-  <h1>PulsimCore Backend</h1>
-  <p>High-performance power-electronics simulation backend with a <strong>Python-first runtime</strong>, versioned YAML netlists, mixed electrical-and-control domains, and a 50-bench closed-loop regression dashboard.</p>
-  <p>Recommended surface: <code>import pulsim</code> + <code>schema: pulsim-v1</code>.</p>
-  <div class="pulsim-hero-actions">
-    <a class="md-button md-button--primary" href="getting-started/">Get Started</a>
-    <a class="md-button" href="components-reference/">Components Reference</a>
-    <a class="md-button" href="control-blocks-reference/">Control Blocks</a>
-    <a class="md-button" href="api-reference/">API</a>
-  </div>
-</div>
-
-<h2 id="whats-in-the-box">What's in the box<a class="headerlink" href="#whats-in-the-box" title="Permanent link">&para;</a></h2>
-<div class="grid cards">
+<h1 id="pulsim-user-guide">Pulsim — User Guide<a class="headerlink" href="#pulsim-user-guide" title="Permanent link">&para;</a></h1>
+<p>Pulsim is a header-only C++23 circuit simulator with a Python frontend, designed for <strong>power electronics and SMPS</strong> workloads. The whole solver lives in a few <code>.hpp</code> files; the engine pre-factors every reachable switch configuration into a piecewise-linear state-space cache, then steps through time at near-machine-speed.</p>
+<p>If you've used SPICE before, the mental model is similar but the implementation is very different — see <a href="mental-model/">the mental model page</a> for the one-page summary.</p>
+<h2 id="when-to-use-pulsim">When to use Pulsim<a class="headerlink" href="#when-to-use-pulsim" title="Permanent link">&para;</a></h2>
 <ul>
-<li>
-<p>:material-circle-multiple-outline: <strong>30+ electrical components</strong></p>
-<hr />
-<p>Resistors, capacitors, inductors, mosfets (smooth Shichman-Hodges),
-IGBTs, diodes, transformers, coupled inductors, saturable inductors,
-fuses, breakers, relays, thyristors, triacs — every parameter,
-default, and unit documented.</p>
-<p><a href="components-reference/">Components Reference</a></p>
-</li>
-<li>
-<p>:material-graph-outline: <strong>30+ virtual control blocks</strong></p>
-<hr />
-<p>PWM generators, PI / PID, integrators, Schmitt triggers,
-state-machines, lookup tables, transfer functions, Clarke / Park /
-PLL / SVM — all mixable in the same netlist, all addressable as
-channels (<code>chan:PI.output</code>, <code>chan:PLL.theta</code>, …).</p>
-<p><a href="control-blocks-reference/">Control Blocks Reference</a></p>
-</li>
-<li>
-<p>:material-file-code-outline: <strong>Versioned YAML netlists</strong></p>
-<hr />
-<p>Schema <code>pulsim-v1</code> is stable, validated, diffable, and round-trips
-through every backend (transient / shooting / harmonic balance / AC
-/ FRA). YAML is the source of truth for the benchmark suite.</p>
-<p><a href="netlist-format/">Netlist YAML Format</a></p>
-</li>
-<li>
-<p>:material-sine-wave: <strong>Mixed-domain runtime</strong></p>
-<hr />
-<p>Stamping electrical solver (MNA + trapezoidal / TR-BDF2 / Rosenbrock)
-runs alongside the control-block scheduler in a single simulator
-object. Switch events, duty callbacks, channel feedback — all in one
-Newton iteration.</p>
-<p><a href="backend-architecture/">Backend Architecture</a></p>
-</li>
-<li>
-<p>:material-chart-bell-curve: <strong>AC sweep + FRA</strong></p>
-<hr />
-<p>Linearize around a periodic operating point, sweep frequency
-analytically (<code>run_ac_sweep</code>) or via transient injection
-(<code>run_fra_sweep</code>). Both produce LinearSystem outputs you can
-compare to analytical Bode models.</p>
-<p><a href="ac-analysis/">AC Analysis</a> / <a href="fra/">FRA</a></p>
-</li>
-<li>
-<p>:material-thermometer: <strong>Electrothermal coupling</strong></p>
-<hr />
-<p>MOSFET / IGBT / BJT carry a <code>thermal:</code> port; the runtime computes
-junction temperature alongside electrical state, and KPI helpers
-derive <code>T_j_max</code>, <code>Δ_T_j</code>, and full Foster-network responses.</p>
-<p><a href="electrothermal-workflow/">Electrothermal Workflow</a></p>
-</li>
-<li>
-<p>:material-magnet: <strong>Magnetic fidelity</strong></p>
-<hr />
-<p>Saturable inductors with soft-knee L(I), SPICE-style mutual
-coupling, ideal transformers, and Steinmetz core-loss KPI for B(t)
-traces — all callable from YAML.</p>
-<p><a href="magnetic-models/">Magnetic Models</a></p>
-</li>
-<li>
-<p>:material-speedometer: <strong>Quantitative KPIs</strong></p>
-<hr />
-<p>THD, power factor, efficiency, ripple p-p, rise/settling/overshoot,
-ZVS%, ZCS%, conduction + switching loss, Steinmetz core loss, and
-junction temperature — all wired into the benchmark runner with CI
-gates.</p>
-<p><a href="kpi-reference/">KPI Reference</a></p>
-</li>
-<li>
-<p>:material-cog-transfer-outline: <strong>Real-time codegen + FMI</strong></p>
-<hr />
-<p>Export a circuit as a C99 step function (<code>pulsim.codegen</code>) or as
-an FMI 2.0 Co-Simulation FMU — for HIL targets, model exchange, or
-integration with Simulink / OpenModelica.</p>
-<p><a href="code-generation/">Code Generation</a> / <a href="fmi-export/">FMI Export</a></p>
-</li>
-<li>
-<p>:material-circuit-board: <strong>Domain libraries</strong></p>
-<hr />
-<p>Vendor MOSFET / IGBT presets, converter templates (buck / boost /
-full-bridge / LLC), seven motor families (DC, PMSM, PMSM-FOC,
-BLDC, 3φ and 1φ induction, mechanical), refrigeration compressor
-loads (Reciprocating / Rotary / Scroll, with a curated refrigerant
-table for R600a / R134a / R290 / R32 / R744), and three-phase grid
-primitives (sources, PLLs, grid-following + grid-forming inverters).</p>
-<p><a href="catalog-devices/">Catalog Devices</a> · <a href="converter-templates/">Converter Templates</a> · <a href="motor-models/">Motor Models</a> · <a href="compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a> · <a href="three-phase-grid/">Three-Phase Grid</a></p>
-</li>
-<li>
-<p>:material-shield-check-outline: <strong>Benchmark dashboards</strong></p>
-<hr />
-<p>50 closed-loop benches, 80+ stress benches, ngspice/LTspice parity
-matrices, and a live SPICE parity dashboard — Pulsim is regression-
-tested on real topologies, not toy circuits.</p>
-<p><a href="benchmarks-and-parity/">Benchmarks and Parity</a> · <a href="spice-parity-dashboard/">SPICE Parity Dashboard</a></p>
-</li>
-<li>
-<p>:material-tools: <strong>Pro tooling</strong></p>
-<hr />
-<p>Parameter sweeps, property-based tests, automatic differentiation,
-a linear-solver cache, JFNK / GMRES / KLU / Pardiso solvers, and
-robust convergence policies.</p>
-<p><a href="parameter-sweep/">Parameter Sweep</a> · <a href="property-based-testing/">Property-Based Testing</a> · <a href="automatic-differentiation/">Automatic Differentiation</a> · <a href="linear-solver-cache/">Linear-Solver Cache</a></p>
-</li>
+<li>You're building <strong>power-electronics converters</strong> (buck, boost, flyback, full-bridge, 3-φ VSI, LDO, …).</li>
+<li>You want a <strong>scriptable, Python-first</strong> workflow with full access to the solver internals.</li>
+<li>You need to <strong>run thousands of duty-cycle / load-line sweeps</strong> quickly — the kernel's PWL cache makes each switch combo essentially free after the first solve.</li>
+<li>You're OK driving things from a <code>CircuitBuilder</code> (Python or C++) or YAML — there is no schematic GUI yet.</li>
 </ul>
-</div>
-<h2 id="one-command-sanity-check">One-command sanity check<a class="headerlink" href="#one-command-sanity-check" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
-</code></pre></div>
-<p>If that prints a version string, you're set. Otherwise see
-<a href="getting-started/">Getting Started</a> → "Installation" or
-<a href="troubleshooting/">Troubleshooting</a>.</p>
-<h2 id="recommended-learning-path">Recommended learning path<a class="headerlink" href="#recommended-learning-path" title="Permanent link">&para;</a></h2>
+<h2 id="when-not-to-use-pulsim">When NOT to use Pulsim<a class="headerlink" href="#when-not-to-use-pulsim" title="Permanent link">&para;</a></h2>
+<ul>
+<li>You need a full SPICE language frontend with <code>.MODEL</code> cards — Pulsim has its own device catalogue, not SPICE-compatible.</li>
+<li>You're doing <strong>RF / high-frequency PCB</strong> simulations with distributed elements — Pulsim is lumped-only.</li>
+<li>You need built-in convergence retries that mask physically dubious circuits — the kernel's Newton is principled but unforgiving; expect to think about your circuit.</li>
+</ul>
+<h2 id="reading-order">Reading order<a class="headerlink" href="#reading-order" title="Permanent link">&para;</a></h2>
 <ol>
-<li><a href="getting-started/">Getting Started</a> — install, run an RC step, see the output CSV.</li>
-<li><a href="numerical-configuration/">Numerical Configuration</a> — the four presets (<code>Auto</code>/<code>Fast</code>/<code>Robust</code>/<code>HighFidelity</code>) that materialise a full tuning profile in one call.</li>
-<li><a href="user-guide/">User Guide</a> — the canonical runtime flow.</li>
-<li><a href="netlist-format/">Netlist YAML Format</a> — schema for your first real circuit.</li>
-<li><a href="components-reference/">Components Reference</a> + <a href="control-blocks-reference/">Control Blocks Reference</a> — every block at your disposal.</li>
-<li><a href="examples-and-results/">Examples and Results</a> — run shipped scripts end-to-end.</li>
-<li><a href="kpi-reference/">KPI Reference</a> — score what you've built.</li>
-<li><a href="benchmarks-and-parity/">Benchmarks and Parity</a> — wire it into CI.</li>
-<li><a href="api-reference/">API Reference</a> — when you need to drop down past YAML.</li>
+<li><a href="getting-started/"><strong>Getting started</strong></a> — install, run the first transient, see a plot.</li>
+<li><a href="mental-model/"><strong>Mental model</strong></a> — what the Graph, DevicePool, PwlStateSpaceCache, and Newton refresh do.</li>
+<li><strong>Tutorials</strong> — six walk-throughs from simplest to most involved:</li>
+<li><a href="tutorials/01-rc-charging/">01 — RC charging from a pulse source</a></li>
+<li><a href="tutorials/02-buck-converter/">02 — Buck converter (YAML + switch_fn)</a></li>
+<li><a href="tutorials/03-flyback-isolated/">03 — Isolated flyback (transformer + commutation)</a></li>
+<li><a href="tutorials/04-3phase-vsi/">04 — Three-phase voltage-source inverter (SPWM)</a></li>
+<li><a href="tutorials/05-ldo-feedback/">05 — LDO with op-amp feedback (VCVS + MOSFET)</a></li>
+<li><a href="tutorials/06-igbt-boost/">06 — IGBT boost with realistic gate drive</a></li>
+<li><a href="api-reference/"><strong>API reference</strong></a> — Python surface, one page.</li>
+<li><a href="gotchas/"><strong>Gotchas</strong></a> — Newton convergence corner cases and the workarounds that ship in 1.0.</li>
 </ol>
-<h2 id="topic-shortcuts">Topic shortcuts<a class="headerlink" href="#topic-shortcuts" title="Permanent link">&para;</a></h2>
+<h2 id="where-the-source-lives">Where the source lives<a class="headerlink" href="#where-the-source-lives" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>If you're doing...</th>
-<th>Read</th>
+<th>Tree</th>
+<th>What's inside</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>First simulation — what numerical knobs to set</td>
-<td><a href="numerical-configuration/">Numerical Configuration</a></td>
+<td><code>core/include/pulsim/</code></td>
+<td>The entire C++23 solver (header-only)</td>
 </tr>
 <tr>
-<td>Buck / boost / LLC / FB converter</td>
-<td><a href="converter-templates/">Converter Templates</a>, <a href="catalog-devices/">Catalog Devices</a></td>
+<td><code>core/tests/</code></td>
+<td>Catch2 unit + integration tests</td>
 </tr>
 <tr>
-<td>Multilevel (NPC, T-type, flying-cap, MMC)</td>
-<td><a href="multilevel-converters/">Multilevel Converters</a>, <a href="numerical-configuration/">Numerical Configuration</a></td>
+<td><code>python/pulsim/__init__.py</code></td>
+<td>Python re-export module + <code>simulate()</code> helper</td>
 </tr>
 <tr>
-<td>Three-phase / motor drives / vector control</td>
-<td><a href="three-phase-grid/">Three-Phase Grid</a>, <a href="motor-models/">Motor Models</a>, <a href="control-blocks-reference/">Control Blocks</a></td>
+<td><code>python/bindings.cpp</code></td>
+<td>pybind11 bindings</td>
 </tr>
 <tr>
-<td>Refrigeration / fridge / freezer compressor (CC convencional or inverter VCC)</td>
-<td><a href="compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a>, <a href="motor-models/">Motor Models</a></td>
+<td><code>examples/*.yaml</code></td>
+<td>YAML showcases referenced from these tutorials</td>
 </tr>
 <tr>
-<td>Magnetics design (saturation, core loss)</td>
-<td><a href="magnetic-models/">Magnetic Models</a>, <a href="kpi-reference/">KPI Reference</a></td>
+<td><code>openspec/specs/pulsim-*</code></td>
+<td>Authoritative capability specs</td>
 </tr>
 <tr>
-<td>Thermal margin sizing</td>
-<td><a href="electrothermal-workflow/">Electrothermal Workflow</a>, <a href="kpi-reference/">KPI Reference</a></td>
-</tr>
-<tr>
-<td>Closed-loop tuning</td>
-<td><a href="ac-analysis/">AC Analysis</a>, <a href="fra/">FRA</a></td>
-</tr>
-<tr>
-<td>HIL / embedded export</td>
-<td><a href="code-generation/">Code Generation</a>, <a href="fmi-export/">FMI Export</a></td>
-</tr>
-<tr>
-<td>Comparing to PSIM / PLECS / ngspice / LTspice</td>
-<td><a href="benchmarks-and-parity/">Benchmarks and Parity</a>, <a href="spice-parity-dashboard/">SPICE Parity Dashboard</a>, <a href="gui-component-parity/">GUI Backend Parity</a></td>
-</tr>
-<tr>
-<td>Solver convergence problems</td>
-<td><a href="convergence-tuning-guide/">Convergence Tuning</a>, <a href="troubleshooting/">Troubleshooting</a></td>
+<td><code>openspec/changes/pulsim-*</code></td>
+<td>Historical change proposals</td>
 </tr>
 </tbody>
 </table>
@@ -2370,15 +1417,31 @@ robust convergence policies.</p>
       
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
+          
+          <a href="." class="md-footer__link md-footer__link--prev" aria-label="Previous: Home">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Home
+              </div>
+            </div>
+          </a>
+        
         
           
-          <a href="backend-architecture/" class="md-footer__link md-footer__link--next" aria-label="Next: Backend Architecture">
+          <a href="getting-started/" class="md-footer__link md-footer__link--next" aria-label="Next: Getting Started">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Getting Started
               </div>
             </div>
             <div class="md-footer__button md-icon">
