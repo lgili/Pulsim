@@ -468,4 +468,50 @@ if(PULSIM_BUILD_TESTS)
     endif()
     catch_discover_tests(pulsim_core_layer5_v4_tests)
 
+    # =============================================================================
+    # pulsim_benchmarks — analytical-validation + perf measurement
+    # =============================================================================
+    # Catch2 binary that pairs each circuit (RC, RL, RLC, half-wave
+    # rectifier, buck steady-state, …) with a closed-form analytical
+    # reference and measures max abs / max rel error alongside the
+    # cold-start cache build time + per-step solve cost.
+    #
+    # Deliberately NOT registered with ctest (``catch_discover_tests``)
+    # so a normal ``ctest`` run stays focused on correctness tests.
+    # Run manually:
+    #
+    #     ./build/core/pulsim_benchmarks                # all benchmarks
+    #     ./build/core/pulsim_benchmarks "[rc]"          # one tag
+    #     ./build/core/pulsim_benchmarks --reporter console
+    #
+    # Or via the convenience target:
+    #
+    #     cmake --build build --target bench
+    add_executable(pulsim_benchmarks
+        tests/benchmarks/test_main.cpp
+        tests/benchmarks/test_bench_rc.cpp
+        tests/benchmarks/test_bench_rl.cpp
+        tests/benchmarks/test_bench_rlc.cpp
+        tests/benchmarks/test_bench_half_wave.cpp
+    )
+    target_include_directories(pulsim_benchmarks
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks
+    )
+    target_link_libraries(pulsim_benchmarks
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_benchmarks)
+    endif()
+    # Convenience: ``cmake --build build --target bench`` builds + runs.
+    add_custom_target(bench
+        COMMAND $<TARGET_FILE:pulsim_benchmarks>
+        DEPENDS pulsim_benchmarks
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running pulsim_benchmarks (analytical + timing)…"
+    )
+
 endif()
