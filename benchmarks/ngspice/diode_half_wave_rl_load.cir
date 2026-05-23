@@ -1,0 +1,17 @@
+* Half-wave rectifier with RL load — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/diode_half_wave_rl_load.yaml
+*
+* AC sine (10V peak, 50Hz) → D1 → R + L → ground.
+* Inductive load extends conduction past zero-crossing: i_L > 0 keeps
+* diode forward until current decays through R. Pulsim's g_on=200
+* (R_on=5mΩ), g_off=1e-6 (R_off=1MΩ) maps to a low-Is DIODEMOD here.
+
+Vac in  0   SIN(0 10 50)
+D1  in  out DIODEMOD
+R1  out n_l 10
+L1  n_l 0   1m IC=0
+
+.model DIODEMOD D(IS=1e-12 N=1 RS=5m)
+
+.tran 20u 60m UIC
+.end

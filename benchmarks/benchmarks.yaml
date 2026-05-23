@@ -143,6 +143,40 @@ benchmarks:
       - column: V(node)
         spice_vector: v(node)
     scenarios: [direct_trap]
+  # ----- Model-interaction batch (Phase 8 — second validation batch) -----
+  - path: circuits/diode_clamp_overvoltage.yaml
+    ngspice_netlist: ngspice/diode_clamp_overvoltage.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    # direct_trap numerically explodes at the 0→15V step crossing the
+    # diode's piecewise-linear knee (oscillation grows unbounded).
+    # gmres_trbdf2 is L-stable and tracks the clamp cleanly.
+    scenarios: [gmres_trbdf2]
+  - path: circuits/pwm_voltage_rl_filter.yaml
+    ngspice_netlist: ngspice/pwm_voltage_rl_filter.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/inductor_chain_step.yaml
+    ngspice_netlist: ngspice/inductor_chain_step.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/rl_natural_response.yaml
+    ngspice_netlist: ngspice/rl_natural_response.cir
+    ngspice_observables:
+      - column: V(node)
+        spice_vector: v(node)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/diode_half_wave_rl_load.yaml
+    ngspice_netlist: ngspice/diode_half_wave_rl_load.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
   - path: circuits/pulse_voltage_rl.yaml
     ngspice_netlist: ngspice/pulse_voltage_rl.cir
     ngspice_observables:

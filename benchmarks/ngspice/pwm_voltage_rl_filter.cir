@@ -1,0 +1,16 @@
+* PWM voltage source + RL filter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/pwm_voltage_rl_filter.yaml
+*
+* V_pwm: 5V/0V square wave at 10 kHz, 50% duty.
+* R = 100Ω, L = 10mH, R_load = 1Ω (tiny load — V(out) ≈ V across L
+* before R_load).
+* L/R = 100 µs (cutoff f_c = R/(2πL) = 1591 Hz)
+* PULSE(V_low V_high TD TR TF PW PER) — 1 ns rise/fall.
+
+Vpwm in  0   PULSE(0 5 0 1n 1n 50u 100u)
+R1   in  n_l 100
+L1   n_l out 10m IC=0
+Rl   out 0   1
+
+.tran 1u 3m UIC
+.end
