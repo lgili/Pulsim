@@ -272,46 +272,70 @@ def _draw_voltage_source(p: ComponentPlacement) -> str:
 
 
 def _draw_sine_source(p: ComponentPlacement) -> str:
-    """Sinusoidal source: circle with a sine wave inside."""
+    """AC sinusoidal source: circle containing a sine wave only — no
+    polarity markers (AC has no fixed polarity)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 4.5
+    r = 5.0
     body = [_circle(cx, cy, r)]
-    # Sine wave: two arcs joined at center.
-    wave = _polyline([
-        (cx - r * 0.7, cy),
-        (cx - r * 0.35, cy - r * 0.55),
-        (cx, cy),
-        (cx + r * 0.35, cy + r * 0.55),
-        (cx + r * 0.7, cy),
-    ], width=1.0)
+    # Sine: cubic-Bezier-feeling polyline approximating one full cycle
+    # spanning the body width. Fine resolution = 12 sample points.
+    span = r * 1.4
+    n = 12
+    pts: list[tuple[float, float]] = []
+    for i in range(n + 1):
+        t = i / n
+        ang = -math.pi + 2 * math.pi * t
+        sx = cx - span / 2.0 + span * t
+        sy = cy + r * 0.5 * math.sin(ang)
+        pts.append((sx, sy))
+    wave = _polyline(pts, width=1.3)
     leads = _source_leads(p, r)
     label = _label_outside(p, r + 3.0)
     return "<g>" + "".join(leads + body + [wave, label]) + "</g>"
 
 
 def _draw_pwm_source(p: ComponentPlacement) -> str:
-    """PWM: circle with a square-wave inside."""
+    """PWM source: circle containing a square-wave only — drives a
+    switching device, no polarity markers (PWM is typically gate-
+    referenced)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 4.5
+    r = 5.0
     body = [_circle(cx, cy, r)]
     sq = _polyline([
-        (cx - r * 0.7, cy + r * 0.4),
-        (cx - r * 0.3, cy + r * 0.4),
-        (cx - r * 0.3, cy - r * 0.4),
-        (cx + r * 0.1, cy - r * 0.4),
-        (cx + r * 0.1, cy + r * 0.4),
-        (cx + r * 0.5, cy + r * 0.4),
-        (cx + r * 0.5, cy - r * 0.4),
-    ], width=1.0)
+        (cx - r * 0.7, cy + r * 0.5),
+        (cx - r * 0.3, cy + r * 0.5),
+        (cx - r * 0.3, cy - r * 0.5),
+        (cx + r * 0.1, cy - r * 0.5),
+        (cx + r * 0.1, cy + r * 0.5),
+        (cx + r * 0.5, cy + r * 0.5),
+        (cx + r * 0.5, cy - r * 0.5),
+    ], width=1.3)
     leads = _source_leads(p, r)
     label = _label_outside(p, r + 3.0)
     return "<g>" + "".join(leads + body + [sq, label]) + "</g>"
 
 
 def _draw_pulse_source(p: ComponentPlacement) -> str:
-    return _draw_pwm_source(p)  # same indicator visually
+    """Single-pulse / step source: circle with a single rising-edge
+    pulse glyph inside (distinct from the periodic-PWM square wave)."""
+    a, b = p.terminal_anchors[0], p.terminal_anchors[1]
+    cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
+    r = 5.0
+    body = [_circle(cx, cy, r)]
+    # ⎍-shaped step (low-high-low): rises once.
+    pulse = _polyline([
+        (cx - r * 0.7, cy + r * 0.4),
+        (cx - r * 0.2, cy + r * 0.4),
+        (cx - r * 0.2, cy - r * 0.4),
+        (cx + r * 0.2, cy - r * 0.4),
+        (cx + r * 0.2, cy + r * 0.4),
+        (cx + r * 0.7, cy + r * 0.4),
+    ], width=1.3)
+    leads = _source_leads(p, r)
+    label = _label_outside(p, r + 3.0)
+    return "<g>" + "".join(leads + body + [pulse, label]) + "</g>"
 
 
 def _draw_current_source(p: ComponentPlacement) -> str:
@@ -412,7 +436,6 @@ def _draw_mosfet(p: ComponentPlacement) -> str:
 
     # Three enhancement-region ticks between gate bar and channel
     # (parallel to gate bar, shorter, 3 segments).
-    tick_half = bar_half * 0.7
     ticks: list[str] = []
     for frac in (-0.5, 0.0, 0.5):
         tx = gx + cux * bar_half * frac
@@ -609,18 +632,67 @@ def _draw_wire(w: Wire) -> str:
 
 
 def _ground_symbol(x: float, y: float) -> str:
-    """Tiny three-bar ground symbol pointing south from (x, y).
-    Used only when the layout did NOT emit a ground rail (e.g.
-    standalone test renders). With the rail path, this isn't called.
-    """
+    """Three-bar IEC ground symbol pointing south from (x, y).
+
+    A short vertical stem connects the rail to the top bar so the
+    glyph looks tied to (not bumping into) the rail. The 3 bars step
+    down by 1.6 mm with widths 7 mm → 4.5 mm → 2 mm — large enough to
+    read at the rendered ~4× scale we use."""
     return (
-        f'<g stroke="{_GROUND_STROKE}" '
-        f'stroke-width="{_fmt(_STROKE_WIDTH)}">'
-        f'  {_line(x - 3, y, x + 3, y)}'
-        f'  {_line(x - 2, y + 1.2, x + 2, y + 1.2)}'
-        f'  {_line(x - 1, y + 2.4, x + 1, y + 2.4)}'
+        f'<g stroke="{_GROUND_STROKE}" fill="none" '
+        f'stroke-width="{_fmt(_STROKE_WIDTH)}" '
+        f'stroke-linecap="round">'
+        # Tie-down stem from rail to first bar.
+        f'{_line(x, y, x, y + 1.6, stroke=_GROUND_STROKE)}'
+        # Three horizontal bars, decreasing width.
+        f'{_line(x - 3.5, y + 1.6, x + 3.5, y + 1.6, stroke=_GROUND_STROKE)}'
+        f'{_line(x - 2.25, y + 3.4, x + 2.25, y + 3.4, stroke=_GROUND_STROKE)}'
+        f'{_line(x - 1.0, y + 5.2, x + 1.0, y + 5.2, stroke=_GROUND_STROKE)}'
         '</g>'
     )
+
+
+def _detect_ground_rail(layout: SchematicLayout) -> tuple[float, float, float] | None:
+    """Inspect ``layout.wires`` for synthetic ``<gnd-rail>`` endpoints
+    and return ``(rail_y, x_min, x_max)``. None if no rail is present.
+
+    Two wire shapes carry rail geometry:
+      * vertical stubs — one endpoint references ``<gnd-rail>``,
+        path[-1].y is the rail's y;
+      * the optional rail-to-rail wire — both endpoints reference
+        ``<gnd-rail>``, path spans ``(xs_min, rail_y) → (xs_max, rail_y)``.
+
+    A standalone schematic with only a single grounded component will
+    have only one stub, so we still return a rail at that single x."""
+    rail_y: float | None = None
+    xs: list[float] = []
+    for w in layout.wires:
+        from_gnd = w.from_.component == "<gnd-rail>"
+        to_gnd = w.to.component == "<gnd-rail>"
+        if not (from_gnd or to_gnd):
+            continue
+        if not w.path:
+            continue
+        # Each rail-related wire has rail_y as its lowest path-y (because
+        # the rail sits BELOW the components in screen coords).
+        for px, py in w.path:
+            if rail_y is None or py > rail_y:
+                rail_y = py
+        # Collect every x that lands on rail_y for x-extent computation.
+        # We re-scan AFTER rail_y is known.
+    if rail_y is None:
+        return None
+    eps = 0.25  # mm — y-comparison tolerance
+    for w in layout.wires:
+        if (w.from_.component != "<gnd-rail>"
+                and w.to.component != "<gnd-rail>"):
+            continue
+        for px, py in w.path:
+            if abs(py - rail_y) < eps:
+                xs.append(px)
+    if not xs:
+        return None
+    return rail_y, min(xs), max(xs)
 
 
 # ---------------------------------------------------------------------------
@@ -672,6 +744,39 @@ def render_svg(layout: SchematicLayout, path: Any) -> Path:
     for placement in layout.components.values():
         chunks.append(_draw_component(placement) + "\n")
     chunks.append('</g>\n')
+
+    # Layer 4: ground symbol(s) on the rail. Renders ONE IEC ground glyph
+    # at the leftmost rail x (offset 2 mm out so it doesn't overlap a
+    # stub). When the rail is a single point (only one grounded
+    # component), the glyph lands directly at that x.
+    rail = _detect_ground_rail(layout)
+    if rail is not None:
+        rail_y, x_min, x_max = rail
+        if x_max - x_min > 5.0:
+            # Multi-component rail — anchor the glyph just past the
+            # leftmost stub so it visually labels the rail.
+            gx = x_min - 4.0
+        else:
+            gx = x_min
+        chunks.append('<g id="ground-symbols">\n')
+        chunks.append(_ground_symbol(gx, rail_y) + "\n")
+        # On wide rails, drop a second glyph near the right end too so
+        # very long rails don't look "unlabeled".
+        if x_max - x_min > 80.0:
+            chunks.append(_ground_symbol(x_max + 4.0, rail_y) + "\n")
+        chunks.append('</g>\n')
+        # Extend the rail line to MEET the leftmost ground symbol so
+        # there's no visible gap between the rail and the glyph.
+        if x_max - x_min > 5.0:
+            chunks.append(
+                _line(gx, rail_y, x_min, rail_y, stroke=_WIRE_STROKE,
+                      width=_WIRE_WIDTH) + "\n"
+            )
+            if x_max - x_min > 80.0:
+                chunks.append(
+                    _line(x_max, rail_y, x_max + 4.0, rail_y,
+                          stroke=_WIRE_STROKE, width=_WIRE_WIDTH) + "\n"
+                )
 
     chunks.append('</svg>\n')
     out.write_text("".join(chunks), encoding="utf-8")
