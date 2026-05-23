@@ -1,0 +1,9 @@
+name: rl_filter
+quality: draft
+canvas:
+  width:  160
+  height: 100
+slots:
+  source:   { x: 0.12, y: 0.50, rotation: 0 }
+  filter_r: { x: 0.45, y: 0.30, rotation: 90 }
+  filter_l: { x: 0.75, y: 0.50, rotation: 0 }

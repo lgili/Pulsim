@@ -8,7 +8,7 @@
 #   ./scripts/setup-macos.sh --help   # Show help
 #
 # This script installs:
-#   Required: Homebrew, LLVM/Clang 17+, CMake, Ninja, Python 3, SuiteSparse (KLU)
+#   Required: Homebrew, LLVM/Clang 17+, CMake, Ninja, Python 3
 #   Optional (--full): SUNDIALS, gRPC, protobuf
 # =============================================================================
 
@@ -67,7 +67,6 @@ Required dependencies (always installed):
     - CMake 3.20+
     - Ninja build system
     - Python 3.10+
-    - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with --full):
     - SUNDIALS (advanced ODE/DAE solvers)
@@ -211,19 +210,6 @@ install_python() {
     fi
 }
 
-install_suitesparse() {
-    print_header "Installing SuiteSparse/KLU"
-
-    # SuiteSparse (required for KLU sparse linear solver)
-    if is_installed suite-sparse; then
-        print_success "SuiteSparse already installed"
-    else
-        print_info "Installing SuiteSparse (required for KLU linear solver)..."
-        brew install suite-sparse
-        print_success "SuiteSparse installed"
-    fi
-}
-
 install_optional_deps() {
     print_header "Installing Optional Dependencies"
 
@@ -313,7 +299,6 @@ verify_installation() {
     echo "CMake:       $(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
     echo "Ninja:       $(ninja --version)"
     echo "Python:      $(python3 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-    is_installed suite-sparse && echo "SuiteSparse: installed (KLU enabled)" || echo "SuiteSparse: not installed"
 
     if [[ "${FULL_INSTALL:-false}" == "true" ]]; then
         echo ""
@@ -365,7 +350,6 @@ main() {
     install_llvm
     install_build_tools
     install_python
-    install_suitesparse
 
     if [[ "$full_install" == "true" ]]; then
         install_optional_deps

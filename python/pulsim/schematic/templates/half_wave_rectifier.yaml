@@ -1,0 +1,10 @@
+name: half_wave_rectifier
+quality: draft
+canvas:
+  width:  180
+  height: 120
+slots:
+  source:           { x: 0.12, y: 0.50, rotation: 0 }
+  rectifier_diode:  { x: 0.40, y: 0.30, rotation: 90 }
+  filter_capacitor: { x: 0.65, y: 0.50, rotation: 0 }
+  load_resistor:    { x: 0.85, y: 0.50, rotation: 0 }

@@ -58,13 +58,15 @@ jobs:
           node-version: '20'
 
       - name: Install Python dependencies
-        # `pulsim/__init__.py` imports numpy at module load; the schematic
-        # render path itself does not need scipy/networkx but the package
-        # import must succeed before `pulsim.schematic.render(...)` can
-        # be called.
+        # `pulsim/__init__.py` imports numpy at module load. PyYAML is
+        # required by the template_instantiator (each canonical
+        # topology ships a YAML template); without it the dispatcher
+        # silently falls through to the spring backend which then
+        # raises about networkx. cairosvg is optional but cheap to
+        # install — gives us PNG output alongside the SVG.
         run: |
           python -m pip install --upgrade pip
-          pip install numpy
+          pip install numpy pyyaml cairosvg
 
       - name: Install elkjs (+ legacy netlistsvg for backward compat)
         # The Phase 5 default is python_native — only elkjs is actually
@@ -88,21 +90,65 @@ jobs:
           cmake --build build --target _pulsim -j
 
       - name: Render demo set
+        # The v1 YAML examples (`examples/rc_circuit.yaml`, etc.) were
+        # retired in pulsim 1.0.0 — `YamlParser` is gone. We exercise
+        # the same surface area with the v2 `CircuitBuilder` API
+        # directly, building the three canonical topologies and
+        # rendering each via `pulsim.schematic.render_layout`. Use
+        # `compute_layout` (which dispatches through the topology
+        # recognizer + template instantiator) plus the native SVG
+        # renderer — the same path the per-topology tests cover.
         run: |
           mkdir -p build/schematic_demo
           PYTHONPATH=build/python python3 - <<'PY'
-          import pulsim as ps
-          parser = ps.YamlParser(ps.YamlParserOptions())
-          for yaml_path in (
-              "examples/rc_circuit.yaml",
-              "examples/buck_converter.yaml",
-              "examples/half_bridge_pwm.yaml",
+          import pulsim as p
+          import pulsim.schematic as sch
+
+
+          def build_rc_circuit():
+              b = p.CircuitBuilder()
+              b.add_voltage_source("Vin", "vin", "gnd", 5.0)
+              b.add_resistor("R", "vin", "vout", 1e3)
+              b.add_capacitor("C", "vout", "gnd", 1e-6)
+              return b
+
+
+          def build_buck_converter():
+              b = p.CircuitBuilder()
+              b.add_voltage_source("Vin",   "vin", "gnd", 24.0)
+              b.add_switch        ("Q",     "vin", "sw",  g_on=1e3, g_off=1e-9)
+              b.add_diode         ("D",     "gnd", "sw",  g_on=1e3, g_off=1e-9,
+                                   V_th=0.0)
+              b.add_inductor      ("L",     "sw",  "vout", 100e-6)
+              b.add_capacitor     ("Cout",  "vout","gnd",  100e-6)
+              b.add_resistor      ("Rload", "vout","gnd",  5.0)
+              return b
+
+
+          def build_half_bridge_pwm():
+              b = p.CircuitBuilder()
+              b.add_voltage_source("Vdc", "vdc", "gnd", 48.0)
+              b.add_switch       ("Qh",   "vdc", "mid", g_on=1e3, g_off=1e-9)
+              b.add_switch       ("Ql",   "mid", "gnd", g_on=1e3, g_off=1e-9)
+              return b
+
+
+          for stem, builder in (
+              ("rc_circuit",     build_rc_circuit),
+              ("buck_converter", build_buck_converter),
+              ("half_bridge_pwm", build_half_bridge_pwm),
           ):
-              ckt, _ = parser.load(yaml_path)
-              stem = yaml_path.split("/")[-1].rsplit(".", 1)[0]
-              svg = ps.schematic.render(ckt, f"build/schematic_demo/{stem}.svg")
-              png = ps.schematic.render(ckt, f"build/schematic_demo/{stem}.png")
-              print(f"  {stem}: svg={svg.stat().st_size}B png={png.stat().st_size}B")
+              ckt = builder()
+              layout = sch.compute_layout(ckt)
+              svg = sch.render_layout(layout, f"build/schematic_demo/{stem}.svg",
+                                       format="svg")
+              try:
+                  png = sch.render_layout(layout, f"build/schematic_demo/{stem}.png",
+                                           format="png")
+                  png_size = png.stat().st_size
+              except ImportError:
+                  png_size = 0  # cairosvg not installed → svg-only is fine
+              print(f"  {stem}: svg={svg.stat().st_size}B png={png_size}B")
           PY
 
       - name: Upload schematic artifacts

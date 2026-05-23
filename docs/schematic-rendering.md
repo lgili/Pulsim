@@ -1,146 +1,178 @@
-# Schematic Rendering
+# Schematic rendering
 
-Render any Pulsim circuit to a publication-quality schematic SVG or PNG with one Python call. The default backend produces real analog symbols (resistor zig-zag, capacitor parallel lines, MOSFET vertical body, ground rails, etc.) — not labeled boxes — and routes wires orthogonally.
-
-## Quick start
+`pulsim.schematic` turns a `CircuitBuilder` into a publication-quality
+SVG (or PNG) by recognising canonical power-electronics topologies and
+laying them out with hand-tuned templates, falling back to
+constraint-aware force-directed for everything else.
 
 ```python
-import pulsim as ps
+import pulsim as p
+import pulsim.schematic as sch
 
-parser = ps.YamlParser(ps.YamlParserOptions())
-circuit, _ = parser.load("examples/buck_converter.yaml")
+b = p.CircuitBuilder()
+b.add_voltage_source("Vin",   "vin", "gnd", 24.0)
+b.add_switch        ("Q",     "vin", "sw",   g_on=1e3, g_off=1e-9)
+b.add_diode         ("D_FW",  "gnd", "sw",   g_on=1e3, g_off=1e-9, V_th=0.0)
+b.add_inductor      ("L1",    "sw",  "vout", 100e-6)
+b.add_capacitor     ("Cout",  "vout","gnd",  100e-6)
+b.add_resistor      ("Rload", "vout","gnd",  5.0)
 
-# SVG — vector, scales to any resolution
-ps.schematic.render(circuit, "buck.svg")
-
-# PNG — handy for embedding in docs / chat
-ps.schematic.render(circuit, "buck.png")
+sch.render(b, "buck.svg")     # SVG (default)
+sch.render(b, "buck.png")     # PNG (extension picks the writer)
 ```
 
-That's it. No layout configuration required for the common case.
+In a Jupyter cell, just return the layout — the schematic is rendered
+inline via `_repr_svg_`:
 
-## What gets rendered
+```python
+sch.compute_layout(b)
+```
 
-Every device introspected via `Circuit.components()` becomes a symbol on the canvas:
+## How it picks a layout
 
-| Pulsim kind | Symbol |
-|---|---|
-| `resistor` | IEC rectangle (zig-zag with the alternative skin) |
-| `capacitor` | Two parallel lines |
-| `inductor` | Coiled spiral |
-| `voltage_source` / `pwm_voltage_source` / `sine_voltage_source` / `pulse_voltage_source` | Circle with ±, sine, pulse, or DC indicator |
-| `current_source` | Circle with arrow |
-| `diode` | Triangle + cathode bar |
-| `mosfet` | N-channel MOSFET (vertical channel, gate left, body-diode arrow) |
-| `igbt` | MOSFET body + collector triangle |
-| `vcswitch` | Open contacts + tilted switch arm + dashed control input |
-| `transformer` | Two coupled coils |
-| anything else | Labeled rectangle (graceful fallback) |
+Three tiers are tried in order; the first one to produce a result wins.
 
-Each terminal connecting to ground gets its own `gnd` symbol — standard schematic convention.
+### Tier 1 — Deterministic recogniser
+`pulsim.schematic.topology_recognizer.recognize(circuit)` returns a
+`RecognizedTopology` for any of the twelve canonical topologies it
+knows: `buck`, `boost`, `buck_boost`, `flyback`, `forward`,
+`half_bridge`, `full_bridge`, `rc_filter`, `rl_filter`, `rlc_filter`,
+`half_wave_rectifier`, `full_wave_bridge_rectifier`. Pure Python, no
+network. Confidence in `[0, 1]` — a hit is `≥ 0.9` for the canonical
+shape.
 
-## Install
+### Tier 2 — LLM classifier (optional, on by default)
+When Tier 1 returns `confidence < 0.7` (or `None`), the LLM classifier
+sends the circuit fingerprint to the Anthropic API
+(`claude-haiku-4-5` by default) and parses one of seventeen known
+topologies from the JSON response. Results are cached locally at
+`~/.cache/pulsim/topology-cache.json`, so the API is invoked at most
+once per distinct netlist fingerprint.
 
-The default backend needs **Node.js** + **netlistsvg** (the production renderer used by the Yosys / openlane ecosystem, with a Pulsim-extended analog skin). PNG output additionally requires `librsvg` or `cairosvg` for the SVG→PNG conversion.
+Tier 2 is **disabled silently** when any of these conditions hold —
+the renderer always falls through to Tier 3 instead of raising:
+
+| Condition                                  | Effect                       |
+|--------------------------------------------|------------------------------|
+| `PULSIM_LLM_LAYOUT_HINTS=0`                | LLM never invoked            |
+| `ANTHROPIC_API_KEY` missing                | Skip Tier 2, no error        |
+| `anthropic` package not installed          | Skip Tier 2, one-time warning|
+| Network error / rate limit / parse fail    | Skip Tier 2, log at DEBUG    |
+
+Override the model with `PULSIM_LLM_MODEL=claude-sonnet-4-5` and the
+cache directory with `PULSIM_TOPOLOGY_CACHE_DIR=/some/path`.
+
+### Tier 3 — Template instantiator
+Once Tiers 1 + 2 produce a `RecognizedTopology`, the instantiator loads
+`python/pulsim/schematic/templates/<name>.yaml` and places every
+recognised role at the canvas-fraction slot defined in the template.
+The buck, boost, and flyback templates are visually polished; the
+remaining nine ship as drafts and may be refined in follow-up changes.
+
+### Fallback — Force-directed
+If every tier above misses (no template, low confidence, empty
+role_map, parsing error), the legacy force-directed layout runs. It
+produces a sensible if generic placement with ground anchored to the
+south rail and voltage sources on the west edge.
+
+## Output formats
+
+`render_layout(layout, path)` infers the format from the file
+extension. Supported: `.svg` (default), `.png`, `.pdf`, `.jpg`,
+`.jpeg`. PNG rendering uses `schemdraw`'s native matplotlib backend;
+the `netlistsvg` legacy backend additionally accepts a
+`cairosvg`/`rsvg-convert` SVG → PNG path for higher fidelity.
+
+Pass `format="svg"` explicitly to override an unrecognised extension.
+
+## Determinism
+
+The same circuit produces a byte-identical SVG across runs (assuming
+the cache state is the same). This is a hard requirement — every
+detector and the LLM cache lookup are deterministic. Two consecutive
+`compute_layout` calls return byte-identical placements; two
+consecutive `render_layout` calls produce identical SVG bytes.
+
+## API reference
+
+### `pulsim.schematic`
+
+| Function                                    | Purpose                                 |
+|---------------------------------------------|-----------------------------------------|
+| `compute_layout(circuit) → SchematicLayout` | Dispatch through all 3 tiers + fallback |
+| `render_layout(layout, path, format=…)`     | Write SVG/PNG to disk                   |
+| `render(circuit, path, format=…)`           | Convenience: layout + render in one call|
+
+### `pulsim.schematic.topology_recognizer`
+
+| Symbol                       | Purpose                                         |
+|------------------------------|-------------------------------------------------|
+| `recognize(circuit)`         | Tier-1 deterministic recogniser                 |
+| `RecognizedTopology`         | `(name, confidence, role_map, source)` dataclass|
+| `KNOWN_TOPOLOGIES`           | Frozen set of Tier-1 names                      |
+| `detect_buck(view)` …        | Per-topology detector — exposed for advanced use|
+
+### `pulsim.schematic.llm_classifier`
+
+| Symbol                        | Purpose                              |
+|-------------------------------|--------------------------------------|
+| `classify(circuit)`           | Tier-2 LLM classifier                |
+| `circuit_fingerprint(circuit)`| Deterministic text representation    |
+| `LLM_KNOWN_TOPOLOGIES`        | Superset of Tier-1 + 5 LLM-only names|
+| `CACHE_SCHEMA_VERSION`        | On-disk cache schema tag             |
+| `DEFAULT_MODEL`               | `"claude-haiku-4-5"`                 |
+
+### `pulsim.schematic.template_instantiator`
+
+| Symbol                              | Purpose                              |
+|-------------------------------------|--------------------------------------|
+| `template_layout(circuit, recognized)` | Build layout from template     |
+| `load_template(name)`               | Read a single YAML template          |
+| `list_available_templates()`        | Names of templates that ship today   |
+| `Template`, `Slot`                  | Loaded template dataclasses          |
+
+## Adding a new template
+
+1. Drop a `python/pulsim/schematic/templates/<name>.yaml` with:
+
+```yaml
+name: my_topology
+quality: draft          # or "polished" once visually validated
+canvas:
+  width:  200          # mm
+  height: 120
+slots:
+  source:           { x: 0.10, y: 0.50, rotation: 0 }
+  inductor_main:    { x: 0.30, y: 0.30, rotation: 90 }
+  # … one entry per role the recognizer assigns
+```
+
+2. If the topology is one the deterministic recogniser already covers,
+   you're done — `compute_layout` will pick up the template on the
+   next run.
+
+3. If it's a new topology, either:
+   * add a `detect_<name>(view)` function and append it to `_DETECTORS`
+     in `topology_recognizer.py`, **or**
+   * add the name to `LLM_KNOWN_TOPOLOGIES` so the LLM tier can
+     classify it.
+
+## Optional dependencies
+
+| Package      | Required for                                   |
+|--------------|------------------------------------------------|
+| `schemdraw`  | SVG/PNG render via the native backend          |
+| `networkx`   | Force-directed fallback layout                 |
+| `PyYAML`     | Loading templates                              |
+| `anthropic`  | Tier-2 LLM classifier (Anthropic API client)   |
+| `cairosvg`   | High-fidelity SVG → PNG conversion path        |
+
+Install the bundle:
 
 ```bash
-# Repo root
-npm install netlistsvg elkjs
-
-# macOS — for PNG output
-brew install librsvg
-
-# Debian/Ubuntu — for PNG output
-sudo apt-get install librsvg2-bin
-
-# Python side: nothing extra; pulsim.schematic is part of the core wheel.
+pip install 'pulsim[schematic]'
 ```
 
-If `pulsim.schematic.render(...)` is called without Node installed, an `ImportError` fires with the exact install command.
-
-## Backends and how to switch
-
-`PULSIM_SCHEMATIC_BACKEND` selects the rendering backend:
-
-| Value | When to use | Output |
-|---|---|---|
-| `netlistsvg` (default) | Default — publication quality | SVG (PNG/PDF/JPG via rsvg-convert) |
-| `elk` | Need a Python `SchematicLayout` object (e.g. for GUI auto-place) | SVG/PNG via schemdraw + ELK Sugiyama layered layout |
-| `spring` | No Node.js available, or comparing against the legacy layout | SVG/PNG via schemdraw + force-directed |
-
-```bash
-PULSIM_SCHEMATIC_BACKEND=elk python my_script.py
-```
-
-## GUI auto-placement
-
-For a GUI that wants to read component coordinates and draw the canvas itself, use the ELK backend's `SchematicLayout`:
-
-```python
-import os
-os.environ["PULSIM_SCHEMATIC_BACKEND"] = "elk"
-
-import pulsim as ps
-parser = ps.YamlParser(ps.YamlParserOptions())
-circuit, _ = parser.load("examples/buck_converter.yaml")
-
-layout = ps.schematic.compute_layout(circuit)
-payload = layout.to_json()
-# payload is a dict with keys: components, wires, junctions, canvas, schema_version
-# Coordinates in mm, origin top-left, +x right, +y down.
-```
-
-`payload["components"]` is a dict keyed by component name with `{x, y, rotation, terminal_anchors, ...}`. `payload["wires"]` is a list of `{from, to, path}`. The schema version is `"schematic-v1"` and stays stable for GUI consumers.
-
-## Custom output paths
-
-Both SVG and raster formats infer from the path extension. Override explicitly with `format=`:
-
-```python
-ps.schematic.render(circuit, "out.svg")           # → SVG
-ps.schematic.render(circuit, "out.png")           # → PNG
-ps.schematic.render(circuit, "out.pdf")           # → PDF (rsvg-convert)
-ps.schematic.render(circuit, "diagram", format="svg")  # explicit
-```
-
-## Known limits
-
-- **Layout is auto-computed.** Component positions follow netlistsvg's ELK layered placement, which honors connectivity but doesn't reproduce a hand-drawn "textbook" layout for every topology. Tracked in [`openspec/changes/add-schematic-position-hints`](../openspec/changes/add-schematic-position-hints) — manual position hints are blocked by upstream netlistsvg bugs and require a fork or a Python re-implementation to land.
-- **Switching-device symbols** (`mosfet`, `igbt`, `vcswitch`) ship in the Pulsim analog skin (`python/pulsim/schematic/skin/pulsim_analog.svg`). If you load a custom skin that drops them, they fall back to a labeled `generic` rectangle.
-- **Probes / control blocks** (`voltage_probe`, `pi_controller`, …) don't have analog skin symbols. They render as labeled boxes.
-- **SPICE-style directives** (`.tran`, `.ic`, etc.) are not part of the rendered graphic — they live in the YAML `simulation:` block.
-
-## Programmatic circuits
-
-The same `render()` works for circuits built in Python:
-
-```python
-import pulsim as ps
-
-ckt = ps.Circuit()
-vin = ckt.add_node("vin")
-vout = ckt.add_node("vout")
-gnd = ckt.ground()
-ckt.add_voltage_source("V1", vin, gnd, 12.0)
-ckt.add_resistor("R1", vin, vout, 1_000.0)
-ckt.add_capacitor("C1", vout, gnd, 1e-6, 0.0)
-
-ps.schematic.render(ckt, "rc.svg")
-```
-
-## Testing your schematic in code
-
-`pulsim.schematic.render(circuit, path)` returns a `pathlib.Path`. A simple smoke test:
-
-```python
-import pulsim as ps
-import xml.etree.ElementTree as ET
-
-def test_my_circuit_renders(tmp_path):
-    ckt = build_my_circuit()
-    out = ps.schematic.render(ckt, tmp_path / "my.svg")
-    assert out.exists() and out.stat().st_size > 0
-    ET.parse(out)  # raises on malformed SVG
-```
-
-The schematic test suite in [`python/tests/test_schematic_render.py`](https://github.com/lgili/Pulsim/blob/main/python/tests/test_schematic_render.py) covers SVG/PNG output, the unknown-kind fallback, and the lazy-import gate — read that file for more patterns.
+A bare `import pulsim.schematic` succeeds even without these packages
+— each tier is wrapped in a try/except so the renderer degrades
+gracefully.

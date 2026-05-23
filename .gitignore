@@ -36,6 +36,7 @@ benchmarks/ltspice/
 benchmarks/out/
 benchmarks/matrix/
 benchmarks/ngspice_out/
+benchmarks/ngspice_parity_out/
 
 # Dependencies (fetched by CMake)
 _deps/

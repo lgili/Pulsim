@@ -1,0 +1,9 @@
+name: half_bridge
+quality: draft
+canvas:
+  width:  180
+  height: 140
+slots:
+  source:      { x: 0.10, y: 0.50, rotation: 0 }
+  switch_high: { x: 0.50, y: 0.25, rotation: 0 }
+  switch_low:  { x: 0.50, y: 0.75, rotation: 0 }

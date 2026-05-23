@@ -7,7 +7,7 @@
 #   .\scripts\setup-windows.ps1 -Help    # Show help
 #
 # This script installs:
-#   Required: LLVM/Clang 17+, CMake, Ninja, Python 3, SuiteSparse/KLU
+#   Required: LLVM/Clang 17+, CMake, Ninja, Python 3
 #   Optional (-Full): SUNDIALS, gRPC
 #
 # Run as Administrator for best results.
@@ -77,7 +77,6 @@ Required dependencies (always installed):
     - Ninja build system
     - Python 3.10+
     - vcpkg (C++ package manager)
-    - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with -Full):
     - SUNDIALS (advanced ODE/DAE solvers)
@@ -324,31 +323,6 @@ function Install-Vcpkg {
     Write-Success "vcpkg installed at $VCPKG_PATH"
 }
 
-function Install-SuiteSparse {
-    Write-Header "Installing SuiteSparse/KLU"
-
-    if (-not (Test-Path "$VCPKG_PATH\vcpkg.exe")) {
-        Install-Vcpkg
-    }
-
-    $vcpkg = "$VCPKG_PATH\vcpkg.exe"
-
-    # Check if already installed
-    if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\klu*") {
-        Write-Success "SuiteSparse already installed"
-        return
-    }
-
-    # SuiteSparse (required for KLU sparse linear solver)
-    Write-Info "Installing SuiteSparse (required for KLU linear solver, this may take a while)..."
-    & $vcpkg install suitesparse:x64-windows
-    Write-Success "SuiteSparse installed"
-
-    # Integrate vcpkg with CMake
-    Write-Info "Integrating vcpkg with CMake..."
-    & $vcpkg integrate install
-    Write-Success "vcpkg integrated"
-}
 
 function Install-OptionalDeps {
     Write-Header "Installing Optional Dependencies"
@@ -409,8 +383,7 @@ To build PulsimCore with the Clang toolchain:
     cmake --build build
 
 To run tests:
-    cmake --build build --target pulsim_tests
-    .\build\core\pulsim_tests.exe
+    ctest --test-dir build --output-on-failure
 
 For Python development:
     pip install -e .
@@ -437,13 +410,6 @@ function Test-Installation {
     if (Get-Command python -ErrorAction SilentlyContinue) {
         $pyVersion = (python --version 2>&1) -replace "Python ", ""
         Write-Host "Python:      $pyVersion"
-    }
-
-    # Required: SuiteSparse
-    if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\klu*") {
-        Write-Host "SuiteSparse: installed (KLU enabled)"
-    } else {
-        Write-Host "SuiteSparse: not installed" -ForegroundColor Yellow
     }
 
     if ($Full) {
@@ -492,7 +458,6 @@ function Main {
     Install-BuildTools -PackageManager $pkgMgr
     Install-Python -PackageManager $pkgMgr
     Set-EnvironmentVariables
-    Install-SuiteSparse
 
     if ($Full) {
         Install-OptionalDeps

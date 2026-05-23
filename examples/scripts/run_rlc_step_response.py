@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""RLC step response — series L-R-C driven by a 10 V pulse.
+
+Underdamped 2nd-order ringing:
+
+   V_step ── L ── R ── C ── gnd
+              (100 µH) (0.1 Ω) (100 µF)
+
+ω_n = 1/√(LC) = 10 000 rad/s ≈ 1591 Hz
+ζ   = (R/2)·√(C/L) ≈ 0.05  (lightly damped)
+Peak overshoot ≈ 18.5 V at t ≈ 314 µs after the step (which fires
+at t = 100 µs).
+
+This is the simplest pedagogical case: no switches, no PWM, no
+nonlinear devices. `simulate()` collapses to one line.
+
+Toggle USE_YAML between True (load examples/v2/rlc_step_response.yaml)
+and False (build the same circuit from Python directly) to see
+both authoring styles.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+import pulsim as p
+
+
+# =============================================================================
+# Authoring toggle
+# =============================================================================
+USE_YAML = True   # ← change to False to see the equivalent Python builder
+
+
+# -----------------------------------------------------------------------------
+# Option A — Load the bundled YAML.
+# -----------------------------------------------------------------------------
+def load_from_yaml() -> tuple[p.CircuitBuilder, float, float, float]:
+    yaml_path = Path(__file__).resolve().parent.parent / "rlc_step_response.yaml"
+    if not yaml_path.exists():
+        raise SystemExit(f"missing YAML: {yaml_path}")
+    print(f"Loading {yaml_path}")
+    loaded = p.load_yaml_file(str(yaml_path))
+    return (loaded.builder,
+            loaded.options.t_start,
+            loaded.options.t_end,
+            loaded.options.dt)
+
+
+# -----------------------------------------------------------------------------
+# Option B — Build the same circuit programmatically.
+# -----------------------------------------------------------------------------
+def build_from_python() -> tuple[p.CircuitBuilder, float, float, float]:
+    """Series L-R-C with a delayed 10 V step on the 'in' node."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source(
+        "Vstep", "in", "gnd",
+        v_initial=0.0, v_pulsed=10.0,
+        t_start=1.0e-4,           # 100 µs delay so baseline is visible
+        pulse_width=1.0,          # stays high forever (single-shot)
+    )
+    b.add_inductor ("L", "in",     "lr_mid", 100e-6)   # 100 µH
+    b.add_resistor ("R", "lr_mid", "vc",     0.1)      # 0.1 Ω → ζ ≈ 0.05
+    b.add_capacitor("C", "vc",     "gnd",    100e-6)   # 100 µF
+    return b, 0.0, 3.0e-3, 5.0e-7
+
+
+# =============================================================================
+# Plot helpers + main
+# =============================================================================
+def main() -> None:
+    if USE_YAML:
+        builder, t_start, t_end, dt = load_from_yaml()
+    else:
+        builder, t_start, t_end, dt = build_from_python()
+    print(f"  authoring mode: {'YAML' if USE_YAML else 'Python builder'}")
+    print(f"  num_branches:    {builder.num_branches}")
+    print(f"  t_end/dt:        {t_end*1e3:.2f} ms / {dt*1e9:.0f} ns")
+
+    # Single-line simulate(): no switches, no nonlinear devices.
+    # `progress=True` prints "progress: X%" every 10% of t_end.
+    res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
+                       progress=True)
+    print(f"  samples: {res.num_steps()}")
+
+    # Quick steady-state check via raw state-vector access.
+    vc_idx = builder.node_id_of("vc")
+    v_c   = np.array([s[vc_idx]  for s in res.states])
+    final_window = v_c[int(0.9 * len(v_c)):]
+    print(f"  V_C (last 10% mean) = {final_window.mean():.3f} V "
+          f"(target 10.000 V)")
+    overshoot = v_c.max() - 10.0
+    print(f"  V_C peak overshoot   = {overshoot:.3f} V "
+          f"(analytical ≈ 8.5 V)")
+
+    # One-line plot via `p.scope()` — auto-detects time units,
+    # stacks the two signals on separate y-axes, writes the PNG.
+    out = Path(__file__).resolve().parent / "output" / "rlc_step_response.png"
+    p.scope(
+        builder, res,
+        signals=["in", "vc"],
+        title="RLC step response — V_step + V_C (ζ ≈ 0.05, "
+              "f_d ≈ 1.6 kHz)",
+        save=out,
+    )
+
+
+if __name__ == "__main__":
+    main()
