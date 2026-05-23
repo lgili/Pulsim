@@ -25,8 +25,13 @@
 
 #include <pybind11/eigen.h>
 #include <pybind11/functional.h>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <atomic>
+#include <cstring>
+#include <stdexcept>
 
 #include "pulsim/v2/analysis/mna_sweep.hpp"
 #include "pulsim/v2/blockchain/blocks.hpp"
@@ -61,6 +66,88 @@
 namespace py = pybind11;
 
 namespace pulsim_v2_kernel_bindings {
+
+// ---------------------------------------------------------------------------
+// LiveRingHandle — lock-free SPSC ring buffer for live-scope streaming.
+//
+// The kernel thread writes ``(t, x)`` samples to a pre-allocated numpy
+// array shared with Python. A single atomic write head + release
+// memory order on every push makes the buffer safely readable from
+// the GUI thread without any locks or GIL handoffs in the kernel
+// hot loop.
+//
+// Decimation is enforced in C++: the kernel pushes every ``decimate``
+// steps (skipped steps cost ~3 instructions — counter+compare+branch),
+// so a 10 MHz kernel at decimate=100 produces ~100 kHz of visual
+// samples without ever crossing into Python.
+//
+// Capacity is fixed at construction; on overflow the head wraps
+// modulo ``capacity`` and the OLDEST samples are overwritten. The
+// reader (Python LiveScope) atomically reads ``head``, snapshots the
+// numpy slice from ``last_read .. head``, and advances. No
+// allocation, no copies, no queue.Queue.
+// ---------------------------------------------------------------------------
+struct LiveRingHandle {
+    py::array_t<double, py::array::c_style> t_array;
+    py::array_t<double, py::array::c_style> x_array;
+    double* t_data{nullptr};
+    double* x_data{nullptr};
+
+    int64_t capacity{0};
+    int64_t state_size{0};
+    int decimate{1};
+
+    // Atomic — shared between kernel writer + Python reader.
+    std::atomic<int64_t> head{0};
+    std::atomic<bool>    stop_flag{false};
+
+    // Kernel-local — only the writer thread touches.
+    int local_counter{0};
+
+    LiveRingHandle(int64_t cap, int64_t ssz, int dec)
+        : capacity(cap), state_size(ssz), decimate(std::max(1, dec)) {
+        if (cap <= 0) {
+            throw std::invalid_argument(
+                "LiveRingHandle: capacity must be > 0");
+        }
+        if (ssz <= 0) {
+            throw std::invalid_argument(
+                "LiveRingHandle: state_size must be > 0");
+        }
+        t_array = py::array_t<double>(cap);
+        x_array = py::array_t<double>({cap, ssz});
+        std::memset(t_array.mutable_data(),
+                    0, static_cast<size_t>(cap) * sizeof(double));
+        std::memset(x_array.mutable_data(),
+                    0, static_cast<size_t>(cap * ssz) * sizeof(double));
+        t_data = t_array.mutable_data();
+        x_data = x_array.mutable_data();
+    }
+
+    // Called by the kernel thread. NO GIL needed (we only write to
+    // raw double* and to atomics).
+    inline void push_unlocked(double t, const double* x) noexcept {
+        int64_t h = head.load(std::memory_order_relaxed);
+        int64_t slot = h % capacity;
+        t_data[slot] = t;
+        std::memcpy(x_data + slot * state_size,
+                    x,
+                    static_cast<size_t>(state_size) * sizeof(double));
+        // Release store: any reader that loads the new ``head`` value
+        // is guaranteed to see the data writes above.
+        head.store(h + 1, std::memory_order_release);
+    }
+
+    int64_t get_head() const {
+        return head.load(std::memory_order_acquire);
+    }
+    bool stopped() const {
+        return stop_flag.load(std::memory_order_acquire);
+    }
+    void request_stop() {
+        stop_flag.store(true, std::memory_order_release);
+    }
+};
 
 void init_module(py::module_& m) {
     m.doc() = "Pulsim v2 kernel — PWL state-space cache, "
@@ -413,6 +500,13 @@ void init_module(py::module_& m) {
               "Newton iteration). Used by the Python "
               "`simulate()` wrapper to auto-enable the "
               "nonlinear-refresh pass.")
+        .def("num_diodes",
+              &pwl::DevicePool::num_diodes,
+              "Count of PWL diodes registered. Each PWL diode\n"
+              "is event-tracked (commutation at state-dependent\n"
+              "times within a dt step), so the Python "
+              "`simulate()` wrapper uses this to auto-enable\n"
+              "sub-step state correction.")
         .def("branch_var_id_for_inductor",
               &pwl::DevicePool::branch_var_id_for_inductor,
               py::arg("branch_id"), py::arg("graph"),
@@ -559,6 +653,92 @@ void init_module(py::module_& m) {
         "period (T = 1 / frequency) and OFF for the rest. "
         "All other switch bits stay OFF. Returns a Python "
         "callable usable as `switch_fn=` in run_transient.");
+
+    // Native C++ switch_fn reading from a BlockChain channel — used
+    // by chain.make_pwm_switch_fn(..., use_kernel=True). Eliminates
+    // the ~20 µs/step Python overhead a pure-Python switch_fn
+    // imposes on every kernel iteration.
+    m.def("make_chain_channel_switch_fn",
+        [](pulsim::v2::blockchain::BlockChain& chain,
+            const std::string& channel_name,
+            int num_switches,
+            int switch_idx,
+            double threshold) -> pulsim::v2::solver::SwitchScheduleFn {
+            auto* chain_ptr = &chain;
+            // Returned std::function captures a raw pointer to the
+            // chain and a copy of the channel name. The kernel
+            // invokes it via std::function — no GIL acquire because
+            // the closure body doesn't touch any Python objects.
+            return [chain_ptr,
+                    channel_name,
+                    num_switches,
+                    switch_idx,
+                    threshold]
+                   (Real /*t*/) -> topology::SwitchStateMask {
+                topology::SwitchStateMask m(
+                    static_cast<Size>(num_switches));
+                const auto& chs = chain_ptr->channels();
+                auto it = chs.find(channel_name);
+                if (it != chs.end() && it->second > threshold) {
+                    m.set(switch_idx, true);
+                }
+                return m;
+            };
+        },
+        py::arg("chain"),
+        py::arg("channel_name"),
+        py::arg("num_switches"),
+        py::arg("switch_idx") = 0,
+        py::arg("threshold") = 0.5,
+        "Build a SwitchScheduleFn that drives `switch_idx` ON when\n"
+        "the named chain channel exceeds `threshold` (default 0.5).\n"
+        "The closure runs entirely in C++ — no GIL acquire on the\n"
+        "kernel hot loop. Use this in place of the Python-side\n"
+        "`chain.make_pwm_switch_fn` when feeding a live scope at\n"
+        "high step rates.");
+
+    // Same idea for multi-switch (e.g. half-bridge / 3-phase). Reads
+    // one channel per switch index and ORs them into a single mask.
+    m.def("make_chain_channels_switch_fn",
+        [](pulsim::v2::blockchain::BlockChain& chain,
+            std::vector<std::string> channel_names,
+            int num_switches,
+            std::vector<int> switch_indices,
+            double threshold) -> pulsim::v2::solver::SwitchScheduleFn {
+            if (channel_names.size() != switch_indices.size()) {
+                throw std::invalid_argument(
+                    "make_chain_channels_switch_fn: "
+                    "channel_names and switch_indices must have "
+                    "the same length");
+            }
+            auto* chain_ptr = &chain;
+            return [chain_ptr,
+                    channel_names = std::move(channel_names),
+                    num_switches,
+                    switch_indices = std::move(switch_indices),
+                    threshold]
+                   (Real /*t*/) -> topology::SwitchStateMask {
+                topology::SwitchStateMask m(
+                    static_cast<Size>(num_switches));
+                const auto& chs = chain_ptr->channels();
+                for (size_t k = 0; k < channel_names.size(); ++k) {
+                    auto it = chs.find(channel_names[k]);
+                    if (it != chs.end()
+                          && it->second > threshold) {
+                        m.set(static_cast<Size>(
+                            switch_indices[k]), true);
+                    }
+                }
+                return m;
+            };
+        },
+        py::arg("chain"),
+        py::arg("channel_names"),
+        py::arg("num_switches"),
+        py::arg("switch_indices"),
+        py::arg("threshold") = 0.5,
+        "Multi-channel variant — each chain channel drives the\n"
+        "corresponding switch index. C++-native, GIL-free.");
 
     m.def("make_dead_time_pwm_pair_fn",
         &sources::make_dead_time_pwm_pair_fn,
@@ -1416,13 +1596,15 @@ void init_module(py::module_& m) {
             SwitchScheduleFn switch_fn,
             BExtraFn b_extra_fn,
             bool start_from_dc_op,
-            StepObserverFn step_observer) {
+            StepObserverFn step_observer,
+            ShouldContinueFn should_continue) {
             SimulationResult result;
             {
                 py::gil_scoped_release rel;
                 result = run_transient_bdf1(
                     builder, opts, switch_fn, b_extra_fn,
-                    start_from_dc_op, step_observer);
+                    start_from_dc_op, step_observer,
+                    should_continue);
             }
             return result;
         },
@@ -1430,6 +1612,7 @@ void init_module(py::module_& m) {
         py::arg("b_extra_fn") = BExtraFn{},
         py::arg("start_from_dc_op") = false,
         py::arg("step_observer") = StepObserverFn{},
+        py::arg("should_continue") = ShouldContinueFn{},
         "BDF1 (implicit Euler) transient simulation. Use when the "
         "trapezoidal path rings on stiff problems — BDF1 is L-stable "
         "(adds artificial damping that kills numerical oscillation). "
@@ -1441,6 +1624,52 @@ void init_module(py::module_& m) {
     // Skips the pybind11 std::function wrap on the step_observer.
     // For small chains the saving is modest; for large chains (FOC
     // with 13+ blocks) it's substantial.
+    // ---- LiveRingHandle --------------------------------------------------
+    py::class_<LiveRingHandle, std::shared_ptr<LiveRingHandle>>(
+        m, "LiveRingHandle",
+        "Lock-free SPSC ring buffer for live-scope streaming.\n\n"
+        "The kernel writes (t, x) samples directly into preallocated\n"
+        "numpy arrays at a decimated rate; the GUI reads them as a\n"
+        "numpy view with zero copies. No Python callback per step, no\n"
+        "queue.Queue, no GIL handoffs in the hot loop.\n\n"
+        "Parameters\n"
+        "----------\n"
+        "capacity\n"
+        "    Number of (t, x) slots in the ring. When the kernel\n"
+        "    writes past ``capacity``, the head wraps modulo capacity\n"
+        "    and the oldest sample is overwritten. Default 1_000_000\n"
+        "    covers 10 s of a 100 kHz visual stream.\n"
+        "state_size\n"
+        "    Dimensionality of the kernel state vector (from\n"
+        "    ``pool.state_size(graph)`` or ``builder.pool.state_size("
+        "builder.graph)``).\n"
+        "decimate\n"
+        "    Kernel-side decimation factor. Every ``decimate`` steps\n"
+        "    the kernel pushes one sample. Default 1 (push every\n"
+        "    step). At 100 ns dt and decimate=100 → 100 kHz visual\n"
+        "    sample rate.")
+        .def(py::init<int64_t, int64_t, int>(),
+             py::arg("capacity"),
+             py::arg("state_size"),
+             py::arg("decimate") = 1)
+        .def_readonly("capacity",   &LiveRingHandle::capacity)
+        .def_readonly("state_size", &LiveRingHandle::state_size)
+        .def_readonly("decimate",   &LiveRingHandle::decimate)
+        .def_property_readonly("t_buf",
+            [](LiveRingHandle& h) { return h.t_array; },
+            "(capacity,) numpy view of the time-sample ring.")
+        .def_property_readonly("x_buf",
+            [](LiveRingHandle& h) { return h.x_array; },
+            "(capacity, state_size) numpy view of the state ring.")
+        .def("get_head", &LiveRingHandle::get_head,
+             "Atomically load the current write head (monotonic\n"
+             "sample counter; modulo capacity to get the ring slot).")
+        .def("stopped", &LiveRingHandle::stopped,
+             "True if request_stop() was called.")
+        .def("request_stop", &LiveRingHandle::request_stop,
+             "Signal the kernel to break out of the step loop at the\n"
+             "next iteration. Used by the LiveScope STOP button.");
+
     m.def("run_transient_with_chain",
         [](const pwl::PwlStateSpaceCache& cache,
            const topology::Graph& graph,
@@ -1453,15 +1682,55 @@ void init_module(py::module_& m) {
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
            py::object initial_state,
-           ShouldContinueFn should_continue) {
+           ShouldContinueFn should_continue,
+           std::shared_ptr<LiveRingHandle> live_ring) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
                     pwl::make_combined_diode_mosfet_refresh();
             }
             // Build a step_observer that calls the chain DIRECTLY in
-            // C++ — no Python roundtrip per step.
-            auto step_observer = chain.make_step_observer(chain_dt);
+            // C++ — no Python roundtrip per step. If a live_ring is
+            // attached, wrap it: chain.step() then (decimated) ring
+            // push. Both run as plain C++ — zero GIL.
+            auto chain_obs = chain.make_step_observer(chain_dt);
+            StepObserverFn step_observer;
+            if (live_ring) {
+                if (live_ring->state_size !=
+                        static_cast<int64_t>(pool.state_size(graph))) {
+                    throw std::invalid_argument(
+                        "run_transient_with_chain: live_ring."
+                        "state_size does not match "
+                        "pool.state_size(graph)");
+                }
+                auto* ring_ptr = live_ring.get();
+                step_observer = [chain_obs, ring_ptr](
+                                       Real t, const Vector& x) {
+                    chain_obs(t, x);
+                    if (++ring_ptr->local_counter
+                            >= ring_ptr->decimate) {
+                        ring_ptr->local_counter = 0;
+                        ring_ptr->push_unlocked(t, x.data());
+                    }
+                };
+            } else {
+                step_observer = chain_obs;
+            }
+
+            // Combine should_continue with the ring's atomic stop
+            // flag. The kernel checks this once per step — also no
+            // Python.
+            ShouldContinueFn combined_sc = should_continue;
+            if (live_ring) {
+                auto* ring_ptr = live_ring.get();
+                auto orig_sc = should_continue;
+                combined_sc = [ring_ptr, orig_sc]() -> bool {
+                    if (ring_ptr->stopped()) return false;
+                    if (orig_sc) return orig_sc();
+                    return true;
+                };
+            }
+
             Vector x_init;
             const Vector* x_init_ptr = nullptr;
             if (!initial_state.is_none()) {
@@ -1477,7 +1746,7 @@ void init_module(py::module_& m) {
                                           nl_refresh,
                                           step_observer,
                                           x_init_ptr,
-                                          should_continue);
+                                          combined_sc);
             }
             return result;
         },
@@ -1489,11 +1758,16 @@ void init_module(py::module_& m) {
         py::arg("enable_nonlinear_refresh") = false,
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
+        py::arg("live_ring") = nullptr,
         "Run transient with a BlockChain as the per-step observer. "
         "The chain's step is invoked directly in C++ each step — "
         "no Python interpreter cost per step. Equivalent to "
         "`run_transient(..., step_observer=chain.make_step_observer(dt))` "
-        "but ~10x faster on chains with > 5 blocks.");
+        "but ~10x faster on chains with > 5 blocks.\n\n"
+        "If ``live_ring`` is provided, the kernel ALSO writes each\n"
+        "(t, x) sample (decimated) to its shared ring buffer — the\n"
+        "live scope reads from there with no Python callback in the\n"
+        "kernel hot loop.");
 }
 
 }  // namespace pulsim_v2_kernel_bindings

@@ -164,11 +164,14 @@ from .v2_snubber import (
 )
 from .v2_thermal import (
     FosterStage,
+    CauerStage,
     fit_foster_from_zth,
     predict_zth_curve,
     compute_temperature,
     add_foster_network,
+    add_cauer_thermal_network,
     make_thermal_observer,
+    ThermalLimitMonitor,
 )
 from .v2_grid import (
     add_three_phase_grid,
@@ -208,7 +211,29 @@ from .v2_spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
-from .v2_stream import LiveStream
+from .v2_stream import LiveStream, NativeLiveStream
+from .v2_topology import (
+    BridgeRectifierResult,
+    ThreePhaseRLLoadResult,
+    ThreePhaseVsiResult,
+    add_bridge_rectifier,
+    add_three_phase_rl_load,
+    add_three_phase_vsi,
+)
+from .v2_losses import (
+    EfficiencyCalculator,
+    LossAccumulator,
+    average_power_at_node,
+    device_loss_summary,
+)
+from .v2_motor_helpers import (
+    FocWiringResult,
+    wire_pmsm_foc,
+)
+from .v2_periodic import (
+    PeriodicShootingResult,
+    run_periodic_shooting,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -319,13 +344,16 @@ __all__ = [
     "SnubberRecommendation",
     "predict_overshoot",
     "recommend_snubber",
-    # Thermal Foster networks + electro-thermal co-sim (Phase C.1).
+    # Thermal Foster + Cauer networks + electro-thermal co-sim.
     "FosterStage",
+    "CauerStage",
     "fit_foster_from_zth",
     "predict_zth_curve",
     "compute_temperature",
     "add_foster_network",
+    "add_cauer_thermal_network",
     "make_thermal_observer",
+    "ThermalLimitMonitor",
     # Three-phase grid helpers (Phase C.2).
     "add_three_phase_grid",
     "add_three_phase_line_impedance",
@@ -361,10 +389,52 @@ __all__ = [
     "spice_to_builder",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
+    "NativeLiveStream",
+    # Composite topology helpers (Phase 1 of v1→v2 closure).
+    "BridgeRectifierResult",
+    "ThreePhaseRLLoadResult",
+    "ThreePhaseVsiResult",
+    "add_bridge_rectifier",
+    "add_three_phase_rl_load",
+    "add_three_phase_vsi",
+    # Loss accounting (Phase 1 of v1→v2 closure).
+    "EfficiencyCalculator",
+    "LossAccumulator",
+    "average_power_at_node",
+    "device_loss_summary",
+    # Motor-control wiring helpers.
+    "FocWiringResult",
+    "wire_pmsm_foc",
+    # Periodic-steady-state solver (Phase 2 of v1→v2 closure).
+    "PeriodicShootingResult",
+    "run_periodic_shooting",
 ]
 
 if _HAS_SCOPE:
     __all__.append("LiveScope")
+
+
+def _bdf1_dispatch(_k, builder, opts, switch_fn, *,
+                       b_extra_fn=None,
+                       start_from_dc_op: bool = False,
+                       step_observer=None,
+                       should_continue=None):
+    """Call ``_pulsim.v2_kernel.run_transient_bdf1`` with only the
+    kwargs it accepts. BDF1 binding has a deliberately small surface
+    (builder, opts, switch_fn, b_extra_fn, start_from_dc_op,
+    step_observer, should_continue) — it doesn't yet take ``cache``,
+    ``initial_state``, or Newton tolerances. Centralising the call
+    here keeps the main ``simulate()`` body readable."""
+    kwargs: dict = {}
+    if b_extra_fn is not None:
+        kwargs["b_extra_fn"] = b_extra_fn
+    if start_from_dc_op:
+        kwargs["start_from_dc_op"] = True
+    if step_observer is not None:
+        kwargs["step_observer"] = step_observer
+    if should_continue is not None:
+        kwargs["should_continue"] = should_continue
+    return _k.run_transient_bdf1(builder, opts, switch_fn, **kwargs)
 
 
 def simulate(
@@ -388,6 +458,14 @@ def simulate(
     progress: "bool | int | str" = False,
     initial_state=None,
     should_continue=None,
+    live_stream=None,
+    # ----- New: integrator + adaptive auto-routing -----
+    integrator: str = "auto",
+    adaptive: Optional[bool] = None,
+    atol: float = 1e-6,
+    rtol: float = 1e-4,
+    dt_min: Optional[float] = None,
+    dt_max: Optional[float] = None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -407,6 +485,22 @@ def simulate(
       smooth-blend `IdealDiode`, SH1 `MosfetLevel1`, Level 1
       `IgbtLevel1`, or `SaturableInductor` is present; ``False``
       otherwise. Pass an explicit bool to override.
+    * **`enable_substep_state_correction`** — auto-enabled when
+      the pool has nonlinear (event-tracked) devices. Pinpoints
+      commutation times within a dt for accurate event handling.
+      Pass an explicit bool to override.
+    * **`integrator`** — ``"auto"`` (default), ``"trap"`` or
+      ``"bdf1"``. Auto picks trapezoidal for sub-millisecond ``dt``
+      (typical switching converter), BDF1 for ``dt`` above 1 ms
+      where trap can ring on stiff systems (thermal, slow plants).
+      BDF1 is L-stable but 1st-order — explicit choice recommended
+      when accuracy matters.
+    * **`adaptive`** — when ``True``, the simulation runs through
+      :func:`run_transient_adaptive` (a coarse-grain Python driver
+      that grows ``dt`` during slow segments). Useful for settling
+      tails and long thermal sims; not useful for continuous PWM
+      where the switching forces a small ``dt`` everywhere.
+      Default ``None`` ⇒ stay on fixed-dt.
 
     Parameters
     ----------
@@ -439,6 +533,28 @@ def simulate(
     SimulationResult
         The full per-sample state-vector history.
     """
+    # =====================================================================
+    # Adaptive (variable-dt) shortcut — Item 2 of the auto-routing trio.
+    # When adaptive=True, we delegate to ``run_transient_adaptive`` which
+    # runs a sequence of fixed-dt segments with dt adjusted between
+    # segments based on the state's rate of change. The fixed-dt path
+    # below is bypassed.
+    # =====================================================================
+    if adaptive:
+        return run_transient_adaptive(
+            builder,
+            t_start=t_start, t_end=t_end,
+            dt_init=dt,
+            dt_min=dt_min,
+            dt_max=dt_max,
+            atol=atol, rtol=rtol,
+            switch_fn=switch_fn,
+            step_observer=step_observer,
+            b_extra_fn=b_extra_fn,
+            start_from_dc_op=start_from_dc_op,
+            max_event_iterations=max_event_iterations or 8,
+        )
+
     # Build the PWL cache.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build(dt)
@@ -457,8 +573,19 @@ def simulate(
         opts.enable_newton_line_search = enable_newton_line_search
     if enable_newton_lm is not None:
         opts.enable_newton_lm = enable_newton_lm
-    if enable_substep_state_correction is not None:
-        opts.enable_substep_state_correction = enable_substep_state_correction
+    # Item 3 — auto-enable sub-step state correction when the circuit
+    # has event-tracked devices: either smooth-blend nonlinear (smooth
+    # IdealDiode / SH1 MOSFET / IGBT L1 / SaturableInductor) OR PWL
+    # diodes (discrete events whose commutation times are state-
+    # dependent — current crossing zero, etc.). Sub-step correction
+    # pinpoints those commutation instants within a dt so the
+    # post-event state is on the right side of the switch.
+    # User can still force on/off with an explicit kwarg.
+    if enable_substep_state_correction is None:
+        enable_substep_state_correction = (
+            builder.pool.has_nonlinear_devices()
+            or builder.pool.num_diodes() > 0)
+    opts.enable_substep_state_correction = enable_substep_state_correction
 
     # Default switch_fn: all switches closed.
     if switch_fn is None:
@@ -539,6 +666,41 @@ def simulate(
     # wrap. Saves ~10-30 % wall time on chains > 5 blocks.
     cxx_chain = getattr(step_observer, "_cxx_chain", None) \
                   if step_observer is not None else None
+
+    # NativeLiveStream — needs to attach to the kernel's state-vector
+    # size before run; it also requires the chain path so the kernel
+    # has somewhere to insert the ring-push in C++.
+    native_stream_attached = False
+    if live_stream is not None and getattr(
+            live_stream, "is_native", False):
+        state_size = builder.pool.state_size(builder.graph)
+        if not live_stream.attached:
+            live_stream.attach(state_size)
+        native_stream_attached = True
+        if cxx_chain is None:
+            raise ValueError(
+                "simulate(): live_stream is a NativeLiveStream but "
+                "no C++ chain was found on step_observer. Build the "
+                "observer with `chain.make_step_observer(use_kernel="
+                "True)` so the ring can be pushed entirely from C++.")
+
+    # ---------------------------------------------------------------------
+    # Item 1 — integrator selection.
+    # ---------------------------------------------------------------------
+    # "auto" picks BDF1 when dt is "large" (≥1 ms) — at that scale a
+    # typical converter has tiny parasitic L/C that make the trapezoidal
+    # method ring. For sub-ms dt (the common switching-converter case)
+    # trap is preferred (2nd-order accurate, A-stable).
+    # The threshold is intentionally conservative: when in doubt, use
+    # trap. Explicit ``integrator="bdf1"`` always wins.
+    integrator_choice = integrator.lower()
+    if integrator_choice == "auto":
+        integrator_choice = "bdf1" if dt >= 1e-3 else "trap"
+    elif integrator_choice not in ("trap", "bdf1"):
+        raise ValueError(
+            f"simulate(integrator={integrator!r}): must be "
+            f"'auto', 'trap' or 'bdf1'.")
+
     if cxx_chain is not None:
         from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
         chain_dt = getattr(step_observer, "_chain_dt", dt)
@@ -553,11 +715,27 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
-        res = _k.run_transient_with_chain(
-            cache, builder.graph, builder.pool, opts,
-            chain=cxx_chain, chain_dt=chain_dt,
-            **kwargs,
-        )
+        if native_stream_attached:
+            kwargs["live_ring"] = live_stream.native_ring
+        if integrator_choice == "bdf1":
+            # BDF1 has its own (builder, opts, switch_fn, …) signature
+            # and doesn't yet have a chain-fastpath binding; fall back
+            # to passing the chain's Python step_observer wrapper.
+            # (BDF1 is for stiff/long-tail sims that rarely run
+            # PWM controllers, so the chain fastpath is rarely
+            # needed alongside it.)
+            res = _bdf1_dispatch(
+                _k, builder, opts, switch_fn,
+                b_extra_fn=b_extra_fn,
+                start_from_dc_op=start_from_dc_op,
+                step_observer=step_observer,
+                should_continue=should_continue)
+        else:
+            res = _k.run_transient_with_chain(
+                cache, builder.graph, builder.pool, opts,
+                chain=cxx_chain, chain_dt=chain_dt,
+                **kwargs,
+            )
     else:
         # Standard path — pybind11-wrapped step_observer (Python or
         # plain C++ via std::function).
@@ -574,9 +752,18 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
-        res = run_transient(
-            cache, builder.graph, builder.pool, opts, **kwargs,
-        )
+        if integrator_choice == "bdf1":
+            from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
+            res = _bdf1_dispatch(
+                _k, builder, opts, switch_fn,
+                b_extra_fn=b_extra_fn,
+                start_from_dc_op=start_from_dc_op,
+                step_observer=step_observer,
+                should_continue=should_continue)
+        else:
+            res = run_transient(
+                cache, builder.graph, builder.pool, opts, **kwargs,
+            )
     # Close the progress bar with a newline if we were in bar mode.
     if progress is True or (isinstance(progress, str)
                               and progress.lower() == "bar"):

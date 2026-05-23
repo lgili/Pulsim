@@ -53,11 +53,14 @@ import numpy as np
 
 __all__ = [
     "FosterStage",
+    "CauerStage",
     "fit_foster_from_zth",
     "predict_zth_curve",
     "compute_temperature",
     "add_foster_network",
+    "add_cauer_thermal_network",
     "make_thermal_observer",
+    "ThermalLimitMonitor",
 ]
 
 
@@ -227,6 +230,154 @@ def compute_temperature(t: np.ndarray,
 # =============================================================================
 # Foster network as an embedded sub-circuit
 # =============================================================================
+
+@dataclass
+class CauerStage:
+    """One stage of a Cauer (physical) thermal ladder.
+
+    Cauer parametrisation gives the per-layer R_th and C_th
+    directly — these are the values you'd extract from a finite-
+    element thermal simulation of the device's material stack,
+    or from a Cauer fit of measured Z_th(t).
+
+    Foster parametrisation (used by :class:`FosterStage`) uses
+    R_th + τ instead, fitted from the impedance spectrum without
+    physical interpretation per stage.
+
+    Topologically both parametrisations feed into the same ladder
+    (R between consecutive nodes, C from each node to ambient) —
+    only the numerical values differ. Use whichever your data
+    source provides; conversions are well-defined but not always
+    elementary.
+    """
+    R_th_K_per_W: float
+    C_th_J_per_K: float
+
+
+def add_cauer_thermal_network(builder,
+                                    stages,
+                                    *,
+                                    junction_node: str = "T_j",
+                                    ambient_node: str = "T_amb",
+                                    T_amb_C: float = 25.0,
+                                    name_prefix: str = "Th") -> None:
+    """Embed a Cauer RC ladder using direct (R, C) parameters.
+
+    Identical topology to :func:`add_foster_network` (R between
+    consecutive nodes, C from each node to ambient) but takes
+    :class:`CauerStage` (R + C) instead of :class:`FosterStage`
+    (R + τ). Convenient when the user has material-stack thermal
+    values rather than impedance-fit values.
+
+    Example
+    -------
+    ::
+
+        stages = [
+            p.CauerStage(R_th_K_per_W=0.05, C_th_J_per_K=0.001),
+            p.CauerStage(R_th_K_per_W=0.10, C_th_J_per_K=0.010),
+            p.CauerStage(R_th_K_per_W=0.20, C_th_J_per_K=0.100),
+        ]
+        p.add_cauer_thermal_network(b, stages,
+            junction_node="T_j", T_amb_C=25.0)
+    """
+    n = len(stages)
+    if n == 0:
+        raise ValueError(
+            "add_cauer_thermal_network: at least one stage required")
+    builder.add_voltage_source(f"{name_prefix}_amb",
+                                  ambient_node, "gnd",
+                                  float(T_amb_C))
+    prev = ambient_node
+    for k, s in enumerate(stages):
+        if k == n - 1:
+            curr = junction_node
+        else:
+            curr = f"{name_prefix}_stage_{k}"
+        builder.add_resistor(f"{name_prefix}_R{k}",
+                                prev, curr,
+                                float(s.R_th_K_per_W))
+        builder.add_capacitor(f"{name_prefix}_C{k}",
+                                  curr, ambient_node,
+                                  float(s.C_th_J_per_K))
+        prev = curr
+
+
+class ThermalLimitMonitor:
+    """Halts a simulation when junction temperature exceeds a limit.
+
+    Designed to plug into ``simulate(should_continue=...)``. The
+    monitor reads the node voltage at ``junction_node_idx`` from a
+    Python step_observer that the user passes alongside; the monitor
+    itself just remembers whether the limit was tripped and reports
+    via :meth:`should_continue`.
+
+    Example
+    -------
+    ::
+
+        mon = p.ThermalLimitMonitor(T_limit_C=150.0)
+
+        def observe(t, x):
+            T_j = x[junction_node_idx]
+            mon.update(t, T_j)
+
+        res = p.simulate(b, t_end=10.0, dt=1e-4,
+                            step_observer=observe,
+                            should_continue=mon.should_continue)
+        if mon.tripped:
+            print(f"Thermal trip at t={mon.trip_time:.3f}s, "
+                  f"T_j={mon.trip_temperature:.1f} °C")
+
+    Attributes
+    ----------
+    T_limit_C
+        Trip threshold (°C — matches the absolute-temperature
+        convention used by :func:`add_foster_network` and
+        :func:`add_cauer_thermal_network`).
+    tripped
+        True once the monitor saw ``T_j > T_limit_C``.
+    trip_time
+        Wall-clock simulation time at which the trip occurred.
+    trip_temperature
+        ``T_j`` value at the trip moment.
+    peak_temperature
+        Highest ``T_j`` observed across the run.
+    """
+
+    def __init__(self, *, T_limit_C: float, hysteresis_C: float = 0.0):
+        self.T_limit_C = float(T_limit_C)
+        self.hysteresis_C = float(hysteresis_C)
+        self.tripped = False
+        self.trip_time = float("nan")
+        self.trip_temperature = float("nan")
+        self.peak_temperature = -float("inf")
+        self._last_time = 0.0
+
+    def update(self, t: float, T_j: float) -> None:
+        """Feed one (t, T_j) sample. Sets ``tripped`` when
+        T_j > T_limit_C (or stays tripped while T_j > T_limit_C −
+        hysteresis_C when ``hysteresis_C > 0``)."""
+        T = float(T_j)
+        if T > self.peak_temperature:
+            self.peak_temperature = T
+        self._last_time = float(t)
+        if self.tripped:
+            # Latch — only reset when below limit minus hysteresis.
+            if T < self.T_limit_C - self.hysteresis_C:
+                self.tripped = False
+        else:
+            if T > self.T_limit_C:
+                self.tripped = True
+                self.trip_time = float(t)
+                self.trip_temperature = T
+
+    def should_continue(self) -> bool:
+        """Returns False once the limit was tripped — meant to
+        be passed to ``simulate(should_continue=mon.should_continue)``.
+        """
+        return not self.tripped
+
 
 def add_foster_network(builder,
                           stages,
