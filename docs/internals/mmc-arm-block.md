@@ -1,6 +1,8 @@
 # MMC Arm Block — design doc
 
-**Status:** draft (Phase 20 — L0 in design).
+**Status:** L0–L3 implemented (Phase 20 — Python layer complete).
+See ``python/pulsim/mmc.py`` and the integration tests under
+``python/tests/test_mmc_arm_{average,multilevel,equivalent,detailed}.py``.
 **Reference:** Sousa, Gean Jacques Maia de.
 *Sistemas de Controle para a Operação Eficiente de Conversores Modulares Multiníveis em Acionamentos Elétricos*. PhD thesis, UFSC, 2022. (`artigos/Gean Jacques Maia de Sousa.pdf`)
 

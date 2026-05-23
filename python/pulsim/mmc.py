@@ -84,6 +84,13 @@ __all__ = [
     "make_l2_state",
     "mmc_arm_equivalent_step",
     "simulate_mmc_arm_equivalent",
+    # L3 detailed (per-SM v_C with sort-and-select balancing) — Phase 20.7.
+    "MmcArmDetailedParams",
+    "MmcArmDetailedState",
+    "MmcArmDetailedResult",
+    "make_l3_state",
+    "mmc_arm_detailed_step",
+    "simulate_mmc_arm_detailed",
 ]
 
 
@@ -1441,6 +1448,357 @@ def simulate_mmc_arm_equivalent(
         m_ref=m_ref_arr,
         s_w=s_w_arr,
         s_u=s_u_arr,
+        i_b=i_b_arr,
+        params=params,
+    )
+
+
+# ======================================================================
+# L3 — Per-SM detailed arm with sort-and-select balancing  Phase 20.7
+# ======================================================================
+#
+# L3 lifts the L0/L1/L2 simplification ``v_C_SM,n ≈ v_C / N`` and
+# tracks each SM's capacitor voltage independently. The PS-PWM
+# quantizer still picks **how many** SMs to insert (s_b); a
+# *balancing algorithm* picks **which** s_b out of the N to insert
+# at each step. The classical scheme (Tu / Hu / Xu, 2011) is
+# *sort-and-select*:
+#
+#   * ``i_b ≥ 0`` (charging current): insert the ``s_b`` SMs with the
+#     **lowest** ``v_C_n`` so they catch up to the mean.
+#   * ``i_b < 0`` (discharging): insert the ``s_b`` SMs with the
+#     **highest** ``v_C_n`` so they release energy.
+#
+# Per-SM dynamics:
+#
+#   dv_C_n / dt = (insertion_n · i_b − v_C_n / r_p_per_sm) / c_sm   (L3 eq)
+#
+# where ``insertion_n ∈ {0, 1}`` is whether SM n is in the inserted
+# set this step. Summing over all N SMs gives back the L0 / L1
+# arm-equivalent dynamics in the limit where all v_C_n are equal:
+#
+#   d(Σ v_C_n)/dt = (Σ insertion_n · i_b)/c_sm = s_b · i_b / c_sm
+#                  = (s_b/N) · i_b / (c_sm/N) = m_b · i_b / C_arm
+#
+# so L3 is consistent with L0 when balancing keeps the SMs uniform.
+#
+# We ship two balancing schemes:
+#   * ``"sort_and_select"`` — the standard algorithm above.
+#   * ``"none"`` — a fixed assignment (first ``s_b`` SMs in index
+#     order) that intentionally *does not* balance, useful to see
+#     the divergence in tests / showcases.
+
+
+@dataclass(frozen=True)
+class MmcArmDetailedParams:
+    """Configuration for the L3 detailed per-SM arm model.
+
+    Attributes:
+        n_sm: Number of submodules per arm.
+        c_sm: Per-SM capacitance [F].
+        sm_type: ``"half_bridge"`` only at this layer.
+        v_c0: Initial **arm-sum** voltage [V]; each SM starts at
+            ``v_c0 / n_sm``. Pass a heterogeneous initial-state
+            array directly via :func:`make_l3_state` if you want
+            unbalanced ICs.
+        r_p: Optional total arm parallel-loss resistance [Ω]; each
+            SM sees an equivalent loss of ``r_p · n_sm`` from its
+            own cap so the *arm-sum* discharge rate matches the
+            simpler L0/L1/L2 models.
+        f_carrier: PS-PWM carrier frequency per SM [Hz].
+        balancing: ``"sort_and_select"`` (default) or ``"none"``.
+    """
+
+    n_sm: int
+    c_sm: float
+    sm_type: SubmoduleType = "half_bridge"
+    v_c0: float = 0.0
+    r_p: float | None = None
+    f_carrier: float = 1000.0
+    balancing: Literal["sort_and_select", "none"] = "sort_and_select"
+
+    def __post_init__(self) -> None:
+        if self.n_sm < 1:
+            raise ValueError(f"n_sm must be ≥ 1 (got {self.n_sm})")
+        if self.c_sm <= 0:
+            raise ValueError(f"c_sm must be > 0 (got {self.c_sm})")
+        if self.sm_type != "half_bridge":
+            raise ValueError(
+                f"L3 ships half-bridge only for now "
+                f"(got {self.sm_type!r})",
+            )
+        if self.r_p is not None and self.r_p <= 0:
+            raise ValueError(f"r_p must be > 0 when set (got {self.r_p})")
+        if self.f_carrier <= 0:
+            raise ValueError(
+                f"f_carrier must be > 0 (got {self.f_carrier})",
+            )
+        if self.balancing not in ("sort_and_select", "none"):
+            raise ValueError(
+                f"balancing must be 'sort_and_select' or 'none' "
+                f"(got {self.balancing!r})",
+            )
+
+    @property
+    def c_arm(self) -> float:
+        """Arm-equivalent capacitance C_arm = c_sm / n_sm [F]."""
+        return self.c_sm / self.n_sm
+
+    @property
+    def f_switch(self) -> float:
+        return self.n_sm * self.f_carrier
+
+    @property
+    def m_min(self) -> float:
+        return 0.0
+
+    @property
+    def m_max(self) -> float:
+        return 1.0
+
+
+@dataclass
+class MmcArmDetailedState:
+    """Mutable L3 arm state.
+
+    Attributes:
+        v_C_per_sm: Length-N ``float64`` array — capacitor voltage
+            per submodule [V].
+    """
+
+    v_C_per_sm: np.ndarray
+
+    @property
+    def v_C(self) -> float:
+        """Total arm-sum voltage = Σ v_C_n."""
+        return float(self.v_C_per_sm.sum())
+
+    @property
+    def v_C_mean(self) -> float:
+        """Mean per-SM voltage."""
+        return float(self.v_C_per_sm.mean())
+
+    @property
+    def v_C_spread(self) -> float:
+        """Peak-to-peak per-SM voltage spread (a diagnostic for
+        balancing health)."""
+        return float(
+            self.v_C_per_sm.max() - self.v_C_per_sm.min()
+        )
+
+
+def make_l3_state(
+    params: MmcArmDetailedParams,
+    *,
+    initial_v_C_per_sm: "np.ndarray | None" = None,
+) -> MmcArmDetailedState:
+    """Construct a fresh L3 arm state.
+
+    Args:
+        params: Arm configuration.
+        initial_v_C_per_sm: Optional length-``n_sm`` array of per-SM
+            initial voltages. Defaults to a uniform distribution
+            ``v_c0 / n_sm`` per SM.
+
+    Returns:
+        Fresh :class:`MmcArmDetailedState`.
+    """
+    n = params.n_sm
+    if initial_v_C_per_sm is None:
+        v = np.full(n, params.v_c0 / n, dtype=np.float64)
+    else:
+        v = np.asarray(initial_v_C_per_sm, dtype=np.float64)
+        if v.shape != (n,):
+            raise ValueError(
+                f"initial_v_C_per_sm must have shape (n_sm,) = ({n},); "
+                f"got {v.shape}",
+            )
+    return MmcArmDetailedState(v_C_per_sm=v.copy())
+
+
+def _balance_select(
+    v_C_per_sm: np.ndarray,
+    s_b: int,
+    i_b: float,
+    scheme: str,
+) -> np.ndarray:
+    """Return a boolean mask of length N picking the ``s_b`` SMs to insert.
+
+    Args:
+        v_C_per_sm: Current per-SM voltages.
+        s_b: Switching count from PS-PWM (0..N).
+        i_b: Arm current (sign drives the selection).
+        scheme: ``"sort_and_select"`` or ``"none"``.
+
+    Returns:
+        Length-N boolean array; exactly ``s_b`` entries are True.
+    """
+    n = len(v_C_per_sm)
+    if s_b <= 0:
+        return np.zeros(n, dtype=bool)
+    if s_b >= n:
+        return np.ones(n, dtype=bool)
+    if scheme == "none":
+        mask = np.zeros(n, dtype=bool)
+        mask[:s_b] = True
+        return mask
+    # sort_and_select: charging ⇒ insert lowest; discharging ⇒ insert highest.
+    order = np.argsort(v_C_per_sm, kind="stable")
+    mask = np.zeros(n, dtype=bool)
+    if i_b >= 0:
+        mask[order[:s_b]] = True
+    else:
+        mask[order[-s_b:]] = True
+    return mask
+
+
+def mmc_arm_detailed_step(
+    state: MmcArmDetailedState,
+    m_ref: float,
+    i_b: float,
+    dt: float,
+    t: float,
+    params: MmcArmDetailedParams,
+) -> "tuple[float, int, np.ndarray]":
+    """Advance the L3 detailed arm by one forward-Euler step.
+
+    Mutates ``state.v_C_per_sm`` in place.
+
+    Args:
+        state: Live L3 state (see :func:`make_l3_state`).
+        m_ref: Reference modulation index ``∈ [0, 1]``.
+        i_b: Arm current [A].
+        dt: Time step [s] (> 0).
+        t: Current time [s].
+        params: Arm configuration.
+
+    Returns:
+        ``(v_b, s_b, insertion_mask)``:
+            * ``v_b`` — arm-generated voltage = Σ v_C_n for inserted SMs [V].
+            * ``s_b`` — count of inserted SMs.
+            * ``insertion_mask`` — length-N boolean array of which SMs
+              were inserted this step.
+    """
+    if dt <= 0:
+        raise ValueError(f"dt must be > 0 (got {dt})")
+
+    s_b = ps_pwm_switching_function(
+        m_ref, t, params.n_sm, params.f_carrier,
+        sm_type=params.sm_type,
+    )
+    insertion = _balance_select(
+        state.v_C_per_sm, s_b, i_b, params.balancing,
+    )
+
+    v_b = float(state.v_C_per_sm[insertion].sum())
+
+    if params.r_p is not None:
+        # Distribute the arm-equivalent loss uniformly: each SM sees
+        # r_p · n_sm as its individual loss so the *sum* discharge
+        # current matches the L0/L1/L2 single-resistor model.
+        r_per_sm = params.r_p * params.n_sm
+        leak_per_sm = state.v_C_per_sm / r_per_sm
+    else:
+        leak_per_sm = 0.0
+
+    dv_dt = (insertion.astype(np.float64) * i_b - leak_per_sm) / params.c_sm
+    state.v_C_per_sm = state.v_C_per_sm + dt * dv_dt
+    return v_b, s_b, insertion
+
+
+@dataclass(frozen=True)
+class MmcArmDetailedResult:
+    """Output of :func:`simulate_mmc_arm_detailed`."""
+
+    t: np.ndarray
+    v_C_per_sm: np.ndarray         # shape (n_points, n_sm)
+    v_C_sum: np.ndarray            # shape (n_points,)
+    v_C_spread: np.ndarray         # shape (n_points,) — pk-pk per step
+    v_b: np.ndarray
+    m_ref: np.ndarray
+    s_b: np.ndarray
+    i_b: np.ndarray
+    params: MmcArmDetailedParams = field(repr=False)
+
+
+def simulate_mmc_arm_detailed(
+    *,
+    duration: float,
+    dt: float,
+    m_ref: float | Callable[[float], float],
+    i_b: float | Callable[[float], float],
+    params: MmcArmDetailedParams,
+    initial_v_C_per_sm: "np.ndarray | None" = None,
+) -> MmcArmDetailedResult:
+    """Run the L3 detailed arm model over ``[0, duration]``."""
+    if duration <= 0:
+        raise ValueError(f"duration must be > 0 (got {duration})")
+    if dt <= 0 or dt > duration:
+        raise ValueError(f"dt must be in (0, duration] (got {dt})")
+    if not callable(m_ref):
+        m0 = float(m_ref)
+        if m0 < params.m_min or m0 > params.m_max:
+            raise ValueError(
+                f"m_ref={m0:.4f} outside valid range "
+                f"[{params.m_min}, {params.m_max}]",
+            )
+
+    m_ref_fn = (
+        (lambda _t, _v=float(m_ref): _v)
+        if not callable(m_ref) else m_ref
+    )
+    i_b_fn = (
+        (lambda _t, _v=float(i_b): _v)
+        if not callable(i_b) else i_b
+    )
+
+    state = make_l3_state(params, initial_v_C_per_sm=initial_v_C_per_sm)
+    n_steps = int(np.floor(duration / dt))
+    n_points = n_steps + 1
+    t_arr = np.arange(n_points) * dt
+
+    v_C_per_sm_arr = np.zeros((n_points, params.n_sm))
+    v_C_sum_arr = np.zeros(n_points)
+    v_C_spread_arr = np.zeros(n_points)
+    v_b_arr = np.zeros(n_points)
+    m_ref_arr = np.zeros(n_points)
+    s_b_arr = np.zeros(n_points, dtype=np.int64)
+    i_b_arr = np.zeros(n_points)
+
+    for k, tk in enumerate(t_arr):
+        m_k = float(m_ref_fn(tk))
+        i_k = float(i_b_fn(tk))
+        v_C_per_sm_arr[k] = state.v_C_per_sm
+        v_C_sum_arr[k] = state.v_C
+        v_C_spread_arr[k] = state.v_C_spread
+        m_ref_arr[k] = m_k
+        i_b_arr[k] = i_k
+        if k < n_points - 1:
+            v_b, s_b, _ = mmc_arm_detailed_step(
+                state, m_k, i_k, dt, float(tk), params,
+            )
+            v_b_arr[k] = v_b
+            s_b_arr[k] = s_b
+        else:
+            # Compute v_b at the final sample without advancing state.
+            s_b_final = ps_pwm_switching_function(
+                m_k, float(tk), params.n_sm, params.f_carrier,
+                sm_type=params.sm_type,
+            )
+            insertion = _balance_select(
+                state.v_C_per_sm, s_b_final, i_k, params.balancing,
+            )
+            v_b_arr[k] = float(state.v_C_per_sm[insertion].sum())
+            s_b_arr[k] = s_b_final
+
+    return MmcArmDetailedResult(
+        t=t_arr,
+        v_C_per_sm=v_C_per_sm_arr,
+        v_C_sum=v_C_sum_arr,
+        v_C_spread=v_C_spread_arr,
+        v_b=v_b_arr,
+        m_ref=m_ref_arr,
+        s_b=s_b_arr,
         i_b=i_b_arr,
         params=params,
     )

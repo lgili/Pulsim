@@ -235,6 +235,13 @@ from .mmc import (
     make_l2_state,
     mmc_arm_equivalent_step,
     simulate_mmc_arm_equivalent,
+    # L3 detailed (per-SM balancing) — Phase 20.7.
+    MmcArmDetailedParams,
+    MmcArmDetailedState,
+    MmcArmDetailedResult,
+    make_l3_state,
+    mmc_arm_detailed_step,
+    simulate_mmc_arm_detailed,
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -421,6 +428,13 @@ __all__ = [
     "make_l2_state",
     "mmc_arm_equivalent_step",
     "simulate_mmc_arm_equivalent",
+    # MMC L3 — detailed per-SM with balancing.
+    "MmcArmDetailedParams",
+    "MmcArmDetailedState",
+    "MmcArmDetailedResult",
+    "make_l3_state",
+    "mmc_arm_detailed_step",
+    "simulate_mmc_arm_detailed",
 ]
 
 if _HAS_SCOPE:
