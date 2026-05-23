@@ -1,0 +1,43 @@
+# =============================================================================
+# Boost converter — canonical layout
+# =============================================================================
+#
+# Topology:
+#
+#     Vin ──[L]── sw ──[D]── vout ──┬──[Rload]── gnd
+#                  │                 └──[Cout]── gnd
+#         gnd ────[Q]── sw  (low-side switch)
+#
+# Layout convention: source left, inductor before switching node,
+# diode after to output, output cap + load right.
+
+name: boost
+quality: polished
+canvas:
+  width:  200
+  height: 120
+slots:
+  source:
+    x: 0.08
+    y: 0.50
+    rotation: 0       # vertical battery
+  inductor_main:
+    x: 0.30
+    y: 0.30
+    rotation: 90      # horizontal L
+  switch_low:
+    x: 0.45
+    y: 0.78
+    rotation: 0       # vertical switch between sw_node and gnd
+  output_diode:
+    x: 0.60
+    y: 0.30
+    rotation: 90      # horizontal D (anode @ sw_node, cathode @ vout)
+  output_capacitor:
+    x: 0.78
+    y: 0.50
+    rotation: 0       # vertical between vout & gnd
+  load_resistor:
+    x: 0.92
+    y: 0.50
+    rotation: 0       # vertical

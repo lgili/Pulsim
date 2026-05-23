@@ -1,0 +1,13 @@
+name: full_wave_bridge_rectifier
+quality: draft
+canvas:
+  width:  220
+  height: 160
+slots:
+  source:             { x: 0.10, y: 0.50, rotation: 0 }
+  rectifier_diode_a:  { x: 0.40, y: 0.25, rotation: 90 }
+  rectifier_diode_b:  { x: 0.40, y: 0.75, rotation: 90 }
+  rectifier_diode_c:  { x: 0.60, y: 0.25, rotation: 90 }
+  rectifier_diode_d:  { x: 0.60, y: 0.75, rotation: 90 }
+  filter_capacitor:   { x: 0.82, y: 0.50, rotation: 0 }
+  load_resistor:      { x: 0.93, y: 0.50, rotation: 0 }

@@ -1,0 +1,10 @@
+name: rlc_filter
+quality: draft
+canvas:
+  width:  180
+  height: 100
+slots:
+  source:   { x: 0.10, y: 0.50, rotation: 0 }
+  filter_l: { x: 0.35, y: 0.30, rotation: 90 }
+  filter_r: { x: 0.55, y: 0.30, rotation: 90 }
+  filter_c: { x: 0.80, y: 0.50, rotation: 0 }

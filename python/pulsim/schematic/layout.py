@@ -33,6 +33,7 @@ from typing import Any
 
 from .elk_backend import compute_layout_elk
 from .templates import apply_templates, recognize_all
+from .topology_recognizer import recognize as _tier1_recognize
 from .types import (
     BoundingBox,
     ComponentPlacement,
@@ -525,6 +526,49 @@ def _compute_canvas(pos_mm: dict[int, tuple[float, float]]) -> BoundingBox:
     )
 
 
+def _try_template_layout(circuit: Any):
+    """V2 topology-aware path: try Tier-1 recognizer, then Tier-2 LLM
+    classifier, then load the matching YAML template and instantiate
+    a layout. Returns ``None`` on any miss — caller falls through to
+    the legacy force-directed/ELK path.
+
+    Failure modes (every one returns ``None`` silently — never
+    raises): no template file, missing PyYAML, low confidence, no
+    role_map, empty circuit.
+    """
+    try:
+        # Lazy imports — template_instantiator + llm_classifier are
+        # pulled in only when the dispatcher actually fires, so a
+        # plain `import pulsim.schematic` doesn't pay the cost.
+        from .template_instantiator import template_layout
+        from .llm_classifier import classify as _tier2_classify
+    except ImportError:
+        return None
+
+    try:
+        recognized = _tier1_recognize(circuit)
+    except Exception:
+        recognized = None
+
+    # Tier 2 falls in when Tier 1 misses OR comes back with low
+    # confidence. Fast path: skip the LLM entirely on a Tier-1 win.
+    if recognized is None or recognized.confidence < 0.7:
+        try:
+            llm_result = _tier2_classify(circuit)
+        except Exception:
+            llm_result = None
+        if llm_result is not None and (
+                recognized is None or llm_result.confidence > recognized.confidence):
+            recognized = llm_result
+
+    if recognized is None:
+        return None
+    try:
+        return template_layout(circuit, recognized)
+    except Exception:
+        return None
+
+
 def compute_layout(circuit: Any) -> SchematicLayout:
     """Build a deterministic :class:`SchematicLayout` for a Circuit.
 
@@ -552,6 +596,16 @@ def compute_layout(circuit: Any) -> SchematicLayout:
             facing message names the install hint). On the spring fallback
             path, if ``networkx`` isn't installed.
     """
+    # V2 dispatcher — try the topology-aware template path first.
+    # On a hit, this produces a textbook-quality layout (Tier-1
+    # recognizer or Tier-2 LLM classifier identified the topology,
+    # and the matching YAML template placed every role at its
+    # canonical canvas slot). On a miss, fall through to ELK or the
+    # force-directed "spring" backend exactly as V1.
+    template_layout_result = _try_template_layout(circuit)
+    if template_layout_result is not None:
+        return template_layout_result
+
     # Default to the pure-Python "spring" (force-directed) backend so
     # the schematic works out of the box without Node.js + elkjs. The
     # ELK backend is still available via PULSIM_SCHEMATIC_BACKEND=elk

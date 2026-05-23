@@ -1,0 +1,47 @@
+# =============================================================================
+# Flyback converter — canonical layout
+# =============================================================================
+#
+# Topology (single-switch flyback):
+#
+#     Primary:    Vin ──[Lp]── sw ──[Q]── gnd
+#     Secondary:  (Ls + D) ──── vout ──┬──[Rload]── gnd
+#                                       └──[Cout]── gnd
+#
+# Primary on the LEFT half, secondary on the RIGHT half. Transformer
+# windings stacked vertically to show coupling.
+
+name: flyback
+quality: polished
+canvas:
+  width:  220
+  height: 130
+slots:
+  source:
+    x: 0.07
+    y: 0.50
+    rotation: 0       # vertical battery
+  transformer_primary:
+    x: 0.30
+    y: 0.30
+    rotation: 0       # vertical primary winding (Lp)
+  switch_primary:
+    x: 0.30
+    y: 0.78
+    rotation: 0       # vertical low-side switch
+  transformer_secondary:
+    x: 0.55
+    y: 0.30
+    rotation: 0       # vertical secondary winding (Ls)
+  rectifier_diode:
+    x: 0.72
+    y: 0.30
+    rotation: 90      # horizontal diode (anode @ Ls+, cathode @ vout)
+  output_capacitor:
+    x: 0.85
+    y: 0.50
+    rotation: 0       # vertical
+  load_resistor:
+    x: 0.95
+    y: 0.50
+    rotation: 0       # vertical

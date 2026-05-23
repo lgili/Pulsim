@@ -1,0 +1,55 @@
+# =============================================================================
+# Buck converter — canonical layout
+# =============================================================================
+#
+# Topology:
+#
+#     Vin ──[Q]── sw ──[L]── vout ──┬──[Rload]── gnd
+#                                    └──[Cout]── gnd
+#         gnd ──[D]── sw  (freewheel diode)
+#
+# Layout convention (left → right, ground at the bottom):
+#
+#   ┌─────────────────────────────────────────────────────┐
+#   │                                                     │
+#   │    [Vin]        [Q]──────[L]────────┬───┬───        │
+#   │      │           │                  │   │           │
+#   │      │          sw                 [C] [R]          │
+#   │      │           │                  │   │           │
+#   │     gnd ────────[D]─────────────── gnd gnd          │
+#   │                                                     │
+#   └─────────────────────────────────────────────────────┘
+#
+# x_frac: 0..1 along width (200 mm); y_frac: 0..1 along height (120 mm).
+# rotation snaps to {0, 90, 180, 270} — 0 = upright body, 90 = horizontal.
+
+name: buck
+quality: polished
+canvas:
+  width:  200
+  height: 120
+slots:
+  source:
+    x: 0.08
+    y: 0.50
+    rotation: 0       # vertical battery symbol
+  switch_high:
+    x: 0.35
+    y: 0.30
+    rotation: 90      # horizontal switch
+  freewheel_diode:
+    x: 0.35
+    y: 0.78
+    rotation: 0       # vertical diode (anode down at gnd, cathode up at sw)
+  inductor_main:
+    x: 0.55
+    y: 0.30
+    rotation: 90      # horizontal inductor
+  output_capacitor:
+    x: 0.75
+    y: 0.50
+    rotation: 0       # vertical between vout & gnd
+  load_resistor:
+    x: 0.90
+    y: 0.50
+    rotation: 0       # vertical between vout & gnd (right of Cout)
