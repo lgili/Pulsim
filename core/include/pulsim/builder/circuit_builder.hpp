@@ -38,8 +38,11 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <format>
+#include <functional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -52,15 +55,20 @@ public:
     /// Return the node index for `name`, creating it if not
     /// yet registered. `"gnd"` / `"GND"` / `"0"` all map to
     /// `graph().ground()` without consuming a node slot.
-    Index node(std::string name) {
+    ///
+    /// Takes a `std::string_view` so call sites using string
+    /// literals (the DSL's common case) skip the per-call
+    /// `std::string` allocation; the materialised owned copy
+    /// only happens on the first insertion of a given name.
+    Index node(std::string_view name) {
         return resolve_node_(name);
     }
 
     // -------- Add methods --------------------------------------------------
 
     CircuitBuilder& add_voltage_source(
-        std::string /*name*/, std::string from,
-        std::string to, Real V) {
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real V) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -87,8 +95,8 @@ public:
     ///   duty       [-]  ON-time fraction ∈ [0, 1]
     ///   phase      [s]  start-of-cycle offset (default 0)
     CircuitBuilder& add_pwm_voltage_source(
-        std::string /*name*/, std::string from,
-        std::string to, Real v_high, Real v_low,
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real v_high, Real v_low,
         Real frequency, Real duty,
         Real phase = Real{0}) {
         const Index from_idx = resolve_node_(from);
@@ -114,8 +122,8 @@ public:
     ///   phase        [rad] phase angle (default 0)
     /// Output: v(t) = v_dc + v_amplitude · sin(2π·f·t + φ).
     CircuitBuilder& add_sine_voltage_source(
-        std::string /*name*/, std::string from,
-        std::string to,
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to,
         Real v_dc, Real v_amplitude,
         Real frequency, Real phase = Real{0}) {
         const Index from_idx = resolve_node_(from);
@@ -144,9 +152,9 @@ public:
     ///   lambda      [1/V]  channel-length modulation
     ///   kappa       [1/V]  cutoff-region sigmoid sharpness
     CircuitBuilder& add_mosfet_level1(
-        std::string /*name*/,
-        std::string drain, std::string source,
-        std::string gate,
+        std::string_view /*name*/,
+        std::string_view drain, std::string_view source,
+        std::string_view gate,
         Real K, Real V_T,
         Real lambda = Real{0.02},
         Real kappa  = Real{15.0},
@@ -186,9 +194,9 @@ public:
     /// Use a high gain (e.g. 1e5) plus negative feedback for
     /// an ideal-op-amp approximation.
     CircuitBuilder& add_vcvs(
-        std::string /*name*/,
-        std::string in_pos,  std::string in_neg,
-        std::string out_pos, std::string out_neg,
+        std::string_view /*name*/,
+        std::string_view in_pos,  std::string_view in_neg,
+        std::string_view out_pos, std::string_view out_neg,
         Real gain) {
         const Index inp_idx = resolve_node_(in_pos);
         const Index inn_idx = resolve_node_(in_neg);
@@ -209,9 +217,9 @@ public:
     /// negative feedback to enforce the "virtual short"
     /// V_in_pos ≈ V_in_neg.
     CircuitBuilder& add_op_amp_ideal(
-        std::string /*name*/,
-        std::string in_pos, std::string in_neg,
-        std::string out,
+        std::string_view /*name*/,
+        std::string_view in_pos, std::string_view in_neg,
+        std::string_view out,
         Real gain = Real{1e5}) {
         return add_vcvs(/*name=*/"", in_pos, in_neg,
                           out, /*out_neg=*/"gnd", gain);
@@ -226,9 +234,9 @@ public:
     ///   V_T         [V] gate threshold
     ///   kappa       [1/V] cutoff sigmoid sharpness
     CircuitBuilder& add_igbt_level1(
-        std::string /*name*/,
-        std::string collector, std::string emitter,
-        std::string gate,
+        std::string_view /*name*/,
+        std::string_view collector, std::string_view emitter,
+        std::string_view gate,
         Real V_CE_sat = Real{1.5},
         Real R_CE_sat = Real{0.05},
         Real V_T      = Real{5.0},
@@ -257,8 +265,8 @@ public:
     ///   pulse_width  [s] duration of each pulse
     ///   period       [s] repetition period; 0 → single-shot
     CircuitBuilder& add_pulse_voltage_source(
-        std::string /*name*/, std::string from,
-        std::string to,
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to,
         Real v_initial, Real v_pulsed,
         Real t_start, Real pulse_width,
         Real period    = Real{0},
@@ -297,8 +305,8 @@ public:
     /// `b_extra_fn(t)` — same pattern as time-varying
     /// VoltageSource.
     CircuitBuilder& add_current_source(
-        std::string /*name*/, std::string from,
-        std::string to, Real I) {
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real I) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -310,8 +318,8 @@ public:
     }
 
     CircuitBuilder& add_resistor(
-        std::string /*name*/, std::string from,
-        std::string to, Real R_ohms) {
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real R_ohms) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -324,8 +332,8 @@ public:
     }
 
     CircuitBuilder& add_capacitor(
-        std::string /*name*/, std::string from,
-        std::string to, Real C_farads) {
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real C_farads) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -337,8 +345,8 @@ public:
     }
 
     CircuitBuilder& add_inductor(
-        std::string /*name*/, std::string from,
-        std::string to, Real L_henries) {
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real L_henries) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -354,8 +362,8 @@ public:
     /// `BranchKind::Switch` (the diode behaves as a switch
     /// from the topology's perspective).
     CircuitBuilder& add_diode(
-        std::string /*name*/, std::string anode,
-        std::string cathode, Real g_on, Real g_off,
+        std::string_view /*name*/, std::string_view anode,
+        std::string_view cathode, Real g_on, Real g_off,
         Real V_th = Real{0}) {
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
@@ -370,8 +378,8 @@ public:
     /// AD-driven nonlinear model). The branch uses
     /// `BranchKind::Nonlinear`.
     CircuitBuilder& add_nonlinear_diode(
-        std::string /*name*/, std::string anode,
-        std::string cathode,
+        std::string_view /*name*/, std::string_view anode,
+        std::string_view cathode,
         models::IdealDiode::Params params) {
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
@@ -385,8 +393,8 @@ public:
     /// Add a controlled switch (drives by `switch_fn`
     /// at simulation time).
     CircuitBuilder& add_switch(
-        std::string /*name*/, std::string from,
-        std::string to, Real g_on, Real g_off) {
+        std::string_view /*name*/, std::string_view from,
+        std::string_view to, Real g_on, Real g_off) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -409,8 +417,8 @@ public:
     /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ (typical for
     /// modern Si MOSFETs in SMPS applications).
     CircuitBuilder& add_mosfet(
-        std::string name, std::string drain,
-        std::string source,
+        std::string_view name, std::string_view drain,
+        std::string_view source,
         Real R_on  = Real{1e-3},
         Real R_off = Real{1e9}) {
         return add_switch(std::move(name),
@@ -428,8 +436,8 @@ public:
     /// Defaults model a typical Si MOSFET: R_on = 1 mΩ,
     /// R_off = 1 GΩ, body-diode V_F = 0.7 V.
     CircuitBuilder& add_mosfet_with_body_diode(
-        std::string name, std::string drain,
-        std::string source,
+        std::string_view name, std::string_view drain,
+        std::string_view source,
         Real R_on        = Real{1e-3},
         Real R_off       = Real{1e9},
         Real V_F         = Real{0.7},
@@ -461,8 +469,8 @@ public:
     /// Defaults: R_on = 10 mΩ, R_off = 1 GΩ (typical for
     /// IGBT modules).
     CircuitBuilder& add_igbt(
-        std::string name, std::string collector,
-        std::string emitter,
+        std::string_view name, std::string_view collector,
+        std::string_view emitter,
         Real R_on  = Real{10e-3},
         Real R_off = Real{1e9}) {
         return add_switch(std::move(name),
@@ -488,9 +496,9 @@ public:
     /// as open circuits, matching the standalone inductor
     /// model.
     CircuitBuilder& add_transformer(
-        std::string name,
-        std::string p_from, std::string p_to,
-        std::string s_from, std::string s_to,
+        std::string_view name,
+        std::string_view p_from, std::string_view p_to,
+        std::string_view s_from, std::string_view s_to,
         Real L_p, Real L_s, Real k = Real{1}) {
         const Index p_from_idx = resolve_node_(p_from);
         const Index p_to_idx   = resolve_node_(p_to);
@@ -532,8 +540,8 @@ public:
     ///     the solver when the circuit contains saturable
     ///     inductors.
     CircuitBuilder& add_saturable_inductor(
-        std::string /*name*/,
-        std::string from, std::string to,
+        std::string_view /*name*/,
+        std::string_view from, std::string_view to,
         Real L_0, Real I_sat,
         Real L_residual = Real{0}) {
         const Index from_idx = resolve_node_(from);
@@ -571,7 +579,7 @@ public:
     };
 
     CircuitBuilder& add_multi_winding_transformer(
-        std::string /*name*/,
+        std::string_view /*name*/,
         const std::vector<WindingSpec>& windings,
         const std::vector<std::vector<Real>>& k_matrix = {}) {
         const Size N = windings.size();
@@ -629,43 +637,63 @@ public:
     /// Look up a previously-registered node by name. Throws
     /// `std::out_of_range` if not found. The "gnd" alias is
     /// handled here too.
-    [[nodiscard]] Index node_id_of(
-        const std::string& name) const {
+    [[nodiscard]] Index node_id_of(std::string_view name) const {
         if (is_ground_alias_(name)) {
             return graph_.ground();
         }
         const auto it = node_map_.find(name);
         if (it == node_map_.end()) {
-            throw std::out_of_range(
-                "CircuitBuilder::node_id_of: node \"" +
-                name + "\" was never registered");
+            throw std::out_of_range(std::format(
+                "CircuitBuilder::node_id_of: node \"{}\" was never "
+                "registered",
+                name));
         }
         return it->second;
     }
 
 private:
-    [[nodiscard]] static bool is_ground_alias_(
-        const std::string& name) noexcept {
-        return name == "gnd" || name == "GND" ||
-               name == "0";
+    [[nodiscard]] static constexpr bool is_ground_alias_(
+        std::string_view name) noexcept {
+        return name == "gnd" || name == "GND" || name == "0";
     }
 
-    Index resolve_node_(const std::string& name) {
+    Index resolve_node_(std::string_view name) {
         if (is_ground_alias_(name)) {
             return graph_.ground();
         }
+        // Heterogeneous find — no allocation when the node was
+        // already registered (the common case for nets touched
+        // by multiple devices).
         const auto it = node_map_.find(name);
         if (it != node_map_.end()) {
             return it->second;
         }
-        const Index idx = graph_.add_node(name);
-        node_map_.emplace(name, idx);
+        // First insertion: materialise the owned string once.
+        std::string owned{name};
+        const Index idx = graph_.add_node(owned);
+        node_map_.emplace(std::move(owned), idx);
         return idx;
     }
 
+    /// Transparent hash + equal so `node_map_.find(string_view)`
+    /// works without materialising a `std::string` per lookup.
+    struct NodeKeyHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view sv) const noexcept {
+            return std::hash<std::string_view>{}(sv);
+        }
+        std::size_t operator()(const std::string& s) const noexcept {
+            return std::hash<std::string_view>{}(s);
+        }
+        std::size_t operator()(const char* c) const noexcept {
+            return std::hash<std::string_view>{}(c);
+        }
+    };
+
     topology::Graph                         graph_;
     pwl::DevicePool                         pool_;
-    std::unordered_map<std::string, Index>  node_map_;
+    std::unordered_map<std::string, Index,
+                        NodeKeyHash, std::equal_to<>> node_map_;
 };
 
 }  // namespace pulsim::builder
