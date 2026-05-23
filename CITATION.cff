@@ -16,7 +16,7 @@ repository-code: 'https://github.com/lgili/Pulsim'
 authors:
   - family-names: Gili
     given-names: Luiz Carlos
-    # orcid: 'https://orcid.org/0000-0000-0000-0000'    # TODO: fill in your ORCID
+    orcid: 'https://orcid.org/0000-0002-5749-7199'
     affiliation: 'Independent Researcher, Brazil'
 
 keywords:
