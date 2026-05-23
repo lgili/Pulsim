@@ -219,6 +219,9 @@ from .mmc import (
     add_mmc_arm_average,
     make_mmc_arm_observer,
     make_mmc_arms_observer,
+    # Three-phase DC/AC topology helper (Phase 20.4 step 2).
+    MmcThreePhaseDcAc,
+    add_mmc_three_phase_dc_ac,
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -389,6 +392,9 @@ __all__ = [
     "add_mmc_arm_average",
     "make_mmc_arm_observer",
     "make_mmc_arms_observer",
+    # MMC three-phase DC/AC topology helper.
+    "MmcThreePhaseDcAc",
+    "add_mmc_three_phase_dc_ac",
 ]
 
 if _HAS_SCOPE:

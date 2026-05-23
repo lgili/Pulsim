@@ -306,3 +306,169 @@ def test_make_observer_rejects_non_positive_dt():
         p.make_mmc_arm_observer(b, arm, dt=0.0)
     with pytest.raises(ValueError, match="dt must be"):
         p.make_mmc_arm_observer(b, arm, dt=-1e-6)
+
+
+# ===========================================================================
+# Three-phase DC/AC MMC topology helper
+# ===========================================================================
+
+class TestThreePhaseDcAc:
+    """Tests for ``add_mmc_three_phase_dc_ac`` — the full 6-arm
+    topology helper."""
+
+    def test_structure_correct_number_of_branches(self):
+        """A 3-φ MMC adds 6 arm sources + 6 arm inductors = 12 branches."""
+        b = p.CircuitBuilder()
+        n_before = b.graph.num_branches
+        mmc = p.add_mmc_three_phase_dc_ac(
+            b,
+            dc_pos="dc_p", dc_neg="dc_n",
+            ac_nodes=("ac_a", "ac_b", "ac_c"),
+            n_sm=10, c_sm=1e-3, l_b=1e-3,
+            v_c0=100.0,
+            m_signals=(0.5, 0.5, 0.5),  # auto-complement for lower arms
+        )
+        n_after = b.graph.num_branches
+        # 6 voltage sources (arms) + 6 inductors = 12 new branches.
+        assert n_after - n_before == 12
+
+        # Six arms accessible.
+        assert isinstance(mmc, p.MmcThreePhaseDcAc)
+        assert len(mmc.all_arms) == 6
+        assert len(mmc.upper_arms) == 3
+        assert len(mmc.lower_arms) == 3
+        # Each carries its initial v_C.
+        for arm in mmc.all_arms:
+            assert arm.v_C == 100.0
+
+    def test_three_signal_tuple_auto_complements_lower_arms(self):
+        """For half-bridge, providing only 3 m_signals fills in the
+        complementary 3 for the lower arms so v_arm_p + v_arm_n = v_C
+        (matching the DC bus)."""
+        b = p.CircuitBuilder()
+        mmc = p.add_mmc_three_phase_dc_ac(
+            b,
+            dc_pos="dc_p", dc_neg="dc_n",
+            ac_nodes=("ac_a", "ac_b", "ac_c"),
+            n_sm=4, c_sm=1e-3, l_b=1e-3,
+            v_c0=200.0,
+            m_signals=(0.3, 0.6, 0.9),
+        )
+        # Upper-arm m_b(0) is what the user passed.
+        assert mmc.arm_a_p.m_b_fn(0.0) == pytest.approx(0.3)
+        assert mmc.arm_b_p.m_b_fn(0.0) == pytest.approx(0.6)
+        assert mmc.arm_c_p.m_b_fn(0.0) == pytest.approx(0.9)
+        # Lower-arm m_b(0) is the complement (1 - m_p) for HB.
+        assert mmc.arm_a_n.m_b_fn(0.0) == pytest.approx(0.7)
+        assert mmc.arm_b_n.m_b_fn(0.0) == pytest.approx(0.4)
+        assert mmc.arm_c_n.m_b_fn(0.0) == pytest.approx(0.1)
+
+    def test_three_signal_tuple_full_bridge_negates(self):
+        """For full-bridge, the 3-tuple shorthand negates rather than
+        complements (since FB m_b ∈ [-1, 1])."""
+        b = p.CircuitBuilder()
+        mmc = p.add_mmc_three_phase_dc_ac(
+            b,
+            dc_pos="dc_p", dc_neg="dc_n",
+            ac_nodes=("ac_a", "ac_b", "ac_c"),
+            n_sm=4, c_sm=1e-3, l_b=1e-3,
+            sm_type="full_bridge",
+            v_c0=200.0,
+            m_signals=(0.3, -0.4, 0.5),
+        )
+        assert mmc.arm_a_n.m_b_fn(0.0) == pytest.approx(-0.3)
+        assert mmc.arm_b_n.m_b_fn(0.0) == pytest.approx(0.4)
+        assert mmc.arm_c_n.m_b_fn(0.0) == pytest.approx(-0.5)
+
+    def test_six_signal_tuple_passes_through_independently(self):
+        """A 6-tuple gives independent per-arm control."""
+        b = p.CircuitBuilder()
+        mmc = p.add_mmc_three_phase_dc_ac(
+            b,
+            dc_pos="dc_p", dc_neg="dc_n",
+            ac_nodes=("ac_a", "ac_b", "ac_c"),
+            n_sm=4, c_sm=1e-3, l_b=1e-3,
+            v_c0=200.0,
+            m_signals=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6),
+        )
+        observed = [arm.m_b_fn(0.0) for arm in mmc.all_arms]
+        assert observed == pytest.approx([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+
+    def test_dc_equilibrium_no_circulating_current(self):
+        """Matched DC bus and v_C: zero current flows through arms,
+        v_C never drifts."""
+        V_dc = 200.0           # DC bus
+        n_sm = 4
+        c_sm = 1e-3            # C_arm = 2.5e-4 F
+        l_b = 1e-3
+        v_c0 = V_dc            # matched: v_C = V_dc so m=0.5 gives V_arm = 100 V
+
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vdc", "dc_p", "dc_n", V_dc)
+        mmc = p.add_mmc_three_phase_dc_ac(
+            b,
+            dc_pos="dc_p", dc_neg="dc_n",
+            ac_nodes=("ac_a", "ac_b", "ac_c"),
+            n_sm=n_sm, c_sm=c_sm, l_b=l_b,
+            v_c0=v_c0,
+            m_signals=(0.5, 0.5, 0.5),
+        )
+        # No AC load — ac_X nodes float; current must be 0 by KCL.
+        # We need *some* path to ground for the DC bus; the v-source
+        # already provides that internally. But pulsim's MNA may need
+        # a path from each phase midpoint to gnd. Add huge bleed
+        # resistors so MNA is well-posed but they draw negligible
+        # current.
+        b.add_resistor("R_bleed_a", "ac_a", "dc_n", 1e9)
+        b.add_resistor("R_bleed_b", "ac_b", "dc_n", 1e9)
+        b.add_resistor("R_bleed_c", "ac_c", "dc_n", 1e9)
+
+        dt = 1e-5
+        obs, bex = p.make_mmc_arms_observer(b, mmc.all_arms, dt=dt)
+        p.simulate(b, t_end=1e-3, dt=dt,
+                       step_observer=obs, b_extra_fn=bex,
+                       start_from_dc_op=True)
+
+        # At equilibrium, all six v_C should be ~v_c0 (no charging).
+        # Allow 1 % drift to absorb bleed-resistor leakage + numerical
+        # forward-Euler jitter.
+        for arm in mmc.all_arms:
+            assert arm.v_C == pytest.approx(v_c0, rel=0.01), (
+                f"arm {arm.name} drifted to v_C = {arm.v_C} "
+                f"(expected ~{v_c0})"
+            )
+
+    # -------- Guard rails --------
+
+    def test_rejects_ac_nodes_wrong_length(self):
+        b = p.CircuitBuilder()
+        with pytest.raises(ValueError, match="ac_nodes"):
+            p.add_mmc_three_phase_dc_ac(
+                b,
+                dc_pos="dc_p", dc_neg="dc_n",
+                ac_nodes=("a", "b"),  # type: ignore[arg-type]
+                n_sm=4, c_sm=1e-3, l_b=1e-3,
+                m_signals=(0.5, 0.5, 0.5),
+            )
+
+    def test_rejects_invalid_l_b(self):
+        b = p.CircuitBuilder()
+        with pytest.raises(ValueError, match="l_b"):
+            p.add_mmc_three_phase_dc_ac(
+                b,
+                dc_pos="dc_p", dc_neg="dc_n",
+                ac_nodes=("a", "b", "c"),
+                n_sm=4, c_sm=1e-3, l_b=0.0,
+                m_signals=(0.5, 0.5, 0.5),
+            )
+
+    def test_rejects_m_signals_wrong_length(self):
+        b = p.CircuitBuilder()
+        with pytest.raises(ValueError, match="m_signals"):
+            p.add_mmc_three_phase_dc_ac(
+                b,
+                dc_pos="dc_p", dc_neg="dc_n",
+                ac_nodes=("a", "b", "c"),
+                n_sm=4, c_sm=1e-3, l_b=1e-3,
+                m_signals=(0.5, 0.5),  # neither 3 nor 6
+            )

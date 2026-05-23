@@ -68,6 +68,9 @@ __all__ = [
     "add_mmc_arm_average",
     "make_mmc_arm_observer",
     "make_mmc_arms_observer",
+    # Three-phase DC/AC topology helper (Phase 20.4 step 2).
+    "MmcThreePhaseDcAc",
+    "add_mmc_three_phase_dc_ac",
 ]
 
 
@@ -321,6 +324,10 @@ class MmcArmAverage:
             step). Starts at ``params.v_c0``.
         v_b: Live arm-generated voltage [V] (== m_b(t) · v_C). Mirrors
             what the observer stashes for the *next* simulation step.
+        v_b_baseline: V-source baseline (== m_b(0) · v_c0) written
+            into ``builder.add_voltage_source`` so DC-OP sees the
+            correct arm voltage and can solve circuits with multiple
+            arms in series (e.g. a 3-φ MMC).
         name: Prefix used for the underlying voltage-source name.
         source_branch_id: Graph branch id of the v-source added by
             :func:`add_mmc_arm_average` — needed to locate the state
@@ -331,6 +338,7 @@ class MmcArmAverage:
     m_b_fn: Callable[[float], float]
     v_C: float = 0.0
     v_b: float = 0.0
+    v_b_baseline: float = 0.0
     name: str = ""
     source_branch_id: int = -1
 
@@ -399,16 +407,26 @@ def add_mmc_arm_average(
             f"sm_type={params.sm_type!r}",
         )
 
-    # Record branch id before adding (it equals the current branch
-    # count — same trick motors.py uses).
+    # Set the v-source baseline to m_b(0)·v_c0 so the kernel's
+    # *DC operating point* solver sees the correct arm voltage at
+    # t=0 — without this, multi-arm topologies (e.g. a 3-φ MMC where
+    # the arms are arranged in series across the DC bus) make DC-OP
+    # un-solvable and fall back to ill-conditioned states. The
+    # observer's b_extra_fn then injects the *delta* from this
+    # baseline at every subsequent step.
+    v_b_baseline = m0 * float(params.v_c0)
+
     src_id = builder.graph.num_branches
-    builder.add_voltage_source(f"{name}_Varm", node_a, node_b, 0.0)
+    builder.add_voltage_source(
+        f"{name}_Varm", node_a, node_b, v_b_baseline,
+    )
 
     return MmcArmAverage(
         params=params,
         m_b_fn=m_b_fn,
         v_C=float(params.v_c0),
-        v_b=m0 * float(params.v_c0),
+        v_b=v_b_baseline,
+        v_b_baseline=v_b_baseline,
         name=name,
         source_branch_id=src_id,
     )
@@ -509,10 +527,237 @@ def make_mmc_arms_observer(
         out = [0.0] * state_size
         # Convention (matches motors.py): the constraint row reads
         # ``(V_from − V_to) − V_source = 0``. Adding ``+X`` to b
-        # shifts V_source by ``−X``, so we inject ``−v_b`` to set the
-        # source's terminal voltage to ``+v_b``.
+        # shifts V_source by ``−X``. The v-source's *baseline* value
+        # (set in ``add_mmc_arm_average``) is ``v_b_baseline`` =
+        # m_b(0)·v_c0, so we inject the *delta* needed to bring the
+        # effective source voltage to the current v_b:
+        #   V_source_effective = baseline - inject(t) = v_b(t)
+        #   ⇒ inject(t) = baseline - v_b(t)
+        # At t=0 the inject is 0 (V_source stays at the DC-OP-correct
+        # baseline); at later steps it tracks v_b(t).
         for k, arm in enumerate(arms):
-            out[src_indices[k]] = -arm.v_b
+            out[src_indices[k]] = arm.v_b_baseline - arm.v_b
         return out
 
     return step_observer, b_extra_fn
+
+
+# ----------------------------------------------------------------------
+# Three-phase DC/AC MMC topology helper (Phase 20.4 step 2)
+# ----------------------------------------------------------------------
+#
+# Canonical topology (thesis fig 2.7):
+#
+#                       dc_pos
+#                         │
+#               ┌─────────┼─────────┐
+#               │         │         │
+#           [arm_a_p] [arm_b_p] [arm_c_p]   (upper arms — controlled VS)
+#               │         │         │
+#             L_a_p     L_b_p     L_c_p     (arm inductors)
+#               │         │         │
+#              ac_a      ac_b      ac_c     (AC ports)
+#               │         │         │
+#             L_a_n     L_b_n     L_c_n     (arm inductors)
+#               │         │         │
+#           [arm_a_n] [arm_b_n] [arm_c_n]   (lower arms — controlled VS)
+#               │         │         │
+#               └─────────┼─────────┘
+#                         │
+#                       dc_neg
+#
+# We do NOT add the DC bus voltage source — the user wires it
+# externally (e.g. ``b.add_voltage_source("Vdc", "dc_pos", "dc_neg", V)``).
+# We do NOT add an AC load — the user wires it between the three
+# ``ac_nodes`` (e.g. a three-phase RL motor or a Y-connected grid
+# impedance via :func:`pulsim.add_three_phase_grid`).
+
+
+@dataclass
+class MmcThreePhaseDcAc:
+    """The six arms of a three-phase DC/AC MMC built by
+    :func:`add_mmc_three_phase_dc_ac`.
+
+    Each ``arm_*_p`` / ``arm_*_n`` is a live :class:`MmcArmAverage`
+    whose ``v_C`` and ``v_b`` mutate as the simulation progresses.
+
+    Attributes:
+        arm_a_p, arm_b_p, arm_c_p: Upper arms (dc_pos → mid_X).
+        arm_a_n, arm_b_n, arm_c_n: Lower arms (mid_X → dc_neg).
+    """
+    arm_a_p: MmcArmAverage
+    arm_b_p: MmcArmAverage
+    arm_c_p: MmcArmAverage
+    arm_a_n: MmcArmAverage
+    arm_b_n: MmcArmAverage
+    arm_c_n: MmcArmAverage
+
+    @property
+    def all_arms(self) -> "list[MmcArmAverage]":
+        """All six arms in (a_p, b_p, c_p, a_n, b_n, c_n) order."""
+        return [
+            self.arm_a_p, self.arm_b_p, self.arm_c_p,
+            self.arm_a_n, self.arm_b_n, self.arm_c_n,
+        ]
+
+    @property
+    def upper_arms(self) -> "list[MmcArmAverage]":
+        """The three upper arms (positive DC-bus side)."""
+        return [self.arm_a_p, self.arm_b_p, self.arm_c_p]
+
+    @property
+    def lower_arms(self) -> "list[MmcArmAverage]":
+        """The three lower arms (negative DC-bus side)."""
+        return [self.arm_a_n, self.arm_b_n, self.arm_c_n]
+
+
+def add_mmc_three_phase_dc_ac(
+    builder,
+    *,
+    name: str = "MMC",
+    dc_pos: str,
+    dc_neg: str,
+    ac_nodes: "tuple[str, str, str]",
+    n_sm: int,
+    c_sm: float,
+    l_b: float,
+    sm_type: SubmoduleType = "half_bridge",
+    v_c0: float = 0.0,
+    m_signals: "tuple[Callable[[float], float] | float, ...]",
+) -> MmcThreePhaseDcAc:
+    """Add a complete three-phase DC/AC MMC topology to ``builder``.
+
+    Composes:
+        * Six average-value arms via :func:`add_mmc_arm_average`.
+        * Six arm inductors of value ``l_b`` (Henries).
+
+    The DC bus voltage source and the AC load are **not** added —
+    wire them yourself before / after this helper.
+
+    Args:
+        builder: A populated ``pulsim.CircuitBuilder``.
+        name: Common prefix for the device names registered (default
+            ``"MMC"`` → ``MMC_a_p_Varm``, ``MMC_L_a_p``, …).
+        dc_pos, dc_neg: Node names of the DC bus (positive and
+            negative rails).
+        ac_nodes: 3-tuple ``(ac_a, ac_b, ac_c)`` of node names for
+            the three AC ports.
+        n_sm, c_sm, sm_type, v_c0: Per-arm parameters forwarded into
+            :class:`MmcArmAverageParams`. All six arms share the
+            same values — for non-uniform arms, build them one at a
+            time with :func:`add_mmc_arm_average`.
+        l_b: Arm inductance in Henries (same for all six arms).
+        m_signals: Either:
+            * a 3-tuple ``(m_a, m_b, m_c)`` — applied to the upper
+              arms; lower arms get the complement ``1 - m_X`` for
+              half-bridge or ``-m_X`` for full-bridge so the arm
+              sum ``v_arm_p + v_arm_n = v_C_p + v_C_n`` matches the
+              DC bus by construction;
+            * a 6-tuple ``(m_a_p, m_b_p, m_c_p, m_a_n, m_b_n, m_c_n)``
+              — independent control of each arm.
+
+    Returns:
+        A :class:`MmcThreePhaseDcAc` carrying the six arm objects.
+
+    Notes:
+        Pair the returned object with :func:`make_mmc_arms_observer`:
+
+        .. code-block:: python
+
+            mmc = p.add_mmc_three_phase_dc_ac(b, ..., m_signals=...)
+            obs, bex = p.make_mmc_arms_observer(
+                b, mmc.all_arms, dt=dt,
+            )
+            res = p.simulate(b, ..., step_observer=obs,
+                             b_extra_fn=bex,
+                             start_from_dc_op=True)
+    """
+    if len(ac_nodes) != 3:
+        raise ValueError(
+            f"ac_nodes must be a 3-tuple (got len {len(ac_nodes)})",
+        )
+    if l_b <= 0:
+        raise ValueError(f"l_b must be > 0 (got {l_b})")
+
+    # Normalise m_signals → 6-tuple ``(m_a_p, m_b_p, m_c_p, m_a_n,
+    # m_b_n, m_c_n)``.
+    if len(m_signals) == 3:
+        m_a, m_b_, m_c = m_signals  # type: ignore[misc]
+        if sm_type == "half_bridge":
+            def _complement(m_fn):
+                if callable(m_fn):
+                    return lambda t, _f=m_fn: 1.0 - float(_f(t))
+                _const = float(m_fn)
+                return lambda _t, _v=1.0 - _const: _v
+        else:  # full_bridge
+            def _complement(m_fn):
+                if callable(m_fn):
+                    return lambda t, _f=m_fn: -float(_f(t))
+                _const = float(m_fn)
+                return lambda _t, _v=-_const: _v
+        m_signals = (
+            m_a, m_b_, m_c,
+            _complement(m_a), _complement(m_b_), _complement(m_c),
+        )
+    elif len(m_signals) != 6:
+        raise ValueError(
+            f"m_signals must be a 3- or 6-tuple (got len {len(m_signals)})",
+        )
+
+    m_a_p, m_b_p, m_c_p, m_a_n, m_b_n, m_c_n = m_signals
+    ac_a, ac_b, ac_c = ac_nodes
+
+    params = MmcArmAverageParams(
+        n_sm=n_sm, c_sm=c_sm, sm_type=sm_type, v_c0=v_c0,
+    )
+
+    # --- Upper half: dc_pos → arm → mid → L_b → ac_X ---
+    mid_a_p = f"{name}_mid_a_p"
+    mid_b_p = f"{name}_mid_b_p"
+    mid_c_p = f"{name}_mid_c_p"
+    arm_a_p = add_mmc_arm_average(
+        builder, name=f"{name}_a_p",
+        node_a=dc_pos, node_b=mid_a_p,
+        params=params, m_b=m_a_p,
+    )
+    arm_b_p = add_mmc_arm_average(
+        builder, name=f"{name}_b_p",
+        node_a=dc_pos, node_b=mid_b_p,
+        params=params, m_b=m_b_p,
+    )
+    arm_c_p = add_mmc_arm_average(
+        builder, name=f"{name}_c_p",
+        node_a=dc_pos, node_b=mid_c_p,
+        params=params, m_b=m_c_p,
+    )
+    builder.add_inductor(f"{name}_L_a_p", mid_a_p, ac_a, l_b)
+    builder.add_inductor(f"{name}_L_b_p", mid_b_p, ac_b, l_b)
+    builder.add_inductor(f"{name}_L_c_p", mid_c_p, ac_c, l_b)
+
+    # --- Lower half: ac_X → L_b → mid → arm → dc_neg ---
+    mid_a_n = f"{name}_mid_a_n"
+    mid_b_n = f"{name}_mid_b_n"
+    mid_c_n = f"{name}_mid_c_n"
+    builder.add_inductor(f"{name}_L_a_n", ac_a, mid_a_n, l_b)
+    builder.add_inductor(f"{name}_L_b_n", ac_b, mid_b_n, l_b)
+    builder.add_inductor(f"{name}_L_c_n", ac_c, mid_c_n, l_b)
+    arm_a_n = add_mmc_arm_average(
+        builder, name=f"{name}_a_n",
+        node_a=mid_a_n, node_b=dc_neg,
+        params=params, m_b=m_a_n,
+    )
+    arm_b_n = add_mmc_arm_average(
+        builder, name=f"{name}_b_n",
+        node_a=mid_b_n, node_b=dc_neg,
+        params=params, m_b=m_b_n,
+    )
+    arm_c_n = add_mmc_arm_average(
+        builder, name=f"{name}_c_n",
+        node_a=mid_c_n, node_b=dc_neg,
+        params=params, m_b=m_c_n,
+    )
+
+    return MmcThreePhaseDcAc(
+        arm_a_p=arm_a_p, arm_b_p=arm_b_p, arm_c_p=arm_c_p,
+        arm_a_n=arm_a_n, arm_b_n=arm_b_n, arm_c_n=arm_c_n,
+    )
