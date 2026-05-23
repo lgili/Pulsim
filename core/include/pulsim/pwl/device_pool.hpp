@@ -35,6 +35,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <format>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -207,10 +208,10 @@ public:
         const auto it =
             mosfet_level1_gate_node_id_.find(branch_id);
         if (it == mosfet_level1_gate_node_id_.end()) {
-            throw std::out_of_range(
+            throw std::out_of_range(std::format(
                 "DevicePool::mosfet_level1_gate_node: "
-                "branch " + std::to_string(branch_id) +
-                " is not a MosfetLevel1");
+                "branch {} is not a MosfetLevel1",
+                branch_id));
         }
         return it->second;
     }
@@ -236,10 +237,9 @@ public:
     vcvs_input_nodes(Index branch_id) const {
         const auto it = vcvs_input_nodes_.find(branch_id);
         if (it == vcvs_input_nodes_.end()) {
-            throw std::out_of_range(
-                "DevicePool::vcvs_input_nodes: branch " +
-                std::to_string(branch_id) +
-                " is not a VCVS");
+            throw std::out_of_range(std::format(
+                "DevicePool::vcvs_input_nodes: branch {} is not a VCVS",
+                branch_id));
         }
         return it->second;
     }
@@ -285,10 +285,10 @@ public:
         const auto it =
             igbt_level1_gate_node_id_.find(branch_id);
         if (it == igbt_level1_gate_node_id_.end()) {
-            throw std::out_of_range(
+            throw std::out_of_range(std::format(
                 "DevicePool::igbt_level1_gate_node: "
-                "branch " + std::to_string(branch_id) +
-                " is not an IgbtLevel1");
+                "branch {} is not an IgbtLevel1",
+                branch_id));
         }
         return it->second;
     }
@@ -344,136 +344,75 @@ public:
     [[nodiscard]] StoredKind kind_of(Index branch_id) const {
         const auto it = entries_.find(branch_id);
         if (it == entries_.end()) {
-            throw std::out_of_range(
-                "DevicePool::kind_of: branch_id " +
-                std::to_string(branch_id) + " not registered");
+            throw std::out_of_range(std::format(
+                "DevicePool::kind_of: branch_id {} not registered",
+                branch_id));
         }
         return static_cast<StoredKind>(it->second.index());
     }
 
     [[nodiscard]] const models::Resistor::Params&
     resistor_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::Resistor::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::resistor_params: branch " +
-                std::to_string(branch_id) + " is not a Resistor");
-        }
-        return std::get<models::Resistor::Params>(entry);
+        return require_params_<models::Resistor::Params>(
+            branch_id, "resistor_params", "a Resistor");
     }
 
     [[nodiscard]] const models::VoltageSource::Params&
     voltage_source_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::VoltageSource::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::voltage_source_params: branch " +
-                std::to_string(branch_id) + " is not a VoltageSource");
-        }
-        return std::get<models::VoltageSource::Params>(entry);
+        return require_params_<models::VoltageSource::Params>(
+            branch_id, "voltage_source_params", "a VoltageSource");
     }
 
     [[nodiscard]] const models::CurrentSource::Params&
     current_source_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::CurrentSource::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::current_source_params: branch " +
-                std::to_string(branch_id) + " is not a CurrentSource");
-        }
-        return std::get<models::CurrentSource::Params>(entry);
+        return require_params_<models::CurrentSource::Params>(
+            branch_id, "current_source_params", "a CurrentSource");
     }
 
     [[nodiscard]] const models::PWMVoltageSource::Params&
     pwm_voltage_source_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::PWMVoltageSource::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::pwm_voltage_source_params: "
-                "branch " + std::to_string(branch_id) +
-                " is not a PWMVoltageSource");
-        }
-        return std::get<models::PWMVoltageSource::Params>(entry);
+        return require_params_<models::PWMVoltageSource::Params>(
+            branch_id, "pwm_voltage_source_params",
+            "a PWMVoltageSource");
     }
 
     [[nodiscard]] const models::SineVoltageSource::Params&
     sine_voltage_source_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::SineVoltageSource::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::sine_voltage_source_params: "
-                "branch " + std::to_string(branch_id) +
-                " is not a SineVoltageSource");
-        }
-        return std::get<models::SineVoltageSource::Params>(entry);
+        return require_params_<models::SineVoltageSource::Params>(
+            branch_id, "sine_voltage_source_params",
+            "a SineVoltageSource");
     }
 
     [[nodiscard]] const models::PulseVoltageSource::Params&
     pulse_voltage_source_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::PulseVoltageSource::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::pulse_voltage_source_params: "
-                "branch " + std::to_string(branch_id) +
-                " is not a PulseVoltageSource");
-        }
-        return std::get<models::PulseVoltageSource::Params>(entry);
+        return require_params_<models::PulseVoltageSource::Params>(
+            branch_id, "pulse_voltage_source_params",
+            "a PulseVoltageSource");
     }
 
     [[nodiscard]] const models::MosfetLevel1::Params&
     mosfet_level1_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::MosfetLevel1::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::mosfet_level1_params: branch " +
-                std::to_string(branch_id) +
-                " is not a MosfetLevel1");
-        }
-        return std::get<models::MosfetLevel1::Params>(entry);
+        return require_params_<models::MosfetLevel1::Params>(
+            branch_id, "mosfet_level1_params", "a MosfetLevel1");
     }
 
     [[nodiscard]] const models::SaturableInductor::Params&
     saturable_inductor_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::SaturableInductor::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::saturable_inductor_params: "
-                "branch " + std::to_string(branch_id) +
-                " is not a SaturableInductor");
-        }
-        return std::get<
-            models::SaturableInductor::Params>(entry);
+        return require_params_<models::SaturableInductor::Params>(
+            branch_id, "saturable_inductor_params",
+            "a SaturableInductor");
     }
 
     [[nodiscard]] const models::VCVS::Params&
     vcvs_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::VCVS::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::vcvs_params: branch " +
-                std::to_string(branch_id) +
-                " is not a VCVS");
-        }
-        return std::get<models::VCVS::Params>(entry);
+        return require_params_<models::VCVS::Params>(
+            branch_id, "vcvs_params", "a VCVS");
     }
 
     [[nodiscard]] const models::IgbtLevel1::Params&
     igbt_level1_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<
-                models::IgbtLevel1::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::igbt_level1_params: branch " +
-                std::to_string(branch_id) +
-                " is not an IgbtLevel1");
-        }
-        return std::get<models::IgbtLevel1::Params>(entry);
+        return require_params_<models::IgbtLevel1::Params>(
+            branch_id, "igbt_level1_params", "an IgbtLevel1");
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -485,47 +424,26 @@ public:
 
     [[nodiscard]] const models::Capacitor::Params&
     capacitor_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::Capacitor::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::capacitor_params: branch " +
-                std::to_string(branch_id) + " is not a Capacitor");
-        }
-        return std::get<models::Capacitor::Params>(entry);
+        return require_params_<models::Capacitor::Params>(
+            branch_id, "capacitor_params", "a Capacitor");
     }
 
     [[nodiscard]] const models::Inductor::Params&
     inductor_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::Inductor::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::inductor_params: branch " +
-                std::to_string(branch_id) + " is not an Inductor");
-        }
-        return std::get<models::Inductor::Params>(entry);
+        return require_params_<models::Inductor::Params>(
+            branch_id, "inductor_params", "an Inductor");
     }
 
     [[nodiscard]] const models::SwitchedDiode::Params&
     diode_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::SwitchedDiode::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::diode_params: branch " +
-                std::to_string(branch_id) + " is not a Diode");
-        }
-        return std::get<models::SwitchedDiode::Params>(entry);
+        return require_params_<models::SwitchedDiode::Params>(
+            branch_id, "diode_params", "a Diode");
     }
 
     [[nodiscard]] const models::IdealDiode::Params&
     nonlinear_diode_params(Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<models::IdealDiode::Params>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::nonlinear_diode_params: branch " +
-                std::to_string(branch_id) +
-                " is not a NonlinearDiode");
-        }
-        return std::get<models::IdealDiode::Params>(entry);
+        return require_params_<models::IdealDiode::Params>(
+            branch_id, "nonlinear_diode_params", "a NonlinearDiode");
     }
 
     /// Iterate diode branch ids in insertion (= branch) order.
@@ -551,9 +469,10 @@ public:
         Index branch_id, const topology::Graph& graph) const {
         const auto it = source_branch_var_id_.find(branch_id);
         if (it == source_branch_var_id_.end()) {
-            throw std::out_of_range(
-                "DevicePool::branch_var_id_for_source: branch " +
-                std::to_string(branch_id) + " is not a VoltageSource");
+            throw std::out_of_range(std::format(
+                "DevicePool::branch_var_id_for_source: "
+                "branch {} is not a VoltageSource",
+                branch_id));
         }
         return static_cast<Index>(graph.num_nodes()) + it->second;
     }
@@ -576,9 +495,10 @@ public:
         Index branch_id, const topology::Graph& graph) const {
         const auto it = inductor_branch_var_id_.find(branch_id);
         if (it == inductor_branch_var_id_.end()) {
-            throw std::out_of_range(
-                "DevicePool::branch_var_id_for_inductor: branch " +
-                std::to_string(branch_id) + " is not an Inductor");
+            throw std::out_of_range(std::format(
+                "DevicePool::branch_var_id_for_inductor: "
+                "branch {} is not an Inductor",
+                branch_id));
         }
         return static_cast<Index>(graph.num_nodes()) +
                static_cast<Index>(num_sources_) + it->second;
@@ -590,13 +510,24 @@ public:
 
     /// Total count of dynamic devices (Capacitor + Inductor). Used
     /// by Layer 5's HistoryState to size itself.
+    ///
+    /// Implemented via `std::visit` so adding a new dynamic-device
+    /// alternative to `Entry` causes a compile error here unless
+    /// it's explicitly classified (compiler reminds you to update
+    /// the visitor — exhaustiveness check on a closed variant).
     [[nodiscard]] Size num_dynamic_branches() const noexcept {
         Size n = 0;
         for (const auto& [_, entry] : entries_) {
-            if (std::holds_alternative<models::Capacitor::Params>(entry) ||
-                std::holds_alternative<models::Inductor::Params>(entry)) {
-                ++n;
-            }
+            n += std::visit(
+                []<typename T>(const T&) noexcept -> Size {
+                    using Pure = std::decay_t<T>;
+                    return std::is_same_v<Pure,
+                               models::Capacitor::Params> ||
+                           std::is_same_v<Pure,
+                               models::Inductor::Params>
+                        ? Size{1} : Size{0};
+                },
+                entry);
         }
         return n;
     }
@@ -629,22 +560,38 @@ private:
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
         if (it == entries_.end()) {
-            throw std::out_of_range(
-                "DevicePool: branch_id " + std::to_string(branch_id) +
-                " not registered");
+            throw std::out_of_range(std::format(
+                "DevicePool: branch_id {} not registered",
+                branch_id));
         }
         return it->second;
     }
 
+    /// Single-shot `get_if`-based accessor. Avoids the double
+    /// type-id dispatch of `holds_alternative + std::get` (which
+    /// the compiler can usually fold but isn't required to), and
+    /// collapses the per-device accessor body to a one-liner.
+    /// `kind_label` is the human-readable device kind ("a Resistor",
+    /// "an Inductor", …) — the leading article is part of the label
+    /// so we get grammar right in error messages.
+    template <typename T>
+    [[nodiscard]] const T& require_params_(
+        Index branch_id,
+        std::string_view method_name,
+        std::string_view kind_label) const {
+        const auto& entry = entry_at(branch_id);
+        if (const auto* p = std::get_if<T>(&entry)) {
+            return *p;
+        }
+        throw std::out_of_range(std::format(
+            "DevicePool::{}: branch {} is not {}",
+            method_name, branch_id, kind_label));
+    }
+
     [[nodiscard]] const SwitchParams& switch_params_at(
         Index branch_id) const {
-        const auto& entry = entry_at(branch_id);
-        if (!std::holds_alternative<SwitchParams>(entry)) {
-            throw std::out_of_range(
-                "DevicePool::switch_params: branch " +
-                std::to_string(branch_id) + " is not a Switch");
-        }
-        return std::get<SwitchParams>(entry);
+        return require_params_<SwitchParams>(
+            branch_id, "switch_params", "a Switch");
     }
 
     numeric::Dictionary<Index, Entry> entries_;
