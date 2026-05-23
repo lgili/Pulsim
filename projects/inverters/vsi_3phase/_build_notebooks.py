@@ -408,6 +408,13 @@ You've seen:
 The dq frame is what enables straightforward control of a 3-phase
 inverter — the buck-control intuition transfers verbatim.
 
+**Cross-validation against Pulsim**: open
+[`00_vsi_pulsim_validation.ipynb`](00_vsi_pulsim_validation.ipynb)
+for an executed notebook that builds the 3-phase VSI in Pulsim
+(``pulsim.topology.add_three_phase_vsi`` + ``add_three_phase_rl_load``
++ ``make_three_phase_spwm_fn``) and overlays the phase and
+line-to-line voltages against the analytical fundamental.
+
 **Next notebooks**:
 
 - `02_vsi_svpwm.ipynb` — derive SVPWM, prove the min-max injection

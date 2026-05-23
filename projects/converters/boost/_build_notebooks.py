@@ -513,112 +513,19 @@ print("✅  All three self-consistency checks pass.")
 """))
 
     cells.append(md(r"""
-## 9. Cross-validation against a switched Pulsim simulation (optional)
-
-Build the same boost in Pulsim and confirm the steady-state output
-matches $V_g/(1-D)$. Cold-start, run for 5 ms, average over the
-last 1 ms (the LC pole is lightly damped so settling takes longer
-than a buck).
-"""))
-
-    cells.append(code(r"""
-try:
-    import pulsim as ps
-    HAVE_PULSIM = True
-except ImportError as exc:
-    print(f"Skipping Pulsim cross-validation: {exc}")
-    HAVE_PULSIM = False
-"""))
-
-    cells.append(code(r"""
-def build_pulsim_boost(p: BoostParams, duty: float):
-    '''Pulsim boost: V_g → L → (S to gnd) → D → C ∥ R → gnd.'''
-    import pulsim as ps
-
-    ckt = ps.Circuit()
-    vin   = ckt.add_node("vin")
-    sw    = ckt.add_node("sw")
-    out   = ckt.add_node("out")
-    ctrl  = ckt.add_node("ctrl")
-    gnd   = ckt.ground()
-
-    ckt.add_voltage_source("Vdc", vin, gnd, p.V_g)
-
-    pulse = ps.PulseParams()
-    pulse.v_initial = 0.0; pulse.v_pulse = 5.0
-    pulse.t_rise = 1e-9; pulse.t_fall = 1e-9
-    pulse.t_width = duty / p.f_sw
-    pulse.period = 1.0 / p.f_sw
-    ckt.add_pulse_voltage_source("Vpwm", ctrl, gnd, pulse)
-
-    ckt.add_inductor("L1", vin, sw, p.L, 0.0)
-    # Switch: from sw to gnd (turning on shorts L's right side to ground)
-    ckt.add_vcswitch("S1", ctrl, sw, gnd, v_threshold=2.5)
-    # Output diode: anode=sw, cathode=out (current flows sw→out when S is off)
-    ckt.add_diode("D1", sw, out)
-    ckt.add_capacitor("C1", out, gnd, p.C, 0.0)
-    ckt.add_resistor("Rload", out, gnd, p.R)
-    return ckt
-"""))
-
-    cells.append(code(r"""
-if HAVE_PULSIM:
-    ckt = build_pulsim_boost(params, duty=params.D)
-    sim = ps.Simulator(ckt)
-    opts = ps.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 8e-3       # boost LC is lightly damped — give it time
-    opts.dt = 5e-8
-    opts.dt_max = 1e-6
-    sim.options = opts
-    result = sim.run_transient()
-
-    t_sim = np.asarray(result.time)
-    states = np.asarray(result.states)
-    signal_names = list(result.signal_names)
-    v_o_idx = signal_names.index("V(out)")
-    v_o_sim = states[:, v_o_idx]
-
-    tail = t_sim >= t_sim[-1] - 1e-3
-    v_o_dc = np.mean(v_o_sim[tail])
-    print(f"  Pulsim transient: {len(t_sim)} samples over {t_sim[-1]*1e3:.2f} ms")
-    print(f"  Pulsim V_o (mean over last 1 ms): {v_o_dc:.4f} V")
-    print(f"  Analytical V_o = V_g/(1-D)      : {params.V_o:.4f} V")
-    rel_err = abs(v_o_dc - params.V_o) / max(abs(params.V_o), 1e-9)
-    print(f"  Relative error                  : {rel_err * 100:.2f} %")
-    if rel_err < 0.10:
-        print(f"  ✅  Steady-state matches within 10 %.")
-    else:
-        print(f"  ⚠️   Larger steady-state mismatch — boost is lightly damped, "
-              f"may need longer t_end.")
-"""))
-
-    cells.append(code(r"""
-if HAVE_PULSIM:
-    fig, ax = plt.subplots(figsize=(11, 5))
-    ax.plot(t_sim * 1e3, v_o_sim, color="C0", linewidth=0.7,
-            label="Pulsim $v_o$ (instantaneous, with ripple)")
-    ax.axhline(params.V_o, color="C3", linestyle="--", linewidth=1.5,
-               label=f"Analytical $V_o = V_g/(1-D)$ = {params.V_o:.2f} V")
-    ax.axhline(v_o_dc, color="k", linestyle=":", linewidth=1.0,
-               label=f"Pulsim mean (last 1 ms) = {v_o_dc:.3f} V")
-    ax.set_xlabel("Time [ms]")
-    ax.set_ylabel("$v_o$ [V]")
-    ax.set_title(f"Pulsim cold-start boost at D = {params.D:.2f}, "
-                 f"$V_g$ = {params.V_g} V → $V_o$ ≈ {params.V_o} V")
-    ax.legend(loc="lower right")
-    plt.tight_layout()
-    plt.show()
-"""))
-
-    cells.append(md(r"""
-## 10. Summary
+## 9. Summary
 
 You derived an ideal boost average model and found the
 right-half-plane zero in $G_{vd}(s)$ at $\omega_{z,RHP} = R(1-D)^2/L$.
 That zero is what makes boost control fundamentally harder than buck
 control. The closed-loop bandwidth is capped at ~$f_{z}/5$, beyond
 which the controller's commands actually destabilize the loop.
+
+**Cross-validation against Pulsim**: open
+[`00_boost_pulsim_validation.ipynb`](00_boost_pulsim_validation.ipynb)
+for an executed notebook that builds the same boost topology in
+Pulsim, runs the switched transient, and shows the RHP-zero
+dip-and-recover on a duty step.
 
 **Next**: open `02_boost_controller.ipynb` to design a compensator
 that respects this constraint, then run a switched closed-loop
