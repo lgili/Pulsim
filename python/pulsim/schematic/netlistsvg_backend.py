@@ -259,26 +259,28 @@ def _build_yosys_json(components: list, ground_id: int) -> dict[str, Any]:
 def render_netlistsvg(
     circuit: Any,
     svg_path: Any,
-    position_hints: dict[str, dict[str, Any]] | None = None,
 ) -> Path:
     """Render a Pulsim Circuit to SVG via netlistsvg + analog skin.
 
-    ``position_hints`` is **reserved but not yet implemented** — see
-    [`openspec/changes/add-schematic-position-hints`](../../../openspec/changes/add-schematic-position-hints)
-    for the tracking proposal. The empirical finding: netlistsvg 1.0.2's
-    ``--layout`` flag has two real upstream bugs (a) Promise-path renders
-    the SVG into ``undefined`` when ``elkData`` is supplied, (b) overriding
-    ``(x, y)`` on cells without recomputing the cached edge ``sections``
-    produces tangled wires through empty space. Both require either a
-    fork of netlistsvg or replicating its render layer in Python — neither
-    feasible as an MVP. Until a path is implemented, passing
-    ``position_hints`` raises :class:`NotImplementedError`.
+    The previous prototype accepted a ``position_hints`` keyword that
+    was never wired in — netlistsvg 1.0.2's ``--layout`` flag has two
+    real upstream bugs (Promise-path renders into ``undefined`` when
+    ``elkData`` is supplied; overriding ``(x, y)`` on cells without
+    recomputing the cached edge ``sections`` produces tangled wires).
+    Closing that gap requires forking netlistsvg or replicating its
+    render layer in Python; the work is tracked in
+    ``openspec/changes/add-schematic-renderer-v2`` and the historical
+    findings in ``openspec/changes/add-schematic-position-hints``.
+
+    Until a path lands, only the auto-layout (no hints) renderer is
+    exposed. Callers that previously passed ``position_hints=None``
+    or ``{}`` keep working unchanged; callers that passed a populated
+    dict must drop that argument and migrate to the v2 renderer when
+    it ships.
 
     Args:
         circuit: Pulsim Circuit (uses ``components()`` and ``ground()``).
         svg_path: Output SVG path (must end in ``.svg``).
-        position_hints: Reserved for future use; currently must be ``None``
-            or empty.
 
     Returns:
         The :class:`pathlib.Path` of the written SVG.
@@ -286,16 +288,7 @@ def render_netlistsvg(
     Raises:
         ImportError: If the netlistsvg CLI isn't available locally.
         RuntimeError: If the netlistsvg subprocess fails.
-        NotImplementedError: If ``position_hints`` is non-empty (see above).
     """
-    if position_hints:
-        raise NotImplementedError(
-            "pulsim.schematic position hints are tracked but not yet "
-            "implemented — see openspec/changes/add-schematic-position-hints "
-            "for the upstream-bug analysis and the path to a working "
-            "implementation. The auto-layout (no hints) renders correctly."
-        )
-
     binary = _require_netlistsvg()
     components = list(circuit.components())
     ground_id = int(circuit.ground())

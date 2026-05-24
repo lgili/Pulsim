@@ -95,6 +95,34 @@ factory returns PulsimSparseLuSolver by default.
 - **Build prerequisites** — just **Eigen 3.4+ and a C++23 compiler**
   now; no SuiteSparse install needed.
 
+### Fixed — pre-release cleanup
+
+- **`pulsim.device_loss_summary`** now walks both **inductor** and
+  **resistor** branches. Resistor entries report `P_avg` and
+  `E_total` in addition to `i_avg`/`i_rms`/`i_peak` — current is
+  reconstructed from the node-voltage difference and the stored
+  `R_ohms`. Switches and diodes remain deferred (see
+  [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) § *Post-hoc
+  analysis*). Previously the summary covered inductors only and
+  the module docstring advertised a function that the curated
+  `pulsim.*` surface never re-exported.
+- **`pulsim.LossAccumulator`, `pulsim.EfficiencyCalculator`,
+  `pulsim.device_loss_summary`, `pulsim.average_power_at_node`**
+  are now wired into `pulsim.__all__` and importable from the
+  top level. The functions existed in `pulsim/losses.py` from the
+  start but were not exposed, so callers following the module
+  docstring (`p.LossAccumulator()`) hit `AttributeError`.
+- **`pulsim.schematic.render`** — removed the `position_hints=`
+  keyword. Neither backend (`netlistsvg`, `python_native`) ever
+  shipped an implementation; both raised `NotImplementedError` on
+  non-empty input. The auto-layout path is unchanged. The
+  follow-up renderer is tracked as
+  [`add-schematic-renderer-v2`](openspec/changes/add-schematic-renderer-v2/).
+- **`KNOWN_LIMITATIONS.md`** — added at the repository root,
+  cataloguing every deliberately-deferred item carried into v1.3
+  and linking each one back to its OpenSpec proposal or follow-up
+  task.
+
 ## [1.2.0] — 2026-05-24
 
 ### Highlights — PWL rank-1 cache update path (Layer 4 V8)

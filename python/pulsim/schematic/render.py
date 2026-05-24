@@ -255,30 +255,34 @@ def render(
     circuit: Any,
     path: Any,
     format: str | None = None,
-    position_hints: dict[str, dict[str, Any]] | None = None,
 ) -> Path:
     """Render a Pulsim ``Circuit`` to a schematic file.
 
-    The default backend is **netlistsvg** (Phase 4F) — production-grade
-    output with proper analog symbols. Override via the
+    The default backend is **python_native** — a pure-Python renderer
+    that reuses the ELK Java bridge for layout. Override via the
     ``PULSIM_SCHEMATIC_BACKEND`` environment variable:
 
-    - ``netlistsvg`` (default): subprocess to ``netlistsvg`` CLI with
-      the bundled analog skin. SVG is native output; PNG is supported
-      via ``rsvg-convert`` or ``cairosvg``.
+    - ``python_native`` (default): in-tree ELK layered layout + Python
+      SVG emitter. SVG is native output; PNG is supported via
+      ``cairosvg`` or ``rsvg-convert``.
+    - ``netlistsvg`` (deprecated): subprocess to the ``netlistsvg`` CLI
+      with the bundled analog skin. Emits a deprecation warning when
+      explicitly selected.
     - ``elk``: in-tree ELK layered layout + schemdraw render.
     - ``spring``: legacy force-directed + templates + schemdraw.
 
     The output format is inferred from the path extension (``.svg``,
     ``.png``, ``.pdf``, ``.jpg``) unless ``format=`` is passed.
 
-    Position hints (netlistsvg backend only):
-        ``position_hints`` is an optional dict mapping component names to
-        either ``{"layer": int, "slot": int}`` (semantic grid placement) or
-        ``{"x": float, "y": float}`` (absolute layout units). Hinted cells
-        land at the user-specified coordinates; un-hinted cells use the
-        default auto-layout. Useful when the auto-layout produces an
-        unconventional arrangement and you want a textbook layout.
+    .. note::
+
+       v1.3 removed the previously-documented ``position_hints=`` kwarg
+       — neither backend ever shipped a working implementation (both
+       raised ``NotImplementedError`` on non-empty input). Component
+       placement is governed by the auto-layout. The follow-up work is
+       tracked in ``openspec/changes/add-schematic-renderer-v2`` and the
+       upstream-bug analysis lives in
+       ``openspec/changes/add-schematic-position-hints``.
 
     Args:
         circuit: A Pulsim ``Circuit`` (or anything matching the
@@ -286,7 +290,6 @@ def render(
             contract).
         path: Output file path.
         format: Optional explicit format override.
-        position_hints: Optional placement hints (netlistsvg backend).
 
     Returns:
         The :class:`pathlib.Path` of the written file.
@@ -322,18 +325,13 @@ def render(
 
     if backend == "python_native":
         # `add-python-schematic-renderer` (Phases 1-4): pure-Python
-        # renderer that reuses `elk_bridge.js` for layout. Hints (user
-        # via `Circuit.set_position` / YAML `position:` + topology
-        # auto-layouts) flow into ELK as constraints, then a
-        # post-process layer overrides cell positions deterministically.
+        # renderer that reuses `elk_bridge.js` for layout. The
+        # position-hint pipeline (placing user-specified cells on a
+        # semantic grid) is tracked in
+        # ``openspec/changes/add-schematic-renderer-v2``; until then the
+        # auto-layout governs every cell position.
         from .native_backend import render_native
         if fmt == "svg":
-            if position_hints:
-                raise NotImplementedError(
-                    "position hints are tracked for Phase 2/3 of "
-                    "`add-python-schematic-renderer` and not yet wired into "
-                    "the python_native backend."
-                )
             return render_native(circuit, out_path)
         # PNG / PDF / JPG: render SVG first then convert via rsvg-convert.
         with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as tmp:
@@ -369,12 +367,12 @@ def render(
 
     if backend == "netlistsvg":
         if fmt == "svg":
-            return render_netlistsvg(circuit, out_path, position_hints=position_hints)
+            return render_netlistsvg(circuit, out_path)
         # PNG / PDF / JPG: render to a temp SVG first, then convert.
         with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as tmp:
             svg_tmp = Path(tmp.name)
         try:
-            render_netlistsvg(circuit, svg_tmp, position_hints=position_hints)
+            render_netlistsvg(circuit, svg_tmp)
             if fmt == "png":
                 _svg_to_png(svg_tmp, out_path)
             else:
