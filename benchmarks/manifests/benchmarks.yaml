@@ -1,86 +1,105 @@
+# Pulsim benchmark manifest.
+#
+# Path convention (post structural reorg, see REORG_PLAN.md phases A–E):
+#   * `path:` / `ngspice_netlist:` / `ltspice_netlist:` / `baseline:`
+#     entries are resolved RELATIVE TO `benchmarks/` (the suite root,
+#     i.e. the parent of this `manifests/` directory).
+#   * Runners must use `benchmarks/` as the path resolution base, NOT
+#     the manifest's own parent directory.
+#
+# Layout:
+#   benchmarks/
+#   ├── circuits/    YAML netlists      (path: circuits/<name>.yaml)
+#   ├── spice/       SPICE backends     (ngspice_netlist: spice/ngspice/…)
+#   │                                   (ltspice_netlist: spice/ltspice/…)
+#   ├── baselines/   reference CSVs     (baseline: baselines/<name>.csv)
+#   ├── manifests/   <- this file lives here
+#   ├── tools/       bench runners (benchmark_runner.py, etc.)
+#   └── kpi_baselines/  frozen KPI snapshots
+
 benchmarks:
   - path: circuits/rc_step.yaml
-    ngspice_netlist: ngspice/rc_step.cir
-    ltspice_netlist: ltspice/rc_step.cir
+    ngspice_netlist: spice/ngspice/rc_step.cir
+    ltspice_netlist: spice/ltspice/rc_step.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, gmres_trbdf2, jfnk_trbdf2]
   - path: circuits/rl_step.yaml
-    ngspice_netlist: ngspice/rl_step.cir
-    ltspice_netlist: ltspice/rl_step.cir
+    ngspice_netlist: spice/ngspice/rl_step.cir
+    ltspice_netlist: spice/ltspice/rl_step.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, gmres_trbdf2]
   - path: circuits/rlc_step.yaml
-    ngspice_netlist: ngspice/rlc_step.cir
-    ltspice_netlist: ltspice/rlc_step.cir
+    ngspice_netlist: spice/ngspice/rlc_step.cir
+    ltspice_netlist: spice/ltspice/rlc_step.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, gmres_trbdf2]
   - path: circuits/rc_dc.yaml
-    ngspice_netlist: ngspice/rc_circuit.cir
-    ltspice_netlist: ltspice/rc_circuit.cir
+    ngspice_netlist: spice/ngspice/rc_circuit.cir
+    ltspice_netlist: spice/ltspice/rc_circuit.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap]
   - path: circuits/diode_rectifier.yaml
-    ngspice_netlist: ngspice/diode_rectifier.cir
+    ngspice_netlist: spice/ngspice/diode_rectifier.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/buck_switching.yaml
-    ngspice_netlist: ngspice/buck_switching.cir
+    ngspice_netlist: spice/ngspice/buck_switching.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
-    ltspice_netlist: ltspice/buck_switching.cir
+    ltspice_netlist: spice/ltspice/buck_switching.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
   - path: circuits/buck_igbt.yaml
-    ngspice_netlist: ngspice/buck_igbt.cir
+    ngspice_netlist: spice/ngspice/buck_igbt.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap, trbdf2]
   - path: circuits/boost_switching_complex.yaml
-    ngspice_netlist: ngspice/boost_switching_complex.cir
+    ngspice_netlist: spice/ngspice/boost_switching_complex.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
-    ltspice_netlist: ltspice/boost_switching_complex.cir
+    ltspice_netlist: spice/ltspice/boost_switching_complex.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
   - path: circuits/interleaved_buck_3ph.yaml
-    ngspice_netlist: ngspice/interleaved_buck_3ph.cir
+    ngspice_netlist: spice/ngspice/interleaved_buck_3ph.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
-    ltspice_netlist: ltspice/interleaved_buck_3ph.cir
+    ltspice_netlist: spice/ltspice/interleaved_buck_3ph.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
   - path: circuits/buck_mosfet_nonlinear.yaml
-    ngspice_netlist: ngspice/buck_mosfet_nonlinear.cir
+    ngspice_netlist: spice/ngspice/buck_mosfet_nonlinear.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
-    ltspice_netlist: ltspice/buck_mosfet_nonlinear.cir
+    ltspice_netlist: spice/ltspice/buck_mosfet_nonlinear.cir
     ltspice_observables:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [trbdf2]
   - path: circuits/stiff_rlc.yaml
-    ngspice_netlist: ngspice/stiff_rlc.cir
+    ngspice_netlist: spice/ngspice/stiff_rlc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -96,13 +115,13 @@ benchmarks:
 
   # ----- Component-coverage benchmarks (Phase 7) -----
   - path: circuits/current_source_rc.yaml
-    ngspice_netlist: ngspice/current_source_rc.cir
+    ngspice_netlist: spice/ngspice/current_source_rc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/current_source_rl_step.yaml
-    ngspice_netlist: ngspice/current_source_rl_step.cir
+    ngspice_netlist: spice/ngspice/current_source_rl_step.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -112,25 +131,25 @@ benchmarks:
     # has internal adaptive timestep that damps the equivalent.
     scenarios: [gmres_trbdf2]
   - path: circuits/rl_high_pass_sine.yaml
-    ngspice_netlist: ngspice/rl_high_pass_sine.cir
+    ngspice_netlist: spice/ngspice/rl_high_pass_sine.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
   - path: circuits/rlc_overdamped_step.yaml
-    ngspice_netlist: ngspice/rlc_overdamped_step.cir
+    ngspice_netlist: spice/ngspice/rlc_overdamped_step.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/two_stage_rc_lowpass.yaml
-    ngspice_netlist: ngspice/two_stage_rc_lowpass.cir
+    ngspice_netlist: spice/ngspice/two_stage_rc_lowpass.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/lc_resonant_tank.yaml
-    ngspice_netlist: ngspice/lc_resonant_tank.cir
+    ngspice_netlist: spice/ngspice/lc_resonant_tank.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -138,14 +157,14 @@ benchmarks:
     # drift over many oscillation cycles.
     scenarios: [gmres_trbdf2]
   - path: circuits/current_divider_3way.yaml
-    ngspice_netlist: ngspice/current_divider_3way.cir
+    ngspice_netlist: spice/ngspice/current_divider_3way.cir
     ngspice_observables:
       - column: V(node)
         spice_vector: v(node)
     scenarios: [direct_trap]
   # ----- Model-interaction batch (Phase 8 — second validation batch) -----
   - path: circuits/diode_clamp_overvoltage.yaml
-    ngspice_netlist: ngspice/diode_clamp_overvoltage.cir
+    ngspice_netlist: spice/ngspice/diode_clamp_overvoltage.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -154,25 +173,25 @@ benchmarks:
     # gmres_trbdf2 is L-stable and tracks the clamp cleanly.
     scenarios: [gmres_trbdf2]
   - path: circuits/pwm_voltage_rl_filter.yaml
-    ngspice_netlist: ngspice/pwm_voltage_rl_filter.cir
+    ngspice_netlist: spice/ngspice/pwm_voltage_rl_filter.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
   - path: circuits/inductor_chain_step.yaml
-    ngspice_netlist: ngspice/inductor_chain_step.cir
+    ngspice_netlist: spice/ngspice/inductor_chain_step.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
   - path: circuits/rl_natural_response.yaml
-    ngspice_netlist: ngspice/rl_natural_response.cir
+    ngspice_netlist: spice/ngspice/rl_natural_response.cir
     ngspice_observables:
       - column: V(node)
         spice_vector: v(node)
     scenarios: [gmres_trbdf2]
   - path: circuits/diode_half_wave_rl_load.yaml
-    ngspice_netlist: ngspice/diode_half_wave_rl_load.cir
+    ngspice_netlist: spice/ngspice/diode_half_wave_rl_load.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -185,25 +204,25 @@ benchmarks:
   # known solver-side issue; the four entries below stick to paths
   # that the solver handles cleanly.
   - path: circuits/capacitor_natural_discharge.yaml
-    ngspice_netlist: ngspice/capacitor_natural_discharge.cir
+    ngspice_netlist: spice/ngspice/capacitor_natural_discharge.cir
     ngspice_observables:
       - column: V(node)
         spice_vector: v(node)
     scenarios: [gmres_trbdf2]
   - path: circuits/voltage_divider_3stage.yaml
-    ngspice_netlist: ngspice/voltage_divider_3stage.cir
+    ngspice_netlist: spice/ngspice/voltage_divider_3stage.cir
     ngspice_observables:
       - column: V(n_mid)
         spice_vector: v(n_mid)
     scenarios: [direct_trap]
   - path: circuits/bridge_resistive_pure.yaml
-    ngspice_netlist: ngspice/bridge_resistive_pure.cir
+    ngspice_netlist: spice/ngspice/bridge_resistive_pure.cir
     ngspice_observables:
       - column: V(a)
         spice_vector: v(a)
     scenarios: [direct_trap]
   - path: circuits/driven_lc_series_resonance.yaml
-    ngspice_netlist: ngspice/driven_lc_series_resonance.cir
+    ngspice_netlist: spice/ngspice/driven_lc_series_resonance.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -222,31 +241,31 @@ benchmarks:
   # files remain on disk as regression-test fixtures for when the
   # solver gains the fix.
   - path: circuits/high_q_rlc_ringdown.yaml
-    ngspice_netlist: ngspice/high_q_rlc_ringdown.cir
+    ngspice_netlist: spice/ngspice/high_q_rlc_ringdown.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
   - path: circuits/stiff_two_timescale_rc.yaml
-    ngspice_netlist: ngspice/stiff_two_timescale_rc.cir
+    ngspice_netlist: spice/ngspice/stiff_two_timescale_rc.cir
     ngspice_observables:
       - column: V(slow)
         spice_vector: v(slow)
     scenarios: [gmres_trbdf2]
   - path: circuits/back_to_back_diodes_sine.yaml
-    ngspice_netlist: ngspice/back_to_back_diodes_sine.cir
+    ngspice_netlist: spice/ngspice/back_to_back_diodes_sine.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
   - path: circuits/rlc_parallel_step.yaml
-    ngspice_netlist: ngspice/rlc_parallel_step.cir
+    ngspice_netlist: spice/ngspice/rlc_parallel_step.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
   - path: circuits/pulse_voltage_rl.yaml
-    ngspice_netlist: ngspice/pulse_voltage_rl.cir
+    ngspice_netlist: spice/ngspice/pulse_voltage_rl.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -271,43 +290,43 @@ benchmarks:
   # ngspice. The goal: a runnable matrix that proves every supported
   # component in the parser still produces SPICE-equivalent behavior.
   - path: circuits/sine_voltage_rc.yaml
-    ngspice_netlist: ngspice/sine_voltage_rc.cir
+    ngspice_netlist: spice/ngspice/sine_voltage_rc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/pwm_voltage_rc.yaml
-    ngspice_netlist: ngspice/pwm_voltage_rc.cir
+    ngspice_netlist: spice/ngspice/pwm_voltage_rc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/snubber_rc.yaml
-    ngspice_netlist: ngspice/snubber_rc.cir
+    ngspice_netlist: spice/ngspice/snubber_rc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/vcswitch_resistor.yaml
-    ngspice_netlist: ngspice/vcswitch_resistor.cir
+    ngspice_netlist: spice/ngspice/vcswitch_resistor.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/mosfet_nmos_dc.yaml
-    ngspice_netlist: ngspice/mosfet_nmos_dc.cir
+    ngspice_netlist: spice/ngspice/mosfet_nmos_dc.cir
     ngspice_observables:
       - column: V(drain)
         spice_vector: v(drain)
     scenarios: [direct_trap]
   - path: circuits/coupled_inductor_step.yaml
-    ngspice_netlist: ngspice/coupled_inductor_step.cir
+    ngspice_netlist: spice/ngspice/coupled_inductor_step.cir
     ngspice_observables:
       - column: V(sec)
         spice_vector: v(sec)
     scenarios: [direct_trap]
   - path: circuits/transformer_leakage.yaml
-    ngspice_netlist: ngspice/transformer_leakage.cir
+    ngspice_netlist: spice/ngspice/transformer_leakage.cir
     ngspice_observables:
       - column: V(sec)
         spice_vector: v(sec)
@@ -317,13 +336,13 @@ benchmarks:
   # Progressively heavier topologies designed to find solver +
   # component-coverage gaps. Each pushes a different stress axis.
   - path: circuits/synchronous_buck.yaml
-    ngspice_netlist: ngspice/synchronous_buck.cir
+    ngspice_netlist: spice/ngspice/synchronous_buck.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/half_bridge_inverter.yaml
-    ngspice_netlist: ngspice/half_bridge_inverter.cir
+    ngspice_netlist: spice/ngspice/half_bridge_inverter.cir
     ngspice_observables:
       - column: V(load)
         spice_vector: v(load)
@@ -349,7 +368,7 @@ benchmarks:
   # stamp + diode commutation simply needs the same
   # rejection-tolerant config the other switching benches use.
   - path: circuits/flyback_converter.yaml
-    ngspice_netlist: ngspice/flyback_converter.cir
+    ngspice_netlist: spice/ngspice/flyback_converter.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -359,13 +378,13 @@ benchmarks:
     # falls back to TRBDF2) and the manifest run passes.
     scenarios: [trbdf2]
   - path: circuits/boost_classic.yaml
-    ngspice_netlist: ngspice/boost_classic.cir
+    ngspice_netlist: spice/ngspice/boost_classic.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/buck_boost.yaml
-    ngspice_netlist: ngspice/buck_boost.cir
+    ngspice_netlist: spice/ngspice/buck_boost.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -381,25 +400,25 @@ benchmarks:
   - path: circuits/cascaded_boost_buck.yaml
     scenarios: [default]
   - path: circuits/cascaded_buck_buck.yaml
-    ngspice_netlist: ngspice/cascaded_buck_buck.cir
+    ngspice_netlist: spice/ngspice/cascaded_buck_buck.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/sync_buck_500khz.yaml
-    ngspice_netlist: ngspice/sync_buck_500khz.cir
+    ngspice_netlist: spice/ngspice/sync_buck_500khz.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/triple_sync_buck.yaml
-    ngspice_netlist: ngspice/triple_sync_buck.cir
+    ngspice_netlist: spice/ngspice/triple_sync_buck.cir
     ngspice_observables:
       - column: V(out_b)
         spice_vector: v(out_b)
     scenarios: [direct_trap]
   - path: circuits/buck_dcm.yaml
-    ngspice_netlist: ngspice/buck_dcm.cir
+    ngspice_netlist: spice/ngspice/buck_dcm.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -411,49 +430,49 @@ benchmarks:
   # transformer_dc, npc_three_level_halfbridge) — see DEFERRED
   # comments below.
   - path: circuits/diode_bridge_rectifier.yaml
-    ngspice_netlist: ngspice/diode_bridge_rectifier.cir
+    ngspice_netlist: spice/ngspice/diode_bridge_rectifier.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/sepic.yaml
-    ngspice_netlist: ngspice/sepic.cir
+    ngspice_netlist: spice/ngspice/sepic.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/cuk_converter.yaml
-    ngspice_netlist: ngspice/cuk_converter.cir
+    ngspice_netlist: spice/ngspice/cuk_converter.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/voltage_doubler.yaml
-    ngspice_netlist: ngspice/voltage_doubler.cir
+    ngspice_netlist: spice/ngspice/voltage_doubler.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/two_phase_interleaved_boost.yaml
-    ngspice_netlist: ngspice/two_phase_interleaved_boost.cir
+    ngspice_netlist: spice/ngspice/two_phase_interleaved_boost.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/synchronous_flyback.yaml
-    ngspice_netlist: ngspice/synchronous_flyback.cir
+    ngspice_netlist: spice/ngspice/synchronous_flyback.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [trbdf2]
   - path: circuits/bidirectional_buck_boost.yaml
-    ngspice_netlist: ngspice/bidirectional_buck_boost.cir
+    ngspice_netlist: spice/ngspice/bidirectional_buck_boost.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
   - path: circuits/three_phase_diode_rectifier.yaml
-    ngspice_netlist: ngspice/three_phase_diode_rectifier.cir
+    ngspice_netlist: spice/ngspice/three_phase_diode_rectifier.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
@@ -462,13 +481,13 @@ benchmarks:
     # trbdf2 (both of which lose accuracy on this circuit).
     scenarios: [direct_bdf1]
   - path: circuits/forward_converter.yaml
-    ngspice_netlist: ngspice/forward_converter.cir
+    ngspice_netlist: spice/ngspice/forward_converter.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [trbdf2]
   - path: circuits/buck_with_current_sense.yaml
-    ngspice_netlist: ngspice/buck_with_current_sense.cir
+    ngspice_netlist: spice/ngspice/buck_with_current_sense.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
