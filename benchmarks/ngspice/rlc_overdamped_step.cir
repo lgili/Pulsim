@@ -1,0 +1,14 @@
+* Series RLC overdamped step — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/rlc_overdamped_step.yaml
+*
+* ζ = R/2 · sqrt(C/L) = 200/2 · sqrt(1e-6/1e-3) = 100 · 0.0316 = 3.16
+* → overdamped (ζ > 1), two real roots, pure exponential decay.
+* Source: 10 V pulse with 1 ns rise; observe V across C.
+
+Vp in 0 PULSE(0 10 0 1n 1n 10m 20m)
+R1 in n_l 200
+L1 n_l out 1m IC=0
+C1 out 0 1u IC=0
+
+.tran 5u 5m UIC
+.end

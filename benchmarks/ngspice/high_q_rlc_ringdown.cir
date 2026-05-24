@@ -1,0 +1,13 @@
+* High-Q (Q=316) series RLC ringdown — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/high_q_rlc_ringdown.yaml
+*
+* R = 0.1 Ω, L = 1 mH, C = 1 µF → Q = 316, f_0 = 5033 Hz.
+* Stress test: ~50 ringdown cycles in 10 ms, each only 3% damped.
+
+Vp in 0   PULSE(0 10 0 1n 1n 20m 40m)
+R1 in n_l 0.1
+L1 n_l out 1m IC=0
+C1 out 0  1u IC=0
+
+.tran 2u 10m UIC
+.end

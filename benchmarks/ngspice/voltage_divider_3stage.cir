@@ -1,0 +1,15 @@
+* 3-resistor voltage divider (DC OP) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/voltage_divider_3stage.yaml
+*
+* 12 V across 100 + 200 + 300 Ω series. I = 20 mA.
+* V(n_mid) = 12 - 0.02·100 = 10 V.
+* V(n_low) = 6 V.
+* Pure DC OP — both simulators settle in one sample. Sub-µV match.
+
+Vsrc vcc   0     DC 12
+R1   vcc   n_mid 100
+R2   n_mid n_low 200
+R3   n_low 0     300
+
+.tran 5u 1m
+.end

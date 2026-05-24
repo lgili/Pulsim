@@ -1,0 +1,62 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: diode_half_wave_rl_load
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # AC source → diode → RL load. Half-wave rectifier driving an
+      # inductive load. The inductor extends conduction PAST the source
+      # zero-crossing (i_L > 0 keeps the diode on until i_L decays to
+      # zero through R). Different from existing half_wave_rectifier_sine
+      # which has a pure RC or R load.
+      # Sine peak 10 V, R=10Ω, L=1mH → ωL = 314 mΩ at 50 Hz (still
+      # mostly resistive at this freq).
+      #
+      # KNOWN MODEL GAP: Pulsim's diode g_on=200 gives V_F ≈ i·R_on ≈
+      # 5 mV at 1 A. ngspice's DIODEMOD(IS=1e-12) gives Shockley V_F ≈
+      # 0.7 V at 1 A. The two clamp levels differ by ~700 mV → the
+      # peak observable on each conducting half-cycle differs by that.
+      # Threshold sized to accommodate this model difference, NOT the
+      # numerical accuracy of either simulator.
+      max_error: 1.0
+
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/diode_half_wave_rl_load.csv
+# AC source + series diode + RL load. Tests diode + inductor
+# interaction during half-cycle conduction. The inductive load
+# extends conduction past zero-crossing (back-EMF holds diode
+# forward) and adds a phase lag.
+simulation:
+  tstop: 60e-3
+  dt: 20e-6
+  integrator: trbdf2
+  uic: true
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [in, 0]
+    waveform:
+      type: sine
+      amplitude: 10.0
+      frequency: 50.0
+      offset: 0.0
+      phase: 0.0
+  - type: diode
+    name: D1
+    nodes: [in, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: resistor
+    name: R1
+    nodes: [out, n_l]
+    value: 10.0
+  - type: inductor
+    name: L1
+    nodes: [n_l, 0]
+    value: 1e-3
+    ic: 0.0

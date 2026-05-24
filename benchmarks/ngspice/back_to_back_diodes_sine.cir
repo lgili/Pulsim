@@ -1,0 +1,16 @@
+* Anti-parallel diode clipper with sine input — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/back_to_back_diodes_sine.yaml
+*
+* V_sine 5V_peak / 50 Hz → R_series → out → two anti-parallel diodes.
+* Tests both diodes alternately conducting on positive/negative half-cycles.
+* Output is clipped at ±V_F (Pulsim ≈ ±5 mV, ngspice ≈ ±0.7 V — V_F gap).
+
+Vac in  0   SIN(0 5 50)
+R1  in  out 100
+Dp  out 0   DIODEMOD
+Dn  0   out DIODEMOD
+
+.model DIODEMOD D(IS=1e-12 N=1 RS=5m)
+
+.tran 20u 60m UIC
+.end

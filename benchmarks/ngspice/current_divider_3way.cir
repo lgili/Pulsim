@@ -1,0 +1,16 @@
+* DC current source feeding 3 parallel resistors — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/current_divider_3way.yaml
+*
+* R_par = R1||R2||R3 = 1/(1/100 + 1/200 + 1/300) = 54.545 Ω
+* V(node) = I · R_par = 30 mA · 54.545 = 1.6364 V (steady-state).
+*
+* Pulsim YAML uses `nodes: [node, 0]` (positive current INTO node).
+* ngspice's `I1 0 node` is the mirror (npos/nneg swapped) — same physics.
+
+I1 0    node DC 30m
+R1 node 0    100
+R2 node 0    200
+R3 node 0    300
+
+.tran 5u 1m
+.end

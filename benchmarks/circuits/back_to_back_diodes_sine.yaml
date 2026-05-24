@@ -1,0 +1,55 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: back_to_back_diodes_sine
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Diode clipper: V_sine (5V peak, 50 Hz) → R_series → out node →
+      # two anti-parallel diodes to ground. Tests both diodes conducting
+      # alternately as the sine swings positive/negative.
+      # Output V(out) clamped at ±V_F:
+      #   Pulsim:  ±i·R_on ≈ ±5 mV (linear g_on=200 model)
+      #   ngspice: ±0.7 V (Shockley DIODEMOD)
+      # Same V_F model gap as `diode_clamp_overvoltage`. Threshold sized
+      # for the ~0.7V mismatch on each clipped half-cycle.
+      max_error: 1.0
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/back_to_back_diodes_sine.csv
+# Two-diode clipper. Tests both diodes commutating on each AC half-
+# cycle — i.e. the diode model handling current reversal at the source
+# zero-crossings. Different from existing diode tests where only one
+# diode conducts per period.
+simulation:
+  tstop: 60e-3
+  dt: 20e-6
+  integrator: trbdf2
+  uic: true
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [in, 0]
+    waveform:
+      type: sine
+      amplitude: 5.0
+      frequency: 50.0
+      offset: 0.0
+      phase: 0.0
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 100.0
+  - type: diode
+    name: D_pos
+    nodes: [out, 0]      # forward when V(out) > 0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_neg
+    nodes: [0, out]      # forward when V(out) < 0
+    g_on: 200.0
+    g_off: 1e-6
