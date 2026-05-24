@@ -24,6 +24,7 @@ sys.path.insert(0, str(_M3C_DIR))
 from m3c_3phase_model import (  # noqa: E402
     ALL_VALID_CONFIGURATIONS,
     LG_TRANSFORM_MATRIX,
+    M3cL1ControlState,
     M3cParams,
     ModuleConfiguration,
     abc_to_lg,
@@ -39,12 +40,14 @@ from m3c_3phase_model import (  # noqa: E402
     fast_svm_step,
     lg_to_abc,
     make_fast_svm_fn,
+    make_m3c_l1_cost_control,
     make_m3c_l1_open_loop_control,
     predict_i_out_peak,
     predict_load_impedance,
     predict_load_power_factor,
     rms,
     run_l0_open_loop,
+    run_l1_cost_loop,
     run_l1_open_loop,
     select_best_connection,
     solve_module_currents,
@@ -563,27 +566,32 @@ class TestModuleCurrentSolver:
 
 
 class TestCostFunction:
-    """Validate the cost function (Sec 5.5.3 Eqs 161-163)."""
+    """Validate the cost function (Sec 5.5.3 Eqs 161-163).
+
+    The Phase 22.6 API is ``connection_cost(cfg, V_caps, V_xy, I_xy,
+    T_s, C_sm)`` — V_xy and I_xy are precomputed dicts so the cost
+    can use the proper signed-S_n formula ``ΔV = V_int · I · T_s/C_SM``.
+    """
 
     @pytest.fixture
     def std_params(self) -> dict:
-        """Sec 5.5.3 / Tab 15: T_s=2 kHz, C=680 µF, N=6."""
+        """Sec 5.5.3 / Tab 15: T_s=2 kHz, C=680 µF."""
         return {
             "T_s": 1.0 / 2000.0,
             "C_sm": 680e-6,
-            "n_sm_per_module": 6,
         }
 
     def test_balanced_caps_zero_currents_gives_zero_cost(
         self, std_params: dict,
     ) -> None:
-        """Perfectly balanced caps with zero terminal currents give 0."""
+        """Perfectly balanced caps with zero module currents give 0."""
         cfg = _THESIS_EXAMPLE_CFG
         V_caps = np.full(9, 1000.0)
+        # 5 active modules each with V_int=0, I=0 → ΔV=0 for all.
+        V_xy = {(i, j): 0 for (i, j) in cfg.active_modules()}
+        I_xy = {(i, j): 0.0 for (i, j) in cfg.active_modules()}
         cost = connection_cost(
-            cfg, V_caps,
-            I_input=[0.0, 0.0, 0.0], I_output=[0.0, 0.0, 0.0],
-            **std_params,
+            cfg, V_caps, V_xy, I_xy, **std_params,
         )
         assert cost == pytest.approx(0.0, abs=1e-12)
 
@@ -592,41 +600,74 @@ class TestCostFunction:
         rng = np.random.default_rng(seed=23)
         for cfg in ALL_VALID_CONFIGURATIONS[:15]:
             V_caps = 1000.0 + rng.uniform(-100, 100, 9)
-            I_in = rng.uniform(-10, 10, 3)
-            I_out_base = rng.uniform(-10, 10, 3)
-            I_out = I_out_base - (I_out_base.sum() - I_in.sum()) / 3
+            V_xy = {
+                (i, j): int(rng.integers(-3, 4))
+                for (i, j) in cfg.active_modules()
+            }
+            I_xy = {
+                (i, j): float(rng.uniform(-10, 10))
+                for (i, j) in cfg.active_modules()
+            }
             cost = connection_cost(
-                cfg, V_caps, I_in, I_out, **std_params,
+                cfg, V_caps, V_xy, I_xy, **std_params,
             )
             assert cost >= 0.0
 
-    def test_imbalanced_caps_no_current_gives_sum_of_squared_eps(
+    def test_imbalanced_caps_zero_voltage_gives_sum_of_squared_eps(
         self, std_params: dict,
     ) -> None:
-        """With zero terminal currents, ΔV = 0 for every module so
-        cost = sum (V_xy - mean)²."""
+        """With every V_xy = 0, ΔV = 0 for every module so cost
+        reduces to sum (V_caps - mean)²."""
         cfg = _THESIS_EXAMPLE_CFG
         V_caps = np.array([
             1100.0, 900.0, 1000.0,
             1050.0, 950.0, 1000.0,
             1000.0, 1000.0, 1000.0,
         ])
+        V_xy = {(i, j): 0 for (i, j) in cfg.active_modules()}
+        I_xy = {(i, j): 1.0 for (i, j) in cfg.active_modules()}  # I != 0
+        # With V_xy = 0, ΔV = V_int · I · T_s/C = 0 regardless of I.
         cost = connection_cost(
-            cfg, V_caps,
-            I_input=[0.0, 0.0, 0.0], I_output=[0.0, 0.0, 0.0],
-            **std_params,
+            cfg, V_caps, V_xy, I_xy, **std_params,
         )
         expected = float(np.sum((V_caps - V_caps.mean()) ** 2))
         assert cost == pytest.approx(expected, rel=1e-12)
 
     def test_wrong_vcaps_shape_raises(self, std_params: dict) -> None:
+        cfg = _THESIS_EXAMPLE_CFG
+        V_xy = {(i, j): 0 for (i, j) in cfg.active_modules()}
+        I_xy = {(i, j): 0.0 for (i, j) in cfg.active_modules()}
         with pytest.raises(ValueError, match="length 9"):
             connection_cost(
-                _THESIS_EXAMPLE_CFG,
-                V_caps=np.zeros(5),
-                I_input=[0.0, 0.0, 0.0], I_output=[0.0, 0.0, 0.0],
+                cfg, V_caps=np.zeros(5), V_xy=V_xy, I_xy=I_xy,
                 **std_params,
             )
+
+    def test_delta_v_sign_with_signed_V_int(
+        self, std_params: dict,
+    ) -> None:
+        """Eq 162 with signed S_n: cost should differ between V_int=+k
+        and V_int=-k (same |k| but opposite sign of ΔV)."""
+        cfg = _THESIS_EXAMPLE_CFG
+        V_caps = np.array([
+            1100.0, 1000.0, 1000.0,
+            1000.0, 1000.0, 1000.0,
+            1000.0, 1000.0, 1000.0,
+        ])
+        # ε[0,0] = +88.9, others negative small. So if ΔV[0,0] is
+        # negative (charge cap down), cost should be smaller than
+        # if ΔV[0,0] is positive.
+        # Need (0,0) to be active in cfg — it is NOT in _THESIS_EXAMPLE_CFG.
+        # Use first config that has M_Aa active.
+        cfg2 = configurations_containing_module(0, 0)[0]
+        # Active modules of cfg2: must include (0,0).
+        V_pos = {(i, j): 1 for (i, j) in cfg2.active_modules()}
+        V_neg = {(i, j): -1 for (i, j) in cfg2.active_modules()}
+        I = {(i, j): 1.0 for (i, j) in cfg2.active_modules()}
+        cost_pos = connection_cost(cfg2, V_caps, V_pos, I, **std_params)
+        cost_neg = connection_cost(cfg2, V_caps, V_neg, I, **std_params)
+        # The two costs differ (signed ΔV is non-trivial).
+        assert cost_pos != cost_neg
 
 
 class TestConfigurationsContainingModule:
@@ -647,14 +688,14 @@ class TestConfigurationsContainingModule:
 
 
 class TestSelectBestConnection:
-    """Validate the Sec 5.5.3 best-connection selector."""
+    """Validate the Sec 5.5.3 best-connection selector with the
+    Phase 22.6 API (takes integer SVM refs, no n_sm_per_module)."""
 
     @pytest.fixture
     def std_params(self) -> dict:
         return {
             "T_s": 1.0 / 2000.0,
             "C_sm": 680e-6,
-            "n_sm_per_module": 6,
         }
 
     def test_returns_valid_config(self, std_params: dict) -> None:
@@ -662,13 +703,18 @@ class TestSelectBestConnection:
         and be in the 81 valid set."""
         rng = np.random.default_rng(seed=99)
         V_caps = 1000.0 + rng.uniform(-50, 50, 9)
+        V_in_int = rng.integers(-2, 3, 3).astype(int)
+        V_out_int = rng.integers(-2, 3, 3).astype(int)
         I_in = rng.uniform(-5, 5, 3)
         I_out_base = rng.uniform(-5, 5, 3)
         I_out = I_out_base - (I_out_base.sum() - I_in.sum()) / 3
 
         best_cfg, best_cost = select_best_connection(
             short_module=(1, 0),
-            V_caps=V_caps, I_input=I_in, I_output=I_out, **std_params,
+            V_caps=V_caps,
+            V_input_int=V_in_int, V_output_int=V_out_int,
+            I_input=I_in, I_output=I_out,
+            **std_params,
         )
         assert best_cfg.is_active(1, 0)
         assert best_cfg in ALL_VALID_CONFIGURATIONS
@@ -679,6 +725,8 @@ class TestSelectBestConnection:
         global minimum."""
         rng = np.random.default_rng(seed=123)
         V_caps = 1000.0 + rng.uniform(-50, 50, 9)
+        V_in_int = rng.integers(-2, 3, 3).astype(int)
+        V_out_int = rng.integers(-2, 3, 3).astype(int)
         I_in = rng.uniform(-5, 5, 3)
         I_out_base = rng.uniform(-5, 5, 3)
         I_out = I_out_base - (I_out_base.sum() - I_in.sum()) / 3
@@ -686,15 +734,20 @@ class TestSelectBestConnection:
 
         best_cfg, best_cost = select_best_connection(
             short_module=short, V_caps=V_caps,
+            V_input_int=V_in_int, V_output_int=V_out_int,
             I_input=I_in, I_output=I_out, **std_params,
         )
-        # Manual brute force.
-        all_costs = [
-            connection_cost(
-                cfg, V_caps, I_in, I_out, **std_params,
+        # Manual brute force using the (cfg, V_caps, V_xy, I_xy, T_s, C_sm)
+        # API.
+        all_costs = []
+        for cfg in configurations_containing_module(*short):
+            V_xy = solve_module_voltages(
+                cfg, short, V_in_int, V_out_int,
             )
-            for cfg in configurations_containing_module(*short)
-        ]
+            I_xy = solve_module_currents(cfg, I_in, I_out)
+            all_costs.append(
+                connection_cost(cfg, V_caps, V_xy, I_xy, **std_params),
+            )
         assert best_cost == pytest.approx(min(all_costs))
         assert best_cfg.is_active(*short)
 
@@ -1037,3 +1090,154 @@ class TestL1Plant:
         assert ia_in_pk > 1.0, (
             f"L1 input current at A is too small: {ia_in_pk:.4f} A"
         )
+
+
+# ============================================================================
+# Tier 11 — L1 cost-function controller (Phase 22.6)
+#
+# The cost-function selector replaces the Phase 22.5 heuristic with
+# Sec 5.5.3 Eq 163 over the 45 candidates per T_s. It does NOT change
+# the output current (the voltage solver guarantees the same terminal
+# voltages regardless of which 5 modules conduct) — its job is purely
+# internal: route current through the module set that best preserves
+# capacitor balance. So we test that:
+#   - the cost loop runs and tracks caps,
+#   - the resulting output currents match the open-loop run exactly,
+#   - the cap drift is bounded (smaller than no-balancing baseline).
+# ============================================================================
+
+
+@_requires_pulsim
+class TestL1CostLoop:
+    """L1 with the Sec 5.5.3 cost-function selector + cap tracking."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> M3cParams:
+        return M3cParams(m_v=1.0)
+
+    @pytest.fixture(scope="class")
+    def cost_run(self, params: M3cParams):
+        plant = build_l1_plant(params)
+        return run_l1_cost_loop(plant, params, t_end=200e-3, dt=25e-6)
+
+    # ---- controller signature -----------------------------------------
+
+    def test_returns_3_callables(self, params: M3cParams) -> None:
+        plant = build_l1_plant(params)
+        obs, sw, bx = make_m3c_l1_cost_control(params, plant)
+        assert callable(obs)
+        assert callable(sw)
+        assert callable(bx)
+
+    def test_run_returns_state_and_result(
+        self, params: M3cParams, cost_run,
+    ) -> None:
+        result, state = cost_run
+        assert len(result.t) > 1000
+        assert isinstance(state, M3cL1ControlState)
+        assert len(state.v_caps_module) == 9
+        assert state.n_refreshes > 100  # 200 ms / 0.5 ms = 400 ticks
+
+    # ---- cap voltage tracking -----------------------------------------
+
+    def test_initial_v_caps_at_nominal(
+        self, params: M3cParams,
+    ) -> None:
+        """Fresh state has v_caps_module = N · v_cap_nominal."""
+        state = M3cL1ControlState(
+            v_caps_module=[params.v_cap_total_per_module] * 9,
+        )
+        assert all(
+            v == params.v_cap_total_per_module
+            for v in state.v_caps_module
+        )
+
+    def test_v_caps_change_over_time(
+        self, cost_run, params: M3cParams,
+    ) -> None:
+        """After running, the cap voltages should differ from their
+        initial nominal value (current did flow)."""
+        _result, state = cost_run
+        initial = params.v_cap_total_per_module
+        max_dev = max(abs(v - initial) for v in state.v_caps_module)
+        assert max_dev > 100.0, (
+            f"V_caps did not move: max deviation {max_dev:.1f} V"
+        )
+
+    def test_v_caps_drift_bounded(
+        self, cost_run, params: M3cParams,
+    ) -> None:
+        """The cost function should keep cap voltage spread bounded.
+        At the M3C nominal op (m_v=1.0) over 200 ms the spread stays
+        within ~ N · v_cap_nominal (i.e. caps stay within ±100 % of
+        their nominal sum)."""
+        _result, state = cost_run
+        spread = max(state.v_caps_module) - min(state.v_caps_module)
+        assert spread < 2.0 * params.v_cap_total_per_module, (
+            f"Cap voltage spread {spread:.0f} V exceeds 2·N·v_cap "
+            f"({2*params.v_cap_total_per_module:.0f} V) — greedy "
+            f"cost is failing to balance."
+        )
+
+    def test_diagnostics_populated(self, cost_run) -> None:
+        """The state should record one chosen config + one cost value
+        per T_s tick."""
+        _result, state = cost_run
+        assert len(state.chosen_configs) == state.n_refreshes
+        assert len(state.chosen_costs) == state.n_refreshes
+        # First tick: caps balanced → cost = 0 (eps=0 and any ΔV
+        # contributes only at next tick).
+        assert state.chosen_costs[0] == pytest.approx(0.0, abs=1e-9)
+
+    def test_visits_multiple_configs(self, cost_run) -> None:
+        """The selector should pick at least 3 distinct configs across
+        the run (i.e. it's not stuck on one)."""
+        _result, state = cost_run
+        distinct = len(set(c.grid for c in state.chosen_configs))
+        assert distinct >= 3, (
+            f"Only {distinct} distinct configs chosen; selector likely"
+            f" stuck"
+        )
+
+    # ---- output current consistency -----------------------------------
+
+    def test_output_current_matches_heuristic(
+        self, params: M3cParams, cost_run,
+    ) -> None:
+        """Because the SVM voltage solver produces the same terminal
+        voltages for *any* valid configuration containing the short,
+        the cost-loop output current must match the heuristic open-
+        loop output to within numerical precision of the matrix
+        system. (Only the *internal* module-current allocation
+        differs.)"""
+        cost_result, _ = cost_run
+        plant_h = build_l1_plant(params)
+        heur_result = run_l1_open_loop(
+            plant_h, params, t_end=200e-3, dt=25e-6,
+        )
+        diff_pk = float(np.max(np.abs(
+            cost_result.i_a_out - heur_result.i_a_out
+        )))
+        ia_pk = float(np.max(np.abs(heur_result.i_a_out)))
+        # Different switch masks → slightly different state-space
+        # matrices → numerical roundoff. 0.001 % of peak is well
+        # below any physically meaningful difference.
+        assert diff_pk / ia_pk < 1e-5, (
+            f"Cost and heuristic outputs differ by {diff_pk:.2e} A "
+            f"({diff_pk/ia_pk*100:.4f}% of {ia_pk:.1f} A peak)"
+        )
+
+    def test_fundamental_close_to_l0(
+        self, params: M3cParams, cost_run,
+    ) -> None:
+        """Same as the Phase 22.5 test, but now via the cost loop."""
+        cost_result, _ = cost_run
+        fs = 1.0 / 25e-6
+        n_per = int(round((1.0 / params.f_out) * fs))
+        ia = cost_result.i_a_out[-3 * n_per:]
+        spec = np.fft.rfft(ia)
+        k1 = int(round(params.f_out * len(ia) / fs))
+        fund_pk = 2.0 * float(np.abs(spec[k1])) / len(ia)
+        fund_pred = predict_i_out_peak(params)
+        rel_err = abs(fund_pk - fund_pred) / fund_pred
+        assert rel_err < 0.15

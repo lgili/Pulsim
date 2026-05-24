@@ -902,11 +902,10 @@ def solve_module_currents(
 def connection_cost(
     cfg: ModuleConfiguration,
     V_caps: np.ndarray,
-    I_input: np.ndarray | list | tuple,
-    I_output: np.ndarray | list | tuple,
+    V_xy: dict[tuple[int, int], float],
+    I_xy: dict[tuple[int, int], float],
     T_s: float,
     C_sm: float,
-    n_sm_per_module: int,
 ) -> float:
     """Compute the Sec 5.5.3 cost function (Eq 163) for a candidate
     connection ``cfg``.
@@ -915,30 +914,40 @@ def connection_cost(
     voltage deviations from their mean: each module's deviation is
     its current imbalance ε plus the projected change ΔV during T_s.
 
+    Eq 162: ``ΔV_xy = S_n · I_xy · T_s / C`` where ``S_n`` is the
+    number of **active** SM capacitors in the module. For a module
+    with ``V_xy = k · V_cap``, exactly ``|k|`` SMs are in state 1 or
+    state 2 (the rest bypassed) — so ``S_n = |k| = |V_xy| / V_cap``
+    and the SIGNED quantity ``V_xy/V_cap`` captures both ``S_n`` and
+    the charge-direction sign in one term.
+
     Parameters
     ----------
     cfg
-        Candidate configuration (5 active modules).
+        Candidate configuration (5 active modules). Used only for
+        ``is_active`` checks; the actual physics is carried by V_xy
+        and I_xy.
     V_caps
-        Length-9 array of measured module capacitor voltages [V],
-        flattened as ``V_caps[i*3 + j] = V_(input_i, output_j)``.
-    I_input, I_output
-        Terminal currents [A] (same convention as
-        :func:`solve_module_currents`).
+        Length-9 array of module capacitor sum voltages [V], flat
+        row-major (``V_caps[3·i + j]``).
+    V_xy
+        Dict ``(i, j) -> integer`` mapping each ACTIVE module to its
+        voltage in **V_cap units** (signed integer, as produced by
+        :func:`solve_module_voltages` when given integer references).
+    I_xy
+        Dict ``(i, j) -> float`` for each active module's current [A]
+        (as produced by :func:`solve_module_currents`).
     T_s
         Switching period [s].
     C_sm
         Submodule capacitance [F].
-    n_sm_per_module
-        Number of submodules per module (== ``params.n_sm_per_module``).
-        Determines :math:`S_n` in Eq 162 — for simplicity we assume
-        all N SMs of each active module are actively contributing
-        (the upper-bound worst case for ΔV).
 
     Returns
     -------
     float
         :math:`\\mathcal{C} = \\sum_{xy} (\\epsilon_{xy} + \\Delta V_{xy})^2`
+        with the sum over all 9 modules; inactive modules contribute
+        only their ε² term.
     """
     V_caps = np.asarray(V_caps, dtype=float).reshape(-1)
     if V_caps.shape != (9,):
@@ -947,18 +956,17 @@ def connection_cost(
         )
 
     V_mean = float(V_caps.mean())
-    eps = V_caps - V_mean   # Eq 161 — shape (9,)
+    eps = V_caps - V_mean                                  # Eq 161
 
-    # Predict module currents for active modules. Inactive ones
-    # contribute I_xy = 0 → ΔV_xy = 0.
-    currents = solve_module_currents(cfg, I_input, I_output)
+    # Predict the module-level cap-sum change for each module.
+    # ΔV_module = sign(V_xy) · |V_xy / V_cap| · I · T_s / C_SM
+    #           = (V_xy / V_cap) · I · T_s / C_SM       [signed]
+    # Since V_xy is already in V_cap units (integer), this is just
+    # ``V_int · I · T_s / C_SM``. Inactive modules: V_xy=0 → ΔV=0.
     delta_v = np.zeros(9)
-    for (i, j), I_xy in currents.items():
-        # Eq 162: ΔV = S_n · I · T_s / C. S_n = n_sm_per_module for
-        # active modules in this simplified model.
-        delta_v[i * 3 + j] = (
-            n_sm_per_module * I_xy * T_s / C_sm
-        )
+    for (i, j), V_int in V_xy.items():
+        I_val = I_xy.get((i, j), 0.0)
+        delta_v[i * 3 + j] = float(V_int) * float(I_val) * T_s / C_sm
 
     return float(np.sum((eps + delta_v) ** 2))
 
@@ -966,28 +974,43 @@ def connection_cost(
 def select_best_connection(
     short_module: tuple[int, int],
     V_caps: np.ndarray,
+    V_input_int: np.ndarray | list | tuple,
+    V_output_int: np.ndarray | list | tuple,
     I_input: np.ndarray | list | tuple,
     I_output: np.ndarray | list | tuple,
     T_s: float,
     C_sm: float,
-    n_sm_per_module: int,
 ) -> tuple[ModuleConfiguration, float]:
     """Sec 5.5.3 selector: among the 45 configurations that contain
     ``short_module``, pick the one with the lowest cost.
 
+    For each candidate this function computes:
+      * its 5 active module voltages via :func:`solve_module_voltages`
+        (in V_cap units, signed integers from the integer SVM refs);
+      * its 5 active module currents via :func:`solve_module_currents`;
+      * the Eq 163 cost via :func:`connection_cost`.
+
     Parameters
     ----------
     short_module
-        The fixed connection (typically min-input × min-output phase
-        per Sec 5.5.3) that all 45 candidates must include.
-    V_caps, I_input, I_output, T_s, C_sm, n_sm_per_module
-        See :func:`connection_cost`.
+        ``(input_idx, output_idx)`` — the short module shared by all
+        45 candidates (Sec 5.5.3 paragraph 4).
+    V_caps
+        9-element module cap-sum voltages [V], row-major.
+    V_input_int, V_output_int
+        Integer SVM phase references in V_cap units, shape (3,).
+    I_input, I_output
+        Terminal currents [A] (length 3 each, balanced).
+    T_s
+        Switching period [s].
+    C_sm
+        Submodule capacitance [F].
 
     Returns
     -------
     (best_cfg, best_cost)
-        The configuration that minimizes the cost function and its
-        cost value.
+        The minimum-cost configuration containing ``short_module``,
+        along with its cost value.
     """
     candidates = configurations_containing_module(*short_module)
     if not candidates:
@@ -997,9 +1020,11 @@ def select_best_connection(
     best_cfg = candidates[0]
     best_cost = float("inf")
     for cfg in candidates:
-        cost = connection_cost(
-            cfg, V_caps, I_input, I_output, T_s, C_sm, n_sm_per_module
+        V_xy = solve_module_voltages(
+            cfg, short_module, V_input_int, V_output_int,
         )
+        I_xy = solve_module_currents(cfg, I_input, I_output)
+        cost = connection_cost(cfg, V_caps, V_xy, I_xy, T_s, C_sm)
         if cost < best_cost:
             best_cost = cost
             best_cfg = cfg
@@ -1662,4 +1687,291 @@ def run_l1_open_loop(
         i_a_in=log_iAi[:n],
         i_b_in=log_iBi[:n],
         i_c_in=log_iCi[:n],
+    )
+
+
+# =============================================================================
+# L1 cost-function controller (Phase 22.6)
+# =============================================================================
+#
+# Upgrade to the heuristic open-loop controller of Phase 22.5: at the
+# centre of each T_s window, evaluate the Sec 5.5.3 cost function
+# (Eq 163) over the 45 candidate configurations containing the short
+# module, and pick the one that minimises projected cap imbalance.
+#
+# This requires module-level capacitor voltages tracked externally
+# (pulsim does not model the individual SM caps), updated at every
+# T_s using the predicted module current of the chosen configuration
+# (Eq 162: ΔV_xy = S_n · I_xy · T_s / C with S_n = N).
+#
+# The terminal currents I_input and I_output needed by the cost
+# function are read from the pulsim state vector via the L_in and
+# L_out inductor branch indices — hence the controller now takes a
+# step_observer hook to access ``x`` at each integration step.
+
+
+@dataclass
+class M3cL1ControlState:
+    """Live state for the L1 cost-function controller.
+
+    Refreshed once per ``T_s`` tick inside the step observer; the
+    switch_fn and b_extra_fn callbacks simply read the cached
+    ``switch_bits`` and ``v_module_target`` arrays.
+
+    The 9-element ``v_caps_module`` array tracks module-level
+    capacitor sums ``V_module = Σ_k V_cap_SM_k``. Each entry starts
+    at ``N · v_cap_nominal`` (balanced nominal) and integrates the
+    Eq 162 update for whichever configuration was selected.
+    """
+
+    last_period: int = -1
+    switch_bits: list[bool] = field(default_factory=lambda: [False] * 9)
+    v_module_target: list[float] = field(
+        default_factory=lambda: [0.0] * 9,
+    )
+    v_caps_module: list[float] = field(default_factory=list)
+    # Bookkeeping for tests / diagnostics.
+    n_refreshes: int = 0
+    chosen_configs: list = field(default_factory=list)
+    chosen_costs: list = field(default_factory=list)
+
+
+def make_m3c_l1_cost_control(
+    params: M3cParams,
+    plant: M3cPlant,
+    *,
+    state: M3cL1ControlState | None = None,
+):
+    """Build ``(step_observer, switch_fn, b_extra_fn)`` for the L1
+    cost-function controller (Sec 5.5.3 Eq 163).
+
+    Per-T_s update logic:
+
+      1. Read I_input from ``x[iL_in_indices]`` and I_output from
+         ``x[iL_out_indices]``.
+      2. Compute V_input_ref, V_output_ref at the T_s centre from the
+         cosine references; quantise to integer × V_cap.
+      3. Identify the short module
+         ``M_(argmin V_input, argmin V_output)``.
+      4. Use :func:`select_best_connection` to pick the minimum-cost
+         configuration of the 45 candidates containing the short.
+      5. Compute the 5 active module voltages via
+         :func:`solve_module_voltages` and the 5 module currents via
+         :func:`solve_module_currents`.
+      6. Set switch_bits + v_module_target accordingly.
+      7. Integrate Eq 162: ``v_caps_module[k] += N · I_xy · T_s / C``
+         for each of the 5 active modules.
+
+    Parameters
+    ----------
+    params, plant
+        Same as :func:`make_m3c_l1_open_loop_control`.
+    state
+        Optional initial state. Defaults to a freshly-allocated one
+        with ``v_caps_module = N · v_cap_nominal`` for all 9 modules.
+
+    Returns
+    -------
+    (step_observer, switch_fn, b_extra_fn)
+        Three callables with the same signatures pulsim's
+        ``simulate()`` expects.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if plant.module_v_src_state_indices is None:
+        raise ValueError("L1 plant must expose module_v_src_state_indices")
+    if plant.iL_in_indices is None:
+        raise ValueError("L1 plant must expose iL_in_indices")
+
+    if state is None:
+        state = M3cL1ControlState(
+            v_caps_module=[
+                params.v_cap_total_per_module for _ in range(9)
+            ],
+        )
+    elif not state.v_caps_module:
+        state.v_caps_module = [
+            params.v_cap_total_per_module for _ in range(9)
+        ]
+
+    state_size = plant.builder.pool.state_size(plant.builder.graph)
+    v_cap = params.v_cap_nominal
+    T_s = params.T_s
+    src_indices = plant.module_v_src_state_indices
+    iL_in_indices = plant.iL_in_indices
+    iL_out_indices = plant.iL_out_indices
+
+    def step_observer(t, x):
+        period_idx = int(t / T_s)
+        if period_idx == state.last_period:
+            return
+        state.last_period = period_idx
+        state.n_refreshes += 1
+
+        # 1. Terminal currents from the pulsim state vector.
+        I_in = np.array([float(x[i]) for i in iL_in_indices])
+        I_out = np.array([float(x[i]) for i in iL_out_indices])
+        # KCL conservation: enforce numerical balance (caller may have
+        # tiny drift). The cost function would otherwise reject.
+        diff = (I_in.sum() - I_out.sum()) / 3.0
+        I_out_balanced = I_out + diff
+
+        # 2. SVM references at the T_s centre.
+        t_centre = (period_idx + 0.5) * T_s
+        V_in_ref = _phase_voltages_at(
+            t_centre, V_peak=params.V_in_phase_peak,
+            omega=params.omega_in, m=params.m_c,
+        )
+        V_out_ref = _phase_voltages_at(
+            t_centre, V_peak=params.V_out_phase_peak,
+            omega=params.omega_out, m=params.m_v,
+        )
+        V_in_int = np.round(V_in_ref / v_cap).astype(int)
+        V_out_int = np.round(V_out_ref / v_cap).astype(int)
+
+        # 3. Short module = argmin × argmin.
+        short_in = int(np.argmin(V_in_ref))
+        short_out = int(np.argmin(V_out_ref))
+        short = (short_in, short_out)
+
+        # 4. Cost-function selector — pick the best of 45 candidates.
+        best_cfg, best_cost = select_best_connection(
+            short_module=short,
+            V_caps=np.array(state.v_caps_module, dtype=float),
+            V_input_int=V_in_int,
+            V_output_int=V_out_int,
+            I_input=I_in,
+            I_output=I_out_balanced,
+            T_s=T_s,
+            C_sm=params.c_sm,
+        )
+
+        # 5. Module voltages + currents for the selected configuration.
+        V_xy = solve_module_voltages(
+            best_cfg, short,
+            V_input=V_in_int, V_output=V_out_int,
+        )
+        I_xy = solve_module_currents(
+            best_cfg, I_in, I_out_balanced,
+        )
+
+        # 6. Populate switch + voltage caches.
+        switch_bits = [False] * 9
+        v_module = [0.0] * 9
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            switch_bits[idx] = True
+            v_module[idx] = float(V_int) * v_cap
+        state.switch_bits = switch_bits
+        state.v_module_target = v_module
+
+        # 7. Integrate Eq 162 — cap-sum voltage update per module:
+        #    ΔV_module = V_xy_signed · I_xy · T_s / C_SM     (S_n = |V_int|;
+        #    sign carried by V_int for charge-direction physics).
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            state.v_caps_module[idx] += (
+                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
+            )
+
+        # Diagnostics.
+        state.chosen_configs.append(best_cfg)
+        state.chosen_costs.append(best_cost)
+
+    def switch_fn(_t: float):
+        mask = _p.SwitchStateMask(9)
+        for k, on in enumerate(state.switch_bits):
+            mask.set(k, bool(on))
+        return mask
+
+    def b_extra_fn(_t: float):
+        out = [0.0] * state_size
+        for k, src_idx in enumerate(src_indices):
+            out[src_idx] = -state.v_module_target[k]
+        return out
+
+    return step_observer, switch_fn, b_extra_fn
+
+
+def run_l1_cost_loop(
+    plant: M3cPlant,
+    params: M3cParams,
+    *,
+    t_end: float = 80e-3,
+    dt: float | None = None,
+    initial_state: M3cL1ControlState | None = None,
+) -> tuple[M3cRunResult, M3cL1ControlState]:
+    """Run an L1 plant with the Sec 5.5.3 cost-function controller.
+
+    Returns
+    -------
+    (result, control_state)
+        ``result`` is the standard :class:`M3cRunResult` with the
+        terminal currents logged at every dt step. ``control_state``
+        is the final :class:`M3cL1ControlState`, which exposes the
+        evolved ``v_caps_module``, the chosen configurations per T_s,
+        and the per-T_s cost values — useful for verifying the
+        balancing behaviour.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if dt is None:
+        dt = max(1e-6, params.T_s / 20.0)
+
+    state = initial_state or M3cL1ControlState(
+        v_caps_module=[
+            params.v_cap_total_per_module for _ in range(9)
+        ],
+    )
+    control_obs, switch_fn, b_extra_fn = make_m3c_l1_cost_control(
+        params, plant, state=state,
+    )
+
+    assert plant.iL_in_indices is not None
+    iLa_in, iLb_in, iLc_in = plant.iL_in_indices
+    iLa, iLb, iLc = plant.iL_out_indices
+
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    log_iAi = np.zeros(n_samples)
+    log_iBi = np.zeros(n_samples)
+    log_iCi = np.zeros(n_samples)
+    counter = [0]
+
+    def combined_obs(t, x):
+        control_obs(t, x)
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+            log_iAi[i] = x[iLa_in]
+            log_iBi[i] = x[iLb_in]
+            log_iCi[i] = x[iLc_in]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=combined_obs,
+        switch_fn=switch_fn,
+        b_extra_fn=b_extra_fn,
+        start_from_dc_op=False,
+    )
+
+    n = counter[0]
+    return (
+        M3cRunResult(
+            t=log_t[:n],
+            i_a_out=log_ia[:n],
+            i_b_out=log_ib[:n],
+            i_c_out=log_ic[:n],
+            i_a_in=log_iAi[:n],
+            i_b_in=log_iBi[:n],
+            i_c_in=log_iCi[:n],
+        ),
+        state,
     )
