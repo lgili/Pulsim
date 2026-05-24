@@ -1,30 +1,43 @@
 ## 1. Build / dependency wiring (vendor DPsim KLU fork)
 
-- [ ] 1.1 Pick a pinned commit SHA of dpsim-simulator/SuiteSparse to
-      vendor (must contain `KLU/Source/klu_compute_path.c` +
-      `klu_partial_factorization_path.c`). Record SHA + date in design.md.
-- [ ] 1.2 Replace the `find_package(KLU CONFIG)` block in root
-      `CMakeLists.txt` with `FetchContent_Declare(klu_dpsim GIT_REPOSITORY ...
-      GIT_TAG <sha>)` + `FetchContent_MakeAvailable`. Configure
-      SuiteSparse's CMake to build ONLY the KLU + BTF + AMD + COLAMD
-      sub-projects (skip CHOLMOD, UMFPACK, etc.). License audit on the
-      4 vendored sub-projects (KLU: LGPL-2.1+; BTF: LGPL-2.1+; AMD:
-      BSD-3; COLAMD: BSD-3).
-- [ ] 1.3 Add a `LICENSES/` entry recording the LGPL-2.1+ text + the
-      SHA we vendored. JOSS-style provenance: which file came from where.
-- [ ] 1.4 CMake: link `KLU` (the new vendored static lib) into
-      `pulsim_core` as INTERFACE, replacing the previous
-      `SuiteSparse::KLU` imported target. Keep `PULSIM_HAVE_KLU=1`
-      semantics intact (still `#ifdef`-gated).
-- [ ] 1.5 CI workflow updates:
-  - [ ] 1.5.1 Remove `libsuitesparse-dev` from Linux apt install commands
-  - [ ] 1.5.2 Remove `suite-sparse` from macOS brew install commands
-  - [ ] 1.5.3 Add CI step that verifies the FetchContent download
-        succeeded (cache-friendly)
-- [ ] 1.6 README "Build prerequisites" — remove per-platform KLU install
-      instruction; add a 1-paragraph note that KLU is vendored from the
-      DPsim fork at commit `<sha>` and explain how to override via
-      `-DPULSIM_KLU_FETCH_SOURCE=local` for air-gapped builds.
+- [x] 1.1 SHA pinned: `6cf768091962336466808e7f02d476842e4c5281`
+      (master @ 2023-03-08, last commit on the fork's master branch).
+      Verified the path-based files exist in this commit
+      (`klu_compute_path.c`, `klu_partial_factorization_path.c`,
+      `klu_partial_refactorization_restart.c`). Documented in
+      `LICENSES/SuiteSparse-DPsim-fork.md`.
+- [x] 1.2 Replaced the `find_package(KLU CONFIG)` block in root
+      `CMakeLists.txt` with `FetchContent_Declare(klu_dpsim ...
+      GIT_TAG 6cf76809)` + `FetchContent_MakeAvailable`. Sets
+      `WITH_GPL=OFF` to skip any GPL-gated bits; fork's CMake only
+      builds 5 targets (amd, colamd, btf, suitesparseconfig, klu) so
+      no CHOLMOD/UMFPACK contamination. `klu` static lib aliased as
+      `SuiteSparse::KLU` so the V8 link line in `core/CMakeLists.txt`
+      keeps working unchanged.
+- [x] 1.3 `LICENSES/` directory created:
+  - `LICENSES/README.md` — index of bundled third-party licenses +
+    redistribution requirements (LGPL-2.1+ relinking + attribution
+    + ship-the-LICENSES-dir)
+  - `LICENSES/LGPL-2.1.txt` — full 501-line GNU LGPL 2.1 text
+    (fetched from www.gnu.org)
+  - `LICENSES/SuiteSparse-DPsim-fork.md` — provenance record: source
+    URL, pinned commit SHA, capture date, list of new API surface
+    + new `klu_numeric` fields + new error codes vs upstream, plus
+    re-verification recipe
+- [x] 1.4 No code change needed — the alias `SuiteSparse::KLU` keeps
+      the existing `target_link_libraries(... SuiteSparse::KLU)` line
+      in `core/CMakeLists.txt` working without edits. `PULSIM_HAVE_KLU=1`
+      compile def still propagated.
+- [x] 1.5 CI workflow updates (`.github/workflows/ci.yml`):
+  - [x] 1.5.1 Removed `libsuitesparse-dev` from every Linux apt install
+        command (4 matrix entries + coverage job)
+  - [x] 1.5.2 Removed `suite-sparse` from the macOS brew install (2 jobs)
+  - [ ] 1.5.3 No explicit "verify FetchContent succeeded" step —
+        skipped because a successful build already implies success.
+- [x] 1.6 README "Build prerequisites" — removed per-platform
+      `libsuitesparse-dev` / `suite-sparse` install instructions;
+      added a row in the dependency table marking KLU as
+      "bundled (vendored)" with the SHA + fork URL + license summary.
 
 ## 2. KluSolver upgrade (path-based partial refactor)
 

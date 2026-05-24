@@ -32,29 +32,38 @@ device / analysis mapping table.
 
 ### Build prerequisites
 
-Pulsim builds with two strict and one optional native dependency:
+Pulsim builds with two strict native dependencies (the SuiteSparse KLU
+backend used by the rank-1 PWL cache fast-path is now **vendored** via
+CMake `FetchContent`, no separate install required):
 
 | Dependency | Status | Why |
 |---|---|---|
 | **Eigen 3.4+** | required | Header-only sparse linear algebra |
 | **C++23 compiler** | required | AppleClang 15+ / Clang 17+ / GCC 13+ |
-| **SuiteSparse KLU** | optional | Unlocks the rank-1 PWL cache update path for circuits with n ≥ 100 — see [`openspec/changes/add-pwl-rank1-update/`](openspec/changes/add-pwl-rank1-update/). When absent, Pulsim falls back to Eigen::SparseLU with no functional regression. |
+| SuiteSparse KLU (vendored) | bundled | Pulled at configure time from the
+  [dpsim-simulator/SuiteSparse](https://github.com/dpsim-simulator/SuiteSparse) fork
+  (commit `6cf76809`). Provides path-based partial refactorization
+  (Schumacher/Dinkelbach 2021) — the algorithmic core of Pulsim's rank-1
+  cache update path. License: KLU + BTF are LGPL-2.1+, AMD + COLAMD are
+  BSD-3, the fork's CMake glue is Apache-2.0. See [`LICENSES/`](LICENSES/). |
 
 Install on the supported platforms:
 
 ```bash
 # macOS (Homebrew)
-brew install cmake ninja eigen suite-sparse
+brew install cmake ninja eigen
 
 # Debian / Ubuntu
-sudo apt-get install -y cmake ninja-build libeigen3-dev libsuitesparse-dev
+sudo apt-get install -y cmake ninja-build libeigen3-dev
 
 # Fedora
-sudo dnf install cmake ninja-build eigen3-devel suitesparse-devel
+sudo dnf install cmake ninja-build eigen3-devel
 ```
 
 To explicitly disable the KLU backend (e.g. when measuring the
-fallback path), configure with `-DPULSIM_ENABLE_KLU=OFF`.
+Eigen::SparseLU fallback path), configure with
+`-DPULSIM_ENABLE_KLU=OFF`. This skips the FetchContent download
+entirely.
 
 ### Build + run
 
