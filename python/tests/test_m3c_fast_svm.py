@@ -24,15 +24,18 @@ sys.path.insert(0, str(_M3C_DIR))
 from m3c_3phase_model import (  # noqa: E402
     ALL_VALID_CONFIGURATIONS,
     LG_TRANSFORM_MATRIX,
+    M3cDqController,
     M3cL1ControlState,
     M3cParams,
     ModuleConfiguration,
+    abc_to_dq,
     abc_to_lg,
     build_l0_plant,
     build_l1_plant,
     configurations_by_distribution,
     configurations_containing_module,
     connection_cost,
+    dq_to_abc,
     enumerate_valid_configurations,
     fast_svm_4_vectors,
     fast_svm_duty_cycles,
@@ -41,6 +44,7 @@ from m3c_3phase_model import (  # noqa: E402
     lg_to_abc,
     make_fast_svm_fn,
     make_m3c_l1_cost_control,
+    make_m3c_l1_dq_control,
     make_m3c_l1_open_loop_control,
     predict_i_out_peak,
     predict_load_impedance,
@@ -48,6 +52,7 @@ from m3c_3phase_model import (  # noqa: E402
     rms,
     run_l0_open_loop,
     run_l1_cost_loop,
+    run_l1_dq_closed_loop,
     run_l1_open_loop,
     select_best_connection,
     solve_module_currents,
@@ -1241,3 +1246,192 @@ class TestL1CostLoop:
         fund_pred = predict_i_out_peak(params)
         rel_err = abs(fund_pk - fund_pred) / fund_pred
         assert rel_err < 0.15
+
+
+# ============================================================================
+# Tier 12 — Closed-loop dq output current control (Phase 22.7)
+# ============================================================================
+
+
+class TestParkTransforms:
+    """Synchronous-frame Park / inverse Park (amplitude-invariant)."""
+
+    @pytest.mark.parametrize("theta", [0.0, 0.3, pi / 2, pi, 5 * pi / 3])
+    def test_abc_to_dq_for_cos_sinusoid(self, theta: float) -> None:
+        """For a = A·cos(θ), b = A·cos(θ−2π/3), c = A·cos(θ+2π/3),
+        the Park transform at the same θ yields (d=A, q=0)."""
+        A = 123.4
+        a = A * np.cos(theta)
+        b = A * np.cos(theta - 2 * pi / 3)
+        c = A * np.cos(theta + 2 * pi / 3)
+        d, q = abc_to_dq(a, b, c, theta)
+        assert d == pytest.approx(A, abs=1e-9)
+        assert q == pytest.approx(0.0, abs=1e-9)
+
+    @pytest.mark.parametrize("theta", [0.0, 1.234, pi, 2.5])
+    def test_round_trip(self, theta: float) -> None:
+        """abc → dq → abc should be the identity (minus zero-sequence)
+        at any θ."""
+        a, b, c = 12.0, -7.5, 3.3
+        d, q = abc_to_dq(a, b, c, theta)
+        a2, b2, c2 = dq_to_abc(d, q, theta)
+        # Park strips zero-sequence; subtract common-mode and compare.
+        m = (a + b + c) / 3.0
+        assert a2 == pytest.approx(a - m, abs=1e-9)
+        assert b2 == pytest.approx(b - m, abs=1e-9)
+        assert c2 == pytest.approx(c - m, abs=1e-9)
+
+    def test_q_axis_for_sin_sinusoid(self) -> None:
+        """For a = A·sin(θ) (lagging the cos reference by 90°), Park
+        yields (d=0, q=−A) — the sign is negative because our Park
+        convention has the q-axis 90° AHEAD of the d-axis."""
+        A = 50.0
+        for theta in [0.1, 1.0, pi / 4, 2.0]:
+            a = A * np.sin(theta)
+            b = A * np.sin(theta - 2 * pi / 3)
+            c = A * np.sin(theta + 2 * pi / 3)
+            d, q = abc_to_dq(a, b, c, theta)
+            assert d == pytest.approx(0.0, abs=1e-9)
+            assert q == pytest.approx(-A, abs=1e-9)
+
+
+class TestM3cDqController:
+    """The PI struct's ``step`` method (decoupled, with anti-windup)."""
+
+    def test_zero_error_zero_output(self) -> None:
+        ctrl = M3cDqController(K_p=100.0, K_i=1000.0)
+        V_d, V_q = ctrl.step(
+            i_d_meas=10.0, i_q_meas=5.0,
+            i_d_ref=10.0, i_q_ref=5.0,
+            dt=1e-4,
+        )
+        assert V_d == pytest.approx(0.0, abs=1e-9)
+        assert V_q == pytest.approx(0.0, abs=1e-9)
+
+    def test_proportional_response(self) -> None:
+        ctrl = M3cDqController(K_p=10.0, K_i=0.0)  # P-only
+        V_d, V_q = ctrl.step(
+            i_d_meas=0.0, i_q_meas=0.0,
+            i_d_ref=5.0, i_q_ref=3.0,
+            dt=1e-4,
+        )
+        assert V_d == pytest.approx(10.0 * 5.0, abs=1e-9)
+        assert V_q == pytest.approx(10.0 * 3.0, abs=1e-9)
+
+    def test_anti_windup_clamps_V_pi(self) -> None:
+        """Huge error + finite v_pi_max → V output saturates."""
+        ctrl = M3cDqController(
+            K_p=1e4, K_i=1e6, v_pi_max=1000.0,
+        )
+        V_d, V_q = ctrl.step(
+            i_d_meas=0.0, i_q_meas=0.0,
+            i_d_ref=1e6, i_q_ref=-1e6,
+            dt=1e-3,
+        )
+        assert -1001.0 <= V_d <= 1001.0
+        assert -1001.0 <= V_q <= 1001.0
+
+    def test_decoupling_term_present(self) -> None:
+        """With ``omega_L_decouple > 0``, V_d_ref carries −ωL·i_q and
+        V_q_ref carries +ωL·i_d (Sec 5.6.2 cross-axis cancellation)."""
+        ctrl = M3cDqController(
+            K_p=0.0, K_i=0.0,              # P=I=0 → output is decoupling only
+            omega_L_decouple=10.0,
+        )
+        V_d, V_q = ctrl.step(
+            i_d_meas=3.0, i_q_meas=7.0,
+            i_d_ref=3.0, i_q_ref=7.0,      # zero error
+            dt=1e-4,
+        )
+        assert V_d == pytest.approx(-10.0 * 7.0)
+        assert V_q == pytest.approx(+10.0 * 3.0)
+
+
+@_requires_pulsim
+class TestDqClosedLoop:
+    """Step response of the L1 plant under closed-loop dq control."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> M3cParams:
+        return M3cParams()
+
+    @pytest.fixture(scope="class")
+    def step_result(self, params: M3cParams):
+        def i_d_ref(t):
+            return 100.0 if t >= 50e-3 else 0.0
+        L_total = params.L_out + params.L_load
+        omega_c = 2 * pi * 50.0
+        dq = M3cDqController(
+            K_p=omega_c * L_total,
+            K_i=omega_c * params.R_load,
+            omega_L_decouple=params.omega_out * L_total,
+        )
+        plant = build_l1_plant(params)
+        return run_l1_dq_closed_loop(
+            plant, params,
+            i_d_ref=i_d_ref, i_q_ref=0.0,
+            dq_controller=dq,
+            t_end=200e-3, dt=25e-6,
+        )
+
+    def test_run_returns_three_objects(
+        self, params: M3cParams, step_result,
+    ) -> None:
+        result, ctrl_state, dq_ctrl = step_result
+        assert len(result.t) > 1000
+        assert isinstance(ctrl_state, M3cL1ControlState)
+        assert isinstance(dq_ctrl, M3cDqController)
+
+    def test_id_tracks_step_reference(
+        self, params: M3cParams, step_result,
+    ) -> None:
+        """i_d should converge to ≈ 100 A in the 150-200 ms window."""
+        result, _, _ = step_result
+        mask = result.t >= 150e-3
+        theta = params.omega_out * result.t[mask]
+        ia = result.i_a_out[mask]
+        ib = result.i_b_out[mask]
+        ic = result.i_c_out[mask]
+        i_d = np.array([
+            abc_to_dq(float(ia[k]), float(ib[k]), float(ic[k]),
+                      float(theta[k]))[0]
+            for k in range(len(ia))
+        ])
+        rel_err = abs(i_d.mean() - 100.0) / 100.0
+        assert rel_err < 0.10, (
+            f"i_d mean = {i_d.mean():.2f} A, expected ~100 A "
+            f"(rel-err {rel_err*100:.2f}%)"
+        )
+
+    def test_iq_stays_near_zero(
+        self, params: M3cParams, step_result,
+    ) -> None:
+        """With i_q_ref=0 and ωL-decoupling enabled, |i_q| is small."""
+        result, _, _ = step_result
+        mask = result.t >= 150e-3
+        theta = params.omega_out * result.t[mask]
+        ia = result.i_a_out[mask]
+        ib = result.i_b_out[mask]
+        ic = result.i_c_out[mask]
+        i_q = np.array([
+            abc_to_dq(float(ia[k]), float(ib[k]), float(ic[k]),
+                      float(theta[k]))[1]
+            for k in range(len(ia))
+        ])
+        assert abs(i_q.mean()) < 25.0
+
+    def test_pre_step_currents_are_zero(
+        self, params: M3cParams, step_result,
+    ) -> None:
+        """Before the step (t < 50 ms), i_d_ref = 0 → near zero current."""
+        result, _, _ = step_result
+        mask = (result.t >= 10e-3) & (result.t < 50e-3)
+        i_a_pre = result.i_a_out[mask]
+        peak_pre = float(np.max(np.abs(i_a_pre)))
+        assert peak_pre < 5.0
+
+    def test_pi_integrator_evolved(
+        self, params: M3cParams, step_result,
+    ) -> None:
+        _, _, dq_ctrl = step_result
+        assert abs(dq_ctrl.integral_d) > 0.0
