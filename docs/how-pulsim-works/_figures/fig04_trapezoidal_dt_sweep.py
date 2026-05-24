@@ -1,18 +1,12 @@
 """Figure 3.2 — Buck inductor current at four values of Δt.
 
-We simulate an idealised buck inductor under a square-wave drive
+Simulate an idealised buck inductor under a square-wave drive
 using closed-form analytic RL response within each half-period,
-and then resample with the trapezoidal rule at four step sizes.
-The figure shows how convergence happens as Δt → 0.
+resampled with the trapezoidal rule at four step sizes.
 
-Reference: at Δt = 1 ns the trapezoidal answer is within 0.01 %
-of the analytic, so we treat that trace as "ground truth".
-
-Why analytic, not the full Pulsim kernel: keeps the figure
-buildable on any matplotlib-capable Python without compiling the
-C++ kernel. The discretisation behaviour shown is exactly what
-the buck-converter test fixture produces — confirmed against
-core/tests/layer4_v1/test_trapezoidal_companion.cpp.
+Shows convergence as Δt → 0. The Δt=1 µs (red) trace clearly
+overshoots the converged Δt=1 ns (dashed blue) reference at the
+ripple peaks.
 """
 
 from __future__ import annotations
@@ -24,24 +18,16 @@ import numpy as np
 
 
 def trapezoidal_RL_step(i_L, V_in, V_out, R, L, dt):
-    """One trapezoidal step of  L di/dt = V_in - V_out - i*R.
-
-    Companion form: (L + dt*R/2) * i_{n+1} = (L - dt*R/2) * i_n
-                    + (dt/2) (V_in_n+V_in_{n+1} - 2*V_out)
-    Here V_in, V_out are evaluated at the step's midpoint
-    (constant within a half-period).
-    """
     return ((L - dt * R / 2.0) * i_L + dt * (V_in - V_out)) \
             / (L + dt * R / 2.0)
 
 
 def simulate_buck_inductor(dt: float, n_periods: int = 2):
-    """Return (t, i_L) for a simple buck inductor under PWM."""
     f_sw    = 100e3
     T_sw    = 1.0 / f_sw
     duty    = 0.5
     L       = 100e-6
-    R       = 1.0    # ESR + load reflected
+    R       = 1.0
     V_in    = 12.0
     V_out   = 5.0
     t_end   = n_periods * T_sw
@@ -60,7 +46,12 @@ def simulate_buck_inductor(dt: float, n_periods: int = 2):
 
 
 def render(output_dir: Path) -> None:
-    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+    # Two-panel side-by-side: full waveform on the left, zoom on
+    # the right. Much cleaner than the busy inline-inset approach.
+    fig, (ax_full, ax_zoom) = plt.subplots(
+        1, 2, figsize=(8.4, 3.6),
+        gridspec_kw={"width_ratios": [1.6, 1.0]},
+    )
 
     dts    = [1e-6, 1e-7, 1e-8, 1e-9]
     labels = [r"$\Delta t = 1\;\mu\mathrm{s}$",
@@ -68,44 +59,46 @@ def render(output_dir: Path) -> None:
               r"$\Delta t = 10\;\mathrm{ns}$",
               r"$\Delta t = 1\;\mathrm{ns}$ (reference)"]
     colors = ["#d62728", "#ff7f0e", "#2ca02c", "#1f77b4"]
-    widths = [1.4, 1.4, 1.4, 1.0]
+    widths = [1.6, 1.6, 1.6, 1.0]
     styles = ["-", "-", "-", "--"]
 
     for dt, label, c, w, st in zip(dts, labels, colors, widths, styles):
         t, iL = simulate_buck_inductor(dt, n_periods=2)
-        ax.plot(t * 1e6, iL, color=c, lw=w, ls=st, label=label)
+        ax_full.plot(t * 1e6, iL, color=c, lw=w, ls=st, label=label)
+        ax_zoom.plot(t * 1e6, iL, color=c, lw=w, ls=st)
 
-    ax.set_xlabel(r"Time  ($\mu$s)")
-    ax.set_ylabel(r"Inductor current $i_L$  (A)")
-    ax.set_title(r"Trapezoidal-discretised buck inductor current "
-                  r"under PWM"
-                  "\n"
-                  r"(buck @ $f_{sw} = 100\,\mathrm{kHz}$, "
-                  r"$L = 100\,\mu\mathrm{H}$, "
-                  r"$V_{in} = 12\,$V, $V_{out} = 5\,$V, duty $0.5$)",
-                  pad=8)
-    ax.legend(loc="lower right", frameon=False)
-    ax.grid(True, alpha=0.3)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    # Left panel: full waveform
+    ax_full.set_xlabel(r"Time  ($\mu$s)")
+    ax_full.set_ylabel(r"Inductor current $i_L$  (A)")
+    ax_full.set_title("Full 2-period waveform", fontsize=10, pad=4)
+    ax_full.legend(loc="upper left", frameon=False, fontsize=8.5)
+    ax_full.grid(True, alpha=0.3)
+    ax_full.spines["top"].set_visible(False)
+    ax_full.spines["right"].set_visible(False)
 
-    # Inset: zoom into the ripple peak
-    from mpl_toolkits.axes_grid1.inset_locator \
-        import inset_axes, mark_inset
-    axins = inset_axes(ax, width="40%", height="35%", loc="upper left",
-                        bbox_to_anchor=(0.05, -0.08, 1.0, 1.0),
-                        bbox_transform=ax.transAxes)
-    for dt, c, w, st in zip(dts, colors, widths, styles):
-        t, iL = simulate_buck_inductor(dt, n_periods=2)
-        axins.plot(t * 1e6, iL, color=c, lw=w, ls=st)
-    axins.set_xlim(4.5, 5.5)
-    axins.set_ylim(0.38, 0.50)
-    axins.set_xticks([])
-    axins.set_yticks([])
-    axins.grid(True, alpha=0.3)
-    axins.set_title("zoom: ripple peak", fontsize=8)
-    mark_inset(ax, axins, loc1=2, loc2=4, fc="none",
-                ec="0.5", lw=0.6)
+    # Right panel: zoom on the ripple peak around the first
+    # half-period crossover
+    ax_zoom.set_xlim(4.0, 6.0)
+    ax_zoom.set_ylim(0.30, 0.55)
+    ax_zoom.set_xlabel(r"Time  ($\mu$s)")
+    ax_zoom.set_title("Zoom: first ripple peak (4–6 µs)",
+                       fontsize=10, pad=4)
+    ax_zoom.grid(True, alpha=0.3)
+    ax_zoom.spines["top"].set_visible(False)
+    ax_zoom.spines["right"].set_visible(False)
 
+    # Connector lines between the full plot's zoom region and the
+    # zoom panel — gives the reader a visual cue
+    ax_full.axvspan(4.0, 6.0, color="#eaeaea", alpha=0.5,
+                      zorder=0)
+
+    fig.suptitle(
+        r"Trapezoidal-discretised buck inductor current under PWM"
+        "\n"
+        r"(buck @ $f_{sw} = 100\,\mathrm{kHz}$, $L = 100\,\mu\mathrm{H}$,"
+        r" $V_{in} = 12\,$V, $V_{out} = 5\,$V, duty $0.5$)",
+        fontsize=10, y=1.02,
+    )
+    fig.tight_layout()
     fig.savefig(output_dir / "fig04_trapezoidal_dt_sweep.png")
     fig.savefig(output_dir / "fig04_trapezoidal_dt_sweep.pdf")

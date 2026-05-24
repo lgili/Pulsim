@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]  # _figures → how-pulsim-works → docs → repo root
+REPO = HERE.parents[2]
 CSV  = REPO / "artigos" / "02_tpel_methods" / "benchmarks" / "results" \
             / "rank1_microbench.csv"
 
@@ -50,7 +50,9 @@ def render(output_dir: Path) -> None:
     c_over_a = np.array([r["speedup_C_A"] for r in rows])
     c_over_b = np.array([r["speedup_C_B"] for r in rows])
 
-    fig, ax = plt.subplots(figsize=(7.0, 4.2))
+    # Wider canvas + dedicated bottom legend region keeps the
+    # in-line C/A annotations from colliding with the legend.
+    fig, ax = plt.subplots(figsize=(7.6, 4.6))
 
     # Crossover zone shading
     ax.axhspan(0.5, 1.0, color="#f5f5f5", alpha=0.6, lw=0, zorder=0)
@@ -64,21 +66,25 @@ def render(output_dir: Path) -> None:
 
     # Three speedup curves
     ax.plot(n_state, c_over_a, color="#d95f02", lw=2.0, marker="o",
-              markersize=6, label=r"C/A — headline (Pulsim path-based vs baseline)")
+              markersize=6,
+              label=r"$C/A$ — headline (Pulsim path-based vs baseline)")
     ax.plot(n_state, b_over_a, color="#1f77b4", lw=1.6, marker="s",
-              markersize=5, label=r"B/A — amortised-symbolic (Eigen sliding vs baseline)")
+              markersize=5,
+              label=r"$B/A$ — amortised-symbolic (Eigen sliding vs baseline)")
     ax.plot(n_state, c_over_b, color="#2ca02c", lw=1.6, marker="^",
-              markersize=5, label=r"C/B — path-based on top (Pulsim vs Eigen sliding)")
+              markersize=5,
+              label=r"$C/B$ — path-based on top (Pulsim vs Eigen sliding)")
 
-    # Annotate the headline at n=14, 18, 22, 26
+    # Annotate the headline at n=14, 18, 22, 26 — placed BELOW the
+    # data point so they don't bump into the C/B curve above
     for n_val in (14, 18, 22, 26):
         idx = np.argmin(np.abs(n_state - n_val))
         ax.annotate(f"{c_over_a[idx]:.2f}×",
                      xy=(n_state[idx], c_over_a[idx]),
-                     xytext=(0, 8),
+                     xytext=(0, 12),
                      textcoords="offset points",
                      ha="center", va="bottom",
-                     fontsize=8, color="#d95f02", weight="bold")
+                     fontsize=9, color="#d95f02", weight="bold")
 
     ax.set_xlabel(r"$n_{\mathrm{state}}$")
     ax.set_ylabel("Speedup ratio (×)")
@@ -86,11 +92,16 @@ def render(output_dir: Path) -> None:
                  "(macOS / Apple Silicon / 2000 single-bit Gray-code flips per N)",
                   pad=8)
     ax.set_xticks(n_state)
-    ax.set_ylim(0.4, 3.2)
-    ax.legend(loc="upper left", frameon=False, fontsize=8)
+    ax.set_ylim(0.4, 3.4)
+    # Bottom legend in a 3-column row underneath the plot — keeps
+    # the plot area clear for annotations
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18),
+                ncol=1, frameon=False, fontsize=8.5,
+                handlelength=2.5)
     ax.grid(True, alpha=0.3)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
+    fig.tight_layout()
     fig.savefig(output_dir / "fig81_speedup_vs_n.png")
     fig.savefig(output_dir / "fig81_speedup_vs_n.pdf")

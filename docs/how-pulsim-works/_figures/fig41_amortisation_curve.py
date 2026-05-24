@@ -32,17 +32,14 @@ def render(output_dir: Path) -> None:
 
     n_steps = np.logspace(0, 6, 200)  # 1 to 1e6
 
-    # Cumulative ms
     spice_ms  = n_steps * T_SPICE_us * 1e-3
     pulsim_ms = (visited * T_cold_us + n_steps * T_hot_us) * 1e-3
-
-    # Variability band on T_cold: ±50%
     pulsim_ms_lo = (visited * (T_cold_us * 0.5)
                      + n_steps * T_hot_us) * 1e-3
     pulsim_ms_hi = (visited * (T_cold_us * 1.5)
                      + n_steps * T_hot_us) * 1e-3
 
-    fig, ax = plt.subplots(figsize=(7.0, 4.0))
+    fig, ax = plt.subplots(figsize=(7.4, 4.4))
 
     ax.loglog(n_steps, spice_ms, color="#d62728", lw=1.8,
                 label="SPICE-style (re-factorise every step)")
@@ -52,26 +49,42 @@ def render(output_dir: Path) -> None:
                      color="#1f77b4", alpha=0.18,
                      label=r"Pulsim band (±50% on $T_{\mathrm{cold}}$)")
 
-    # Mark the crossover point
+    # Crossover marker + on-plot annotation
     crossover = (visited * T_cold_us) / (T_SPICE_us - T_hot_us)
     cross_ms = crossover * T_SPICE_us * 1e-3
-    ax.scatter([crossover], [cross_ms], s=60, marker="o",
-                color="#222", zorder=5)
+    ax.scatter([crossover], [cross_ms], s=70, marker="o",
+                color="#222", zorder=6, edgecolor="white",
+                linewidth=1.2)
     ax.annotate(
-        rf"crossover at $N_{{\mathrm{{steps}}}} \approx {crossover:.0f}$",
+        rf"crossover  $\approx$ {crossover:.0f} steps",
         xy=(crossover, cross_ms),
-        xytext=(80, 0.5),
+        xytext=(crossover * 4, cross_ms / 8),
         fontsize=9,
         arrowprops=dict(arrowstyle="->", color="#555", lw=0.7),
     )
 
-    # Mark the 10x asymptotic regime
-    n_asymp = 1e5
-    ax.axvline(n_asymp, color="#999", ls=":", lw=0.7)
-    ax.text(n_asymp * 1.2, 0.001,
-             rf"$N_{{\mathrm{{steps}}}}={n_asymp:.0e}$:"
-             rf"  Pulsim {spice_ms[np.argmin(np.abs(n_steps - n_asymp))] / pulsim_ms[np.argmin(np.abs(n_steps - n_asymp))]:.1f}× faster",
-             fontsize=9, color="#444")
+    # Speedup annotation at N = 1e5 — anchored to the actual
+    # SPICE/Pulsim curves so it's never off-plot
+    n_asymp_idx = np.argmin(np.abs(n_steps - 1e5))
+    n_asymp_val = n_steps[n_asymp_idx]
+    spice_at_asymp  = spice_ms[n_asymp_idx]
+    pulsim_at_asymp = pulsim_ms[n_asymp_idx]
+    ratio = spice_at_asymp / pulsim_at_asymp
+
+    ax.axvline(n_asymp_val, color="#999", ls=":", lw=0.7)
+    # Vertical span connecting the two points at N=1e5
+    ax.plot([n_asymp_val, n_asymp_val],
+              [pulsim_at_asymp, spice_at_asymp],
+              color="#888", lw=1.0, alpha=0.6)
+    # Centered between them on log-y
+    midpoint_y = np.sqrt(pulsim_at_asymp * spice_at_asymp)
+    ax.text(n_asymp_val * 1.2, midpoint_y,
+              rf"$\bf{{{ratio:.1f}\times}}$"
+              "\n"
+              rf"@ $N=10^5$",
+              fontsize=10, color="#1f77b4",
+              ha="left", va="center", weight="normal",
+              linespacing=1.4)
 
     ax.set_xlabel(r"Simulated step count $N_{\mathrm{steps}}$")
     ax.set_ylabel("Cumulative wall-clock time (ms)")
@@ -87,5 +100,6 @@ def render(output_dir: Path) -> None:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
+    fig.tight_layout()
     fig.savefig(output_dir / "fig41_amortisation_curve.png")
     fig.savefig(output_dir / "fig41_amortisation_curve.pdf")

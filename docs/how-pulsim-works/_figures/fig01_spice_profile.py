@@ -1,17 +1,16 @@
 """Figure 1.1 — Where time goes in a SPICE-style buck simulation.
 
-A representative profile (from the literature + Pulsim's own
+Representative profile (from the literature + Pulsim's own
 comparison runs against ngspice on the buck fixture under
-artigos/02_tpel_methods/benchmarks/buck/). The exact percentages
+artigos/02_tpel_methods/benchmarks/buck/). Exact percentages
 vary by toolchain but the shape is robust across SPICE-family
 simulators and across SMPS workloads.
 
 Sourcing
 --------
-The percentages below come from a profile of ngspice 41 running
+Percentages below come from a profile of ngspice 41 running
 the buck.cir fixture in artigos/02_tpel_methods/benchmarks/buck/
-for 1000 switching periods at 100 kHz, dt=10 ns. Reproducer in
-the same directory's run_buck_benchmark.py.
+for 1000 switching periods at 100 kHz, dt=10 ns.
 """
 
 from __future__ import annotations
@@ -23,40 +22,49 @@ import numpy as np
 
 
 def render(output_dir: Path) -> None:
-    """Stacked-horizontal-bar plot of SPICE per-step cost shares."""
+    """Stacked-horizontal-bar plot with categories listed in a
+    side legend instead of crammed beneath the bar."""
     categories = [
-        "Jacobian assembly\n(stamp_*)",
-        "Sparse LU factorisation\n(lu_decomp)",
-        "Newton iteration management\n(convergence check, line search)",
-        "Triangular solve\n(forward/back substitution)",
-        "Misc.\n(history update, output)",
+        ("Jacobian assembly  (stamp_*)",                 38.0, "#d95f02"),
+        ("Sparse LU factorisation  (lu_decomp)",         32.0, "#7570b3"),
+        ("Newton iteration management",                   14.0, "#66a61e"),
+        ("Triangular solve  (fwd/back substitution)",     9.0,  "#1b9e77"),
+        ("Misc.  (history update, output)",               7.0,  "#999999"),
     ]
-    shares = np.array([38.0, 32.0, 14.0, 9.0, 7.0])
-    colors = ["#d95f02", "#7570b3", "#66a61e", "#1b9e77", "#999999"]
 
-    fig, ax = plt.subplots(figsize=(7.0, 2.2))
+    fig, ax = plt.subplots(figsize=(7.6, 2.4))
 
+    # The stacked bar
     left = 0.0
-    for share, label, color in zip(shares, categories, colors):
-        ax.barh(0, share, left=left, height=0.45,
-                color=color, edgecolor="white", linewidth=0.6)
-        # Center the percentage label inside the bar
-        ax.text(left + share / 2.0, 0,
-                f"{share:.0f}%",
-                ha="center", va="center",
-                fontsize=10, color="white", weight="bold")
+    for label, share, color in categories:
+        ax.barh(0, share, left=left, height=0.55,
+                color=color, edgecolor="white", linewidth=0.8)
+        # Only inline-label the wider segments to avoid overlap;
+        # narrow ones rely on the right-side legend
+        if share >= 12.0:
+            ax.text(left + share / 2.0, 0,
+                    f"{share:.0f}%",
+                    ha="center", va="center",
+                    fontsize=11, color="white", weight="bold")
+        else:
+            ax.text(left + share / 2.0, 0,
+                    f"{share:.0f}%",
+                    ha="center", va="center",
+                    fontsize=9, color="white", weight="bold")
         left += share
 
-    # Category labels under the bar
-    left = 0.0
-    for share, label, color in zip(shares, categories, colors):
-        ax.text(left + share / 2.0, -0.65, label,
-                ha="center", va="top", fontsize=8.5,
-                color="black", linespacing=1.1)
-        left += share
+    # External legend (avoids the cramped inline-label problem)
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=c, edgecolor="white", label=lbl)
+               for lbl, _, c in categories]
+    ax.legend(handles=handles, loc="upper center",
+              bbox_to_anchor=(0.5, -0.35),
+              ncol=2, frameon=False, fontsize=8.5,
+              handlelength=1.5, handleheight=1.2,
+              columnspacing=1.5)
 
     ax.set_xlim(0, 100)
-    ax.set_ylim(-1.4, 0.5)
+    ax.set_ylim(-0.55, 0.55)
     ax.set_yticks([])
     ax.set_xticks(np.arange(0, 101, 25))
     ax.set_xlabel("Share of per-step CPU time (%)")

@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
+from matplotlib.patches import FancyBboxPatch, Rectangle
 
 
 LAYERS = [
@@ -53,65 +53,82 @@ LAYERS = [
 
 
 def render(output_dir: Path) -> None:
-    fig, ax = plt.subplots(figsize=(8.0, 5.5))
+    # Wider figure + dedicated columns avoid the overlap problem
+    # the v1 layout had between the line-count / chapter-ref column
+    # and the highlight sidebar.
+    fig, ax = plt.subplots(figsize=(9.0, 6.0))
 
-    # Compute total lines for color shading
+    # Column x-coordinates (carved out explicitly so nothing overlaps)
+    BOX_LEFT  = 0.0
+    BOX_RIGHT = 5.6
+    LINES_X   = 5.95
+    CHAP_X    = 7.05
+    SIDEBAR_X = 8.6
+
     max_lines = max(l[3] for l in LAYERS)
 
-    # Sort by level descending so Layer 9 is at the top of the stack
     for layer in sorted(LAYERS, key=lambda x: -x[0]):
         level, title, summary, n_lines, chapter_ref = layer
-        # y-position: layers 0..9 → y = 0..9
         y = level
-        # Width shading by line count
         shade = 0.25 + 0.55 * (n_lines / max_lines)
-        # Special highlight for the v1.3.0-contribution layers (0 and 4)
         is_highlight = level in (0, 4)
         face = (1.0 - shade * 0.4, 1.0 - shade * 0.2, 1.0)
         edge = "#d95f02" if is_highlight else "#1f3a6b"
         lw   = 2.0 if is_highlight else 0.8
 
         rect = FancyBboxPatch(
-            (0.0, y), 5.0, 0.85,
+            (BOX_LEFT, y), BOX_RIGHT - BOX_LEFT, 0.85,
             boxstyle="round,pad=0.02,rounding_size=0.05",
             facecolor=face, edgecolor=edge, linewidth=lw,
         )
         ax.add_patch(rect)
 
-        # Layer number on the left
+        # Layer number left of the box
         ax.text(-0.35, y + 0.45, f"L{level}",
                 ha="right", va="center",
                 fontsize=11, weight="bold", color="#222")
 
         # Title + summary inside the box
-        ax.text(0.15, y + 0.6, title,
+        ax.text(BOX_LEFT + 0.15, y + 0.6, title,
                 ha="left", va="center",
                 fontsize=10, weight="bold", color="#111")
-        ax.text(0.15, y + 0.2, summary,
+        ax.text(BOX_LEFT + 0.15, y + 0.22, summary,
                 ha="left", va="center",
                 fontsize=8.5, color="#444")
 
-        # Line-count + chapter ref on the right
-        ax.text(5.1, y + 0.6, f"~{n_lines:,} lines",
+        # Line-count in its dedicated column
+        ax.text(LINES_X, y + 0.45, f"~{n_lines:,} lines",
                 ha="left", va="center",
                 fontsize=8.5, color="#666", style="italic")
+
+        # Chapter-ref in its dedicated column
         if chapter_ref:
             color = "#d95f02" if is_highlight else "#666"
-            ax.text(5.1, y + 0.2, chapter_ref,
+            weight = "bold" if is_highlight else "normal"
+            ax.text(CHAP_X, y + 0.45, chapter_ref,
                     ha="left", va="center",
-                    fontsize=8.5, color=color, weight="bold")
+                    fontsize=8.5, color=color, weight=weight)
 
-    # Highlight the "v1.3.0 contributions" with a sidebar
-    from matplotlib.patches import Rectangle
-    ax.add_patch(Rectangle((7.5, 3.95), 0.15, 1.85,
+    # Sidebar — vertical bar spanning ONLY L0 and L4 with arrows
+    # pointing to each. Now in its own column so it doesn't collide.
+    ax.add_patch(Rectangle((SIDEBAR_X, 0.0), 0.18, 0.85,
                               facecolor="#d95f02", alpha=0.7, lw=0))
-    ax.text(7.7, 4.875, "v1.3.0\nalgorithmic\ncontributions\n"
-                          "(this doc set)",
-              ha="left", va="center", fontsize=8,
-              color="#d95f02", weight="bold")
+    ax.add_patch(Rectangle((SIDEBAR_X, 4.0), 0.18, 0.85,
+                              facecolor="#d95f02", alpha=0.7, lw=0))
+
+    # Connect L0 ↔ L4 with a vertical line on the sidebar so the
+    # reader sees they're related
+    ax.plot([SIDEBAR_X + 0.09, SIDEBAR_X + 0.09], [0.85, 4.0],
+              color="#d95f02", lw=1.0, ls=":", alpha=0.5)
+
+    ax.text(SIDEBAR_X + 0.32, 2.43,
+              "v1.3.0\nalgorithmic\ncontributions\n(this doc set)",
+              ha="left", va="center", fontsize=8.5,
+              color="#d95f02", weight="bold",
+              linespacing=1.3)
 
     # Axis cosmetics
-    ax.set_xlim(-1.5, 10.5)
+    ax.set_xlim(-1.4, 11.2)
     ax.set_ylim(-0.5, 10.4)
     ax.set_xticks([])
     ax.set_yticks([])
