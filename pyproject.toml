@@ -47,6 +47,10 @@ dev = [
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.21.0",
     "PyYAML>=6.0",
+    # benchmark CLI visual layer (Onda 1 of bench-tool refresh):
+    # `benchmarks/_console.py` degrades gracefully when rich is absent,
+    # so this stays a soft dev dep — CI without rich keeps working.
+    "rich>=13.0",
 ]
 docs = [
     "mkdocs>=1.6,<2.0",

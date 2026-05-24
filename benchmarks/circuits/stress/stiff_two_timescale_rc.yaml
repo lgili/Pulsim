@@ -1,0 +1,66 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: stiff_two_timescale_rc
+  category: linear
+  observables:
+    - column: V(slow)
+  expectations:
+    metrics:
+      # Two RC stages with VERY different time constants in series:
+      #   Stage A: R_a = 100, C_a = 1 pF  → τ_a = 100 ps
+      #   Stage B: R_b = 100, C_b = 1 µF  → τ_b = 100 µs
+      #   Ratio: τ_b / τ_a = 1e6 — extremely stiff.
+      # Sample dt = 100 ns ≫ τ_a but ≪ τ_b. The fast stage settles
+      # completely between samples (V_fast → V_in within nanoseconds);
+      # only the slow stage's exponential is captured.
+      # STRESS TEST: an adaptive solver shrinks dt at t=0 to capture
+      # the fast initial transient. A fixed-step trbdf2 cannot; it
+      # may either (a) give the right answer because τ_a is invisible
+      # at sample times, or (b) ring or fail to converge in the first
+      # step. Observable V(slow) eventually charges with τ_b ≈ 100 µs.
+      max_error: 5e-2
+  validation:
+    type: reference
+    observable: V(slow)
+    baseline: baselines/stiff_two_timescale_rc.csv
+# Stiff multi-rate test: two RC time constants 1e6× apart in series.
+# Used to probe how Pulsim's fixed-step trbdf2 handles a hidden fast
+# transient (τ ≪ dt) embedded inside a circuit otherwise dominated
+# by a slow time scale.
+simulation:
+  tstop: 1e-3
+  dt: 100e-9
+  integrator: trbdf2
+  uic: true
+components:
+  - type: voltage_source
+    name: Vp
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 5.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 10e-3
+      period: 20e-3
+  - type: resistor
+    name: Ra
+    nodes: [in, fast]
+    value: 100.0
+  - type: capacitor
+    name: Ca
+    nodes: [fast, 0]
+    value: 1e-12       # 1 pF — fast pole at τ = 100 ps
+    ic: 0.0
+  - type: resistor
+    name: Rb
+    nodes: [fast, slow]
+    value: 100.0
+  - type: capacitor
+    name: Cb
+    nodes: [slow, 0]
+    value: 1e-6        # 1 µF — slow pole at τ = 100 µs
+    ic: 0.0

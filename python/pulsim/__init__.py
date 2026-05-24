@@ -209,6 +209,54 @@ from .spice_import import (
     spice_to_builder,
 )
 from .stream import LiveStream
+from .mmc import (
+    MmcArmAverageParams,
+    MmcArmAverageResult,
+    mmc_arm_average_step,
+    simulate_mmc_arm_average,
+    # Builder-side wiring (Phase 20.4).
+    MmcArmAverage,
+    add_mmc_arm_average,
+    make_mmc_arm_observer,
+    make_mmc_arms_observer,
+    # Three-phase DC/AC topology helper (Phase 20.4 step 2).
+    MmcThreePhaseDcAc,
+    add_mmc_three_phase_dc_ac,
+    # L1 multilevel arm — Phase 20.5.
+    MmcArmMultilevelParams,
+    MmcArmMultilevelResult,
+    ps_pwm_switching_function,
+    ipd_switching_function,
+    mmc_arm_multilevel_step,
+    simulate_mmc_arm_multilevel,
+    # L2 SM-equivalent arm (dead-time aware) — Phase 20.6.
+    MmcArmEquivalentParams,
+    MmcArmEquivalentState,
+    MmcArmEquivalentResult,
+    make_l2_state,
+    mmc_arm_equivalent_step,
+    simulate_mmc_arm_equivalent,
+    # L3 detailed (per-SM balancing) — Phase 20.7.
+    MmcArmDetailedParams,
+    MmcArmDetailedState,
+    MmcArmDetailedResult,
+    make_l3_state,
+    mmc_arm_detailed_step,
+    simulate_mmc_arm_detailed,
+    # Builder integration for L1/L2/L3 — Phase 20.8.
+    MmcArmMultilevel,
+    add_mmc_arm_multilevel,
+    make_mmc_arm_multilevel_observer,
+    make_mmc_arm_multilevel_observers,
+    MmcArmEquivalent,
+    add_mmc_arm_equivalent,
+    make_mmc_arm_equivalent_observer,
+    make_mmc_arm_equivalent_observers,
+    MmcArmDetailed,
+    add_mmc_arm_detailed,
+    make_mmc_arm_detailed_observer,
+    make_mmc_arm_detailed_observers,
+)
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
 # (schemdraw + networkx + cairosvg + anthropic). Importing the
@@ -367,6 +415,54 @@ __all__ = [
     "spice_to_builder",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
+    # Modular Multilevel Converter — L0 average-value arm model
+    # (Phase 20, Sousa 2022 eqs 2.13/2.14).
+    "MmcArmAverageParams",
+    "MmcArmAverageResult",
+    "mmc_arm_average_step",
+    "simulate_mmc_arm_average",
+    # MMC L0 CircuitBuilder integration (Phase 20.4).
+    "MmcArmAverage",
+    "add_mmc_arm_average",
+    "make_mmc_arm_observer",
+    "make_mmc_arms_observer",
+    # MMC three-phase DC/AC topology helper.
+    "MmcThreePhaseDcAc",
+    "add_mmc_three_phase_dc_ac",
+    # MMC L1 — discrete multilevel arm (PS-PWM).
+    "MmcArmMultilevelParams",
+    "MmcArmMultilevelResult",
+    "ps_pwm_switching_function",
+    "ipd_switching_function",
+    "mmc_arm_multilevel_step",
+    "simulate_mmc_arm_multilevel",
+    # MMC L2 — SM-equivalent (dead-time + min-pulse-width).
+    "MmcArmEquivalentParams",
+    "MmcArmEquivalentState",
+    "MmcArmEquivalentResult",
+    "make_l2_state",
+    "mmc_arm_equivalent_step",
+    "simulate_mmc_arm_equivalent",
+    # MMC L3 — detailed per-SM with balancing.
+    "MmcArmDetailedParams",
+    "MmcArmDetailedState",
+    "MmcArmDetailedResult",
+    "make_l3_state",
+    "mmc_arm_detailed_step",
+    "simulate_mmc_arm_detailed",
+    # MMC L1/L2/L3 builder integration.
+    "MmcArmMultilevel",
+    "add_mmc_arm_multilevel",
+    "make_mmc_arm_multilevel_observer",
+    "make_mmc_arm_multilevel_observers",
+    "MmcArmEquivalent",
+    "add_mmc_arm_equivalent",
+    "make_mmc_arm_equivalent_observer",
+    "make_mmc_arm_equivalent_observers",
+    "MmcArmDetailed",
+    "add_mmc_arm_detailed",
+    "make_mmc_arm_detailed_observer",
+    "make_mmc_arm_detailed_observers",
 ]
 
 if _HAS_SCOPE:

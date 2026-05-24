@@ -89,7 +89,7 @@ PYTEST := $(PYTHON) -m pytest
 RUFF := $(shell command -v ruff 2>/dev/null || echo "$(PYTHON) -m ruff")
 
 # Benchmark helpers
-BENCHMARKS_FILE ?= benchmarks/benchmarks.yaml
+BENCHMARKS_FILE ?= benchmarks/manifests/benchmarks.yaml
 BENCHMARK_OUT ?= benchmarks/out_converters
 LTSPICE_OUT ?= benchmarks/ltspice_out_converters
 LTSPICE_EXE ?= /Applications/LTspice.app/Contents/MacOS/LTspice
@@ -303,24 +303,18 @@ benchmark: benchmark-converters-compare
 
 benchmark-converters: python
 	@echo "Running converter benchmarks (runtime only)..."
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_runner.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(BENCHMARK_OUT)
-	@$(PYTHON) scripts/benchmark_table.py \
-		--runtime $(BENCHMARK_OUT)/results.json \
-		--title "Converter Benchmarks (Runtime)"
 
 benchmark-converters-baselines: python
 	@echo "Running converter benchmarks and generating missing baselines..."
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_runner.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(BENCHMARK_OUT) \
 		--generate-baselines
-	@$(PYTHON) scripts/benchmark_table.py \
-		--runtime $(BENCHMARK_OUT)/results.json \
-		--title "Converter Benchmarks (Runtime + Baselines)"
 
 benchmark-ltspice: python
 	@echo "Running LTspice parity for converter benchmarks..."
@@ -329,49 +323,52 @@ benchmark-ltspice: python
 		echo "Use: make benchmark-ltspice LTSPICE_EXE=/path/to/LTspice"; \
 		exit 1; \
 	fi
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_ngspice.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_ngspice.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--backend ltspice \
 		--ltspice-exe "$(LTSPICE_EXE)" \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(LTSPICE_OUT)
-	@$(PYTHON) scripts/benchmark_table.py \
-		--parity $(LTSPICE_OUT)/parity_results.json \
-		--title "Converter Parity (LTspice)"
 
 benchmark-converters-compare: python
-	@echo "Running runtime benchmarks + LTspice parity and printing combined table..."
+	@echo "Running runtime benchmarks + LTspice parity..."
 	@if [ ! -x "$(LTSPICE_EXE)" ]; then \
 		echo "LTspice executable not found: $(LTSPICE_EXE)"; \
 		echo "Use: make benchmark-converters-compare LTSPICE_EXE=/path/to/LTspice"; \
 		exit 1; \
 	fi
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_runner.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(BENCHMARK_OUT)
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_ngspice.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_ngspice.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--backend ltspice \
 		--ltspice-exe "$(LTSPICE_EXE)" \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(LTSPICE_OUT)
-	@$(PYTHON) scripts/benchmark_table.py \
-		--runtime $(BENCHMARK_OUT)/results.json \
-		--parity $(LTSPICE_OUT)/parity_results.json \
-		--title "$(BENCHMARK_TABLE_TITLE)"
 
+# Re-render a previous benchmark output without re-running the suite.
+# Migrated from `scripts/benchmark_table.py` to `pulsim-bench show`:
+# the runners themselves now print the rich table live, so the standalone
+# table renderer is only useful for re-inspecting existing artifacts.
+# Requires `pip install -e tools/bench` (or PYTHONPATH=tools/bench).
 benchmark-table:
-	@echo "Rendering benchmark table from existing outputs..."
+	@echo "Rendering benchmark output via pulsim-bench show..."
 	@runtime_file="$(BENCHMARK_OUT)/results.json"; \
 	parity_file="$(LTSPICE_OUT)/parity_results.json"; \
-	if [ -f "$$runtime_file" ] && [ -f "$$parity_file" ]; then \
-		$(PYTHON) scripts/benchmark_table.py --runtime "$$runtime_file" --parity "$$parity_file" --title "$(BENCHMARK_TABLE_TITLE)"; \
-	elif [ -f "$$runtime_file" ]; then \
-		$(PYTHON) scripts/benchmark_table.py --runtime "$$runtime_file" --title "Converter Benchmarks (Runtime)"; \
-	elif [ -f "$$parity_file" ]; then \
-		$(PYTHON) scripts/benchmark_table.py --parity "$$parity_file" --title "Converter Parity (LTspice)"; \
-	else \
+	any=0; \
+	if [ -f "$$runtime_file" ]; then \
+		PYTHONPATH=tools/bench:$(BUILD_DIR)/python $(PYTHON) -m pulsim_bench show \
+			"$(BENCHMARK_OUT)" --title "$(BENCHMARK_TABLE_TITLE) — Runtime"; \
+		any=1; \
+	fi; \
+	if [ -f "$$parity_file" ]; then \
+		PYTHONPATH=tools/bench:$(BUILD_DIR)/python $(PYTHON) -m pulsim_bench show \
+			"$(LTSPICE_OUT)" --title "$(BENCHMARK_TABLE_TITLE) — Parity (LTspice)"; \
+		any=1; \
+	fi; \
+	if [ "$$any" = "0" ]; then \
 		echo "No benchmark outputs found."; \
 		echo "Run: make benchmark-converters or make benchmark-converters-compare"; \
 		exit 1; \
@@ -380,7 +377,7 @@ benchmark-table:
 benchmark-local-limit: python
 	@echo "Running local limit suite ($(LOCAL_LIMIT_MODE), duration scale=$(LOCAL_LIMIT_DURATION_SCALE))..."
 	@set -e; \
-	CMD="PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/local_limit_suite.py --manifest $(LOCAL_LIMIT_MANIFEST) --output-dir $(LOCAL_LIMIT_OUT) --mode $(LOCAL_LIMIT_MODE) --duration-scale $(LOCAL_LIMIT_DURATION_SCALE)"; \
+	CMD="PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/local_limit_suite.py --manifest $(LOCAL_LIMIT_MANIFEST) --output-dir $(LOCAL_LIMIT_OUT) --mode $(LOCAL_LIMIT_MODE) --duration-scale $(LOCAL_LIMIT_DURATION_SCALE)"; \
 	if [ -n "$(LOCAL_LIMIT_MAX_RUNTIME)" ]; then \
 		CMD="$$CMD --max-runtime-s $(LOCAL_LIMIT_MAX_RUNTIME)"; \
 	fi; \

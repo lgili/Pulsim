@@ -80,7 +80,7 @@ Cause:
 Fix:
 
 ```bash
-PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
+PYTHONPATH=build/python python3 benchmarks/tools/benchmark_ngspice.py \
   --backend ltspice \
   --ltspice-exe "/Applications/LTspice.app/Contents/MacOS/LTspice" \
   --output-dir benchmarks/ltspice_out

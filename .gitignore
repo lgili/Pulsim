@@ -9,11 +9,19 @@ build_ad/
 build_py/
 docs/_build/
 build_release/
+artigos/
 
 site/
 cmake-build-*/
 benchmarks/out_*/
-benchmarks/ltspice/
+benchmarks/stress_out/
+benchmarks/stress_out_*/
+benchmarks/local_limit_out/
+# LTspice / ngspice runtime artifacts (.raw, .log) — committed .cir files
+# are explicitly NOT covered by these patterns.
+benchmarks/spice/*/*.raw
+benchmarks/spice/*/*.log
+benchmarks/spice/*/*.op.raw
 .gemini/
 .claude/
 # IDE

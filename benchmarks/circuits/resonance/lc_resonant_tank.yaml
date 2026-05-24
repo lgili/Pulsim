@@ -1,0 +1,53 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: lc_resonant_tank
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Pure LC tank with NO damping → undamped sinusoid (oscillates
+      # forever in continuous time). Two solvers with slightly different
+      # numerical damping accumulate phase drift over many cycles, so we
+      # restrict the window to 3 cycles (~600 µs) to keep the comparison
+      # meaningful. Even there, ~400 mV mismatch on a ~20 V peak is
+      # expected (~2%) from sample-grid alignment of two trap variants.
+      max_error: 5e-1
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/lc_resonant_tank.csv
+# Lossless LC tank: V_pulse → L → C → ground. Classical 2nd-order
+# undamped response. Tests:
+#   - Solver behavior on a system at the imaginary axis (no damping).
+#   - Whether trbdf2's tiny built-in damping introduces visible decay
+#     over a few oscillation cycles.
+simulation:
+  tstop: 600e-6
+  dt: 1e-6
+  integrator: trbdf2
+  uic: true
+components:
+  - type: voltage_source
+    name: Vp
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 10.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 10e-3
+      period: 20e-3
+  - type: inductor
+    name: L1
+    nodes: [in, out]
+    value: 1e-3
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1e-6
+    ic: 0.0

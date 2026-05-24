@@ -1,0 +1,7 @@
+{
+  "include": ["pulsim_bench"],
+  "extraPaths": [".", "../../benchmarks"],
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "pythonVersion": "3.10"
+}
