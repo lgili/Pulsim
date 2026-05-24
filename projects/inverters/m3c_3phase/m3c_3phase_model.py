@@ -2981,6 +2981,73 @@ def make_sinusoidal_abc_ref(
     return ref
 
 
+def make_freq_ramp_abc_ref(
+    amplitude: float,
+    f_start: float,
+    f_end: float,
+    t_ramp_start: float,
+    t_ramp_end: float,
+):
+    """3-φ balanced reference whose FREQUENCY ramps linearly from
+    ``f_start`` (Hz) to ``f_end`` (Hz) between ``t_ramp_start`` and
+    ``t_ramp_end`` (seconds). Outside the ramp window the frequency
+    is held constant. Amplitude is constant throughout.
+
+    Builds the phase angle by integrating ω(t) analytically (closed
+    form for a piecewise-linear frequency profile) so the abc waveform
+    is smooth across the ramp boundaries — no spurious phase jumps.
+
+    Use for motor V/f acceleration profiles: ``amplitude`` sets the
+    torque-producing current peak, ``f_start → f_end`` defines the
+    speed sweep, ``t_ramp_start, t_ramp_end`` set when and how long
+    the acceleration takes.
+    """
+    omega_start = 2.0 * pi * f_start
+    omega_end = 2.0 * pi * f_end
+    t_ramp = max(t_ramp_end - t_ramp_start, 1e-12)
+    domega_dt = (omega_end - omega_start) / t_ramp
+
+    def theta(t: float) -> float:
+        if t < t_ramp_start:
+            return omega_start * t
+        if t < t_ramp_end:
+            tau = t - t_ramp_start
+            return (
+                omega_start * t_ramp_start
+                + omega_start * tau
+                + 0.5 * domega_dt * tau * tau
+            )
+        # After ramp.
+        theta_at_end = (
+            omega_start * t_ramp_start
+            + omega_start * t_ramp
+            + 0.5 * domega_dt * t_ramp * t_ramp
+        )
+        return theta_at_end + omega_end * (t - t_ramp_end)
+
+    def freq_at(t: float) -> float:
+        if t < t_ramp_start:
+            return f_start
+        if t < t_ramp_end:
+            return f_start + (f_end - f_start) * (
+                (t - t_ramp_start) / t_ramp
+            )
+        return f_end
+
+    def ref(t: float) -> np.ndarray:
+        th = theta(t)
+        return amplitude * np.array([
+            np.cos(th),
+            np.cos(th - 2.0 * pi / 3.0),
+            np.cos(th + 2.0 * pi / 3.0),
+        ])
+
+    # Expose the angle and frequency functions for plotting.
+    ref.theta = theta              # type: ignore[attr-defined]
+    ref.frequency = freq_at        # type: ignore[attr-defined]
+    return ref
+
+
 def make_dc_abc_ref(
     i_a: float, i_b: float | None = None, i_c: float | None = None,
 ):
