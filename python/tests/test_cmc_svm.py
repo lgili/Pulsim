@@ -28,12 +28,15 @@ from cmc_3phase_model import (  # noqa: E402
     CMC_ZERO_VECTORS,
     CmcParams,
     build_l0_plant,
+    build_l1_plant,
     make_cmc_gate_signals,
+    make_cmc_switch_fn,
     predict_i_out_peak,
     predict_load_impedance,
     predict_load_power_factor,
     rms,
     run_l0_open_loop,
+    run_l1_open_loop,
     svm_active_vectors_for_sectors,
     svm_duty_cycles,
     svm_max_modulation,
@@ -394,3 +397,111 @@ class TestL0Plant:
         arg = params.omega_out * params.L_load / params.R_load
         pf_expected = 1.0 / np.sqrt(1.0 + arg ** 2)
         assert abs(pf_theory - pf_expected) < 1e-12
+
+
+# ============================================================================
+# Tier 6 — L1 switched plant validation
+# ============================================================================
+
+
+class TestL1Plant:
+    """L1 (switched) plant: 9 ideal bidirectional switches driven by
+    SVM. Validates that pulsim end-to-end converges to the correct
+    fundamental output even with high-frequency PWM-style switching."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> CmcParams:
+        return CmcParams(
+            V_in_peak=311.13, f_in=60.0, f_out=30.0, m_depth=0.5,
+            R_load=5.0, L_load=10e-3, f_switching=10_000.0,
+        )
+
+    @pytest.fixture(scope="class")
+    def result(self, params: CmcParams):
+        plant = build_l1_plant(params)
+        return run_l1_open_loop(plant, params, t_end=100e-3)
+
+    def test_plant_has_correct_topology(self, params: CmcParams) -> None:
+        plant = build_l1_plant(params)
+        # 3 sources + 9 switches + 3 inductors + 3 resistors + 2 ties = 20
+        assert plant.builder.graph.num_branches == 20
+        assert plant.iL_out_indices is not None
+        assert len(plant.iL_out_indices) == 3
+        assert plant.iL_in_indices is not None
+        assert len(plant.iL_in_indices) == 3
+
+    def test_switch_fn_returns_9_bit_mask(self, params: CmcParams) -> None:
+        """Mask should have 9 switches and always exactly 3 ON."""
+        import pulsim as p
+        sw_fn = make_cmc_switch_fn(params)
+        for t in [0.0, 1e-5, 5e-5, 1e-4, 5e-3, 25e-3]:
+            mask = sw_fn(t)
+            assert isinstance(mask, p.SwitchStateMask)
+            n_on = sum(1 for i in range(9) if mask.get(i))
+            assert n_on == 3, f"At t={t*1e6:.0f}µs: {n_on} switches ON (must be 3)"
+
+    def test_i_out_peak_within_5pct_of_l0(
+        self, params: CmcParams, result,
+    ) -> None:
+        """L1 fundamental should match L0 analytical within ~5% (the
+        residual comes from carrier ripple modulating the peak)."""
+        mask = result.t >= 50e-3
+        i_a_pk = float(np.max(np.abs(result.i_a_out[mask])))
+        i_a_pk_pred = predict_i_out_peak(params)
+        rel_err = abs(i_a_pk - i_a_pk_pred) / i_a_pk_pred
+        assert rel_err < 0.05, (
+            f"L1 i_a peak = {i_a_pk:.2f} A vs L0 {i_a_pk_pred:.2f} A "
+            f"predicted, rel-err = {rel_err*100:.2f}%"
+        )
+
+    def test_i_out_rms_within_2pct_of_l0(
+        self, params: CmcParams, result,
+    ) -> None:
+        """RMS should match analytical within 2% (ripple has zero
+        first-order contribution to RMS at high f_sw)."""
+        mask = result.t >= 50e-3
+        i_a_rms = rms(result.i_a_out[mask])
+        i_a_rms_pred = predict_i_out_peak(params) / np.sqrt(2.0)
+        rel_err = abs(i_a_rms - i_a_rms_pred) / i_a_rms_pred
+        assert rel_err < 0.02, (
+            f"L1 i_a RMS = {i_a_rms:.3f} A vs {i_a_rms_pred:.3f} A, "
+            f"rel-err = {rel_err*100:.3f}%"
+        )
+
+    def test_balanced_three_phase_output(self, result) -> None:
+        """All three load currents have similar peaks (3-φ balance
+        preserved with ripple of < 5%)."""
+        mask = result.t >= 50e-3
+        peaks = [
+            float(np.max(np.abs(x[mask])))
+            for x in (result.i_a_out, result.i_b_out, result.i_c_out)
+        ]
+        max_dev = (max(peaks) - min(peaks)) / max(peaks)
+        assert max_dev < 0.05, (
+            f"3-φ peaks unbalanced: {peaks}, max rel deviation {max_dev*100:.2f}%"
+        )
+
+    def test_input_currents_nonzero(self, result) -> None:
+        """Input grid currents should flow (non-trivial) when load
+        is drawing real power."""
+        mask = result.t >= 50e-3
+        for label, sig in [
+            ("I_A", result.i_a_in[mask]),
+            ("I_B", result.i_b_in[mask]),
+            ("I_C", result.i_c_in[mask]),
+        ]:
+            peak = float(np.max(np.abs(sig)))
+            assert peak > 1.0, f"{label} peak = {peak:.3f} A (expected > 1 A)"
+
+    def test_thd_below_10pct(
+        self, params: CmcParams, result,
+    ) -> None:
+        """Output THD should be a few percent — carrier ripple
+        absorbed by L_load filter."""
+        mask = result.t >= 50e-3
+        fs = 1.0 / (params.T_s / 20.0)
+        n_win = int(round(3 * (1 / params.f_out) * fs))
+        thd_pct = thd(result.i_a_out[mask][:n_win], fs, params.f_out)
+        assert thd_pct < 10.0, (
+            f"L1 i_a THD = {thd_pct:.2f}% (expected < 10% with L_load filter)"
+        )

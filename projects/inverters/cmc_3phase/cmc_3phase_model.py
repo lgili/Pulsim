@@ -614,26 +614,25 @@ def build_l0_plant(params: CmcParams) -> CmcPlant:
     f_out = params.f_out
 
     # Output voltage sources — one per phase, sinusoidal at f_out.
-    # All 3 sources reference the same ``star`` node (the converter
-    # neutral). Phase offsets: a → 0°, b → −120°, c → +120°.
-    # The load Y-neutral is the **same** ``star`` node — there's no
-    # need for a separate ``load_star`` (which created an MNA
-    # conditioning artefact: a near-singular 1 mΩ tie between two
-    # logically-identical nodes induced numerical phase coupling
-    # between the three legs).
+    # Phase offset includes ``+π/2`` to convert pulsim's ``sin``
+    # convention to the **cosine** convention used by the SVM theory
+    # in the thesis (V_a = V_o·cos(ω_o·t), so at t=0 V_a = V_o).
+    # This guarantees that the SVM α_o = ω_o·t lookup aligns with
+    # the actual voltage vector position in pulsim's clock.
     b.add_sine_voltage_source(
         "V_a_out", "a", "star",
-        v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out, phase=0.0,
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out,
+        phase=+pi / 2.0,                       # sin(ωt + π/2) = cos(ωt)
     )
     b.add_sine_voltage_source(
         "V_b_out", "b", "star",
         v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out,
-        phase=-2.0 * pi / 3.0,
+        phase=+pi / 2.0 - 2.0 * pi / 3.0,       # cos(ωt − 2π/3)
     )
     b.add_sine_voltage_source(
         "V_c_out", "c", "star",
         v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out,
-        phase=+2.0 * pi / 3.0,
+        phase=+pi / 2.0 + 2.0 * pi / 3.0,       # cos(ωt + 2π/3)
     )
 
     # Y-load: ph → L_load → R_load → star (same neutral as sources).
@@ -763,6 +762,216 @@ def predict_load_power_factor(params: CmcParams) -> float:
 def rms(signal: np.ndarray) -> float:
     """RMS value of a signal."""
     return float(np.sqrt(np.mean(np.asarray(signal, dtype=np.float64) ** 2)))
+
+
+# =============================================================================
+# L1 — switched plant (9 ideal bidirectional switches driven by SVM)
+# =============================================================================
+#
+# L1 captures the actual switching behaviour of the CMC by replacing
+# the synthesised sinusoidal output sources of L0 with the physical
+# matrix-converter topology: 9 ideal bidirectional switches connecting
+# every input phase to every output phase.
+#
+# For the initial L1 pass we use ``add_switch`` — a switched-resistor
+# (g_on / g_off binary) primitive that is inherently bidirectional
+# and provides the same abstraction the thesis Sec 2.2 SVM
+# derivation uses. A Phase 21.4 upgrade will replace each switch
+# with a 2-IGBT common-emitter pair + 2 anti-parallel diodes for
+# physical V_CE_sat + R_CE_sat modelling.
+#
+# Switch ordering matches the thesis convention exactly (Fig 1):
+#
+#   S_1 = A → a      S_2 = A → b      S_3 = A → c
+#   S_4 = B → a      S_5 = B → b      S_6 = B → c
+#   S_7 = C → a      S_8 = C → b      S_9 = C → c
+#
+# The :class:`SwitchStateMask` returned by :func:`make_cmc_switch_fn`
+# packs the 9 switch states in this column-major order so that the
+# values returned by :func:`svm_step` align directly with the mask
+# bits.
+
+
+def build_l1_plant(params: CmcParams) -> CmcPlant:
+    """3-φ CMC switched plant — 9 ideal bidirectional switches with
+    the SVM driving the gate signals.
+
+    Topology::
+
+        V_A ── A ─┬── S1 ──┐    ┌── S2 ──┐    ┌── S3 ──┐
+                  │         │    │         │    │         │
+                  S4        a    S5        b    S6        c
+                  │         │    │         │    │         │
+                  └── ...  load_a load_b ... load_c
+        V_B ── B ──...──┘
+        V_C ── C ──...──┘
+
+    There is no input filter — input currents are taken directly
+    from the source branch currents and will show the full
+    switching ripple. The output side has the Y-connected RL load
+    (same as L0).
+    """
+    b = p.CircuitBuilder()
+    V_in_peak = params.V_in_peak
+    f_in = params.f_in
+
+    # ---- Input voltage sources (Y) -------------------------------------
+    # Cosine convention to align with SVM theory (V_A = V_in·cos(ω_i·t)).
+    # See note in build_l0_plant — phase = +π/2 turns sin → cos.
+    b.add_sine_voltage_source(
+        "V_A", "A", "src_star",
+        v_dc=0.0, v_amplitude=V_in_peak, frequency=f_in,
+        phase=+pi / 2.0,
+    )
+    b.add_sine_voltage_source(
+        "V_B", "B", "src_star",
+        v_dc=0.0, v_amplitude=V_in_peak, frequency=f_in,
+        phase=+pi / 2.0 - 2.0 * pi / 3.0,
+    )
+    b.add_sine_voltage_source(
+        "V_C", "C", "src_star",
+        v_dc=0.0, v_amplitude=V_in_peak, frequency=f_in,
+        phase=+pi / 2.0 + 2.0 * pi / 3.0,
+    )
+
+    # Record source branch IDs (always 0, 1, 2 for V_A, V_B, V_C).
+    src_branch_ids = (0, 1, 2)
+
+    # ---- 9 bidirectional switches in column-major order ---------------
+    # Order MUST match the thesis convention so svm_step output aligns
+    # with the SwitchStateMask bits.
+    input_nodes = ("A", "B", "C")
+    output_nodes = ("a", "b", "c")
+    switch_idx = 0
+    for input_node in input_nodes:
+        for output_node in output_nodes:
+            switch_idx += 1
+            b.add_switch(
+                f"S_{switch_idx}",
+                input_node, output_node,
+                g_on=1e3,     # 1/g_on  = 1 mΩ  on-state resistance
+                g_off=1e-6,   # 1/g_off = 1 MΩ off-state resistance
+            )
+
+    # ---- Output Y-load -------------------------------------------------
+    L_branch_ids: list[int] = []
+    for ph in output_nodes:
+        L_id = b.graph.num_branches
+        b.add_inductor(
+            f"L_load_{ph}", ph, f"rload_{ph}", params.L_load,
+        )
+        b.add_resistor(
+            f"R_load_{ph}", f"rload_{ph}", "load_star", params.R_load,
+        )
+        L_branch_ids.append(L_id)
+
+    # Neutral / ground ties (MNA conditioning).
+    b.add_resistor("R_src_gnd", "src_star", "gnd", 1e6)
+    b.add_resistor("R_load_gnd", "load_star", "gnd", 1e6)
+
+    # Resolve state indices after the FULL graph is built (see note in
+    # build_l0_plant — pulsim re-numbers state indices as branches
+    # are added).
+    iL_out_indices = tuple(
+        b.pool.branch_var_id_for_inductor(L_id, b.graph)
+        for L_id in L_branch_ids
+    )
+    iL_in_indices = tuple(
+        b.pool.branch_var_id_for_source(src_id, b.graph)
+        for src_id in src_branch_ids
+    )
+
+    return CmcPlant(
+        builder=b,
+        iL_out_indices=iL_out_indices,    # type: ignore[arg-type]
+        iL_in_indices=iL_in_indices,      # type: ignore[arg-type]
+    )
+
+
+def make_cmc_switch_fn(
+    params: CmcParams,
+) -> Callable[[float], "p.SwitchStateMask"]:
+    """Build a callable ``t → SwitchStateMask(9)`` packing the 9
+    instantaneous switch states from :func:`svm_step` in the order
+    in which the switches were added to the builder (column-major:
+    S_1..S_3 for input A, S_4..S_6 for B, S_7..S_9 for C).
+    """
+    gate_fn = make_cmc_gate_signals(params)
+
+    def _switch_fn(t: float) -> "p.SwitchStateMask":
+        mask_bits = gate_fn(t)  # 9-tuple of 0/1
+        mask = p.SwitchStateMask(9)
+        for i, b in enumerate(mask_bits):
+            mask.set(i, bool(b))
+        return mask
+
+    return _switch_fn
+
+
+def run_l1_open_loop(
+    plant: CmcPlant,
+    params: CmcParams,
+    *,
+    t_end: float = 100e-3,
+    dt: float | None = None,
+) -> CmcRunResult:
+    """Run an L1 switched plant for ``t_end`` seconds. ``dt`` defaults
+    to ``T_s / 20`` for adequate switching resolution.
+
+    The SVM gating is driven by :func:`make_cmc_switch_fn(params)`,
+    which is passed to ``simulate`` as the ``switch_fn``.
+    """
+    if dt is None:
+        dt = params.T_s / 20.0  # 20 samples per T_s by default
+
+    sw_fn = make_cmc_switch_fn(params)
+
+    iLa, iLb, iLc = plant.iL_out_indices
+    assert plant.iL_in_indices is not None, "L1 plant must have input current indices"
+    iIA, iIB, iIC = plant.iL_in_indices
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_iao = np.zeros(n_samples)
+    log_ibo = np.zeros(n_samples)
+    log_ico = np.zeros(n_samples)
+    log_iai = np.zeros(n_samples)
+    log_ibi = np.zeros(n_samples)
+    log_ici = np.zeros(n_samples)
+    counter = [0]
+
+    def log_obs(t, x):
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_iao[i] = x[iLa]
+            log_ibo[i] = x[iLb]
+            log_ico[i] = x[iLc]
+            # Source branch currents: pulsim's sign convention is
+            # opposite to "current flowing OUT of `from` terminal".
+            # Negate so that I_A > 0 means current drawn from V_A's
+            # `from` terminal — the conventional grid-current.
+            log_iai[i] = -x[iIA]
+            log_ibi[i] = -x[iIB]
+            log_ici[i] = -x[iIC]
+        counter[0] += 1
+
+    p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        switch_fn=sw_fn, step_observer=log_obs,
+        start_from_dc_op=True,
+    )
+
+    n = counter[0]
+    return CmcRunResult(
+        t=log_t[:n],
+        i_a_out=log_iao[:n], i_b_out=log_ibo[:n], i_c_out=log_ico[:n],
+        i_a_in=log_iai[:n], i_b_in=log_ibi[:n], i_c_in=log_ici[:n],
+    )
+
+
+# =============================================================================
+# Metrics — closed-form predictions + signal analysis
+# =============================================================================
 
 
 def thd(signal: np.ndarray, fs: float, f0: float, n_harm: int = 50) -> float:
