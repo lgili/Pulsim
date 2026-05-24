@@ -45,8 +45,6 @@ from m3c_3phase_model import (  # noqa: E402
     lg_to_abc,
     make_fast_svm_fn,
     make_m3c_l1_cost_control,
-    make_m3c_l1_dq_control,
-    make_m3c_l1_dq_full_control,
     make_m3c_l1_open_loop_control,
     predict_i_out_peak,
     predict_load_impedance,
@@ -336,7 +334,6 @@ class TestModuleConfigurations:
     def test_all_have_valid_distributions(self) -> None:
         """Every config's row-sum AND col-sum distribution must be
         (1,1,3) or (1,2,2) — never (1,2,3) or (0,1,4) etc."""
-        valid_dists = ({1, 1, 3}, {1, 2, 2})
         for cfg in ALL_VALID_CONFIGURATIONS:
             row_dist = sorted(cfg.row_sum(i) for i in range(3))
             col_dist = sorted(cfg.col_sum(j) for j in range(3))
@@ -503,11 +500,11 @@ class TestModuleCurrentSolver:
             I_out = I_out_base - (I_out_base.sum() - I_in.sum()) / 3
             assert np.isclose(I_in.sum(), I_out.sum(), atol=1e-12)
 
-            I = solve_module_currents(cfg, I_in, I_out)
+            I_xy = solve_module_currents(cfg, I_in, I_out)
 
             for i in range(3):
                 lhs = sum(
-                    I[(ii, jj)] for (ii, jj) in cfg.active_modules()
+                    I_xy[(ii, jj)] for (ii, jj) in cfg.active_modules()
                     if ii == i
                 )
                 assert lhs == pytest.approx(I_in[i], abs=1e-9), (
@@ -522,20 +519,20 @@ class TestModuleCurrentSolver:
             I_in = rng.uniform(-10, 10, 3)
             I_out_base = rng.uniform(-10, 10, 3)
             I_out = I_out_base - (I_out_base.sum() - I_in.sum()) / 3
-            I = solve_module_currents(cfg, I_in, I_out)
+            I_xy = solve_module_currents(cfg, I_in, I_out)
 
             for j in range(3):
                 lhs = sum(
-                    I[(ii, jj)] for (ii, jj) in cfg.active_modules()
+                    I_xy[(ii, jj)] for (ii, jj) in cfg.active_modules()
                     if jj == j
                 )
                 assert lhs == pytest.approx(I_out[j], abs=1e-9)
 
     def test_zero_terminal_currents_gives_zero_module_currents(self) -> None:
         for cfg in ALL_VALID_CONFIGURATIONS[:10]:
-            I = solve_module_currents(cfg, [0.0, 0.0, 0.0],
-                                      [0.0, 0.0, 0.0])
-            for v in I.values():
+            I_xy = solve_module_currents(cfg, [0.0, 0.0, 0.0],
+                                         [0.0, 0.0, 0.0])
+            for v in I_xy.values():
                 assert v == pytest.approx(0.0)
 
     def test_conservation_violation_raises(self) -> None:
@@ -548,10 +545,10 @@ class TestModuleCurrentSolver:
 
     def test_returns_5_module_currents(self) -> None:
         cfg = _THESIS_EXAMPLE_CFG
-        I = solve_module_currents(cfg, [10.0, -5.0, -5.0],
-                                  [3.0, -3.0, 0.0])
-        assert len(I) == 5
-        assert set(I.keys()) == set(cfg.active_modules())
+        I_xy = solve_module_currents(cfg, [10.0, -5.0, -5.0],
+                                     [3.0, -3.0, 0.0])
+        assert len(I_xy) == 5
+        assert set(I_xy.keys()) == set(cfg.active_modules())
 
     def test_linearity_in_currents(self) -> None:
         """Module currents are linear in terminal currents."""
@@ -657,7 +654,6 @@ class TestCostFunction:
     ) -> None:
         """Eq 162 with signed S_n: cost should differ between V_int=+k
         and V_int=-k (same |k| but opposite sign of ΔV)."""
-        cfg = _THESIS_EXAMPLE_CFG
         V_caps = np.array([
             1100.0, 1000.0, 1000.0,
             1000.0, 1000.0, 1000.0,
@@ -672,9 +668,9 @@ class TestCostFunction:
         # Active modules of cfg2: must include (0,0).
         V_pos = {(i, j): 1 for (i, j) in cfg2.active_modules()}
         V_neg = {(i, j): -1 for (i, j) in cfg2.active_modules()}
-        I = {(i, j): 1.0 for (i, j) in cfg2.active_modules()}
-        cost_pos = connection_cost(cfg2, V_caps, V_pos, I, **std_params)
-        cost_neg = connection_cost(cfg2, V_caps, V_neg, I, **std_params)
+        I_xy = {(i, j): 1.0 for (i, j) in cfg2.active_modules()}
+        cost_pos = connection_cost(cfg2, V_caps, V_pos, I_xy, **std_params)
+        cost_neg = connection_cost(cfg2, V_caps, V_neg, I_xy, **std_params)
         # The two costs differ (signed ΔV is non-trivial).
         assert cost_pos != cost_neg
 
@@ -1584,7 +1580,7 @@ class TestCapOuterLoop:
         # First call: integral = -1000 · 1e-3 = -1.
         loop.apply(0.0, v_caps)
         # Second call: integral = -2.
-        out = loop.apply(0.0, v_caps)
+        loop.apply(0.0, v_caps)
         # Correction = -K_i · integral = -0.01 · (-2) = +0.02 A.
         assert loop.last_correction == pytest.approx(0.02, abs=1e-9)
 

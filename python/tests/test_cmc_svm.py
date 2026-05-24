@@ -32,7 +32,6 @@ from cmc_3phase_model import (  # noqa: E402
     make_cmc_gate_signals,
     make_cmc_switch_fn,
     predict_i_out_peak,
-    predict_load_impedance,
     predict_load_power_factor,
     rms,
     run_l0_open_loop,
