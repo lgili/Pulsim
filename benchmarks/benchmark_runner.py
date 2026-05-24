@@ -1,0 +1,1072 @@
+#!/usr/bin/env python3
+"""Benchmark and validation runner for Pulsim YAML netlists."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - optional dependency
+    yaml = None
+
+try:
+    from pulsim_python_backend import availability_error as python_backend_error
+    from pulsim_python_backend import is_available as python_backend_available
+    from pulsim_python_backend import run_from_yaml as run_pulsim_python
+except ImportError:  # pragma: no cover - local import fallback
+    python_backend_error = None
+    python_backend_available = None
+    run_pulsim_python = None
+
+# Onda 1 of the bench-tool refresh: optional rich-based terminal UI.
+# `benchmarks/_console.py` exposes BenchProgress + rendering helpers
+# with a plain-text fallback when rich is unavailable. Keeping the
+# import optional means CI environments without rich (and embedded
+# callers like local_limit_suite.py) keep working unchanged.
+if TYPE_CHECKING:
+    # Always visible to type-checkers so the call sites below resolve
+    # even when the runtime import path fails on a minimal env.
+    from _console import (
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+
+try:
+    from _console import (
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+    _HAS_CONSOLE = True
+except ImportError:  # pragma: no cover
+    _HAS_CONSOLE = False
+
+
+@dataclass
+class PulsimRunResult:
+    runtime_s: float
+    steps: int
+    mode: str
+    telemetry: Dict[str, Optional[float]]
+
+
+@dataclass
+class ScenarioResult:
+    benchmark_id: str
+    scenario: str
+    status: str
+    runtime_s: float
+    steps: int
+    max_error: Optional[float]
+    rms_error: Optional[float]
+    message: str
+    telemetry: Dict[str, Optional[float]]
+    # Phase 23: KPIs (THD, PF, η, ripple, transient response, loss
+    # breakdown) — populated when the YAML declares a `kpi:` block.
+    # Key naming: `kpi__<metric>__<observable_or_label>` so multiple
+    # columns can coexist in results.csv without name collisions.
+    kpis: Dict[str, float] = field(default_factory=dict)
+
+
+def can_use_pulsim_python_backend() -> bool:
+    if python_backend_available is None:
+        return False
+    try:
+        return bool(python_backend_available())
+    except Exception:
+        return False
+
+
+def load_yaml(path: Path) -> Dict[str, Any]:
+    if yaml is None:
+        raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
+    with open(path, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def parse_value(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if value is None:
+        raise ValueError("Missing value")
+    raw = str(value).strip().lower()
+    suffixes = {
+        "f": 1e-15,
+        "p": 1e-12,
+        "n": 1e-9,
+        "u": 1e-6,
+        "µ": 1e-6,
+        "m": 1e-3,
+        "k": 1e3,
+        "meg": 1e6,
+        "g": 1e9,
+        "t": 1e12,
+    }
+    if raw.endswith("meg"):
+        return float(raw[:-3]) * suffixes["meg"]
+    for suffix, multiplier in suffixes.items():
+        if suffix != "meg" and raw.endswith(suffix):
+            return float(raw[: -len(suffix)]) * multiplier
+    return float(raw)
+
+
+def coerce_optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    return parse_value(value)
+
+
+def infer_preferred_mode(scenario_name: str, scenario_override: Dict[str, Any]) -> Optional[str]:
+    sim = scenario_override.get("simulation") if isinstance(scenario_override, dict) else None
+    if isinstance(sim, dict):
+        has_shooting = "shooting" in sim
+        has_hb = "harmonic_balance" in sim or "hb" in sim
+        if has_shooting and not has_hb:
+            return "shooting"
+        if has_hb and not has_shooting:
+            return "harmonic_balance"
+
+    lowered = scenario_name.lower()
+    if "shooting" in lowered:
+        return "shooting"
+    if "harmonic" in lowered or lowered == "hb":
+        return "harmonic_balance"
+    return None
+
+
+def normalize_periodic_mode(netlist: Dict[str, Any], preferred_mode: Optional[str]) -> None:
+    if preferred_mode is None:
+        return
+    simulation = netlist.get("simulation")
+    if not isinstance(simulation, dict):
+        return
+
+    if preferred_mode == "shooting":
+        simulation.pop("harmonic_balance", None)
+        simulation.pop("hb", None)
+    elif preferred_mode == "harmonic_balance":
+        simulation.pop("shooting", None)
+
+
+def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
+    """Apply benchmark runtime defaults without overriding explicit YAML choices."""
+    simulation = netlist.get("simulation")
+    if not isinstance(simulation, dict):
+        return
+
+    # Benchmark suite targets deterministic comparisons by default.
+    # simplify-and-harden-numerical-surface §10: `adaptive_timestep`
+    # is deprecated in v0.11 in favour of the canonical `step_mode`.
+    # Set `step_mode` when neither field is present, preserving the
+    # legacy `adaptive_timestep` only when YAML pins it explicitly.
+    if "step_mode" not in simulation and "adaptive_timestep" not in simulation:
+        simulation["step_mode"] = "fixed"
+
+
+def run_pulsim(
+    netlist_path: Path,
+    output_path: Path,
+    preferred_mode: Optional[str] = None,
+    use_initial_conditions: bool = False,
+) -> PulsimRunResult:
+    if run_pulsim_python is None:
+        reason = "benchmark backend module import failed"
+        if python_backend_error is not None:
+            try:
+                backend_reason = python_backend_error()
+                if backend_reason:
+                    reason = backend_reason
+            except Exception:
+                pass
+        raise RuntimeError(
+            "Pulsim Python runtime backend unavailable. "
+            "Build Python bindings and expose them via build/python or install pulsim package. "
+            f"Reason: {reason}"
+        )
+
+    raw_result = run_pulsim_python(
+        netlist_path,
+        output_path,
+        preferred_mode=preferred_mode,
+        use_initial_conditions=use_initial_conditions,
+    )
+
+    if not hasattr(raw_result, "runtime_s") or not hasattr(raw_result, "telemetry"):
+        raise RuntimeError("Unexpected backend response: structured telemetry result expected")
+
+    return PulsimRunResult(
+        runtime_s=float(getattr(raw_result, "runtime_s")),
+        steps=int(getattr(raw_result, "steps")),
+        mode=str(getattr(raw_result, "mode")),
+        telemetry=dict(getattr(raw_result, "telemetry")),
+    )
+
+
+def load_csv_series(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
+    with open(path, "r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        times: List[float] = []
+        series: Dict[str, List[float]] = {}
+        for row in reader:
+            times.append(float(row["time"]))
+            for key, value in row.items():
+                if key == "time":
+                    continue
+                series.setdefault(key, []).append(float(value))
+    return times, series
+
+
+def analytical_rc_step(times: List[float], v0: float, r: float, c: float) -> List[float]:
+    tau = r * c
+    return [v0 * (1.0 - math.exp(-t / tau)) for t in times]
+
+
+def analytical_rl_step(times: List[float], v0: float, r: float, l: float) -> List[float]:
+    tau = l / r
+    return [v0 * math.exp(-t / tau) for t in times]
+
+
+def analytical_rlc_step(times: List[float], v0: float, r: float, l: float, c: float) -> List[float]:
+    alpha = r / (2.0 * l)
+    omega0 = 1.0 / math.sqrt(l * c)
+    result = []
+    if alpha < omega0:
+        omega_d = math.sqrt(omega0 * omega0 - alpha * alpha)
+        for t in times:
+            value = 1.0 - math.exp(-alpha * t) * (
+                math.cos(omega_d * t) + (alpha / omega_d) * math.sin(omega_d * t)
+            )
+            result.append(v0 * value)
+    else:
+        s1 = -alpha + math.sqrt(alpha * alpha - omega0 * omega0)
+        s2 = -alpha - math.sqrt(alpha * alpha - omega0 * omega0)
+        a = v0 * s2 / (s2 - s1)
+        b = -v0 * s1 / (s2 - s1)
+        for t in times:
+            result.append(v0 - a * math.exp(s1 * t) - b * math.exp(s2 * t))
+    return result
+
+
+def compute_errors(values: List[float], reference: List[float]) -> Tuple[float, float]:
+    if len(values) != len(reference):
+        raise ValueError("Length mismatch between values and reference")
+    errors = [abs(a - b) for a, b in zip(values, reference)]
+    max_error = max(errors) if errors else 0.0
+    rms_error = math.sqrt(sum(err * err for err in errors) / len(errors)) if errors else 0.0
+    return max_error, rms_error
+
+
+def validate_analytical(times: List[float], values: List[float], model: str, params: Dict[str, Any]) -> Tuple[float, float]:
+    v0 = parse_value(params["v0"])
+    if model == "rc_step":
+        r = parse_value(params["r"])
+        c = parse_value(params["c"])
+        reference = analytical_rc_step(times, v0, r, c)
+    elif model == "rl_step":
+        r = parse_value(params["r"])
+        l = parse_value(params["l"])
+        reference = analytical_rl_step(times, v0, r, l)
+    elif model == "rlc_step":
+        r = parse_value(params["r"])
+        l = parse_value(params["l"])
+        c = parse_value(params["c"])
+        reference = analytical_rlc_step(times, v0, r, l, c)
+    else:
+        raise ValueError(f"Unknown analytical model: {model}")
+    return compute_errors(values, reference)
+
+
+def validate_reference(times: List[float], values: List[float], baseline_path: Path, column: str) -> Tuple[Optional[float], Optional[float], str]:
+    if not baseline_path.exists():
+        return None, None, f"Baseline missing: {baseline_path}"
+    ref_times, ref_series = load_csv_series(baseline_path)
+    if column not in ref_series:
+        return None, None, f"Baseline missing column: {column}"
+    ref_values = ref_series[column]
+    if len(ref_times) < 2 or len(times) < 2:
+        return None, None, "Not enough samples for baseline comparison"
+
+    overlap_start = max(times[0], ref_times[0])
+    overlap_end = min(times[-1], ref_times[-1])
+    if overlap_start >= overlap_end:
+        return None, None, "No overlapping time range with baseline"
+
+    eval_times: List[float] = []
+    eval_values: List[float] = []
+    for t, v in zip(times, values):
+        if overlap_start <= t <= overlap_end:
+            eval_times.append(t)
+            eval_values.append(v)
+
+    if len(eval_times) < 2:
+        return None, None, "Not enough overlapping samples with baseline"
+
+    interp_ref: List[float] = []
+    idx = 0
+    for t in eval_times:
+        while idx + 1 < len(ref_times) and ref_times[idx + 1] < t:
+            idx += 1
+        if idx + 1 >= len(ref_times):
+            interp_ref.append(ref_values[-1])
+            continue
+        t0, t1 = ref_times[idx], ref_times[idx + 1]
+        v0, v1 = ref_values[idx], ref_values[idx + 1]
+        if t1 == t0:
+            interp_ref.append(v0)
+            continue
+        alpha = (t - t0) / (t1 - t0)
+        interp_ref.append(v0 + alpha * (v1 - v0))
+
+    return (*compute_errors(eval_values, interp_ref), "")
+
+
+def apply_validation_window(
+    times: List[float],
+    values: List[float],
+    validation: Dict[str, Any],
+) -> Tuple[List[float], List[float]]:
+    if len(times) != len(values):
+        raise ValueError("Time/value length mismatch")
+
+    ignore_initial_samples = int(validation.get("ignore_initial_samples", 0) or 0)
+    start_time = validation.get("start_time")
+    start_time_value = parse_value(start_time) if start_time is not None else None
+
+    filtered_times: List[float] = []
+    filtered_values: List[float] = []
+    for idx, (t, v) in enumerate(zip(times, values)):
+        if idx < ignore_initial_samples:
+            continue
+        if start_time_value is not None and t < start_time_value:
+            continue
+        filtered_times.append(t)
+        filtered_values.append(v)
+
+    if len(filtered_times) < 2:
+        raise ValueError("Validation window has fewer than 2 samples")
+
+    return filtered_times, filtered_values
+
+
+def count_scenarios(
+    benchmarks_path: Path,
+    selected: Optional[List[str]] = None,
+    matrix: bool = False,
+    scenario_filter: Optional[List[str]] = None,
+) -> int:
+    """Pre-compute the total scenario count so a progress bar knows its
+    denominator. Mirrors the filtering logic of `run_benchmarks`."""
+    manifest = load_yaml(benchmarks_path)
+    scenarios = manifest.get("scenarios", {})
+    total = 0
+    for entry in manifest.get("benchmarks", []):
+        circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
+        try:
+            netlist = load_yaml(circuit_path)
+        except Exception:
+            continue
+        bench_meta = netlist.get("benchmark", {})
+        benchmark_id = bench_meta.get("id", circuit_path.stem)
+        if selected and benchmark_id not in selected:
+            continue
+        scenario_names = list(scenarios.keys()) if matrix else entry.get("scenarios", ["default"])
+        if scenario_filter:
+            allow = set(scenario_filter)
+            scenario_names = [n for n in scenario_names if n in allow]
+        total += len(scenario_names)
+    return total
+
+
+def run_benchmarks(
+    benchmarks_path: Path,
+    output_dir: Path,
+    selected: Optional[List[str]] = None,
+    matrix: bool = False,
+    generate_baselines: bool = False,
+    simulation_overrides: Optional[Dict[str, Any]] = None,
+    scenario_filter: Optional[List[str]] = None,
+    adaptive_dt_max_factor: Optional[float] = None,
+    progress: Optional[Any] = None,
+) -> List[ScenarioResult]:
+    """Execute the benchmark matrix and return per-scenario results.
+
+    `progress`: optional `BenchProgress` (from `_console`) for live
+    terminal output. When `None` the function is silent — callers like
+    `local_limit_suite.py` keep working unchanged.
+    """
+    manifest = load_yaml(benchmarks_path)
+    scenarios = manifest.get("scenarios", {})
+    results: List[ScenarioResult] = []
+
+    def _emit_progress_for_last() -> None:
+        """Tell the progress UI the most recently appended result is
+        done. Safe to call when `progress is None` (no-op)."""
+        if progress is None or not results:
+            return
+        last = results[-1]
+        progress.case_done(
+            benchmark_id=last.benchmark_id,
+            scenario=last.scenario,
+            status=last.status,
+            runtime_s=last.runtime_s,
+            max_error=last.max_error,
+            message=last.message,
+        )
+
+    for entry in manifest.get("benchmarks", []):
+        circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
+        netlist = load_yaml(circuit_path)
+        bench_meta = netlist.get("benchmark", {})
+        benchmark_id = bench_meta.get("id", circuit_path.stem)
+        if selected and benchmark_id not in selected:
+            continue
+
+        scenario_names = list(scenarios.keys()) if matrix else entry.get("scenarios", ["default"])
+        if scenario_filter:
+            allow = set(scenario_filter)
+            scenario_names = [name for name in scenario_names if name in allow]
+            if not scenario_names:
+                continue
+        if "default" in scenario_names and "default" not in scenarios:
+            scenarios["default"] = {}
+
+        for scenario_name in scenario_names:
+            if progress is not None:
+                progress.case_start(f"{benchmark_id} · {scenario_name}")
+            scenario_override = scenarios.get(scenario_name, {})
+            scenario_netlist = deep_merge(netlist, scenario_override)
+            preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
+            normalize_periodic_mode(scenario_netlist, preferred_mode)
+            apply_runtime_defaults(scenario_netlist)
+            if simulation_overrides:
+                sim_cfg = scenario_netlist.get("simulation", {})
+                if not isinstance(sim_cfg, dict):
+                    sim_cfg = {}
+                scenario_netlist["simulation"] = deep_merge(sim_cfg, simulation_overrides)
+            simulation_cfg = scenario_netlist.get("simulation", {})
+            # simplify-and-harden-numerical-surface §10: accept both the
+            # canonical `step_mode: variable` and the legacy
+            # `adaptive_timestep: true` (deprecated) for back-compat.
+            _is_variable = (
+                isinstance(simulation_cfg, dict)
+                and (
+                    str(simulation_cfg.get("step_mode", "")).lower() == "variable"
+                    or bool(simulation_cfg.get("adaptive_timestep", False))
+                )
+            )
+            if (
+                adaptive_dt_max_factor is not None
+                and _is_variable
+                and simulation_cfg.get("dt") is not None
+            ):
+                try:
+                    dt_value = parse_value(simulation_cfg.get("dt"))
+                    dt_limit = max(dt_value * float(adaptive_dt_max_factor), dt_value)
+                    current_dt_max = (
+                        parse_value(simulation_cfg.get("dt_max"))
+                        if simulation_cfg.get("dt_max") is not None
+                        else None
+                    )
+                    if current_dt_max is None or current_dt_max > dt_limit:
+                        simulation_cfg["dt_max"] = dt_limit
+                except Exception:
+                    pass
+            use_initial_conditions = bool(
+                simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
+            )
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                scenario_file = tmpdir_path / f"{benchmark_id}_{scenario_name}.yaml"
+                output_path = output_dir / "outputs" / benchmark_id / scenario_name / "pulsim.csv"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if yaml is None:
+                    raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
+                with open(scenario_file, "w", encoding="utf-8") as handle:
+                    yaml.safe_dump(scenario_netlist, handle, sort_keys=False)
+
+                try:
+                    run_result = run_pulsim(
+                        scenario_file,
+                        output_path,
+                        preferred_mode=preferred_mode,
+                        use_initial_conditions=use_initial_conditions,
+                    )
+                except Exception as exc:
+                    results.append(
+                        ScenarioResult(
+                            benchmark_id=benchmark_id,
+                            scenario=scenario_name,
+                            status="failed",
+                            runtime_s=0.0,
+                            steps=0,
+                            max_error=None,
+                            rms_error=None,
+                            message=str(exc),
+                            telemetry={},
+                        )
+                    )
+                    _emit_progress_for_last()
+                    continue
+
+                status = "passed"
+                max_error = None
+                rms_error = None
+                message = ""
+                runtime_s = run_result.runtime_s
+                steps = run_result.steps
+                telemetry = dict(run_result.telemetry)
+                telemetry["steps"] = float(steps)
+                telemetry["runtime_s"] = float(runtime_s)
+                telemetry["python_backend"] = 1.0
+                for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
+                    if telemetry.get(key) is None:
+                        telemetry[key] = 0.0
+                components_block = scenario_netlist.get("components", [])
+                if isinstance(components_block, list):
+                    declared_components = sum(1 for item in components_block if isinstance(item, dict))
+                    telemetry["component_declared_count"] = float(declared_components)
+                    reported_value = telemetry.get("component_reported_count")
+                    if reported_value is not None:
+                        try:
+                            reported_components = float(reported_value)
+                            if math.isfinite(reported_components):
+                                covered = min(reported_components, float(declared_components))
+                                telemetry["component_coverage_rate"] = (
+                                    (covered / float(declared_components))
+                                    if declared_components > 0
+                                    else 1.0
+                                )
+                                telemetry["component_coverage_gap"] = max(
+                                    0.0, float(declared_components) - reported_components
+                                )
+                        except (TypeError, ValueError):
+                            pass
+
+                validation = bench_meta.get("validation", {})
+                validation_type = validation.get("type", "none")
+                observable = validation.get("observable")
+                expectations = bench_meta.get("expectations", {})
+                max_threshold = coerce_optional_float(expectations.get("metrics", {}).get("max_error"))
+
+                if validation_type != "none" and not observable:
+                    status = "failed"
+                    message = "Missing validation observable"
+                elif validation_type == "bode":
+                    # Bode validation doesn't read from the transient CSV — it
+                    # runs its own FRA sweep against the YAML. We still need
+                    # the observable string (it's a node name into Simulator),
+                    # but we don't require it to be a column of the captured
+                    # transient.
+                    times_eval, values_eval = [], []
+                    # Fall through to the validation dispatch below
+                elif validation_type != "none":
+                    times, series = load_csv_series(output_path)
+                    if observable not in series:
+                        status = "failed"
+                        message = f"Missing observable column: {observable}"
+                    else:
+                        values = series[observable]
+                        try:
+                            times_eval, values_eval = apply_validation_window(times, values, validation)
+                        except Exception as exc:
+                            status = "failed"
+                            message = str(exc)
+                        else:
+                            if validation_type == "analytical":
+                                try:
+                                    max_error, rms_error = validate_analytical(
+                                        times_eval,
+                                        values_eval,
+                                        validation.get("model", ""),
+                                        validation.get("params", {}),
+                                    )
+                                    if max_threshold is not None and max_error is not None:
+                                        if max_error <= max_threshold:
+                                            status = "passed"
+                                        else:
+                                            status = "failed"
+                                            message = (
+                                                f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                            )
+                                except Exception as exc:
+                                    status = "failed"
+                                    message = str(exc)
+                            elif validation_type == "reference":
+                                baseline_rel = validation.get("baseline")
+                                if not baseline_rel:
+                                    status = "failed"
+                                    message = "Missing baseline path"
+                                else:
+                                    baseline_path = (benchmarks_path.parent / baseline_rel).resolve()
+                                    if not baseline_path.exists() and generate_baselines:
+                                        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+                                        with open(output_path, "r", encoding="utf-8") as src, open(
+                                            baseline_path, "w", encoding="utf-8"
+                                        ) as dst:
+                                            dst.write(src.read())
+                                        status = "baseline"
+                                        message = "Baseline generated"
+                                    else:
+                                        max_error, rms_error, message = validate_reference(
+                                            times_eval, values_eval, baseline_path, observable
+                                        )
+                                        if max_error is None:
+                                            status = "failed"
+                                        elif max_threshold is not None:
+                                            if max_error <= max_threshold:
+                                                status = "passed"
+                                            else:
+                                                status = "failed"
+                                                message = (
+                                                    f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                                )
+                            elif validation_type == "bode":
+                                # Phase 23 Sprint B: FRA-based Bode validation
+                                # against an analytical transfer function.
+                                try:
+                                    import importlib
+                                    try:
+                                        from frequency import run_fra_sweep, compare_to_analytical, extract_margins
+                                    except ImportError:
+                                        from .frequency import run_fra_sweep, compare_to_analytical, extract_margins
+
+                                    pert_src = validation.get("perturbation_source")
+                                    obs_node = validation.get("observable")
+                                    f_start = float(validation.get("f_start", 10.0))
+                                    f_stop = float(validation.get("f_stop", 1e5))
+                                    ppd = int(validation.get("points_per_decade", 10))
+                                    amp = float(validation.get("amplitude", 0.01))
+
+                                    measured = run_fra_sweep(
+                                        yaml_path=scenario_file,
+                                        perturbation_source=pert_src,
+                                        observable=obs_node,
+                                        f_start=f_start,
+                                        f_stop=f_stop,
+                                        points_per_decade=ppd,
+                                        amplitude=amp,
+                                    )
+
+                                    # Resolve the analytical model
+                                    a_spec = validation.get("analytical", {})
+                                    model_module = a_spec.get("module")
+                                    model_fn_name = a_spec.get("function")
+                                    model_params = a_spec.get("params", {})
+                                    if not model_module or not model_fn_name:
+                                        raise RuntimeError("bode validation requires analytical.module and analytical.function")
+
+                                    mod = importlib.import_module(model_module)
+                                    fn_factory = getattr(mod, model_fn_name)
+                                    H_model = fn_factory(**model_params)
+
+                                    cmp = compare_to_analytical(measured, H_model)
+                                    margins = extract_margins(measured)
+
+                                    tol = validation.get("tolerance", {})
+                                    db_tol = float(tol.get("max_db_err", 2.0))
+                                    phase_tol = float(tol.get("max_phase_err_deg", 10.0))
+
+                                    max_error = cmp.max_db_err  # surface |H| error as the primary metric
+                                    rms_error = cmp.max_phase_err_deg
+
+                                    # KPIs: per-measurement margin + worst-case errors
+                                    telemetry = telemetry or {}
+                                    telemetry["bode_max_db_err"] = cmp.max_db_err
+                                    telemetry["bode_max_phase_err_deg"] = cmp.max_phase_err_deg
+                                    for k, v in margins.items():
+                                        if v is not None:
+                                            telemetry[f"bode_{k}"] = float(v)
+
+                                    if cmp.max_db_err <= db_tol and cmp.max_phase_err_deg <= phase_tol:
+                                        status = "passed"
+                                    else:
+                                        status = "failed"
+                                        message = (
+                                            f"Bode tol exceeded: |H|_err={cmp.max_db_err:.2f}dB "
+                                            f"(thr {db_tol}dB), ∠H_err={cmp.max_phase_err_deg:.2f}° "
+                                            f"(thr {phase_tol}°)"
+                                        )
+                                except Exception as exc:
+                                    status = "failed"
+                                    message = f"bode validation error: {exc}"
+                            else:
+                                status = "failed"
+                                message = f"Unsupported validation type: {validation_type}"
+
+                # Phase 23: KPI extraction. If the YAML declares
+                # benchmark.kpi: [...], run each requested metric and
+                # surface the results in the per-scenario record.
+                kpis: Dict[str, float] = {}
+                kpi_block = bench_meta.get("kpi") or []
+                if kpi_block and output_path.exists():
+                    try:
+                        from kpi import (
+                            compute_efficiency,
+                            compute_loss_breakdown,
+                            compute_power_factor,
+                            compute_ripple_pkpk,
+                            compute_thd,
+                            compute_transient_response,
+                        )
+                    except ImportError:
+                        # Try relative import (depends on how the runner is invoked)
+                        from .kpi import (
+                            compute_efficiency,
+                            compute_loss_breakdown,
+                            compute_power_factor,
+                            compute_ripple_pkpk,
+                            compute_thd,
+                            compute_transient_response,
+                        )
+
+                    times, series = load_csv_series(output_path)
+                    sample_rate = (1.0 / (times[1] - times[0])) if len(times) > 1 else 0.0
+
+                    # Metrics that use a single `observable` field as the
+                    # primary signal — required for these to be looked up.
+                    _SINGLE_OBS_METRICS = {
+                        "thd", "power_factor", "transient_response",
+                        "ripple_pkpk",
+                    }
+
+                    for kpi_entry in kpi_block:
+                        if not isinstance(kpi_entry, dict):
+                            continue
+                        metric = kpi_entry.get("metric")
+                        obs = kpi_entry.get("observable")
+                        label = kpi_entry.get("label", metric or "kpi")
+                        if metric is None:
+                            continue
+                        # Only check `obs in series` for metrics that need it
+                        if metric in _SINGLE_OBS_METRICS:
+                            if obs not in series:
+                                continue
+                            samples = series[obs]
+                        else:
+                            samples = series[obs] if obs in series else []
+                        try:
+                            if metric == "thd":
+                                f0 = float(kpi_entry.get("fundamental_hz", 60.0))
+                                n_harm = int(kpi_entry.get("num_harmonics", 20))
+                                kpis[f"kpi__thd_pct__{label}"] = compute_thd(samples, sample_rate, f0, n_harm)
+                            elif metric == "power_factor":
+                                i_obs = kpi_entry.get("current_observable")
+                                if isinstance(i_obs, str) and i_obs in series:
+                                    kpis[f"kpi__pf__{label}"] = compute_power_factor(samples, series[i_obs])
+                            elif metric == "efficiency":
+                                in_obs = kpi_entry.get("p_in_observable")
+                                out_obs = kpi_entry.get("p_out_observable")
+                                if (isinstance(in_obs, str) and isinstance(out_obs, str)
+                                        and in_obs in series and out_obs in series):
+                                    ss_frac = float(kpi_entry.get("steady_state_fraction", 0.2))
+                                    kpis[f"kpi__efficiency_pct__{label}"] = compute_efficiency(
+                                        series[in_obs], series[out_obs], ss_frac
+                                    )
+                            elif metric == "transient_response":
+                                target = float(kpi_entry.get("target", 0.0))
+                                tol = float(kpi_entry.get("tolerance_pct", 2.0))
+                                rsp = compute_transient_response(times, samples, target, tol)
+                                for k, v in rsp.items():
+                                    if v is not None:
+                                        kpis[f"kpi__{k}__{label}"] = float(v)
+                            elif metric == "ripple_pkpk":
+                                ss_frac = float(kpi_entry.get("steady_state_fraction", 0.2))
+                                kpis[f"kpi__ripple_pkpk__{label}"] = compute_ripple_pkpk(samples, ss_frac)
+                            elif metric == "zvs_fraction":
+                                try:
+                                    from kpi import compute_zvs_fraction
+                                except ImportError:
+                                    from .kpi import compute_zvs_fraction  # type: ignore
+                                sw_obs = kpi_entry.get("switch_observable")
+                                v_obs = kpi_entry.get("voltage_observable")
+                                thr_v = float(kpi_entry.get("threshold_v", 1.0))
+                                lookback = int(kpi_entry.get("lookback_samples", 1))
+                                if (isinstance(sw_obs, str) and isinstance(v_obs, str)
+                                        and sw_obs in series and v_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    r = compute_zvs_fraction(sw_states, series[v_obs], thr_v, lookback)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "zcs_fraction":
+                                try:
+                                    from kpi import compute_zcs_fraction
+                                except ImportError:
+                                    from .kpi import compute_zcs_fraction  # type: ignore
+                                sw_obs = kpi_entry.get("switch_observable")
+                                i_obs = kpi_entry.get("current_observable")
+                                thr_a = float(kpi_entry.get("threshold_a", 0.1))
+                                lookback = int(kpi_entry.get("lookback_samples", 1))
+                                if (isinstance(sw_obs, str) and isinstance(i_obs, str)
+                                        and sw_obs in series and i_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    r = compute_zcs_fraction(sw_states, series[i_obs], thr_a, lookback)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "junction_temperature":
+                                try:
+                                    from kpi import compute_junction_temperature, compute_power_dissipation_resistor
+                                except ImportError:
+                                    from .kpi import compute_junction_temperature, compute_power_dissipation_resistor  # type: ignore
+                                if obs in series:
+                                    R = float(kpi_entry.get("r_resistor", 1.0))
+                                    R_th = float(kpi_entry.get("r_th_jc", 5.0))
+                                    C_th = float(kpi_entry.get("c_th_jc", 0.1))
+                                    T_amb = float(kpi_entry.get("t_ambient_c", 25.0))
+                                    v_a = series[obs]
+                                    v_b = [0.0] * len(v_a)
+                                    p_diss = compute_power_dissipation_resistor(v_a, v_b, R)
+                                    r = compute_junction_temperature(p_diss, times, R_th, C_th, T_amb)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "core_loss_steinmetz":
+                                try:
+                                    from kpi import compute_core_loss_steinmetz, compute_inductor_flux_density
+                                except ImportError:
+                                    from .kpi import compute_core_loss_steinmetz, compute_inductor_flux_density  # type: ignore
+                                if obs in series:
+                                    L = float(kpi_entry.get("inductance_h", 1e-3))
+                                    N = int(kpi_entry.get("turns", 50))
+                                    A = float(kpi_entry.get("area_m2", 1e-4))
+                                    f0 = float(kpi_entry.get("fundamental_hz", 60.0))
+                                    k_st = float(kpi_entry.get("k", 16.0))
+                                    alpha = float(kpi_entry.get("alpha", 1.45))
+                                    beta = float(kpi_entry.get("beta", 2.7))
+                                    B = compute_inductor_flux_density(samples, L, N, A)
+                                    r = compute_core_loss_steinmetz(B, sample_rate, f0, k_st, alpha, beta)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "switching_loss":
+                                try:
+                                    from kpi import compute_switching_loss_per_event
+                                except ImportError:
+                                    from .kpi import compute_switching_loss_per_event  # type: ignore
+                                sw_obs = kpi_entry.get("switch_observable")
+                                v_obs = kpi_entry.get("voltage_observable")
+                                i_obs = kpi_entry.get("current_observable")
+                                if (isinstance(sw_obs, str) and isinstance(v_obs, str)
+                                        and isinstance(i_obs, str)
+                                        and sw_obs in series and v_obs in series and i_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    r = compute_switching_loss_per_event(
+                                        sw_states, series[v_obs], series[i_obs], times
+                                    )
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "loss_breakdown":
+                                sw_obs = kpi_entry.get("switch_observable")
+                                i_obs = kpi_entry.get("current_observable")
+                                v_obs = kpi_entry.get("voltage_observable")
+                                r_on = float(kpi_entry.get("r_on", 5e-3))
+                                if (isinstance(sw_obs, str) and isinstance(i_obs, str)
+                                        and isinstance(v_obs, str)
+                                        and sw_obs in series and i_obs in series and v_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    loss = compute_loss_breakdown(
+                                        sw_states, series[i_obs], series[v_obs], r_on, times
+                                    )
+                                    for k, v in loss.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                        except Exception as exc:
+                            import os
+                            if os.environ.get("PULSIM_KPI_DEBUG"):
+                                import traceback
+                                print(f"[KPI debug] {metric} for {benchmark_id}: {exc}")
+                                traceback.print_exc()
+                            continue
+
+                results.append(
+                    ScenarioResult(
+                        benchmark_id=benchmark_id,
+                        scenario=scenario_name,
+                        status=status,
+                        runtime_s=runtime_s,
+                        steps=steps,
+                        max_error=max_error,
+                        rms_error=rms_error,
+                        message=message,
+                        telemetry=telemetry,
+                        kpis=kpis,
+                    )
+                )
+                _emit_progress_for_last()
+
+    return results
+
+
+def write_results(output_dir: Path, results: List[ScenarioResult]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results_csv = output_dir / "results.csv"
+    results_json = output_dir / "results.json"
+    summary_json = output_dir / "summary.json"
+
+    # Compute the union of KPI keys across all results so the CSV has
+    # consistent columns (rows that don't have a given KPI get empty cells).
+    kpi_keys = sorted({k for item in results for k in item.kpis.keys()})
+
+    with open(results_csv, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([
+            "benchmark_id",
+            "scenario",
+            "status",
+            "runtime_s",
+            "steps",
+            "max_error",
+            "rms_error",
+            "message",
+            *kpi_keys,
+        ])
+        for item in results:
+            writer.writerow([
+                item.benchmark_id,
+                item.scenario,
+                item.status,
+                f"{item.runtime_s:.6f}",
+                item.steps,
+                "" if item.max_error is None else f"{item.max_error:.6e}",
+                "" if item.rms_error is None else f"{item.rms_error:.6e}",
+                item.message,
+                *[f"{item.kpis[k]:.6e}" if k in item.kpis else "" for k in kpi_keys],
+            ])
+
+    payload = {
+        "results": [item.__dict__ for item in results],
+    }
+    with open(results_json, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+
+    summary = {
+        "passed": sum(1 for item in results if item.status == "passed"),
+        "failed": sum(1 for item in results if item.status == "failed"),
+        "skipped": sum(1 for item in results if item.status == "skipped"),
+        "baseline": sum(1 for item in results if item.status == "baseline"),
+        "total": len(results),
+    }
+    with open(summary_json, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run Pulsim benchmark suite")
+    parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
+    parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/out"))
+    parser.add_argument("--only", nargs="*", help="Benchmark ids to run")
+    parser.add_argument("--matrix", action="store_true", help="Run full validation matrix")
+    parser.add_argument("--generate-baselines", action="store_true", help="Generate missing reference baselines")
+    parser.add_argument("--force-adaptive", action="store_true",
+                        help="Force simulation.step_mode=variable (legacy alias: was --force-adaptive)")
+    parser.add_argument("--scenario-filter", nargs="*", help="Run only selected scenarios")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Disable rich terminal UI (header, progress, table). Useful for CI logs; "
+             "results are still written to disk and the final JSON summary is printed.",
+    )
+    args = parser.parse_args()
+
+    if yaml is None:
+        raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
+
+    backend_reason = None
+    if python_backend_error is not None:
+        try:
+            backend_reason = python_backend_error()
+        except Exception as exc:
+            backend_reason = f"{exc.__class__.__name__}: {exc}"
+
+    if backend_reason is not None:
+        raise SystemExit(
+            "Pulsim Python runtime backend unavailable. "
+            "Build Python bindings and expose build/python on PYTHONPATH or install pulsim package. "
+            f"Reason: {backend_reason}"
+        )
+
+    use_ui = _HAS_CONSOLE and not args.quiet
+    console = _make_console(force_plain=args.quiet) if use_ui else None
+    if console is not None:
+        _print_environment_header(console, title="Pulsim Bench — runner")
+
+    total = 0
+    progress_ctx = None
+    if console is not None:
+        try:
+            total = count_scenarios(
+                args.benchmarks,
+                selected=args.only,
+                matrix=args.matrix,
+                scenario_filter=args.scenario_filter,
+            )
+        except Exception:
+            total = 0
+        progress_ctx = _BenchProgress(console, total=total, description="benchmarks")
+
+    if progress_ctx is not None:
+        with progress_ctx as prog:
+            results = run_benchmarks(
+                args.benchmarks,
+                args.output_dir,
+                selected=args.only,
+                matrix=args.matrix,
+                generate_baselines=args.generate_baselines,
+                simulation_overrides={"step_mode": "variable"} if args.force_adaptive else None,
+                scenario_filter=args.scenario_filter,
+                progress=prog,
+            )
+            elapsed = prog.elapsed_s
+    else:
+        results = run_benchmarks(
+            args.benchmarks,
+            args.output_dir,
+            selected=args.only,
+            matrix=args.matrix,
+            generate_baselines=args.generate_baselines,
+            simulation_overrides={"step_mode": "variable"} if args.force_adaptive else None,
+            scenario_filter=args.scenario_filter,
+        )
+        elapsed = None
+
+    write_results(args.output_dir, results)
+
+    summary = {
+        "passed": sum(1 for item in results if item.status == "passed"),
+        "failed": sum(1 for item in results if item.status == "failed"),
+        "skipped": sum(1 for item in results if item.status == "skipped"),
+        "baseline": sum(1 for item in results if item.status == "baseline"),
+    }
+
+    if console is not None:
+        _print_results_table(console, results, title="Benchmark Results")
+        _print_results_summary(console, results, runtime_s=elapsed)
+    else:
+        print(json.dumps(summary, indent=2))
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

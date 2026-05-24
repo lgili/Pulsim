@@ -1,0 +1,16 @@
+* 2-inductor chain step response — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/inductor_chain_step.yaml
+*
+* Vp(pulse) → R → L1 → L2 → 0; observe V(out) = V across L2.
+* L1 = 10 mH, L2 = 20 mH → L_eq = 30 mH, τ = L_eq/R = 300 µs.
+* V(0+) on L2 = V_in · L2/(L1+L2) = 5 · 2/3 = 3.333 V (voltage division
+* between two inductors fed by an ideal source — the initial step
+* divides across them per their reactance ratio = inductance ratio).
+
+Vp in 0   PULSE(0 5 0 1n 1n 10m 20m)
+R1 in n1  100
+L1 n1 out 10m IC=0
+L2 out 0  20m IC=0
+
+.tran 5u 2m UIC
+.end

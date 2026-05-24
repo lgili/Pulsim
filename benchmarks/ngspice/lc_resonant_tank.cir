@@ -1,0 +1,13 @@
+* LC resonant tank (no damping) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/lc_resonant_tank.yaml
+*
+* L = 1 mH, C = 1 µF → f_0 = 1/(2π·sqrt(LC)) = 5033 Hz, T = 199 µs.
+* Pure 2nd order, undamped. ngspice's default trap method preserves
+* energy well over short windows. Expect ~24 oscillations in 5 ms.
+
+Vp in 0   PULSE(0 10 0 1n 1n 10m 20m)
+L1 in out 1m IC=0
+C1 out 0  1u IC=0
+
+.tran 5u 5m UIC
+.end
