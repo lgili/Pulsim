@@ -376,68 +376,77 @@ else()
 endif()
 
 # =============================================================================
-# SuiteSparse KLU — vendored from dpsim-simulator/SuiteSparse fork
+# SuiteSparse KLU — OPTIONAL sparse-LU solver for circuit MNA matrices
 # =============================================================================
-# KLU is purpose-built for circuit-simulation MNA matrices (Davis & Natarajan,
-# ACM TOMS 37(3), 2010, Algorithm 907). Pulsim's PWL state-space cache uses
-# it as the default backend for circuits with n ≥ 100.
+# KLU is purpose-built for circuit-simulation matrices (Davis & Natarajan,
+# ACM TOMS 37(3), 2010, Algorithm 907). When detected, Pulsim's PWL state-
+# space cache uses it as the default backend for circuits with n ≥ 100,
+# unlocking the path-based partial refactorization fast-path for single-bit
+# Gray-code switch flips (openspec/changes/add-pwl-rank1-update).
 #
-# We vendor the DPsim fork
-# (https://github.com/dpsim-simulator/SuiteSparse) rather than using upstream
-# SuiteSparse because the fork extends KLU with the path-based partial
-# refactorization primitives (Schumacher/Dinkelbach 2021,
-# *Energies* 14:7989) that back our V8.1 algorithmic contribution
-# — namely `klu_compute_path`, `klu_partial_factorization_path`, and
-# `klu_partial_refactorization_restart` plus new fields on `klu_numeric`.
-# These are NOT present in upstream Davis SuiteSparse.
+# When KLU is NOT installed, Pulsim builds and runs identically using the
+# default Eigen::SparseLU backend — no functional regression.
 #
-# Pinned to commit 6cf76809... (master @ 2023-03-08), the last commit on the
-# fork's master branch. The fork has been quiet for over 2 years — patches
-# are mature, no breaking changes expected.
-#
-# License: the SuiteSparse libraries themselves keep their original licenses
-# (KLU + BTF: LGPL-2.1+; AMD + COLAMD: BSD-3); the fork's CMake glue is
-# Apache-2.0. All are compatible with Pulsim's MIT for static linking,
-# provided the LGPL terms are honoured (we don't modify the vendored sources
-# in-place, we only link, and we ship the LGPL text). See `LICENSES/`.
-#
-# When PULSIM_ENABLE_KLU is OFF, Pulsim builds and runs identically using
-# the default Eigen::SparseLU backend — no functional regression.
-option(PULSIM_ENABLE_KLU "Enable SuiteSparse KLU backend (vendored DPsim fork)" ON)
+# Install:
+#   macOS:  brew install suite-sparse
+#   Debian: apt-get install libsuitesparse-dev
+#   Fedora: dnf install suitesparse-devel
+option(PULSIM_ENABLE_KLU "Enable SuiteSparse KLU backend (auto-detected if found)" ON)
 
 set(PULSIM_HAVE_KLU OFF)
 
 if(PULSIM_ENABLE_KLU)
-    # Silence the fork's optional GPL-gated bits (we don't pull any GPL'd
-    # code by leaving WITH_GPL OFF). WITH_LGPL stays ON because KLU itself
-    # is LGPL-2.1+ — that's the licence we're knowingly accepting.
-    set(WITH_GPL  OFF CACHE BOOL "" FORCE)
-    set(WITH_LGPL ON  CACHE BOOL "" FORCE)
-    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    # Modern SuiteSparse (>=7.0) ships a CMake config for KLU.
+    # Older releases ship per-component configs or only pkg-config /
+    # raw .so + .h. Try in order from cleanest to legacy.
+    find_package(KLU QUIET CONFIG)
 
-    FetchContent_Declare(
-        klu_dpsim
-        GIT_REPOSITORY https://github.com/dpsim-simulator/SuiteSparse.git
-        GIT_TAG        6cf768091962336466808e7f02d476842e4c5281  # master @ 2023-03-08
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(klu_dpsim)
+    if(NOT TARGET SuiteSparse::KLU)
+        # Some distros (Homebrew on Apple Silicon) need explicit hints.
+        find_package(KLU QUIET CONFIG
+            PATHS
+                /opt/homebrew/opt/suite-sparse
+                /usr/local/opt/suite-sparse
+            PATH_SUFFIXES
+                lib/cmake/KLU
+                lib/cmake/SuiteSparse
+        )
+    endif()
 
-    if(TARGET klu)
-        # Provide the same imported-target alias name the V8 (v1.2.0) code
-        # expected. Existing `target_link_libraries(... SuiteSparse::KLU)`
-        # lines elsewhere in the build keep working.
-        if(NOT TARGET SuiteSparse::KLU)
-            add_library(SuiteSparse::KLU ALIAS klu)
+    if(NOT TARGET SuiteSparse::KLU)
+        # Legacy fallback: locate the library + headers manually.
+        find_path(PULSIM_KLU_INCLUDE_DIR
+            NAMES klu.h
+            PATHS
+                /opt/homebrew/include
+                /usr/local/include
+                /usr/include
+            PATH_SUFFIXES
+                suitesparse
+        )
+        find_library(PULSIM_KLU_LIBRARY
+            NAMES klu
+            PATHS
+                /opt/homebrew/lib
+                /usr/local/lib
+                /usr/lib
+                /usr/lib/x86_64-linux-gnu
+                /usr/lib/aarch64-linux-gnu
+        )
+        if(PULSIM_KLU_INCLUDE_DIR AND PULSIM_KLU_LIBRARY)
+            add_library(SuiteSparse::KLU UNKNOWN IMPORTED)
+            set_target_properties(SuiteSparse::KLU PROPERTIES
+                IMPORTED_LOCATION "${PULSIM_KLU_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${PULSIM_KLU_INCLUDE_DIR}"
+            )
         endif()
+    endif()
+
+    if(TARGET SuiteSparse::KLU)
         set(PULSIM_HAVE_KLU ON)
-        message(STATUS "SuiteSparse KLU: vendored DPsim fork @ 6cf76809 "
-                       "(rank-1 path-based partial refactor ENABLED)")
+        message(STATUS "SuiteSparse KLU: found (rank-1 cache update path ENABLED)")
     else()
-        message(WARNING
-            "SuiteSparse KLU: FetchContent succeeded but `klu` target was "
-            "not exported by the fork's CMake. Falling back to "
-            "Eigen::SparseLU.")
+        message(STATUS "SuiteSparse KLU: not found (rank-1 cache update path DISABLED — falls back to Eigen::SparseLU)")
     endif()
 else()
     message(STATUS "SuiteSparse KLU: explicitly disabled via PULSIM_ENABLE_KLU=OFF")
