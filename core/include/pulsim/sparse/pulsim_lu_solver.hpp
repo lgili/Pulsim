@@ -442,8 +442,15 @@ public:
         const int*  Ai = new_M.innerIndexPtr();
         const Real* Ax = new_M.valuePtr();
 
-        constexpr Real PIVOT_TOL       = Real{1e-14};
-        constexpr Real PIVOT_RATIO_TOL = Real{1.1};
+        constexpr Real PIVOT_TOL        = Real{1e-14};
+        // Threshold-pivoting tolerance: the cached pivot is acceptable
+        // as long as its magnitude is at least PIVOT_THRESH × the
+        // column infinity-norm. KLU's default is 0.001 (0.1%), giving
+        // generous headroom to absorb the wide pivot-magnitude swings
+        // common in circuit MNA between switch-state changes. Stricter
+        // values cause excess fallback to full factorize without much
+        // numerical benefit.
+        constexpr Real PIVOT_THRESH     = Real{1e-3};
 
         for (Index k : path_) {
             // ---- Load x = new_M[Prow, Pcol[k]] -------------------------
@@ -469,21 +476,24 @@ public:
 
             // ---- Pivot-fault check ------------------------------------
             const Real pivot = x[static_cast<std::size_t>(k)];
-            if (std::abs(pivot) < PIVOT_TOL) {
+            const Real pivot_abs = std::abs(pivot);
+            if (pivot_abs < PIVOT_TOL) {
                 invalidate_path_cache_();
                 return false;
             }
-            // Check if some row i > k has |x[i]| > 1.1 × |x[k]| —
-            // would mean partial pivoting needs a row swap. Original
-            // factorize chose row k as the pivot, so this signals the
-            // pivot order is no longer optimal.
-            const Real pivot_abs = std::abs(pivot);
+            // Threshold pivoting: reject if |x[k]| < PIVOT_THRESH ×
+            // column infinity norm, i.e. some row's magnitude is more
+            // than 1/PIVOT_THRESH × the current pivot. KLU-style; lets
+            // typical switch-state swings through while catching true
+            // pivot-order collapses.
+            Real col_max = pivot_abs;
             for (Index i = k + 1; i < n_; ++i) {
-                if (std::abs(x[static_cast<std::size_t>(i)]) >
-                    PIVOT_RATIO_TOL * pivot_abs) {
-                    invalidate_path_cache_();
-                    return false;
-                }
+                col_max = std::max(col_max,
+                    std::abs(x[static_cast<std::size_t>(i)]));
+            }
+            if (pivot_abs < PIVOT_THRESH * col_max) {
+                invalidate_path_cache_();
+                return false;
             }
 
             // ---- Pattern check + value update -------------------------
@@ -970,22 +980,20 @@ private:
 // pattern V0 used for KLU; ODR-safe because only ONE definition of the
 // 2-arg overload exists per build.
 //
-// Backend::Auto behaviour during the interim (Sections 2 done, 3-5
-// pending): falls through to `SparseLuSolver` because
-// `PulsimSparseLuSolver::factorize` is still a Section-3 stub. Once
-// Section 3 lands the real numeric factorization, flip this to pick
-// `PulsimSparseLuSolver` for any n ≥ 1.
+// `Backend::Auto` returns `PulsimSparseLuSolver` since v1.3.0 — the
+// in-house solver is the default for the rank-1 PWL cache fast-path
+// because it implements `partial_refactor`. `Backend::Eigen` remains
+// available for parity testing + as a non-rank-1 baseline.
 // -----------------------------------------------------------------------------
 inline std::unique_ptr<DirectSolver> make_default_solver(
     [[maybe_unused]] Size n, Backend hint) {
     switch (hint) {
-        case Backend::Pulsim:
-            return std::make_unique<PulsimSparseLuSolver>();
         case Backend::Eigen:
             return std::make_unique<SparseLuSolver>();
+        case Backend::Pulsim:
         case Backend::Auto:
         default:
-            return std::make_unique<SparseLuSolver>();
+            return std::make_unique<PulsimSparseLuSolver>();
     }
 }
 

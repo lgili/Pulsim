@@ -626,16 +626,17 @@ TEST_CASE("make_default_solver(n, Backend::Pulsim) returns a PulsimSparseLuSolve
     REQUIRE(solver->is_factorized());
 }
 
-TEST_CASE("make_default_solver(n, Backend::Auto) still returns SparseLuSolver "
-          "during Section 2",
+TEST_CASE("make_default_solver(n, Backend::Auto) returns PulsimSparseLuSolver "
+          "(in-house LU is the default since v1.3.0)",
           "[v2][layer0][sparse][pulsim_lu][factory]") {
-    // During the interim (Section 3 not yet implemented), Backend::Auto
-    // falls through to SparseLuSolver because PulsimSparseLuSolver's
-    // factorize() doesn't yet work. This test will flip to expect
-    // Pulsim once Section 3 lands.
     auto solver = make_default_solver(/*n=*/8, Backend::Auto);
     REQUIRE(solver != nullptr);
+    // PulsimSparseLuSolver advertises partial_refactor support; the
+    // SparseLuSolver fallback does not. This is the cheapest way to
+    // assert the backend identity without exposing typeid.
+    REQUIRE(solver->supports_partial_refactor());
+    // analyze + factorize round-trip on the canonical SPD 3x3.
     Matrix M = make_spd_3x3();
     REQUIRE(solver->analyze(M));
-    REQUIRE(solver->factorize(M));  // SparseLuSolver works end-to-end
+    REQUIRE(solver->factorize(M));
 }

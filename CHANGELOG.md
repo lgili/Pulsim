@@ -4,6 +4,97 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-05-24
+
+### Highlights — In-house sparse LU + path-based partial refactorization
+
+This release replaces the V8 KLU-backed `partial_refactor` with a
+**fully in-house C++23 sparse LU stack** (`pulsim::sparse::PulsimSparseLuSolver`),
+implementing the path-based partial refactorisation algorithm
+(Chan/Brandwajn/Tinney, *IEEE Trans. Power Syst.* 1, 1986;
+Dinkelbach et al., *Energies* 14:7989, 2021, §3) from scratch on
+top of Eigen sparse-matrix containers. **Zero third-party LU
+dependency** — neither SuiteSparse KLU (V8) nor the dpsim-simulator
+fork (the rejected V8.1-vendoring approach).
+
+Per the project owner's 2026-05-24 architectural decision
+(documented in
+[`openspec/changes/replace-klu-with-pulsim-sparse-lu/`](openspec/changes/replace-klu-with-pulsim-sparse-lu/)):
+the algorithmic novelty of the planned IEEE TPEL methods paper
+must be ours, not a thin wrapper around someone else's C patch.
+
+### Performance
+
+3-backend microbench captured 2026-05-24 on macOS Apple Silicon
+(see [`artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md`](artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md)):
+
+| n_state | baseline solve | Pulsim path-based | speedup |
+|--------:|---------------:|------------------:|--------:|
+| 6       | 6.7 µs         | 2.3 µs            | 2.93×   |
+| 14      | 10.0 µs        | 3.6 µs            | **2.81×** |
+| 18      | 12.2 µs        | 4.3 µs            | **2.82×** |
+| 26      | 16.4 µs        | 6.1 µs            | **2.68×** |
+
+**Zero fallbacks across all 1999 single-bit Gray-code flips per N**
+— every transition exercised the path-based fast path successfully.
+The per-call cost stays nearly flat (3.6 → 6.1 µs from n_state=14
+to n_state=26) while the baseline scales linearly — the textbook
+signature of O(path) per call vs O(nnz·log n) for fresh factorize.
+
+### Added
+
+- **`pulsim::sparse::PulsimSparseLuSolver`** — in-house sparse LU
+  in pure C++23, ~900 lines header-only. Implements the full
+  `DirectSolver` lifecycle:
+  - `analyze()` — Reverse Cuthill-McKee column ordering (George 1971),
+    elimination tree (Davis 2006 §4.10 / Liu 1986), symbolic L+U
+    pattern
+  - `factorize()` — Gilbert-Peierls left-looking with partial
+    pivoting (Gilbert & Peierls, *SIAM J. Sci. Stat. Comput.* 9,
+    1988). Handles the asymmetric MNA + zero-diagonal patterns
+    characteristic of voltage-source constraint rows.
+  - `solve()` — forward + back substitution with `Prow`/`Pcol`
+    permutations
+  - `partial_refactor()` — **path-based** re-elimination over the
+    etree, with lazy union of varying columns + pivot-threshold
+    fault detection. ~2.7-2.9× speedup vs baseline at the
+    n_state ≥ 14 regime.
+- **`pulsim::sparse::Backend::Pulsim`** — new enum value (replaces
+  `Backend::KLU` from v1.2.0). Default for `Backend::Auto`.
+- **CSV bench `rank1_microbench.csv`** — 3-backend, 8-row capture
+  for direct citation in the TPEL §VI table.
+
+### Removed (BREAKING at the C++ kernel-builder level)
+
+- **`pulsim::sparse::KluSolver`** — replaced by PulsimSparseLuSolver
+- **`pulsim::sparse::Backend::KLU`** — replaced by `Backend::Pulsim`
+- **`find_package(KLU)` block in `CMakeLists.txt`** — KLU is no
+  longer a dependency at all
+- **`PULSIM_HAVE_KLU` + `PULSIM_ENABLE_KLU` compile defs / build
+  options** — no longer applicable
+- **`libsuitesparse-dev` from CI** — no longer needed; `apt install
+  libsuitesparse-dev` removed from all Linux CI matrix entries,
+  `brew install suite-sparse` removed from macOS
+
+**Migration:** any out-of-tree caller that constructed `KluSolver`
+directly or passed `Backend::KLU` to `make_default_solver(n, hint)`
+must switch to `PulsimSparseLuSolver` / `Backend::Pulsim`. The
+standard `make_default_solver()` / `make_default_solver(n,
+Backend::Auto)` entry points continue to work transparently — the
+factory returns PulsimSparseLuSolver by default.
+
+### Not changed
+
+- **Public Python API** — `pp.simulate(builder, ...)` keeps working.
+  Wiring `solve_rank1` into Layer 5's `run_transient` + Python
+  bindings is out of scope of this release; tracked as
+  `add-pwl-rank1-runtime-integration` (TBD).
+- **All 8 reference projects under `projects/`** — bit-identical
+  output (verified via the 17,279 layer4/4_v1/5/5_v1/5_v4
+  assertions across 135 test cases).
+- **Build prerequisites** — just **Eigen 3.4+ and a C++23 compiler**
+  now; no SuiteSparse install needed.
+
 ## [1.2.0] — 2026-05-24
 
 ### Highlights — PWL rank-1 cache update path (Layer 4 V8)
