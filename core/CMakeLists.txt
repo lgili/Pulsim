@@ -39,7 +39,8 @@ if(PULSIM_BUILD_TESTS)
         tests/layer0/test_numeric_types.cpp
         tests/layer0/test_sparse_matrix.cpp
         tests/layer0/test_sparse_solver.cpp
-        tests/layer0/test_pulsim_lu_solver.cpp   # Layer 0 V8 — in-house sparse LU
+        tests/layer0/test_pulsim_lu_solver.cpp           # Layer 0 V8 — in-house sparse LU (Real)
+        tests/layer0/test_pulsim_lu_solver_complex.cpp   # Layer 0 v1.4.0 — complex specialisation
     )
     target_link_libraries(pulsim_core_layer0_tests
         PRIVATE
@@ -117,6 +118,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_analysis_tests
         tests/analysis/test_main.cpp
         tests/analysis/test_core_loss.cpp
+        tests/analysis/test_mna_sweep.cpp   # v1.4.0 — in-house complex solver integration
     )
     target_link_libraries(pulsim_core_analysis_tests
         PRIVATE
@@ -191,7 +193,8 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4/test_assemble.cpp
         tests/layer4/test_cache.cpp
         tests/layer4/test_integration_chopper.cpp
-        tests/layer4/test_pwl_cache_rank1.cpp   # Layer 4 V8 — rank-1 fast path
+        tests/layer4/test_pwl_cache_rank1.cpp       # Layer 4 V8 — rank-1 fast path
+        tests/layer4/test_pwl_cache_parametric.cpp  # Layer 4 v1.4.0 — parametric refactor
     )
     target_link_libraries(pulsim_core_layer4_tests
         PRIVATE
@@ -499,7 +502,10 @@ if(PULSIM_BUILD_TESTS)
         tests/benchmarks/test_bench_half_wave.cpp
         tests/benchmarks/test_bench_buck.cpp
         tests/benchmarks/test_bench_boost.cpp
-        tests/benchmarks/test_bench_pwl_rank1.cpp   # Layer 4 V8 — rank-1 fast path
+        tests/benchmarks/test_bench_pwl_rank1.cpp        # Layer 4 V8 — rank-1 fast path
+        tests/benchmarks/test_bench_ac_sweep.cpp         # v1.4.0 — complex solver per-freq cost
+        tests/benchmarks/test_bench_multi_bit_rank1.cpp  # v1.4.0 — multi-bit path-union routing
+        tests/benchmarks/test_bench_parametric_sweep.cpp # v1.4.0 — refactor_parametric for sweeps
     )
     target_include_directories(pulsim_benchmarks
         PRIVATE

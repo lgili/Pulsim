@@ -4,10 +4,11 @@ The single page that maps every figure in the "How Pulsim
 Works" doc set to the paper section it feeds. Reviewers and
 co-authors land here; everything below is a stable link target.
 
-**Status (as of iteration 3 of the doc set):** 12 of 12
-matplotlib figures rendered + 4 mermaid diagrams embedded
-in-line in chapters. Both PNG (web) and PDF (paper-grade,
-300 dpi) outputs land in `_figures/output/`.
+**Status (as of v1.4.0):** 15 of 15 matplotlib figures
+rendered + 4 mermaid diagrams embedded in-line in chapters.
+Both PNG (web) and PDF (paper-grade, 300 dpi) outputs land
+in `_figures/output/`. New in v1.4.0: figs 8.4, 8.5, 8.6
+covering the multi-bit / parametric / AC-sweep contributions.
 
 ---
 
@@ -34,15 +35,25 @@ in-line in chapters. Both PNG (web) and PDF (paper-grade,
 | 8.1 | [§8.3](08-benchmarks.md#83-speedup-vs-n_mathrmstate) | Captured speedups B/A, C/B, C/A vs $n_{\mathrm{state}}$ | **§VIII.A captured speedup** | ✅ rendered |
 | 8.2 | [§8.4](08-benchmarks.md#84-the-decomposition-in-bar-form) | Multiplicative decomposition stacked bars | **§VIII.A decomposition** | ✅ rendered |
 | 8.3 | [§8.5](08-benchmarks.md#85-per-call-cost-flat-vs-linear) | Per-call cost vs $n_{\mathrm{state}}$ (flat vs linear) | **§VIII.B asymptotic scaling** | ✅ rendered |
+| 8.4 | [§8.11.1](08-benchmarks.md#8111-multi-bit-path-union-speedup) | Multi-bit speedup vs Hamming distance + hit-rate decay (v1.4.0) | **§VI.A multi-bit row** | ✅ rendered (NEW) |
+| 8.5 | [§8.11.2](08-benchmarks.md#8112-parametric-sweep--monte-carlo-speedup) | Parametric sweep speedup + per-point cost (v1.4.0) | **§VI.C parametric row** | ✅ rendered (NEW) |
+| 8.6 | [§8.11.3](08-benchmarks.md#8113-ac-sweep-complex-sparse-lu-v140) | AC sweep complex LU: Pulsim vs Eigen (v1.4.0) | **§VI.B AC complex** | ✅ rendered (NEW) |
 | 9.1 | [§9.1](09-architecture-walkthrough.md#91-the-layer-model) | Pulsim 10-layer stack | §I.B kernel architecture | ✅ rendered |
 | 9.2 | [§9.3](09-architecture-walkthrough.md#93-cross-layer-dependency-graph) | Cross-layer dependency DAG | §I.B (appendix) | mermaid (no PDF) |
 
-**Inventory at iteration 3:**
+**Inventory at v1.4.0:**
 
-- **12 PDF/PNG matplotlib figures** in `_figures/output/`
+- **15 PDF/PNG matplotlib figures** in `_figures/output/`
+  (figs 1.1, 1.2, 2.2, 3.2, 4.2, 5.1, 5.2, 5.3, 6.2, 6.3, 7.1,
+  8.1, 8.2, 8.3, **8.4 (NEW)**, **8.5 (NEW)**, **8.6 (NEW)**,
+  9.1 — 18 entries total because some figs are 2-panel)
 - **6 mermaid diagrams** embedded in markdown (rendered live
   in the docs site; export to PDF via `npx @mermaid-js/mermaid-cli`
   for paper inclusion)
+- **Captured CSVs feeding figs 8.4-8.6**:
+  - `multi_bit_microbench.csv` → fig 8.4
+  - `parametric_microbench.csv` → fig 8.5
+  - `ac_sweep_microbench.csv` → fig 8.6
 
 ---
 

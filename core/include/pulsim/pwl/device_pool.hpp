@@ -537,6 +537,170 @@ public:
                num_inductors_;
     }
 
+    // -------- Switch / parameter affected-column helpers (v1.4.0) -----------
+    //
+    // `openspec/changes/add-generalised-path-refactor` Part A — the
+    // multi-bit path-union routing in `PwlStateSpaceCache::solve_rank1`
+    // queries these helpers to assemble the union of MNA columns
+    // affected by a set of toggled switches.
+    //
+    // A switch between nodes (from, to) stamps its conductance at the
+    // diagonal entries (from, from) + (to, to) and the off-diagonal
+    // entries (from, to) + (to, from). In MNA column space, this means
+    // toggling that switch changes the values of columns `from` AND `to`
+    // (the off-diagonal entries live IN those columns). Ground-anchored
+    // endpoints (node < 0) are skipped.
+
+    /// Columns in J that change when the `sw_idx`-th switch toggles.
+    /// `sw_idx` is the switch's index (0..num_switches-1), not its
+    /// branch_id; this matches the bit ordering of `SwitchStateMask`.
+    /// Throws `std::out_of_range` if `sw_idx >= graph.num_switches()`.
+    [[nodiscard]] std::vector<Index> columns_affected_by_switch(
+        Size sw_idx, const topology::Graph& graph) const {
+        Size cur = 0;
+        for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+            const auto& branch = graph.branch(b_id);
+            if (branch.kind != topology::BranchKind::Switch) continue;
+            if (cur == sw_idx) {
+                std::vector<Index> cols;
+                cols.reserve(2);
+                if (branch.from >= 0) cols.push_back(branch.from);
+                if (branch.to   >= 0) cols.push_back(branch.to);
+                return cols;
+            }
+            ++cur;
+        }
+        throw std::out_of_range(std::format(
+            "DevicePool::columns_affected_by_switch: sw_idx {} "
+            ">= num_switches ({})",
+            sw_idx, graph.num_switches()));
+    }
+
+    /// Columns in J that change when `branch_id`'s parameter values
+    /// change (with topology fixed). Used by
+    /// `PwlStateSpaceCache::refactor_parametric` to identify the
+    /// minimum set of columns to re-stamp + path-refactor after a
+    /// user-driven parameter sweep / Monte Carlo update.
+    ///
+    /// The mapping follows the MNA stamping rules:
+    ///   * Resistor/Switch/Capacitor (admittance-stamped between two
+    ///     nodes): both endpoint columns (skipping ground).
+    ///   * Inductor (companion-stamped with branch-current row): the
+    ///     branch-current column only — the inductor's L value enters
+    ///     the constraint row as `-L·(2/dt)·i_L` at the inductor's
+    ///     own branch-current column. The endpoint v rows are
+    ///     unaffected when L changes (only the branch-current column
+    ///     entry shifts).
+    ///   * VoltageSource: the source-current column (one column). The
+    ///     value V affects ONLY the RHS `b_constant`, not J — so the
+    ///     returned column set is empty for sources. Callers updating
+    ///     a source value should re-stamp `b_constant` separately.
+    ///   * Other (CurrentSource, Diode, MOSFET, etc.): currently not
+    ///     supported in the parametric-refactor pipeline → empty set
+    ///     (caller falls back to full re-build of the cache).
+    ///
+    /// Returns an empty vector for any branch whose parameter change
+    /// is NOT expressible as a path-based update over the existing
+    /// sparsity pattern. The caller (refactor_parametric) treats an
+    /// empty return as "force fallback to full re-build".
+    [[nodiscard]] std::vector<Index> columns_affected_by_branch(
+        Index branch_id, const topology::Graph& graph) const {
+        const auto it = entries_.find(branch_id);
+        if (it == entries_.end()) {
+            return {};
+        }
+        const auto& branch = graph.branch(branch_id);
+        const StoredKind sk = static_cast<StoredKind>(it->second.index());
+        std::vector<Index> cols;
+        switch (sk) {
+            case StoredKind::Resistor:
+            case StoredKind::Switch:
+            case StoredKind::Capacitor:
+                if (branch.from >= 0) cols.push_back(branch.from);
+                if (branch.to   >= 0) cols.push_back(branch.to);
+                break;
+            case StoredKind::Inductor: {
+                // Inductor's L value enters the branch-current
+                // constraint row only. The col we touch is the
+                // inductor's branch-current state slot.
+                cols.push_back(branch_var_id_for_inductor(branch_id,
+                                                            graph));
+                break;
+            }
+            case StoredKind::VoltageSource:
+                // Pure-RHS update — no J entries depend on V. Caller
+                // gets an empty set, signalling "stamp b_constant
+                // only, no refactor needed". A future revision may
+                // expose this distinction via a separate method; for
+                // now `empty cols ⇒ no path-refactor work to do on J`.
+                break;
+            default:
+                // Other devices (CurrentSource, Diode, MOSFET, etc.)
+                // are out of scope for the v1.4.0 parametric pipeline.
+                // Returning empty triggers full-rebuild fallback.
+                break;
+        }
+        return cols;
+    }
+
+    // -------- Parameter mutators (v1.4.0 — parametric refactor) -------------
+    //
+    // Modify a stored parameter in place. Pre-conditions:
+    //   * `branch_id` is registered with the expected device kind
+    //     (throws std::out_of_range otherwise).
+    //   * The topology is unchanged (these mutators do NOT add or
+    //     remove devices). Use with `PwlStateSpaceCache::refactor_parametric`.
+    //
+    // Storage is std::variant inside Entry; we write the new value
+    // back via std::get_if + reassignment.
+
+    /// Update a resistor's resistance value (ohms). Matches the
+    /// builder convention `add_resistor(name, from, to, R_ohms)` —
+    /// the pool stores conductance G = 1/R, so we convert here.
+    void update_resistor_R(Index branch_id, Real new_R_ohms) {
+        auto& entry = require_entry_(branch_id, "update_resistor_R");
+        if (auto* p = std::get_if<models::Resistor::Params>(&entry)) {
+            p->G = Real{1} / new_R_ohms;
+        } else {
+            throw std::out_of_range(std::format(
+                "DevicePool::update_resistor_R: branch {} "
+                "is not a Resistor", branch_id));
+        }
+    }
+
+    void update_inductor_L(Index branch_id, Real new_L) {
+        auto& entry = require_entry_(branch_id, "update_inductor_L");
+        if (auto* p = std::get_if<models::Inductor::Params>(&entry)) {
+            p->L = new_L;
+        } else {
+            throw std::out_of_range(std::format(
+                "DevicePool::update_inductor_L: branch {} "
+                "is not an Inductor", branch_id));
+        }
+    }
+
+    void update_capacitor_C(Index branch_id, Real new_C) {
+        auto& entry = require_entry_(branch_id, "update_capacitor_C");
+        if (auto* p = std::get_if<models::Capacitor::Params>(&entry)) {
+            p->C = new_C;
+        } else {
+            throw std::out_of_range(std::format(
+                "DevicePool::update_capacitor_C: branch {} "
+                "is not a Capacitor", branch_id));
+        }
+    }
+
+    void update_voltage_source_V(Index branch_id, Real new_V) {
+        auto& entry = require_entry_(branch_id, "update_voltage_source_V");
+        if (auto* p = std::get_if<models::VoltageSource::Params>(&entry)) {
+            p->V = new_V;
+        } else {
+            throw std::out_of_range(std::format(
+                "DevicePool::update_voltage_source_V: branch {} "
+                "is not a VoltageSource", branch_id));
+        }
+    }
+
 private:
     // The alternative order is locked to `StoredKind`: index 0 is
     // Resistor, 1 is VoltageSource, … — `kind_of` casts the variant
@@ -563,6 +727,20 @@ private:
             throw std::out_of_range(std::format(
                 "DevicePool: branch_id {} not registered",
                 branch_id));
+        }
+        return it->second;
+    }
+
+    /// Non-const counterpart used by the `update_*` mutators.
+    /// `method_name` surfaces in the std::out_of_range message so
+    /// debug output names the offending API path.
+    [[nodiscard]] Entry& require_entry_(
+        Index branch_id, std::string_view method_name) {
+        auto it = entries_.find(branch_id);
+        if (it == entries_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::{}: branch_id {} not registered",
+                method_name, branch_id));
         }
         return it->second;
     }

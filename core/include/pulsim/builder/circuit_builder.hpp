@@ -637,6 +637,16 @@ public:
         return pool_;
     }
 
+    /// Non-const pool accessor (v1.4.0). Required by
+    /// `PwlStateSpaceCache::refactor_parametric` which mutates the
+    /// pool's per-device values to drive a parameter sweep / Monte
+    /// Carlo. Existing const-`pool()` consumers (the vast majority)
+    /// are unaffected; this overload is picked only when the caller
+    /// has a non-const builder reference.
+    [[nodiscard]] pwl::DevicePool& pool() noexcept {
+        return pool_;
+    }
+
     [[nodiscard]] Size num_branches() const noexcept {
         return graph_.num_branches();
     }
@@ -649,6 +659,25 @@ public:
         const auto it = branch_names_.find(branch_id);
         if (it == branch_names_.end()) return std::string_view{};
         return it->second;
+    }
+
+    /// Inverse of `name_of`: lookup the branch_id for a user-supplied
+    /// component name (the first argument of every `add_*` call).
+    /// Used by v1.4.0's parametric refactor pipeline
+    /// (`PwlStateSpaceCache::refactor_parametric`) to translate
+    /// user-facing param strings like `"L_out"` into the branch_id
+    /// the pool's `update_*` mutators consume.
+    ///
+    /// Throws `std::out_of_range` if `name` was never registered.
+    /// O(num_branches) per call; cache the result if calling in a
+    /// hot loop.
+    [[nodiscard]] Index branch_id_of(std::string_view name) const {
+        for (const auto& [b_id, n] : branch_names_) {
+            if (n == name) return b_id;
+        }
+        throw std::out_of_range(std::format(
+            "CircuitBuilder::branch_id_of: component name \"{}\" "
+            "was never registered", name));
     }
 
     /// Look up a previously-registered node by name. Throws

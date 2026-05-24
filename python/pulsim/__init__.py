@@ -149,6 +149,9 @@ from .sweep import (
     SweepResult,
     sweep,
     monte_carlo,
+    # v1.4.0 — path-aware variants exploiting refactor_parametric
+    sweep_path_aware,
+    monte_carlo_path_aware,
 )
 from .kpi import (
     KpiGate,
@@ -369,6 +372,8 @@ __all__ = [
     "SweepResult",
     "sweep",
     "monte_carlo",
+    "sweep_path_aware",
+    "monte_carlo_path_aware",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -704,7 +709,7 @@ def simulate(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 # ---------------------------------------------------------------------------

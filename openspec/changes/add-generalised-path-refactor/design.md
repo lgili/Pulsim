@@ -111,7 +111,7 @@ data (per a small offline sweep I ran during the
   worst-case multi-bit patterns. Rejected as a regression
   risk.
 - *Per-circuit-tuned ratio via online learning*: too clever for
-  v1.5.0; defer to `add-adaptive-pivot-threshold`.
+  v1.4.0; defer to `add-adaptive-pivot-threshold`.
 - *Cost model that estimates µs of each path vs the µs of
   factorise*: requires a calibrated cost model per platform.
   Overkill; the simple ratio works.
@@ -147,7 +147,7 @@ parameter lookup.
 
 ### Decision 4: Python `sweep_path_aware` is opt-in initially
 
-**Decision**: v1.5.0 ships both `pulsim.sweep.sweep(...)`
+**Decision**: v1.4.0 ships both `pulsim.sweep.sweep(...)`
 (legacy) and `pulsim.sweep.sweep_path_aware(...)` (new). v1.6.0
 or later: deprecate the legacy variant after the path-aware
 version has had one minor cycle of field testing.
@@ -235,7 +235,7 @@ disabled. Single-commit revert; no data loss.
    `cache.refactor_parametric_via(lambda pool: pool.update_inductor("L_out", 101e-6))`)
    More flexible — handles any pool mutation, not just
    single-name-single-value. But adds another API form. Lean
-   towards "no" for v1.5.0; revisit if users ask.
+   towards "no" for v1.4.0; revisit if users ask.
 
 2. **How does the new framework interact with the
    PWL-cache rebuild on `dt` change?** Today `build_lazy(dt2)`

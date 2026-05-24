@@ -348,18 +348,37 @@ majority of single-bit transitions and that the
 
 ## 7.7 What the algorithm does NOT do
 
-Three explicit non-features, deferred to follow-up proposals:
+Three explicit non-features, deferred to follow-up proposals.
 
-### Multi-bit transitions fall back
+### Wide path-unions still fall back (v1.4.0 update)
 
-If `changed_cols.size() > 1` *for a single transition* (not the
-cumulative `varying_set_`), the resulting path is the union of
-each column's path. Path length can grow to $O(n)$ in worst
-cases. For SPWM with multiple legs commutating in one timestep,
-this is common; the `PwlStateSpaceCache::solve_rank1` wrapper
-detects the Hamming distance and routes multi-bit transitions
-to full `factorize` instead of `partial_refactor`. The
-single-bit-flip workload is what chapter 8's benchmark measures.
+Up to v1.3.0 the cache routed any **multi-bit transition** to
+full `factorize` unconditionally. v1.4.0 lifts that restriction
+— `PwlStateSpaceCache::solve_rank1` now consults the
+$\mathrm{MAX\_PATH\_LENGTH\_RATIO} = 0.6$ gate via a new
+`PulsimSparseLuSolverT<Scalar>::partial_refactor_count_path`
+query method:
+
+- $\delta = 1$ (single-bit flip): always attempt
+  `partial_refactor` (v1.3.0 behaviour preserved — single-bit
+  paths are always short on real fixtures).
+- $\delta \ge 2$ (multi-bit): compute the union of etree paths
+  for all affected columns. If the union covers $\le 60\%$ of
+  $n$, attempt `partial_refactor`; otherwise fall back to fresh
+  `factorize`.
+
+The captured multi-bit microbench (chapter 8 §8.11.1, Fig 8.4)
+shows the gate fires correctly: $\sim 45\%$ of $\delta = 2$
+transitions take the path-union, decaying to $\sim 10\%$ at
+$\delta = 4$, with **no regression** at $\delta = 1$ vs v1.3.0.
+Parametric value changes (chapter 8 §8.11.2) use the same gate
+and the same `partial_refactor_count_path` query.
+
+**What does still fall back** is the case where the union path
+is genuinely so wide (>60 % of $n$) that path-based update
+would cost the same as a fresh factorize. The gate keeps the
+solver from doing pointless work; the wall-clock cost matches
+the v1.3.0 baseline in those cases.
 
 ### Sparsity pattern changes are detected and rejected
 
