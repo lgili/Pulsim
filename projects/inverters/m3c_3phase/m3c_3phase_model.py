@@ -1061,11 +1061,18 @@ class M3cPlant:
         State indices of the 3 input-side filter inductor currents,
         or ``None`` when the plant does not model the input side
         (as is the case for L0).
+    module_v_src_state_indices
+        State indices of the 9 per-module controlled voltage sources
+        in row-major order ``(M_Aa, M_Ab, M_Ac, M_Ba, M_Bb, M_Bc,
+        M_Ca, M_Cb, M_Cc)``. Populated by the L1 builder for use
+        with the ``b_extra`` injection mechanism (matches the MMC
+        L1 multilevel arm pattern). ``None`` for L0.
     """
 
     builder: object
     iL_out_indices: tuple[int, int, int] = (0, 0, 0)
     iL_in_indices: tuple[int, int, int] | None = None
+    module_v_src_state_indices: tuple[int, ...] | None = None
 
 
 def build_l0_plant(params: M3cParams) -> M3cPlant:
@@ -1278,3 +1285,381 @@ def thd(signal: np.ndarray, fs: float, f_fundamental: float) -> float:
         harmonics_sq += float(abs(spec[k])) ** 2
         k += k1
     return 100.0 * float(np.sqrt(harmonics_sq)) / fundamental
+
+
+# =============================================================================
+# L1 — switched plant + open-loop SVM controller (Phase 22.5)
+# =============================================================================
+#
+# L1 captures the actual switched behaviour of the M3C: 9 modules
+# between input and output phases, each module being either INACTIVE
+# (open switch) or ACTIVE with a quantised voltage ``V_xy = k·V_cap``
+# (``k`` integer in [-N, +N] for N submodules per module). The
+# multilevel staircase appears at the output line-line voltage.
+#
+# This first L1 cut is intentionally minimal:
+#
+#   * Per-T_s switching only (no within-T_s vector-mixing yet).
+#   * Heuristic config selector: pick the FIRST of the 45 valid
+#     configurations that include the "short" module (= min-voltage
+#     input × min-voltage output, per Sec 5.5.3 paragraph 4). The
+#     cost-function selector (Eq 163) will arrive in a follow-up
+#     commit.
+#   * No capacitor dynamics: the SM caps are treated as ideal
+#     references at ``v_cap_nominal``. Cap balancing kicks in once
+#     we add their state-tracking + the cost function.
+#
+# Each module is realised in pulsim with TWO branches:
+#
+#   1. A constant ``add_voltage_source`` set to 0 V baseline. We
+#      then use the ``b_extra`` injection mechanism (same pattern as
+#      MMC L1 multilevel arm) to update the effective source voltage
+#      to ``V_xy · V_cap_nominal`` every integration step.
+#   2. A bidirectional ``add_switch`` in series. When the module is
+#      inactive in the current configuration, the switch is OFF and
+#      the high R_off blocks current.
+#
+# The two-branch realisation means the per-module index in the
+# SwitchStateMask (0..8 row-major) does **not** equal the per-module
+# index in the b_extra vector — those use different state-vector
+# indices. The plant exposes both via ``module_v_src_state_indices``
+# and a fixed mask layout.
+
+
+def _module_index(input_idx: int, output_idx: int) -> int:
+    """Row-major flat index for module M_(input_idx, output_idx)."""
+    return input_idx * 3 + output_idx
+
+
+def build_l1_plant(params: M3cParams) -> M3cPlant:
+    """3-φ M3C switched plant (open-loop SVM, no cap dynamics).
+
+    Topology::
+
+        V_A ── A ── L_in ── inA ─┬── VM_Aa──S_Aa ──┬── outA ── L_out ─┐
+                                  ├── VM_Ab──S_Ab ──┤                  │
+                                  └── VM_Ac──S_Ac ──┤   load Y         │
+        V_B ── B ── L_in ── inB ──···──S_Bx ───────┤  (R + jωL,        │
+        V_C ── C ── L_in ── inC ──···──S_Cx ───────┤   neutral=load_star)
+                                                   └─── load_star
+
+    Each "VM_xy──S_xy" pair is a *controlled* module: a constant
+    voltage source initialised at 0 V (updated each step via
+    ``b_extra``) followed by an ideal bidirectional switch. With
+    the switch ON, the source enforces ``V_xy · V_cap_nominal``
+    across the module; with the switch OFF, the 1 MΩ R_off makes
+    the module nearly an open circuit.
+
+    Returns
+    -------
+    M3cPlant
+        Fully assembled, with ``iL_in_indices``, ``iL_out_indices``,
+        and ``module_v_src_state_indices`` (row-major M_Aa..M_Cc) all
+        resolved against the final graph.
+    """
+    if _p is None:
+        raise RuntimeError(
+            "pulsim is not importable — build_l1_plant requires the "
+            "full pulsim package."
+        )
+
+    b = _p.CircuitBuilder()
+
+    # ---- Input voltage sources (Y) -------------------------------------
+    # Cosine convention to align with the Fast SVM (V_A=V_in·cos(ω·t)).
+    V_in_pk = params.V_in_phase_peak
+    for k_ph, ph in enumerate(("A", "B", "C")):
+        b.add_sine_voltage_source(
+            f"V_{ph}", ph, "src_star",
+            v_dc=0.0, v_amplitude=V_in_pk, frequency=params.f_in,
+            phase=pi / 2.0 - k_ph * 2.0 * pi / 3.0,
+        )
+
+    # ---- Input filter inductors ----------------------------------------
+    # X → L_in → in_X (each phase has its own inductor).
+    L_in_branch_ids: list[int] = []
+    for ph in "ABC":
+        L_id = b.graph.num_branches
+        b.add_inductor(f"L_in_{ph}", ph, f"in_{ph}", params.L_in)
+        L_in_branch_ids.append(L_id)
+
+    # ---- 9 controlled modules (row-major: M_Aa, M_Ab, ..., M_Cc) -------
+    # Each module = voltage source (0 V baseline, updated via b_extra)
+    # then a switch in series. Order MUST match _module_index(i, j) so
+    # that the SwitchStateMask bits align with the b_extra injection.
+    module_v_src_branch_ids: list[int] = []
+    in_labels = ("A", "B", "C")
+    out_labels = ("a", "b", "c")
+    for i, in_ph in enumerate(in_labels):
+        for j, out_ph in enumerate(out_labels):
+            src_id = b.graph.num_branches
+            b.add_voltage_source(
+                f"VM_{in_ph}{out_ph}",
+                f"in_{in_ph}", f"mid_{in_ph}{out_ph}",
+                0.0,                     # V baseline (updated via b_extra)
+            )
+            module_v_src_branch_ids.append(src_id)
+            b.add_switch(
+                f"SM_{in_ph}{out_ph}",
+                f"mid_{in_ph}{out_ph}", f"out_{out_ph}",
+                g_on=1e4,                # 1/g_on = 0.1 mΩ ON resistance
+                g_off=1e-6,              # 1/g_off = 1 MΩ OFF resistance
+            )
+
+    # ---- Output filter inductors + Y-load ------------------------------
+    L_out_branch_ids: list[int] = []
+    for ph in "abc":
+        L_id = b.graph.num_branches
+        b.add_inductor(
+            f"L_out_{ph}", f"out_{ph}", f"rload_{ph}", params.L_out,
+        )
+        b.add_resistor(
+            f"R_load_{ph}", f"rload_{ph}", "load_star", params.R_load,
+        )
+        L_out_branch_ids.append(L_id)
+
+    # MNA conditioning ties.
+    b.add_resistor("R_src_gnd", "src_star", "gnd", 1e6)
+    b.add_resistor("R_load_gnd", "load_star", "gnd", 1e6)
+
+    # ---- Resolve all state indices AFTER the full graph is built ------
+    iL_in_indices = tuple(
+        b.pool.branch_var_id_for_inductor(L_id, b.graph)
+        for L_id in L_in_branch_ids
+    )
+    iL_out_indices = tuple(
+        b.pool.branch_var_id_for_inductor(L_id, b.graph)
+        for L_id in L_out_branch_ids
+    )
+    module_v_src_state_indices = tuple(
+        b.pool.branch_var_id_for_source(src_id, b.graph)
+        for src_id in module_v_src_branch_ids
+    )
+
+    return M3cPlant(
+        builder=b,
+        iL_in_indices=iL_in_indices,           # type: ignore[arg-type]
+        iL_out_indices=iL_out_indices,         # type: ignore[arg-type]
+        module_v_src_state_indices=module_v_src_state_indices,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Open-loop SVM controller for L1
+# -----------------------------------------------------------------------------
+
+
+def _phase_voltages_at(
+    t: float, V_peak: float, omega: float, m: float = 1.0,
+) -> np.ndarray:
+    """3-φ phase voltages at time ``t`` with the same cosine convention
+    used by the L0 plant builder (i.e. V_a(0) = V_peak)."""
+    return m * V_peak * np.array([
+        np.cos(omega * t),
+        np.cos(omega * t - 2.0 * pi / 3.0),
+        np.cos(omega * t + 2.0 * pi / 3.0),
+    ])
+
+
+def _select_config_heuristic(
+    short_module: tuple[int, int],
+) -> ModuleConfiguration:
+    """Phase 22.5 heuristic: pick the **first** of the 45 valid
+    configurations containing the short module. Future commits will
+    replace this with the Sec 5.5.3 cost-function selector."""
+    candidates = configurations_containing_module(*short_module)
+    if not candidates:
+        raise RuntimeError(
+            f"No valid configuration contains short {short_module}"
+        )
+    return candidates[0]
+
+
+def _build_l1_step_state(params: M3cParams):
+    """Mutable scratch state shared between switch_fn and b_extra.
+
+    Both callbacks are invoked at each integration step but can be
+    called in any order; we recompute the SVM/config/voltages at most
+    once per T_s tick and cache the result.
+    """
+    state = {
+        "last_period": -1,                 # T_s tick index of last update
+        "switch_bits": [False] * 9,        # per-module ON/OFF
+        "v_module": [0.0] * 9,             # per-module V [V]
+    }
+    return state
+
+
+def make_m3c_l1_open_loop_control(
+    params: M3cParams,
+    plant: M3cPlant,
+):
+    """Build ``(switch_fn, b_extra_fn)`` for the L1 open-loop SVM
+    controller.
+
+    Both callbacks share a small dict of cached values that is
+    refreshed once per switching period ``T_s``. Within a single
+    T_s interval the switch states and module voltages are constant
+    (no within-T_s vector mixing yet — that's a Phase 22.6 upgrade).
+
+    The control logic per T_s:
+
+      1. Compute the 3-φ phase voltage references at the centre of
+         the period for both input (using ``f_in``) and output
+         (using ``f_out``).
+      2. Round each side's phases to integer multiples of V_cap_nominal
+         (Fast SVM "integer plane" Sec 3.2).
+      3. Pick the *short* module ``M_(argmin V_in, argmin V_out)`` —
+         Sec 5.5.3 paragraph 4.
+      4. Pick the first valid configuration containing the short
+         (heuristic — cost-function selector arrives later).
+      5. Compute the 5 active module voltages via
+         :func:`solve_module_voltages`.
+      6. Set the switch mask + voltage-source values accordingly.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if plant.module_v_src_state_indices is None:
+        raise ValueError("L1 plant must expose module_v_src_state_indices")
+
+    state = _build_l1_step_state(params)
+    state_size = plant.builder.pool.state_size(plant.builder.graph)
+    v_cap = params.v_cap_nominal
+    T_s = params.T_s
+    src_indices = plant.module_v_src_state_indices
+
+    def _refresh_if_needed(t: float) -> None:
+        period_idx = int(t / T_s)
+        if period_idx == state["last_period"]:
+            return
+        state["last_period"] = period_idx
+
+        # Reference phase voltages at the CENTRE of this T_s window.
+        t_centre = (period_idx + 0.5) * T_s
+        V_in_ref = _phase_voltages_at(
+            t_centre, V_peak=params.V_in_phase_peak,
+            omega=params.omega_in, m=params.m_c,
+        )
+        V_out_ref = _phase_voltages_at(
+            t_centre, V_peak=params.V_out_phase_peak,
+            omega=params.omega_out, m=params.m_v,
+        )
+
+        # Quantise to integer * V_cap (Sec 3.2 integer plane).
+        V_in_int = np.round(V_in_ref / v_cap).astype(int)
+        V_out_int = np.round(V_out_ref / v_cap).astype(int)
+
+        # Short module = argmin(V_in_int) × argmin(V_out_int).
+        # Use the *float* refs for argmin (so ties resolve smoothly).
+        short_in = int(np.argmin(V_in_ref))
+        short_out = int(np.argmin(V_out_ref))
+        cfg = _select_config_heuristic((short_in, short_out))
+
+        # Module voltages (in V_cap units) via Sec 4.3 solver.
+        V_xy = solve_module_voltages(
+            cfg, (short_in, short_out),
+            V_input=V_in_int, V_output=V_out_int,
+        )
+
+        # Populate switch + voltage caches.
+        switch_bits = [False] * 9
+        v_module = [0.0] * 9
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            switch_bits[idx] = True
+            v_module[idx] = float(V_int) * v_cap
+
+        state["switch_bits"] = switch_bits
+        state["v_module"] = v_module
+
+    def switch_fn(t: float):  # -> p.SwitchStateMask
+        _refresh_if_needed(t)
+        mask = _p.SwitchStateMask(9)
+        for k, on in enumerate(state["switch_bits"]):
+            mask.set(k, bool(on))
+        return mask
+
+    def b_extra_fn(t: float):
+        _refresh_if_needed(t)
+        out = [0.0] * state_size
+        for k, src_idx in enumerate(src_indices):
+            # baseline=0, so inject = -V_target makes effective V = V_target.
+            out[src_idx] = -state["v_module"][k]
+        return out
+
+    return switch_fn, b_extra_fn
+
+
+def run_l1_open_loop(
+    plant: M3cPlant,
+    params: M3cParams,
+    *,
+    t_end: float = 80e-3,
+    dt: float | None = None,
+) -> M3cRunResult:
+    """Run an L1 plant with SVM open-loop control.
+
+    Parameters
+    ----------
+    plant
+        Built via :func:`build_l1_plant`.
+    params
+        Same ``M3cParams`` used to build the plant.
+    t_end
+        Simulation end time [s].
+    dt
+        Integration step. Defaults to ``T_s / 20`` so the per-T_s
+        update has clean resolution; clamp to a minimum of 1 µs.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+
+    if dt is None:
+        dt = max(1e-6, params.T_s / 20.0)
+
+    switch_fn, b_extra_fn = make_m3c_l1_open_loop_control(params, plant)
+
+    assert plant.iL_in_indices is not None
+    iLa_in, iLb_in, iLc_in = plant.iL_in_indices
+    iLa, iLb, iLc = plant.iL_out_indices
+
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    log_iAi = np.zeros(n_samples)
+    log_iBi = np.zeros(n_samples)
+    log_iCi = np.zeros(n_samples)
+    counter = [0]
+
+    def log_obs(t, x):
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+            log_iAi[i] = x[iLa_in]
+            log_iBi[i] = x[iLb_in]
+            log_iCi[i] = x[iLc_in]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=log_obs,
+        switch_fn=switch_fn,
+        b_extra_fn=b_extra_fn,
+        start_from_dc_op=False,           # cold start (caps assumed nominal)
+    )
+
+    n = counter[0]
+    return M3cRunResult(
+        t=log_t[:n],
+        i_a_out=log_ia[:n],
+        i_b_out=log_ib[:n],
+        i_c_out=log_ic[:n],
+        i_a_in=log_iAi[:n],
+        i_b_in=log_iBi[:n],
+        i_c_in=log_iCi[:n],
+    )

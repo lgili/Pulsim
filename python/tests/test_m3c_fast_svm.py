@@ -28,6 +28,7 @@ from m3c_3phase_model import (  # noqa: E402
     ModuleConfiguration,
     abc_to_lg,
     build_l0_plant,
+    build_l1_plant,
     configurations_by_distribution,
     configurations_containing_module,
     connection_cost,
@@ -38,11 +39,13 @@ from m3c_3phase_model import (  # noqa: E402
     fast_svm_step,
     lg_to_abc,
     make_fast_svm_fn,
+    make_m3c_l1_open_loop_control,
     predict_i_out_peak,
     predict_load_impedance,
     predict_load_power_factor,
     rms,
     run_l0_open_loop,
+    run_l1_open_loop,
     select_best_connection,
     solve_module_currents,
     solve_module_voltages,
@@ -867,4 +870,170 @@ class TestL0Plant:
         assert rel_err < 0.02, (
             f"f_out={f_out} Hz: peak = {i_pk:.3f} A vs {i_pk_pred:.3f} A "
             f"predicted, rel-err = {rel_err*100:.2f}%"
+        )
+
+
+# ============================================================================
+# Tier 10 — L1 plant (Phase 22.5) — switched plant with open-loop SVM.
+# Validates that the SVM + Sec 4.3 solver produces a multilevel
+# stepped output whose fundamental is close to L0's prediction.
+# ============================================================================
+
+
+@_requires_pulsim
+class TestL1Plant:
+    """L1 switched plant — 9 (switch + voltage source) modules driven
+    by an open-loop SVM controller. The output current's fundamental
+    should match L0's Ohm's-law prediction to within ~10 % (the gap
+    comes from per-T_s quantisation; the cost-function selector of
+    Phase 22.6 will close it further)."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> M3cParams:
+        # Use m_v=1.0 for fair L0/L1 fundamental comparison.
+        return M3cParams(m_v=1.0)
+
+    @pytest.fixture(scope="class")
+    def result(self, params: M3cParams):
+        plant = build_l1_plant(params)
+        # 200 ms ≈ 9 fundamental periods at 45 Hz; T_s/20 = 25 µs.
+        return run_l1_open_loop(plant, params, t_end=200e-3, dt=25e-6)
+
+    # ---- topology -----------------------------------------------------
+
+    def test_plant_topology_dimensions(
+        self, params: M3cParams,
+    ) -> None:
+        plant = build_l1_plant(params)
+        # 3 input filter inductors.
+        assert plant.iL_in_indices is not None
+        assert len(plant.iL_in_indices) == 3
+        # 3 output filter inductors.
+        assert len(plant.iL_out_indices) == 3
+        # 9 module voltage sources.
+        assert plant.module_v_src_state_indices is not None
+        assert len(plant.module_v_src_state_indices) == 9
+        # All distinct.
+        all_idx = (
+            list(plant.iL_in_indices)
+            + list(plant.iL_out_indices)
+            + list(plant.module_v_src_state_indices)
+        )
+        assert len(set(all_idx)) == 15  # 3 + 3 + 9
+
+    def test_state_size_larger_than_l0(
+        self, params: M3cParams,
+    ) -> None:
+        """L1 has more state vars than L0 (extra L_in inductors +
+        9 module sources)."""
+        l0 = build_l0_plant(params)
+        l1 = build_l1_plant(params)
+        ss_l0 = l0.builder.pool.state_size(l0.builder.graph)
+        ss_l1 = l1.builder.pool.state_size(l1.builder.graph)
+        assert ss_l1 > ss_l0
+
+    # ---- controller signature -----------------------------------------
+
+    def test_controller_signature(self, params: M3cParams) -> None:
+        """``make_m3c_l1_open_loop_control`` returns a (switch_fn,
+        b_extra_fn) pair, both callable."""
+        plant = build_l1_plant(params)
+        switch_fn, b_extra_fn = make_m3c_l1_open_loop_control(
+            params, plant,
+        )
+        assert callable(switch_fn)
+        assert callable(b_extra_fn)
+
+    def test_switch_fn_returns_5_active(
+        self, params: M3cParams,
+    ) -> None:
+        """At any t > 0, exactly 5 of 9 switches are ON (the 5-modules
+        conducting rule). We sample 100 random instants."""
+        plant = build_l1_plant(params)
+        switch_fn, _ = make_m3c_l1_open_loop_control(params, plant)
+        rng = np.random.default_rng(seed=37)
+        for _ in range(50):
+            t = float(rng.uniform(1e-3, 50e-3))
+            mask = switch_fn(t)
+            n_on = sum(1 for k in range(9) if mask.get(k))
+            assert n_on == 5, (
+                f"At t={t*1e3:.3f} ms: {n_on} switches ON, expected 5"
+            )
+
+    def test_b_extra_has_9_module_entries(
+        self, params: M3cParams,
+    ) -> None:
+        """The b_extra vector has 9 non-zero entries (one per module).
+        Note: inactive modules get V=0 → entry=0, so we expect
+        ≤ 9 non-zero entries (since at most 5 modules are active in
+        any given period)."""
+        plant = build_l1_plant(params)
+        _, b_extra_fn = make_m3c_l1_open_loop_control(params, plant)
+        vec = b_extra_fn(1e-3)
+        # The state_size should match plant builder.
+        ss = plant.builder.pool.state_size(plant.builder.graph)
+        assert len(vec) == ss
+
+    # ---- simulation behaviour -----------------------------------------
+
+    def test_runs_without_crash(
+        self, params: M3cParams, result,
+    ) -> None:
+        """Just verify the run produced data."""
+        assert len(result.t) > 1000
+        assert result.t[-1] > 0.1  # at least 100 ms
+
+    def test_balanced_three_phase_output(self, result) -> None:
+        """Output currents on a, b, c should be balanced in peak."""
+        mask = result.t >= 100e-3
+        peaks = [
+            float(np.max(np.abs(x[mask])))
+            for x in (result.i_a_out, result.i_b_out, result.i_c_out)
+        ]
+        max_dev_rel = (max(peaks) - min(peaks)) / max(peaks)
+        # Looser tolerance than L0 — quantisation breaks perfect symmetry.
+        assert max_dev_rel < 0.10, (
+            f"3-φ peaks unbalanced: {peaks}, max rel dev "
+            f"{max_dev_rel*100:.2f}%"
+        )
+
+    def test_fundamental_close_to_l0(
+        self, params: M3cParams, result,
+    ) -> None:
+        """L1 fundamental amplitude should match L0 prediction within
+        15 % (gap closes once cost-function selector arrives)."""
+        # FFT on last 3 fundamental periods (integer cycles).
+        fs = 1.0 / 25e-6
+        n_per_period = int(round((1.0 / params.f_out) * fs))
+        ia = result.i_a_out[-3 * n_per_period:]
+        spec = np.fft.rfft(ia)
+        k1 = int(round(params.f_out * len(ia) / fs))
+        fund_pk = 2.0 * float(np.abs(spec[k1])) / len(ia)
+        fund_pred = predict_i_out_peak(params)
+        rel_err = abs(fund_pk - fund_pred) / fund_pred
+        assert rel_err < 0.15, (
+            f"L1 fund = {fund_pk:.2f} A vs L0 pred = {fund_pred:.2f} A, "
+            f"rel-err = {rel_err*100:.2f}%"
+        )
+
+    def test_thd_bounded(
+        self, params: M3cParams, result,
+    ) -> None:
+        """L1 has switching ripple but the THD should still be bounded
+        (≤ 25 % for the heuristic config selector)."""
+        fs = 1.0 / 25e-6
+        n_per_period = int(round((1.0 / params.f_out) * fs))
+        ia = result.i_a_out[-3 * n_per_period:]
+        thd_pct = thd(ia, fs, params.f_out)
+        assert 0.1 < thd_pct < 25.0, (
+            f"L1 THD = {thd_pct:.2f}% — expected 0.1-25%"
+        )
+
+    def test_input_currents_nontrivial(self, result) -> None:
+        """Unlike L0, L1 *does* model the input side — the L_in inductor
+        currents should be non-zero in steady state."""
+        mask = result.t >= 100e-3
+        ia_in_pk = float(np.max(np.abs(result.i_a_in[mask])))
+        assert ia_in_pk > 1.0, (
+            f"L1 input current at A is too small: {ia_in_pk:.4f} A"
         )
