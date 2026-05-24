@@ -39,6 +39,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer0/test_numeric_types.cpp
         tests/layer0/test_sparse_matrix.cpp
         tests/layer0/test_sparse_solver.cpp
+        tests/layer0/test_pulsim_lu_solver.cpp   # Layer 0 V8 — in-house sparse LU
     )
     target_link_libraries(pulsim_core_layer0_tests
         PRIVATE

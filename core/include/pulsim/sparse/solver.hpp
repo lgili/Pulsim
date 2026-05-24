@@ -207,34 +207,21 @@ private:
 // `make_default_solver()` (no args): always SparseLuSolver — safe baseline.
 //
 // `make_default_solver(n, hint)` honours the `Backend` enum above.
-// `PulsimSparseLuSolver`'s declaration will live in `pulsim_lu_solver.hpp`
-// once Section 2 of the openspec/replace-klu-with-pulsim-sparse-lu rewrite
-// lands; only a forward declaration is needed here. During the interim
-// (Section 1 only — this commit) the `Backend::Pulsim` path throws a
-// runtime_error, and `Backend::Auto` falls through to SparseLuSolver.
+// The Pulsim-aware factory impl lives at the bottom of
+// `pulsim_lu_solver.hpp` (same include-at-bottom pattern V0 used for
+// klu_solver.hpp): only one definition exists per build, ODR-safe,
+// regardless of whether the user pulls in `solver.hpp` first or
+// `pulsim_lu_solver.hpp` first.
 // -----------------------------------------------------------------------------
-class PulsimSparseLuSolver;  // forward decl — see pulsim_lu_solver.hpp (TBD)
+class PulsimSparseLuSolver;  // forward decl — see pulsim_lu_solver.hpp
 
 inline std::unique_ptr<DirectSolver> make_default_solver() {
     return std::make_unique<SparseLuSolver>();
 }
 
-inline std::unique_ptr<DirectSolver> make_default_solver(
-    [[maybe_unused]] Size n, Backend hint) {
-    switch (hint) {
-        case Backend::Pulsim:
-            throw std::runtime_error(
-                "make_default_solver(n, Backend::Pulsim): "
-                "PulsimSparseLuSolver is not yet implemented. The "
-                "in-house sparse LU rewrite is tracked in "
-                "openspec/changes/replace-klu-with-pulsim-sparse-lu/; "
-                "until Sections 2-5 land, use Backend::Eigen or "
-                "Backend::Auto (which falls through to SparseLuSolver).");
-        case Backend::Eigen:
-        case Backend::Auto:
-        default:
-            return std::make_unique<SparseLuSolver>();
-    }
-}
+[[nodiscard]] std::unique_ptr<DirectSolver> make_default_solver(
+    Size n, Backend hint = Backend::Auto);
 
 }  // namespace pulsim::sparse
+
+#include "pulsim/sparse/pulsim_lu_solver.hpp"
