@@ -60,12 +60,14 @@ _build_notebooks.py         — Gerador do notebook (edite aqui, regenere com
 * THD da corrente de fase é maior (~80% vs ~0.7% da tese).
 * Pico da corrente de fase é ~30% maior (~28 A vs ~22 A da tese).
 
-A causa principal das duas primeiras divergências é uma escolha
-de modulação diferente: **a tese usa In-Phase Disposition (IPD)**,
-enquanto o pulsim L1/L2 implementa **Phase-Shifted PWM (PS-PWM)**.
-Com N = 5 (ímpar), PS-PWM tem mais conteúdo sub-harmônico que IPD,
-resultando em maior ondulação de v_C que por sua vez modula a saída
-e cria distorção na corrente.
+Update: depois do commit `feat(mmc): IPD modulation`, o pulsim
+suporta IPD nativamente via `MmcArmMultilevelParams.modulation_scheme
+= "ipd"` (e idem para L2/L3). Este notebook já usa IPD por padrão.
+Mesmo assim, a ondulação `v_C` continua em ~200 V — porque a
+ondulação fundamental vem da dinâmica L0 média (`m·i_b` integrado),
+que é a *mesma* para IPD e PS-PWM. A análise analítica do L0 prevê
+~250 V pkpk para o ponto de operação documentado, indicando que os
+parâmetros da Fig 4.2 da tese não correspondem 100% à legenda.
 
 A diferença na corrente de fase ainda fica em parte sem explicar —
 o protótipo da tese tem perdas adicionais (semicondutores não-ideais)
@@ -74,12 +76,17 @@ half-bridge é mais idealizado.
 
 ## Próximos passos sugeridos
 
-1. **Implementar IPD no pulsim** (`MmcArmMultilevelParams.modulation_scheme = "ipd"`)
-   para fechar o gap de v_C ripple.
+1. ✅ ~~Implementar IPD no pulsim~~ — feito (Phase 20.14). Resultado:
+   o ripple não muda significativamente porque o componente
+   fundamental vem da dinâmica L0 média, não da estratégia de
+   chaveamento.
 2. **Substituir o half-bridge ideal por IGBT level-1** (já existe no
-   pulsim) para capturar V_F0 e r_on.
+   pulsim) para capturar V_F0 e r_on — pode reduzir o pico de corrente
+   o suficiente para diminuir o ripple `m·i` por sua vez.
 3. **Replicar o Capítulo 5** (controle de energia + frequência variável)
-   para extender a validação ao regime closed-loop.
+   para estender a validação ao regime closed-loop, onde o controle
+   ativo das energias circulantes mantém v_C balanceado mesmo sob
+   modulação imperfeita.
 
 ## Como rodar
 

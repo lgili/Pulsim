@@ -47,6 +47,15 @@ enum class SubmoduleType : std::uint8_t {
     FullBridge = 1,
 };
 
+// Multilevel modulation strategy. PS-PWM phase-shifts ``N`` carriers
+// by ``2π/N``; IPD (In-Phase Disposition) keeps all ``N`` carriers
+// in phase but stacks them at different DC offsets so the output
+// only ever switches between two adjacent levels at a time.
+enum class ModulationScheme : std::uint8_t {
+    PsPwm = 0,
+    Ipd   = 1,
+};
+
 [[nodiscard]] inline Real m_min_of(SubmoduleType t) noexcept {
     return (t == SubmoduleType::HalfBridge) ? Real{0.0} : Real{-1.0};
 }
@@ -126,6 +135,83 @@ enum class SubmoduleType : std::uint8_t {
 }
 
 // ----------------------------------------------------------------------------
+// IPD (In-Phase Disposition) switching function.
+// ----------------------------------------------------------------------------
+//
+// ``N`` triangular carriers all share the same phase but are stacked
+// vertically in [0, 1]: carrier ``k`` covers the band
+// ``[k/N, (k+1)/N]``. The reference ``m_ref`` is compared against
+// every carrier; ``s_b`` is the count of "true" comparators. Because
+// the bands are non-overlapping, at any instant exactly ``s_b`` ∈
+// ``{floor(m·N), floor(m·N) + 1}`` — the output only swings between
+// two adjacent levels at a time, which is what gives IPD its
+// substantially cleaner output spectrum vs PS-PWM at low N.
+//
+// Implementation: don't actually evaluate N carriers. Compute
+// ``m_scaled = m_ref · N``, split into integer + fractional parts,
+// and compare the fractional part against a single shared triangle.
+
+[[nodiscard]] inline Index ipd_switching_function(
+    Real m_ref,
+    Real t,
+    Index n_sm,
+    Real f_carrier,
+    SubmoduleType sm_type = SubmoduleType::HalfBridge) noexcept {
+
+    // One shared triangular carrier in [0, 1].
+    const Real raw = t * f_carrier;
+    const Real phase = raw - std::floor(raw);
+    const Real tri = (phase < Real{0.5})
+        ? Real{2.0} * phase
+        : Real{2.0} * (Real{1.0} - phase);
+
+    if (sm_type == SubmoduleType::HalfBridge) {
+        Real m = m_ref;
+        if (m < Real{0.0}) m = Real{0.0};
+        else if (m > Real{1.0}) m = Real{1.0};
+
+        const Real m_scaled = m * static_cast<Real>(n_sm);
+        Index s_base = static_cast<Index>(std::floor(m_scaled));
+        if (s_base >= n_sm) return n_sm;
+        const Real m_frac = m_scaled - static_cast<Real>(s_base);
+        return s_base + ((m_frac > tri) ? 1 : 0);
+    }
+
+    // Full-bridge: split into sign × magnitude.
+    Real m_clamped = m_ref;
+    if (m_clamped < Real{-1.0}) m_clamped = Real{-1.0};
+    else if (m_clamped > Real{1.0}) m_clamped = Real{1.0};
+    const Index sign = (m_clamped >= Real{0.0}) ? +1 : -1;
+    const Real m_abs = std::fabs(m_clamped);
+
+    const Real m_scaled = m_abs * static_cast<Real>(n_sm);
+    Index s_base = static_cast<Index>(std::floor(m_scaled));
+    if (s_base >= n_sm) return sign * n_sm;
+    const Real m_frac = m_scaled - static_cast<Real>(s_base);
+    return sign * (s_base + ((m_frac > tri) ? 1 : 0));
+}
+
+// Single dispatch point — picks the strategy at runtime. Both
+// branches are constexpr-inlined; the branch predictor will lock
+// onto whichever scheme the simulation uses.
+[[nodiscard]] inline Index switching_function(
+    Real m_ref,
+    Real t,
+    Index n_sm,
+    Real f_carrier,
+    SubmoduleType sm_type,
+    ModulationScheme scheme) noexcept {
+
+    if (scheme == ModulationScheme::Ipd) {
+        return ipd_switching_function(
+            m_ref, t, n_sm, f_carrier, sm_type);
+    }
+    return ps_pwm_switching_function(
+        m_ref, t, n_sm, f_carrier, sm_type);
+}
+
+
+// ----------------------------------------------------------------------------
 // L0 — Average-value arm step.
 // ----------------------------------------------------------------------------
 //
@@ -188,14 +274,15 @@ struct StepMultilevelResult {
     Real c_arm,
     Real f_carrier,
     SubmoduleType sm_type = SubmoduleType::HalfBridge,
-    Real r_p_inv = Real{0.0}) {
+    Real r_p_inv = Real{0.0},
+    ModulationScheme scheme = ModulationScheme::PsPwm) {
 
     if (dt <= Real{0.0}) {
         throw std::invalid_argument(
             "mmc_arm_multilevel_step: dt must be > 0");
     }
-    const Index s_b = ps_pwm_switching_function(
-        m_ref, t, n_sm, f_carrier, sm_type);
+    const Index s_b = switching_function(
+        m_ref, t, n_sm, f_carrier, sm_type, scheme);
     const Real m_b = static_cast<Real>(s_b) /
                        static_cast<Real>(n_sm);
     const Real v_b = m_b * v_C;
@@ -240,28 +327,58 @@ struct StepEquivalentResult {
     Real f_carrier,
     Real t_dead,
     Real t_min,
-    Real r_p_inv = Real{0.0}) {
+    Real r_p_inv = Real{0.0},
+    ModulationScheme scheme = ModulationScheme::PsPwm) {
 
     if (dt <= Real{0.0}) {
         throw std::invalid_argument(
             "mmc_arm_equivalent_step: dt must be > 0");
     }
 
-    // Per-SM state machine. Inline the PS-PWM target computation
-    // here so we don't build a separate target array.
     const Real m_clamped = (m_ref < Real{0.0})
         ? Real{0.0}
         : (m_ref > Real{1.0} ? Real{1.0} : m_ref);
 
+    // ---- IPD: precompute the shared triangle + integer base s_b.
+    // All SMs below ``s_base`` always want to be on; the SM at index
+    // ``s_base`` follows the triangle comparator; the rest want off.
+    Index ipd_s_base = 0;
+    Real ipd_m_frac = Real{0.0};
+    Real ipd_tri = Real{0.0};
+    if (scheme == ModulationScheme::Ipd) {
+        const Real raw_ipd = t * f_carrier;
+        const Real phase_ipd = raw_ipd - std::floor(raw_ipd);
+        ipd_tri = (phase_ipd < Real{0.5})
+            ? Real{2.0} * phase_ipd
+            : Real{2.0} * (Real{1.0} - phase_ipd);
+        const Real m_scaled = m_clamped * static_cast<Real>(n_sm);
+        ipd_s_base = static_cast<Index>(std::floor(m_scaled));
+        if (ipd_s_base > n_sm) ipd_s_base = n_sm;
+        ipd_m_frac = m_scaled - static_cast<Real>(ipd_s_base);
+    }
+
     for (Index k = 0; k < n_sm; ++k) {
-        // PS-PWM target bit for SM k at time t.
-        const Real raw = t * f_carrier +
-            static_cast<Real>(k) / static_cast<Real>(n_sm);
-        const Real phase = raw - std::floor(raw);
-        const Real tri = (phase < Real{0.5})
-            ? Real{2.0} * phase
-            : Real{2.0} * (Real{1.0} - phase);
-        const std::int8_t target = (m_clamped > tri) ? 1 : 0;
+        std::int8_t target;
+        if (scheme == ModulationScheme::Ipd) {
+            // IPD assignment: SMs 0..s_base-1 ON, SM at s_base
+            // follows the triangle, rest OFF.
+            if (k < ipd_s_base) {
+                target = 1;
+            } else if (k == ipd_s_base) {
+                target = (ipd_m_frac > ipd_tri) ? 1 : 0;
+            } else {
+                target = 0;
+            }
+        } else {
+            // PS-PWM target bit for SM k at time t.
+            const Real raw = t * f_carrier +
+                static_cast<Real>(k) / static_cast<Real>(n_sm);
+            const Real phase = raw - std::floor(raw);
+            const Real tri = (phase < Real{0.5})
+                ? Real{2.0} * phase
+                : Real{2.0} * (Real{1.0} - phase);
+            target = (m_clamped > tri) ? 1 : 0;
+        }
 
         if (in_dead_time_until[k] > Real{0.0} &&
             t >= in_dead_time_until[k]) {
@@ -394,15 +511,16 @@ inline Index balance_select(
     Real f_carrier,
     SubmoduleType sm_type,
     BalancingScheme scheme,
-    Real r_p_inv_per_sm = Real{0.0}) {
+    Real r_p_inv_per_sm = Real{0.0},
+    ModulationScheme modulation_scheme = ModulationScheme::PsPwm) {
 
     if (dt <= Real{0.0}) {
         throw std::invalid_argument(
             "mmc_arm_detailed_step: dt must be > 0");
     }
 
-    const Index s_b = ps_pwm_switching_function(
-        m_ref, t, n_sm, f_carrier, sm_type);
+    const Index s_b = switching_function(
+        m_ref, t, n_sm, f_carrier, sm_type, modulation_scheme);
     balance_select(
         v_C_per_sm, n_sm, s_b, i_b, scheme, insertion_mask);
 

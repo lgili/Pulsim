@@ -1732,6 +1732,25 @@ void init_module(py::module_& m) {
           "modulation reference `m_ref`. Equivalent to "
           "`ps_pwm_switching_function` in pulsim/mmc.py.");
 
+    m.def("_cpp_ipd_switching_function",
+          [](Real m_ref, Real t, Index n_sm, Real f_carrier,
+             const std::string& sm_type) {
+              const mmc::SubmoduleType type =
+                  (sm_type == "full_bridge")
+                      ? mmc::SubmoduleType::FullBridge
+                      : mmc::SubmoduleType::HalfBridge;
+              return mmc::ipd_switching_function(
+                  m_ref, t, n_sm, f_carrier, type);
+          },
+          py::arg("m_ref"), py::arg("t"), py::arg("n_sm"),
+          py::arg("f_carrier"),
+          py::arg("sm_type") = "half_bridge",
+          "C++ hotpath: IPD (In-Phase Disposition) switching "
+          "function. All N carriers share the same phase but sit "
+          "at stacked DC offsets, so the output only switches "
+          "between two adjacent levels per step. Cleaner spectrum "
+          "than PS-PWM at small N.");
+
     m.def("_cpp_mmc_arm_average_step",
           [](Real v_C, Real m_b, Real i_b, Real dt,
              Real c_arm, Real r_p_inv) {
@@ -1749,14 +1768,19 @@ void init_module(py::module_& m) {
     m.def("_cpp_mmc_arm_multilevel_step",
           [](Real v_C, Real m_ref, Real i_b, Real dt, Real t,
              Index n_sm, Real c_arm, Real f_carrier,
-             const std::string& sm_type, Real r_p_inv) {
+             const std::string& sm_type, Real r_p_inv,
+             const std::string& modulation_scheme) {
               const mmc::SubmoduleType type =
                   (sm_type == "full_bridge")
                       ? mmc::SubmoduleType::FullBridge
                       : mmc::SubmoduleType::HalfBridge;
+              const mmc::ModulationScheme sch =
+                  (modulation_scheme == "ipd")
+                      ? mmc::ModulationScheme::Ipd
+                      : mmc::ModulationScheme::PsPwm;
               const auto res = mmc::mmc_arm_multilevel_step(
                   v_C, m_ref, i_b, dt, t, n_sm, c_arm,
-                  f_carrier, type, r_p_inv);
+                  f_carrier, type, r_p_inv, sch);
               return py::make_tuple(
                   res.v_C_next, res.v_b,
                   static_cast<py::int_>(res.s_b));
@@ -1766,9 +1790,10 @@ void init_module(py::module_& m) {
           py::arg("c_arm"), py::arg("f_carrier"),
           py::arg("sm_type") = "half_bridge",
           py::arg("r_p_inv") = Real{0.0},
+          py::arg("modulation_scheme") = "ps_pwm",
           "C++ hotpath: L1 multilevel forward-Euler step. Returns "
           "`(v_C_next, v_b, s_b)` where `s_b` is the integer "
-          "PS-PWM switching count for this step.");
+          "switching count for this step (PS-PWM or IPD).");
 
     m.def("_cpp_mmc_arm_equivalent_step",
           [](Real v_C,
@@ -1782,13 +1807,18 @@ void init_module(py::module_& m) {
                                   py::array::forcecast> last_toggle_time,
              Real m_ref, Real i_b, Real dt, Real t,
              Index n_sm, Real c_arm, Real f_carrier,
-             Real t_dead, Real t_min, Real r_p_inv) {
+             Real t_dead, Real t_min, Real r_p_inv,
+             const std::string& modulation_scheme) {
               if (bit_s1.size() != n_sm || bit_s2.size() != n_sm ||
                   in_dead_time_until.size() != n_sm ||
                   last_toggle_time.size() != n_sm) {
                   throw std::invalid_argument(
                       "L2 state arrays must all have length n_sm");
               }
+              const mmc::ModulationScheme sch =
+                  (modulation_scheme == "ipd")
+                      ? mmc::ModulationScheme::Ipd
+                      : mmc::ModulationScheme::PsPwm;
               const auto res = mmc::mmc_arm_equivalent_step(
                   v_C,
                   bit_s1.mutable_data(),
@@ -1796,10 +1826,7 @@ void init_module(py::module_& m) {
                   in_dead_time_until.mutable_data(),
                   last_toggle_time.mutable_data(),
                   m_ref, i_b, dt, t, n_sm, c_arm, f_carrier,
-                  t_dead, t_min, r_p_inv);
-              // ``v_C`` was passed by value; pack the updated copy
-              // into the return tuple. The four arrays were mutated
-              // in place via their numpy buffers.
+                  t_dead, t_min, r_p_inv, sch);
               return py::make_tuple(
                   v_C, res.v_b,
                   static_cast<py::int_>(res.s_w),
@@ -1811,6 +1838,7 @@ void init_module(py::module_& m) {
           py::arg("t"), py::arg("n_sm"), py::arg("c_arm"),
           py::arg("f_carrier"), py::arg("t_dead"), py::arg("t_min"),
           py::arg("r_p_inv") = Real{0.0},
+          py::arg("modulation_scheme") = "ps_pwm",
           "C++ hotpath: L2 SM-equivalent forward-Euler step "
           "(dead-time + min-pulse-width). State arrays are mutated "
           "in place. Returns `(v_C_next, v_b, s_w, s_u)`.");
@@ -1823,7 +1851,8 @@ void init_module(py::module_& m) {
              Real m_ref, Real i_b, Real dt, Real t,
              Index n_sm, Real c_sm, Real f_carrier,
              const std::string& sm_type,
-             const std::string& balancing, Real r_p_inv_per_sm) {
+             const std::string& balancing, Real r_p_inv_per_sm,
+             const std::string& modulation_scheme) {
               if (v_C_per_sm.size() != n_sm ||
                   insertion_mask.size() != n_sm) {
                   throw std::invalid_argument(
@@ -1837,11 +1866,15 @@ void init_module(py::module_& m) {
                   (balancing == "none")
                       ? mmc::BalancingScheme::None
                       : mmc::BalancingScheme::SortAndSelect;
+              const mmc::ModulationScheme msch =
+                  (modulation_scheme == "ipd")
+                      ? mmc::ModulationScheme::Ipd
+                      : mmc::ModulationScheme::PsPwm;
               const auto res = mmc::mmc_arm_detailed_step(
                   v_C_per_sm.mutable_data(),
                   insertion_mask.mutable_data(),
                   m_ref, i_b, dt, t, n_sm, c_sm, f_carrier,
-                  type, scheme, r_p_inv_per_sm);
+                  type, scheme, r_p_inv_per_sm, msch);
               return py::make_tuple(
                   res.v_b, static_cast<py::int_>(res.s_b));
           },
@@ -1852,6 +1885,7 @@ void init_module(py::module_& m) {
           py::arg("sm_type") = "half_bridge",
           py::arg("balancing") = "sort_and_select",
           py::arg("r_p_inv_per_sm") = Real{0.0},
+          py::arg("modulation_scheme") = "ps_pwm",
           "C++ hotpath: L3 detailed per-SM forward-Euler step. "
           "`v_C_per_sm` and `insertion_mask` are mutated in place. "
           "Returns `(v_b, s_b)`.");

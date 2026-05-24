@@ -226,6 +226,7 @@ from .mmc import (
     MmcArmMultilevelParams,
     MmcArmMultilevelResult,
     ps_pwm_switching_function,
+    ipd_switching_function,
     mmc_arm_multilevel_step,
     simulate_mmc_arm_multilevel,
     # L2 SM-equivalent arm (dead-time aware) — Phase 20.6.
@@ -432,6 +433,7 @@ __all__ = [
     "MmcArmMultilevelParams",
     "MmcArmMultilevelResult",
     "ps_pwm_switching_function",
+    "ipd_switching_function",
     "mmc_arm_multilevel_step",
     "simulate_mmc_arm_multilevel",
     # MMC L2 — SM-equivalent (dead-time + min-pulse-width).

@@ -66,11 +66,15 @@ import numpy as np
 # is the only contract worth maintaining.
 from ._pulsim import (  # type: ignore[import-not-found]
     _cpp_ps_pwm_switching_function as _cpp_ps_pwm,
+    _cpp_ipd_switching_function as _cpp_ipd,
     _cpp_mmc_arm_average_step as _cpp_avg_step,
     _cpp_mmc_arm_multilevel_step as _cpp_ml_step,
     _cpp_mmc_arm_equivalent_step as _cpp_eq_step,
     _cpp_mmc_arm_detailed_step as _cpp_dt_step,
 )
+
+
+ModulationScheme = Literal["ps_pwm", "ipd"]
 
 __all__ = [
     "MmcArmAverageParams",
@@ -89,6 +93,7 @@ __all__ = [
     "MmcArmMultilevelParams",
     "MmcArmMultilevelResult",
     "ps_pwm_switching_function",
+    "ipd_switching_function",
     "mmc_arm_multilevel_step",
     "simulate_mmc_arm_multilevel",
     # L2 SM-equivalent (dead-time aware) — Phase 20.6.
@@ -867,6 +872,7 @@ class MmcArmMultilevelParams:
     v_c0: float = 0.0
     r_p: float | None = None
     f_carrier: float = 1000.0
+    modulation_scheme: ModulationScheme = "ps_pwm"
 
     def __post_init__(self) -> None:
         if self.n_sm < 1:
@@ -883,6 +889,11 @@ class MmcArmMultilevelParams:
         if self.f_carrier <= 0:
             raise ValueError(
                 f"f_carrier must be > 0 (got {self.f_carrier})",
+            )
+        if self.modulation_scheme not in ("ps_pwm", "ipd"):
+            raise ValueError(
+                f"modulation_scheme must be 'ps_pwm' or 'ipd' "
+                f"(got {self.modulation_scheme!r})",
             )
 
     @property
@@ -942,6 +953,37 @@ def ps_pwm_switching_function(
     ))
 
 
+def ipd_switching_function(
+    m_ref: float,
+    t: float,
+    n_sm: int,
+    f_carrier: float,
+    *,
+    sm_type: SubmoduleType = "half_bridge",
+) -> int:
+    """In-Phase Disposition (IPD) switching function ``s_b(t)``.
+
+    All ``n_sm`` carriers share the same phase and the same triangular
+    shape, but each occupies a distinct DC band of width ``1/n_sm`` in
+    ``[0, 1]`` (or ``[-1, 0] ∪ [0, 1]`` for full-bridge). At any time
+    ``t`` the output ``s_b`` only switches between two adjacent levels,
+    which gives IPD a cleaner output spectrum than PS-PWM at small N
+    (especially N odd).
+
+    Args:
+        m_ref: Reference modulation index. Clamped silently.
+        t: Time [s].
+        n_sm: Number of SMs (= number of carriers).
+        f_carrier: Carrier frequency [Hz].
+        sm_type: ``"half_bridge"`` ⇒ s_b ∈ {0..N}; ``"full_bridge"``
+            ⇒ s_b ∈ {−N..N} with sign(s_b) = sign(m_ref).
+    """
+    return int(_cpp_ipd(
+        float(m_ref), float(t), int(n_sm),
+        float(f_carrier), sm_type,
+    ))
+
+
 # ----------------------------------------------------------------------
 # Step + driver
 # ----------------------------------------------------------------------
@@ -985,6 +1027,7 @@ def mmc_arm_multilevel_step(
         float(dt), float(t), int(params.n_sm),
         float(params.c_arm), float(params.f_carrier),
         params.sm_type, float(r_p_inv),
+        params.modulation_scheme,
     )
     return v_C_next, v_b, int(s_b_cpp)
 
@@ -1175,6 +1218,7 @@ class MmcArmEquivalentParams:
     f_carrier: float = 1000.0
     t_dead: float = 0.0
     t_min: float = 0.0
+    modulation_scheme: ModulationScheme = "ps_pwm"
 
     def __post_init__(self) -> None:
         if self.n_sm < 1:
@@ -1196,6 +1240,11 @@ class MmcArmEquivalentParams:
             raise ValueError(f"t_dead must be ≥ 0 (got {self.t_dead})")
         if self.t_min < 0:
             raise ValueError(f"t_min must be ≥ 0 (got {self.t_min})")
+        if self.modulation_scheme not in ("ps_pwm", "ipd"):
+            raise ValueError(
+                f"modulation_scheme must be 'ps_pwm' or 'ipd' "
+                f"(got {self.modulation_scheme!r})",
+            )
 
     @property
     def c_arm(self) -> float:
@@ -1302,6 +1351,7 @@ def mmc_arm_equivalent_step(
         float(params.f_carrier),
         float(params.t_dead), float(params.t_min),
         float(r_p_inv),
+        params.modulation_scheme,
     )
     state.v_C = v_C_next
     return v_b, int(s_w), int(s_u)
@@ -1477,6 +1527,7 @@ class MmcArmDetailedParams:
     r_p: float | None = None
     f_carrier: float = 1000.0
     balancing: Literal["sort_and_select", "none"] = "sort_and_select"
+    modulation_scheme: ModulationScheme = "ps_pwm"
 
     def __post_init__(self) -> None:
         if self.n_sm < 1:
@@ -1498,6 +1549,11 @@ class MmcArmDetailedParams:
             raise ValueError(
                 f"balancing must be 'sort_and_select' or 'none' "
                 f"(got {self.balancing!r})",
+            )
+        if self.modulation_scheme not in ("ps_pwm", "ipd"):
+            raise ValueError(
+                f"modulation_scheme must be 'ps_pwm' or 'ipd' "
+                f"(got {self.modulation_scheme!r})",
             )
 
     @property
@@ -1656,6 +1712,7 @@ def mmc_arm_detailed_step(
         float(params.f_carrier),
         params.sm_type, params.balancing,
         float(r_p_inv_per_sm),
+        params.modulation_scheme,
     )
     return float(v_b), int(s_b_int), insertion.astype(bool)
 

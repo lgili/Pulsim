@@ -94,11 +94,14 @@ de validação.
 
 **O que NÃO vai bater 1:1 com a tese, e por quê**:
 
-1. A tese usa **In-Phase Disposition (IPD)** como modulação. O pulsim
-   L1/L2 implementa **Phase-Shifted PWM (PS-PWM)**. As duas estratégias
-   produzem o mesmo valor médio no v_b mas as harmônicas de
-   chaveamento são bem diferentes — IPD concentra mais energia na
-   frequência da portadora, PS-PWM concentra em N·f_carrier.
+1. **Modulação IPD agora disponível no pulsim** — esta atualização
+   adicionou ``modulation_scheme = "ipd"`` aos params do MMC, e este
+   notebook já usa IPD (a mesma estratégia da tese). Mesmo assim, a
+   ondulação ``v_C`` do nosso modelo continua maior que a da Fig 4.2
+   da tese. Isso porque a ondulação ``v_C`` é dominada pela dinâmica
+   ``L0`` média (``m·i_b`` integrada), que é a *mesma* para IPD e
+   PS-PWM. A diferença entre os esquemas está só no padrão de
+   chaveamento de alta-frequência, que contribui pouco ao ``v_C``.
 2. O protótipo experimental tem perdas adicionais (semicondutores,
    conexões, capacitores não-ideais) que a tese modela aproximadamente
    ajustando ``R_b = 0.675 Ω``. O nosso modelo não captura todas essas
@@ -106,6 +109,13 @@ de validação.
 3. Indutância do braço ``L_b`` não está explicitamente fixada na
    Seção 4.1 da tese — vou usar um valor típico (1 mH) e documentar
    o impacto.
+4. Da nossa análise analítica do L0 (``ΔV_C(1ω) = amplitude(m·i)/(ω·C_arm)``),
+   o ponto de operação documentado (V_dc=640, M=0.85, R=9.75Ω, L=2.8mH)
+   deveria dar ~250 V pkpk de ondulação — *muito* mais que os 50 V da
+   Fig 4.2. Isso sugere que a Fig 4.2 da tese pode ter sido obtida com
+   parâmetros ligeiramente diferentes do que a legenda especifica
+   (ex.: indutância de carga maior, ou M efetivo menor por queda nos
+   semicondutores).
 
 A discussão final do notebook contém uma tabela comparativa lado-a-lado.
 
@@ -471,20 +481,29 @@ a **THD da corrente de fase**.
 
 ### Por que a ondulação $v_C$ é maior na nossa simulação
 
-A Seção 4.1 da tese usa **In-Phase Disposition (IPD)** como modulação
-multinível, enquanto nosso L1/L2 usa **Phase-Shifted PWM (PS-PWM)**:
+**Atualizado**: pulsim agora suporta IPD via ``modulation_scheme = "ipd"``,
+e este notebook já está rodando com IPD. Mesmo com a *mesma* modulação
+da tese, nossa ondulação ainda fica em ~200 V pkpk vs ~50 V da Fig 4.2.
 
-* **IPD**: todos os N portadoras na mesma fase mas em níveis
-  diferentes. A energia da chaveamento concentra na frequência da
-  portadora ($f_{carrier}$) e seus múltiplos.
-* **PS-PWM**: as N portadoras deslocadas por $2\pi/N$ entre si. A
-  frequência *efetiva* de chaveamento na saída é $N \cdot f_{carrier}$
-  — mas com N ímpar (N=5 aqui!) há um conteúdo sub-harmônico residual
-  que aumenta a ondulação $v_C$.
+A análise analítica do modelo L0 médio explica: a ondulação
+$v_C(1\omega)$ é proporcional à amplitude do produto $m \cdot i_b$
+naquela frequência, integrada e dividida por $C_{arm} \cdot \omega$.
+Para nossos parâmetros (V_dc=640, M=0.85, |Z_load|=9.81Ω,
+C_arm=94µF):
 
-Para o caso da tese (N=5), PS-PWM é uma escolha sub-ótima. Em
-implementações reais de MMC com N ímpar, costuma-se usar IPD ou outras
-variantes (Phase Disposition, alternative phase opposition disposition).
+$$|m \cdot i_b|_{1\omega} \approx 4.5 \text{ A}, \quad
+  \Delta V_C(1\omega) = \frac{4.5}{2\pi \cdot 60 \cdot 94 \cdot 10^{-6}}
+                       \approx 127 \text{ V (single-sided)}$$
+
+ou seja, ~254 V pkpk — essencialmente o que estamos medindo. A escolha
+PS-PWM vs IPD afeta o ripple de chaveamento (alta frequência), mas
+*não* o ripple fundamental — esse vem direto do L0.
+
+A divergência com a Fig 4.2 da tese (50 V pkpk) sugere que os
+parâmetros documentados não correspondem 100% à figura. Possíveis
+explicações: maior indutância de carga real (filtragem extra dos
+harmônicos), M efetivo menor por queda nos semicondutores, ou
+operação a corrente mais baixa que a documentada.
 
 ### Por que a corrente é maior
 

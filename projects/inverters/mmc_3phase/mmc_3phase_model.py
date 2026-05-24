@@ -79,9 +79,8 @@ class GeanThesisParams:
 
     # Modulation
     m_depth: float = 0.85        # M = V̂ / (V_dc / 2)
-    f_carrier: float = 1800.0    # PS-PWM carrier per SM [Hz]
-                                 # (gives f_switch = N · f_carrier = 9 kHz/arm;
-                                 #  thesis uses a similar-effective rate via IPD)
+    f_carrier: float = 1800.0    # carrier per SM [Hz]
+    modulation_scheme: str = "ipd"  # "ipd" (thesis) or "ps_pwm"
 
     # Initial conditions
     v_c0: float | None = None    # capacitor-sum IC; default = V_dc.
@@ -161,6 +160,7 @@ def build_l1_plant(params: GeanThesisParams) -> MmcPlant:
     arm_params = p.MmcArmMultilevelParams(
         n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
         f_carrier=params.f_carrier,
+        modulation_scheme=params.modulation_scheme,  # type: ignore[arg-type]
     )
 
     arms: list[object] = []
@@ -218,6 +218,7 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
         n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
         f_carrier=params.f_carrier,
         t_dead=params.t_dead, t_min=params.t_min,
+        modulation_scheme=params.modulation_scheme,  # type: ignore[arg-type]
     )
 
     arms: list[object] = []
