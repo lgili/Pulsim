@@ -9,6 +9,7 @@ build_ad/
 build_py/
 docs/_build/
 build_release/
+artigos/
 
 site/
 cmake-build-*/

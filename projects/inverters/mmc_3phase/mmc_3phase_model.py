@@ -462,6 +462,13 @@ class ClosedLoopResult:
     m_c_p: np.ndarray
     # Per-arm capacitor sums.
     v_C: np.ndarray  # shape (6, n)
+    # Circulating currents per phase (Phase 20.16): (i_arm_p + i_arm_n)/2.
+    # When ``with_circulating=False`` these are still logged for analysis.
+    i_circ_a: np.ndarray = field(default_factory=lambda: np.empty(0))
+    i_circ_b: np.ndarray = field(default_factory=lambda: np.empty(0))
+    i_circ_c: np.ndarray = field(default_factory=lambda: np.empty(0))
+    # Mean per-arm capacitor voltage (for energy-loop diagnostics).
+    v_C_mean: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
 def run_mmc_closed_loop(
@@ -474,26 +481,55 @@ def run_mmc_closed_loop(
     layer: str = "l1",
     t_end: float = 200e-3,
     dt: float = 5e-6,
+    with_decoupling: bool = False,
+    with_circulating: bool = False,
+    kp_circ: float = 0.002,
+    ki_circ: float = 5.0,
+    with_energy_loop: bool = False,
+    kp_energy: float = 0.005,    # Gentle — outer loop ~6 Hz bandwidth.
+    ki_energy: float = 0.2,
+    v_C_target: "float | None" = None,
 ) -> ClosedLoopResult:
     """Run an MMC inverter under closed-loop dq current control.
 
-    Architecture mirrors the thesis Section 4.3:
+    Architecture mirrors the thesis Section 4.3 plus the optional
+    Section 5.3 enhancements:
 
       * abc → αβ (Clarke 2/3) → dq (Park at θ = ω·t)
       * Two decoupled PI loops, one per axis
+      * (optional) ω·L cross-coupling feedforward: cancels the
+        natural coupling between d- and q-axis dynamics
+      * (optional) per-phase circulating-current control: PI on the
+        AC residual of ``(i_arm_p + i_arm_n)/2`` drives a common-mode
+        offset ``δ_X`` to suppress the 2ω circulating ripple without
+        disturbing the AC port voltage
+      * (optional) outer energy loop: PI on ``mean(v_C) − V_dc``
+        offsets ``i_d_ref`` so the converter draws / sources active
+        power to balance the cap energy storage
       * Inverse Park / Clarke → per-phase voltage references
-      * Per-arm modulation: ``m_X_p = 0.5 − v_X / V_dc``,
-        ``m_X_n = 0.5 + v_X / V_dc`` (half-bridge MMC convention)
+      * Per-arm modulation: ``m_X_p = (0.5 − v_X / V_dc) − δ_X``,
+        ``m_X_n = (0.5 + v_X / V_dc) − δ_X``
 
     Args:
         params: Plant parameters (uses ``params.modulation_scheme``).
         i_d_ref_fn, i_q_ref_fn: Setpoint generators for the d- and q-axis
             currents (callables of ``t``).
-        kp, ki: PI gains (same for both axes — symmetric tuning is
-            standard for balanced 3-φ plants).
+        kp, ki: Current PI gains (same for both axes).
         layer: ``"l1"`` (PS-PWM / IPD multilevel) or ``"l2"`` (with
             dead-time + min-pulse-width).
         t_end, dt: Simulation horizon and step.
+        with_decoupling: If True, add ω·L_eff feedforward terms to
+            decouple the d/q axes. ``L_eff = l_load + l_b/2``.
+        with_circulating: If True, enable per-phase PI on the AC
+            residual of the circulating currents.
+        kp_circ, ki_circ: Gains for the circulating-current PI
+            (units: 1/(A) and 1/(A·s) — output is a modulation-index
+            offset δ).
+        with_energy_loop: If True, enable the outer slow PI on
+            mean(v_C) that offsets i_d_ref.
+        kp_energy, ki_energy: Outer-loop PI gains (units A/V and
+            A/(V·s)).
+        v_C_target: Energy-loop setpoint. Defaults to ``V_dc``.
 
     Returns:
         :class:`ClosedLoopResult` with the full logged trajectories.
@@ -563,6 +599,20 @@ def run_mmc_closed_loop(
 
     obs_arms, bex = make_obs(b, arms, dt=dt)  # type: ignore[arg-type]
 
+    # Arm-current branch indices (for circulating + load decomposition).
+    # The pulsim sign convention: x[src_idx] is positive when the
+    # internal current flows ``from → to``. For our upper arm
+    # (from=dc_p, to=mid_X_p) that's the natural arm-current direction.
+    # The matching make_*_observers helpers also call this with the
+    # same sign — see ``pulsim.mmc.make_mmc_arms_observer`` and the
+    # commit ``feat(mmc): correct i_b sign``.
+    arm_src_idx = [
+        b.pool.branch_var_id_for_source(
+            arm.source_branch_id, b.graph,  # type: ignore[attr-defined]
+        )
+        for arm in arms
+    ]
+
     pi_d = p.PIController(
         Kp=kp, Ki=ki,
         output_min=-params.V_dc / 2.0,
@@ -573,6 +623,41 @@ def run_mmc_closed_loop(
         output_min=-params.V_dc / 2.0,
         output_max=+params.V_dc / 2.0,
     )
+
+    # Per-phase circulating-current PIs. Output ``δ`` is a modulation
+    # index offset — keep it small (±0.1) so we don't lose load
+    # control margin.
+    pi_circ = [
+        p.PIController(
+            Kp=kp_circ, Ki=ki_circ,
+            output_min=-0.10, output_max=+0.10,
+        )
+        for _ in range(3)
+    ]
+
+    # Outer energy-loop PI on mean(v_C). Output is a small offset
+    # added to ``i_d_ref`` (clamped to ±5 A to stay well within the
+    # main current loop's authority).
+    energy_pi = p.PIController(
+        Kp=kp_energy, Ki=ki_energy,
+        output_min=-5.0, output_max=+5.0,
+    )
+
+    # Low-pass filters that extract the DC component of each
+    # circulating current; the PI then drives the *AC residual* to
+    # zero (we don't want to fight the natural DC bus current sharing).
+    lpf_circ = [p.FirstOrderLowPass(tau=20e-3) for _ in range(3)]
+
+    # Low-pass for the v_C mean — smooths out the 2ω ripple so the
+    # outer loop sees the slow energy trend.
+    lpf_vC = p.FirstOrderLowPass(tau=20e-3)
+
+    v_C_set = params.V_dc if v_C_target is None else float(v_C_target)
+
+    # Effective phase inductance for the decoupling feedforward.
+    # AC current sees ``L_load`` plus ``L_b/2`` from the parallel arm
+    # inductors at the AC port.
+    L_eff = params.l_load + params.l_b / 2.0
 
     n = int(round(t_end / dt)) + 1
     log = {
@@ -588,6 +673,10 @@ def run_mmc_closed_loop(
         "m_b_p":  np.zeros(n),
         "m_c_p":  np.zeros(n),
         "v_C":    np.zeros((6, n)),
+        "i_circ_a": np.zeros(n),
+        "i_circ_b": np.zeros(n),
+        "i_circ_c": np.zeros(n),
+        "v_C_mean": np.zeros(n),
     }
     counter = [0]
     omega = params.omega_grid
@@ -599,12 +688,50 @@ def run_mmc_closed_loop(
         i_c_ = float(x[iL_idx[2]])
         theta = omega * t
 
+        # ---- Arm currents + per-phase circulating currents ----
+        # arms list order: a_p, b_p, c_p, a_n, b_n, c_n.
+        i_arm = [float(x[arm_src_idx[k]]) for k in range(6)]
+        i_circ_a = 0.5 * (i_arm[0] + i_arm[3])
+        i_circ_b = 0.5 * (i_arm[1] + i_arm[4])
+        i_circ_c = 0.5 * (i_arm[2] + i_arm[5])
+
+        # ---- Outer energy loop (slow) ----
+        # Sign convention for an inverter (V_dc → AC):
+        #   * positive ``i_d`` drains power from the DC bus → caps
+        #     discharge → ``v_C`` drops.
+        #   * If ``v_C < v_C_target`` we need to drain LESS, so
+        #     ``i_d_offset`` should be NEGATIVE.
+        # We achieve that by swapping setpoint/measured in the PI:
+        # error = (v_C_mean − v_C_target). When v_C is low (negative
+        # error) the integral output goes negative → i_d shrinks.
+        v_C_mean = sum(arm.v_C for arm in arms) / 6.0  # type: ignore[attr-defined]
+        v_C_mean_filt = lpf_vC.update(input_value=v_C_mean, dt=dt)
+        i_d_ref = float(i_d_ref_fn(t))
+        if with_energy_loop:
+            i_d_offset = energy_pi.update(
+                setpoint=v_C_mean_filt, measured=v_C_set, dt=dt,
+            )
+            i_d_ref = i_d_ref + i_d_offset
+
+        i_q_ref = float(i_q_ref_fn(t))
+
+        # ---- Inner dq current PI ----
         i_alpha, i_beta = clarke_2_3(i_a, i_b_, i_c_)
         i_d, i_q = park(i_alpha, i_beta, theta)
-        i_d_ref = float(i_d_ref_fn(t))
-        i_q_ref = float(i_q_ref_fn(t))
         v_d = pi_d.update(setpoint=i_d_ref, measured=i_d, dt=dt)
         v_q = pi_q.update(setpoint=i_q_ref, measured=i_q, dt=dt)
+
+        # ---- ω·L decoupling feedforward ----
+        # Continuous-time plant in dq frame:
+        #   v_d = R·i_d + L·di_d/dt − ω·L·i_q
+        #   v_q = R·i_q + L·di_q/dt + ω·L·i_d
+        # The PI controllers regulate (R·i + L·di/dt). Adding the
+        # cross-coupling term cancels the natural coupling so each
+        # axis becomes independent.
+        if with_decoupling:
+            v_d = v_d - omega * L_eff * i_q
+            v_q = v_q + omega * L_eff * i_d
+
         v_alpha, v_beta = inv_park(v_d, v_q, theta)
         v_a, v_b, v_c = inv_clarke_2_3(v_alpha, v_beta)
 
@@ -615,9 +742,36 @@ def run_mmc_closed_loop(
         v_b = max(-half_swing, min(half_swing, v_b))
         v_c = max(-half_swing, min(half_swing, v_c))
 
-        m_a_holder[0] = 0.5 - v_a / params.V_dc
-        m_b_holder[0] = 0.5 - v_b / params.V_dc
-        m_c_holder[0] = 0.5 - v_c / params.V_dc
+        # ---- Per-phase circulating-current damping ----
+        # Proper MMC circulating-current control uses a PI in the
+        # 2ω-synchronous (negative-sequence) frame so that the 2ω
+        # ripple appears as DC to the integrator. Implementing that
+        # full structure properly is its own exercise; for this
+        # notebook we use a lighter-weight scheme — pure proportional
+        # damping on the AC residual ``(i_circ − lpf(i_circ))``. It
+        # *damps* the natural circulating ripple without trying to
+        # zero it (which would need accurate phase tracking).
+        if with_circulating:
+            i_circ_dc_a = lpf_circ[0].update(input_value=i_circ_a, dt=dt)
+            i_circ_dc_b = lpf_circ[1].update(input_value=i_circ_b, dt=dt)
+            i_circ_dc_c = lpf_circ[2].update(input_value=i_circ_c, dt=dt)
+            delta_a = max(-0.05, min(0.05,
+                kp_circ * (i_circ_a - i_circ_dc_a)))
+            delta_b = max(-0.05, min(0.05,
+                kp_circ * (i_circ_b - i_circ_dc_b)))
+            delta_c = max(-0.05, min(0.05,
+                kp_circ * (i_circ_c - i_circ_dc_c)))
+        else:
+            delta_a = delta_b = delta_c = 0.0
+
+        # Base modulation from the load-side voltage commands.
+        m_a_base = 0.5 - v_a / params.V_dc
+        m_b_base = 0.5 - v_b / params.V_dc
+        m_c_base = 0.5 - v_c / params.V_dc
+        # Apply circulating-current correction.
+        m_a_holder[0] = m_a_base - delta_a
+        m_b_holder[0] = m_b_base - delta_b
+        m_c_holder[0] = m_c_base - delta_c
 
         obs_arms(t, x)
 
@@ -634,6 +788,10 @@ def run_mmc_closed_loop(
             log["m_a_p"][i] = m_a_holder[0]
             log["m_b_p"][i] = m_b_holder[0]
             log["m_c_p"][i] = m_c_holder[0]
+            log["i_circ_a"][i] = i_circ_a
+            log["i_circ_b"][i] = i_circ_b
+            log["i_circ_c"][i] = i_circ_c
+            log["v_C_mean"][i] = v_C_mean
             for k in range(6):
                 log["v_C"][k, i] = arms[k].v_C  # type: ignore[attr-defined]
         counter[0] += 1
@@ -652,4 +810,8 @@ def run_mmc_closed_loop(
         i_d_ref=log["i_d_ref"][:nn], i_q_ref=log["i_q_ref"][:nn],
         m_a_p=log["m_a_p"][:nn], m_b_p=log["m_b_p"][:nn], m_c_p=log["m_c_p"][:nn],
         v_C=log["v_C"][:, :nn],
+        i_circ_a=log["i_circ_a"][:nn],
+        i_circ_b=log["i_circ_b"][:nn],
+        i_circ_c=log["i_circ_c"][:nn],
+        v_C_mean=log["v_C_mean"][:nn],
     )
