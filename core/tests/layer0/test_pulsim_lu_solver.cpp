@@ -84,24 +84,30 @@ Matrix make_buck_like_8x8() {
 }
 
 /// Total L+U fill (excluding U's diagonal) produced by Eigen's reference
-/// SparseLU with COLAMD ordering. Used as the baseline for the ±50%
-/// envelope check in test 2.8.2.
+/// SparseLU with COLAMD ordering. Used as the baseline for the upper-
+/// guard check in test 2.8.2.
+///
+/// Implementation note: we use Eigen's portable `nnzL()` + `nnzU()`
+/// accessors (present since Eigen 3.2) instead of materialising the
+/// L/U factors via `matrixL().toSparse()` — that helper is Eigen 5.x+
+/// only and breaks the Linux CI which ships Eigen 3.4 via apt's
+/// libeigen3-dev. The numerical answer is identical: nnzL counts the
+/// stored strictly-lower L entries, nnzU counts the upper triangle
+/// including the diagonal.
 Index eigen_reference_fill(const Matrix& M) {
     Eigen::SparseLU<Matrix, Eigen::COLAMDOrdering<Index>> solver;
     solver.analyzePattern(M);
     solver.factorize(M);
     REQUIRE(solver.info() == Eigen::Success);
-    // Eigen's matrixL() / matrixU() return Expression types; we extract
-    // the actual sparse factors via the SparseLUMatrixL/U wrappers.
-    Eigen::SparseMatrix<Real, Eigen::ColMajor, Index> L =
-        solver.matrixL().toSparse();
-    Eigen::SparseMatrix<Real, Eigen::ColMajor, Index> U =
-        solver.matrixU().toSparse();
-    // L includes its implicit unit diagonal; subtract it so we compare
-    // like-with-like vs PulsimSparseLuSolver's `l_nnz()` (strictly lower)
-    // + `u_nnz()` (upper + diagonal = our U-includes-diag convention).
-    return static_cast<Index>(L.nonZeros() + U.nonZeros())
-           - static_cast<Index>(M.rows());  // subtract Eigen's L unit-diag
+    // nnzL() — strictly-lower L entries (Eigen's L stores the unit
+    //          diagonal implicitly, so its nnzL is already "diag-free").
+    // nnzU() — upper triangle including the diagonal — same convention as
+    //          PulsimSparseLuSolver's `u_nnz()`. Subtracting M.rows()
+    //          would remove the diagonal from BOTH solvers' counts; we
+    //          skip that since the caller already subtracts `n` from
+    //          `pulsim_fill` and we want the same convention on Eigen.
+    return static_cast<Index>(solver.nnzL() + solver.nnzU())
+           - static_cast<Index>(M.rows());  // subtract diagonal
 }
 
 }  // namespace
