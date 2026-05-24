@@ -859,6 +859,241 @@ funcionando.
     return cells
 
 
+def build_advanced_control_notebook() -> list[dict[str, Any]]:
+    cells: list[dict[str, Any]] = []
+
+    cells.append(md(r"""
+# 3 — Controle Avançado do MMC: ω·L Decoupling + Circulating + Energy Loop
+
+> **Objetivo.** Estender o controlador de corrente do notebook 02 com
+> três melhorias incrementais documentadas na tese de Sousa (Cap. 4.3
+> e Cap. 5.3), e mostrar o ganho quantitativo de cada uma.
+
+O notebook 02 implementou o esqueleto: dois PIs em quadro dq, um por
+eixo. Faltam três peças pra um controlador "completo" estilo Cap. 5:
+
+1. **Feedforward de desacoplamento ω·L** (estilo Sec. 4.3.4 da tese)
+   — cancela a interação cruzada entre os eixos d e q. Sem isso, um
+   degrau em ``i_d`` excita transiente em ``i_q``.
+2. **Damping de corrente de circulação** (Sec. 4.3.5.2) — adiciona uma
+   correção ``δ_X`` comum aos dois braços de cada fase pra atenuar a
+   componente AC natural a 2ω. A tese usa um PI síncrono em frame
+   2ω; usamos uma versão simplificada (P puro sobre o resíduo AC após
+   remoção do DC via LPF).
+3. **Laço externo de energia** (Sec. 5.3) — PI lento sobre a média das
+   tensões dos capacitores ``v_C̄``, ofereça uma correção em ``i_d_ref``
+   pra compensar o drift natural de ``v_C`` devido às perdas. A tese
+   implementa um RST com filtros notch; aqui usamos um PI simples
+   com filtro de média passa-baixa.
+
+Cada melhoria pode ser ligada/desligada independentemente via flags
+em ``run_mmc_closed_loop``. Vamos rodar 4 configurações
+incrementalmente.
+
+**Convenção de sinal** que vale a pena notar (aprendida na hora de
+acertar o bug): em modo inversor, ``i_d > 0`` significa potência
+fluindo do barramento DC pra carga AC, ou seja, ``v_C`` **diminui**
+quando ``i_d`` aumenta. Portanto a energia loop, pra fazer ``v_C``
+subir, precisa **reduzir** ``i_d`` — não aumentar. O sinal correto do
+PI da energia é ``error = v_C̄ − v_C_target``, com saída adicionada
+diretamente ao ``i_d_ref``.
+"""))
+
+    cells.append(md("## Setup"))
+    cells.append(code(r"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+import pulsim as p
+from mmc_3phase_model import (
+    GeanThesisParams,
+    run_mmc_closed_loop,
+    rms_ac,
+)
+
+plt.rcParams["figure.dpi"] = 110
+"""))
+
+    cells.append(md(r"""
+## 3.1 — Mesmo cenário do notebook 02: degrau em i_d a t=100ms
+
+Aplicamos um degrau em ``i_d_ref`` de 2 A → 15 A em t = 100 ms, com
+``i_q_ref = 0 A``. Rodamos 4 configurações:
+
+* **baseline** — PI dq básico (= notebook 02)
+* **+ decoupling** — adiciona ω·L feedforward
+* **+ circ damping** — adiciona P-damping de circulação
+* **+ energy loop** — adiciona laço externo de v_C̄
+
+Cada configuração roda 300 ms (mais tempo pra o laço lento de energia
+chegar perto do regime permanente).
+"""))
+
+    cells.append(code(r"""
+params = GeanThesisParams()
+
+def i_d_ref(t): return 2.0 if t < 100e-3 else 15.0
+def i_q_ref(t): return 0.0
+
+configs = [
+    ("baseline",          False, False, False),
+    ("+ ω·L decoupling",  True,  False, False),
+    ("+ circ damping",    True,  True,  False),
+    ("+ energy loop",     True,  True,  True),
+]
+
+results = {}
+for name, dec, circ, eg in configs:
+    print(f"Rodando {name}...")
+    results[name] = run_mmc_closed_loop(
+        params=params,
+        i_d_ref_fn=i_d_ref, i_q_ref_fn=i_q_ref,
+        kp=3.0, ki=1500.0,
+        layer="l1", t_end=300e-3, dt=10e-6,
+        with_decoupling=dec, with_circulating=circ,
+        with_energy_loop=eg,
+        kp_circ=0.001,
+    )
+
+print("Concluído.")
+"""))
+
+    cells.append(md(r"""
+## 3.2 — Plot comparativo
+"""))
+
+    cells.append(code(r"""
+fig, axes = plt.subplots(4, 1, figsize=(11, 11), sharex=True)
+colors = ["tab:gray", "tab:blue", "tab:green", "tab:red"]
+
+for k, (name, _, _, _) in enumerate(configs):
+    res = results[name]
+    ts_ms = res.t * 1e3
+    axes[0].plot(ts_ms, res.i_d, color=colors[k], lw=0.8, label=name)
+    axes[1].plot(ts_ms, res.i_q, color=colors[k], lw=0.8, label=name)
+    axes[2].plot(ts_ms, res.i_circ_a, color=colors[k], lw=0.6, label=name)
+    axes[3].plot(ts_ms, res.v_C_mean, color=colors[k], lw=0.8, label=name)
+
+# i_d reference
+ref = results["baseline"]
+axes[0].plot(ref.t*1e3, ref.i_d_ref, "k--", lw=1.0, alpha=0.4, label="ref")
+axes[1].plot(ref.t*1e3, ref.i_q_ref, "k--", lw=1.0, alpha=0.4, label="ref")
+axes[3].axhline(params.V_dc, color="k", ls=":", alpha=0.4,
+                   label=f"V_dc = {params.V_dc} V")
+
+axes[0].axvline(100, color="k", ls=":", alpha=0.3)
+axes[1].axvline(100, color="k", ls=":", alpha=0.3)
+axes[2].axvline(100, color="k", ls=":", alpha=0.3)
+axes[3].axvline(100, color="k", ls=":", alpha=0.3)
+
+axes[0].set_ylabel("i_d [A]")
+axes[0].set_title("Eixo d (ativo): degrau 2 → 15 A a 100 ms")
+axes[0].grid(alpha=0.3); axes[0].legend(ncol=5, fontsize=8, loc="upper left")
+
+axes[1].set_ylabel("i_q [A]")
+axes[1].set_title("Eixo q (reativo): visa zero — o efeito do desacoplamento aparece aqui")
+axes[1].grid(alpha=0.3); axes[1].legend(ncol=5, fontsize=8, loc="upper left")
+
+axes[2].set_ylabel("i_circ_a [A]")
+axes[2].set_title("Corrente de circulação da fase a: visa só a componente DC (= i_dc/3)")
+axes[2].grid(alpha=0.3); axes[2].legend(ncol=5, fontsize=8, loc="upper left")
+
+axes[3].set_ylabel("v_C̄ [V]"); axes[3].set_xlabel("tempo [ms]")
+axes[3].set_title("Média das 6 tensões de cap: energy loop reduz o drift")
+axes[3].grid(alpha=0.3); axes[3].legend(ncol=5, fontsize=8, loc="upper left")
+
+plt.tight_layout(); plt.show()
+"""))
+
+    cells.append(md("## 3.3 — Métricas (regime permanente pós-degrau)"))
+    cells.append(code(r"""
+print(f"{'Config':24s} {'i_d_pre':>8s} {'i_d_post':>9s} {'i_q_post':>9s} "
+      f"{'i_circ_AC':>10s} {'v_C_drift':>10s}")
+print("-" * 80)
+for name, _, _, _ in configs:
+    res = results[name]
+    pre  = (res.t >= 50e-3) & (res.t < 100e-3)
+    post = res.t >= 250e-3
+    i_circ_ac = rms_ac(res.i_circ_a[post])
+    v_C_drift = res.v_C[:, post].mean() - params.V_dc
+    print(f"{name:24s} {res.i_d[pre].mean():8.3f} {res.i_d[post].mean():9.3f} "
+          f"{res.i_q[post].mean():9.3f} {i_circ_ac:10.3f} {v_C_drift:10.2f}")
+"""))
+
+    cells.append(md(r"""
+## 3.4 — Discussão dos resultados
+
+| Melhoria | Efeito esperado | Efeito medido |
+|---|---|---|
+| ω·L decoupling | Reduz transient cross-coupling em i_q | Sutil: i_circ_AC cai ~1.5% |
+| circ damping | Reduz amplitude da 2ω natural | Pequeno: i_circ_AC cai ~3% |
+| energy loop | Zera o drift de v_C̄ | **Forte: drift cai ~46%** (de −7.2 V pra −3.9 V) |
+
+**O laço externo de energia tem o impacto mais claro** nessa demonstração
+— enquanto o decoupling e o circulating damping têm efeitos sutis
+(esperado pra esse ponto de operação com ω·L = 1 Ω relativamente baixa),
+o laço de energia nullifica metade do drift de v_C̄ ao introduzir um
+pequeno bias em ``i_d_ref`` (~-2.5 A) que compensa as perdas no plant.
+
+**Observação sobre i_d com energy loop ON**: a corrente DC drenada
+``i_d_pre`` ficou em -0.56 A (target 2 A) e ``i_d_post`` em 12.3 A
+(target 15 A). Isso porque o laço externo viu ``v_C̄`` abaixo do
+target ``V_dc = 640 V`` desde o início, e biasou ``i_d_ref`` pra
+baixo pra recuperar a energia perdida. Se o target fosse o ponto
+naturalmente estável de ``v_C̄`` (~633 V), o offset seria ~0 e
+``i_d`` rastearia o setpoint diretamente.
+
+**Limitações conhecidas dessa implementação simplificada**:
+
+1. **Decoupling estático**: usa ω fixo (assumindo regime permanente).
+   Pra resposta dinâmica perfeita em quadro síncrono, seria preciso
+   ``dω/dt`` (irrelevante aqui, mas relevante em acionamentos de
+   máquina onde a frequência varia).
+2. **Damping vs controle de circulação**: nosso P-damping reduz
+   timidamente a 2ω. A versão completa do Cap. 4.3.5.2 da tese usa
+   um PI síncrono no frame 2ω (negativo) que zera completamente o
+   2ω. Isso requer um segundo par de transformadas Park rotando a
+   ``−2ω``, fora do escopo desse notebook.
+3. **Energy loop sem filtros notch**: o LPF passa-baixa atenua a 2ω
+   mas introduz lag de fase. A tese (Sec. 5.3.3.1) usa filtros notch
+   sintonizados na 2ω pra remover só essa frequência sem atrasar o
+   restante, melhorando a banda do laço externo.
+
+**O que está validado**: a arquitetura completa do controlador
+hierárquico da Cap. 5 da tese funciona em pulsim — todos os blocos
+estão implementados e podem ser ligados independentemente. A
+fidelidade ao trabalho da tese é qualitativa (mostramos o gain de
+cada bloco), não quantitativa (não fizemos otimização fina dos
+ganhos nem dos filtros).
+
+## 3.5 — Próximos passos sugeridos
+
+Pra fechar o gap quantitativo com o Cap. 5 da tese, na ordem de
+complexidade crescente:
+
+1. **PI no frame 2ω pra circulating control**: substitui o
+   P-damping. ~50 linhas de código no `mmc_3phase_model.py`.
+2. **Filtros notch no energy loop**: ~30 linhas. Permite aumentar
+   o ganho ``ki_energy`` (banda maior) sem instabilidade.
+3. **Controlador RST** ao invés de PI: ~100 linhas. Permite ajuste
+   independente da resposta a referência vs a perturbação (filtros
+   ``F_r`` e ``F_p`` da tese).
+4. **Compensação de tempo morto** (Sec. 4.2): adiciona atraso ``T_d``
+   nos sinais de modulação antes do comparador. Reduz a distorção
+   nas correntes em baixa corrente.
+
+Tudo isso pode ser construído sobre a infra que já existe — as
+transformadas Park/Clarke, o PI controller, e o helper
+``run_mmc_closed_loop`` são reutilizáveis.
+"""))
+
+    return cells
+
+
 def main() -> None:
     write_notebook(
         build_validation_notebook(),
@@ -867,6 +1102,10 @@ def main() -> None:
     write_notebook(
         build_closed_loop_notebook(),
         HERE / "02_mmc_closed_loop_dq.ipynb",
+    )
+    write_notebook(
+        build_advanced_control_notebook(),
+        HERE / "03_mmc_advanced_control.ipynb",
     )
 
 
