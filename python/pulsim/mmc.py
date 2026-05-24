@@ -58,6 +58,27 @@ from typing import Callable, Literal
 
 import numpy as np
 
+# C++ hotpath: prefer the kernel-side PS-PWM quantizer + L1 step when
+# the native extension is available (Phase 20.11 — header in
+# ``core/include/pulsim/mmc/arm.hpp``). The pure-Python fallbacks
+# below remain as the canonical reference.
+#
+# The L0 step uses pure Python deliberately: its arithmetic body is
+# so small (a handful of float ops) that pybind11 marshalling cost
+# eats the savings — empirically about 0.5× through the C++ port.
+# The C++ helper is still bound as ``_cpp_avg_step`` for users who
+# want to amortise the call in a tight C++ loop.
+try:
+    from ._pulsim import (  # type: ignore[import-not-found]
+        _cpp_ps_pwm_switching_function as _cpp_ps_pwm,
+        _cpp_mmc_arm_multilevel_step as _cpp_ml_step,
+    )
+    _HAS_CPP_MMC = True
+except ImportError:  # pragma: no cover
+    _cpp_ps_pwm = None  # type: ignore[assignment]
+    _cpp_ml_step = None  # type: ignore[assignment]
+    _HAS_CPP_MMC = False
+
 __all__ = [
     "MmcArmAverageParams",
     "MmcArmAverageResult",
@@ -204,6 +225,12 @@ def mmc_arm_average_step(
     if dt <= 0:
         raise ValueError(f"dt must be > 0 (got {dt})")
 
+    # NB: this layer keeps its pure-Python implementation. The L0 step
+    # is so simple (a handful of float ops) that the pybind11
+    # marshalling cost of calling the C++ helper would dominate the
+    # work — empirically a 2× slowdown vs the inlined CPython arithmetic.
+    # The C++ helper is still available as ``_cpp_avg_step`` for users
+    # who can amortise the call (e.g., looping in C++).
     v_b = m_b * v_C
     # dv_C/dt = (m_b · i_b - v_C / R_p) / C
     leak = (v_C / params.r_p) if params.r_p is not None else 0.0
@@ -925,6 +952,13 @@ def ps_pwm_switching_function(
     Returns:
         ``s_b`` — integer switching count.
     """
+    if _HAS_CPP_MMC:
+        return int(_cpp_ps_pwm(
+            float(m_ref), float(t), int(n_sm),
+            float(f_carrier), sm_type,
+        ))
+
+    # Pure-Python reference (kept as the canonical implementation).
     if sm_type == "half_bridge":
         m = max(0.0, min(1.0, m_ref))
         s_b = 0
@@ -985,6 +1019,17 @@ def mmc_arm_multilevel_step(
     if dt <= 0:
         raise ValueError(f"dt must be > 0 (got {dt})")
 
+    if _HAS_CPP_MMC:
+        r_p_inv = (1.0 / params.r_p) if params.r_p is not None else 0.0
+        v_C_next, v_b, s_b_cpp = _cpp_ml_step(
+            float(v_C), float(m_ref), float(i_b),
+            float(dt), float(t), int(params.n_sm),
+            float(params.c_arm), float(params.f_carrier),
+            params.sm_type, float(r_p_inv),
+        )
+        return v_C_next, v_b, int(s_b_cpp)
+
+    # Pure-Python reference (kept as the canonical implementation).
     s_b = ps_pwm_switching_function(
         m_ref, t, params.n_sm, params.f_carrier,
         sm_type=params.sm_type,
