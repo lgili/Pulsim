@@ -242,6 +242,19 @@ from .mmc import (
     make_l3_state,
     mmc_arm_detailed_step,
     simulate_mmc_arm_detailed,
+    # Builder integration for L1/L2/L3 — Phase 20.8.
+    MmcArmMultilevel,
+    add_mmc_arm_multilevel,
+    make_mmc_arm_multilevel_observer,
+    make_mmc_arm_multilevel_observers,
+    MmcArmEquivalent,
+    add_mmc_arm_equivalent,
+    make_mmc_arm_equivalent_observer,
+    make_mmc_arm_equivalent_observers,
+    MmcArmDetailed,
+    add_mmc_arm_detailed,
+    make_mmc_arm_detailed_observer,
+    make_mmc_arm_detailed_observers,
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -435,6 +448,19 @@ __all__ = [
     "make_l3_state",
     "mmc_arm_detailed_step",
     "simulate_mmc_arm_detailed",
+    # MMC L1/L2/L3 builder integration.
+    "MmcArmMultilevel",
+    "add_mmc_arm_multilevel",
+    "make_mmc_arm_multilevel_observer",
+    "make_mmc_arm_multilevel_observers",
+    "MmcArmEquivalent",
+    "add_mmc_arm_equivalent",
+    "make_mmc_arm_equivalent_observer",
+    "make_mmc_arm_equivalent_observers",
+    "MmcArmDetailed",
+    "add_mmc_arm_detailed",
+    "make_mmc_arm_detailed_observer",
+    "make_mmc_arm_detailed_observers",
 ]
 
 if _HAS_SCOPE:

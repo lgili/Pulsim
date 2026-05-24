@@ -91,6 +91,19 @@ __all__ = [
     "make_l3_state",
     "mmc_arm_detailed_step",
     "simulate_mmc_arm_detailed",
+    # Builder-integration for L1/L2/L3 — Phase 20.8.
+    "MmcArmMultilevel",
+    "add_mmc_arm_multilevel",
+    "make_mmc_arm_multilevel_observer",
+    "make_mmc_arm_multilevel_observers",
+    "MmcArmEquivalent",
+    "add_mmc_arm_equivalent",
+    "make_mmc_arm_equivalent_observer",
+    "make_mmc_arm_equivalent_observers",
+    "MmcArmDetailed",
+    "add_mmc_arm_detailed",
+    "make_mmc_arm_detailed_observer",
+    "make_mmc_arm_detailed_observers",
 ]
 
 
@@ -1802,3 +1815,421 @@ def simulate_mmc_arm_detailed(
         i_b=i_b_arr,
         params=params,
     )
+
+
+# ======================================================================
+# Builder-integration for L1/L2/L3  Phase 20.8
+# ======================================================================
+#
+# Same pattern as ``add_mmc_arm_average`` / ``make_mmc_arms_observer``:
+# the kernel sees a single voltage source per arm whose value is
+# updated each simulation step by the observer / b_extra_fn pair.
+# The L1/L2/L3 dynamics (PS-PWM quantizer, dead-time state machine,
+# per-SM balancing) live in Python — they are exercised once per
+# kernel step via the layer's ``mmc_arm_*_step`` function.
+#
+# Sign conventions (validated empirically in Phase 20.4):
+#   * V-source ``x[src_idx]`` is positive when current flows
+#     ``from → to`` internally.
+#   * That matches the physical ``i_b`` direction (current entering
+#     the arm at ``node_a`` charges the cap when modulation is
+#     positive) — **no sign negation** is needed in the observer.
+#
+# DC-OP seeding:
+#   * Set the v-source baseline to ``m_ref(0) · v_c0`` so DC OP
+#     finds a consistent operating point in multi-arm topologies.
+#   * b_extra_fn injects the *delta* from baseline: at every step,
+#     ``inject(t) = baseline - v_b(t)`` so the effective source
+#     voltage is ``v_b(t)`` (matches the kernel convention
+#     ``V_source_effective = baseline - inject``).
+
+
+# ----------------------------------------------------------------------
+# L1 — Multilevel arm builder helper
+# ----------------------------------------------------------------------
+
+@dataclass
+class MmcArmMultilevel:
+    """Builder-side wrapper for an L1 multilevel arm.
+
+    Mirrors :class:`MmcArmAverage` but references the L1 step. The
+    runtime state is just ``v_C`` (one per arm); per-SM PS-PWM bits
+    are recomputed each step from ``t`` and the carrier phase.
+
+    Attributes:
+        params: Static configuration.
+        m_ref_fn: Reference modulation signal ``t -> m_ref``.
+        v_C: Live arm-equivalent capacitor-sum voltage [V].
+        v_b: Stashed arm-generated voltage for the next b_extra call.
+        v_b_baseline: V-source baseline (m_ref(0)·v_c0) for DC-OP.
+        name: Prefix used for the underlying source name.
+        source_branch_id: Graph branch id of the v-source.
+    """
+
+    params: MmcArmMultilevelParams
+    m_ref_fn: Callable[[float], float]
+    v_C: float = 0.0
+    v_b: float = 0.0
+    v_b_baseline: float = 0.0
+    name: str = ""
+    source_branch_id: int = -1
+
+
+def add_mmc_arm_multilevel(
+    builder,
+    *,
+    name: str,
+    node_a: str,
+    node_b: str,
+    params: MmcArmMultilevelParams,
+    m_ref: float | Callable[[float], float],
+) -> MmcArmMultilevel:
+    """Add an L1 multilevel-arm to ``builder``.
+
+    Pair the returned object with :func:`make_mmc_arm_multilevel_observer`
+    to drive the dynamics each simulation step.
+    """
+    if callable(m_ref):
+        m_ref_fn = m_ref
+    else:
+        m_ref_const = float(m_ref)
+        m_ref_fn = lambda _t, _v=m_ref_const: _v  # noqa: E731
+
+    m0 = float(m_ref_fn(0.0))
+    if m0 < params.m_min or m0 > params.m_max:
+        raise ValueError(
+            f"m_ref(t=0)={m0:.4f} outside valid range "
+            f"[{params.m_min}, {params.m_max}] for "
+            f"sm_type={params.sm_type!r}",
+        )
+
+    v_b_baseline = m0 * float(params.v_c0)
+    src_id = builder.graph.num_branches
+    builder.add_voltage_source(
+        f"{name}_Varm", node_a, node_b, v_b_baseline,
+    )
+
+    return MmcArmMultilevel(
+        params=params,
+        m_ref_fn=m_ref_fn,
+        v_C=float(params.v_c0),
+        v_b=v_b_baseline,
+        v_b_baseline=v_b_baseline,
+        name=name,
+        source_branch_id=src_id,
+    )
+
+
+def make_mmc_arm_multilevel_observer(
+    builder, arm: MmcArmMultilevel, *, dt: float,
+):
+    """Single-arm wrapper around
+    :func:`make_mmc_arm_multilevel_observers`."""
+    return make_mmc_arm_multilevel_observers(builder, [arm], dt=dt)
+
+
+def make_mmc_arm_multilevel_observers(
+    builder, arms: "list[MmcArmMultilevel]", *, dt: float,
+):
+    """Build ``(step_observer, b_extra_fn)`` for one or more L1 arms.
+
+    Notes:
+        Use ``dt ≤ 1 / (10 · N · f_carrier)`` so the per-step
+        observer sees a clean staircase. With ``start_from_dc_op=True``
+        the trajectory has the same ~+1·dt boundary bias L0 carries
+        (the observer fires N+1 times for N integration steps).
+    """
+    if dt <= 0:
+        raise ValueError(f"dt must be > 0 (got {dt})")
+    if not arms:
+        raise ValueError("arms must contain at least one element")
+
+    state_size = builder.pool.state_size(builder.graph)
+    src_indices = [
+        builder.pool.branch_var_id_for_source(
+            arm.source_branch_id, builder.graph,
+        )
+        for arm in arms
+    ]
+
+    def step_observer(t, x):
+        for k, arm in enumerate(arms):
+            i_b = float(x[src_indices[k]])
+            m_k = float(arm.m_ref_fn(t))
+            v_C_next, _, _s_b = mmc_arm_multilevel_step(
+                arm.v_C, m_k, i_b, dt, t, arm.params,
+            )
+            arm.v_C = v_C_next
+            # Stash next-step v_b using the s_b evaluated at t+dt
+            # so b_extra_fn injects the correct staircase value.
+            t_next = t + dt
+            s_b_next = ps_pwm_switching_function(
+                float(arm.m_ref_fn(t_next)), t_next,
+                arm.params.n_sm, arm.params.f_carrier,
+                sm_type=arm.params.sm_type,
+            )
+            arm.v_b = (s_b_next / arm.params.n_sm) * v_C_next
+
+    def b_extra_fn(_t):
+        out = [0.0] * state_size
+        for k, arm in enumerate(arms):
+            out[src_indices[k]] = arm.v_b_baseline - arm.v_b
+        return out
+
+    return step_observer, b_extra_fn
+
+
+# ----------------------------------------------------------------------
+# L2 — SM-equivalent arm builder helper
+# ----------------------------------------------------------------------
+
+@dataclass
+class MmcArmEquivalent:
+    """Builder-side wrapper for an L2 SM-equivalent arm.
+
+    Owns its own :class:`MmcArmEquivalentState` (per-SM bits +
+    dead-time timers); the observer advances both ``state.v_C``
+    and the per-SM bookkeeping each step.
+
+    Attributes:
+        params: Static configuration.
+        m_ref_fn: Reference modulation signal ``t -> m_ref``.
+        state: Live L2 state (per-SM bits + timers + v_C).
+        v_b: Last computed arm voltage (stashed for next b_extra).
+        v_b_baseline: V-source baseline for DC-OP.
+        name: Prefix for the underlying source name.
+        source_branch_id: Graph branch id of the v-source.
+    """
+
+    params: MmcArmEquivalentParams
+    m_ref_fn: Callable[[float], float]
+    state: MmcArmEquivalentState
+    v_b: float = 0.0
+    v_b_baseline: float = 0.0
+    name: str = ""
+    source_branch_id: int = -1
+
+    @property
+    def v_C(self) -> float:
+        """Arm-sum capacitor voltage (delegates to the internal state)."""
+        return self.state.v_C
+
+
+def add_mmc_arm_equivalent(
+    builder,
+    *,
+    name: str,
+    node_a: str,
+    node_b: str,
+    params: MmcArmEquivalentParams,
+    m_ref: float | Callable[[float], float],
+) -> MmcArmEquivalent:
+    """Add an L2 SM-equivalent arm to ``builder``."""
+    if callable(m_ref):
+        m_ref_fn = m_ref
+    else:
+        m_ref_const = float(m_ref)
+        m_ref_fn = lambda _t, _v=m_ref_const: _v  # noqa: E731
+
+    m0 = float(m_ref_fn(0.0))
+    if m0 < params.m_min or m0 > params.m_max:
+        raise ValueError(
+            f"m_ref(t=0)={m0:.4f} outside valid range "
+            f"[{params.m_min}, {params.m_max}]",
+        )
+
+    v_b_baseline = m0 * float(params.v_c0)
+    src_id = builder.graph.num_branches
+    builder.add_voltage_source(
+        f"{name}_Varm", node_a, node_b, v_b_baseline,
+    )
+
+    return MmcArmEquivalent(
+        params=params,
+        m_ref_fn=m_ref_fn,
+        state=make_l2_state(params),
+        v_b=v_b_baseline,
+        v_b_baseline=v_b_baseline,
+        name=name,
+        source_branch_id=src_id,
+    )
+
+
+def make_mmc_arm_equivalent_observer(
+    builder, arm: MmcArmEquivalent, *, dt: float,
+):
+    return make_mmc_arm_equivalent_observers(builder, [arm], dt=dt)
+
+
+def make_mmc_arm_equivalent_observers(
+    builder, arms: "list[MmcArmEquivalent]", *, dt: float,
+):
+    """Build ``(step_observer, b_extra_fn)`` for one or more L2 arms.
+
+    Notes:
+        L2 has a per-SM state machine that advances inside
+        ``mmc_arm_equivalent_step``. ``arm.v_b`` is stashed from the
+        v_b returned by the *current* step — there is a 1-dt lag
+        between the v_b the kernel injects and the v_b that
+        corresponds to the *advanced* state. Acceptable at L2's
+        target step sizes (well below 1/f_switch).
+
+        ``dt`` must satisfy ``dt < t_dead`` to resolve dead-time
+        events, and ``dt ≤ 1 / (20 · N · f_carrier)`` for the
+        PS-PWM staircase.
+    """
+    if dt <= 0:
+        raise ValueError(f"dt must be > 0 (got {dt})")
+    if not arms:
+        raise ValueError("arms must contain at least one element")
+
+    state_size = builder.pool.state_size(builder.graph)
+    src_indices = [
+        builder.pool.branch_var_id_for_source(
+            arm.source_branch_id, builder.graph,
+        )
+        for arm in arms
+    ]
+
+    def step_observer(t, x):
+        for k, arm in enumerate(arms):
+            i_b = float(x[src_indices[k]])
+            m_k = float(arm.m_ref_fn(t))
+            v_b, _s_w, _s_u = mmc_arm_equivalent_step(
+                arm.state, m_k, i_b, dt, t, arm.params,
+            )
+            # Stash the v_b just computed for the next b_extra call.
+            arm.v_b = v_b
+
+    def b_extra_fn(_t):
+        out = [0.0] * state_size
+        for k, arm in enumerate(arms):
+            out[src_indices[k]] = arm.v_b_baseline - arm.v_b
+        return out
+
+    return step_observer, b_extra_fn
+
+
+# ----------------------------------------------------------------------
+# L3 — Detailed per-SM arm builder helper
+# ----------------------------------------------------------------------
+
+@dataclass
+class MmcArmDetailed:
+    """Builder-side wrapper for an L3 detailed per-SM arm.
+
+    Owns an :class:`MmcArmDetailedState` so the observer can advance
+    the per-SM capacitor voltages each step under the configured
+    balancing scheme.
+
+    Attributes:
+        params: Static configuration (includes ``balancing``).
+        m_ref_fn: Reference modulation signal.
+        state: Live L3 state (per-SM v_C array).
+        v_b: Last computed arm voltage stash.
+        v_b_baseline: V-source DC-OP baseline.
+        name: Source-name prefix.
+        source_branch_id: Graph branch id.
+    """
+
+    params: MmcArmDetailedParams
+    m_ref_fn: Callable[[float], float]
+    state: MmcArmDetailedState
+    v_b: float = 0.0
+    v_b_baseline: float = 0.0
+    name: str = ""
+    source_branch_id: int = -1
+
+    @property
+    def v_C(self) -> float:
+        """Arm-sum capacitor voltage (Σ v_C_n)."""
+        return self.state.v_C
+
+    @property
+    def v_C_spread(self) -> float:
+        """Per-SM peak-to-peak spread (balancing diagnostic)."""
+        return self.state.v_C_spread
+
+
+def add_mmc_arm_detailed(
+    builder,
+    *,
+    name: str,
+    node_a: str,
+    node_b: str,
+    params: MmcArmDetailedParams,
+    m_ref: float | Callable[[float], float],
+    initial_v_C_per_sm: "np.ndarray | None" = None,
+) -> MmcArmDetailed:
+    """Add an L3 detailed arm to ``builder``."""
+    if callable(m_ref):
+        m_ref_fn = m_ref
+    else:
+        m_ref_const = float(m_ref)
+        m_ref_fn = lambda _t, _v=m_ref_const: _v  # noqa: E731
+
+    m0 = float(m_ref_fn(0.0))
+    if m0 < params.m_min or m0 > params.m_max:
+        raise ValueError(
+            f"m_ref(t=0)={m0:.4f} outside valid range "
+            f"[{params.m_min}, {params.m_max}]",
+        )
+
+    v_b_baseline = m0 * float(params.v_c0)
+    src_id = builder.graph.num_branches
+    builder.add_voltage_source(
+        f"{name}_Varm", node_a, node_b, v_b_baseline,
+    )
+
+    return MmcArmDetailed(
+        params=params,
+        m_ref_fn=m_ref_fn,
+        state=make_l3_state(
+            params, initial_v_C_per_sm=initial_v_C_per_sm,
+        ),
+        v_b=v_b_baseline,
+        v_b_baseline=v_b_baseline,
+        name=name,
+        source_branch_id=src_id,
+    )
+
+
+def make_mmc_arm_detailed_observer(
+    builder, arm: MmcArmDetailed, *, dt: float,
+):
+    return make_mmc_arm_detailed_observers(builder, [arm], dt=dt)
+
+
+def make_mmc_arm_detailed_observers(
+    builder, arms: "list[MmcArmDetailed]", *, dt: float,
+):
+    """Build ``(step_observer, b_extra_fn)`` for one or more L3 arms."""
+    if dt <= 0:
+        raise ValueError(f"dt must be > 0 (got {dt})")
+    if not arms:
+        raise ValueError("arms must contain at least one element")
+
+    state_size = builder.pool.state_size(builder.graph)
+    src_indices = [
+        builder.pool.branch_var_id_for_source(
+            arm.source_branch_id, builder.graph,
+        )
+        for arm in arms
+    ]
+
+    def step_observer(t, x):
+        for k, arm in enumerate(arms):
+            i_b = float(x[src_indices[k]])
+            m_k = float(arm.m_ref_fn(t))
+            v_b, _s_b, _mask = mmc_arm_detailed_step(
+                arm.state, m_k, i_b, dt, t, arm.params,
+            )
+            arm.v_b = v_b
+
+    def b_extra_fn(_t):
+        out = [0.0] * state_size
+        for k, arm in enumerate(arms):
+            out[src_indices[k]] = arm.v_b_baseline - arm.v_b
+        return out
+
+    return step_observer, b_extra_fn
