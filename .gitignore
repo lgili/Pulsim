@@ -14,6 +14,9 @@ artigos/
 site/
 cmake-build-*/
 benchmarks/out_*/
+benchmarks/stress_out/
+benchmarks/stress_out_*/
+benchmarks/local_limit_out/
 benchmarks/ltspice/
 .gemini/
 .claude/
