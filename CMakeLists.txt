@@ -375,6 +375,83 @@ else()
     endif()
 endif()
 
+# =============================================================================
+# SuiteSparse KLU — OPTIONAL sparse-LU solver for circuit MNA matrices
+# =============================================================================
+# KLU is purpose-built for circuit-simulation matrices (Davis & Natarajan,
+# ACM TOMS 37(3), 2010, Algorithm 907). When detected, Pulsim's PWL state-
+# space cache uses it as the default backend for circuits with n ≥ 100,
+# unlocking the path-based partial refactorization fast-path for single-bit
+# Gray-code switch flips (openspec/changes/add-pwl-rank1-update).
+#
+# When KLU is NOT installed, Pulsim builds and runs identically using the
+# default Eigen::SparseLU backend — no functional regression.
+#
+# Install:
+#   macOS:  brew install suite-sparse
+#   Debian: apt-get install libsuitesparse-dev
+#   Fedora: dnf install suitesparse-devel
+option(PULSIM_ENABLE_KLU "Enable SuiteSparse KLU backend (auto-detected if found)" ON)
+
+set(PULSIM_HAVE_KLU OFF)
+
+if(PULSIM_ENABLE_KLU)
+    # Modern SuiteSparse (>=7.0) ships a CMake config for KLU.
+    # Older releases ship per-component configs or only pkg-config /
+    # raw .so + .h. Try in order from cleanest to legacy.
+    find_package(KLU QUIET CONFIG)
+
+    if(NOT TARGET SuiteSparse::KLU)
+        # Some distros (Homebrew on Apple Silicon) need explicit hints.
+        find_package(KLU QUIET CONFIG
+            PATHS
+                /opt/homebrew/opt/suite-sparse
+                /usr/local/opt/suite-sparse
+            PATH_SUFFIXES
+                lib/cmake/KLU
+                lib/cmake/SuiteSparse
+        )
+    endif()
+
+    if(NOT TARGET SuiteSparse::KLU)
+        # Legacy fallback: locate the library + headers manually.
+        find_path(PULSIM_KLU_INCLUDE_DIR
+            NAMES klu.h
+            PATHS
+                /opt/homebrew/include
+                /usr/local/include
+                /usr/include
+            PATH_SUFFIXES
+                suitesparse
+        )
+        find_library(PULSIM_KLU_LIBRARY
+            NAMES klu
+            PATHS
+                /opt/homebrew/lib
+                /usr/local/lib
+                /usr/lib
+                /usr/lib/x86_64-linux-gnu
+                /usr/lib/aarch64-linux-gnu
+        )
+        if(PULSIM_KLU_INCLUDE_DIR AND PULSIM_KLU_LIBRARY)
+            add_library(SuiteSparse::KLU UNKNOWN IMPORTED)
+            set_target_properties(SuiteSparse::KLU PROPERTIES
+                IMPORTED_LOCATION "${PULSIM_KLU_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${PULSIM_KLU_INCLUDE_DIR}"
+            )
+        endif()
+    endif()
+
+    if(TARGET SuiteSparse::KLU)
+        set(PULSIM_HAVE_KLU ON)
+        message(STATUS "SuiteSparse KLU: found (rank-1 cache update path ENABLED)")
+    else()
+        message(STATUS "SuiteSparse KLU: not found (rank-1 cache update path DISABLED — falls back to Eigen::SparseLU)")
+    endif()
+else()
+    message(STATUS "SuiteSparse KLU: explicitly disabled via PULSIM_ENABLE_KLU=OFF")
+endif()
+
 # yaml-cpp - YAML parser
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -503,4 +580,5 @@ message(STATUS "  PGO Use:           ${PULSIM_ENABLE_PGO_USE}")
 message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
 message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
 message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
+message(STATUS "  KLU backend:       ${PULSIM_HAVE_KLU}")
 message(STATUS "=========================================")

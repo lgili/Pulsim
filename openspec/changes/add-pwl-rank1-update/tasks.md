@@ -1,7 +1,11 @@
 ## 1. CMake + dependency wiring
 
-- [ ] 1.1 Add `find_package(SuiteSparse COMPONENTS KLU)` to `core/CMakeLists.txt`
-- [ ] 1.2 Add `PULSIM_HAVE_KLU` compile definition gated on KLU presence
+- [x] 1.1 Add `find_package(KLU CONFIG)` (with Homebrew fallback + legacy
+      `find_library(klu)` last resort) to root `CMakeLists.txt`; gate the
+      whole block behind `option(PULSIM_ENABLE_KLU ON)`.
+- [x] 1.2 Add `PULSIM_HAVE_KLU=1` compile definition + `SuiteSparse::KLU`
+      INTERFACE link to `pulsim_core` in `core/CMakeLists.txt`, conditional
+      on `PULSIM_HAVE_KLU` being set by step 1.1.
 - [ ] 1.3 Update CI matrix to install `libsuitesparse-dev` on Linux + `suite-sparse` via brew on macOS
 - [ ] 1.4 Document new optional dependency in top-level `README.md` "Build prerequisites" section
 

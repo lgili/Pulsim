@@ -21,6 +21,15 @@ target_link_libraries(pulsim_core
         Eigen3::Eigen
         yaml-cpp::yaml-cpp
 )
+
+# Conditional KLU linkage — opt-in via PULSIM_HAVE_KLU set by the root
+# CMakeLists.txt's `find_package(KLU ...)` block. When KLU is absent the
+# kernel still builds and runs identically using Eigen::SparseLU.
+if(PULSIM_HAVE_KLU)
+    target_link_libraries(pulsim_core INTERFACE SuiteSparse::KLU)
+    target_compile_definitions(pulsim_core INTERFACE PULSIM_HAVE_KLU=1)
+endif()
+
 add_library(pulsim::core ALIAS pulsim_core)
 
 # =============================================================================
