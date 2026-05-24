@@ -1108,39 +1108,38 @@ def build_igbt_notebook() -> list[dict[str, Any]]:
 > **Objetivo.** Refinar a validação do MMC contra a tese do Sousa
 > trocando o half-bridge ideal por um modelo físico de IGBT level-1
 > com queda de saturação $V_{CE,sat}$ e resistência de condução
-> $R_{CE,sat}$. O capítulo 4 da tese atribui a maior parte do
-> *damping* observado no protótipo experimental ao parasita $R_b$
-> (= 0,675 Ω/braço), que é um valor calibrado empiricamente. Aqui
-> derivamos $R_b$ a partir dos parâmetros físicos de dois IGBTs
-> típicos para inversores classe 15 kVA / 1200 V.
+> $R_{CE,sat}$.
 
-A fórmula linear-equivalente:
+Duas abordagens são apresentadas:
 
-$$R_{b,eq} = N \cdot R_{CE,sat} + \frac{N \cdot V_{CE,sat}}{I_{pico}}$$
+1. **$R_b$ linear-equivalente** (Sec 4.2) — converte os params de
+   IGBT em um $R_b$ lumped que entrega o mesmo *pico* de queda de
+   tensão no ponto de operação. Simples, funciona com o
+   `build_l1_plant` original.
 
-— captura corretamente o *pico* de queda de tensão de condução e a
-*potência RMS* dissipada por braço. O que ela **não** captura é o
-*degrau* de tensão $\Delta v = 2 \cdot N \cdot V_{CE,sat}$ que ocorre
-em cada zero-crossing da corrente, pois o R_b puro é linear. Para
-modelar esse degrau seria necessário um par de diodos antiparalelos
-não-lineares por braço; é trabalho futuro (está documentado em
-`mmc_3phase_model.py` — o DC operating point com 12 diodes não-
-lineares ainda apresenta singularidade no Newton).
+2. **Par anti-paralelo de SwitchedDiodes** (Sec 4.3) — substitui o
+   $R_b$ por dois diodos chaveados em anti-paralelo entre o L_b e
+   o nó AC, capturando explicitamente o *degrau* de tensão
+   $2 \cdot N \cdot V_{CE,sat}$ em cada zero-crossing da corrente
+   de braço. Esta é a **modelagem física correta** do braço de N
+   IGBTs em série + diodos antiparalelos por SM.
 
-> **Esquema do experimento.** 4 configurações rodando lado a lado:
->
-> 1. **Ideal** — $R_b = 0{,}01$ Ω (sem perdas significativas)
-> 2. **Tese-calibrado** — $R_b = 0{,}675$ Ω (valor da Seção 4.1 da
->    tese, ajustado empiricamente)
-> 3. **IGBT típico** — $V_{CE,sat} = 1{,}5$ V, $R_{CE,sat} = 50$ mΩ
->    → $R_b \approx 0{,}59$ Ω
-> 4. **IGBT conservador** — $V_{CE,sat} = 2{,}5$ V, $R_{CE,sat}
->    = 75$ mΩ → $R_b \approx 0{,}94$ Ω
+O capítulo 4 da tese atribui a maior parte do *damping* observado
+no protótipo experimental ao parasita $R_b$ (= 0,675 Ω/braço),
+que é um valor calibrado empiricamente. Aqui partimos dos params
+físicos de dois IGBTs típicos para inversores classe 15 kVA / 1200 V
+e comparamos os dois modelos contra a Tabela 4.2.
 
-Para cada configuração medimos as métricas chave da Tabela 4.2 da
-tese (THD, RMS, pico de $i_a$, ondulação de $v_C$) e comparamos com
-o valor experimental (1,11 % de THD, 16 A RMS, ~22 A pico, ~50 V
-de ondulação).
+### Por que SwitchedDiode e não IdealDiode?
+
+Tentamos primeiro o `add_nonlinear_diode` (smooth-blend
+``IdealDiode``), mas o solver Newton encontra matriz numericamente
+singular no primeiro passo do transiente — quando ambos os diodos
+do par estão no estado off (condição natural no DC OP), o blend
+suave colapsa o Jacobiano. A versão `add_diode` (SwitchedDiode,
+piecewise-linear com detecção de eventos) é muito mais bem
+condicionada e está documentada em `mmc_3phase_model.py`
+(seção *IGBT-aware plant builders*).
 """))
 
     cells.append(md(r"""
@@ -1158,7 +1157,10 @@ from dataclasses import replace
 
 from mmc_3phase_model import (
     GeanThesisParams,
+    GeanThesisIgbtParams,
     build_l1_plant,
+    build_l1_plant_igbt,
+    build_l2_plant_igbt,
     run_mmc_open_loop,
     igbt_equivalent_r_b,
     thd,
@@ -1169,196 +1171,247 @@ from mmc_3phase_model import (
 """))
 
     cells.append(md(r"""
-## 4.1 — Configurações de IGBT
+## 4.1 — $R_b$ linear-equivalente
 
 Calculamos $R_{b,eq}$ para 2 famílias de IGBT representativas, no
 mesmo ponto de operação da tese ($V_{dc}=640$ V, $M=0{,}85$,
-$I_{pico} \approx 22$ A).
+$I_{pico} \approx 22$ A):
+
+$$R_{b,eq} = N \cdot R_{CE,sat} + \frac{N \cdot V_{CE,sat}}{I_{pico}}$$
 """))
 
     cells.append(code(r"""
 I_op_peak = 22.0  # A — peak current at steady state (per the thesis)
 
-configs = [
-    ("Ideal",            {"r_b": 0.01}),
-    ("Tese-calibrado",   {"r_b": 0.675}),
-    ("IGBT 1.5V/50mΩ",   {
+configs_lump = [
+    ("Ideal",                {"r_b": 0.01}),
+    ("Tese-calibrado",       {"r_b": 0.675}),
+    ("IGBT eq. 1.5V/50mΩ",   {
         "r_b": igbt_equivalent_r_b(
             n_sm=5, V_CE_sat=1.5, R_CE_sat=0.05, I_op=I_op_peak,
         ),
     }),
-    ("IGBT 2.5V/75mΩ",   {
+    ("IGBT eq. 2.5V/75mΩ",   {
         "r_b": igbt_equivalent_r_b(
             n_sm=5, V_CE_sat=2.5, R_CE_sat=0.075, I_op=I_op_peak,
         ),
     }),
 ]
 
-print(f"{'Config':22s} {'R_b [Ω]':>10s}")
-print('-' * 35)
-for label, kw in configs:
-    print(f'{label:22s} {kw["r_b"]:10.4f}')
+print(f"{'Config':24s} {'R_b [Ω]':>10s}")
+print('-' * 38)
+for label, kw in configs_lump:
+    print(f'{label:24s} {kw["r_b"]:10.4f}')
 """))
 
     cells.append(md(r"""
-## 4.2 — Rodando as 4 simulações
-
-Cada simulação corre 200 ms a $dt = 5\,\mu s$ (40 001 amostras) e
-mede as métricas na janela 150-200 ms (steady-state).
+## 4.2 — Sweep linear-equivalente (200 ms)
 """))
 
     cells.append(code(r"""
-results = {}
+results_lump = {}
 p_base = GeanThesisParams()
-
-for label, kw in configs:
+for label, kw in configs_lump:
     p_run = replace(p_base, **kw)
-    print(f'Rodando {label} (R_b = {p_run.r_b:.3f} Ω)...')
+    print(f'Rodando {label} (R_b = {p_run.r_b:.3f} Ω)...', flush=True)
     plant = build_l1_plant(p_run)
     res = run_mmc_open_loop(plant, t_end=200e-3, dt=5e-6, layer='l1')
-    results[label] = res
+    results_lump[label] = res
+print('Pronto.')
+"""))
+
+    cells.append(md(r"""
+## 4.3 — Modelo físico: par anti-paralelo de SwitchedDiodes
+
+Para cada braço (N = 5 SMs em série), insere-se um par
+anti-paralelo de SwitchedDiodes com:
+
+  * $V_{th}$ = $N \cdot V_{CE,sat}$ (knee voltage agregado)
+  * $g_{on} = 1 / (N \cdot R_{CE,sat})$ (slope on-state agregado)
+  * $g_{off} = g_{on} \cdot 10^{-4}$ (off-state ~10 kΩ leak)
+
+Cada braço passa a ter 2 diodes extra (24 SwitchedDiodes no total
+para o MMC trifásico) — o solver detecta os eventos de zero-crossing
+da corrente e usa a substep-state-correction da Phase 20.5 do
+pulsim para resolver as comutações com precisão sub-dt.
+"""))
+
+    cells.append(code(r"""
+configs_phys = [
+    ("IGBT phys 1.5V/50mΩ",   GeanThesisIgbtParams(
+        V_CE_sat_per_sm=1.5, R_CE_sat_per_sm=0.05,
+    )),
+    ("IGBT phys 2.5V/75mΩ",   GeanThesisIgbtParams(
+        V_CE_sat_per_sm=2.5, R_CE_sat_per_sm=0.075,
+    )),
+]
+print(f"{'Config':24s} {'V_F0_aggr':>10s}  {'R_d_aggr':>9s}")
+print('-' * 50)
+for label, params in configs_phys:
+    V_F0 = params.n_sm * params.V_CE_sat_per_sm
+    R_d  = params.n_sm * params.R_CE_sat_per_sm
+    print(f'{label:24s} {V_F0:10.2f}V {R_d:8.3f}Ω')
+"""))
+
+    cells.append(code(r"""
+results_phys = {}
+for label, params in configs_phys:
+    print(f'Rodando {label} (L1, switched-diode pair)...', flush=True)
+    plant = build_l1_plant_igbt(params)
+    res = run_mmc_open_loop(plant, t_end=200e-3, dt=5e-6, layer='l1')
+    results_phys[label] = res
+
+# Also one L2 (with dead-time) for completeness
+print('Rodando L2 IGBT phys 1.5V/50mΩ + t_d=5µs ...', flush=True)
+plant_l2 = build_l2_plant_igbt(configs_phys[0][1])
+res_l2 = run_mmc_open_loop(plant_l2, t_end=200e-3, dt=5e-6, layer='l2')
+results_phys["L2 IGBT phys + t_d"] = res_l2
 
 print('Pronto.')
 """))
 
     cells.append(md(r"""
-## 4.3 — Métricas comparativas
+## 4.4 — Tabela comparativa final
 
-Janela steady-state 150-200 ms, 3 períodos do fundamental para
-o cálculo da THD.
+Junta as 4 configs lumped + 3 configs físicas + referência
+experimental da tese. Janela 150-200 ms, 3 períodos do fundamental
+para a THD.
 """))
 
     cells.append(code(r"""
 fs = 1.0 / 5e-6  # 200 kHz
 n_win = int(round(3 * (1 / 60.0) * fs))
 
-print(f"{'Config':22s} {'R_b':>7s} {'i_a pk':>8s} {'i_a RMS':>8s} "
-      f"{'THD %':>7s} {'v_C mean':>9s} {'v_C pkpk':>9s}")
-print('-' * 80)
-
-# Reference row from Tabela 4.2 of the thesis
-print(f"{'Sousa (experimental)':22s} {'(N/A)':>7s} {'~22':>8s} {'16.0':>8s} "
-      f"{'1.11':>7s} {'~627':>9s} {'~50':>9s}")
-print('-' * 80)
-
-table = []
-for label, kw in configs:
-    res = results[label]
+def show_row(label, res):
     mask = res.t >= 150e-3
     ia = res.i_a[mask]
     ia_win = ia[:n_win]
-    metrics = {
-        'r_b':       kw['r_b'],
-        'i_a_pk':    float(np.max(np.abs(ia))),
-        'i_a_rms':   rms(ia),
-        'thd_pct':   thd(ia_win, fs, 60.0),
-        'v_C_mean':  float(np.mean(res.v_C[0, mask])),
-        'v_C_pkpk':  float(np.ptp(res.v_C[0, mask])),
-    }
-    table.append((label, metrics))
-    print(f'{label:22s} {metrics["r_b"]:7.3f} {metrics["i_a_pk"]:8.2f} '
-          f'{metrics["i_a_rms"]:8.2f} {metrics["thd_pct"]:7.2f} '
-          f'{metrics["v_C_mean"]:9.1f} {metrics["v_C_pkpk"]:9.1f}')
+    print(f'{label:26s} {np.max(np.abs(ia)):7.2f} '
+          f'{rms(ia):8.2f} {thd(ia_win, fs, 60.0):7.2f} '
+          f'{np.mean(res.v_C[0, mask]):9.1f} '
+          f'{np.ptp(res.v_C[0, mask]):9.1f}')
+
+print(f"{'Config':26s} {'i_a pk':>7s} {'i_a RMS':>8s} {'THD %':>7s} "
+      f"{'v_C mean':>9s} {'v_C pkpk':>9s}")
+print('-' * 75)
+print(f"{'Sousa (Tabela 4.2 exp.)':26s} {'~22':>7s} {'16.0':>8s} "
+      f"{'1.11':>7s} {'~627':>9s} {'~50':>9s}")
+print('--- Linear-equivalent R_b ---')
+for label, _ in configs_lump:
+    show_row(label, results_lump[label])
+print('--- Physical (SwitchedDiode pair) ---')
+for label, _ in configs_phys:
+    show_row(label, results_phys[label])
+show_row("L2 IGBT phys + t_d", results_phys["L2 IGBT phys + t_d"])
 """))
 
     cells.append(md(r"""
-## 4.4 — Visualização dos sinais
+## 4.5 — Visualização: zero-crossings e step de V_F0
 
-Plot da corrente $i_a$ e da tensão $v_{C,a,p}$ para as 4
-configurações em uma janela de 30 ms (1,8 períodos do fundamental).
+A diferença mais marcante entre o modelo *linear* ($R_b$ lumped)
+e o modelo *físico* (SwitchedDiode pair) aparece nos **zero-crossings**
+da corrente $i_a$. No modelo físico, a tensão sobre o par de diodos
+salta abruptamente de $-V_{F0,aggr}$ para $+V_{F0,aggr}$ (ou vice-
+versa) quando a corrente cruza zero — um degrau de $2 \cdot N \cdot
+V_{CE,sat} \approx 15$ V que distorce a forma de onda de $i_a$.
+
+O modelo $R_b$ é *linear*: a queda de tensão passa suavemente por
+zero junto com a corrente. Sem degrau, sem distorção adicional.
 """))
 
     cells.append(code(r"""
 fig, axes = plt.subplots(2, 1, figsize=(12, 6.5), sharex=True)
 
-t_win = slice(None)  # plot the whole thing then zoom
-colors = ['C0', 'C1', 'C2', 'C3']
+# Zoom: 5 ms window starting at 160ms — should contain ~0.3 fund cycles
+t_lo, t_hi = 160e-3, 165e-3
 
-for (label, _), color in zip(configs, colors):
-    res = results[label]
-    mask = (res.t >= 150e-3) & (res.t <= 180e-3)
-    t_ms = res.t[mask] * 1e3
-    axes[0].plot(t_ms, res.i_a[mask], color=color, label=label, lw=1.2)
-    axes[1].plot(t_ms, res.v_C[0, mask], color=color, label=label, lw=1.2)
+label_lump = "Tese-calibrado"
+res_lump = results_lump[label_lump]
+mask = (res_lump.t >= t_lo) & (res_lump.t <= t_hi)
+axes[0].plot(res_lump.t[mask]*1e3, res_lump.i_a[mask],
+             label="R_b lumped = 0.675 Ω", color='C0', lw=1.5)
+
+label_phys = "IGBT phys 1.5V/50mΩ"
+res_phys = results_phys[label_phys]
+mask = (res_phys.t >= t_lo) & (res_phys.t <= t_hi)
+axes[0].plot(res_phys.t[mask]*1e3, res_phys.i_a[mask],
+             label="SwitchedDiode pair (V_F0=7.5V)", color='C2', lw=1.5)
 
 axes[0].set_ylabel('$i_a$  [A]')
 axes[0].grid(True, alpha=0.3)
-axes[0].legend(loc='upper right', fontsize=9)
-axes[0].set_title('Corrente de fase $a$ — comparação das 4 configurações')
+axes[0].legend(loc='upper right', fontsize=10)
+axes[0].set_title('Detalhe — zero-crossing de $i_a$ '
+                   '(lumped vs. físico)')
+
+# v_C[a_p] — capacitor voltage, upper arm phase a
+mask = (res_lump.t >= t_lo) & (res_lump.t <= t_hi)
+axes[1].plot(res_lump.t[mask]*1e3, res_lump.v_C[0, mask],
+             label="R_b lumped", color='C0', lw=1.5)
+mask = (res_phys.t >= t_lo) & (res_phys.t <= t_hi)
+axes[1].plot(res_phys.t[mask]*1e3, res_phys.v_C[0, mask],
+             label="SwitchedDiode pair", color='C2', lw=1.5)
 
 axes[1].set_ylabel('$v_{C,a,p}$  [V]')
 axes[1].set_xlabel('tempo [ms]')
 axes[1].grid(True, alpha=0.3)
-axes[1].set_title('Tensão do capacitor (braço superior fase $a$)')
+axes[1].legend(loc='upper right', fontsize=10)
 
 plt.tight_layout()
 plt.show()
 """))
 
     cells.append(md(r"""
-## 4.5 — Discussão
+## 4.6 — Discussão
 
-**Resultado central — honesto e um pouco frustrante.** A diferença
-entre as 4 configurações é **pequena**: variar $R_b$ de 0,01 Ω
-(ideal) até 0,94 Ω (IGBT conservador) muda THD em ~8 pontos
-percentuais, $i_a$ peak em ~3 A, e $v_C$ pkpk em ~17 V. Os números
-*ainda* estão muito distantes da tese:
+### Observação central: o modelo físico *piora* o THD ligeiramente
 
-| Métrica | Pulsim | Sousa exp. | Gap |
-|---|---:|---:|:---|
-| THD($i_a$) [%] | 79–87 | **1,11** | ~70× pior |
-| $v_C$ pkpk [V] | 180–198 | **~50** | ~4× maior |
-| $i_a$ pico [A] | 27–31 | **~22** | ~30 % maior |
+Comparando o `R_b` lumped (THD ≈ 81,7 %) com o SwitchedDiode pair
+físico (THD ≈ 85,5 %), o modelo físico tem **THD um pouco maior**.
+Isso é contra-intuitivo à primeira vista — *adicionar* a física do
+$V_{F0}$ deveria deixar o modelo mais fiel ao protótipo, certo?
+Mas o efeito é o oposto:
 
-A melhoria com IGBT-equivalente é marginal, o que **comprova** o que
-o README já antecipava: a maior parte do gap **não vem** da
-modelagem de perdas de condução. Vem de:
+* O $R_b$ linear **suaviza** a corrente em todos os pontos
+  (incluindo zero-crossings).
+* O $V_{F0}$ físico **distorce** o zero-crossing — introduz um degrau
+  de tensão que aparece como **harmônicos ímpares de baixa ordem**
+  na corrente. Isso *aumenta* o THD computado sobre 50 harmônicos.
 
-1. **Filtro LC/LCL na medição experimental** — o protótipo da tese
-   provavelmente tem um filtro passivo de saída que não está
-   documentado na Seção 4.1. Sem esse filtro, é matematicamente
-   impossível obter 1,11 % de THD com PWM multinível $N=5$ a 1800
-   Hz/SM (carrier eficaz 9 kHz é alto, mas não tanto).
+Isso confirma que IGBTs reais **não atenuam** harmônicos PWM —
+eles introduzem uma assinatura de distorção própria. O protótipo
+da tese consegue 1,11 % de THD experimental **apesar** dos IGBTs,
+não graças a eles. A filtragem deve vir do filtro LC/LCL de saída,
+da indutância de carga maior, ou dos parâmetros efetivos diferentes
+dos documentados na Fig 4.2.
 
-2. **Indutância de carga maior** — a Seção 4.1 lista $L_{load}
-   = 2{,}8$ mH, mas a Fig 4.2 pode ter sido obtida com $L$ efetivo
-   maior (incluindo o filtro acima ou indutância do cabeamento).
+### O gap quantitativo persiste — mas as razões estão claras agora
 
-3. **Parâmetros da Fig 4.2 não casam 100% com a legenda** — nossa
-   análise analítica do L0 médio prevê ~250 V pkpk para o ponto
-   declarado, e a Fig mostra ~50 V. Há uma inconsistência interna
-   no Cap. 4.
+| Métrica | Pulsim (best) | Sousa exp. | Gap | Causa identificada |
+|---|---:|---:|:---|:---|
+| THD($i_a$) [%] | 81,7 | 1,11 | ~70× | Filtro LCL não documentado |
+| $v_C$ pkpk [V] | 185 | ~50 | ~4× | Inconsistência nos params Fig 4.2 |
+| $i_a$ pico [A] | 28,7 | ~22 | ~30 % | Filtro LCL ou $L_{load}$ maior |
 
-**Ponto positivo do experimento**: as métricas *internas* batem
-com o modelo. THD do baseline tese-calibrado (0,675 Ω) é 81,7 %, e
-$v_C$ pkpk é 185 V — exatamente o que o notebook 01 reporta.
-Reprodutibilidade ✓.
+Modelar IGBTs fisicamente **não fecha** essas diferenças, porque
+elas não vêm de perdas de condução. A modelagem física agora está
+no lugar para futuros estudos onde o detalhe importa (ex.: estimar
+perdas semiconductoras totais, projetar circuitos de gate-drive,
+estudar efeitos de comutação não-ideal).
 
-### Trabalho futuro — modelagem não-linear genuína do IGBT
+### Notas técnicas — robustez do solver
 
-A maneira fisicamente correta de modelar IGBTs é com **par
-antiparalelo de diodos não-lineares** por braço (anode/cathode
-invertidos), capturando o degrau de $V_{F0}$ em cada zero-crossing
-da corrente.
+A escolha de **SwitchedDiode** (linear piecewise) em vez de
+**IdealDiode** (smooth-blend nonlinear) é crítica. O smooth-blend
+faz o Jacobiano colapsar quando ambos os diodos do par estão off
+(condição natural no DC OP), e nem Levenberg-Marquardt com $\lambda
+= 10^9$ consegue regularizar — o problema é estrutural, não numérico.
+O SwitchedDiode é **piecewise-linear**, então cada região é um LTI
+e o solver não precisa iterar dentro do passo; só detecta o evento
+de zero-crossing. Robustez ✓.
 
-A infraestrutura já existe em `mmc_3phase_model.py` (funções
-`igbt_equivalent_r_b` e código comentado), mas o **DC operating
-point** com 12 pares antiparalelos (= 24 diodos) atualmente falha:
-no estado inicial todos os diodos estão bloqueando, e mesmo com
-$G_{off}$ não-zero, a matriz MNA fica singular no `solve_with_newton`.
-
-Para destravar isso seria preciso uma das três coisas:
-
-* Inicialização inteligente do DC OP que pré-condicione metade dos
-  diodos como conduzindo;
-* Pseudo-transient continuation no Newton (já existe no kernel mas
-  precisa ser ativada explicitamente para essa configuração);
-* Modelo de diodo com $G_{off}$ adaptativo (alto no início, baixo
-  em regime).
-
-Por hora a abordagem $R_b$ equivalente é "good enough" para o
-escopo desse notebook — a conclusão (gap ≠ perdas de condução) é
-**robusta** mesmo com o modelo linearizado.
+Esse insight está documentado em `mmc_3phase_model.py` (seção *IGBT-
+aware plant builders*) para futuros usuários que tropeçarem no mesmo
+problema.
 """))
 
     return cells

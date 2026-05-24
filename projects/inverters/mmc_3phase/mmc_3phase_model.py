@@ -262,7 +262,300 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
 
 
 # =============================================================================
-# IGBT-aware: compute lumped R_b equivalent of an IGBT level-1 conduction
+# IGBT-aware plant builders (Phase 20.18) — anti-parallel SwitchedDiode pair
+# =============================================================================
+#
+# Goal: model the **non-linear conduction loss** of an MMC arm where N
+# IGBT/diode pairs sit in series. At any instant exactly N switches
+# conduct in the same direction; aggregating per arm:
+#
+#   V_F0_aggr = N · V_CE_sat   (knee voltage of N IGBTs in series)
+#   R_d_aggr  = N · R_CE_sat   (on-state resistance, summed)
+#
+# Implementation: replace the lumped ``R_b`` resistor with an
+# **anti-parallel pair of SwitchedDiodes** (``b.add_diode``, the
+# *linear* binary-state model with ``V_th``, ``g_on`` and ``g_off``).
+# SwitchedDiode is event-detected (Layer 4 V3 / Phase 20.14), not
+# smooth-blend, so:
+#
+#   * the Jacobian stays well-conditioned (it's piecewise linear);
+#   * the Newton solver doesn't need to iterate inside a step — each
+#     state is just an LTI region;
+#   * commutation events (zero-crossing of i_arm) are detected by
+#     the kernel and the substep-state-correction path is used to
+#     resolve them at sub-dt resolution.
+#
+# We *also* tried ``b.add_nonlinear_diode`` (smooth-blend IdealDiode),
+# but ``solve_with_newton`` reports a numerically singular combined
+# matrix at the first transient step — the smooth-blend Jacobian
+# collapses when both diodes of the pair are in their off-state
+# simultaneously (the natural condition at DC OP). The linear
+# SwitchedDiode sidesteps this entirely because there's no Newton
+# iteration on its branch — only event detection.
+
+
+def igbt_equivalent_r_b(
+    *, n_sm: int, V_CE_sat: float, R_CE_sat: float, I_op: float,
+) -> float:
+    """Linear-equivalent arm resistance for an N-SM half-bridge whose
+    IGBTs have ``V_CE_sat`` knee and ``R_CE_sat`` on-state slope per
+    switch, sized to match the peak voltage drop at operating peak
+    current ``I_op``.
+
+    Returns:
+        ``R_b_eq = N · R_CE_sat + N · V_CE_sat / I_op``  [Ω]
+
+    Use the returned value in :class:`GeanThesisParams` and pass to
+    :func:`build_l1_plant` / :func:`build_l2_plant` to model an MMC
+    with IGBT-level-1 conduction physics, without needing pulsim's
+    nonlinear-diode infrastructure.
+
+    See :func:`build_l1_plant_igbt` / :func:`build_l2_plant_igbt`
+    for the *non-linear* alternative that captures the V_F0 step at
+    each zero-crossing of i_arm.
+    """
+    if n_sm <= 0:
+        raise ValueError(f"n_sm must be positive (got {n_sm})")
+    if I_op <= 0:
+        raise ValueError(f"I_op must be positive (got {I_op})")
+    return n_sm * R_CE_sat + n_sm * V_CE_sat / I_op
+
+
+@dataclass(frozen=True)
+class GeanThesisIgbtParams(GeanThesisParams):
+    """Extension of :class:`GeanThesisParams` adding physical IGBT
+    level-1 conduction-loss parameters per SM.
+
+    The per-arm conduction is modeled as a pair of anti-parallel
+    SwitchedDiodes between the arm inductor and the AC node:
+
+      * V_F0_aggr = ``n_sm · V_CE_sat_per_sm`` — the knee voltage
+        (``V_th`` of the SwitchedDiode model);
+      * R_d_aggr  = ``n_sm · R_CE_sat_per_sm`` — the on-state
+        slope (``g_on = 1 / R_d_aggr``);
+      * g_off (off-state conductance) = ``g_on · 1e-4`` by
+        default, so the blocking diode looks like a ~10 kΩ leak.
+
+    Typical IGBT level-1 parameters (FF150R12KE3 class — used in
+    Sousa's 15-kVA prototype):
+
+      * V_CE_sat ≈ 1.5–2.5 V
+      * R_CE_sat ≈ 30–80 mΩ
+
+    The base ``r_b`` is set to 0 by default — the diode pair *is*
+    the arm parasitic. Set ``r_b > 0`` to add a small residual
+    linear series resistance for extra damping.
+    """
+
+    V_CE_sat_per_sm: float = 1.5      # IGBT saturation voltage [V]
+    R_CE_sat_per_sm: float = 0.05     # IGBT on-state slope [Ω]
+    g_off_ratio: float = 1e-4         # off/on conductance ratio
+    r_b: float = 0.0                  # override base default (no residual)
+
+
+def _add_arm_diode_pair_switched(
+    b: object,
+    *,
+    name_prefix: str,
+    node_in: str,
+    node_out: str,
+    V_F0_aggr: float,
+    g_on: float,
+    g_off: float,
+) -> None:
+    """Insert an anti-parallel pair of SwitchedDiodes between
+    ``node_in`` and ``node_out`` modeling bidirectional IGBT-arm
+    conduction.
+
+    Forward diode: ``node_in → node_out`` (knee at V_F0_aggr).
+    Reverse diode: ``node_out → node_in`` (same knee on the other
+    side).
+    """
+    b.add_diode(  # type: ignore[attr-defined]
+        f"D_F_{name_prefix}", node_in, node_out, g_on, g_off, V_F0_aggr,
+    )
+    b.add_diode(  # type: ignore[attr-defined]
+        f"D_R_{name_prefix}", node_out, node_in, g_on, g_off, V_F0_aggr,
+    )
+
+
+def build_l1_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
+    """L1 MMC plant with **anti-parallel SwitchedDiode pair** in each
+    arm (modeling N IGBTs in series with V_CE_sat + R_CE_sat), replacing
+    the lumped ``R_b`` resistor of :func:`build_l1_plant`.
+
+    Optionally also inserts a residual ``r_b`` resistor in series if
+    ``params.r_b > 0`` (useful to capture parasitic interconnect that
+    isn't part of the semiconductor itself).
+    """
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+
+    m_a, m_b_, m_c = make_phase_mref_fns(params)
+
+    arm_params = p.MmcArmMultilevelParams(
+        n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
+        f_carrier=params.f_carrier,
+        modulation_scheme=params.modulation_scheme,  # type: ignore[arg-type]
+    )
+
+    V_F0_aggr = params.n_sm * params.V_CE_sat_per_sm
+    R_d_aggr  = params.n_sm * params.R_CE_sat_per_sm
+    g_on  = 1.0 / R_d_aggr if R_d_aggr > 0 else 1.0
+    g_off = g_on * params.g_off_ratio
+
+    arms: list[object] = []
+    upper_refs = (m_a, m_b_, m_c)
+    for k, ph in enumerate("abc"):
+        arm_p = p.add_mmc_arm_multilevel(
+            b, name=f"A_{ph}_p",
+            node_a="dc_p", node_b=f"mid_{ph}_p",
+            params=arm_params, m_ref=upper_refs[k],
+        )
+        arms.append(arm_p)
+        b.add_inductor(f"Lb_{ph}_p", f"mid_{ph}_p", f"rb_{ph}_p", params.l_b)
+        if params.r_b > 0:
+            b.add_resistor(
+                f"Rb_{ph}_p", f"rb_{ph}_p", f"dpre_{ph}_p", params.r_b,
+            )
+            diode_in = f"dpre_{ph}_p"
+        else:
+            diode_in = f"rb_{ph}_p"
+        _add_arm_diode_pair_switched(
+            b, name_prefix=f"{ph}_p",
+            node_in=diode_in, node_out=f"ac_{ph}",
+            V_F0_aggr=V_F0_aggr, g_on=g_on, g_off=g_off,
+        )
+
+    def _complement(f):
+        return lambda t, _f=f: 1.0 - float(_f(t))
+
+    lower_refs = tuple(_complement(f) for f in upper_refs)
+    for k, ph in enumerate("abc"):
+        if params.r_b > 0:
+            _add_arm_diode_pair_switched(
+                b, name_prefix=f"{ph}_n",
+                node_in=f"ac_{ph}", node_out=f"dpre_{ph}_n",
+                V_F0_aggr=V_F0_aggr, g_on=g_on, g_off=g_off,
+            )
+            b.add_resistor(
+                f"Rb_{ph}_n", f"dpre_{ph}_n", f"rb_{ph}_n", params.r_b,
+            )
+        else:
+            _add_arm_diode_pair_switched(
+                b, name_prefix=f"{ph}_n",
+                node_in=f"ac_{ph}", node_out=f"rb_{ph}_n",
+                V_F0_aggr=V_F0_aggr, g_on=g_on, g_off=g_off,
+            )
+        b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
+        arm_n = p.add_mmc_arm_multilevel(
+            b, name=f"A_{ph}_n",
+            node_a=f"mid_{ph}_n", node_b="dc_n",
+            params=arm_params, m_ref=lower_refs[k],
+        )
+        arms.append(arm_n)
+
+    iL_indices: list[int] = []
+    for ph in "abc":
+        l_id = b.graph.num_branches
+        b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
+        b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
+        iL_indices.append(
+            b.pool.branch_var_id_for_inductor(l_id, b.graph),
+        )
+    b.add_resistor("R_star", "star", "dc_n", 1e6)
+
+    return MmcPlant(builder=b, arms=arms,
+                     iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
+
+
+def build_l2_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
+    """L2 (dead-time aware) MMC plant with anti-parallel SwitchedDiode
+    pair per arm (V_CE_sat + R_CE_sat physics)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+
+    m_a, m_b_, m_c = make_phase_mref_fns(params)
+
+    arm_params = p.MmcArmEquivalentParams(
+        n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
+        f_carrier=params.f_carrier,
+        t_dead=params.t_dead, t_min=params.t_min,
+        modulation_scheme=params.modulation_scheme,  # type: ignore[arg-type]
+    )
+
+    V_F0_aggr = params.n_sm * params.V_CE_sat_per_sm
+    R_d_aggr  = params.n_sm * params.R_CE_sat_per_sm
+    g_on  = 1.0 / R_d_aggr if R_d_aggr > 0 else 1.0
+    g_off = g_on * params.g_off_ratio
+
+    arms: list[object] = []
+    upper_refs = (m_a, m_b_, m_c)
+    for k, ph in enumerate("abc"):
+        arm_p = p.add_mmc_arm_equivalent(
+            b, name=f"A_{ph}_p",
+            node_a="dc_p", node_b=f"mid_{ph}_p",
+            params=arm_params, m_ref=upper_refs[k],
+        )
+        arms.append(arm_p)
+        b.add_inductor(f"Lb_{ph}_p", f"mid_{ph}_p", f"rb_{ph}_p", params.l_b)
+        if params.r_b > 0:
+            b.add_resistor(
+                f"Rb_{ph}_p", f"rb_{ph}_p", f"dpre_{ph}_p", params.r_b,
+            )
+            diode_in = f"dpre_{ph}_p"
+        else:
+            diode_in = f"rb_{ph}_p"
+        _add_arm_diode_pair_switched(
+            b, name_prefix=f"{ph}_p",
+            node_in=diode_in, node_out=f"ac_{ph}",
+            V_F0_aggr=V_F0_aggr, g_on=g_on, g_off=g_off,
+        )
+
+    def _complement(f):
+        return lambda t, _f=f: 1.0 - float(_f(t))
+
+    lower_refs = tuple(_complement(f) for f in upper_refs)
+    for k, ph in enumerate("abc"):
+        if params.r_b > 0:
+            _add_arm_diode_pair_switched(
+                b, name_prefix=f"{ph}_n",
+                node_in=f"ac_{ph}", node_out=f"dpre_{ph}_n",
+                V_F0_aggr=V_F0_aggr, g_on=g_on, g_off=g_off,
+            )
+            b.add_resistor(
+                f"Rb_{ph}_n", f"dpre_{ph}_n", f"rb_{ph}_n", params.r_b,
+            )
+        else:
+            _add_arm_diode_pair_switched(
+                b, name_prefix=f"{ph}_n",
+                node_in=f"ac_{ph}", node_out=f"rb_{ph}_n",
+                V_F0_aggr=V_F0_aggr, g_on=g_on, g_off=g_off,
+            )
+        b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
+        arm_n = p.add_mmc_arm_equivalent(
+            b, name=f"A_{ph}_n",
+            node_a=f"mid_{ph}_n", node_b="dc_n",
+            params=arm_params, m_ref=lower_refs[k],
+        )
+        arms.append(arm_n)
+
+    iL_indices: list[int] = []
+    for ph in "abc":
+        l_id = b.graph.num_branches
+        b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
+        b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
+        iL_indices.append(
+            b.pool.branch_var_id_for_inductor(l_id, b.graph),
+        )
+    b.add_resistor("R_star", "star", "dc_n", 1e6)
+
+    return MmcPlant(builder=b, arms=arms,
+                     iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
+
+
+# =============================================================================
+# Lumped-R_b equivalent helper (kept as an alternative, simpler approach)
 # =============================================================================
 #
 # A physically motivated alternative to a manually-tuned ``R_b`` is to
@@ -287,34 +580,9 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
 # Notebook 04 ("MMC com IGBT level-1") uses this formula to sweep
 # realistic IGBT-equivalent ``R_b`` values and compare the impact on
 # THD, peak/RMS current and v_C ripple against Sousa's Tabela 4.2.
-# Future work: replacing the lumped R_b with a true nonlinear element
-# (anti-parallel IdealDiode pairs) needs further pulsim Newton work —
-# the DC operating point of an MMC with 12 anti-parallel diode pairs
-# is presently singular (off-state both diodes block; small G_off
-# leakage not enough to keep the MNA matrix conditioned).
-
-
-def igbt_equivalent_r_b(
-    *, n_sm: int, V_CE_sat: float, R_CE_sat: float, I_op: float,
-) -> float:
-    """Linear-equivalent arm resistance for an N-SM half-bridge whose
-    IGBTs have ``V_CE_sat`` knee and ``R_CE_sat`` on-state slope per
-    switch, sized to match the peak voltage drop at operating peak
-    current ``I_op``.
-
-    Returns:
-        ``R_b_eq = N · R_CE_sat + N · V_CE_sat / I_op``  [Ω]
-
-    Use the returned value in :class:`GeanThesisParams` and pass to
-    :func:`build_l1_plant` / :func:`build_l2_plant` to model an MMC
-    with IGBT-level-1 conduction physics, without needing pulsim's
-    nonlinear-diode infrastructure.
-    """
-    if n_sm <= 0:
-        raise ValueError(f"n_sm must be positive (got {n_sm})")
-    if I_op <= 0:
-        raise ValueError(f"I_op must be positive (got {I_op})")
-    return n_sm * R_CE_sat + n_sm * V_CE_sat / I_op
+# It is also kept as a simpler alternative to the SwitchedDiode-pair
+# physical model (above) for users who don't want to incur the
+# extra branch count from 12 added switched diodes.
 
 
 # =============================================================================
