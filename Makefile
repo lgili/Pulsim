@@ -303,14 +303,14 @@ benchmark: benchmark-converters-compare
 
 benchmark-converters: python
 	@echo "Running converter benchmarks (runtime only)..."
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_runner.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(BENCHMARK_OUT)
 
 benchmark-converters-baselines: python
 	@echo "Running converter benchmarks and generating missing baselines..."
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_runner.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(BENCHMARK_OUT) \
@@ -323,7 +323,7 @@ benchmark-ltspice: python
 		echo "Use: make benchmark-ltspice LTSPICE_EXE=/path/to/LTspice"; \
 		exit 1; \
 	fi
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_ngspice.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_ngspice.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--backend ltspice \
 		--ltspice-exe "$(LTSPICE_EXE)" \
@@ -337,11 +337,11 @@ benchmark-converters-compare: python
 		echo "Use: make benchmark-converters-compare LTSPICE_EXE=/path/to/LTspice"; \
 		exit 1; \
 	fi
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_runner.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--only $(CONVERTER_BENCH_IDS) \
 		--output-dir $(BENCHMARK_OUT)
-	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_ngspice.py \
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/benchmark_ngspice.py \
 		--benchmarks $(BENCHMARKS_FILE) \
 		--backend ltspice \
 		--ltspice-exe "$(LTSPICE_EXE)" \
@@ -377,7 +377,7 @@ benchmark-table:
 benchmark-local-limit: python
 	@echo "Running local limit suite ($(LOCAL_LIMIT_MODE), duration scale=$(LOCAL_LIMIT_DURATION_SCALE))..."
 	@set -e; \
-	CMD="PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/local_limit_suite.py --manifest $(LOCAL_LIMIT_MANIFEST) --output-dir $(LOCAL_LIMIT_OUT) --mode $(LOCAL_LIMIT_MODE) --duration-scale $(LOCAL_LIMIT_DURATION_SCALE)"; \
+	CMD="PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/tools/local_limit_suite.py --manifest $(LOCAL_LIMIT_MANIFEST) --output-dir $(LOCAL_LIMIT_OUT) --mode $(LOCAL_LIMIT_MODE) --duration-scale $(LOCAL_LIMIT_DURATION_SCALE)"; \
 	if [ -n "$(LOCAL_LIMIT_MAX_RUNTIME)" ]; then \
 		CMD="$$CMD --max-runtime-s $(LOCAL_LIMIT_MAX_RUNTIME)"; \
 	fi; \
