@@ -1354,7 +1354,7 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
 <li>LTspice executable path missing or incorrect.</li>
 </ul>
 <p>Fix:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_ngspice.py<span class="w"> </span><span class="se">\</span>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/tools/benchmark_ngspice.py<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--backend<span class="w"> </span>ltspice<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--ltspice-exe<span class="w"> </span><span class="s2">&quot;/Applications/LTspice.app/Contents/MacOS/LTspice&quot;</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/ltspice_out
