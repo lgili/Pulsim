@@ -551,18 +551,15 @@ where:
 
 Math validated by three checks (poles, DC gains, ss2tf round-trip).
 
+**Cross-validation against Pulsim**: open
+[`00_buck_boost_pulsim_validation.ipynb`](00_buck_boost_pulsim_validation.ipynb)
+for an executed notebook that builds the same buck-boost topology in
+Pulsim and overlays the steady-state output magnitude.
+
 **Next**: open `02_buck_boost_controller.ipynb` to size a Type-III
 compensator with $f_c \\le f_{z,RHP}/5$, discretize via Tustin, and
 run a switched closed-loop simulation that proves the design tracks
 a reference step at the chosen duty.
-
-**Note on Pulsim cross-validation.** Pulsim's switching engine has
-the same numerical-stability issues with the ideal-switch buck-boost
-that we saw with the boost (decoupled output cap → unbounded
-switching-transition dV/dt). The math self-consistency above is the
-rigorous validation; the closed-loop pure-Python simulation in
-notebook 2 demonstrates the controller working on the real switched
-waveform.
 
 **Suggested exercises**
 

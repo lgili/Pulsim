@@ -1,0 +1,51 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: bridge_resistive_pure
+  category: linear
+  observables:
+    - column: V(a)
+  expectations:
+    metrics:
+      # Wheatstone bridge: V_src = 10 V; arms:
+      #   R1 (vcc → a) = 100 Ω, R2 (a → 0) = 200 Ω
+      #   R3 (vcc → b) = 150 Ω, R4 (b → 0) = 100 Ω
+      # V(a) = V · R2 / (R1 + R2) = 10 · 200/300 = 6.6667 V (left mid-node)
+      # V(b) = V · R4 / (R3 + R4) = 10 · 100/250 = 4.0000 V (right mid-node)
+      # Bridge unbalanced (V(a) ≠ V(b)) — galvanometer current would be
+      # non-zero. We observe V(a) directly; ngspice and Pulsim agree to
+      # float-noise on this pure DC OP.
+      max_error: 1e-6
+  validation:
+    type: reference
+    observable: V(a)
+    baseline: baselines/bridge_resistive_pure.csv
+# Wheatstone bridge (4-R diamond). Tests how the linear solver
+# handles a 4-node symmetric resistive network. Bridge is unbalanced
+# (V(a) ≠ V(b)) so the configuration is non-degenerate.
+simulation:
+  tstop: 1e-3
+  dt: 5e-6
+components:
+  - type: voltage_source
+    name: Vsrc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 10.0
+  - type: resistor
+    name: R1
+    nodes: [vcc, a]
+    value: 100.0
+  - type: resistor
+    name: R2
+    nodes: [a, 0]
+    value: 200.0
+  - type: resistor
+    name: R3
+    nodes: [vcc, b]
+    value: 150.0
+  - type: resistor
+    name: R4
+    nodes: [b, 0]
+    value: 100.0

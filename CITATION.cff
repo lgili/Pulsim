@@ -1,0 +1,45 @@
+# Citation File Format — see https://citation-file-format.github.io/
+# Validate with `cffconvert --validate -i CITATION.cff` or
+# the GitHub repository view (auto-rendered as "Cite this repository").
+
+cff-version: 1.2.0
+message: >-
+  If you use Pulsim in academic work, please cite it as below.
+type: software
+title: 'Pulsim: A piecewise-linear state-space simulator for switched-mode power electronics'
+version: 1.1.0
+date-released: 2026-05-23
+license: MIT
+url: 'https://github.com/lgili/Pulsim'
+repository-code: 'https://github.com/lgili/Pulsim'
+
+authors:
+  - family-names: Gili
+    given-names: Luiz Carlos
+    orcid: 'https://orcid.org/0000-0002-5749-7199'
+    affiliation: 'Independent Researcher, Brazil'
+
+keywords:
+  - power-electronics
+  - circuit-simulation
+  - switched-mode-converter
+  - multilevel-converter
+  - modular-multilevel-converter
+  - piecewise-linear
+  - state-space
+  - cpp
+  - python
+
+# Once the JOSS paper is accepted, populate the `preferred-citation`
+# block below with the JOSS DOI so `cite this repository` returns
+# the paper instead of the software metadata.
+#
+# preferred-citation:
+#   type: article
+#   title: 'Pulsim: A piecewise-linear state-space simulator for switched-mode power electronics'
+#   authors:
+#     - family-names: Gili
+#       given-names: Luiz Carlos
+#   journal: 'Journal of Open Source Software'
+#   year: 2026
+#   doi: 'TBD'

@@ -64,8 +64,8 @@ the solver.
 |       |                 | [layer4-v9-vf0-continuation.md](layer4-v9-vf0-continuation.md)                        |
 |       |                 | [layer4-v10-warm-start.md](layer4-v10-warm-start.md) — pseudo-transient               |
 | 5     | `solver/`       | [layer5-solver-and-events.md](layer5-solver-and-events.md) — fixed-dt + bisection     |
-|       |                 | [layer5-v1-history-state.md](layer5-v1-history-state.md) — dynamic-device history     |
-|       |                 | [layer5-v2-event-detection.md](layer5-v2-event-detection.md) — diode auto-commutation |
+|       |                 | [layer5-v1.5-buck-validation.md](layer5-v1.5-buck-validation.md) — buck validation (covers dynamic-device history) |
+|       |                 | [layer5-v2.1-event-detection.md](layer5-v2.1-event-detection.md) — diode auto-commutation |
 |       |                 | [layer5-v3-substep-correction.md](layer5-v3-substep-correction.md)                    |
 | 6     | `builder/`      | [layer6-builder-api.md](layer6-builder-api.md)                                        |
 | 8     | `yaml/`         | [layer8-yaml-parser.md](layer8-yaml-parser.md)                                        |

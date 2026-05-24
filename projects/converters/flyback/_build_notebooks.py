@@ -529,6 +529,12 @@ factors on the reflected secondary side. The RHP zero is at a
 
 Math validated by three checks (poles, DC gains, ss2tf round-trip).
 
+**Cross-validation against Pulsim**: open
+[`00_flyback_pulsim_validation.ipynb`](00_flyback_pulsim_validation.ipynb)
+for an executed notebook that builds the flyback (two-winding linear
+transformer + rectifier diode + output cap) in Pulsim and overlays
+the steady-state output voltage.
+
 **Next**: open `02_flyback_controller.ipynb` to size a Type-III
 compensator and run a switched closed-loop simulation.
 

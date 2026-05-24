@@ -569,6 +569,12 @@ What's different is the **implementation**:
 These differences matter for sizing (switch ratings, filter L-C, EMI
 filter design) but they are invisible to the small-signal model.
 
+**Cross-validation against Pulsim**: open
+[`00_half_bridge_pulsim_validation.ipynb`](00_half_bridge_pulsim_validation.ipynb)
+for an executed notebook that builds the full half-bridge (two
+alternating MOSFETs with dead-time + rail-splitter + transformer +
+4-diode full-wave bridge + LC filter) in Pulsim.
+
 **Next**: open `02_half_bridge_controller.ipynb` for the controller
 design — which reuses the forward's recipe verbatim — plus a
 **4-phase switched closed-loop simulation** that actually models the

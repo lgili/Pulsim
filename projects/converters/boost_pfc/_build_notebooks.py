@@ -1555,6 +1555,13 @@ electronics. DCM and CCM offer two different philosophies — physics
 vs active control — for solving the same problem (shape the input
 current to look like a resistor at the line).
 
+**Cross-validation against Pulsim**: open
+[`00_boost_pfc_pulsim_validation.ipynb`](00_boost_pfc_pulsim_validation.ipynb)
+for an executed notebook that builds the full AC-input power stage
+in Pulsim (``add_sine_voltage_source`` → ``add_bridge_rectifier`` →
+boost stage) and overlays the rectified line voltage against the
+analytical $|V_{pk} \\sin(\\omega_{line} t)|$ envelope.
+
 Both modes share:
 - First-order voltage-loop plant
 - 2·$f_{line}$ output ripple

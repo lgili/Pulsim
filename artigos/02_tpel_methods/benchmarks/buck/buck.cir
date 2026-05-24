@@ -1,0 +1,62 @@
+* Buck converter — ngspice reference netlist
+*
+* Same topology as projects/converters/buck/buck_pulsim_validation.py:
+*   V_g → MOSFET + body diode → freewheeling diode → L → C || R_load → gnd
+*
+* Design defaults (match BuckParams in buck_model.py):
+*   V_g  = 24 V       L   = 100 uH    f_sw = 100 kHz
+*   V_o  = 12 V       C   = 100 uF    duty = 0.5 (steady-state)
+*   R    = 2.4 Ohm
+*
+* Switch model: behavioural voltage-controlled switch (sw_mos) plus
+* simple piecewise-linear diode (D_FW). The Pulsim version uses
+* R_on = 1 mOhm / R_off = 1 GOhm with a 0.7 V body-diode drop —
+* matched here so output waveforms align to within the integrator
+* tolerance.
+*
+* The simulation runs 5 ms (= 500 switching periods at 100 kHz) which
+* is the same window the Pulsim version uses. Output is written to
+* buck_ngspice_out.raw for downstream comparison.
+
+* ---- Source ----
+Vdc vin 0 DC 24
+
+* ---- PWM gate drive: 100 kHz, 50% duty, 10 V swing ----
+* Period 10 us; rise/fall 100 ns; pulse 5 us; on at t=0
+Vgate gate 0 PULSE(0 10 0 100n 100n 4.9u 10u)
+
+* ---- High-side switch (MOSFET + body diode) ----
+* Behavioural switch driven by Vgate. R_on / R_off chosen to match
+* the Pulsim mosfet model (R_on = 1 mOhm, R_off = 1 GOhm).
+.model sw_mos SW(Ron=1m Roff=1G Vt=5 Vh=0.5)
+S1 vin sw gate 0 sw_mos
+
+* ---- Free-wheeling diode (low-side rectifier) ----
+* Pulsim uses g_on = 1e3 S (R_on = 1 mOhm) with V_th = 0.7 V.
+.model d_fw D(IS=1e-9 N=1.0 VJ=0.7 RS=1m)
+D_FW 0 sw d_fw
+
+* ---- Output LC filter ----
+L1 sw out 100u IC=5
+Cout out 0 100u IC=12
+
+* ---- Resistive load ----
+Rload out 0 2.4
+
+* ---- Analysis ----
+* Transient drive lives inside the `.control` block below — the
+* idiom required for `wrdata`/`write` to see populated vectors when
+* run in `-b` batch mode.
+
+.options noacct nomod
+
+.control
+  * Run the transient: step 100 ns, stop 5 ms, start 0, use IC=
+  tran 100n 5m 0 100n uic
+  * `wrdata` writes ASCII tabular output: column 1 = time,
+  * column 2 = V(out). One file per vector list in the args.
+  wrdata buck_ngspice_out.txt v(out)
+  quit
+.endc
+
+.end
