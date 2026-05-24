@@ -41,8 +41,10 @@
 #include "pulsim/sparse/solver.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <queue>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -74,6 +76,9 @@ public:
         l_row_idx_.clear();
         u_col_ptr_.clear();
         u_row_idx_.clear();
+        // Section 5: analyze() invalidates the path cache (etree itself
+        // changes since the column permutation may change).
+        invalidate_path_cache_();
 
         if (M.rows() != M.cols() || M.rows() == 0) {
             return false;
@@ -363,6 +368,190 @@ public:
 
     [[nodiscard]] bool is_analyzed()   const noexcept override { return analyzed_; }
     [[nodiscard]] bool is_factorized() const noexcept override { return factorized_; }
+
+    // -------------------------------------------------------------------------
+    // Section 5 — path-based partial_refactor (Chan/Brandwajn/Tinney 1986;
+    // Dinkelbach et al., *Energies* 14:7989, 2021, §3)
+    // -------------------------------------------------------------------------
+
+    [[nodiscard]] bool supports_partial_refactor() const noexcept override {
+        return true;
+    }
+
+    /// Re-eliminate only the columns of the LU factor that depend on
+    /// `changed_cols` (the columns of `new_M` whose values have changed
+    /// since the most recent `factorize`). The sparsity pattern of M
+    /// MUST be unchanged.
+    ///
+    /// Algorithm (Dinkelbach 2021 §3):
+    ///   1. Update the lazy union `varying_set_` with `changed_cols`.
+    ///   2. If the union grew, recompute the etree path from each
+    ///      varying column up to the root. Walk caches in `path_`.
+    ///   3. For each column k in `path_` (ascending order),
+    ///      re-run Gilbert-Peierls's column step against `new_M`'s
+    ///      values, using the EXISTING `Prow_` (no re-pivoting):
+    ///        - Apply L-updates from j < k (uses both updated columns
+    ///          earlier in path_ AND unchanged columns NOT in path_)
+    ///        - Pivot-fault check: if |x[k]| < `PIVOT_TOL` OR if some
+    ///          x[i] for i > k is significantly larger than x[k]
+    ///          (within factor 1.1), the original pivot order is no
+    ///          longer optimal — invalidate cache + return false
+    ///        - Pattern check: if x has nonzero at a row not in the
+    ///          existing L+U pattern for column k, the symbolic
+    ///          structure changed — invalidate cache + return false
+    ///        - Update L+U values in the existing CSC slots
+    ///
+    /// On any failure mode, invalidates the path cache and returns
+    /// `false`. The caller then falls back to a full `factorize(new_M)`.
+    [[nodiscard]] bool partial_refactor(
+        const Matrix& new_M,
+        std::span<const Index> changed_cols) override {
+        if (!factorized_) {
+            return false;  // need a prior factor to refactor over
+        }
+        if (new_M.rows() != n_ || new_M.cols() != n_) {
+            return false;
+        }
+        if (changed_cols.empty()) {
+            return true;  // nothing to do
+        }
+
+        // 1. Update lazy union of varying columns (in ORIGINAL coords)
+        bool need_recompute = !path_valid_;
+        for (Index c : changed_cols) {
+            if (c < 0 || c >= n_) {
+                invalidate_path_cache_();
+                return false;
+            }
+            auto [_, inserted] = varying_set_.insert(c);
+            if (inserted) {
+                need_recompute = true;
+            }
+        }
+
+        // 2. Recompute path if union grew
+        if (need_recompute) {
+            compute_path_();
+            path_valid_ = true;
+        }
+
+        // 3. Re-eliminate path columns
+        std::vector<Real> x(static_cast<std::size_t>(n_), Real{0});
+        std::vector<bool> in_pattern(static_cast<std::size_t>(n_), false);
+        const int*  Ap = new_M.outerIndexPtr();
+        const int*  Ai = new_M.innerIndexPtr();
+        const Real* Ax = new_M.valuePtr();
+
+        constexpr Real PIVOT_TOL       = Real{1e-14};
+        constexpr Real PIVOT_RATIO_TOL = Real{1.1};
+
+        for (Index k : path_) {
+            // ---- Load x = new_M[Prow, Pcol[k]] -------------------------
+            std::fill(x.begin(), x.end(), Real{0});
+            const Index orig_col = Pcol_[static_cast<std::size_t>(k)];
+            for (int p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
+                const Index orig_row = Ai[p];
+                const Index perm_row = Pinv_row_[static_cast<std::size_t>(orig_row)];
+                x[static_cast<std::size_t>(perm_row)] = Ax[p];
+            }
+
+            // ---- L-updates from j < k ---------------------------------
+            for (Index j = 0; j < k; ++j) {
+                const Real xj = x[static_cast<std::size_t>(j)];
+                if (xj == Real{0}) continue;
+                for (Index q = l_col_ptr_[static_cast<std::size_t>(j)];
+                     q < l_col_ptr_[static_cast<std::size_t>(j + 1)]; ++q) {
+                    const Index i = l_row_idx_[static_cast<std::size_t>(q)];
+                    x[static_cast<std::size_t>(i)] -=
+                        l_values_[static_cast<std::size_t>(q)] * xj;
+                }
+            }
+
+            // ---- Pivot-fault check ------------------------------------
+            const Real pivot = x[static_cast<std::size_t>(k)];
+            if (std::abs(pivot) < PIVOT_TOL) {
+                invalidate_path_cache_();
+                return false;
+            }
+            // Check if some row i > k has |x[i]| > 1.1 × |x[k]| —
+            // would mean partial pivoting needs a row swap. Original
+            // factorize chose row k as the pivot, so this signals the
+            // pivot order is no longer optimal.
+            const Real pivot_abs = std::abs(pivot);
+            for (Index i = k + 1; i < n_; ++i) {
+                if (std::abs(x[static_cast<std::size_t>(i)]) >
+                    PIVOT_RATIO_TOL * pivot_abs) {
+                    invalidate_path_cache_();
+                    return false;
+                }
+            }
+
+            // ---- Pattern check + value update -------------------------
+            // Build a marker set of the existing L+U pattern for column k.
+            for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
+                 q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                in_pattern[static_cast<std::size_t>(
+                    u_row_idx_[static_cast<std::size_t>(q)])] = true;
+            }
+            for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
+                 q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                in_pattern[static_cast<std::size_t>(
+                    l_row_idx_[static_cast<std::size_t>(q)])] = true;
+            }
+            // Verify no x[i] != 0 falls outside the existing pattern.
+            bool pattern_ok = true;
+            for (Index i = 0; i < n_; ++i) {
+                if (x[static_cast<std::size_t>(i)] != Real{0} &&
+                    !in_pattern[static_cast<std::size_t>(i)]) {
+                    pattern_ok = false;
+                    break;
+                }
+            }
+            // Reset the marker for the next column iteration. We
+            // touched only the existing-pattern positions; reset just
+            // those (cheaper than std::fill over the whole vector).
+            for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
+                 q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                in_pattern[static_cast<std::size_t>(
+                    u_row_idx_[static_cast<std::size_t>(q)])] = false;
+            }
+            for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
+                 q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                in_pattern[static_cast<std::size_t>(
+                    l_row_idx_[static_cast<std::size_t>(q)])] = false;
+            }
+            if (!pattern_ok) {
+                invalidate_path_cache_();
+                return false;
+            }
+
+            // Update U[:, k]'s values in-place at the existing slots.
+            // x[u_row_idx_[q]] may be 0 — that's a sparse zero, fine.
+            for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
+                 q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                const Index i = u_row_idx_[static_cast<std::size_t>(q)];
+                u_values_[static_cast<std::size_t>(q)] =
+                    x[static_cast<std::size_t>(i)];
+            }
+            // Update L[:, k]'s values (scaled by 1/pivot).
+            const Real inv_pivot = Real{1} / pivot;
+            for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
+                 q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                const Index i = l_row_idx_[static_cast<std::size_t>(q)];
+                l_values_[static_cast<std::size_t>(q)] =
+                    x[static_cast<std::size_t>(i)] * inv_pivot;
+            }
+        }
+
+        return true;
+    }
+
+    /// Test-only: how many times has `compute_path_()` been invoked?
+    /// Used by 5.7.2 to verify path caching across identical
+    /// changed_cols calls.
+    [[nodiscard]] std::uint64_t path_compute_count() const noexcept {
+        return path_compute_count_;
+    }
 
     // -------------------------------------------------------------------------
     // Test-only / introspection accessors
@@ -690,6 +879,38 @@ private:
     }
 
     // -------------------------------------------------------------------------
+    // 5. Path-based partial refactor helpers
+    // -------------------------------------------------------------------------
+
+    /// Compute the union of etree paths from each varying column up to
+    /// the root. Stored ascending in `path_`. Each call increments
+    /// `path_compute_count_` for diagnostic purposes.
+    void compute_path_() {
+        path_.clear();
+        std::vector<bool> in_path(static_cast<std::size_t>(n_), false);
+        for (Index orig_c : varying_set_) {
+            Index k = Pinv_col_[static_cast<std::size_t>(orig_c)];
+            while (k != Index{-1} &&
+                   !in_path[static_cast<std::size_t>(k)]) {
+                in_path[static_cast<std::size_t>(k)] = true;
+                path_.push_back(k);
+                k = etree_parent_[static_cast<std::size_t>(k)];
+            }
+        }
+        std::sort(path_.begin(), path_.end());
+        ++path_compute_count_;
+    }
+
+    /// Drop the cached path + varying-set state. Called from `analyze()`
+    /// (symbolic factor invalidated by topology change) and on any
+    /// pivot/pattern fault inside `partial_refactor`.
+    void invalidate_path_cache_() {
+        varying_set_.clear();
+        path_.clear();
+        path_valid_ = false;
+    }
+
+    // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
 
@@ -715,6 +936,17 @@ private:
     // Section 3 — numeric storage parallel to the symbolic CSC pattern.
     std::vector<Real> l_values_;   // same length as l_row_idx_
     std::vector<Real> u_values_;   // same length as u_row_idx_
+
+    // Section 5 — path-based partial refactor state.
+    // `varying_set_` holds the union of all ORIGINAL column indices ever
+    // passed as `changed_cols`. `path_` is the (sorted ascending) set
+    // of PERMUTED column indices that depend on the varying set via the
+    // elimination tree. Both are mutated by `partial_refactor`, cleared
+    // by `analyze` and on any pivot/pattern fault.
+    std::set<Index>    varying_set_;
+    std::vector<Index> path_;
+    bool               path_valid_         = false;
+    std::uint64_t      path_compute_count_ = 0;
 
     // Section 3 — row permutation from partial pivoting. V0 of this
     // header initializes both to identity and never mutates them

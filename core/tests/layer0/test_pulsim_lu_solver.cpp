@@ -30,7 +30,9 @@
 #include <Eigen/OrderingMethods>
 
 #include <algorithm>
+#include <array>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -452,6 +454,152 @@ TEST_CASE("PulsimSparseLuSolver::solve uses the latest factor after refactorize"
     for (Index i = 0; i < 3; ++i) {
         REQUIRE(x2[i] == Catch::Approx(x1[i] / 2.0).margin(1e-12));
     }
+}
+
+// -----------------------------------------------------------------------------
+// Section 5 — path-based partial_refactor
+// -----------------------------------------------------------------------------
+
+TEST_CASE("PulsimSparseLuSolver advertises partial_refactor support",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.supports_partial_refactor());
+}
+
+// 5.7.1 — partial_refactor after value perturbation produces L+U
+// numerically equivalent to a fresh full factorize. Tested via solve
+// parity (the LU factors aren't bit-identical because Pulsim's
+// pivoting picks different orders for the two paths, but the solution
+// must match within tolerance).
+TEST_CASE("PulsimSparseLuSolver::partial_refactor matches fresh full factorize on solve",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    Matrix M1 = make_spd_3x3();
+    Matrix M2(3, 3);
+    // Perturb column 1 slightly: M2 differs from M1 only in column 1's
+    // values. Same sparsity pattern.
+    std::vector<Triplet> t2 = {
+        {0, 0,  4.0}, {0, 1, -1.2},
+        {1, 0, -1.0}, {1, 1,  4.3}, {1, 2, -1.0},
+        {2, 1, -1.1}, {2, 2,  4.0},
+    };
+    M2.setFromTriplets(t2.begin(), t2.end());
+    compress_in_place(M2);
+
+    Vector b(3); b << 1.0, 2.0, 3.0;
+
+    // Path A: full factorize of M2 (reference)
+    PulsimSparseLuSolver ref;
+    REQUIRE(ref.analyze(M2));
+    REQUIRE(ref.factorize(M2));
+    Vector x_ref(3);
+    ref.solve(b, x_ref);
+
+    // Path B: factorize M1, then partial_refactor with column 1 marked
+    // as varying
+    PulsimSparseLuSolver inc;
+    REQUIRE(inc.analyze(M1));
+    REQUIRE(inc.factorize(M1));
+    std::array<Index, 1> changed = {1};
+    const bool ok = inc.partial_refactor(M2,
+        std::span<const Index>{changed.data(), changed.size()});
+    REQUIRE(ok);
+    Vector x_inc(3);
+    inc.solve(b, x_inc);
+
+    for (Index i = 0; i < 3; ++i) {
+        INFO("i=" << i << " inc=" << x_inc[i] << " ref=" << x_ref[i]);
+        REQUIRE(x_inc[i] == Catch::Approx(x_ref[i]).margin(1e-12));
+    }
+}
+
+// 5.7.2 — repeated identical changed_cols reuses the cached path
+TEST_CASE("PulsimSparseLuSolver::partial_refactor reuses cached path on repeats",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+    REQUIRE(solver.path_compute_count() == 0);
+
+    std::array<Index, 1> changed = {1};
+    std::span<const Index> cc{changed.data(), changed.size()};
+
+    REQUIRE(solver.partial_refactor(M, cc));
+    REQUIRE(solver.path_compute_count() == 1);  // first call: cache miss
+
+    REQUIRE(solver.partial_refactor(M, cc));
+    REQUIRE(solver.path_compute_count() == 1);  // identical → cache hit
+
+    REQUIRE(solver.partial_refactor(M, cc));
+    REQUIRE(solver.path_compute_count() == 1);  // still cached
+}
+
+// 5.7.3 — adding a previously-unseen column to changed_cols triggers
+// a path recompute
+TEST_CASE("PulsimSparseLuSolver::partial_refactor recomputes path when varying set grows",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+
+    std::array<Index, 1> col1 = {1};
+    std::array<Index, 1> col0 = {0};
+
+    REQUIRE(solver.partial_refactor(M, {col1.data(), 1}));
+    REQUIRE(solver.path_compute_count() == 1);
+
+    REQUIRE(solver.partial_refactor(M, {col1.data(), 1}));
+    REQUIRE(solver.path_compute_count() == 1);  // cached
+
+    // New column → union grows → path recomputed
+    REQUIRE(solver.partial_refactor(M, {col0.data(), 1}));
+    REQUIRE(solver.path_compute_count() == 2);
+}
+
+// 5.7.4 — analyze() invalidates the path cache
+TEST_CASE("PulsimSparseLuSolver::analyze invalidates the path cache",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+
+    std::array<Index, 1> changed = {1};
+    REQUIRE(solver.partial_refactor(M, {changed.data(), 1}));
+    REQUIRE(solver.path_compute_count() == 1);
+
+    // Re-analyze (e.g., topology change) — should clear the cache.
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.path_compute_count() == 1);  // not yet recomputed
+
+    REQUIRE(solver.factorize(M));
+    REQUIRE(solver.partial_refactor(M, {changed.data(), 1}));
+    REQUIRE(solver.path_compute_count() == 2);  // recomputed after analyze
+}
+
+// 5.7.5 — partial_refactor before factorize returns false (can't refactor
+// what hasn't been factored)
+TEST_CASE("PulsimSparseLuSolver::partial_refactor before factorize returns false",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+
+    std::array<Index, 1> changed = {1};
+    REQUIRE_FALSE(solver.partial_refactor(M, {changed.data(), 1}));
+}
+
+// 5.7.6 — empty changed_cols is a no-op (returns true without recomputing)
+TEST_CASE("PulsimSparseLuSolver::partial_refactor with empty changed_cols is a no-op",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+
+    REQUIRE(solver.partial_refactor(M, std::span<const Index>{}));
+    REQUIRE(solver.path_compute_count() == 0);  // no path work happened
 }
 
 TEST_CASE("PulsimSparseLuSolver::factorize before analyze throws",
