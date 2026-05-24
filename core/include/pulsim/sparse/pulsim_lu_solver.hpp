@@ -102,17 +102,204 @@ public:
         return true;
     }
 
-    /// Numeric factorization — Section 3, not yet implemented. Returns
-    /// false so callers see "not ready" cleanly without throwing.
-    [[nodiscard]] bool factorize([[maybe_unused]] const Matrix& M) override {
+    /// Numeric factorization via Gilbert-Peierls left-looking sparse LU
+    /// (Gilbert & Peierls, *SIAM J. Sci. Stat. Comput.* 9, 1988; Davis
+    /// 2006 §3). For each permuted column k = 0..n-1:
+    ///   1. Initialize a dense workspace `x` from column `Pcol_[k]` of M
+    ///      after applying the current row permutation `Prow_`.
+    ///   2. Apply L-updates from previously-factored columns j < k:
+    ///      for each j in the symbolic U[:, k] pattern (excluding the
+    ///      diagonal), subtract `L[i, j] * x[j]` from every i in
+    ///      L[:, j]'s pattern.
+    ///   3. The diagonal entry x[k] becomes the pivot U[k, k]. Above-
+    ///      diagonal x[i] (i < k) become U[i, k]. Below-diagonal entries
+    ///      x[i] (i > k) divided by the pivot become L[i, k].
+    ///
+    /// Includes **partial pivoting** (column-by-column row swap to the
+    /// largest-magnitude candidate). The row swap relabels indices in
+    /// the already-stored L columns 0..k-1 (no new storage slots are
+    /// needed — the symbolic |M|+|M^T| pattern computed in Section 2
+    /// is invariant under row-only permutations). Required for circuit
+    /// MNA matrices whose voltage-source constraint rows produce zero
+    /// diagonals: without pivoting, Gilbert-Peierls hits zero pivot at
+    /// the source's branch-current variable.
+    ///
+    /// Pivot magnitudes below `PIVOT_TOL` (1e-14) trigger
+    /// `numeric_singular_ = true` and a `false` return; this signals
+    /// genuine rank deficiency (no row swap can rescue it) and the
+    /// caller is expected to surface the failure.
+    [[nodiscard]] bool factorize(const Matrix& M) override {
         if (!analyzed_) {
             throw std::logic_error(
                 "PulsimSparseLuSolver::factorize called before analyze");
         }
-        // Section 3 (Gilbert-Peierls + partial pivoting) lands in a
-        // follow-up commit. Stub returns false; callers fall back to
-        // SparseLuSolver in the meantime.
-        return false;
+        factorized_       = false;
+        numeric_singular_ = false;
+        if (M.rows() != n_ || M.cols() != n_) {
+            return false;  // dimensions changed since analyze
+        }
+
+        // Initialize the row permutation to the SAME order as the column
+        // permutation. Circuit MNA matrices are structurally near-symmetric
+        // (every off-diagonal nonzero typically has a transpose partner),
+        // so reordering both rows AND columns the same way keeps the
+        // diagonal entries on the diagonal of M_perm — which is required
+        // for Gilbert-Peierls without partial pivoting to find a non-zero
+        // pivot at column k. Partial pivoting (deferred) would further
+        // mutate Prow_ on top of this base ordering.
+        Prow_     = std::vector<Index>(Pcol_.begin(), Pcol_.end());
+        Pinv_row_ = std::vector<Index>(Pinv_col_.begin(), Pinv_col_.end());
+
+        // Reset L and U storage to empty — factorize() recomputes the
+        // pattern DYNAMICALLY from x's actual nonzeros per column. This
+        // overrides any pattern previously populated by analyze()'s
+        // symbolic step; the symbolic pattern is just a hint for
+        // diagnostics, not used for storage allocation.
+        //
+        // Rationale: Section 2's symbolic pattern was computed against
+        // the |M|+|M^T| symmetric structure under the assumption
+        // Prow == Pcol. Partial pivoting in Section 3 mutates Prow,
+        // which can introduce L/U entries at permuted rows that the
+        // pre-pivot symbolic pattern didn't anticipate. Dynamic
+        // discovery avoids the issue: we record every nonzero x[i]
+        // post-elimination as an L or U entry.
+        l_col_ptr_.assign(static_cast<std::size_t>(n_ + 1), Index{0});
+        l_row_idx_.clear();
+        l_values_.clear();
+        u_col_ptr_.assign(static_cast<std::size_t>(n_ + 1), Index{0});
+        u_row_idx_.clear();
+        u_values_.clear();
+
+        // Dense workspace for the current column. Reused across the k loop.
+        std::vector<Real> x(static_cast<std::size_t>(n_), Real{0});
+
+        const int*  Ap = M.outerIndexPtr();
+        const int*  Ai = M.innerIndexPtr();
+        const Real* Ax = M.valuePtr();
+
+        constexpr Real PIVOT_TOL = Real{1e-14};
+
+        for (Index k = 0; k < n_; ++k) {
+            // ---- Step 1: load column k of M[Prow_, Pcol_] into x --------
+            std::fill(x.begin(), x.end(), Real{0});
+            const Index orig_col = Pcol_[static_cast<std::size_t>(k)];
+            for (int p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
+                const Index orig_row = Ai[p];
+                const Index perm_row = Pinv_row_[static_cast<std::size_t>(orig_row)];
+                x[static_cast<std::size_t>(perm_row)] = Ax[p];
+            }
+
+            // ---- Step 2: apply L-updates from ALL prior columns where x[j] != 0
+            // Dense workspace makes this O(k) per column for the j-loop
+            // (with the inner work scaling with L[:, j]'s nnz). The total
+            // O(n²) iteration cost is acceptable for circuit MNA at
+            // n ≤ a few hundred; for larger n a Davis 2006 §3-style
+            // reachability-based sparse triangular solve is the next
+            // optimization.
+            for (Index j = 0; j < k; ++j) {
+                const Real xj = x[static_cast<std::size_t>(j)];
+                if (xj == Real{0}) continue;
+                for (Index q = l_col_ptr_[static_cast<std::size_t>(j)];
+                     q < l_col_ptr_[static_cast<std::size_t>(j + 1)]; ++q) {
+                    const Index i = l_row_idx_[static_cast<std::size_t>(q)];
+                    x[static_cast<std::size_t>(i)] -=
+                        l_values_[static_cast<std::size_t>(q)] * xj;
+                }
+            }
+
+            // ---- Step 3a: partial pivoting --------------------------------
+            // Find argmax |x[i]| for i ∈ [k, n_). If the largest is not
+            // at position k, swap logical rows i_max ↔ k. The swap
+            // relabels row indices in the already-stored L columns
+            // 0..k-1 (no new storage slots needed — the SET of nonzero
+            // logical rows per column is unchanged, only the labels
+            // permute). The symbolic L+U pattern from Section 2 was
+            // computed against the SYMMETRIC |M|+|M^T| structure, which
+            // is an over-estimate that remains valid under row-only
+            // permutations introduced by pivoting.
+            //
+            // Required for circuit MNA matrices with voltage-source
+            // constraint rows (zero diagonal at the source's branch-
+            // current variable). Without pivoting, M_perm has zero on
+            // the diagonal at that position and factorization fails.
+            Index i_max     = k;
+            Real  max_abs   = std::abs(x[static_cast<std::size_t>(k)]);
+            for (Index i = k + 1; i < n_; ++i) {
+                const Real abs_xi =
+                    std::abs(x[static_cast<std::size_t>(i)]);
+                if (abs_xi > max_abs) {
+                    max_abs = abs_xi;
+                    i_max   = i;
+                }
+            }
+            if (i_max != k) {
+                // (a) workspace
+                std::swap(x[static_cast<std::size_t>(k)],
+                           x[static_cast<std::size_t>(i_max)]);
+                // (b) stored L columns 0..k-1: relabel row indices
+                for (Index j = 0; j < k; ++j) {
+                    for (Index p = l_col_ptr_[static_cast<std::size_t>(j)];
+                         p < l_col_ptr_[static_cast<std::size_t>(j + 1)];
+                         ++p) {
+                        const Index r = l_row_idx_[static_cast<std::size_t>(p)];
+                        if (r == k) {
+                            l_row_idx_[static_cast<std::size_t>(p)] = i_max;
+                        } else if (r == i_max) {
+                            l_row_idx_[static_cast<std::size_t>(p)] = k;
+                        }
+                    }
+                }
+                // (c) row permutation tracker
+                const Index orig_k    = Prow_[static_cast<std::size_t>(k)];
+                const Index orig_imax = Prow_[static_cast<std::size_t>(i_max)];
+                std::swap(Prow_[static_cast<std::size_t>(k)],
+                           Prow_[static_cast<std::size_t>(i_max)]);
+                Pinv_row_[static_cast<std::size_t>(orig_k)]    = i_max;
+                Pinv_row_[static_cast<std::size_t>(orig_imax)] = k;
+            }
+
+            // ---- Step 3b: pivot check + numeric extraction ---------------
+            const Real pivot = x[static_cast<std::size_t>(k)];
+            if (std::abs(pivot) < PIVOT_TOL) {
+                numeric_singular_ = true;
+                return false;
+            }
+
+            // Store U[:, k] — dynamically discover nonzero rows
+            // i ∈ [0, k] in x. Diagonal is `pivot`. Row indices end
+            // up sorted automatically (we iterate i in increasing
+            // order). We update `u_col_ptr_[k+1]` at the END of this
+            // column's push so that the NEXT iteration's L-update
+            // loop sees the correct slice for j ≤ k.
+            for (Index i = 0; i < k; ++i) {
+                const Real xi = x[static_cast<std::size_t>(i)];
+                if (xi != Real{0}) {
+                    u_row_idx_.push_back(i);
+                    u_values_.push_back(xi);
+                }
+            }
+            u_row_idx_.push_back(k);
+            u_values_.push_back(pivot);
+            u_col_ptr_[static_cast<std::size_t>(k + 1)] =
+                static_cast<Index>(u_row_idx_.size());
+
+            // Store L[:, k] — dynamically discover nonzero rows
+            // i ∈ (k, n). Values scaled by 1/pivot to give L unit-
+            // lower-triangular form. Same end-of-push col_ptr update.
+            const Real inv_pivot = Real{1} / pivot;
+            for (Index i = k + 1; i < n_; ++i) {
+                const Real xi = x[static_cast<std::size_t>(i)];
+                if (xi != Real{0}) {
+                    l_row_idx_.push_back(i);
+                    l_values_.push_back(xi * inv_pivot);
+                }
+            }
+            l_col_ptr_[static_cast<std::size_t>(k + 1)] =
+                static_cast<Index>(l_row_idx_.size());
+        }
+
+        factorized_ = true;
+        return true;
     }
 
     /// Triangular solve — Section 4, not yet implemented.
@@ -156,6 +343,61 @@ public:
     [[nodiscard]] Index u_nnz() const noexcept {
         return u_row_idx_.empty() ? Index{0}
                                     : static_cast<Index>(u_row_idx_.size());
+    }
+
+    /// True after a failed `factorize` call when the numerical pivot fell
+    /// below `PIVOT_TOL` (1e-14 of column infinity-norm). Caller can use
+    /// this to distinguish numerical singularity from "didn't call analyze
+    /// first" (which throws std::logic_error instead).
+    [[nodiscard]] bool numeric_singular() const noexcept {
+        return numeric_singular_;
+    }
+
+    /// Row permutation produced by the most recent `factorize`. Identity
+    /// in Section 3 V0 (no partial pivoting yet). `row_permutation()[i]`
+    /// is the index of the ORIGINAL row that becomes the i-th row after
+    /// the eventual partial pivoting.
+    [[nodiscard]] std::span<const Index> row_permutation() const noexcept {
+        return Prow_;
+    }
+
+    /// Extract the strictly lower-triangular L factor as a dense-allocated
+    /// `Eigen::SparseMatrix`. The implicit unit diagonal is NOT included
+    /// (caller should add identity for `L * U == P_row · M · P_col`
+    /// checks). Returns an n×n matrix; empty if not factorized.
+    [[nodiscard]] Matrix extract_L_matrix() const {
+        Matrix L(static_cast<Index>(n_), static_cast<Index>(n_));
+        if (!factorized_) return L;
+        std::vector<Triplet> trips;
+        trips.reserve(l_row_idx_.size());
+        for (Index k = 0; k < n_; ++k) {
+            for (Index p = l_col_ptr_[static_cast<std::size_t>(k)];
+                 p < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++p) {
+                trips.emplace_back(l_row_idx_[static_cast<std::size_t>(p)], k,
+                                    l_values_[static_cast<std::size_t>(p)]);
+            }
+        }
+        L.setFromTriplets(trips.begin(), trips.end());
+        compress_in_place(L);
+        return L;
+    }
+
+    /// Extract the upper-triangular U factor (including the diagonal).
+    [[nodiscard]] Matrix extract_U_matrix() const {
+        Matrix U(static_cast<Index>(n_), static_cast<Index>(n_));
+        if (!factorized_) return U;
+        std::vector<Triplet> trips;
+        trips.reserve(u_row_idx_.size());
+        for (Index k = 0; k < n_; ++k) {
+            for (Index p = u_col_ptr_[static_cast<std::size_t>(k)];
+                 p < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++p) {
+                trips.emplace_back(u_row_idx_[static_cast<std::size_t>(p)], k,
+                                    u_values_[static_cast<std::size_t>(p)]);
+            }
+        }
+        U.setFromTriplets(trips.begin(), trips.end());
+        compress_in_place(U);
+        return U;
     }
 
 private:
@@ -419,8 +661,21 @@ private:
     std::vector<Index> u_col_ptr_;
     std::vector<Index> u_row_idx_;
 
-    bool analyzed_   = false;
-    bool factorized_ = false;
+    // Section 3 — numeric storage parallel to the symbolic CSC pattern.
+    std::vector<Real> l_values_;   // same length as l_row_idx_
+    std::vector<Real> u_values_;   // same length as u_row_idx_
+
+    // Section 3 — row permutation from partial pivoting. V0 of this
+    // header initializes both to identity and never mutates them
+    // (partial pivoting is deferred). The data structures are in place
+    // so a follow-up commit can add pivoting without changing the
+    // factorize() API.
+    std::vector<Index> Prow_;       // size n; Prow_[i] = original row at new position i
+    std::vector<Index> Pinv_row_;   // size n; inverse of Prow_
+
+    bool analyzed_         = false;
+    bool factorized_       = false;
+    bool numeric_singular_ = false;
 };
 
 // -----------------------------------------------------------------------------
