@@ -15,10 +15,20 @@ artigos/
   README.md                       ← this file (the strategic plan)
   shared/                         ← BibTeX + figures + assets shared across papers
   01_joss_tool_paper/             ← Journal of Open Source Software (FIRST)
-  02_epe_ecce_europe_2026/        ← EPE-ECCE Europe 2026 conference
+  02_spec_2026/                   ← IEEE SPEC 2026 conference (Cartagena, Dec)
   03_oj_pel_methods/              ← IEEE Open Journal of Power Electronics
   04_tpel_application/            ← IEEE Transactions on Power Electronics
 ```
+
+> **Pivot history.** The original plan targeted **EPE-ECCE Europe
+> 2026** (Valencia, Sep) for paper #2, but the extended-digest
+> deadline (9 Mar 2026) had already passed when work began. EPE-ECCE
+> requires the 2-stage digest-then-full-paper process; without an
+> accepted digest, the 8 Jun full-paper deadline is unavailable.
+> Re-targeted to **IEEE SPEC 2026** (Southern Power Electronics
+> Conference, Cartagena, Colombia, 8-11 Dec; submission deadline
+> 31 Jul 2026 = 69 days at the time of pivot) — same IEEEtran
+> conference template, same MMC topic, comfortable timeline.
 
 ## Strategic priorities
 
@@ -41,8 +51,8 @@ artigos/
 
 | # | Venue | Paper type | IF | Target submit | Cost |
 |:-:|---|---|---:|---|---|
-| 1 | **JOSS** | Tool paper | n/a (CiteScore ~3.2) | Jun 2026 | **$0** |
-| 2 | **EPE-ECCE Europe 2026** | Conference (case study) | — | 8 Jun 2026 deadline | conf fee |
+| 1 | **JOSS** | Tool paper | n/a (CiteScore ~3.2) | 7 Jun 2026 | **$0** |
+| 2 | **IEEE SPEC 2026** | Conference (case study) | — | **31 Jul 2026 deadline** | conf fee |
 | 3 | **IEEE OJ-PEL** | Methods (PWL cache) | 5.4 | Sep–Oct 2026 | $2.2k OA |
 | 4 | **IEEE TPEL** or **JESTPE** | Application (MMC benchmark) | 8.2 / 6.3 | Dec 2026 | OA optional |
 
@@ -78,26 +88,30 @@ full-paper deadline (also 8 Jun).
 
 ---
 
-### 2. EPE-ECCE Europe 2026 — conference paper (case study)
+### 2. IEEE SPEC 2026 — conference paper (case study)
 
-**Folder:** [`02_epe_ecce_europe_2026/`](02_epe_ecce_europe_2026/)
+**Folder:** [`02_spec_2026/`](02_spec_2026/)
 
-EPE-ECCE Europe is the major European power-electronics conference;
-the 2026 edition is in Valencia (14–18 Sep). **Full-paper deadline:
-8 June 2026** — currently open.
+The IEEE Southern Power Electronics Conference (SPEC) is the
+PELS-flagship conference for Latin America and the southern
+hemisphere. **2026 edition: Cartagena, Colombia, 8–11 December.
+Submission deadline: 31 July 2026** — comfortably open. Same
+IEEEtran conference template as EPE-ECCE / APEC / ECCE, so the
+LaTeX work transfers across any future PELS conference target.
 
-**Strategy:** don't make this a tool paper (conferences reject
-"here's our tool" papers). Make it a **case study** using Pulsim to
-analyse one of the multilevel topologies in the project library — best
-candidate is the **NPC 3-level vs 2-level VSI** comparison or the
-**MMC capacitor balancing** study. The paper showcases the *use* of
-Pulsim while Pulsim itself is cited (JOSS DOI) as the tool.
+**Topic chosen:** *Sort-and-Select Capacitor Balancing in a
+Single-Phase Modular Multilevel Converter: An Open-Source Reference
+Implementation.* This builds directly on the MMC project in
+`projects/inverters/mmc/` and exploits the dramatic side-by-side
+visualisation of open-loop drift (caps diverging from ±100 V) vs
+sort-and-select control (all 6 caps locked within 0.03 V) already
+captured in `00_mmc_pulsim_validation.ipynb`.
 
-**Format:** 6 pages, double column.
+**Format:** 6 pages, double column, A4, IEEEtran `conference` class.
 
 **Why it matters:** conference presentation = face time with PE
-researchers + an indexed Scopus citation + the deadline forces us to
-ship the JOSS paper first (synergy, not competition).
+researchers + indexed Scopus citation; SPEC is also the most
+realistic in-person venue for a Brazil-based author.
 
 ---
 
@@ -147,42 +161,45 @@ Two candidate angles:
 
 ---
 
-## Timeline (calendar)
+## Timeline (calendar, post-EPE-ECCE pivot)
 
 ```
-   2026                        2027
-   May  Jun  Jul  Aug  Sep  Oct  Nov  Dec  Jan  Feb  Mar
-   │                                                  │
-   ├─ CI hardening + CITATION.cff
+   2026                            2027
+   May Jun Jul Aug Sep Oct Nov Dec Jan Feb Mar
+   │                                       │
+   ├ JOSS submission package locked ✅
    │
-   ├─ JOSS draft ───► submit (early Jun)
-   │
-   ├──── EPE-ECCE Europe full paper (deadline 8 Jun)
-   │
-   │    ├─── PSIM/SPICE benchmark runs (Jul–Aug)
-   │    │
-   │    ├─── JOSS reviews + iteration (Jul–Aug)
-   │    │
-   │    │    ├─── JOSS accept → DOI minted (Sep)
-   │    │    │
-   │    │    ├─── EPE-ECCE Europe in Valencia (14–18 Sep)
-   │    │    │
-   │    │    │    ├─── OJ-PEL methods paper drafted (Sep–Oct)
-   │    │    │    │
-   │    │    │    │    ├── OJ-PEL submit ───► review (Nov 2026 – Apr 2027)
-   │    │    │    │    │
-   │    │    │    │    │    ├── TPEL application paper drafted (Oct–Dec)
-   │    │    │    │    │    │
-   │    │    │    │    │    │    ├── TPEL submit (Dec) ───► review (Jan–Jun 2027)
-   │    │    │    │    │    │    │
-   │    │    │    │    │    │    │    ├── APEC 2027 digest (~Aug 2026)
-   │    │    │    │    │    │    │    │
-   │    │    │    │    │    │    │    └─ ECCE 2027 digest (~Jan 2027)
+   │  [7 Jun] JOSS public-history gate opens
+   │  ├──► submit JOSS
+   │  │
+   │  ├ SPEC 2026 paper drafted in parallel
+   │  │
+   │  │   [31 Jul] SPEC 2026 deadline
+   │  │   ├──► submit SPEC
+   │  │   │
+   │  │   ├ OJ-PEL methods paper benchmark work
+   │  │   │ (PSIM/ngspice/Pulsim head-to-head runs)
+   │  │   │
+   │  │   │  [~Sep] JOSS accept → DOI minted
+   │  │   │
+   │  │   │  ├──► OJ-PEL draft + submit (~Oct)
+   │  │   │  │
+   │  │   │  │  [Aug 2026] APEC 2027 digest deadline
+   │  │   │  │  ├──► submit APEC digest
+   │  │   │  │  │
+   │  │   │  │  │  [Dec] SPEC 2026 in Cartagena
+   │  │   │  │  │
+   │  │   │  │  │  ├──► TPEL/JESTPE app paper drafted (Dec-Feb)
+   │  │   │  │  │  │
+   │  │   │  │  │  │  [Mar 2027] APEC 2027 conference
+   │  │   │  │  │  │
+   │  │   │  │  │  └──► submit TPEL (Q1 2027)
 ```
 
-**Realistic outcome by Dec 2026:** 1 JOSS DOI + 1 conference paper
-published + 1 OJ-PEL in review + 1 TPEL in writing. Four citation
-sources alive on Google Scholar.
+**Realistic outcome by Mar 2027:** 1 JOSS DOI + 1 SPEC paper
+presented + 1 OJ-PEL in review + 1 APEC accepted + 1 TPEL in
+writing. Five independent citation sources alive on Google Scholar
+within ~10 months of starting.
 
 ## Tracking
 

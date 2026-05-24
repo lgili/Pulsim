@@ -1,0 +1,256 @@
+% =====================================================================
+% SPEC 2026 — IEEE Southern Power Electronics Conference
+% Submission deadline: 31 July 2026
+% Template: IEEEtran v1.8b+ (conference class)
+% Compile: ./build.sh   (pdflatex → bibtex → pdflatex × 2)
+% =====================================================================
+\documentclass[conference, a4paper]{IEEEtran}
+
+% --- Standard IEEE packages ---
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+% \usepackage{algorithm,algpseudocode}  % uncomment after `tlmgr install algorithms`
+% \usepackage{booktabs}                  % uncomment after `tlmgr install booktabs`
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  pdftitle={Sort-and-Select Capacitor Balancing in a Single-Phase Modular Multilevel Converter},
+  pdfauthor={Luiz Carlos Gili}
+}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+% =====================================================================
+% Title block
+% =====================================================================
+\title{
+  Sort-and-Select Capacitor Balancing in a Single-Phase Modular
+  Multilevel Converter: An Open-Source Reference Implementation
+  in the Pulsim Simulator
+}
+
+\author{
+  \IEEEauthorblockN{Luiz Carlos Gili}
+  \IEEEauthorblockA{
+    Independent Researcher \\
+    Brazil \\
+    \texttt{luizcarlosgili@gmail.com} \\
+    ORCID: \href{https://orcid.org/0000-0002-5749-7199}{0000-0002-5749-7199}
+  }
+}
+
+\maketitle
+
+% =====================================================================
+% Abstract
+% =====================================================================
+\begin{abstract}
+The modular multilevel converter (MMC) is the dominant topology for
+high-voltage DC transmission and a growing share of medium-voltage
+drives. Its defining control challenge is the active balancing of
+the floating sub-module (SM) capacitor voltages — without it, the
+voltages diverge within a few line cycles and the multilevel
+staircase output collapses. This paper presents an end-to-end
+open-source reference implementation of the canonical
+sort-and-select balancing algorithm in the Pulsim circuit simulator,
+applied to a single-phase MMC with $N = 3$ SMs per arm under
+phase-shifted-carrier (PSC) pulse-width modulation. Side-by-side
+simulation results contrast the open-loop case — where the six
+SM cap voltages diverge by more than 150~V within two line cycles
+— with the closed-loop sort-and-select case, where all six
+voltages remain locked within 0.03~V of the nominal
+$V_C = V_{dc}/N$ value. The closed-loop fundamental
+line-to-neutral peak matches the analytical $m_a V_{dc}/2$
+prediction within $0.8\,\%$. The full simulation source,
+including the closed-loop step-observer wiring of the
+sort-and-select rule into the Pulsim solver, is available under
+the MIT license at \texttt{github.com/lgili/Pulsim}.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Modular multilevel converter (MMC), capacitor voltage balancing,
+sort-and-select, phase-shifted carrier PWM, piecewise-linear
+simulation, open-source software, Pulsim.
+\end{IEEEkeywords}
+
+% =====================================================================
+% I. Introduction
+% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+
+% TODO §I (≈500 words, 0.75 page)
+% 1. Why MMC matters (HVDC, MV drives, modularity).
+% 2. The capacitor-balancing problem (1-2 sentences only — it's the
+%    headline; details go in §III).
+% 3. Why open-source matters: lock-in of commercial tools (PLECS,
+%    PSIM, Simscape, Saber), and the resulting reproducibility
+%    cost in published research.
+% 4. Contribution: this paper presents the first MIT-licensed
+%    end-to-end MMC + sort-and-select reference implementation
+%    paired with an executable simulator.
+% 5. Roadmap: §II builds the topology + modulator, §III states the
+%    sort-and-select algorithm, §IV outlines the Pulsim
+%    implementation, §V presents simulation results, §VI concludes.
+
+\textit{Placeholder — to be written.}
+
+% =====================================================================
+% II. MMC Topology and Phase-Shifted Carrier PWM
+% =====================================================================
+\section{MMC Topology and Phase-Shifted Carrier PWM}
+\label{sec:topology}
+
+% TODO §II (≈700 words, 1 page)
+% Subsections:
+%   A. Half-bridge sub-module (with Fig 1 = SM schematic)
+%      - 2-switch HB-SM diagram
+%      - State table: INSERT (S1 ON, S2 OFF) -> v_SM = +V_C
+%                     BYPASS (S1 OFF, S2 ON) -> v_SM = 0
+%      - Forbidden states (cap-short, arm-open)
+%   B. Arm structure
+%      - v_arm = sum_i s_i v_C_i, takes N+1 discrete values
+%      - Steady-state V_C = V_dc/N
+%   C. PSC-PWM modulation
+%      - N carriers phase-shifted by 2*pi/N
+%      - n_insert(t) = count of carriers below the arm reference
+%      - Effective load-side ripple at N * f_carrier
+%      - Fig 2: 3 phase-shifted carriers + reference + n_insert output
+
+\textit{Placeholder — to be written.}
+
+% =====================================================================
+% III. Sort-and-Select Balancing Algorithm
+% =====================================================================
+\section{The Sort-and-Select Balancing Algorithm}
+\label{sec:sas}
+
+% TODO §III (≈600 words, 1 page)
+% 1. Why open-loop fails: naive modulator always inserts SM_0, SM_1, ...
+%    => SM_0 hogs all charge, SM_{N-1} collapses (see Fig 4 in §V).
+% 2. The sort-and-select rule (pseudocode in algorithm 1):
+%
+%    Input: n_insert (from PSC-PWM), V_C[1..N] (current cap voltages),
+%           i_arm (current arm current sign)
+%    if i_arm > 0:     // arm charging the inserted SMs
+%        select the n_insert SMs with LOWEST V_C
+%    else:             // arm discharging
+%        select the n_insert SMs with HIGHEST V_C
+%
+% 3. Complexity: O(N log N) per switching update.
+% 4. Why it works: at each instant, the algorithm picks the SMs
+%    that will MOVE V_C toward the average. Provably stable for any
+%    bounded load current.
+% 5. Brief literature pointer (Saeedifard 2010; Marquardt 2018)
+%    for theoretical analysis we don't repeat.
+
+% TODO: when `algorithm,algpseudocode` are installed, replace this
+% verbatim block with the proper \begin{algorithm}...\end{algorithm}
+% formatting. Until then, the algorithm is described in prose +
+% pseudocode comments below.
+\textit{Algorithm pseudocode placeholder} — once `algorithm,
+algpseudocode` are installed via TeX Live, replace this with the
+properly formatted \texttt{Algorithm 1} block. For now, the rule is:
+
+\begin{quote}\small\ttfamily
+\textbf{Inputs:} $n_{\text{insert}}$ from PSC-PWM,
+$V_C[1..N]$ cap voltages, $i_{\text{arm}}$ sign. \\
+sort $\sigma$ s.t. $V_C[\sigma(1)] \le \cdots \le V_C[\sigma(N)]$. \\
+\textbf{if} $i_{\text{arm}} > 0$
+  \quad INSERT $\sigma(1), \ldots, \sigma(n_{\text{insert}})$ \\
+\textbf{else}
+  \quad INSERT $\sigma(N - n_{\text{insert}} + 1), \ldots, \sigma(N)$ \\
+BYPASS the remaining SMs.
+\end{quote}
+
+\textit{Placeholder text around the algorithm — to be written.}
+
+% =====================================================================
+% IV. Implementation in Pulsim
+% =====================================================================
+\section{Implementation in Pulsim}
+\label{sec:pulsim}
+
+% TODO §IV (≈500 words, 0.75 page)
+% 1. Pulsim brief: C++23 kernel + Python API, piecewise-linear (PWL)
+%    state-space cache. Cite JOSS paper.
+% 2. The CircuitBuilder code that wires up the MMC topology
+%    (12 switches + 6 caps + 2 arm inductors + RL load). One short
+%    snippet (≤ 15 lines).
+% 3. The step_observer pattern: a closure shared between the
+%    switch_fn (called every dt) and the observer (called every dt
+%    AFTER the integration step). Observer reads V_C and i_arm out
+%    of the state vector, sort-and-select runs in switch_fn at the
+%    NEXT step.
+% 4. Why this matters for reproducibility: same C++ kernel runs both
+%    open-loop and closed-loop variants — only the switch_fn closure
+%    differs. No recompilation, no separate binaries.
+
+\textit{Placeholder — to be written.}
+
+% =====================================================================
+% V. Simulation Results
+% =====================================================================
+\section{Simulation Results}
+\label{sec:results}
+
+% TODO §V (≈800 words, 1.75 pages — the figure-heavy section)
+% Sub-sections:
+%   A. Operating point + simulation parameters (1 table)
+%      V_dc=400V, N=3, V_C nom=133.3V, f_o=60Hz, f_carrier=1kHz,
+%      RL load 24Ω + 5mH, single-phase, m_a=0.78
+%   B. Open-loop: caps diverge (Fig 4)
+%      Quote: "within 33 ms (2 line cycles), V_C[SM_u0] reaches
+%      167.8 V (+25.8%), while V_C[SM_u2] collapses to 2.0 V."
+%   C. Sort-and-select: caps locked (Fig 5)
+%      Quote: "After the same 33 ms window with sort-and-select
+%      active, the 6 cap voltages remain within 0.03 V of each
+%      other."
+%   D. 4-level arm voltage + 4-level AC output (Fig 6)
+%      Quantitative: peak v_ac = 156.9 V, target = 155.6 V (0.8% err)
+%   E. (Optional, if space) Output THD comparison with a 2-level VSI
+%      driven at the same fundamental — quote NPC project result for
+%      ballpark numbers.
+
+\textit{Placeholder — to be written.}
+
+% =====================================================================
+% VI. Conclusion
+% =====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+% TODO §VI (≈200 words, 0.25 page)
+% 1. Recap: open-source MMC + sort-and-select reference impl works,
+%    cap-voltage error ≤ 0.03 V, fundamental ≤ 1% off analytical.
+% 2. Why it matters: lowers the entry barrier for MMC research +
+%    teaching.
+% 3. Future work: 3-phase extension (~3× state space, beyond Pulsim
+%    PWL cache today), circulating-current resonant suppression at
+%    2*f_o, hardware-in-the-loop validation.
+
+\textit{Placeholder — to be written.}
+
+% =====================================================================
+% Acknowledgement (optional, IEEE conf often omits)
+% =====================================================================
+% \section*{Acknowledgement}
+% No external funding to acknowledge for this work.
+
+% =====================================================================
+% References
+% =====================================================================
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
