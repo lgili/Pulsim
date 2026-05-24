@@ -2055,10 +2055,10 @@ class M3cDqController:
     """Synchronous-frame PI controller for output i_d, i_q.
 
     The default gains target a ~500 Hz bandwidth on the M3C-default
-    plant (R_load=54 Ω, L_total≈117.5 mH including L_out):
+    plant (R_load=54 Ω, L_out_eff≈117.5 mH including L_out):
 
         ω_bw = 2π · 500 ≈ 3142 rad/s
-        K_p = ω_bw · L_total ≈ 369
+        K_p = ω_bw · L_out_eff ≈ 369
         K_i = ω_bw · R_load  ≈ 1.70e5
 
     Cross-axis ωL decoupling is enabled by default.
@@ -2391,11 +2391,11 @@ def make_m3c_l1_dq_full_control(
             v_pi_max=params.V_in_phase_peak * 0.5,  # half of source amplitude
         )
     if dq_out_controller is None:
-        L_total = params.L_out + params.L_load
+        L_out_eff = params.L_out + params.L_load
         dq_out_controller = M3cDqController(
-            K_p=2.0 * pi * 50.0 * L_total,
+            K_p=2.0 * pi * 50.0 * L_out_eff,
             K_i=2.0 * pi * 50.0 * params.R_load,
-            omega_L_decouple=params.omega_out * L_total,
+            omega_L_decouple=params.omega_out * L_out_eff,
         )
 
     if initial_state is None:
@@ -2923,4 +2923,379 @@ def run_l1_dq_closed_loop(
         ),
         ctrl_state,
         dq_ctrl,
+    )
+
+
+# =============================================================================
+# Phase 22.13 — Dead-Beat Predictive Control (DBPC)
+# =============================================================================
+#
+# Replaces the PI/dq cascade of Phases 22.7-22.9 with one-step discrete
+# predictive control. Computes the converter voltage that drives the
+# current to the reference in EXACTLY one T_s sample:
+#
+#   Input  (L_in plant, no R):
+#     V_source - V_in_node = L_in · di/dt
+#     dead-beat (di/dt = (i_ref - i)/T_s):
+#     V_in_node = V_source - (L_in/T_s)·(i_in_ref - i_in)
+#
+#   Output (R + L_out_eff plant):
+#     V_out_node = R·i_out + L_out_eff·di/dt
+#     dead-beat:
+#     V_out_node = R·i_out + (L_out_eff/T_s)·(i_out_ref - i_out)
+#
+# Why this is *much* better than the PI/dq cascade:
+#
+#   * Zero gains to tune — only L_in, L_out_eff, R_load, T_s (all known
+#     from M3cParams).
+#   * Works at ANY output frequency, including f_out = 0 (DC). The dq
+#     synchronous frame is bypassed — references and dynamics live in
+#     abc directly.
+#   * Latency = 1 T_s (vs ~1/ω_c with PI). Step response is essentially
+#     a single-T_s ramp to the achievable level.
+#   * Robust to f_in ≈ f_out: there's no beat-frequency PI integrator
+#     that can become "trapped" on the cap-voltage oscillation.
+#   * Naturally couples to the Phase 22.6 cost-function inner loop for
+#     cap balancing — DBPC just sets the V_in_int / V_out_int targets,
+#     same as the SVM did, then the cost function picks the cfg.
+
+
+def make_sinusoidal_abc_ref(
+    amplitude: float, frequency: float, phase: float = 0.0,
+):
+    """Build a callable ``t → (a, b, c)`` for a balanced 3-φ sinusoidal
+    reference: ``a(t) = A·cos(ω·t + φ)``, b and c at ∓2π/3.
+
+    Convenience helper for ``make_m3c_l1_dbpc_control``'s
+    ``i_out_ref_fn`` / ``i_in_ref_fn`` arguments.
+    """
+    omega = 2.0 * pi * frequency
+
+    def ref(t: float) -> np.ndarray:
+        th = omega * t + phase
+        return amplitude * np.array([
+            np.cos(th),
+            np.cos(th - 2.0 * pi / 3.0),
+            np.cos(th + 2.0 * pi / 3.0),
+        ])
+    return ref
+
+
+def make_dc_abc_ref(
+    i_a: float, i_b: float | None = None, i_c: float | None = None,
+):
+    """Build a callable ``t → (a, b, c)`` for a CONSTANT DC reference.
+
+    If only ``i_a`` is given, b and c are set to ``-i_a/2`` each
+    (which sums to zero — necessary for a floating-star Y-load).
+    """
+    if i_b is None and i_c is None:
+        i_b = -i_a / 2.0
+        i_c = -i_a / 2.0
+    elif i_b is None or i_c is None:
+        raise ValueError("specify either i_a only OR all three of a/b/c")
+    elif abs(i_a + i_b + i_c) > 1e-9:
+        raise ValueError(
+            f"DC reference must sum to 0: {i_a} + {i_b} + {i_c} != 0"
+        )
+    arr = np.array([float(i_a), float(i_b), float(i_c)])
+
+    def ref(_t: float) -> np.ndarray:
+        return arr
+    return ref
+
+
+def make_m3c_l1_dbpc_control(
+    params: M3cParams,
+    plant: M3cPlant,
+    *,
+    i_out_ref_fn,
+    i_d_in_ref: float | Callable[[float], float] = 0.0,
+    cap_outer_loop: M3cCapOuterLoop | None = None,
+    initial_state: M3cL1ControlState | None = None,
+):
+    """Dead-beat predictive controller for the M3C.
+
+    Parameters
+    ----------
+    params, plant
+        Same as the PI/dq variants.
+    i_out_ref_fn
+        Callable ``t → (i_a_ref, i_b_ref, i_c_ref)`` in abc. Use
+        :func:`make_sinusoidal_abc_ref` for sinusoidal output at any
+        frequency (including 0 — see :func:`make_dc_abc_ref`).
+    i_d_in_ref
+        Base amplitude of the unity-PF input current (scalar or
+        callable). The cap-outer loop ADDS to this to maintain the
+        capacitor voltage at nominal. Set to 0 (default) to let the
+        cap loop manage P_in fully.
+    cap_outer_loop
+        Optional PI outer loop for cap balancing. Defaults to the
+        Phase 22.9 PI (K_p=0.05, K_i=0.05).
+    initial_state
+        Optional initial M3cL1ControlState.
+
+    Returns
+    -------
+    (step_observer, switch_fn, b_extra_fn, ctrl_state, cap_loop)
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if plant.module_v_src_state_indices is None:
+        raise ValueError(
+            "L1 plant must expose module_v_src_state_indices"
+        )
+    if plant.iL_in_indices is None:
+        raise ValueError("L1 plant must expose iL_in_indices")
+
+    if cap_outer_loop is None:
+        cap_outer_loop = M3cCapOuterLoop(
+            K_p=0.05, K_i=0.05, dt=params.T_s,
+            v_cap_target=params.v_cap_total_per_module,
+        )
+
+    if initial_state is None:
+        initial_state = M3cL1ControlState(
+            v_caps_module=[
+                params.v_cap_total_per_module for _ in range(9)
+            ],
+        )
+    state = initial_state
+
+    state_size = plant.builder.pool.state_size(plant.builder.graph)
+    v_cap = params.v_cap_nominal
+    T_s = params.T_s
+    L_in = params.L_in
+    # IMPORTANT: the L1 plant (build_l1_plant) only models the
+    # *output filter* inductor L_out in series with R_load — L_load
+    # is purely a *target* parameter used by the L0 baseline. For
+    # the L1 dead-beat to match the actual plant dynamics, use
+    # ``L_out_eff = params.L_out`` only. (If your plant variant also
+    # models L_load as a separate inductor, sum them here.)
+    L_out_eff = params.L_out
+    R_load = params.R_load
+    N_sm = params.n_sm_per_module
+    src_indices = plant.module_v_src_state_indices
+    iL_in_indices = plant.iL_in_indices
+    iL_out_indices = plant.iL_out_indices
+
+    if callable(i_d_in_ref):
+        i_d_in_base_fn = i_d_in_ref
+    else:
+        i_d_in_base_fn = lambda _t, _v=float(i_d_in_ref): _v  # noqa: E731
+
+    def step_observer(t, x):
+        period_idx = int(t / T_s)
+        if period_idx == state.last_period:
+            return
+        state.last_period = period_idx
+        state.n_refreshes += 1
+
+        # 1) Read currents.
+        I_in = np.array([float(x[i]) for i in iL_in_indices])
+        I_out = np.array([float(x[i]) for i in iL_out_indices])
+        diff = (I_in.sum() - I_out.sum()) / 3.0
+        I_out_balanced = I_out + diff
+
+        # 2) T_s centre for reference evaluation.
+        t_centre = (period_idx + 0.5) * T_s
+
+        # 3) Input reference (unity PF + cap-loop correction).
+        i_d_in_base_val = float(i_d_in_base_fn(t_centre))
+        i_d_in_total = cap_outer_loop.apply(
+            i_d_in_base_val, state.v_caps_module,
+        )
+        omega_in_t = params.omega_in * t_centre
+        # i_in_ref at t_centre + T_s is computed below alongside the
+        # output ref to keep both predict-ahead in one place.
+
+        # 4) Output reference at the END of the next T_s window — the
+        #    NEXT-step prediction. This is the critical detail for
+        #    sinusoidal tracking: using i_ref(k) instead of i_ref(k+1)
+        #    in the dead-beat formula misses the L·(di_ref/dt) feed-
+        #    forward term, which produces a steady-state phase lag
+        #    that the proportional feedback cannot correct. Using
+        #    i_ref(k+1) is equivalent to including ``+L·di_ref/dt``
+        #    inside the formula.
+        i_out_ref_next = np.asarray(
+            i_out_ref_fn(t_centre + T_s), dtype=float,
+        )
+        if i_out_ref_next.shape != (3,):
+            raise ValueError(
+                f"i_out_ref_fn must return shape (3,); got "
+                f"{i_out_ref_next.shape}"
+            )
+
+        # 5) DEAD-BEAT — compute the V_node values that drive
+        #    i(k+1) = i_ref(k+1) in one T_s. To prevent the saturation
+        #    instability of bare one-step dead-beat, we clip the
+        #    requested step in i to the feasible range first.
+        V_source = params.V_in_phase_peak * np.array([
+            np.cos(omega_in_t),
+            np.cos(omega_in_t - 2.0 * pi / 3.0),
+            np.cos(omega_in_t + 2.0 * pi / 3.0),
+        ])
+        # Same predict-ahead trick for input: i_in_ref at t_centre+T_s.
+        omega_in_t_next = params.omega_in * (t_centre + T_s)
+        i_in_ref_next = i_d_in_total * np.array([
+            np.cos(omega_in_t_next),
+            np.cos(omega_in_t_next - 2.0 * pi / 3.0),
+            np.cos(omega_in_t_next + 2.0 * pi / 3.0),
+        ])
+        delta_i_in_max = N_sm * v_cap * T_s / L_in
+        delta_i_out_max = N_sm * v_cap * T_s / L_out_eff
+        d_i_in_clip = np.clip(
+            i_in_ref_next - I_in, -delta_i_in_max, +delta_i_in_max,
+        )
+        d_i_out_clip = np.clip(
+            i_out_ref_next - I_out_balanced,
+            -delta_i_out_max, +delta_i_out_max,
+        )
+        V_in_node_desired = V_source - (L_in / T_s) * d_i_in_clip
+        V_out_node_desired = (
+            R_load * I_out_balanced
+            + (L_out_eff / T_s) * d_i_out_clip
+        )
+
+        # 6) SVM quantisation. Output side carries the Sec 4.3 sign
+        #    flip (same convention as the dq controller). Saturate
+        #    to ±N_sm so we stay within achievable module voltages.
+        V_in_int = np.clip(
+            np.round(V_in_node_desired / v_cap).astype(int),
+            -N_sm, +N_sm,
+        )
+        V_out_int = np.clip(
+            np.round(-V_out_node_desired / v_cap).astype(int),
+            -N_sm, +N_sm,
+        )
+
+        # 7) Short = argmin × argmin (Sec 5.5.3 paragraph 4).
+        short_in = int(np.argmin(V_in_int))
+        short_out = int(np.argmin(V_out_int))
+        short = (short_in, short_out)
+
+        # 8) Cost-function: pick best of 45 configs (Phase 22.6).
+        best_cfg, best_cost = select_best_connection(
+            short_module=short,
+            V_caps=np.array(state.v_caps_module, dtype=float),
+            V_input_int=V_in_int, V_output_int=V_out_int,
+            I_input=I_in, I_output=I_out_balanced,
+            T_s=T_s, C_sm=params.c_sm,
+        )
+        V_xy = solve_module_voltages(
+            best_cfg, short,
+            V_input=V_in_int, V_output=V_out_int,
+        )
+        I_xy = solve_module_currents(
+            best_cfg, I_in, I_out_balanced,
+        )
+
+        # 9) Populate caches + integrate cap voltages.
+        switch_bits = [False] * 9
+        v_module = [0.0] * 9
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            switch_bits[idx] = True
+            v_module[idx] = float(V_int) * v_cap
+        state.switch_bits = switch_bits
+        state.v_module_target = v_module
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            state.v_caps_module[idx] += (
+                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
+            )
+        state.chosen_configs.append(best_cfg)
+        state.chosen_costs.append(best_cost)
+        state.v_caps_module_history.append(list(state.v_caps_module))
+        state.refresh_t_centres.append(float(t_centre))
+
+    def switch_fn(_t: float):
+        mask = _p.SwitchStateMask(9)
+        for k, on in enumerate(state.switch_bits):
+            mask.set(k, bool(on))
+        return mask
+
+    def b_extra_fn(_t: float):
+        out = [0.0] * state_size
+        for k, src_idx in enumerate(src_indices):
+            out[src_idx] = -state.v_module_target[k]
+        return out
+
+    return step_observer, switch_fn, b_extra_fn, state, cap_outer_loop
+
+
+def run_l1_dbpc(
+    plant: M3cPlant,
+    params: M3cParams,
+    *,
+    i_out_ref_fn,
+    i_d_in_ref: float | Callable[[float], float] = 0.0,
+    cap_outer_loop: M3cCapOuterLoop | None = None,
+    initial_state: M3cL1ControlState | None = None,
+    t_end: float = 200e-3,
+    dt: float | None = None,
+):
+    """Run the L1 plant with the dead-beat predictive controller.
+
+    Returns ``(result, ctrl_state, cap_loop)``.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if dt is None:
+        dt = max(1e-6, params.T_s / 20.0)
+
+    obs, sw, bx, ctrl_state, cap_loop = make_m3c_l1_dbpc_control(
+        params, plant,
+        i_out_ref_fn=i_out_ref_fn,
+        i_d_in_ref=i_d_in_ref,
+        cap_outer_loop=cap_outer_loop,
+        initial_state=initial_state,
+    )
+
+    assert plant.iL_in_indices is not None
+    iLa_in, iLb_in, iLc_in = plant.iL_in_indices
+    iLa, iLb, iLc = plant.iL_out_indices
+
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    log_iAi = np.zeros(n_samples)
+    log_iBi = np.zeros(n_samples)
+    log_iCi = np.zeros(n_samples)
+    counter = [0]
+
+    def combined_obs(t, x):
+        obs(t, x)
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+            log_iAi[i] = x[iLa_in]
+            log_iBi[i] = x[iLb_in]
+            log_iCi[i] = x[iLc_in]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=combined_obs,
+        switch_fn=sw, b_extra_fn=bx,
+        start_from_dc_op=False,
+    )
+
+    n = counter[0]
+    return (
+        M3cRunResult(
+            t=log_t[:n],
+            i_a_out=log_ia[:n],
+            i_b_out=log_ib[:n],
+            i_c_out=log_ic[:n],
+            i_a_in=log_iAi[:n],
+            i_b_in=log_iBi[:n],
+            i_c_in=log_iCi[:n],
+        ),
+        ctrl_state, cap_loop,
     )
