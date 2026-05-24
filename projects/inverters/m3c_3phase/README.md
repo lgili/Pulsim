@@ -86,18 +86,17 @@ A tese identifica 4 contribuições principais (Sec 1.1 + 5.6):
    dentro de cada módulo, escolhe quais SMs comutam para equalizar
    as tensões dos N capacitores internos.
 
-## Conteúdo (em construção)
+## Conteúdo
 
 ```
-m3c_3phase_model.py            — M3cParams + Fast SVM + plant builders
-_build_notebooks.py            — gerador dos notebooks
-01_m3c_fast_svm.ipynb          — Fast SVM no plano lgγ (Sec 3)
-02_m3c_module_voltages.ipynb   — cálculo das tensões dos módulos (Sec 4.3)
-03_m3c_cost_function.ipynb     — função custo + balanço (Sec 5.5)
-04_m3c_l0_averaged.ipynb       — L0 plant simplificado
-05_m3c_l1_switched.ipynb       — L1 com 54 SMs
-06_m3c_closed_loop.ipynb       — Cap 5 controle dq
-07_m3c_validation_thesis.ipynb — comparação contra HIL OPAL-RT da tese
+m3c_3phase_model.py             — M3cParams + Fast SVM + plant builders +
+                                   cost function + dq closed-loop + cap loop
+m3c_validation.py               — Tab 16 cross-validation harness
+_build_notebooks.py             — gerador dos notebooks
+01_m3c_fast_svm.ipynb           — Fast SVM no plano lgγ (Sec 3)
+02_m3c_module_voltages.ipynb    — solver de tensões + função custo (Sec 4.3, 5.5.3)
+03_m3c_l0_l1_comparison.ipynb   — L0 ↔ L1 fundamental + FFT
+04_m3c_dq_closed_loop.ipynb     — degrau de i_d em malha fechada (Sec 5.6.2)
 ```
 
 ## Plano de validação (multi-tier)
