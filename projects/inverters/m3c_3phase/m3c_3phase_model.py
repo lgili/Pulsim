@@ -3366,3 +3366,274 @@ def run_l1_dbpc(
         ),
         ctrl_state, cap_loop,
     )
+
+
+# =============================================================================
+# Phase 22.15 — Pre-charge sequence + safe motor start
+# =============================================================================
+#
+# Real M3Cs cannot just power-on with caps at 0 V — the modules can't
+# produce any voltage and the control assumes the rated cap level.
+# This module implements a three-phase startup FSM:
+#
+#   1. PRECHARGE  — output disabled (i_out_ref = 0), input current
+#                   set to a low constant value to charge the caps
+#                   from V_initial up to ~95 % of nominal.
+#   2. STABILIZING — caps reached threshold; hold for a settling
+#                   time to verify they're stable.
+#   3. RUNNING    — release the output reference, hand cap-voltage
+#                   regulation off to the standard cap-outer PI.
+#
+# The result: a clean cold-start from V_cap ≈ 0 → motor at full
+# speed without any over-current or unstable transient.
+
+
+@dataclass
+class M3cPrechargeConfig:
+    """Configuration for the M3C capacitor pre-charge sequence.
+
+    Attributes
+    ----------
+    v_cap_initial : float
+        Initial capacitor voltage per SM aggregate (= V_module at
+        start). Realistic cold-start value is ``~100 V`` per module
+        (essentially zero compared to the 24 kV nominal).
+    v_cap_release_threshold_frac : float
+        Release the output at this fraction of the target cap
+        voltage. Default 0.90 (≥ 21.6 kV → release).
+    stabilize_time : float
+        How long V_caps_mean must stay above threshold before
+        transitioning to RUNNING. Default 0.5 s.
+    i_d_in_precharge : float
+        Input current peak (amplitude, unity-PF) used to charge
+        the caps. Default 30 A — gives a ~1-second charge time
+        for the standard Tab. 16 cap energy budget.
+    """
+
+    v_cap_initial: float = 100.0
+    v_cap_release_threshold_frac: float = 0.90
+    stabilize_time: float = 0.5
+    i_d_in_precharge: float = 30.0
+
+
+@dataclass
+class M3cPrechargeFSM:
+    """Finite-state machine for the pre-charge → stabilize → run
+    sequence.
+
+    The states form a one-way path under normal operation, but a
+    drop below threshold during STABILIZING falls back to PRECHARGE
+    (handles wave-front events like a brief load surge during
+    settling).
+    """
+
+    config: M3cPrechargeConfig
+    v_cap_target: float
+    state: str = "precharge"
+    threshold_first_reached_at: float = -1.0
+    released_at: float = -1.0
+    # Trajectory for plotting: one entry per FSM update call.
+    history_t: list = field(default_factory=list)
+    history_state: list = field(default_factory=list)
+    history_v_mean: list = field(default_factory=list)
+
+    @property
+    def threshold(self) -> float:
+        return (
+            self.config.v_cap_release_threshold_frac
+            * self.v_cap_target
+        )
+
+    @property
+    def is_running(self) -> bool:
+        return self.state == "running"
+
+    def update(self, t: float, v_cap_mean: float) -> None:
+        self.history_t.append(t)
+        self.history_state.append(self.state)
+        self.history_v_mean.append(v_cap_mean)
+
+        if self.state == "precharge":
+            if v_cap_mean >= self.threshold:
+                self.state = "stabilizing"
+                self.threshold_first_reached_at = t
+        elif self.state == "stabilizing":
+            if t - self.threshold_first_reached_at >= self.config.stabilize_time:
+                self.state = "running"
+                self.released_at = t
+            elif v_cap_mean < self.threshold * 0.92:
+                # Dropped back under hysteresis band.
+                self.state = "precharge"
+                self.threshold_first_reached_at = -1.0
+
+
+def make_m3c_l1_dbpc_with_precharge(
+    params: M3cParams,
+    plant: M3cPlant,
+    *,
+    i_out_ref_fn,
+    precharge_config: M3cPrechargeConfig | None = None,
+    cap_outer_loop: M3cCapOuterLoop | None = None,
+    initial_state: M3cL1ControlState | None = None,
+):
+    """DBPC controller with capacitor pre-charge sequence + safe motor
+    start.
+
+    Parameters
+    ----------
+    params, plant
+        Standard M3cParams + M3cPlant from :func:`build_l1_plant`.
+    i_out_ref_fn
+        The *eventual* output current reference (e.g. motor ramp).
+        During PRECHARGE and STABILIZING this is overridden to zero.
+        Once in RUNNING, the user's reference is engaged.
+    precharge_config
+        Optional :class:`M3cPrechargeConfig`. Defaults to the
+        standard slow-charge sequence.
+    cap_outer_loop
+        Optional cap-PI loop used during RUNNING. Disabled during
+        precharge to avoid integrator wind-up.
+    initial_state
+        Optional :class:`M3cL1ControlState`. If ``None``, a fresh
+        state is built with ``v_caps_module = [v_cap_initial] * 9``
+        (typically ≈ 100 V — essentially "cold").
+
+    Returns
+    -------
+    (step_observer, switch_fn, b_extra_fn, ctrl_state, cap_loop, fsm)
+        The standard pulsim control hooks plus the FSM (useful for
+        plotting the state transitions).
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if precharge_config is None:
+        precharge_config = M3cPrechargeConfig()
+
+    target = params.v_cap_total_per_module
+    fsm = M3cPrechargeFSM(precharge_config, v_cap_target=target)
+
+    if cap_outer_loop is None:
+        cap_outer_loop = M3cCapOuterLoop(
+            K_p=0.05, K_i=0.05, dt=params.T_s,
+            v_cap_target=target,
+        )
+
+    if initial_state is None:
+        initial_state = M3cL1ControlState(
+            v_caps_module=[precharge_config.v_cap_initial] * 9,
+        )
+    state = initial_state
+
+    # The underlying DBPC's cap_outer_loop is replaced by a NO-OP — we
+    # manage the real cap loop ourselves via the gated i_d_in callable
+    # so we can fully disable it during precharge (avoids integrator
+    # wind-up from the massive V_err while caps are at ~100 V).
+    noop_cap_loop = M3cCapOuterLoop(
+        K_p=0.0, K_i=0.0, dt=params.T_s, v_cap_target=target,
+    )
+
+    def gated_i_out_ref(t):
+        if fsm.is_running:
+            return i_out_ref_fn(t)
+        return np.zeros(3, dtype=float)
+
+    def gated_i_d_in_ref(t):
+        if fsm.is_running:
+            # Engage the real cap-outer PI.
+            return cap_outer_loop.apply(0.0, state.v_caps_module)
+        # PRECHARGE / STABILIZING — constant charging current.
+        return precharge_config.i_d_in_precharge
+
+    obs, sw, bx, _, _ = make_m3c_l1_dbpc_control(
+        params, plant,
+        i_out_ref_fn=gated_i_out_ref,
+        i_d_in_ref=gated_i_d_in_ref,
+        cap_outer_loop=noop_cap_loop,
+        initial_state=state,
+    )
+
+    def wrapped_obs(t, x):
+        obs(t, x)
+        v_mean = float(np.mean(state.v_caps_module))
+        fsm.update(t, v_mean)
+
+    return wrapped_obs, sw, bx, state, cap_outer_loop, fsm
+
+
+def run_l1_dbpc_with_precharge(
+    plant: M3cPlant,
+    params: M3cParams,
+    *,
+    i_out_ref_fn,
+    precharge_config: M3cPrechargeConfig | None = None,
+    cap_outer_loop: M3cCapOuterLoop | None = None,
+    initial_state: M3cL1ControlState | None = None,
+    t_end: float = 5.0,
+    dt: float | None = None,
+):
+    """Run the L1 plant with the DBPC + pre-charge controller.
+
+    Returns ``(result, ctrl_state, cap_loop, fsm)``.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if dt is None:
+        dt = max(1e-6, params.T_s / 20.0)
+
+    obs, sw, bx, ctrl_state, cap_loop, fsm = (
+        make_m3c_l1_dbpc_with_precharge(
+            params, plant,
+            i_out_ref_fn=i_out_ref_fn,
+            precharge_config=precharge_config,
+            cap_outer_loop=cap_outer_loop,
+            initial_state=initial_state,
+        )
+    )
+
+    assert plant.iL_in_indices is not None
+    iLa_in, iLb_in, iLc_in = plant.iL_in_indices
+    iLa, iLb, iLc = plant.iL_out_indices
+
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    log_iAi = np.zeros(n_samples)
+    log_iBi = np.zeros(n_samples)
+    log_iCi = np.zeros(n_samples)
+    counter = [0]
+
+    def combined_obs(t, x):
+        obs(t, x)
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+            log_iAi[i] = x[iLa_in]
+            log_iBi[i] = x[iLb_in]
+            log_iCi[i] = x[iLc_in]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=combined_obs,
+        switch_fn=sw, b_extra_fn=bx,
+        start_from_dc_op=False,
+    )
+
+    n = counter[0]
+    return (
+        M3cRunResult(
+            t=log_t[:n],
+            i_a_out=log_ia[:n],
+            i_b_out=log_ib[:n],
+            i_c_out=log_ic[:n],
+            i_a_in=log_iAi[:n],
+            i_b_in=log_iBi[:n],
+            i_c_in=log_iCi[:n],
+        ),
+        ctrl_state, cap_loop, fsm,
+    )
