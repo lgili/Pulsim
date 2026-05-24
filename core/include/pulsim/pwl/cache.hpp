@@ -310,9 +310,11 @@ public:
 
         if (!rank1_initialized_) {
             // First call: fresh analyze + factorize on a new solver picked
-            // by the factory's Backend::Auto heuristic.
+            // by the factory. Backend hint defaults to Backend::Auto
+            // (KLU when n >= PULSIM_KLU_AUTO_THRESHOLD) but the caller
+            // may have overridden it via set_rank1_backend(...).
             rank1_solver_ = sparse::make_default_solver(
-                pool_.state_size(graph_), sparse::Backend::Auto);
+                pool_.state_size(graph_), rank1_backend_hint_);
             if (!rank1_solver_->analyze(J)) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial analyze "
@@ -385,6 +387,23 @@ public:
 
         Vector rhs = -(rank1_b_constant_ + b_extra);
         rank1_solver_->solve(rhs, x);
+    }
+
+    /// Override the backend `solve_rank1` uses for its sliding solver.
+    /// By default `solve_rank1` calls
+    /// `make_default_solver(state_size, Backend::Auto)` which picks KLU
+    /// only when `state_size >= PULSIM_KLU_AUTO_THRESHOLD` (= 100). Call
+    /// this before the first `solve_rank1` to force a specific backend
+    /// — e.g. `Backend::KLU` for benchmarks that want the partial-refactor
+    /// path at small n, or `Backend::Eigen` to force the fallback path
+    /// for measurement.
+    ///
+    /// No-op once `solve_rank1` has been called — the solver has already
+    /// been constructed.
+    void set_rank1_backend(sparse::Backend hint) noexcept {
+        if (!rank1_initialized_) {
+            rank1_backend_hint_ = hint;
+        }
     }
 
     /// Snapshot the rank-1 telemetry counters. Read-only from outside;
@@ -522,6 +541,7 @@ private:
     mutable topology::SwitchStateMask rank1_mask_{};
     mutable Vector                     rank1_b_constant_;
     mutable bool                       rank1_initialized_ = false;
+    mutable sparse::Backend            rank1_backend_hint_ = sparse::Backend::Auto;
 
     // Layer 4 V8 telemetry. Atomic so a background thread can sample
     // mid-simulation without locking; const-correct for use inside

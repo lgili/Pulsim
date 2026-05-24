@@ -507,6 +507,7 @@ if(PULSIM_BUILD_TESTS)
         tests/benchmarks/test_bench_half_wave.cpp
         tests/benchmarks/test_bench_buck.cpp
         tests/benchmarks/test_bench_boost.cpp
+        tests/benchmarks/test_bench_pwl_rank1.cpp   # Layer 4 V8 — rank-1 fast path
     )
     target_include_directories(pulsim_benchmarks
         PRIVATE

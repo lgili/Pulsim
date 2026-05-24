@@ -50,13 +50,41 @@
 - [x] 5.4 Same-mask repeats: `solve_rank1` called 3× with identical mask increments `rank1_hits` only on the 2 repeats; first call hits `full_refactor_hits`. Refreshes `b_constant` without refactor.
 - [x] 5.5 `metrics()` on a fresh cache returns `{0, 0, 0}`.
 
-## 6. Benchmark suite extension
+## 6. Benchmark suite — re-scoped to C++ microbenchmark
 
-- [ ] 6.1 Extend `artigos/02_tpel_methods/benchmarks/buck/run_buck_benchmark.py` to report `metrics().rank1_hits / total_solves` per run
-- [ ] 6.2 Add new columns to `<topology>_summary.csv`: `rank1_hit_rate`, `wall_s_full_refactor`, `wall_s_rank1`
-- [ ] 6.3 Author benchmark runners for the remaining 9 converters (boost, buck-boost, forward, flyback, half-bridge LLC, boost PFC, VSI 3φ, NPC 3-level, MMC N=3)
-- [ ] 6.4 Re-run all 10; commit `<topology>_summary.csv` rows to `artigos/02_tpel_methods/benchmarks/results/`
-- [ ] 6.5 Write 1-page report `artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md` — table of speedups, narrative on crossover at n≈100
+> **Scope shift recorded 2026-05-24:** the originally-planned Python
+> per-converter benchmark extension requires `solve_rank1` to be wired
+> into Layer 5's `run_transient` and exposed through the Python bindings
+> — neither of which lives in this OpenSpec change. The honest fast
+> path was to re-scope Section 6 to a kernel-level C++ microbenchmark
+> that exercises `cache.solve_rank1` directly. The original Python
+> work moves to a follow-up proposal `add-pwl-rank1-runtime-integration`
+> (TBD). Detailed in `artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md`
+> "Honest limitations" section.
+
+- [x] 6.1 Author `core/tests/benchmarks/test_bench_pwl_rank1.cpp` —
+      Catch2 binary inside the opt-in `pulsim_benchmarks` target. Uses
+      `bench_helpers::Stopwatch` for clean wall-clock measurement,
+      writes per-N CSV rows.
+- [x] 6.2 Add `set_rank1_backend(Backend)` setter to `PwlStateSpaceCache`
+      so the benchmark can force `Backend::KLU` regardless of the
+      synthetic fixture's tiny `state_size` (avoids needing a build-time
+      flag override).
+- [x] 6.3 Sweep N ∈ {4, 6, 8, 10, 12} switches on a synthetic N-switch
+      chain fixture. Capture baseline vs rank-1 wall-time, per-call cost,
+      speedup ratio, and counter partition (rank1_hits / full_refactor_hits
+      / fallbacks).
+- [x] 6.4 Write captured CSV to
+      `artigos/02_tpel_methods/benchmarks/results/rank1_microbench.csv`
+      (path override via `PULSIM_BENCH_RESULTS_DIR` env var).
+- [x] 6.5 Write `artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md` —
+      reproduction recipe, captured table, interpretation, and honest
+      limitations (synthetic fixture, n_state capped at 14, microbench
+      forces backend hint).
+
+> **DEFERRED** to follow-up proposal `add-pwl-rank1-runtime-integration`:
+> - Per-converter benchmarks on the 10 real reference projects (buck →
+>   MMC). Requires Layer 5 + Python wire-up first.
 
 ## 7. Validation + spec close-out
 
