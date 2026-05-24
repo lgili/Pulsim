@@ -302,12 +302,63 @@ public:
         return true;
     }
 
-    /// Triangular solve — Section 4, not yet implemented.
-    void solve([[maybe_unused]] const Vector& b,
-                [[maybe_unused]] Vector& x) const override {
-        throw std::logic_error(
-            "PulsimSparseLuSolver::solve not yet implemented (Section 4 "
-            "of openspec/changes/replace-klu-with-pulsim-sparse-lu/)");
+    /// Triangular solve: `M · x = b` via the cached factor `L · U = P_row · M · P_col`.
+    /// Three steps (Davis 2006 §3):
+    ///   1. y ← P_row · b           (apply row permutation)
+    ///   2. y ← L \ y               (forward substitution; L is unit-lower)
+    ///   3. y ← U \ y               (back substitution; U is upper, diagonal stored last)
+    ///   4. x[Pcol[k]] ← y[k]       (apply inverse column permutation to recover x)
+    /// Throws `std::logic_error` if called before a successful `factorize`.
+    void solve(const Vector& b, Vector& x) const override {
+        if (!factorized_) {
+            throw std::logic_error(
+                "PulsimSparseLuSolver::solve called before factorize "
+                "(or factorize returned false). Call factorize(M) first "
+                "and check its return value.");
+        }
+
+        // Apply row permutation: y[i] = b[Prow[i]].
+        Vector y(static_cast<Index>(n_));
+        for (Index i = 0; i < n_; ++i) {
+            y[i] = b[Prow_[static_cast<std::size_t>(i)]];
+        }
+
+        // ---- Step 2: forward substitution (L unit-lower triangular) ---
+        // For each column k of L, propagate the now-known y[k] downward:
+        // y[i] -= L[i, k] * y[k] for every (i, val) stored in L[:, k].
+        for (Index k = 0; k < n_; ++k) {
+            const Real yk = y[k];
+            for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
+                 q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                const Index i = l_row_idx_[static_cast<std::size_t>(q)];
+                y[i] -= l_values_[static_cast<std::size_t>(q)] * yk;
+            }
+        }
+
+        // ---- Step 3: back substitution (U upper triangular) ---------
+        // U[:, k]'s storage convention from Section 3: entries with row
+        // i < k come first (in ascending order), the diagonal entry
+        // (row k) is the LAST slot. We divide by U[k, k] then propagate
+        // y[k] backwards through column k's above-diagonal entries.
+        for (Index k = n_ - 1; k >= 0; --k) {
+            const Index diag_slot = u_col_ptr_[static_cast<std::size_t>(k + 1)] - 1;
+            const Real  ukk       = u_values_[static_cast<std::size_t>(diag_slot)];
+            y[k] /= ukk;
+            const Real yk = y[k];
+            for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
+                 q < diag_slot; ++q) {
+                const Index i = u_row_idx_[static_cast<std::size_t>(q)];
+                y[i] -= u_values_[static_cast<std::size_t>(q)] * yk;
+            }
+        }
+
+        // ---- Step 4: apply inverse column permutation ----------------
+        // The solved system is U·z = y in permuted column space; the
+        // original solution x satisfies x[Pcol[k]] = z[k] = y[k].
+        x.resize(static_cast<Index>(n_));
+        for (Index k = 0; k < n_; ++k) {
+            x[Pcol_[static_cast<std::size_t>(k)]] = y[k];
+        }
     }
 
     [[nodiscard]] bool is_analyzed()   const noexcept override { return analyzed_; }

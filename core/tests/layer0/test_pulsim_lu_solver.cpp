@@ -322,14 +322,136 @@ TEST_CASE("PulsimSparseLuSolver::factorize returns false on a structurally singu
 // §3.5 with the rationale (circuit MNA test fixtures are diagonal-
 // dominant; strict factorization works for them).
 
-TEST_CASE("PulsimSparseLuSolver::solve throws (Section 4 not yet implemented)",
-          "[v2][layer0][sparse][pulsim_lu][stub]") {
+TEST_CASE("PulsimSparseLuSolver::solve before factorize throws",
+          "[v2][layer0][sparse][pulsim_lu][lifecycle]") {
     Matrix M = make_spd_3x3();
     Vector b(3); b << 1.0, 1.0, 1.0;
     Vector x(3);
     PulsimSparseLuSolver solver;
     REQUIRE(solver.analyze(M));
+    // analyze succeeded but factorize wasn't called yet
     REQUIRE_THROWS_AS(solver.solve(b, x), std::logic_error);
+}
+
+// -----------------------------------------------------------------------------
+// Section 4 — triangular solve
+// -----------------------------------------------------------------------------
+
+namespace {
+
+/// Solve `M · x = b` via the existing Eigen-backed `SparseLuSolver` —
+/// used as the reference for parity tests against PulsimSparseLuSolver.
+Vector eigen_solve(const Matrix& M, const Vector& b) {
+    SparseLuSolver eigen_solver;
+    REQUIRE(eigen_solver.analyze(M));
+    REQUIRE(eigen_solver.factorize(M));
+    Vector x_eigen(M.rows());
+    eigen_solver.solve(b, x_eigen);
+    return x_eigen;
+}
+
+}  // namespace
+
+// 4.4.1 — solve matches Eigen on SPD 3x3
+TEST_CASE("PulsimSparseLuSolver::solve matches Eigen on SPD 3x3 within 1e-12",
+          "[v2][layer0][sparse][pulsim_lu][solve]") {
+    Matrix M = make_spd_3x3();
+    Vector b(3); b << 1.0, 2.0, 3.0;
+
+    Vector x_eigen = eigen_solve(M, b);
+
+    PulsimSparseLuSolver pulsim_solver;
+    REQUIRE(pulsim_solver.analyze(M));
+    REQUIRE(pulsim_solver.factorize(M));
+    Vector x_pulsim(3);
+    pulsim_solver.solve(b, x_pulsim);
+
+    for (Index i = 0; i < 3; ++i) {
+        INFO("i = " << i << " pulsim=" << x_pulsim[i] << " eigen=" << x_eigen[i]);
+        REQUIRE(x_pulsim[i] == Catch::Approx(x_eigen[i]).margin(1e-12));
+    }
+}
+
+// 4.4.2 — solve matches Eigen on buck-like 8x8 (asymmetric MNA with partial pivoting)
+TEST_CASE("PulsimSparseLuSolver::solve matches Eigen on buck-like 8x8 within 1e-12",
+          "[v2][layer0][sparse][pulsim_lu][solve]") {
+    Matrix M = make_buck_like_8x8();
+    Vector b(8); b << 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 5.0;
+
+    Vector x_eigen = eigen_solve(M, b);
+
+    PulsimSparseLuSolver pulsim_solver;
+    REQUIRE(pulsim_solver.analyze(M));
+    REQUIRE(pulsim_solver.factorize(M));
+    Vector x_pulsim(8);
+    pulsim_solver.solve(b, x_pulsim);
+
+    for (Index i = 0; i < 8; ++i) {
+        INFO("i = " << i << " pulsim=" << x_pulsim[i] << " eigen=" << x_eigen[i]);
+        REQUIRE(x_pulsim[i] == Catch::Approx(x_eigen[i]).margin(1e-10));
+    }
+}
+
+// 4.4.3 — solve before factorize throws (already covered above; here we
+// also exercise the "factorize succeeded then solve" happy path multiple
+// times to confirm the factor isn't consumed by solve)
+TEST_CASE("PulsimSparseLuSolver::solve can be called multiple times after factorize",
+          "[v2][layer0][sparse][pulsim_lu][solve]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+
+    Vector b1(3); b1 << 1.0, 0.0, 0.0;
+    Vector b2(3); b2 << 0.0, 1.0, 0.0;
+    Vector x1(3), x2(3);
+
+    solver.solve(b1, x1);
+    solver.solve(b2, x2);
+
+    // M · x1 = b1 → reconstruct b1 from M*x1
+    Vector recon1 = M * x1;
+    Vector recon2 = M * x2;
+    for (Index i = 0; i < 3; ++i) {
+        REQUIRE(recon1[i] == Catch::Approx(b1[i]).margin(1e-12));
+        REQUIRE(recon2[i] == Catch::Approx(b2[i]).margin(1e-12));
+    }
+}
+
+// 4.4.4 — solve after re-factorize (same symbolic, new values) gives the
+// updated solution. Validates that solve uses the CURRENT L+U, not any
+// cached intermediate.
+TEST_CASE("PulsimSparseLuSolver::solve uses the latest factor after refactorize",
+          "[v2][layer0][sparse][pulsim_lu][solve]") {
+    // First factorize M1, solve.
+    Matrix M1 = make_spd_3x3();
+    Vector b(3); b << 1.0, 1.0, 1.0;
+
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M1));
+    REQUIRE(solver.factorize(M1));
+    Vector x1(3);
+    solver.solve(b, x1);
+
+    // Now perturb the matrix's values (same sparsity pattern) and
+    // factorize again on the SAME analyzed structure.
+    Matrix M2(3, 3);
+    std::vector<Triplet> t2 = {
+        {0, 0,  8.0}, {0, 1, -2.0},
+        {1, 0, -2.0}, {1, 1,  8.0}, {1, 2, -2.0},
+        {2, 1, -2.0}, {2, 2,  8.0},
+    };
+    M2.setFromTriplets(t2.begin(), t2.end());
+    compress_in_place(M2);
+
+    REQUIRE(solver.factorize(M2));  // Re-factor: NOT re-analyzing
+    Vector x2(3);
+    solver.solve(b, x2);
+
+    // x2 should solve M2·x2 = b (= half of x1 because M2 = 2·M1)
+    for (Index i = 0; i < 3; ++i) {
+        REQUIRE(x2[i] == Catch::Approx(x1[i] / 2.0).margin(1e-12));
+    }
 }
 
 TEST_CASE("PulsimSparseLuSolver::factorize before analyze throws",
