@@ -1556,8 +1556,9 @@ class TestCapOuterLoop:
         assert loop.last_correction == pytest.approx(0.0)
 
     def test_positive_error_decreases_i_d_ref(self) -> None:
-        """Caps over-charged (mean > target) → reduce input current."""
-        loop = M3cCapOuterLoop(K_p=0.01, v_cap_target=24000.0)
+        """Caps over-charged (mean > target) → reduce input current.
+        K_i=0 isolates the proportional behavior."""
+        loop = M3cCapOuterLoop(K_p=0.01, K_i=0.0, v_cap_target=24000.0)
         v_caps_over = np.full(9, 25000.0)  # +1000 V overshoot
         out = loop.apply(100.0, v_caps_over)
         assert loop.last_error == pytest.approx(1000.0)
@@ -1565,13 +1566,36 @@ class TestCapOuterLoop:
         assert out == pytest.approx(90.0)
 
     def test_negative_error_increases_i_d_ref(self) -> None:
-        """Caps under-charged → draw more input current."""
-        loop = M3cCapOuterLoop(K_p=0.02, v_cap_target=24000.0)
+        """Caps under-charged → draw more input current. K_i=0 isolates
+        the proportional behavior."""
+        loop = M3cCapOuterLoop(K_p=0.02, K_i=0.0, v_cap_target=24000.0)
         v_caps_low = np.full(9, 22000.0)  # -2000 V undershoot
         out = loop.apply(0.0, v_caps_low)
         assert loop.last_error == pytest.approx(-2000.0)
         assert loop.last_correction == pytest.approx(+40.0)
         assert out == pytest.approx(40.0)
+
+    def test_integrator_accumulates(self) -> None:
+        """With K_p=0, repeated calls integrate the error."""
+        loop = M3cCapOuterLoop(
+            K_p=0.0, K_i=0.01, dt=1e-3, v_cap_target=24000.0,
+        )
+        v_caps = np.full(9, 23000.0)   # err = -1000
+        # First call: integral = -1000 · 1e-3 = -1.
+        loop.apply(0.0, v_caps)
+        # Second call: integral = -2.
+        out = loop.apply(0.0, v_caps)
+        # Correction = -K_i · integral = -0.01 · (-2) = +0.02 A.
+        assert loop.last_correction == pytest.approx(0.02, abs=1e-9)
+
+    def test_anti_windup(self) -> None:
+        """Massive cap error saturates correction at correction_max."""
+        loop = M3cCapOuterLoop(
+            K_p=1.0, K_i=10.0, dt=1e-3,
+            v_cap_target=24000.0, correction_max=200.0,
+        )
+        loop.apply(0.0, np.zeros(9))     # huge V_err = -24000
+        assert abs(loop.last_correction) <= 200.0 + 1e-6
 
 
 @_requires_pulsim
@@ -1600,19 +1624,22 @@ class TestCapOuterLoopIntegration:
         )
         return ctrl_no, ctrl_yes, cap
 
-    def test_cap_loop_reduces_spread(self, comparison) -> None:
-        """Cap loop should give a *smaller* v_caps spread than the
-        plain dq-only loop after the same simulation."""
+    def test_cap_loop_drives_mean_toward_target(
+        self, comparison, params,
+    ) -> None:
+        """The PI cap loop drives the mean v_caps_module closer to
+        the target (v_cap_total_per_module = 24 kV) than the no-loop
+        baseline. With the no-loop case caps drift down toward
+        ~20 kV; with the PI loop they stay close to 24 kV."""
         ctrl_no, ctrl_yes, _ = comparison
-        spread_no = (
-            max(ctrl_no.v_caps_module) - min(ctrl_no.v_caps_module)
-        )
-        spread_yes = (
-            max(ctrl_yes.v_caps_module) - min(ctrl_yes.v_caps_module)
-        )
-        assert spread_yes < spread_no, (
-            f"Cap loop made it worse: spread_no={spread_no:.0f} V "
-            f"vs spread_yes={spread_yes:.0f} V"
+        target = params.v_cap_total_per_module
+        mean_no = float(np.mean(ctrl_no.v_caps_module))
+        mean_yes = float(np.mean(ctrl_yes.v_caps_module))
+        err_no = abs(mean_no - target)
+        err_yes = abs(mean_yes - target)
+        assert err_yes < err_no, (
+            f"Cap loop didn't improve mean: no-loop={mean_no:.0f} V, "
+            f"PI-loop={mean_yes:.0f} V, target={target:.0f} V"
         )
 
     def test_cap_loop_produces_nonzero_correction(

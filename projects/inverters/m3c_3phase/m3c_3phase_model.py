@@ -2377,11 +2377,18 @@ def make_m3c_l1_dq_full_control(
         raise ValueError("L1 plant must expose iL_in_indices")
 
     if dq_in_controller is None:
-        # Default ωL decoupling for input side: ω_in · L_in.
+        # Default gains for a PURE-inductor plant (no R_in):
+        #   K_p = 2·ξ·ω_n·L_in, K_i = ω_n²·L_in.
+        # Use ω_n = 2π·100 Hz, ξ=1 (critically damped). That's well
+        # below the f_sw=2 kHz switching, fast enough that the cap-
+        # outer loop can move a ~200 A i_d_in_ref correction in
+        # ~10 ms.
+        omega_n_in = 2.0 * pi * 100.0
         dq_in_controller = M3cDqController(
-            K_p=2.0 * pi * 50.0 * params.L_in,
-            K_i=2.0 * pi * 50.0 * 1e-3,   # tiny R_in, small K_i
+            K_p=2.0 * 1.0 * omega_n_in * params.L_in,
+            K_i=omega_n_in**2 * params.L_in,
             omega_L_decouple=params.omega_in * params.L_in,
+            v_pi_max=params.V_in_phase_peak * 0.5,  # half of source amplitude
         )
     if dq_out_controller is None:
         L_total = params.L_out + params.L_load
@@ -2719,28 +2726,59 @@ def run_l1_dq_full_closed_loop(
 
 @dataclass
 class M3cCapOuterLoop:
-    """Proportional outer loop that adjusts i_d_in_ref to keep the
-    mean module-level cap voltage at ``v_cap_total_per_module``.
+    """PI outer loop that adjusts ``i_d_in_ref`` to keep the mean
+    module-level cap voltage at ``v_cap_total_per_module``.
+
+    A proportional-only loop leaves a non-zero steady-state error
+    because the input PI needs an *additional* ~100 A bias to deliver
+    the converter's output power (and the bias only appears for
+    non-zero cap error). Adding an integrator drives the steady-state
+    error to zero so caps settle exactly at the target.
 
     Sign convention: positive ``v_caps_mean - target`` means caps are
     OVER-CHARGED → loop should DECREASE the active power drawn from
     the input (smaller i_d_in_ref). So the correction is:
 
-        Δi_d_in = -K_p · (V_caps_mean − V_target)
+        e = V_mean − V_target
+        integral += e · dt
+        Δi_d_in = -K_p · e − K_i · integral
 
-    Use ``apply`` to compute the corrected reference given the
-    base reference plus the current state.
+    ``dt`` is the cap-loop sample time. By default we use the
+    switching period ``T_s`` (the cap loop refreshes once per T_s
+    tick by virtue of being called from the step_observer).
+
+    Default gains: K_p=0.05 (~100 A correction per kV of error),
+    K_i=0.05 (closes the steady-state gap over a few seconds).
     """
 
-    K_p: float = 0.01           # A per V of cap error
+    K_p: float = 0.05           # A per V of cap error (proportional)
+    K_i: float = 0.05           # A per (V·s) of cap error (integral)
     v_cap_target: float = 0.0   # set by factory below
+    dt: float = 5e-4            # loop sample time (defaults to T_s)
+    # PI integrator state.
+    integral: float = 0.0
+    # Anti-windup clamp on the correction.
+    correction_max: float = 500.0
+    # Diagnostics.
     last_error: float = 0.0
     last_correction: float = 0.0
 
     def apply(self, base_i_d_in_ref: float, v_caps_module) -> float:
         v_mean = float(np.mean(v_caps_module))
         err = v_mean - self.v_cap_target
-        delta = -self.K_p * err
+        self.integral += err * self.dt
+        delta = -self.K_p * err - self.K_i * self.integral
+        # Anti-windup.
+        if delta > self.correction_max:
+            self.integral -= (delta - self.correction_max) / max(
+                self.K_i, 1e-12,
+            )
+            delta = self.correction_max
+        elif delta < -self.correction_max:
+            self.integral -= (delta + self.correction_max) / max(
+                self.K_i, 1e-12,
+            )
+            delta = -self.correction_max
         self.last_error = err
         self.last_correction = delta
         return float(base_i_d_in_ref + delta)
@@ -2767,7 +2805,9 @@ def make_m3c_l1_dq_full_control_with_cap_loop(
     """
     if cap_outer_loop is None:
         cap_outer_loop = M3cCapOuterLoop(
-            K_p=0.01,
+            K_p=0.05,
+            K_i=0.05,
+            dt=params.T_s,
             v_cap_target=params.v_cap_total_per_module,
         )
 
