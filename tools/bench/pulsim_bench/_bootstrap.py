@@ -28,24 +28,29 @@ from pathlib import Path
 from typing import Optional
 
 
-_MARKER_FILE = "benchmark_runner.py"  # canonical file inside benchmarks/
+_MARKER_DIR = "circuits"  # stable: benchmarks/circuits/ predates the reorg
 
 
 def _is_pulsim_root(p: Path) -> bool:
     """Heuristic: `p` looks like the Pulsim repo root if it has a
-    `benchmarks/benchmark_runner.py` AND a `pyproject.toml` whose
+    `benchmarks/circuits/` directory AND a `pyproject.toml` whose
     `[project].name == "pulsim"`. The double-check avoids picking up
-    a sibling project that also has a `benchmarks/` dir."""
-    bench = p / "benchmarks" / _MARKER_FILE
+    a sibling project that also has a `benchmarks/` dir.
+
+    Marker chosen post-Phase B reorg: `benchmarks/circuits/` is the
+    one structural element that does NOT move (per REORG_PLAN.md
+    Phase E sub-categorises files inside it, but the dir stays).
+    """
+    bench = p / "benchmarks" / _MARKER_DIR
     pyproject = p / "pyproject.toml"
-    if not bench.is_file() or not pyproject.is_file():
+    if not bench.is_dir() or not pyproject.is_file():
         return False
     try:
         with open(pyproject, "rb") as f:
             data = tomllib.load(f)
         return str(data.get("project", {}).get("name", "")).strip() == "pulsim"
     except Exception:
-        # If we can't parse pyproject, fall back to the marker file
+        # If we can't parse pyproject, fall back to the marker dir
         # being present.
         return True
 
@@ -70,7 +75,7 @@ def repo_root() -> Path:
         # If user set it explicitly but it's wrong, fail loudly.
         raise RuntimeError(
             f"PULSIM_REPO_ROOT='{env}' is set but does not look like a "
-            f"Pulsim checkout (missing benchmarks/{_MARKER_FILE} or "
+            f"Pulsim checkout (missing benchmarks/{_MARKER_DIR}/ or "
             f"pyproject.toml [project].name != 'pulsim')"
         )
 
@@ -106,18 +111,18 @@ def scripts_dir() -> Path:
 
 
 def ensure_benchmarks_on_path() -> Path:
-    """Add `benchmarks/` to `sys.path[0]` (idempotent) and return it.
+    """Add `benchmarks/tools/` to `sys.path[0]` (idempotent) and return it.
 
-    The legacy runners (`benchmark_runner.py`, `benchmark_ngspice.py`,
+    The bench runners (`benchmark_runner.py`, `benchmark_ngspice.py`,
     `stress_suite.py`, `local_limit_suite.py`, `_console.py`,
-    `pulsim_python_backend.py`) live in that flat directory and
+    `freeze_kpi_baseline.py`, `kpi_gate.py`) all live under
+    `benchmarks/tools/` after the Phase B structural reorg, and they
     import each other as siblings (`from benchmark_runner import …`).
-    Adding the dir to sys.path is the minimally-invasive way to make
-    them importable from our package without restructuring the legacy
-    layout.
+    Adding that dir to sys.path is the minimally-invasive way to keep
+    them importable from this package.
     """
-    bdir = benchmarks_dir()
-    bstr = str(bdir)
-    if bstr not in sys.path:
-        sys.path.insert(0, bstr)
-    return bdir
+    tdir = benchmarks_dir() / "tools"
+    tstr = str(tdir)
+    if tstr not in sys.path:
+        sys.path.insert(0, tstr)
+    return tdir
