@@ -99,6 +99,14 @@ class M3cParams:
     m_v: float = 0.5                  # output modulation index
     m_c: float = 1.0                  # input current modulation index
 
+    # ---- Load (RL, Y-connected) -------------------------------------------
+    # Defaults dimensioned for the 2 MVA / 11 kV operating point at 0.9 PF:
+    #   |V_phase_rms| = 11 kV / √3 ≈ 6.351 kV
+    #   I_load_rms   ≈ S / (√3 · V_LL_rms) = 2 MVA / (√3·11 kV) ≈ 105 A
+    #   |Z_load|     ≈ V/I ≈ 60 Ω at 45 Hz, with R/L chosen for 0.9 PF.
+    R_load: float = 54.0              # Ω (≈ 0.9·|Z|)
+    L_load: float = 92.5e-3           # H (≈ |Z|·sin(arccos 0.9) / (2π·45))
+
     @property
     def omega_in(self) -> float:
         return 2.0 * pi * self.f_in
@@ -128,6 +136,18 @@ class M3cParams:
         with the current topology — Sec 4.1 of the thesis.
         Specifically, ``2·N + 1``."""
         return 2 * self.n_sm_per_module + 1
+
+    @property
+    def V_in_phase_peak(self) -> float:
+        """Input phase-to-neutral peak voltage =
+        ``V_in_LL_peak / √3``."""
+        return self.V_in_LL_peak / np.sqrt(3.0)
+
+    @property
+    def V_out_phase_peak(self) -> float:
+        """Output phase-to-neutral peak voltage =
+        ``V_out_LL_peak / √3``."""
+        return self.V_out_LL_peak / np.sqrt(3.0)
 
 
 # =============================================================================
@@ -984,3 +1004,277 @@ def select_best_connection(
             best_cost = cost
             best_cfg = cfg
     return best_cfg, best_cost
+
+
+# =============================================================================
+# L0 — averaged-model plant + runner (Phase 22.4)
+# =============================================================================
+#
+# Like the CMC L0 (Phase 21.2), the M3C L0 plant represents the
+# multilevel-matrix converter as a Venturini-style continuous-time
+# averaged converter: there is no high-frequency switching ripple in
+# the output voltage, only the fundamental synthesised by the Fast
+# SVM. The output line-neutral voltages are:
+#
+#     v_a_out(t) = V_out_phase_peak · cos(ω_o·t)
+#     v_b_out(t) = V_out_phase_peak · cos(ω_o·t − 2π/3)
+#     v_c_out(t) = V_out_phase_peak · cos(ω_o·t + 2π/3)
+#
+# at the three Y-load terminals. The averaging hides:
+#   * the discretization of the 13 output line-voltage levels;
+#   * the capacitor-voltage ripple of the 54 SMs;
+#   * the input-side current draw (no input is modelled in L0).
+#
+# These are intentionally absent at this layer — L0 is purely a
+# verification baseline that establishes the SVM-synthesised
+# fundamental matches its closed-form expectation for the M3C's
+# nominal 11 kV / 45 Hz operating point. Upper layers re-introduce
+# the missing physics:
+#
+#   * L1: 54 ideal SMs switched via the SVM duty cycles, capacitor
+#     dynamics, cost-function selection (Phase 22.5).
+#   * L2: realistic switch models (IGBT V_CE_sat + body diodes).
+#   * L3: closed-loop dq current control (Phase 22.6).
+
+
+try:                                                   # type: ignore[unused-ignore]
+    import pulsim as _p                                # type: ignore[import-not-found]
+except ImportError:                                    # pragma: no cover
+    _p = None  # The plant builders require pulsim;
+    #             tests for Tiers 1-7 still run without it.
+
+
+@dataclass
+class M3cPlant:
+    """Bundle returned by the M3C plant builders.
+
+    Mirrors :class:`CmcPlant` to keep the project-wide pattern.
+
+    Attributes
+    ----------
+    builder
+        The fully-assembled :class:`pulsim.CircuitBuilder`.
+    iL_out_indices
+        State indices of the 3 output-side load inductor currents
+        (i_a, i_b, i_c). Resolved after the graph is complete.
+    iL_in_indices
+        State indices of the 3 input-side filter inductor currents,
+        or ``None`` when the plant does not model the input side
+        (as is the case for L0).
+    """
+
+    builder: object
+    iL_out_indices: tuple[int, int, int] = (0, 0, 0)
+    iL_in_indices: tuple[int, int, int] | None = None
+
+
+def build_l0_plant(params: M3cParams) -> M3cPlant:
+    """3-φ M3C output-side averaged plant.
+
+    Topology::
+
+        ┌── V_a_out ──┬── L_load ──┬── R_load ──┐
+        │                                       │
+        │── V_b_out ──┬── L_load ──┬── R_load ──┼── star
+        │                                       │
+        └── V_c_out ──┴── L_load ──┴── R_load ──┘
+
+    Three output voltage sources are sinusoids at ``params.f_out``
+    with amplitude ``params.V_out_phase_peak``, phase-shifted by
+    120° — the *ideal* SVM-synthesised reference. The load is
+    Y-connected RL, star tied weakly to ground for MNA conditioning.
+
+    Suitable for verifying output fundamental amplitude, RMS, balance,
+    and load impedance response. Does **not** model the input side
+    (entrance currents are zero by construction at L0).
+    """
+    if _p is None:
+        raise RuntimeError(
+            "pulsim is not importable — build_l0_plant requires the "
+            "full pulsim package, not just the SVM helpers."
+        )
+
+    b = _p.CircuitBuilder()
+    V_o_peak = params.V_out_phase_peak  # phase peak from LL peak / √3
+
+    # Output voltage sources — one per phase, sinusoidal at f_out.
+    # Phase offset includes +π/2 to convert pulsim's sin convention
+    # to the cosine convention used by the Fast SVM theory in the
+    # thesis (V_a = V_o·cos(ω_o·t), so at t=0 V_a is at its peak).
+    # This guarantees that the SVM α_o = ω_o·t lookup aligns with
+    # the actual voltage vector position in pulsim's clock.
+    b.add_sine_voltage_source(
+        "V_a_out", "a", "star",
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=params.f_out,
+        phase=+pi / 2.0,                       # sin(ωt + π/2) = cos(ωt)
+    )
+    b.add_sine_voltage_source(
+        "V_b_out", "b", "star",
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=params.f_out,
+        phase=+pi / 2.0 - 2.0 * pi / 3.0,      # cos(ωt − 2π/3)
+    )
+    b.add_sine_voltage_source(
+        "V_c_out", "c", "star",
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=params.f_out,
+        phase=+pi / 2.0 + 2.0 * pi / 3.0,      # cos(ωt + 2π/3)
+    )
+
+    # Y-load: ph → L_load → R_load → star (same neutral as sources).
+    # Capture inductor branch IDs as they are created, but resolve
+    # *state indices* only after the FULL graph is built — pulsim's
+    # state-index assignment depends on the total graph topology and
+    # would yield stale indices if queried mid-build (a well-known
+    # gotcha from Phases 20+21).
+    L_branch_ids: list[int] = []
+    for ph in "abc":
+        L_id = b.graph.num_branches
+        b.add_inductor(
+            f"L_load_{ph}", ph, f"rload_{ph}", params.L_load,
+        )
+        b.add_resistor(
+            f"R_load_{ph}", f"rload_{ph}", "star", params.R_load,
+        )
+        L_branch_ids.append(L_id)
+
+    # Weak tie of star to ground (MNA conditioning).
+    b.add_resistor("R_star_gnd", "star", "gnd", 1e6)
+
+    # Now that the graph is complete, resolve state indices.
+    iL_out_indices = tuple(
+        b.pool.branch_var_id_for_inductor(L_id, b.graph)
+        for L_id in L_branch_ids
+    )
+
+    return M3cPlant(
+        builder=b,
+        iL_out_indices=iL_out_indices,  # type: ignore[arg-type]
+        iL_in_indices=None,
+    )
+
+
+# =============================================================================
+# Run driver
+# =============================================================================
+
+
+@dataclass
+class M3cRunResult:
+    """Output of :func:`run_l0_open_loop`."""
+
+    t: np.ndarray
+    i_a_out: np.ndarray
+    i_b_out: np.ndarray
+    i_c_out: np.ndarray
+    # Optional: input currents (populated by L1+).
+    i_a_in: np.ndarray = field(default_factory=lambda: np.empty(0))
+    i_b_in: np.ndarray = field(default_factory=lambda: np.empty(0))
+    i_c_in: np.ndarray = field(default_factory=lambda: np.empty(0))
+
+
+def run_l0_open_loop(
+    plant: M3cPlant,
+    *,
+    t_end: float = 100e-3,
+    dt: float = 10e-6,
+) -> M3cRunResult:
+    """Run an L0 plant for ``t_end`` seconds at fixed ``dt``.
+
+    No observer is needed at L0 — the sinusoidal sources update
+    themselves automatically via pulsim's built-in time-varying
+    SineVoltageSource primitive.
+    """
+    if _p is None:
+        raise RuntimeError(
+            "pulsim is not importable — run_l0_open_loop requires "
+            "the full pulsim package."
+        )
+
+    iLa, iLb, iLc = plant.iL_out_indices
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    counter = [0]
+
+    def log_obs(t, x):
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=log_obs,
+        start_from_dc_op=True,
+    )
+
+    n = counter[0]
+    return M3cRunResult(
+        t=log_t[:n],
+        i_a_out=log_ia[:n],
+        i_b_out=log_ib[:n],
+        i_c_out=log_ic[:n],
+    )
+
+
+# =============================================================================
+# Metrics — closed-form predictions + signal analysis
+# =============================================================================
+
+
+def predict_load_impedance(params: M3cParams) -> complex:
+    """Per-phase complex impedance of the Y-connected RL load:
+
+        Z = R + jω_out · L
+    """
+    return params.R_load + 1j * params.omega_out * params.L_load
+
+
+def predict_i_out_peak(params: M3cParams) -> float:
+    """Closed-form peak of the load current — Ohm's law at the output:
+
+        |I_o| = V_out_phase_peak / |Z_load|
+    """
+    return params.V_out_phase_peak / abs(predict_load_impedance(params))
+
+
+def predict_load_power_factor(params: M3cParams) -> float:
+    """Power factor of the RL load: cos(arctan(ω·L / R))."""
+    return float(np.cos(
+        np.arctan2(params.omega_out * params.L_load, params.R_load)
+    ))
+
+
+def rms(signal: np.ndarray) -> float:
+    """RMS value of a signal."""
+    return float(np.sqrt(np.mean(
+        np.asarray(signal, dtype=np.float64) ** 2
+    )))
+
+
+def thd(signal: np.ndarray, fs: float, f_fundamental: float) -> float:
+    """Total harmonic distortion in % via DFT.
+
+    Returns ``100·√(Σ |X_k|² / |X_1|²)`` where ``X_1`` is the
+    fundamental and the sum runs over harmonics 2..N within the
+    Nyquist limit.
+    """
+    sig = np.asarray(signal, dtype=np.float64)
+    n = len(sig)
+    spec = np.fft.rfft(sig)
+    k1 = int(round(f_fundamental * n / fs))
+    if k1 <= 0 or k1 >= len(spec):
+        return float("nan")
+    fundamental = abs(spec[k1])
+    if fundamental < 1e-12:
+        return float("nan")
+    harmonics_sq = 0.0
+    k = 2 * k1
+    while k < len(spec):
+        harmonics_sq += float(abs(spec[k])) ** 2
+        k += k1
+    return 100.0 * float(np.sqrt(harmonics_sq)) / fundamental

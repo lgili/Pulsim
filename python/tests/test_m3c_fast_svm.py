@@ -27,6 +27,7 @@ from m3c_3phase_model import (  # noqa: E402
     M3cParams,
     ModuleConfiguration,
     abc_to_lg,
+    build_l0_plant,
     configurations_by_distribution,
     configurations_containing_module,
     connection_cost,
@@ -37,9 +38,26 @@ from m3c_3phase_model import (  # noqa: E402
     fast_svm_step,
     lg_to_abc,
     make_fast_svm_fn,
+    predict_i_out_peak,
+    predict_load_impedance,
+    predict_load_power_factor,
+    rms,
+    run_l0_open_loop,
     select_best_connection,
     solve_module_currents,
     solve_module_voltages,
+    thd,
+)
+
+try:
+    import pulsim  # noqa: F401
+    _PULSIM_AVAILABLE = True
+except ImportError:
+    _PULSIM_AVAILABLE = False
+
+_requires_pulsim = pytest.mark.skipif(
+    not _PULSIM_AVAILABLE,
+    reason="pulsim not importable (only Tiers 1-8 will run)",
 )
 
 
@@ -676,3 +694,177 @@ class TestSelectBestConnection:
         ]
         assert best_cost == pytest.approx(min(all_costs))
         assert best_cfg.is_active(*short)
+
+
+# ============================================================================
+# Tier 9 — L0 plant (Phase 22.4) — end-to-end pulsim verification of the
+# Venturini-style averaged M3C output. Requires pulsim importable.
+# ============================================================================
+
+
+@_requires_pulsim
+class TestL0Plant:
+    """L0 plant: synthesised output sinusoids → Y-connected RL load.
+    Validates pulsim end-to-end at the M3C nominal 11 kV / 45 Hz
+    operating point against closed-form analytical predictions."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> M3cParams:
+        # 11 kV LL output at 45 Hz, ~2 MVA-class RL load (0.9 PF).
+        return M3cParams()  # all defaults: matches Tab 15
+
+    @pytest.fixture(scope="class")
+    def result(self, params: M3cParams):
+        plant = build_l0_plant(params)
+        # Run long enough for ≥ 100 ms settling + 3 fundamental periods
+        # of clean data; at 45 Hz that's ≈ 167 ms. Use 200 ms with a
+        # buffer so the "last 3 periods" slice is always populated.
+        return run_l0_open_loop(plant, t_end=200e-3, dt=20e-6)
+
+    # ---- helpers (use last-N-samples slicing, which is robust to any
+    #              run length and trivially gives an integer-period
+    #              window after settling) ----
+
+    @staticmethod
+    def _last_n_periods(
+        arr: np.ndarray, params: M3cParams, dt: float, n_periods: int,
+    ) -> np.ndarray:
+        fs = 1.0 / dt
+        n_per_period = int(round((1.0 / params.f_out) * fs))
+        return arr[-(n_periods * n_per_period):]
+
+    def test_i_out_peak_matches_analytical(
+        self, params: M3cParams, result,
+    ) -> None:
+        """|I_o| = V_out_phase_peak / |Z_load| should match within 1 %."""
+        mask = result.t >= 100e-3
+        i_a_pk = float(np.max(np.abs(result.i_a_out[mask])))
+        i_a_pk_pred = predict_i_out_peak(params)
+        rel_err = abs(i_a_pk - i_a_pk_pred) / i_a_pk_pred
+        assert rel_err < 0.01, (
+            f"i_a peak = {i_a_pk:.4f} A vs {i_a_pk_pred:.4f} A predicted, "
+            f"rel-err = {rel_err*100:.3f}%"
+        )
+
+    def test_i_out_rms_matches_analytical(
+        self, params: M3cParams, result,
+    ) -> None:
+        """RMS = peak / √2 for pure sinusoid. Window: last 3 periods
+        (deterministic integer-cycle slice → no leakage)."""
+        ia = self._last_n_periods(result.i_a_out, params, 20e-6, 3)
+        i_rms = rms(ia)
+        i_rms_pred = predict_i_out_peak(params) / np.sqrt(2.0)
+        rel_err = abs(i_rms - i_rms_pred) / i_rms_pred
+        assert rel_err < 0.01, (
+            f"i_a RMS = {i_rms:.4f} A vs {i_rms_pred:.4f} A predicted, "
+            f"rel-err = {rel_err*100:.3f}%"
+        )
+
+    def test_balanced_three_phase_output(self, result) -> None:
+        """All three load currents have the same peak (balanced 3-φ)."""
+        mask = result.t >= 100e-3
+        peaks = [
+            float(np.max(np.abs(x[mask])))
+            for x in (result.i_a_out, result.i_b_out, result.i_c_out)
+        ]
+        max_dev_rel = (max(peaks) - min(peaks)) / max(peaks)
+        assert max_dev_rel < 1e-3, (
+            f"3-φ peaks unbalanced: {peaks}, max rel deviation "
+            f"{max_dev_rel*100:.4f}%"
+        )
+
+    def test_load_phase_shift_120_degrees(
+        self, params: M3cParams, result,
+    ) -> None:
+        """The three load currents are 120° apart, measured via DFT
+        of the fundamental over an integer number of periods."""
+        ia = self._last_n_periods(result.i_a_out, params, 20e-6, 3)
+        ib = self._last_n_periods(result.i_b_out, params, 20e-6, 3)
+        ic = self._last_n_periods(result.i_c_out, params, 20e-6, 3)
+        # Coherent DFT bin at f_out (no windowing needed).
+        fs = 1.0 / 20e-6
+        n_win = len(ia)
+        k = int(round(params.f_out * n_win / fs))
+        spec_a = np.fft.rfft(ia)[k]
+        spec_b = np.fft.rfft(ib)[k]
+        spec_c = np.fft.rfft(ic)[k]
+        phase_b_a = np.angle(spec_b) - np.angle(spec_a)
+        phase_c_a = np.angle(spec_c) - np.angle(spec_a)
+        # Wrap to (−π, +π].
+        phase_b_a = ((phase_b_a + pi) % (2 * pi)) - pi
+        phase_c_a = ((phase_c_a + pi) % (2 * pi)) - pi
+        # Expected: b lags by 120° (−2π/3), c leads by 120° (+2π/3).
+        assert abs(phase_b_a - (-2 * pi / 3)) < 0.05, (
+            f"Phase b−a = {np.degrees(phase_b_a):.2f}°, expected −120° ± 3°"
+        )
+        assert abs(phase_c_a - (+2 * pi / 3)) < 0.05, (
+            f"Phase c−a = {np.degrees(phase_c_a):.2f}°, expected +120° ± 3°"
+        )
+
+    def test_low_thd_pure_sinusoid(
+        self, params: M3cParams, result,
+    ) -> None:
+        """L0 has no switching ripple ⇒ THD should be near zero (limited
+        by FFT windowing artefacts of integer cycles ~ 0.1 %)."""
+        ia = self._last_n_periods(result.i_a_out, params, 20e-6, 3)
+        thd_pct = thd(ia, fs=1.0 / 20e-6, f_fundamental=params.f_out)
+        assert thd_pct < 1.0, (
+            f"THD = {thd_pct:.3f}%; expected < 1% for ideal L0"
+        )
+
+    def test_load_power_factor_matches_theory(
+        self, params: M3cParams,
+    ) -> None:
+        """Closed-form check: PF = cos(arctan(ωL/R))."""
+        pf_theory = predict_load_power_factor(params)
+        arg = params.omega_out * params.L_load / params.R_load
+        pf_expected = 1.0 / np.sqrt(1.0 + arg ** 2)
+        assert abs(pf_theory - pf_expected) < 1e-12, (
+            f"PF = {pf_theory}, expected {pf_expected}"
+        )
+
+    def test_load_impedance_matches_theory(
+        self, params: M3cParams,
+    ) -> None:
+        """Closed-form check of complex impedance."""
+        Z = predict_load_impedance(params)
+        assert Z.real == pytest.approx(params.R_load)
+        assert Z.imag == pytest.approx(
+            params.omega_out * params.L_load
+        )
+
+    def test_plant_has_3_inductor_state_indices(
+        self, params: M3cParams,
+    ) -> None:
+        """The plant must expose exactly 3 inductor branch state IDs
+        and they must be distinct."""
+        plant = build_l0_plant(params)
+        assert len(plant.iL_out_indices) == 3
+        assert len(set(plant.iL_out_indices)) == 3
+        # L0 doesn't model the input side.
+        assert plant.iL_in_indices is None
+
+    @pytest.mark.parametrize("f_out", [5.0, 30.0, 45.0, 55.0])
+    def test_runs_at_various_frequencies(
+        self, f_out: float,
+    ) -> None:
+        """Tab 15 of the thesis lists f_out ∈ {5, 30, 45, 55} Hz —
+        verify L0 runs cleanly across that range and the steady-state
+        current peak matches the predicted Ohm's law value."""
+        params = M3cParams(f_out=f_out)
+        plant = build_l0_plant(params)
+        # Pick a window covering ≥ 3 fundamental periods, with ≥ 50
+        # ms settling.
+        t_settle = max(50e-3, 3.0 / f_out)
+        t_window = max(60e-3, 3.0 / f_out)
+        t_end = t_settle + t_window
+        dt = 20e-6
+        result = run_l0_open_loop(plant, t_end=t_end, dt=dt)
+        mask = result.t >= t_settle
+        i_pk = float(np.max(np.abs(result.i_a_out[mask])))
+        i_pk_pred = predict_i_out_peak(params)
+        rel_err = abs(i_pk - i_pk_pred) / i_pk_pred
+        assert rel_err < 0.02, (
+            f"f_out={f_out} Hz: peak = {i_pk:.3f} A vs {i_pk_pred:.3f} A "
+            f"predicted, rel-err = {rel_err*100:.2f}%"
+        )
