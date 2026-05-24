@@ -13,48 +13,64 @@ and a paper-specific README tracking submission status.
 ```
 artigos/
   README.md                       ← this file (the strategic plan)
-  shared/                         ← BibTeX + figures + assets shared across papers
+  _shared/                        ← scripts + figures + bib reused across papers
   01_joss_tool_paper/             ← Journal of Open Source Software (FIRST)
-  02_spec_2026/                   ← IEEE SPEC 2026 conference (Cartagena, Dec)
-  03_oj_pel_methods/              ← IEEE Open Journal of Power Electronics
-  04_tpel_application/            ← IEEE Transactions on Power Electronics
+  02_tpel_methods/                ← IEEE TPEL methods paper (subscription route, free)
+  03_jestpe_application/          ← IEEE JESTPE application paper (subscription route, free)
+  04_arxiv_strategy/              ← arXiv companion-preprint policy + workflow
 ```
 
-> **Pivot history.** The original plan targeted **EPE-ECCE Europe
-> 2026** (Valencia, Sep) for paper #2, but the extended-digest
-> deadline (9 Mar 2026) had already passed when work began. EPE-ECCE
-> requires the 2-stage digest-then-full-paper process; without an
-> accepted digest, the 8 Jun full-paper deadline is unavailable.
-> Re-targeted to **IEEE SPEC 2026** (Southern Power Electronics
-> Conference, Cartagena, Colombia, 8-11 Dec; submission deadline
-> 31 Jul 2026 = 69 days at the time of pivot) — same IEEEtran
-> conference template, same MMC topic, comfortable timeline.
+> **Constraint check.** The author has explicit constraints:
+> (1) **$0 publishing cost** — no APCs, no page fees;
+> (2) **no travel** — no resources for conference attendance / virtual
+> registration.
+>
+> **Pivot history:**
+> - Paper #2 was originally **EPE-ECCE Europe 2026** (Valencia, Sep).
+>   Missed the 9-Mar-2026 digest deadline → dropped.
+> - Paper #2 was then re-targeted to **IEEE SPEC 2026** (Cartagena,
+>   Dec). Dropped because conference attendance / virtual
+>   registration fees violate constraint (2).
+> - Paper #3 was originally **IEEE Open Journal of Power Electronics**
+>   (OJ-PEL). Dropped because OJ-PEL is **mandatory Gold OA**
+>   (~$2,160 USD) → violates constraint (1).
+>
+> **Settled pipeline.** All four papers below are **free to publish**
+> and **require zero travel**: JOSS is Diamond OA; the two IEEE
+> Transactions go through the **subscription route** (no APC; paper
+> sits behind IEEE Xplore paywall, but author self-archives the
+> accepted manuscript on arXiv per IEEE Author Posting Policy);
+> the arXiv companion strategy itself is documented for use across
+> the campaign.
 
 ## Strategic priorities
 
 1. **Establish a canonical citation FAST.** The longer Pulsim circulates
    without a citable paper, the more downstream papers will hand-wave
    the reference. JOSS gets us a DOI in ~12 weeks at $0 cost.
-2. **Pair high-throughput venues with high-impact ones.** Submit the
-   tool paper (JOSS) and a conference paper (EPE-ECCE Europe 2026) in
-   parallel — different audiences, different timelines. Then channel
-   the conference feedback into a stronger journal submission.
-3. **Don't over-invest in any single venue.** Spread bets across 4
-   paper types (tool / conference / methods / application) and venue
-   tiers ($0 OA → top-tier IF 8) so a single rejection doesn't stall
-   the credibility-building campaign.
+2. **Stack independent journal submissions.** With conferences off
+   the table (travel/registration cost), our high-impact slots are
+   two IEEE Transactions in parallel: one *methods* paper (TPEL —
+   the PWL cache algorithm) and one *application* paper (JESTPE —
+   MMC capacitor-balancing benchmark). Different reviewer pools,
+   different angles, both indexed in IEEE Xplore + Scopus.
+3. **Always pair a paywalled submission with an arXiv preprint.**
+   IEEE's Author Posting Policy permits depositing the accepted
+   manuscript on arXiv. This neutralises the only real downside of
+   the subscription route (paywall) without paying an APC.
 4. **Make the simulator itself the supplementary material.** Every
    paper should link to a tagged Pulsim release + reproducibility
-   notebooks. JOSS forces this discipline; the others reward it.
+   notebooks. JOSS forces this discipline; the IEEE Transactions
+   reward it through "Reproducibility-Enabled Research" badges.
 
 ## Pipeline summary
 
-| # | Venue | Paper type | IF | Target submit | Cost |
-|:-:|---|---|---:|---|---|
-| 1 | **JOSS** | Tool paper | n/a (CiteScore ~3.2) | 7 Jun 2026 | **$0** |
-| 2 | **IEEE SPEC 2026** | Conference (case study) | — | **31 Jul 2026 deadline** | conf fee |
-| 3 | **IEEE OJ-PEL** | Methods (PWL cache) | 5.4 | Sep–Oct 2026 | $2.2k OA |
-| 4 | **IEEE TPEL** or **JESTPE** | Application (MMC benchmark) | 8.2 / 6.3 | Dec 2026 | OA optional |
+| # | Venue | Paper type | IF | Target submit | Cost | Travel |
+|:-:|---|---|---:|---|:-:|:-:|
+| 1 | **JOSS** | Tool paper | CiteScore 3.2 | 7 Jun 2026 | **$0** | none |
+| 2 | **IEEE TPEL** (subscription) | Methods (PWL cache + benchmark) | 8.2 | Oct 2026 | **$0** | none |
+| 3 | **IEEE JESTPE** (subscription) | Application (MMC + balancing) | 6.3 | Dec 2026 | **$0** | none |
+| 4 | **arXiv** (companion preprints) | Open preprint workflow | — | continuous | **$0** | none |
 
 ## Per-paper plans
 
@@ -83,85 +99,109 @@ need) more than the paper text.
 - [ ] `paper.bib` with all referenced prior work
 - [ ] Tag a Pulsim release (e.g. `v1.1.0`) that matches the paper
 
-**Target submit:** Jun 2026 — leaves headroom before EPE-ECCE Europe
-full-paper deadline (also 8 Jun).
+**Target submit:** 7 Jun 2026 — first day the Pulsim repo clears
+JOSS's "≥ 6 months of public history" gate (repo went public on
+6 Dec 2025).
 
 ---
 
-### 2. IEEE SPEC 2026 — conference paper (case study)
+### 2. IEEE TPEL — methods paper (PWL state-space cache)
 
-**Folder:** [`02_spec_2026/`](02_spec_2026/)
+**Folder:** [`02_tpel_methods/`](02_tpel_methods/)
 
-The IEEE Southern Power Electronics Conference (SPEC) is the
-PELS-flagship conference for Latin America and the southern
-hemisphere. **2026 edition: Cartagena, Colombia, 8–11 December.
-Submission deadline: 31 July 2026** — comfortably open. Same
-IEEEtran conference template as EPE-ECCE / APEC / ECCE, so the
-LaTeX work transfers across any future PELS conference target.
+The IEEE *Transactions on Power Electronics* (TPEL) is the flagship
+PELS journal (IF 8.2 in 2024) and the canonical home for a deep
+methods paper on switched-mode simulation. We target the **subscription
+route** (no APC, no page fees, no colour fees) and pair it with an
+arXiv preprint of the accepted manuscript per IEEE's Author Posting
+Policy — readers without IEEE Xplore access still find the paper on
+Google Scholar via the arXiv mirror.
 
-**Topic chosen:** *Sort-and-Select Capacitor Balancing in a
-Single-Phase Modular Multilevel Converter: An Open-Source Reference
-Implementation.* This builds directly on the MMC project in
-`projects/inverters/mmc/` and exploits the dramatic side-by-side
-visualisation of open-loop drift (caps diverging from ±100 V) vs
-sort-and-select control (all 6 caps locked within 0.03 V) already
-captured in `00_mmc_pulsim_validation.ipynb`.
-
-**Format:** 6 pages, double column, A4, IEEEtran `conference` class.
-
-**Why it matters:** conference presentation = face time with PE
-researchers + indexed Scopus citation; SPEC is also the most
-realistic in-person venue for a Brazil-based author.
-
----
-
-### 3. IEEE OJ-PEL — methods paper (PWL state-space cache)
-
-**Folder:** [`03_oj_pel_methods/`](03_oj_pel_methods/)
-
-The IEEE Open Journal of Power Electronics is **gold OA**, newer than
-TPEL (~5.4 IF in 2024), and explicitly welcomes novel simulation
-methodologies validated against real hardware or other simulators.
-Target: a deep paper on Pulsim's PWL (piecewise-linear) state-space
-cache — the algorithmic contribution that gives Pulsim its
-performance edge vs general-purpose SPICE-likes.
+**Topic:** *A Piecewise-Linear State-Space Cache for Fast Simulation
+of Switched-Mode Power-Electronic Circuits.* The algorithmic
+contribution behind Pulsim's performance edge over general-purpose
+SPICE-likes.
 
 **Structure (draft):**
-1. State-of-the-art in switched-mode power-electronics simulation
-   (SPICE family, PSIM, PLECS, SimPowerSystems, ngspice, gEDA)
-2. PWL state-space cache: derivation, enumeration strategy,
-   numerical conditioning
-3. Benchmark suite: simulation wall-time vs PSIM and ngspice on the
-   10 reference converters (buck → MMC)
-4. Discussion of cache-build cost vs run-time savings
-5. Reproducibility: link to tagged Pulsim release + benchmark notebooks
+1. State-of-the-art in switched-mode PE simulation (SPICE family,
+   PSIM, PLECS, SimPowerSystems, ngspice, gEDA)
+2. PWL state-space cache: derivation, enumeration strategy, numerical
+   conditioning, event-detection coupling
+3. Benchmark suite: wall-time + accuracy vs ngspice on the 10
+   reference converters in `projects/` (buck → MMC)
+4. Discussion of cache-build cost vs run-time savings; sweet spot
+   in terms of switch count
+5. Reproducibility: link to tagged Pulsim release + benchmark
+   notebooks + raw ngspice netlists
 
-**APC:** $2,160 (PELS members get 20% off → ~$1,728).
+**Cost:** $0 (subscription route — IEEE collects no APC; the paper
+sits behind the IEEE Xplore paywall, but the accepted manuscript is
+self-archived on arXiv).
 
-**Target submit:** Sep–Oct 2026.
-
----
-
-### 4. IEEE TPEL / JESTPE — application paper (MMC benchmark)
-
-**Folder:** [`04_tpel_application/`](04_tpel_application/)
-
-A "full" application paper using Pulsim as the research instrument.
-Two candidate angles:
-
-* **TPEL (IF 8.16):** systematic study of MMC capacitor-balancing
-  algorithms (sort-and-select variants, second-order suppression, etc.)
-  across N = 3 to N = 20, comparing against published HVDC field data.
-  Pulsim is the enabling tool; the paper is "real" PE research.
-* **JESTPE (IF 6.26):** a multi-topology benchmark (NPC vs MMC vs T-type
-  at the same power level), with THD/efficiency/cost comparisons. More
-  "emerging topics" flavour.
-
-**Target submit:** Dec 2026.
+**Target submit:** Oct 2026 (after JOSS DOI is minted, so the
+benchmark notebooks can cite Pulsim's DOI directly).
 
 ---
 
-## Timeline (calendar, post-EPE-ECCE pivot)
+### 3. IEEE JESTPE — application paper (MMC benchmark)
+
+**Folder:** [`03_jestpe_application/`](03_jestpe_application/)
+
+The IEEE *Journal of Emerging and Selected Topics in Power Electronics*
+(JESTPE) is the second-tier PELS journal (IF 6.3 in 2024) and welcomes
+application-driven studies that use a novel tool. Same subscription
+route as TPEL — no APC. Different reviewer pool from TPEL, so the two
+submissions don't compete for reviewer attention.
+
+**Topic:** *An Open-Source Benchmark of Capacitor-Balancing Strategies
+for Modular Multilevel Converters: From N = 3 to N = 20.* Builds on
+the MMC project in `projects/inverters/mmc/` and the side-by-side
+open-loop drift vs sort-and-select comparison already captured in
+`00_mmc_pulsim_validation.ipynb`. Extends to (a) larger N, (b)
+second-order circulating-current suppression, (c) sort-and-select
+variants (rotating, hysteresis-bounded), (d) comparison against
+published HVDC field data where available.
+
+**Why JESTPE rather than a second TPEL submission:**
+- Different reviewer pool → independent verdicts
+- JESTPE explicitly welcomes "emerging topic" and tool-driven studies
+- Avoids the appearance of self-citing TPEL twice in the same year
+
+**Cost:** $0 (subscription route).
+
+**Target submit:** Dec 2026 / Jan 2027.
+
+---
+
+### 4. arXiv companion-preprint workflow
+
+**Folder:** [`04_arxiv_strategy/`](04_arxiv_strategy/)
+
+Not a paper — this folder documents the **policy and workflow** for
+pairing every IEEE Transactions submission with an arXiv preprint.
+
+**Why it's a first-class artefact:**
+- IEEE's Author Posting Policy (2024 revision) explicitly permits
+  posting the *accepted* manuscript (not the final IEEE-typeset
+  version) on arXiv and personal/institutional repositories.
+- arXiv preprints accrue Google Scholar citations long before the
+  IEEE Xplore version is indexed.
+- A preprint with a clear DOI cross-reference back to the journal
+  version ensures every citation lands on Pulsim's canonical DOI.
+
+**Contents (planned):**
+- `WORKFLOW.md` — step-by-step: submit to TPEL → revise → accept →
+  prepare accepted manuscript → submit to arXiv → cross-link
+- `IEEE_POSTING_POLICY.md` — verbatim quotes + URL of the relevant
+  IEEE policy clauses, dated, so we don't lose them to a website
+  refresh
+- `arxiv_metadata_template.txt` — pre-filled arXiv metadata (authors,
+  affiliation, MSC/PACS codes, eess.SY category) reused across
+  submissions
+
+---
+
+## Timeline (calendar, free + no-travel pipeline)
 
 ```
    2026                            2027
@@ -172,34 +212,31 @@ Two candidate angles:
    │  [7 Jun] JOSS public-history gate opens
    │  ├──► submit JOSS
    │  │
-   │  ├ SPEC 2026 paper drafted in parallel
+   │  ├ Buck Pulsim-vs-ngspice benchmark (foundation for TPEL)
    │  │
-   │  │   [31 Jul] SPEC 2026 deadline
-   │  │   ├──► submit SPEC
-   │  │   │
-   │  │   ├ OJ-PEL methods paper benchmark work
-   │  │   │ (PSIM/ngspice/Pulsim head-to-head runs)
+   │  │   [Jul–Sep] Extend benchmark to 10 reference converters
+   │  │   │         (boost, buck-boost, flyback, … MMC)
    │  │   │
    │  │   │  [~Sep] JOSS accept → DOI minted
    │  │   │
-   │  │   │  ├──► OJ-PEL draft + submit (~Oct)
+   │  │   │  ├──► TPEL methods paper drafted (Aug–Sep)
+   │  │   │  ├──► submit TPEL (Oct)
    │  │   │  │
-   │  │   │  │  [Aug 2026] APEC 2027 digest deadline
-   │  │   │  │  ├──► submit APEC digest
-   │  │   │  │  │
-   │  │   │  │  │  [Dec] SPEC 2026 in Cartagena
-   │  │   │  │  │
-   │  │   │  │  │  ├──► TPEL/JESTPE app paper drafted (Dec-Feb)
-   │  │   │  │  │  │
-   │  │   │  │  │  │  [Mar 2027] APEC 2027 conference
-   │  │   │  │  │  │
-   │  │   │  │  │  └──► submit TPEL (Q1 2027)
+   │  │   │  │   [Oct–Nov] JESTPE application paper drafted
+   │  │   │  │   ├──► submit JESTPE (Dec/Jan)
+   │  │   │  │   │
+   │  │   │  │   │   [continuous] arXiv companion preprints
+   │  │   │  │   │   posted on each "accept" (per IEEE policy)
+   │  │   │  │   │
+   │  │   │  │   │   [Q1 2027] TPEL first-round reviews back
+   │  │   │  │   │   └──► revise + resubmit
 ```
 
-**Realistic outcome by Mar 2027:** 1 JOSS DOI + 1 SPEC paper
-presented + 1 OJ-PEL in review + 1 APEC accepted + 1 TPEL in
-writing. Five independent citation sources alive on Google Scholar
-within ~10 months of starting.
+**Realistic outcome by Mar 2027:** 1 JOSS DOI minted + 1 TPEL
+in first-round revision + 1 JESTPE in initial review + 2 arXiv
+preprints accruing Google Scholar citations. Four independent
+citation sources alive on Google Scholar within ~10 months of
+starting — zero dollars spent, zero trips taken.
 
 ## Tracking
 
@@ -211,17 +248,31 @@ Each subfolder has a `README.md` tracking that paper's:
 
 ## Bibliography conventions
 
-Shared BibTeX entries live in [`shared/refs.bib`](shared/refs.bib) so
-all four papers cite the same canonical sources (Marquardt MMC 2003,
+Shared BibTeX entries live in [`_shared/refs.bib`](_shared/refs.bib)
+so all papers cite the same canonical sources (Marquardt MMC 2003,
 Nabae NPC 1981, Holmes & Lipo PWM textbook, Erickson & Maksimović,
 etc.). Per-paper-only references go in each subfolder's `paper.bib`.
 
 ## Useful links
 
+**JOSS**
 - [JOSS submission page](https://joss.theoj.org/papers/new)
 - [JOSS author guidelines](https://joss.readthedocs.io/en/latest/submitting.html)
-- [JOSS example papers](https://joss.theoj.org/papers/published) — read
+- [JOSS submission requirements](https://joss.readthedocs.io/en/latest/submitting.html#submission-requirements)
+- [JOSS example paper](https://joss.readthedocs.io/en/latest/example_paper.html)
+- [JOSS published papers](https://joss.theoj.org/papers/published) — read
   10 of these before writing ours.
-- [EPE-ECCE Europe 2026 CFP](https://www.ecce-europe.org/2026/authorsreviewers/call-for-papers/)
-- [IEEE OJ-PEL](https://www.ieee-pels.org/publications/open-journal-of-power-electronics/)
-- [IEEE TPEL submission portal](https://mc.manuscriptcentral.com/tpel-ieee)
+
+**IEEE Transactions (subscription route — $0)**
+- [IEEE TPEL homepage](https://www.ieee-pels.org/publications/transactions-on-power-electronics/)
+- [IEEE TPEL submission portal (Manuscript Central)](https://mc.manuscriptcentral.com/tpel-ieee)
+- [IEEE JESTPE homepage](https://www.ieee-pels.org/publications/journal-of-emerging-and-selected-topics-in-power-electronics/)
+- [IEEE JESTPE submission portal](https://mc.manuscriptcentral.com/jestpe-ieee)
+- [IEEE Author Posting Policy](https://journals.ieeeauthorcenter.ieee.org/become-an-ieee-journal-author/publishing-ethics/guidelines-and-policies/post-publication-policies/)
+  — confirms self-archiving accepted manuscript on arXiv is permitted.
+
+**arXiv**
+- [arXiv submission portal](https://arxiv.org/submit)
+- [arXiv eess.SY category](https://arxiv.org/list/eess.SY/recent) —
+  Systems and Control, the right primary category for power-electronics
+  simulation work.

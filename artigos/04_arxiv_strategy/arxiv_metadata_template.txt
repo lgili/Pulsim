@@ -1,0 +1,111 @@
+arXiv submission metadata template
+====================================
+Fill in {{...}} placeholders before each submission. The non-{{...}}
+fields are fixed across all Pulsim-related arXiv posts.
+
+
+Title:
+    {{Full paper title — exactly as accepted by IEEE, no changes}}
+
+
+Authors:
+    Luiz Carlos Gili
+
+
+ORCID:
+    0000-0002-5749-7199
+
+
+Affiliations:
+    Independent Researcher, Brazil
+
+
+Abstract:
+    {{Use the IEEE-accepted abstract verbatim.
+     Hard limit: arXiv abstracts can be up to ~1920 characters but
+     ideally match the IEEE abstract word-for-word so the two
+     versions can be matched by indexers (Google Scholar, Semantic
+     Scholar, Connected Papers).}}
+
+
+Primary subject class:
+    eess.SY    (Systems and Control)
+
+
+Secondary subject classes (cross-list):
+    cs.MS      (Mathematical Software)        ← for methods papers
+    physics.app-ph                            ← for application papers
+    (pick ONE secondary depending on paper type — don't cross-list both)
+
+
+MSC classes:
+    78A55      (Technical applications)
+    93B70      (Networked control systems)
+
+
+ACM classes:
+    I.6.3      (Simulation and Modeling — Applications)
+    J.2        (Physical Sciences and Engineering)
+
+
+License:
+    arXiv non-exclusive license to distribute
+    (compatible with IEEE copyright; do NOT select CC-BY)
+
+
+Comments (free text — keep this field tight):
+    {{NN}} pages, {{NN}} figures, {{NN}} tables.
+    Accepted for publication in IEEE Transactions on Power
+    Electronics (or IEEE JESTPE).
+    © {{YYYY}} IEEE. Personal use of this material is permitted.
+    Permission from IEEE must be obtained for all other uses, in
+    any current or future media, including reprinting/republishing
+    this material for advertising or promotional purposes, creating
+    new collective works, for resale or redistribution to servers
+    or lists, or reuse of any copyrighted component of this work
+    in other works.
+    DOI: 10.1109/{{TPEL or JESTPE}}.{{YYYY}}.{{XXXXXXX}}
+
+
+Journal-ref (after IEEE Xplore version goes live):
+    IEEE Trans. Power Electron., vol. {{VV}}, no. {{NN}},
+    pp. {{PP-QQ}}, {{Mon}}. {{YYYY}}.
+    (or)
+    IEEE J. Emerg. Sel. Top. Power Electron., vol. {{VV}}, no. {{NN}},
+    pp. {{PP-QQ}}, {{Mon}}. {{YYYY}}.
+
+
+DOI (after IEEE Xplore version goes live):
+    10.1109/{{TPEL or JESTPE}}.{{YYYY}}.{{XXXXXXX}}
+
+
+Report number:
+    (leave blank — Independent Researcher, no institutional
+    report-number scheme)
+
+
+==========================================
+Files to upload alongside this metadata
+==========================================
+
+    paper_arxiv.tex             ← the main LaTeX source (accepted MS)
+    paper.bib                   ← bibliography
+    IEEEtran.cls                ← optional but safer to include
+    IEEEtran.bst                ← bibliography style
+    figures/*.pdf               ← vector figures, 300dpi minimum
+                                  (PDF preferred over EPS for arXiv)
+
+
+==========================================
+Manual checks before pressing Submit
+==========================================
+
+    [ ] Compiled PDF previews correctly in arXiv's preview step
+    [ ] Page 1 shows the IEEE © attribution block
+    [ ] Page 1 shows the IEEE DOI as "10.1109/..."
+    [ ] All figures render at full quality (no missing fonts)
+    [ ] Bibliography resolves with no "??" cross-refs
+    [ ] arXiv submission language matches paper language (en)
+    [ ] License selection: arXiv non-exclusive (NOT CC-BY)
+    [ ] Primary category: eess.SY
+    [ ] Cross-list: cs.MS (methods) OR physics.app-ph (application)
