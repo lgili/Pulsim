@@ -49,6 +49,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace pulsim;
@@ -113,19 +114,32 @@ std::vector<SwitchStateMask> make_gray_sequence(Size N, Size repeat) {
     return seq;
 }
 
-/// One row of the rank-1 microbench output.
+/// One row of the rank-1 microbench output — 3-backend comparison.
 struct Row {
     Size   N;
     Size   n_state;
     Size   n_calls;
+    // (A) Baseline: solve() with per-mask cache (lazy — each mask is a miss)
     double wall_solve_ms;
-    double wall_rank1_ms;
     double per_call_solve_us;
-    double per_call_rank1_us;
-    double speedup;
-    std::uint64_t rank1_hits;
-    std::uint64_t full_refactor_hits;
-    std::uint64_t fallbacks;
+    // (B) solve_rank1 with Eigen::SparseLU forced — Eigen doesn't support
+    //     partial_refactor, so every single-bit flip falls back to a full
+    //     re-factorize (NOT a fresh analyze+factorize — the sliding solver
+    //     amortises the symbolic phase). Isolates the "amortised analyze"
+    //     win from the path-based win below.
+    double wall_eigen_ms;
+    double per_call_eigen_us;
+    double speedup_eigen_vs_solve;     // wall_solve / wall_eigen
+    std::uint64_t eigen_rank1_hits;
+    std::uint64_t eigen_fallbacks;
+    // (C) solve_rank1 with PulsimSparseLuSolver — the V8.1 path-based
+    //     partial_refactor path. The headline win for the TPEL paper.
+    double wall_pulsim_ms;
+    double per_call_pulsim_us;
+    double speedup_pulsim_vs_solve;    // wall_solve / wall_pulsim
+    double speedup_pulsim_vs_eigen;    // wall_eigen / wall_pulsim (isolates path-based)
+    std::uint64_t pulsim_rank1_hits;
+    std::uint64_t pulsim_fallbacks;
 };
 
 Row run_one(Size N, Size repeat) {
@@ -144,11 +158,24 @@ Row run_one(Size N, Size repeat) {
     constexpr Real dt = 1e-6;
     Vector b_extra = Vector::Zero(static_cast<Index>(n_state));
 
-    // ----- Baseline: per-mask cache via `solve` ------------------------------
+    auto run_backend = [&](sparse::Backend backend)
+        -> std::tuple<double, CacheMetrics> {
+        PwlStateSpaceCache cache(fx.g, fx.pool);
+        cache.build_lazy(dt);
+        cache.set_rank1_backend(backend);
+        Vector x(static_cast<Index>(n_state));
+        Stopwatch sw;
+        for (const auto& m : seq) {
+            cache.solve_rank1(m, b_extra, x);
+        }
+        return {sw.elapsed_ms(), cache.metrics()};
+    };
+
+    // (A) Baseline: per-mask cache via `solve`
     double wall_solve_ms = 0.0;
     {
         PwlStateSpaceCache cache(fx.g, fx.pool);
-        cache.build_lazy(dt);   // lazy → every distinct mask is a miss
+        cache.build_lazy(dt);
         Vector x(static_cast<Index>(n_state));
         Stopwatch sw;
         for (const auto& m : seq) {
@@ -157,68 +184,56 @@ Row run_one(Size N, Size repeat) {
         wall_solve_ms = sw.elapsed_ms();
     }
 
-    // ----- Fast path: sliding solver via `solve_rank1` -----------------------
-    // Force the KLU backend regardless of the synthetic fixture's tiny
-    // `state_size` so the rank-1 partial_refactor path is exercised. In
-    // a production simulator the user's MNA matrices typically exceed
-    // the Backend::Auto threshold (≥ 100) by themselves — this override
-    // is needed only for microbench fixtures.
-    double wall_rank1_ms = 0.0;
-    CacheMetrics metrics{};
-    {
-        PwlStateSpaceCache cache(fx.g, fx.pool);
-        cache.build_lazy(dt);
-#ifdef PULSIM_HAVE_KLU
-        cache.set_rank1_backend(sparse::Backend::KLU);
-#endif
-        Vector x(static_cast<Index>(n_state));
-        Stopwatch sw;
-        for (const auto& m : seq) {
-            cache.solve_rank1(m, b_extra, x);
-        }
-        wall_rank1_ms = sw.elapsed_ms();
-        metrics = cache.metrics();
-    }
+    // (B) solve_rank1 with Backend::Eigen — Eigen doesn't support
+    //     partial_refactor, so every single-bit flip incurs a full
+    //     factorize (but reuses the symbolic analyze across calls).
+    auto [wall_eigen_ms, eigen_metrics] = run_backend(sparse::Backend::Eigen);
+
+    // (C) solve_rank1 with Backend::Pulsim — the path-based partial_refactor.
+    auto [wall_pulsim_ms, pulsim_metrics] = run_backend(sparse::Backend::Pulsim);
 
     return Row{
-        .N                  = N,
-        .n_state            = n_state,
-        .n_calls            = n_calls,
-        .wall_solve_ms      = wall_solve_ms,
-        .wall_rank1_ms      = wall_rank1_ms,
-        .per_call_solve_us  = (wall_solve_ms * 1000.0) /
-                              static_cast<double>(n_calls),
-        .per_call_rank1_us  = (wall_rank1_ms * 1000.0) /
-                              static_cast<double>(n_calls),
-        .speedup            = wall_solve_ms / wall_rank1_ms,
-        .rank1_hits         = metrics.rank1_hits,
-        .full_refactor_hits = metrics.full_refactor_hits,
-        .fallbacks          = metrics.fallbacks,
+        .N                       = N,
+        .n_state                 = n_state,
+        .n_calls                 = n_calls,
+        .wall_solve_ms           = wall_solve_ms,
+        .per_call_solve_us       = (wall_solve_ms * 1000.0) /
+                                   static_cast<double>(n_calls),
+        .wall_eigen_ms           = wall_eigen_ms,
+        .per_call_eigen_us       = (wall_eigen_ms * 1000.0) /
+                                   static_cast<double>(n_calls),
+        .speedup_eigen_vs_solve  = wall_solve_ms / wall_eigen_ms,
+        .eigen_rank1_hits        = eigen_metrics.rank1_hits,
+        .eigen_fallbacks         = eigen_metrics.fallbacks,
+        .wall_pulsim_ms          = wall_pulsim_ms,
+        .per_call_pulsim_us      = (wall_pulsim_ms * 1000.0) /
+                                   static_cast<double>(n_calls),
+        .speedup_pulsim_vs_solve = wall_solve_ms / wall_pulsim_ms,
+        .speedup_pulsim_vs_eigen = wall_eigen_ms / wall_pulsim_ms,
+        .pulsim_rank1_hits       = pulsim_metrics.rank1_hits,
+        .pulsim_fallbacks        = pulsim_metrics.fallbacks,
     };
 }
 
 void print_header() {
-    std::printf("\n%-3s %-6s %-7s %-12s %-12s %-10s %-10s %-7s %-12s %-12s %-9s\n",
-                 "N", "nstate", "ncalls",
-                 "wall_solve", "wall_rank1",
-                 "us/solve", "us/rank1",
-                 "speedup",
-                 "rank1_hits", "full_rftr", "fallbacks");
-    std::printf("--- ------ ------- ------------ ------------ "
-                 "---------- ---------- ------- ------------ "
-                 "------------ ---------\n");
+    std::printf("\n%-3s %-7s %-7s %-10s %-10s %-10s "
+                 "%-8s %-8s %-12s %-12s\n",
+                 "N", "n_state", "n_calls",
+                 "us/solve", "us/eigen", "us/pulsim",
+                 "E/solve", "P/solve",
+                 "rank1(P)", "fallbacks(P)");
+    std::printf("--- ------- ------- ---------- ---------- ---------- "
+                 "-------- -------- ------------ ------------\n");
 }
 
 void print_row(const Row& r) {
-    std::printf("%-3zu %-6zu %-7zu %-9.3f ms %-9.3f ms "
-                 "%-7.3f us %-7.3f us %-6.2fx %-12llu %-12llu %-9llu\n",
+    std::printf("%-3zu %-7zu %-7zu %-7.3f us %-7.3f us %-7.3f us "
+                 "%-6.2fx %-6.2fx %-12llu %-12llu\n",
                  r.N, r.n_state, r.n_calls,
-                 r.wall_solve_ms, r.wall_rank1_ms,
-                 r.per_call_solve_us, r.per_call_rank1_us,
-                 r.speedup,
-                 static_cast<unsigned long long>(r.rank1_hits),
-                 static_cast<unsigned long long>(r.full_refactor_hits),
-                 static_cast<unsigned long long>(r.fallbacks));
+                 r.per_call_solve_us, r.per_call_eigen_us, r.per_call_pulsim_us,
+                 r.speedup_eigen_vs_solve, r.speedup_pulsim_vs_solve,
+                 static_cast<unsigned long long>(r.pulsim_rank1_hits),
+                 static_cast<unsigned long long>(r.pulsim_fallbacks));
 }
 
 /// Resolve the output CSV path. Env var `PULSIM_BENCH_RESULTS_DIR` wins;
@@ -242,47 +257,59 @@ void write_csv(const std::vector<Row>& rows) {
                      p.string().c_str());
         return;
     }
-    ofs << "N,n_state,n_calls,wall_solve_ms,wall_rank1_ms,"
-           "us_per_solve,us_per_rank1,speedup,"
-           "rank1_hits,full_refactor_hits,fallbacks\n";
+    ofs << "N,n_state,n_calls,"
+           "wall_solve_ms,us_per_solve,"
+           "wall_eigen_ms,us_per_eigen,speedup_eigen_vs_solve,"
+           "eigen_rank1_hits,eigen_fallbacks,"
+           "wall_pulsim_ms,us_per_pulsim,speedup_pulsim_vs_solve,"
+           "speedup_pulsim_vs_eigen,"
+           "pulsim_rank1_hits,pulsim_fallbacks\n";
     for (const auto& r : rows) {
         ofs << r.N << ',' << r.n_state << ',' << r.n_calls << ','
-            << r.wall_solve_ms << ',' << r.wall_rank1_ms << ','
-            << r.per_call_solve_us << ',' << r.per_call_rank1_us << ','
-            << r.speedup << ','
-            << r.rank1_hits << ',' << r.full_refactor_hits << ','
-            << r.fallbacks << '\n';
+            << r.wall_solve_ms << ',' << r.per_call_solve_us << ','
+            << r.wall_eigen_ms << ',' << r.per_call_eigen_us << ','
+            << r.speedup_eigen_vs_solve << ','
+            << r.eigen_rank1_hits << ',' << r.eigen_fallbacks << ','
+            << r.wall_pulsim_ms << ',' << r.per_call_pulsim_us << ','
+            << r.speedup_pulsim_vs_solve << ','
+            << r.speedup_pulsim_vs_eigen << ','
+            << r.pulsim_rank1_hits << ',' << r.pulsim_fallbacks << '\n';
     }
     std::printf("  wrote %s\n", p.string().c_str());
 }
 
 }  // namespace
 
-TEST_CASE("Bench: rank-1 microbench — solve vs solve_rank1 across N",
+TEST_CASE("Bench: rank-1 microbench — 3-backend comparison across N",
           "[bench][rank1][microbench][pwl]") {
-    std::printf("\n=== PWL cache rank-1 microbench ===\n");
-#ifdef PULSIM_HAVE_KLU
-    std::printf("Backend (n >= %d): KLU\n", PULSIM_KLU_AUTO_THRESHOLD);
-#else
-    std::printf("Backend: Eigen::SparseLU (KLU not built — "
-                 "solve_rank1 will fall back to full factorize at every "
-                 "single-bit flip, fallbacks counter will dominate)\n");
-#endif
+    std::printf("\n=== PWL cache rank-1 microbench (3-backend, v1.3.0) ===\n");
+    std::printf("Backends:\n");
+    std::printf("  (A) baseline `solve`   — per-mask cache, lazy mode "
+                "(each mask is a fresh analyze+factorize miss)\n");
+    std::printf("  (B) `solve_rank1` Eigen — sliding-solver fallback "
+                "(amortises symbolic analyze; full numeric factorize "
+                "every flip)\n");
+    std::printf("  (C) `solve_rank1` Pulsim — path-based partial "
+                "refactor on the in-house sparse LU (v1.3.0 default)\n");
+    std::printf("\nColumn legend:\n");
+    std::printf("  E/solve = speedup of Eigen   sliding solver vs baseline\n");
+    std::printf("  P/solve = speedup of Pulsim path-based vs baseline\n");
+    std::printf("  rank1(P)/fallbacks(P) = path-based hit/fall counts\n");
     print_header();
 
     std::vector<Row> rows;
-    for (Size N : {Size{4}, Size{6}, Size{8}, Size{10}, Size{12}}) {
-        // Replay the same Gray pass a few times to amortise allocator
-        // noise; capped at 2000 calls inside `run_one`.
+    for (Size N : {Size{4}, Size{6}, Size{8}, Size{10}, Size{12},
+                    Size{16}, Size{20}, Size{24}}) {
         constexpr Size REPEAT = 4;
         const Row r = run_one(N, REPEAT);
         print_row(r);
         rows.push_back(r);
 
-        // Smoke check: same number of calls reached, output produced.
+        // Smoke check: all 3 backends produced output
         REQUIRE(r.n_calls > 0);
         REQUIRE(r.wall_solve_ms > 0.0);
-        REQUIRE(r.wall_rank1_ms > 0.0);
+        REQUIRE(r.wall_eigen_ms > 0.0);
+        REQUIRE(r.wall_pulsim_ms > 0.0);
     }
 
     write_csv(rows);

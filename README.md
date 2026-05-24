@@ -32,29 +32,27 @@ device / analysis mapping table.
 
 ### Build prerequisites
 
-Pulsim builds with two strict and one optional native dependency:
+Pulsim has just two native dependencies — Eigen 3.4+ and a C++23
+compiler. Everything else (sparse LU, YAML parser, tests) is
+header-only or vendored at configure time:
 
-| Dependency | Status | Why |
-|---|---|---|
-| **Eigen 3.4+** | required | Header-only sparse linear algebra |
-| **C++23 compiler** | required | AppleClang 15+ / Clang 17+ / GCC 13+ |
-| **SuiteSparse KLU** | optional | Unlocks the rank-1 PWL cache update path for circuits with n ≥ 100 — see [`openspec/changes/add-pwl-rank1-update/`](openspec/changes/add-pwl-rank1-update/). When absent, Pulsim falls back to Eigen::SparseLU with no functional regression. |
+| Dependency | Why |
+|---|---|
+| **Eigen 3.4+** | Header-only sparse linear algebra (matrices, vectors). Pulsim ships its own sparse LU solver on top — no third-party LU library is linked. |
+| **C++23 compiler** | AppleClang 15+ / Clang 17+ / GCC 13+ |
 
 Install on the supported platforms:
 
 ```bash
 # macOS (Homebrew)
-brew install cmake ninja eigen suite-sparse
+brew install cmake ninja eigen
 
 # Debian / Ubuntu
-sudo apt-get install -y cmake ninja-build libeigen3-dev libsuitesparse-dev
+sudo apt-get install -y cmake ninja-build libeigen3-dev
 
 # Fedora
-sudo dnf install cmake ninja-build eigen3-devel suitesparse-devel
+sudo dnf install cmake ninja-build eigen3-devel
 ```
-
-To explicitly disable the KLU backend (e.g. when measuring the
-fallback path), configure with `-DPULSIM_ENABLE_KLU=OFF`.
 
 ### Build + run
 

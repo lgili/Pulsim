@@ -113,9 +113,9 @@ def test_initial_state_rejects_wrong_shape():
 
 def test_sort_and_select_charging_picks_lowest():
     """For i_b > 0 the inserted SMs are the s_b SMs with lowest v_C_n."""
-    params = MmcArmDetailedParams(
-        n_sm=5, c_sm=1e-3, f_carrier=1e3, balancing="sort_and_select",
-    )
+    # NB: this test exercises the internal `_balance_select` helper
+    # directly (see below) — we don't need a full MmcArmDetailedParams
+    # instance, just a state vector with known SM capacitor voltages.
     state = MmcArmDetailedState(
         v_C_per_sm=np.array([50.0, 70.0, 90.0, 110.0, 130.0]),
     )

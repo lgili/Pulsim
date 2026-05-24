@@ -309,10 +309,12 @@ public:
         sparse::compress_in_place(J);
 
         if (!rank1_initialized_) {
-            // First call: fresh analyze + factorize on a new solver picked
-            // by the factory. Backend hint defaults to Backend::Auto
-            // (KLU when n >= PULSIM_KLU_AUTO_THRESHOLD) but the caller
-            // may have overridden it via set_rank1_backend(...).
+            // First call: fresh analyze + factorize on a new solver
+            // picked by the factory. Backend hint defaults to
+            // Backend::Auto (which currently falls through to
+            // SparseLuSolver — the Pulsim native LU lands in a
+            // follow-up, see openspec/changes/replace-klu-with-pulsim-sparse-lu/).
+            // The caller may override via set_rank1_backend(...).
             rank1_solver_ = sparse::make_default_solver(
                 pool_.state_size(graph_), rank1_backend_hint_);
             if (!rank1_solver_->analyze(J)) {
@@ -391,15 +393,16 @@ public:
 
     /// Override the backend `solve_rank1` uses for its sliding solver.
     /// By default `solve_rank1` calls
-    /// `make_default_solver(state_size, Backend::Auto)` which picks KLU
-    /// only when `state_size >= PULSIM_KLU_AUTO_THRESHOLD` (= 100). Call
-    /// this before the first `solve_rank1` to force a specific backend
-    /// — e.g. `Backend::KLU` for benchmarks that want the partial-refactor
-    /// path at small n, or `Backend::Eigen` to force the fallback path
-    /// for measurement.
+    /// `make_default_solver(state_size, Backend::Auto)`. Call this
+    /// before the first `solve_rank1` to force a specific backend —
+    /// e.g. `Backend::Pulsim` for benchmarks that want the path-based
+    /// partial-refactor path (once
+    /// openspec/changes/replace-klu-with-pulsim-sparse-lu/ Sections 2-5
+    /// land), or `Backend::Eigen` to force the Eigen::SparseLU
+    /// fallback path for measurement.
     ///
-    /// No-op once `solve_rank1` has been called — the solver has already
-    /// been constructed.
+    /// No-op once `solve_rank1` has been called — the solver has
+    /// already been constructed.
     void set_rank1_backend(sparse::Backend hint) noexcept {
         if (!rank1_initialized_) {
             rank1_backend_hint_ = hint;
@@ -492,11 +495,13 @@ private:
     /// may contain duplicates if multiple switches share a node — that's
     /// fine, downstream `partial_refactor` consumers can deduplicate.
     ///
-    /// Layer 4 V8.1 (path-based partial refactorization per Chen et al.,
-    /// IEEE TPEL 2024 §III) will be the first consumer that actually uses
-    /// this hint. The V8 MVP `KluSolver::partial_refactor` ignores it
-    /// (full numeric refactor) but still benefits from the cached symbolic
-    /// ordering.
+    /// Consumed by `DirectSolver::partial_refactor` overrides that
+    /// implement path-based re-elimination (Chan/Brandwajn/Tinney
+    /// 1986, Dinkelbach et al. 2021). The default `DirectSolver`
+    /// returns false from `partial_refactor`, so this hint goes
+    /// unused on backends that don't support the fast path —
+    /// `solve_rank1`'s fallback to full `factorize` engages
+    /// transparently.
     [[nodiscard]] std::vector<Index> compute_changed_columns_(
         const topology::SwitchStateMask& prev_mask,
         const topology::SwitchStateMask& curr_mask) const {
