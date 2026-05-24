@@ -1,0 +1,14 @@
+* Driven series RLC at resonance — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/driven_lc_series_resonance.yaml
+*
+* V_in = 1 V sine at f_0 = 5033 Hz drives series R=10, L=1mH, C=1µF.
+* Q = (1/R)·sqrt(L/C) = 0.1 · 31.6 = 3.16
+* Steady-state |V_C| peak = Q · V_in = 3.16 V.
+
+Vac in 0   SIN(0 1 5033)
+R1  in n_l 10
+L1  n_l out 1m IC=0
+C1  out 0  1u IC=0
+
+.tran 2u 20m UIC
+.end

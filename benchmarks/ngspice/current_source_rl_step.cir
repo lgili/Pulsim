@@ -1,0 +1,21 @@
+* DC current source feeding R || L parallel — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/current_source_rl_step.yaml
+*
+* Analytical: V(out, t) = I·R · exp(-t·R/L)
+*   I = 10 mA, R = 100 Ω, L = 10 mH
+*   V(0+) = I·R = 1 V  (UIC forces i_L(0) = 0, so all current through R)
+*   τ = L/R = 100 µs
+*   Tstop = 1 ms = 10·τ → V settles to ~46 µV.
+*
+* ngspice convention: `I1 0 out DC 10m` injects +10 mA INTO node 0;
+* externally the source pulls 10 mA OUT of node `out`. The parallel
+* RL between `out` and ground re-routes it. Pulsim's matching YAML
+* uses `nodes: [out, 0]` because Pulsim's npos/nneg roles are
+* swapped — identical physics.
+
+I1 0 out DC 10m
+R1 out 0 100
+L1 out 0 10m IC=0
+
+.tran 5u 1m UIC
+.end

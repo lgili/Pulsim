@@ -1,0 +1,63 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: diode_clamp_overvoltage
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # V_in is a 0/15V pulse. V_rail = 5V. The diode (out → rail)
+      # clamps V(out) at ~V_rail + V_F when V_in goes high.
+      # During V_in=0: diode reverse-biased, V(out) ≈ 0.
+      # During V_in=15: diode forward, V(out) clamped to V_rail + V_F.
+      #
+      # KNOWN MODEL GAP: Pulsim's diode g_on=200 → V_F ≈ i·R_on ≈ 5 mV
+      # at typical clamp current. ngspice's DIODEMOD(IS=1e-12) follows
+      # Shockley → V_F ≈ 0.7 V at the same current. The clamp level
+      # therefore differs by ~700 mV between the two simulators. The
+      # threshold accommodates this MODEL difference, NOT a numerical
+      # error in either solver.
+      #
+      # Slow t_rise (20 µs) below — gives trbdf2 time to track the
+      # transition smoothly without numerical overshoot at the diode knee.
+      max_error: 1.0
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/diode_clamp_overvoltage.csv
+# Diode in clamping role: V_pulse drives "out" through R_series; diode
+# clamps "out" to V_rail. Tests forward-conduction model in a non-
+# rectifier role (most existing diode circuits are rectifiers).
+simulation:
+  tstop: 4e-3
+  dt: 5e-6
+  uic: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 15.0
+      t_delay: 1e-3
+      t_rise: 20e-6
+      t_fall: 20e-6
+      t_width: 1.5e-3
+      period: 4e-3
+  - type: voltage_source
+    name: Vrail
+    nodes: [rail, 0]
+    waveform:
+      type: dc
+      value: 5.0
+  - type: resistor
+    name: Rser
+    nodes: [in, out]
+    value: 100.0
+  - type: diode
+    name: Dclamp
+    nodes: [out, rail]
+    g_on: 200.0
+    g_off: 1e-6

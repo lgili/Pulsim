@@ -1,0 +1,14 @@
+* RL high-pass filter with sine source — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/rl_high_pass_sine.yaml
+*
+* Topology: Vsin → R series → L (out to ground)
+*   R = 100 Ω, L = 10 mH
+*   f_c = R/(2πL) = 1592 Hz
+*   Source f = 5 kHz → above cutoff, |H| ≈ 0.95, phase lag ≈ 18°.
+
+Vac in 0 SIN(0 5 5000)
+R1  in out 100
+L1  out 0   10m IC=0
+
+.tran 5u 2m UIC
+.end

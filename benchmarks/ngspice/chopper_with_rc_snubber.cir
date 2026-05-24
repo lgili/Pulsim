@@ -1,0 +1,20 @@
+* Chopper with RC snubber across switch — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/chopper_with_rc_snubber.yaml
+*
+* Diagnostic for the previously-divergent chopper case. Same Vcc/L/D/R
+* but with R_sn=10Ω + C_sn=100nF snubber from sw → vcc to absorb the
+* commutation transient.
+
+Vcc   vcc  0    DC 20
+Vctrl ctrl 0    PULSE(0 10 0 1n 1n 100u 200u)
+S1    vcc  sw   ctrl 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1MEG)
+Dfw   0    sw   DIODEMOD
+.model DIODEMOD D(IS=1e-12 N=1 RS=5m)
+L1    sw   out  1m IC=0
+Rload out  0    10
+Rsn   sw   n_sn 10
+Csn   n_sn vcc  100n IC=0
+
+.tran 100n 1.5m UIC
+.end

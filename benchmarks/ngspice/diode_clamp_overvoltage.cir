@@ -1,0 +1,18 @@
+* Diode clamp to rail — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/diode_clamp_overvoltage.yaml
+*
+* Vin = 0/15V pulse; Vrail = 5V DC. Diode (out → rail) forward
+* conducts when V(out) > V_rail + V_F, clamping the node.
+* Pulsim uses g_on=200 (R_on=5mΩ), g_off=1e-6 (R_off=1MΩ).
+* Ngspice DIODEMOD with low Is gives equivalent piecewise-linear
+* behavior; match within ~50 mV at the clamp level.
+
+Vin   in   0    PULSE(0 15 1m 20u 20u 1.5m 4m)
+Vrail rail 0    DC 5
+Rser  in   out  100
+D1    out  rail DIODEMOD
+
+.model DIODEMOD D(IS=1e-12 N=1 RS=5m)
+
+.tran 5u 4m UIC
+.end

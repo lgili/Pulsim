@@ -1,0 +1,13 @@
+* RL natural response (IC-only, no source) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/rl_natural_response.yaml
+*
+* Pure IC-driven discharge: i_L(0) = 100 mA, no voltage source.
+* The 100 mA inductor current is forced through R, producing an
+* initial -10 V (sign from current direction) that decays
+* exponentially: V(t) = -10 · exp(-t·R/L), τ = L/R = 100 µs.
+
+L1 node 0 10m IC=0.1
+R1 node 0 100
+
+.tran 5u 1m UIC
+.end

@@ -1,0 +1,16 @@
+* Wheatstone bridge (DC OP) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/bridge_resistive_pure.yaml
+*
+* Vsrc=10V. Left arm: R1=100, R2=200. Right arm: R3=150, R4=100.
+* V(a) = 10·200/(100+200) = 6.6667 V
+* V(b) = 10·100/(150+100) = 4.0 V
+* Bridge unbalanced. Pure DC OP — sub-µV match expected.
+
+Vsrc vcc 0   DC 10
+R1   vcc a   100
+R2   a   0   200
+R3   vcc b   150
+R4   b   0   100
+
+.tran 5u 1m
+.end
