@@ -53,7 +53,8 @@ Following the thesis exactly:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import combinations
 from math import floor, ceil, pi
 from typing import Callable
 
@@ -380,3 +381,225 @@ def make_fast_svm_fn(
         return fast_svm_step(t, p, side=side)
 
     return _fn
+
+
+# =============================================================================
+# Module connection configurations — Sec 4.3 of the thesis
+# =============================================================================
+#
+# The M3C has 9 modules ``M_xy`` arranged in a 3×3 matrix between
+# the 3 input phases x ∈ {A, B, C} and 3 output phases y ∈ {a, b, c}.
+# At any instant, the matrix-converter "5 modules conducting"
+# constraint must hold. The valid topologies follow Erickson's
+# rules (Sec 4.3, also Tab. 7 of the thesis):
+#
+#   1. Exactly **one** conduction path between any two distinct
+#      input phases (and likewise between any two output phases) —
+#      i.e. the bipartite graph of active modules must be
+#      **connected** (no decoupled subsystems).
+#   2. If one side has a phase with 2 connections, another phase on
+#      the same side must also have 2, and the third has 1.
+#   3. If one side has a phase with 3 connections (full row/column),
+#      the other two phases on the same side have 1 each.
+#
+# Rules 2 and 3 reduce to: each side's row-sum (or column-sum)
+# distribution must be (3, 1, 1) or (2, 2, 1) — never (3, 2, 0),
+# (4, 1, 0), etc. Rule 1 additionally excludes the 9 (2,2,1)×(2,2,1)
+# cases where the two high-sum inputs happen to connect to the same
+# pair of outputs (which would split the topology into a {single
+# input, single output} block plus a {2 inputs, 2 outputs} block).
+#
+# C(9,5) = 126 → 90 (after no-empty-row/col) → **81 valid** (after
+# connectivity). Matches the thesis count (Sec 4.3 pg 82) and Tabela
+# 7 (27 base patterns × 3 input rotations = 81).
+
+
+# Phase indices: 0=A, 1=B, 2=C on input; 0=a, 1=b, 2=c on output.
+INPUT_LABELS = ("A", "B", "C")
+OUTPUT_LABELS = ("a", "b", "c")
+
+
+@dataclass(frozen=True)
+class ModuleConfiguration:
+    """A 3×3 boolean matrix indicating which of the 9 modules
+    ``M_{xy}`` are currently conducting (True) vs blocked (False).
+
+    Stored as a tuple-of-tuples for hashability (allows config to be
+    used as a dict key when caching cost-function results).
+
+    Attributes
+    ----------
+    grid : tuple of 3 tuples, each containing 3 booleans
+        ``grid[i][j]`` is True iff module ``M_{x_i,y_j}`` conducts.
+        Indices: i for input phase (A=0, B=1, C=2), j for output
+        phase (a=0, b=1, c=2). Runtime-enforced to be 3×3 by
+        the enumerator; type annotation kept loose for Pyright.
+    """
+
+    grid: tuple = field(default_factory=tuple)  # 3-tuple of 3-tuples of bool
+
+    # ---- accessors -------------------------------------------------
+
+    def is_active(self, input_idx: int, output_idx: int) -> bool:
+        return self.grid[input_idx][output_idx]
+
+    def row_sum(self, input_idx: int) -> int:
+        """Number of output phases connected to this input phase."""
+        return sum(self.grid[input_idx])
+
+    def col_sum(self, output_idx: int) -> int:
+        """Number of input phases connected to this output phase."""
+        return sum(self.grid[i][output_idx] for i in range(3))
+
+    def n_active(self) -> int:
+        """Total number of modules conducting (should be 5 for any
+        valid M3C configuration)."""
+        return sum(self.row_sum(i) for i in range(3))
+
+    def active_modules(self) -> list[tuple[int, int]]:
+        """List of ``(input_idx, output_idx)`` for each active module."""
+        return [
+            (i, j) for i in range(3) for j in range(3)
+            if self.grid[i][j]
+        ]
+
+    # ---- validation ------------------------------------------------
+
+    def is_valid(self) -> bool:
+        """Check the Sec 4.3 rules:
+          * Total active modules = 5.
+          * Row sums and column sums each follow distribution
+            (3, 1, 1) or (2, 2, 1) — no zero rows/cols.
+          * Bipartite graph of active modules is **connected** —
+            no decoupled subsystems (excludes the 9 cases where the
+            two row-sum=2 inputs share an identical output set).
+        """
+        if self.n_active() != 5:
+            return False
+        row_dist = sorted(self.row_sum(i) for i in range(3))
+        col_dist = sorted(self.col_sum(j) for j in range(3))
+        valid_dists = ([1, 1, 3], [1, 2, 2])
+        if row_dist not in valid_dists or col_dist not in valid_dists:
+            return False
+        return _is_connected_bipartite(self.grid)
+
+    # ---- formatting ------------------------------------------------
+
+    def to_string(self) -> str:
+        """Compact visual: e.g.::
+
+              a b c
+            A ✓ . .
+            B . ✓ ✓
+            C ✓ . ✓
+        """
+        lines = ["    a b c"]
+        for i, in_label in enumerate(INPUT_LABELS):
+            cells = " ".join(
+                "✓" if self.grid[i][j] else "." for j in range(3)
+            )
+            lines.append(f"  {in_label} {cells}")
+        return "\n".join(lines)
+
+
+def _is_valid_distribution(row_sums) -> bool:
+    """Check if a row-sum tuple follows the (3,1,1) or (2,2,1) rule."""
+    sorted_sums = sorted(row_sums)
+    return sorted_sums == [1, 1, 3] or sorted_sums == [1, 2, 2]
+
+
+def _is_connected_bipartite(grid) -> bool:
+    """Check that the bipartite graph of active modules is connected.
+
+    Modules form edges between 3 input-side nodes (rows 0..2) and 3
+    output-side nodes (cols 0..2). The graph is connected iff a BFS
+    from any node reaches all 6 nodes.
+
+    Assumes no empty rows/cols (the caller already filtered). Returns
+    ``True`` for connected, ``False`` for decoupled.
+    """
+    # BFS starting from input 0 (which is guaranteed non-isolated
+    # since all rows have ≥1 active cell).
+    visited_in = {0}
+    visited_out: set[int] = set()
+    changed = True
+    while changed:
+        changed = False
+        for i in list(visited_in):
+            for j in range(3):
+                if grid[i][j] and j not in visited_out:
+                    visited_out.add(j)
+                    changed = True
+        for j in list(visited_out):
+            for i in range(3):
+                if grid[i][j] and i not in visited_in:
+                    visited_in.add(i)
+                    changed = True
+    return len(visited_in) == 3 and len(visited_out) == 3
+
+
+def enumerate_valid_configurations() -> list[ModuleConfiguration]:
+    """Enumerate the **81 valid M3C connection configurations** per
+    Sec 4.3 of the thesis.
+
+    Algorithm:
+
+      1. Take all ``C(9, 5) = 126`` ways to choose 5 modules out of 9.
+      2. Filter to no-empty-row/col + (3,1,1)/(2,2,1) distribution:
+         → 90 candidates.
+      3. Filter by bipartite-graph connectivity (Sec 4.3 rule 1):
+         → **81 valid configurations**.
+
+    The result is cached at module import time via the module-level
+    constant :data:`ALL_VALID_CONFIGURATIONS`.
+    """
+    configs: list[ModuleConfiguration] = []
+    positions = [(i, j) for i in range(3) for j in range(3)]
+    for chosen in combinations(positions, 5):
+        # Build 3×3 grid.
+        grid = [[False] * 3 for _ in range(3)]
+        for i, j in chosen:
+            grid[i][j] = True
+        grid_t = tuple(tuple(grid[i]) for i in range(3))
+        cfg = ModuleConfiguration(grid=grid_t)
+        row_sums = tuple(cfg.row_sum(i) for i in range(3))
+        col_sums = tuple(cfg.col_sum(j) for j in range(3))
+        if not _is_valid_distribution(row_sums):
+            continue
+        if not _is_valid_distribution(col_sums):
+            continue
+        if not _is_connected_bipartite(grid_t):
+            continue
+        configs.append(cfg)
+    return configs
+
+
+# Precomputed at module load — used by cost function (Phase 22.3).
+ALL_VALID_CONFIGURATIONS: list[ModuleConfiguration] = \
+    enumerate_valid_configurations()
+
+
+def configurations_by_distribution() -> dict[
+    tuple[tuple[int, int, int], tuple[int, int, int]],
+    list[ModuleConfiguration],
+]:
+    """Group :data:`ALL_VALID_CONFIGURATIONS` by their (row-dist,
+    col-dist) tuple, where each distribution is sorted.
+
+    Useful for understanding the structure of the configuration
+    space — should produce 4 groups:
+      * ((1,1,3), (1,1,3)) — both sides have one phase with 3 conns
+      * ((1,1,3), (1,2,2))
+      * ((1,2,2), (1,1,3))
+      * ((1,2,2), (1,2,2))
+    """
+    by_dist: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]],
+        list[ModuleConfiguration],
+    ] = {}
+    for cfg in ALL_VALID_CONFIGURATIONS:
+        row_dist = tuple(sorted(cfg.row_sum(i) for i in range(3)))
+        col_dist = tuple(sorted(cfg.col_sum(j) for j in range(3)))
+        key = (row_dist, col_dist)  # type: ignore[assignment]
+        by_dist.setdefault(key, []).append(cfg)  # type: ignore[arg-type]
+    return by_dist

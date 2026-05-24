@@ -22,9 +22,13 @@ _M3C_DIR = _PROJECT_ROOT / "projects" / "inverters" / "m3c_3phase"
 sys.path.insert(0, str(_M3C_DIR))
 
 from m3c_3phase_model import (  # noqa: E402
+    ALL_VALID_CONFIGURATIONS,
     LG_TRANSFORM_MATRIX,
     M3cParams,
+    ModuleConfiguration,
     abc_to_lg,
+    configurations_by_distribution,
+    enumerate_valid_configurations,
     fast_svm_4_vectors,
     fast_svm_duty_cycles,
     fast_svm_pick_triangle,
@@ -241,3 +245,99 @@ class TestM3cParams:
     def test_T_s_at_2kHz(self) -> None:
         p = M3cParams(f_switching=2_000.0)
         assert abs(p.T_s - 500e-6) < 1e-12
+
+
+# ============================================================================
+# Tier 7 — Module connection configurations (Sec 4.3 of thesis)
+# ============================================================================
+
+
+class TestModuleConfigurations:
+    """The 81 valid M3C configurations per Sec 4.3 of the thesis."""
+
+    def test_total_count_is_81(self) -> None:
+        """Sec 4.3 states 81 valid configurations exist."""
+        assert len(ALL_VALID_CONFIGURATIONS) == 81
+
+    def test_enumerate_returns_same_set(self) -> None:
+        """Calling the enumerator multiple times returns the same
+        set of configurations."""
+        configs_1 = enumerate_valid_configurations()
+        configs_2 = enumerate_valid_configurations()
+        # Same length and same set of grids
+        assert len(configs_1) == len(configs_2)
+        grids_1 = {cfg.grid for cfg in configs_1}
+        grids_2 = {cfg.grid for cfg in configs_2}
+        assert grids_1 == grids_2
+
+    def test_all_have_exactly_5_active_modules(self) -> None:
+        """The M3C "5 modules conducting" constraint."""
+        for cfg in ALL_VALID_CONFIGURATIONS:
+            assert cfg.n_active() == 5, (
+                f"{cfg.to_string()} has {cfg.n_active()} active, "
+                f"expected 5"
+            )
+
+    def test_all_pass_is_valid(self) -> None:
+        for cfg in ALL_VALID_CONFIGURATIONS:
+            assert cfg.is_valid()
+
+    def test_all_have_no_zero_rows_or_cols(self) -> None:
+        """Every input phase and every output phase must have at
+        least one active connection (rule 1, Sec 4.3)."""
+        for cfg in ALL_VALID_CONFIGURATIONS:
+            for i in range(3):
+                assert cfg.row_sum(i) >= 1, (
+                    f"row {i} has no connections in {cfg.to_string()}"
+                )
+            for j in range(3):
+                assert cfg.col_sum(j) >= 1, (
+                    f"col {j} has no connections in {cfg.to_string()}"
+                )
+
+    def test_all_have_valid_distributions(self) -> None:
+        """Every config's row-sum AND col-sum distribution must be
+        (1,1,3) or (1,2,2) — never (1,2,3) or (0,1,4) etc."""
+        valid_dists = ({1, 1, 3}, {1, 2, 2})
+        for cfg in ALL_VALID_CONFIGURATIONS:
+            row_dist = sorted(cfg.row_sum(i) for i in range(3))
+            col_dist = sorted(cfg.col_sum(j) for j in range(3))
+            assert set(row_dist) in [{1, 3}, {1, 2}], row_dist
+            assert sorted(row_dist) in [[1, 1, 3], [1, 2, 2]]
+            assert sorted(col_dist) in [[1, 1, 3], [1, 2, 2]]
+
+    def test_distributions_balance(self) -> None:
+        """Sum of row-sums = sum of col-sums = 5 for every config."""
+        for cfg in ALL_VALID_CONFIGURATIONS:
+            assert sum(cfg.row_sum(i) for i in range(3)) == 5
+            assert sum(cfg.col_sum(j) for j in range(3)) == 5
+
+    def test_configurations_by_distribution_partition(self) -> None:
+        """The 4 distribution patterns must partition the 81 configs."""
+        groups = configurations_by_distribution()
+        total = sum(len(cfgs) for cfgs in groups.values())
+        assert total == 81
+        # 4 distinct (row, col) distribution combinations
+        assert len(groups) == 4
+
+    def test_configurations_have_unique_grids(self) -> None:
+        """No duplicate grids in the enumeration."""
+        grids = {cfg.grid for cfg in ALL_VALID_CONFIGURATIONS}
+        assert len(grids) == 81
+
+    def test_active_modules_count_matches_n_active(self) -> None:
+        """``active_modules()`` returns 5-element list."""
+        for cfg in ALL_VALID_CONFIGURATIONS:
+            assert len(cfg.active_modules()) == 5
+
+    def test_to_string_format(self) -> None:
+        """The string representation is non-empty and has the
+        expected structure."""
+        cfg = ALL_VALID_CONFIGURATIONS[0]
+        s = cfg.to_string()
+        assert "a b c" in s
+        assert "A " in s
+        assert "B " in s
+        assert "C " in s
+        n_ticks = s.count("✓")
+        assert n_ticks == 5
