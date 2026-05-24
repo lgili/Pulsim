@@ -9,12 +9,13 @@
 //   * Output parity with `solve(mask, ...)` across a sequence of single-bit
 //     Gray-code flips (1e-12 tolerance).
 //   * `metrics().rank1_hits` increments on single-bit-diff calls when the
-//     backend supports partial_refactor (PULSIM_HAVE_KLU build).
+//     backend supports partial_refactor (PulsimSparseLuSolver — landing
+//     in Sections 2-5 of openspec/replace-klu-with-pulsim-sparse-lu/).
 //   * `metrics().full_refactor_hits` increments on first-encounter +
 //     multi-bit flips.
 //   * `metrics().fallbacks` increments when the backend does NOT support
-//     partial_refactor (Eigen-only build path; verified by forcing
-//     Backend::Eigen via direct factory in 2.7).
+//     partial_refactor (currently the only state — Eigen::SparseLU is
+//     the sole DirectSolver until Section 2 of the rewrite lands).
 //   * Cache state is unchanged (segments_ map untouched) — solve_rank1 is
 //     orthogonal to the per-mask cache.
 

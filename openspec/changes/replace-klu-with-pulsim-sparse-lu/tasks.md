@@ -1,28 +1,49 @@
 ## 1. Drop KLU + add `Backend::Pulsim` enum slot
 
-- [ ] 1.1 Delete `core/include/pulsim/sparse/klu_solver.hpp`
-- [ ] 1.2 Delete `core/tests/layer0/test_klu_solver.cpp`
-- [ ] 1.3 Remove the `find_package(KLU CONFIG)` block from root
-      `CMakeLists.txt` (also remove `PULSIM_HAVE_KLU` /
-      `PULSIM_ENABLE_KLU` options + the SuiteSparse-related summary line)
-- [ ] 1.4 Remove `SuiteSparse::KLU` link from `core/CMakeLists.txt`
-      and the `tests/layer0/test_klu_solver.cpp` source entry
-- [ ] 1.5 In `core/include/pulsim/sparse/solver.hpp`:
-      - Replace `Backend::KLU` with `Backend::Pulsim` in the enum
-      - Drop the `#ifdef PULSIM_HAVE_KLU` conditional includes + factory
-      - Forward-declare `PulsimSparseLuSolver` instead of `KluSolver`
-      - Update factory: `Backend::Auto` picks Pulsim for any n
-- [ ] 1.6 Remove `libsuitesparse-dev` / `suite-sparse` from
-      `.github/workflows/ci.yml` (5 matrix entries + coverage + python
-      Linux/macOS install commands)
-- [ ] 1.7 Update README "Build prerequisites": drop the SuiteSparse KLU
-      row; drop the `brew install suite-sparse` /
-      `apt install libsuitesparse-dev` lines; drop the
-      `-DPULSIM_ENABLE_KLU=OFF` opt-out note
-- [ ] 1.8 Verify Eigen-only build still passes: layer0 + layer4 tests
-      run unchanged after KLU removal (this is the V0 fallback path
-      that always worked, now becomes the only path until Section 5
-      lands)
+- [x] 1.1 Deleted `core/include/pulsim/sparse/klu_solver.hpp`
+- [x] 1.2 Deleted `core/tests/layer0/test_klu_solver.cpp`
+- [x] 1.3 Removed the entire `find_package(KLU CONFIG)` block from
+      root `CMakeLists.txt` (~76 lines): drops `PULSIM_ENABLE_KLU`
+      option, `PULSIM_HAVE_KLU` cache var, the 3-step
+      find_package + find_library detection cascade, and the build-
+      summary "KLU backend" line.
+- [x] 1.4 Removed `SuiteSparse::KLU` INTERFACE link + `PULSIM_HAVE_KLU`
+      compile definition from `core/CMakeLists.txt`; also dropped
+      `tests/layer0/test_klu_solver.cpp` from the layer0 test sources.
+- [x] 1.5 In `core/include/pulsim/sparse/solver.hpp`:
+      - Replaced `Backend::KLU` with `Backend::Pulsim` in the enum
+      - Removed the `#ifdef PULSIM_HAVE_KLU` conditional include of
+        klu_solver.hpp at the bottom
+      - Forward-declared `PulsimSparseLuSolver` (instead of `KluSolver`)
+        — TBD comment points at the openspec change for the upcoming
+        `pulsim_lu_solver.hpp`
+      - Replaced the dual-impl factory (Eigen-only fallback +
+        klu_solver.hpp-supplied KLU path) with a single inline impl:
+        `Backend::Pulsim` throws a clear runtime_error (since the
+        implementation lands in Sections 2-5), `Backend::Eigen` and
+        `Backend::Auto` both return `SparseLuSolver`. Dropped
+        `PULSIM_KLU_AUTO_THRESHOLD` macro entirely.
+      - Updated the `Backend` enum's docstring to reference the
+        openspec change instead of KLU.
+- [x] 1.6 Removed `libsuitesparse-dev` / `suite-sparse` from
+      `.github/workflows/ci.yml` (5 Linux matrix entries + macOS
+      brew + Python Linux/macOS installs + coverage job). Reverts to
+      the V0-pre-KLU CI layout.
+- [x] 1.7 Updated README "Build prerequisites": dropped the
+      SuiteSparse KLU table row, dropped the install commands,
+      dropped the `-DPULSIM_ENABLE_KLU=OFF` note. New paragraph
+      states Pulsim ships its own sparse LU on top of Eigen.
+- [x] 1.8 Verified Eigen-only build passes locally on macOS 26.5 /
+      AppleClang 17.0.0:
+      - layer0:    80 assertions in 19 test cases ✓
+      - layer4:   172 assertions in 32 test cases ✓
+      - layer4_v1: 103 assertions in 40 test cases ✓
+      Plus comment hygiene in `cache.hpp` (3 docstring cleanups
+      removing stale KLU references) and in `test_pwl_cache_rank1.cpp`
+      + `test_bench_pwl_rank1.cpp` (microbench no longer attempts
+      `set_rank1_backend(Backend::KLU)` — falls back to the
+      Eigen-only behaviour during the interim until Section 5
+      lands the path-based PulsimSparseLuSolver).
 
 ## 2. `PulsimSparseLuSolver` — symbolic analysis layer
 

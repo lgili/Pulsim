@@ -122,24 +122,19 @@ public:
 };
 
 // -----------------------------------------------------------------------------
-// Backend hint for the factory (Layer 4 V8).
+// Backend hint for the factory (Layer 4 V8 — openspec/changes/replace-klu-with-pulsim-sparse-lu).
 //
-// `Auto`  — pick KLU when `PULSIM_HAVE_KLU` is defined AND `n` is at or above
-//           the partial-refactor crossover threshold (`PULSIM_KLU_AUTO_THRESHOLD`,
-//           default 100). Otherwise pick Eigen::SparseLU.
-// `Eigen` — force `SparseLuSolver` regardless of KLU availability.
-// `KLU`   — force `KluSolver`. Throws `std::runtime_error` if `PULSIM_HAVE_KLU`
-//           is not defined.
+// `Auto`   — pick `PulsimSparseLuSolver` when it's been implemented (Section 2+
+//            of the in-house sparse LU rewrite, Pulsim v1.3.0+). During the
+//            interim period when only the symbolic/numeric layers are landing,
+//            falls back to `SparseLuSolver` (Eigen::SparseLU reference).
+// `Eigen`  — force `SparseLuSolver`. Retained for parity testing vs the
+//            in-house `PulsimSparseLuSolver`.
+// `Pulsim` — force `PulsimSparseLuSolver`. Throws `std::runtime_error` while
+//            the in-house implementation is incomplete (Section 1 of the
+//            rewrite has landed but Sections 2-5 have not).
 // -----------------------------------------------------------------------------
-enum class Backend { Auto, Eigen, KLU };
-
-#ifndef PULSIM_KLU_AUTO_THRESHOLD
-/// Matrix dimension at which `Backend::Auto` switches from `SparseLuSolver`
-/// to `KluSolver` (the regime where KLU's analyze-once + partial-refactor
-/// amortisation outweighs Eigen's full-factorize cost; see Q6 of the
-/// 2026-05-24 PWL library audit).
-#define PULSIM_KLU_AUTO_THRESHOLD 100
-#endif
+enum class Backend { Auto, Eigen, Pulsim };
 
 // -----------------------------------------------------------------------------
 // SparseLuSolver — reference implementation via Eigen::SparseLU.
@@ -209,62 +204,37 @@ private:
 // -----------------------------------------------------------------------------
 // make_default_solver — factory.
 //
-// V0 default (n unknown): always SparseLuSolver — safe baseline that needs no
-// optional dependency.
+// `make_default_solver()` (no args): always SparseLuSolver — safe baseline.
 //
-// V1 (Layer 4 V8 — openspec/changes/add-pwl-rank1-update) adds an overload
-// that takes the matrix dimension `n` and an optional `Backend` hint:
-//
-//   * `Backend::Auto`  → KLU when `PULSIM_HAVE_KLU` is defined AND
-//                        n >= `PULSIM_KLU_AUTO_THRESHOLD`. Else SparseLU.
-//   * `Backend::Eigen` → always SparseLuSolver.
-//   * `Backend::KLU`   → always KluSolver. Throws if KLU was not built in.
-//
-// `KluSolver`'s declaration lives in `klu_solver.hpp`; the factory needs
-// only a forward declaration here. The actual ctor call is gated behind
-// `#ifdef PULSIM_HAVE_KLU` to keep the `Backend::KLU` path callable without
-// KLU at all (it throws at runtime with a clear message).
+// `make_default_solver(n, hint)` honours the `Backend` enum above.
+// `PulsimSparseLuSolver`'s declaration will live in `pulsim_lu_solver.hpp`
+// once Section 2 of the openspec/replace-klu-with-pulsim-sparse-lu rewrite
+// lands; only a forward declaration is needed here. During the interim
+// (Section 1 only — this commit) the `Backend::Pulsim` path throws a
+// runtime_error, and `Backend::Auto` falls through to SparseLuSolver.
 // -----------------------------------------------------------------------------
-class KluSolver;  // forward decl — see pulsim/sparse/klu_solver.hpp
+class PulsimSparseLuSolver;  // forward decl — see pulsim_lu_solver.hpp (TBD)
 
 inline std::unique_ptr<DirectSolver> make_default_solver() {
     return std::make_unique<SparseLuSolver>();
 }
 
-[[nodiscard]] std::unique_ptr<DirectSolver> make_default_solver(
-    Size n, Backend hint = Backend::Auto);
-
-#ifndef PULSIM_HAVE_KLU
-// KLU-less inline impl. When PULSIM_HAVE_KLU is defined the impl lives in
-// klu_solver.hpp (pulled in below) and uses `KluSolver`; this fallback
-// honours Backend::Eigen and Backend::Auto via SparseLuSolver and throws
-// loudly on an explicit Backend::KLU request.
 inline std::unique_ptr<DirectSolver> make_default_solver(
     [[maybe_unused]] Size n, Backend hint) {
     switch (hint) {
-        case Backend::KLU:
+        case Backend::Pulsim:
             throw std::runtime_error(
-                "make_default_solver(n, Backend::KLU): Pulsim was built "
-                "without SuiteSparse KLU (PULSIM_HAVE_KLU not defined). "
-                "Install SuiteSparse and reconfigure with "
-                "-DPULSIM_ENABLE_KLU=ON (default).");
+                "make_default_solver(n, Backend::Pulsim): "
+                "PulsimSparseLuSolver is not yet implemented. The "
+                "in-house sparse LU rewrite is tracked in "
+                "openspec/changes/replace-klu-with-pulsim-sparse-lu/; "
+                "until Sections 2-5 land, use Backend::Eigen or "
+                "Backend::Auto (which falls through to SparseLuSolver).");
         case Backend::Eigen:
         case Backend::Auto:
         default:
             return std::make_unique<SparseLuSolver>();
     }
 }
-#endif  // !PULSIM_HAVE_KLU
 
 }  // namespace pulsim::sparse
-
-// -----------------------------------------------------------------------------
-// Conditional KLU backend pull-in. Placed at the BOTTOM of the header so
-// `DirectSolver` is fully declared before `klu_solver.hpp` inherits from it.
-// `klu_solver.hpp` provides the KLU-aware `make_default_solver(n, hint)`
-// impl when PULSIM_HAVE_KLU is set; the include-guards make the symbol
-// ODR-safe regardless of which header the user pulls in first.
-// -----------------------------------------------------------------------------
-#ifdef PULSIM_HAVE_KLU
-#include "pulsim/sparse/klu_solver.hpp"
-#endif

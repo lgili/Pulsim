@@ -158,19 +158,17 @@ Row run_one(Size N, Size repeat) {
     }
 
     // ----- Fast path: sliding solver via `solve_rank1` -----------------------
-    // Force the KLU backend regardless of the synthetic fixture's tiny
-    // `state_size` so the rank-1 partial_refactor path is exercised. In
-    // a production simulator the user's MNA matrices typically exceed
-    // the Backend::Auto threshold (≥ 100) by themselves — this override
-    // is needed only for microbench fixtures.
+    // During the interim (Section 1 of openspec/replace-klu-with-pulsim-sparse-lu/)
+    // there is no partial_refactor-capable backend — the rank-1 path
+    // falls through to full factorize at every flip, hitting the
+    // `metrics().fallbacks` counter. Once Sections 2-5 land the
+    // PulsimSparseLuSolver, this bench will be updated to force
+    // `Backend::Pulsim` and the speedup numbers will repopulate.
     double wall_rank1_ms = 0.0;
     CacheMetrics metrics{};
     {
         PwlStateSpaceCache cache(fx.g, fx.pool);
         cache.build_lazy(dt);
-#ifdef PULSIM_HAVE_KLU
-        cache.set_rank1_backend(sparse::Backend::KLU);
-#endif
         Vector x(static_cast<Index>(n_state));
         Stopwatch sw;
         for (const auto& m : seq) {
@@ -261,13 +259,10 @@ void write_csv(const std::vector<Row>& rows) {
 TEST_CASE("Bench: rank-1 microbench — solve vs solve_rank1 across N",
           "[bench][rank1][microbench][pwl]") {
     std::printf("\n=== PWL cache rank-1 microbench ===\n");
-#ifdef PULSIM_HAVE_KLU
-    std::printf("Backend (n >= %d): KLU\n", PULSIM_KLU_AUTO_THRESHOLD);
-#else
-    std::printf("Backend: Eigen::SparseLU (KLU not built — "
-                 "solve_rank1 will fall back to full factorize at every "
-                 "single-bit flip, fallbacks counter will dominate)\n");
-#endif
+    std::printf("Backend: Eigen::SparseLU (Pulsim native LU not yet "
+                 "implemented — solve_rank1 falls back to full factorize "
+                 "at every single-bit flip; fallbacks counter dominates. "
+                 "See openspec/changes/replace-klu-with-pulsim-sparse-lu/.)\n");
     print_header();
 
     std::vector<Row> rows;

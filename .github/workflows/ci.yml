@@ -30,7 +30,7 @@ jobs:
             build_type: Release
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev libsuitesparse-dev
+              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev
 
           # Linux with Clang 18 (latest)
           - name: "Linux Clang 18"
@@ -41,7 +41,7 @@ jobs:
             build_type: Release
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build clang-18 libc++-18-dev libc++abi-18-dev libeigen3-dev libsuitesparse-dev
+              sudo apt-get install -y cmake ninja-build clang-18 libc++-18-dev libc++abi-18-dev libeigen3-dev
 
           # Linux with GCC 13 (fallback)
           - name: "Linux GCC 13"
@@ -52,7 +52,7 @@ jobs:
             build_type: Release
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libeigen3-dev libsuitesparse-dev
+              sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libeigen3-dev
 
           # macOS ARM64 (Apple Silicon)
           # Note: macos-13 (Intel) removed - Apple has transitioned to ARM,
@@ -63,7 +63,7 @@ jobs:
             cc: clang
             cxx: clang++
             build_type: Release
-            install_cmd: brew install cmake ninja eigen suite-sparse
+            install_cmd: brew install cmake ninja eigen
 
           # Linux Debug build with sanitizers
           - name: "Linux Debug + Sanitizers"
@@ -76,7 +76,7 @@ jobs:
             build_parallel_level: 2
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev libsuitesparse-dev
+              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev
 
     steps:
       - name: Checkout
@@ -140,12 +140,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev libsuitesparse-dev gcc-13 g++-13
+          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev gcc-13 g++-13
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja eigen suite-sparse
+          brew install cmake ninja eigen
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -212,7 +212,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libeigen3-dev libsuitesparse-dev lcov
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libeigen3-dev lcov
 
       - name: Configure CMake (coverage build)
         env:
