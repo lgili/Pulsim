@@ -33,11 +33,13 @@
 
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/numeric/types.hpp"
 
 #include <Eigen/SparseLU>
 #include <Eigen/OrderingMethods>
 
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -85,7 +87,59 @@ public:
     [[nodiscard]] virtual bool is_analyzed() const noexcept = 0;
     /// Diagnostic: has factorize been called and succeeded?
     [[nodiscard]] virtual bool is_factorized() const noexcept = 0;
+
+    // -------------------------------------------------------------------------
+    // Rank-1 / partial-refactor extension (Layer 4 V8 —
+    // openspec/changes/add-pwl-rank1-update). Subclasses that support an
+    // O(path) re-elimination on a small set of perturbed columns override
+    // these; the default implementations announce "not supported" and let
+    // the caller fall back to a full `factorize`.
+    // -------------------------------------------------------------------------
+
+    /// Does this backend implement `partial_refactor`? Default: no.
+    [[nodiscard]] virtual bool supports_partial_refactor() const noexcept {
+        return false;
+    }
+
+    /// Re-eliminate only the columns of the LU factor that depend on the
+    /// listed `changed_cols` of `new_M`. The caller MUST have already
+    /// successfully `analyze`d a matrix with the same sparsity pattern as
+    /// `new_M`, and SHOULD have `factorize`d the previous values at least
+    /// once.
+    ///
+    /// Returns true on success; false on any failure mode (numerical
+    /// singularity in the updated columns, unsupported backend, etc.).
+    /// On `false`, the cache invariants are preserved — the caller can
+    /// safely fall back to a fresh `factorize(new_M)`.
+    ///
+    /// Default implementation: ignore the change set and return false
+    /// (signals "not supported", forces the caller's fallback path).
+    [[nodiscard]] virtual bool partial_refactor(
+        [[maybe_unused]] const Matrix& new_M,
+        [[maybe_unused]] std::span<const Index> changed_cols) {
+        return false;
+    }
 };
+
+// -----------------------------------------------------------------------------
+// Backend hint for the factory (Layer 4 V8).
+//
+// `Auto`  — pick KLU when `PULSIM_HAVE_KLU` is defined AND `n` is at or above
+//           the partial-refactor crossover threshold (`PULSIM_KLU_AUTO_THRESHOLD`,
+//           default 100). Otherwise pick Eigen::SparseLU.
+// `Eigen` — force `SparseLuSolver` regardless of KLU availability.
+// `KLU`   — force `KluSolver`. Throws `std::runtime_error` if `PULSIM_HAVE_KLU`
+//           is not defined.
+// -----------------------------------------------------------------------------
+enum class Backend { Auto, Eigen, KLU };
+
+#ifndef PULSIM_KLU_AUTO_THRESHOLD
+/// Matrix dimension at which `Backend::Auto` switches from `SparseLuSolver`
+/// to `KluSolver` (the regime where KLU's analyze-once + partial-refactor
+/// amortisation outweighs Eigen's full-factorize cost; see Q6 of the
+/// 2026-05-24 PWL library audit).
+#define PULSIM_KLU_AUTO_THRESHOLD 100
+#endif
 
 // -----------------------------------------------------------------------------
 // SparseLuSolver — reference implementation via Eigen::SparseLU.
@@ -155,13 +209,62 @@ private:
 // -----------------------------------------------------------------------------
 // make_default_solver — factory.
 //
-// Layer 0 default = SparseLuSolver. Future layers can grow a
-// preference hint (e.g. "matrix is symmetric SPD", "matrix is
-// extremely sparse and small") that the factory uses to pick a
-// specialised backend; for Layer 0 there's only one choice.
+// V0 default (n unknown): always SparseLuSolver — safe baseline that needs no
+// optional dependency.
+//
+// V1 (Layer 4 V8 — openspec/changes/add-pwl-rank1-update) adds an overload
+// that takes the matrix dimension `n` and an optional `Backend` hint:
+//
+//   * `Backend::Auto`  → KLU when `PULSIM_HAVE_KLU` is defined AND
+//                        n >= `PULSIM_KLU_AUTO_THRESHOLD`. Else SparseLU.
+//   * `Backend::Eigen` → always SparseLuSolver.
+//   * `Backend::KLU`   → always KluSolver. Throws if KLU was not built in.
+//
+// `KluSolver`'s declaration lives in `klu_solver.hpp`; the factory needs
+// only a forward declaration here. The actual ctor call is gated behind
+// `#ifdef PULSIM_HAVE_KLU` to keep the `Backend::KLU` path callable without
+// KLU at all (it throws at runtime with a clear message).
 // -----------------------------------------------------------------------------
+class KluSolver;  // forward decl — see pulsim/sparse/klu_solver.hpp
+
 inline std::unique_ptr<DirectSolver> make_default_solver() {
     return std::make_unique<SparseLuSolver>();
 }
 
+[[nodiscard]] std::unique_ptr<DirectSolver> make_default_solver(
+    Size n, Backend hint = Backend::Auto);
+
+#ifndef PULSIM_HAVE_KLU
+// KLU-less inline impl. When PULSIM_HAVE_KLU is defined the impl lives in
+// klu_solver.hpp (pulled in below) and uses `KluSolver`; this fallback
+// honours Backend::Eigen and Backend::Auto via SparseLuSolver and throws
+// loudly on an explicit Backend::KLU request.
+inline std::unique_ptr<DirectSolver> make_default_solver(
+    [[maybe_unused]] Size n, Backend hint) {
+    switch (hint) {
+        case Backend::KLU:
+            throw std::runtime_error(
+                "make_default_solver(n, Backend::KLU): Pulsim was built "
+                "without SuiteSparse KLU (PULSIM_HAVE_KLU not defined). "
+                "Install SuiteSparse and reconfigure with "
+                "-DPULSIM_ENABLE_KLU=ON (default).");
+        case Backend::Eigen:
+        case Backend::Auto:
+        default:
+            return std::make_unique<SparseLuSolver>();
+    }
+}
+#endif  // !PULSIM_HAVE_KLU
+
 }  // namespace pulsim::sparse
+
+// -----------------------------------------------------------------------------
+// Conditional KLU backend pull-in. Placed at the BOTTOM of the header so
+// `DirectSolver` is fully declared before `klu_solver.hpp` inherits from it.
+// `klu_solver.hpp` provides the KLU-aware `make_default_solver(n, hint)`
+// impl when PULSIM_HAVE_KLU is set; the include-guards make the symbol
+// ODR-safe regardless of which header the user pulls in first.
+// -----------------------------------------------------------------------------
+#ifdef PULSIM_HAVE_KLU
+#include "pulsim/sparse/klu_solver.hpp"
+#endif

@@ -21,6 +21,15 @@ target_link_libraries(pulsim_core
         Eigen3::Eigen
         yaml-cpp::yaml-cpp
 )
+
+# Conditional KLU linkage — opt-in via PULSIM_HAVE_KLU set by the root
+# CMakeLists.txt's `find_package(KLU ...)` block. When KLU is absent the
+# kernel still builds and runs identically using Eigen::SparseLU.
+if(PULSIM_HAVE_KLU)
+    target_link_libraries(pulsim_core INTERFACE SuiteSparse::KLU)
+    target_compile_definitions(pulsim_core INTERFACE PULSIM_HAVE_KLU=1)
+endif()
+
 add_library(pulsim::core ALIAS pulsim_core)
 
 # =============================================================================
@@ -38,6 +47,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer0/test_numeric_types.cpp
         tests/layer0/test_sparse_matrix.cpp
         tests/layer0/test_sparse_solver.cpp
+        tests/layer0/test_klu_solver.cpp   # Layer 0 V8 — empty TU when KLU disabled
     )
     target_link_libraries(pulsim_core_layer0_tests
         PRIVATE
@@ -189,6 +199,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4/test_assemble.cpp
         tests/layer4/test_cache.cpp
         tests/layer4/test_integration_chopper.cpp
+        tests/layer4/test_pwl_cache_rank1.cpp   # Layer 4 V8 — rank-1 fast path
     )
     target_link_libraries(pulsim_core_layer4_tests
         PRIVATE
@@ -496,6 +507,7 @@ if(PULSIM_BUILD_TESTS)
         tests/benchmarks/test_bench_half_wave.cpp
         tests/benchmarks/test_bench_buck.cpp
         tests/benchmarks/test_bench_boost.cpp
+        tests/benchmarks/test_bench_pwl_rank1.cpp   # Layer 4 V8 — rank-1 fast path
     )
     target_include_directories(pulsim_benchmarks
         PRIVATE
