@@ -52,9 +52,12 @@ Following the thesis exactly:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import cos, pi, sqrt
 from typing import Callable
+
+import numpy as np
+import pulsim as p
 
 
 # =============================================================================
@@ -544,3 +547,243 @@ def make_cmc_gate_signals(
         return svm_step(t, m_depth, omega_o, omega_i, phi_i, f_sw)
 
     return _gate_fn
+
+
+# =============================================================================
+# L0 — averaged-model plant + runner
+# =============================================================================
+#
+# The L0 model represents the CMC as a Venturini-style continuous-time
+# averaged converter: there is no high-frequency switching ripple in
+# the output voltages, only the *fundamental* synthesised by SVM.
+# Specifically, the output line-neutral voltages are:
+#
+#     v_a_out(t) = m · V_in_peak · cos(ω_o·t)
+#     v_b_out(t) = m · V_in_peak · cos(ω_o·t − 2π/3)
+#     v_c_out(t) = m · V_in_peak · cos(ω_o·t + 2π/3)
+#
+# Each one synthesised with an :func:`pulsim.add_sine_voltage_source`
+# at the converter terminal. The load is a Y-connected RL bank.
+#
+# The L0 plant is *one-sided* by design: it shows the output side
+# only. The full input-current dynamics couple to the output through
+# the SVM modulation matrix and are captured by the L1 switched model
+# (next phase). The L0 baseline lets us:
+#
+#   1. Validate that the load currents track ``i_o_peak =
+#      m·V_in_peak / |Z_load|`` (closed-form RL response);
+#   2. Confirm THD ≈ 0 (pure sinusoid — no ripple);
+#   3. Provide a reference fundamental for L1 to match.
+
+
+@dataclass
+class CmcPlant:
+    """Bundle of (builder, output-current branch indices) returned by
+    the CMC plant builders. Same pattern as ``MmcPlant`` in the MMC
+    project."""
+
+    builder: object
+    iL_out_indices: tuple[int, int, int] = (0, 0, 0)
+    # Optional: input-current branch ids when the plant models the
+    # input side. None in the output-only L0.
+    iL_in_indices: tuple[int, int, int] | None = None
+
+
+def build_l0_plant(params: CmcParams) -> CmcPlant:
+    """3-φ CMC output-side averaged plant.
+
+    Topology:
+
+        ┌── V_a_out ──┬── L_load ──┬── R_load ──┐
+        │                                       │
+        │── V_b_out ──┬── L_load ──┬── R_load ──┼── star
+        │                                       │
+        └── V_c_out ──┴── L_load ──┴── R_load ──┘
+
+    The three output voltage sources are sinusoids at ``f_out`` with
+    amplitude ``m · V_in_peak``, phase-shifted by 120° — i.e. the
+    *ideal* SVM-synthesised reference. The load is Y-connected RL,
+    star tied weakly to ground for MNA conditioning.
+
+    The plant is suitable for validating output fundamental
+    amplitude, RMS, and the load impedance response. It does **not**
+    model the input side (entrance currents are zero by construction).
+    """
+    b = p.CircuitBuilder()
+    V_o_peak = params.V_o_peak  # = m · V_in_peak
+    f_out = params.f_out
+
+    # Output voltage sources — one per phase, sinusoidal at f_out.
+    # All 3 sources reference the same ``star`` node (the converter
+    # neutral). Phase offsets: a → 0°, b → −120°, c → +120°.
+    # The load Y-neutral is the **same** ``star`` node — there's no
+    # need for a separate ``load_star`` (which created an MNA
+    # conditioning artefact: a near-singular 1 mΩ tie between two
+    # logically-identical nodes induced numerical phase coupling
+    # between the three legs).
+    b.add_sine_voltage_source(
+        "V_a_out", "a", "star",
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out, phase=0.0,
+    )
+    b.add_sine_voltage_source(
+        "V_b_out", "b", "star",
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out,
+        phase=-2.0 * pi / 3.0,
+    )
+    b.add_sine_voltage_source(
+        "V_c_out", "c", "star",
+        v_dc=0.0, v_amplitude=V_o_peak, frequency=f_out,
+        phase=+2.0 * pi / 3.0,
+    )
+
+    # Y-load: ph → L_load → R_load → star (same neutral as sources).
+    # Record the inductor branch IDs as they are created, but resolve
+    # the *state indices* only after the FULL graph is built — pulsim's
+    # state-index assignment depends on the total graph topology and
+    # changes if branches are added later. Calling
+    # ``branch_var_id_for_inductor`` mid-build yields stale indices
+    # that silently permute the (i_a, i_b, i_c) mapping.
+    L_branch_ids: list[int] = []
+    for ph in "abc":
+        L_id = b.graph.num_branches
+        b.add_inductor(
+            f"L_load_{ph}", ph, f"rload_{ph}", params.L_load,
+        )
+        b.add_resistor(
+            f"R_load_{ph}", f"rload_{ph}", "star", params.R_load,
+        )
+        L_branch_ids.append(L_id)
+
+    # Weak tie of star to ground (MNA conditioning).
+    b.add_resistor("R_star_gnd", "star", "gnd", 1e6)
+
+    # Now that the graph is complete, resolve state indices.
+    iL_out_indices = tuple(
+        b.pool.branch_var_id_for_inductor(L_id, b.graph)
+        for L_id in L_branch_ids
+    )
+
+    return CmcPlant(
+        builder=b,
+        iL_out_indices=iL_out_indices,  # type: ignore[arg-type]
+        iL_in_indices=None,
+    )
+
+
+# =============================================================================
+# Run driver
+# =============================================================================
+
+
+@dataclass
+class CmcRunResult:
+    """Output of :func:`run_l0_open_loop` / future L1 runner."""
+
+    t: np.ndarray
+    # Output (load) currents, one per phase
+    i_a_out: np.ndarray
+    i_b_out: np.ndarray
+    i_c_out: np.ndarray
+    # Optional: input currents (populated by L1)
+    i_a_in: np.ndarray = field(default_factory=lambda: np.empty(0))
+    i_b_in: np.ndarray = field(default_factory=lambda: np.empty(0))
+    i_c_in: np.ndarray = field(default_factory=lambda: np.empty(0))
+
+
+def run_l0_open_loop(
+    plant: CmcPlant,
+    *,
+    t_end: float = 100e-3,
+    dt: float = 10e-6,
+) -> CmcRunResult:
+    """Run an L0 plant for ``t_end`` seconds at fixed ``dt``.
+
+    No observer is needed — the sinusoidal sources update themselves
+    automatically (built-in time-varying primitive in pulsim).
+    """
+    iLa, iLb, iLc = plant.iL_out_indices
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    counter = [0]
+
+    def log_obs(t, x):
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+        counter[0] += 1
+
+    p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=log_obs,
+        start_from_dc_op=True,
+    )
+
+    n = counter[0]
+    return CmcRunResult(
+        t=log_t[:n],
+        i_a_out=log_ia[:n],
+        i_b_out=log_ib[:n],
+        i_c_out=log_ic[:n],
+    )
+
+
+# =============================================================================
+# Metrics — closed-form predictions + signal analysis
+# =============================================================================
+
+
+def predict_load_impedance(params: CmcParams) -> complex:
+    """Per-phase complex impedance of the Y-connected RL load:
+
+        Z = R + jω_out · L
+    """
+    return params.R_load + 1j * params.omega_out * params.L_load
+
+
+def predict_i_out_peak(params: CmcParams) -> float:
+    """Closed-form peak of the load current — Ohm's law at the output:
+
+        |I_o| = V_o_peak / |Z_load|
+    """
+    return params.V_o_peak / abs(predict_load_impedance(params))
+
+
+def predict_load_power_factor(params: CmcParams) -> float:
+    """Power factor of the RL load: cos(arctan(ω·L / R))."""
+    return float(np.cos(np.arctan2(params.omega_out * params.L_load,
+                                     params.R_load)))
+
+
+def rms(signal: np.ndarray) -> float:
+    """RMS value of a signal."""
+    return float(np.sqrt(np.mean(np.asarray(signal, dtype=np.float64) ** 2)))
+
+
+def thd(signal: np.ndarray, fs: float, f0: float, n_harm: int = 50) -> float:
+    """Total harmonic distortion of ``signal`` at fundamental ``f0`` [%].
+
+    Computes ``THD = sqrt(sum H_k²) / H_1 × 100 %`` over ``2..n_harm``.
+    Uses a Hann window + rfft. Same formula as in
+    ``mmc_3phase_model.thd``.
+    """
+    sig = np.asarray(signal, dtype=np.float64)
+    sig = sig - sig.mean()
+    n = len(sig)
+    win = np.hanning(n)
+    spec = np.fft.rfft(sig * win)
+    k1 = int(round(f0 / (fs / n)))
+    if k1 < 1:
+        return float("nan")
+    fund = abs(spec[k1])
+    harmonics_sq = 0.0
+    for k in range(2, n_harm + 1):
+        ki = k * k1
+        if ki < len(spec):
+            harmonics_sq += abs(spec[ki]) ** 2
+    return float(100.0 * sqrt(harmonics_sq) / fund) if fund > 0 else float("nan")

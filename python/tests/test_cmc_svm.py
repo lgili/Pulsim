@@ -27,7 +27,13 @@ from cmc_3phase_model import (  # noqa: E402
     CMC_ROTATIONAL_VECTORS,
     CMC_ZERO_VECTORS,
     CmcParams,
+    build_l0_plant,
     make_cmc_gate_signals,
+    predict_i_out_peak,
+    predict_load_impedance,
+    predict_load_power_factor,
+    rms,
+    run_l0_open_loop,
     svm_active_vectors_for_sectors,
     svm_duty_cycles,
     svm_max_modulation,
@@ -35,7 +41,9 @@ from cmc_3phase_model import (  # noqa: E402
     svm_step,
     switch_mask_for_config,
     switch_mask_for_state,
+    thd,
 )
+import numpy as np  # noqa: E402
 
 
 # ============================================================================
@@ -266,3 +274,123 @@ class TestSvmStep:
         for t in [0.0, 1e-5, 5e-5, 1e-4]:
             mask = gate(t)
             assert sum(mask) == 3
+
+
+# ============================================================================
+# Tier 5 — L0 averaged plant validation (output-side)
+# ============================================================================
+
+
+class TestL0Plant:
+    """L0 (averaged Venturini-style) plant: synthesised output sinusoids
+    driving a Y-connected RL load. Validates pulsim end-to-end on the
+    output side, against closed-form analytical predictions."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> CmcParams:
+        return CmcParams(
+            V_in_peak=311.13, f_in=60.0, f_out=30.0, m_depth=0.5,
+            R_load=5.0, L_load=10e-3,
+        )
+
+    @pytest.fixture(scope="class")
+    def result(self, params: CmcParams):
+        plant = build_l0_plant(params)
+        return run_l0_open_loop(plant, t_end=200e-3, dt=10e-6)
+
+    def test_i_out_peak_matches_analytical(
+        self, params: CmcParams, result,
+    ) -> None:
+        """|I_o| = V_o_peak / |Z_load| should match within 1 %."""
+        mask = result.t >= 150e-3
+        i_a_pk = float(np.max(np.abs(result.i_a_out[mask])))
+        i_a_pk_pred = predict_i_out_peak(params)
+        rel_err = abs(i_a_pk - i_a_pk_pred) / i_a_pk_pred
+        assert rel_err < 0.01, (
+            f"i_a peak = {i_a_pk:.4f} A vs {i_a_pk_pred:.4f} A predicted, "
+            f"rel-err = {rel_err*100:.2f}%"
+        )
+
+    def test_i_out_rms_matches_analytical(
+        self, params: CmcParams, result,
+    ) -> None:
+        """RMS = peak / √2 for pure sinusoid."""
+        mask = result.t >= 150e-3
+        i_a_rms = rms(result.i_a_out[mask])
+        i_a_rms_pred = predict_i_out_peak(params) / np.sqrt(2.0)
+        rel_err = abs(i_a_rms - i_a_rms_pred) / i_a_rms_pred
+        assert rel_err < 0.01, (
+            f"i_a RMS = {i_a_rms:.4f} A vs {i_a_rms_pred:.4f} A, "
+            f"rel-err = {rel_err*100:.2f}%"
+        )
+
+    def test_balanced_three_phase_output(self, result) -> None:
+        """All three load currents have the same peak (balanced 3-φ)."""
+        mask = result.t >= 150e-3
+        peaks = [
+            float(np.max(np.abs(x[mask])))
+            for x in (result.i_a_out, result.i_b_out, result.i_c_out)
+        ]
+        max_dev = max(peaks) - min(peaks)
+        max_dev_rel = max_dev / max(peaks)
+        assert max_dev_rel < 1e-3, (
+            f"3-φ peaks unbalanced: {peaks}, max rel deviation {max_dev_rel*100:.4f}%"
+        )
+
+    def test_load_phase_shift_120_degrees(
+        self, params: CmcParams, result,
+    ) -> None:
+        """The three load currents are 120° apart in phase. Measured
+        via DFT of the fundamental — robust against window-edge
+        artefacts of the zero-crossing method."""
+        mask = result.t >= 100e-3
+        # Extract an integer number of fundamental periods for clean FFT.
+        fs = 1.0 / 10e-6
+        T_out = 1.0 / params.f_out
+        n_periods = 3
+        n_win = int(round(n_periods * T_out * fs))
+        ia = result.i_a_out[mask][:n_win]
+        ib = result.i_b_out[mask][:n_win]
+        ic = result.i_c_out[mask][:n_win]
+        # Coherent DFT bin at f_out (no windowing needed for integer cycles).
+        k = int(round(params.f_out * n_win / fs))
+        spec_a = np.fft.rfft(ia)[k]
+        spec_b = np.fft.rfft(ib)[k]
+        spec_c = np.fft.rfft(ic)[k]
+        # Phase shift in radians, then degrees
+        phase_b_minus_a = np.angle(spec_b) - np.angle(spec_a)
+        phase_c_minus_a = np.angle(spec_c) - np.angle(spec_a)
+        # Wrap to (-π, +π]
+        phase_b_minus_a = ((phase_b_minus_a + pi) % (2 * pi)) - pi
+        phase_c_minus_a = ((phase_c_minus_a + pi) % (2 * pi)) - pi
+        # Expected: b lags by 2π/3 (-120°), c leads by 2π/3 (+120°)
+        assert abs(phase_b_minus_a - (-2 * pi / 3)) < 0.05, (
+            f"Phase b−a = {np.degrees(phase_b_minus_a):.2f}°, "
+            f"expected −120° ± 3°"
+        )
+        assert abs(phase_c_minus_a - (+2 * pi / 3)) < 0.05, (
+            f"Phase c−a = {np.degrees(phase_c_minus_a):.2f}°, "
+            f"expected +120° ± 3°"
+        )
+
+    def test_pure_sinusoid_low_thd(self, params: CmcParams, result) -> None:
+        """L0 has no switching ripple ⇒ THD should be near zero
+        (limited by FFT windowing artefacts to ~3 %)."""
+        mask = result.t >= 100e-3
+        fs = 1.0 / 10e-6
+        n_win = int(round(3 * (1.0 / params.f_out) * fs))
+        thd_pct = thd(result.i_a_out[mask][:n_win], fs, params.f_out)
+        # Allow some windowing leakage but flag any actual harmonic content
+        assert thd_pct < 5.0, (
+            f"THD = {thd_pct:.2f}%; expected < 5% for ideal L0"
+        )
+
+    def test_load_power_factor_close_to_R_L_theory(
+        self, params: CmcParams,
+    ) -> None:
+        """The theoretical load PF should match cos(arctan(ωL/R)) exactly."""
+        pf_theory = predict_load_power_factor(params)
+        # Construct analytically: arctan(ω·L / R) for R=5, ω=2π·30, L=10mH
+        arg = params.omega_out * params.L_load / params.R_load
+        pf_expected = 1.0 / np.sqrt(1.0 + arg ** 2)
+        assert abs(pf_theory - pf_expected) < 1e-12
