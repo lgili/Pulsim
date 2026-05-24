@@ -603,3 +603,384 @@ def configurations_by_distribution() -> dict[
         key = (row_dist, col_dist)  # type: ignore[assignment]
         by_dist.setdefault(key, []).append(cfg)  # type: ignore[arg-type]
     return by_dist
+
+
+def configurations_containing_module(
+    input_idx: int, output_idx: int
+) -> list[ModuleConfiguration]:
+    """Return all 81 valid configurations where the module
+    ``M_(input_idx, output_idx)`` is active.
+
+    By symmetry across the 9 modules, each module appears in
+    exactly **45 of 81** configurations (since 81 × 5/9 = 45).
+
+    This is used by the cost function (Sec 5.5.3) to reduce 81 → 45
+    candidates once the SVM has identified the short-circuited
+    module (the M_xy connecting the minimum-voltage input phase to
+    the minimum-voltage output phase, see Sec 5.5.3 paragraph 4).
+    """
+    return [
+        cfg for cfg in ALL_VALID_CONFIGURATIONS
+        if cfg.is_active(input_idx, output_idx)
+    ]
+
+
+# =============================================================================
+# Sec 4.3 — Module voltage solver (Eqs 31-34)
+# =============================================================================
+#
+# Given a configuration with 5 active modules forming a spanning
+# tree over 6 nodes (3 inputs + 3 outputs), and a "short" module
+# whose voltage is forced to 0, the remaining 4 module voltages are
+# uniquely determined by the SVM phase-voltage references.
+#
+# Convention deduced from the thesis worked example (Sec 4.3 pg 83-85,
+# Figures 42-43, Eqs 31-34):
+#
+#   M_xy = V_in_rel[x] - V_out_rel[y]
+#
+# where
+#
+#   V_in_rel[x]  = V_input[x]  - V_input[short_in_idx]
+#   V_out_rel[y] = V_output[short_out_idx] - V_output[y]  (*sign flip*)
+#
+# The sign flip on the output side is a peculiarity of how the SVM
+# references are defined in the lgγ plane: the output line voltage
+# V_ab in the thesis is actually -(V_a - V_b) in the standard "input
+# minus output" convention. Without the flip the algorithm would
+# produce module voltages of the wrong sign.
+#
+# Verified against thesis Example 4.3 (V_input=(-1,0,0), V_output=
+# (1,0,0), short=M_Ba):
+#   M_Ba=0, M_Ca=0, M_Cb=-1, M_Ab=-2, M_Ac=-2  ✓
+
+
+def solve_module_voltages(
+    cfg: ModuleConfiguration,
+    short_module: tuple[int, int],
+    V_input: np.ndarray | list | tuple,
+    V_output: np.ndarray | list | tuple,
+) -> dict[tuple[int, int], float]:
+    """Compute the 5 active module voltages for an M3C configuration.
+
+    Implements Sec 4.3 Eqs 31-34 of the thesis. The 5 active modules
+    form a spanning tree over the 6-node bipartite input/output graph
+    (3 inputs × 3 outputs). Picking one module as "short" (V_xy = 0)
+    uniquely determines the other 4 voltages from the SVM references.
+
+    Parameters
+    ----------
+    cfg
+        A valid :class:`ModuleConfiguration` (5 active modules).
+    short_module
+        ``(input_idx, output_idx)`` — must be an active module. The
+        thesis recommends choosing the module that connects the
+        minimum-voltage input phase to the minimum-voltage output
+        phase (Sec 5.5.3 paragraph 4).
+    V_input
+        SVM input-side phase voltage references ``(V_A, V_B, V_C)``
+        in units of ``V_cap`` (integer for true Fast SVM output).
+    V_output
+        SVM output-side phase voltage references ``(V_a, V_b, V_c)``,
+        same units.
+
+    Returns
+    -------
+    dict[(input_idx, output_idx) -> float]
+        Voltage in units of ``V_cap`` for each of the 5 active modules.
+
+    Raises
+    ------
+    ValueError
+        If ``short_module`` is not one of the 5 active modules of ``cfg``.
+
+    Examples
+    --------
+    >>> cfg = ModuleConfiguration(grid=(
+    ...     (False, True,  True),    # row A: connects to b, c
+    ...     (True,  False, False),   # row B: connects to a
+    ...     (True,  True,  False),   # row C: connects to a, b
+    ... ))
+    >>> V = solve_module_voltages(cfg, (1, 0), [-1, 0, 0], [1, 0, 0])
+    >>> sorted(V.items())  # doctest: +NORMALIZE_WHITESPACE
+    [((0, 1), -2.0), ((0, 2), -2.0), ((1, 0), 0.0),
+     ((2, 0), 0.0), ((2, 1), -1.0)]
+    """
+    if not cfg.is_active(*short_module):
+        raise ValueError(
+            f"Short module {short_module} is not active in this "
+            f"configuration. Active modules: {cfg.active_modules()}"
+        )
+
+    Vin = np.asarray(V_input, dtype=float)
+    Vout = np.asarray(V_output, dtype=float)
+    if Vin.shape != (3,) or Vout.shape != (3,):
+        raise ValueError(
+            f"V_input and V_output must be length-3; "
+            f"got shapes {Vin.shape} and {Vout.shape}"
+        )
+
+    short_in, short_out = short_module
+    V_in_rel = Vin - Vin[short_in]
+    V_out_rel = Vout[short_out] - Vout
+
+    return {
+        (i, j): float(V_in_rel[i] - V_out_rel[j])
+        for (i, j) in cfg.active_modules()
+    }
+
+
+# =============================================================================
+# Module current solver (Sec 5.5.3 — implicit in Eq 162)
+# =============================================================================
+#
+# The 5 module currents are determined by KCL at the 6 nodes:
+#
+#   At input X:  sum_y I_xy = I_X         (current entering input node)
+#   At output Y: sum_x I_xy = I_y         (current leaving output node)
+#
+# Total = 6 equations, but ``sum I_X = sum I_y`` is required by
+# overall power conservation, so 5 are independent. With 5 unknowns
+# (the 5 active module currents) and the modules forming a spanning
+# tree, the system has a **unique** solution.
+#
+# Algorithm: leaf-stripping. A spanning tree always has at least one
+# leaf (degree-1 node). KCL at a leaf gives its unique incident
+# edge's current directly. Remove that edge, repeat — works O(5²) in
+# the worst case but trivially fast.
+
+
+def solve_module_currents(
+    cfg: ModuleConfiguration,
+    I_input: np.ndarray | list | tuple,
+    I_output: np.ndarray | list | tuple,
+) -> dict[tuple[int, int], float]:
+    """Compute the 5 active module currents for an M3C configuration.
+
+    Solves the KCL system on the bipartite tree of active modules.
+    Used by the cost function (Sec 5.5.3 Eq 162) to predict capacitor
+    voltage changes due to module current.
+
+    Parameters
+    ----------
+    cfg
+        A valid :class:`ModuleConfiguration` (5 active modules).
+    I_input
+        Input-side terminal currents ``(I_A, I_B, I_C)`` flowing
+        INTO the converter at each input phase.
+    I_output
+        Output-side terminal currents ``(I_a, I_b, I_c)`` flowing
+        OUT of the converter at each output phase.
+
+    Returns
+    -------
+    dict[(input_idx, output_idx) -> float]
+        Current through each active module, with the convention
+        "positive = flowing from input toward output".
+
+    Raises
+    ------
+    ValueError
+        If conservation ``sum(I_input) ≈ sum(I_output)`` is violated
+        beyond floating-point tolerance.
+
+    Notes
+    -----
+    The algorithm strips leaves of the bipartite tree iteratively
+    (KCL at a degree-1 node gives its incident edge's current
+    directly). Always terminates in ≤ 5 iterations.
+    """
+    Iin = np.asarray(I_input, dtype=float).copy()
+    Iout = np.asarray(I_output, dtype=float).copy()
+    if Iin.shape != (3,) or Iout.shape != (3,):
+        raise ValueError(
+            f"I_input and I_output must be length-3; "
+            f"got shapes {Iin.shape} and {Iout.shape}"
+        )
+    if not np.isclose(Iin.sum(), Iout.sum(), atol=1e-9):
+        raise ValueError(
+            f"KCL conservation violated: sum(I_input)={Iin.sum()} != "
+            f"sum(I_output)={Iout.sum()}"
+        )
+
+    # Live adjacency: which active modules remain to be solved.
+    remaining: set[tuple[int, int]] = set(cfg.active_modules())
+    in_degree = [0] * 3
+    out_degree = [0] * 3
+    for (i, j) in remaining:
+        in_degree[i] += 1
+        out_degree[j] += 1
+
+    currents: dict[tuple[int, int], float] = {}
+
+    while remaining:
+        # Find a leaf: any node with degree 1 in the remaining graph.
+        leaf_found = False
+        for i in range(3):
+            if in_degree[i] == 1:
+                # Find its single remaining edge.
+                j = next(jj for (ii, jj) in remaining if ii == i)
+                # KCL at input i: I_in[i] = I_xy for this single edge.
+                currents[(i, j)] = float(Iin[i])
+                # Subtract from output j's accumulated current.
+                Iout[j] -= Iin[i]
+                Iin[i] = 0.0
+                remaining.discard((i, j))
+                in_degree[i] -= 1
+                out_degree[j] -= 1
+                leaf_found = True
+                break
+        if leaf_found:
+            continue
+        for j in range(3):
+            if out_degree[j] == 1:
+                i = next(ii for (ii, jj) in remaining if jj == j)
+                # KCL at output j: I_out[j] = I_xy (flowing in from input).
+                currents[(i, j)] = float(Iout[j])
+                Iin[i] -= Iout[j]
+                Iout[j] = 0.0
+                remaining.discard((i, j))
+                in_degree[i] -= 1
+                out_degree[j] -= 1
+                leaf_found = True
+                break
+        if not leaf_found:
+            # Tree has no leaf — should be impossible for a connected
+            # 5-edge bipartite graph on 6 nodes.
+            raise RuntimeError(
+                "Module-current solver could not find a leaf; "
+                "the active configuration is not a spanning tree "
+                f"(remaining edges: {remaining})"
+            )
+
+    return currents
+
+
+# =============================================================================
+# Sec 5.5.3 — Cost function for capacitor balancing (Eqs 161-163)
+# =============================================================================
+#
+# The M3C has 9 modules × N submodules each (= 54 SM capacitors in
+# Tab. 15). To keep all caps near V_cap_ref, the cost function picks
+# the configuration that minimizes:
+#
+#   ε_xy   = V_xy - mean(V_xy across 9 modules)         (Eq 161)
+#   ΔV_xy  = S_n · I_xy · T_s / C                       (Eq 162)
+#   C_cost = Σ_{xy} (ε_xy + ΔV_xy)²                     (Eq 163)
+#
+# where V_xy is the **measured** module capacitor voltage (sum of N
+# SM caps) at the start of the period, I_xy is the predicted module
+# current under the candidate configuration, and S_n is the number of
+# SM capacitors actively contributing to the module voltage in this
+# config (≤ N).
+#
+# For inactive modules (4 of the 9), I_xy = 0 so ΔV_xy = 0 and only
+# the ε term contributes. The sum runs over all 9 modules to penalize
+# both new excursions (ΔV) AND pre-existing imbalance (ε).
+
+
+def connection_cost(
+    cfg: ModuleConfiguration,
+    V_caps: np.ndarray,
+    I_input: np.ndarray | list | tuple,
+    I_output: np.ndarray | list | tuple,
+    T_s: float,
+    C_sm: float,
+    n_sm_per_module: int,
+) -> float:
+    """Compute the Sec 5.5.3 cost function (Eq 163) for a candidate
+    connection ``cfg``.
+
+    The cost approximates the squared sum of "post-T_s" capacitor
+    voltage deviations from their mean: each module's deviation is
+    its current imbalance ε plus the projected change ΔV during T_s.
+
+    Parameters
+    ----------
+    cfg
+        Candidate configuration (5 active modules).
+    V_caps
+        Length-9 array of measured module capacitor voltages [V],
+        flattened as ``V_caps[i*3 + j] = V_(input_i, output_j)``.
+    I_input, I_output
+        Terminal currents [A] (same convention as
+        :func:`solve_module_currents`).
+    T_s
+        Switching period [s].
+    C_sm
+        Submodule capacitance [F].
+    n_sm_per_module
+        Number of submodules per module (== ``params.n_sm_per_module``).
+        Determines :math:`S_n` in Eq 162 — for simplicity we assume
+        all N SMs of each active module are actively contributing
+        (the upper-bound worst case for ΔV).
+
+    Returns
+    -------
+    float
+        :math:`\\mathcal{C} = \\sum_{xy} (\\epsilon_{xy} + \\Delta V_{xy})^2`
+    """
+    V_caps = np.asarray(V_caps, dtype=float).reshape(-1)
+    if V_caps.shape != (9,):
+        raise ValueError(
+            f"V_caps must be length 9; got shape {V_caps.shape}"
+        )
+
+    V_mean = float(V_caps.mean())
+    eps = V_caps - V_mean   # Eq 161 — shape (9,)
+
+    # Predict module currents for active modules. Inactive ones
+    # contribute I_xy = 0 → ΔV_xy = 0.
+    currents = solve_module_currents(cfg, I_input, I_output)
+    delta_v = np.zeros(9)
+    for (i, j), I_xy in currents.items():
+        # Eq 162: ΔV = S_n · I · T_s / C. S_n = n_sm_per_module for
+        # active modules in this simplified model.
+        delta_v[i * 3 + j] = (
+            n_sm_per_module * I_xy * T_s / C_sm
+        )
+
+    return float(np.sum((eps + delta_v) ** 2))
+
+
+def select_best_connection(
+    short_module: tuple[int, int],
+    V_caps: np.ndarray,
+    I_input: np.ndarray | list | tuple,
+    I_output: np.ndarray | list | tuple,
+    T_s: float,
+    C_sm: float,
+    n_sm_per_module: int,
+) -> tuple[ModuleConfiguration, float]:
+    """Sec 5.5.3 selector: among the 45 configurations that contain
+    ``short_module``, pick the one with the lowest cost.
+
+    Parameters
+    ----------
+    short_module
+        The fixed connection (typically min-input × min-output phase
+        per Sec 5.5.3) that all 45 candidates must include.
+    V_caps, I_input, I_output, T_s, C_sm, n_sm_per_module
+        See :func:`connection_cost`.
+
+    Returns
+    -------
+    (best_cfg, best_cost)
+        The configuration that minimizes the cost function and its
+        cost value.
+    """
+    candidates = configurations_containing_module(*short_module)
+    if not candidates:
+        raise ValueError(
+            f"No valid configuration contains module {short_module}"
+        )
+    best_cfg = candidates[0]
+    best_cost = float("inf")
+    for cfg in candidates:
+        cost = connection_cost(
+            cfg, V_caps, I_input, I_output, T_s, C_sm, n_sm_per_module
+        )
+        if cost < best_cost:
+            best_cost = cost
+            best_cfg = cfg
+    return best_cfg, best_cost
