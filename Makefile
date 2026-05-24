@@ -89,7 +89,7 @@ PYTEST := $(PYTHON) -m pytest
 RUFF := $(shell command -v ruff 2>/dev/null || echo "$(PYTHON) -m ruff")
 
 # Benchmark helpers
-BENCHMARKS_FILE ?= benchmarks/benchmarks.yaml
+BENCHMARKS_FILE ?= benchmarks/manifests/benchmarks.yaml
 BENCHMARK_OUT ?= benchmarks/out_converters
 LTSPICE_OUT ?= benchmarks/ltspice_out_converters
 LTSPICE_EXE ?= /Applications/LTspice.app/Contents/MacOS/LTspice

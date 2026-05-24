@@ -799,7 +799,7 @@ def main() -> int:
     parser.add_argument(
         "--thresholds",
         type=Path,
-        default=Path("benchmarks/kpi_thresholds.yaml"),
+        default=Path(__file__).resolve().parent.parent / "manifests" / "kpi_thresholds.yaml",
     )
     parser.add_argument("--bench-results", type=Path, required=True)
     parser.add_argument("--parity-ltspice-results", type=Path)

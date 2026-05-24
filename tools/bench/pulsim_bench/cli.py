@@ -47,10 +47,10 @@ app = typer.Typer(
 
 def _resolve_benchmarks_yaml(explicit: Optional[Path]) -> Path:
     """Return the YAML manifest to feed runners. Default = repo's
-    `benchmarks/benchmarks.yaml`."""
+    `benchmarks/manifests/benchmarks.yaml` (post-Phase C reorg)."""
     if explicit is not None:
         return explicit.resolve()
-    return benchmarks_dir() / "benchmarks.yaml"
+    return benchmarks_dir() / "manifests" / "benchmarks.yaml"
 
 
 def _ensure_pulsim_backend() -> None:
@@ -348,7 +348,7 @@ def cmd_stress(
     )
 
     bench_yaml = _resolve_benchmarks_yaml(benchmarks)
-    catalog_yaml = catalog.resolve() if catalog else benchmarks_dir() / "stress_catalog.yaml"
+    catalog_yaml = catalog.resolve() if catalog else benchmarks_dir() / "manifests" / "stress_catalog.yaml"
 
     console = None if quiet else make_console()
     if console is not None:

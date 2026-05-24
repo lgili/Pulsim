@@ -1437,7 +1437,11 @@ def write_results(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare Pulsim and external SPICE backends")
-    parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
+    parser.add_argument(
+        "--benchmarks",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "manifests" / "benchmarks.yaml",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/parity_out"))
     parser.add_argument("--backend", choices=["ngspice", "ltspice"], default="ngspice")
     parser.add_argument("--ngspice-exe", type=Path, default=None, help="Path to ngspice executable")

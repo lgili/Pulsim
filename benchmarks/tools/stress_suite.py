@@ -412,8 +412,16 @@ def write_stress_artifacts(output_dir: Path, tier_runs: Sequence[TierRunResult])
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Pulsim tiered stress validation suite")
-    parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
-    parser.add_argument("--catalog", type=Path, default=Path(__file__).with_name("stress_catalog.yaml"))
+    parser.add_argument(
+        "--benchmarks",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "manifests" / "benchmarks.yaml",
+    )
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "manifests" / "stress_catalog.yaml",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/stress_out"))
     parser.add_argument("--tier", action="append", default=None, help="Run only selected tier (repeatable)")
     parser.add_argument(

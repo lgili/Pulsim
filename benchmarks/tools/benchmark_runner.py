@@ -973,7 +973,11 @@ def write_results(output_dir: Path, results: List[ScenarioResult]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Pulsim benchmark suite")
-    parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
+    parser.add_argument(
+        "--benchmarks",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "manifests" / "benchmarks.yaml",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/out"))
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run")
     parser.add_argument("--matrix", action="store_true", help="Run full validation matrix")
