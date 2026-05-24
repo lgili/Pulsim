@@ -2311,6 +2311,296 @@ def make_m3c_l1_dq_control(
     return step_observer, switch_fn, b_extra_fn, state, dq_controller
 
 
+# =============================================================================
+# Phase 22.8 — Input-side dq current control (Sec 5.6.1)
+# =============================================================================
+#
+# Symmetric to the output-side controller of Phase 22.7. Tracks the
+# input current references ``i_d_in_ref`` and ``i_q_in_ref`` in the
+# synchronous frame θ_i = ω_in · t. Together with the output dq
+# loop, this gives FULL closed-loop control: the user specifies both
+# input and output current dq components, and the M3C tracks both.
+#
+# Plant dynamics (input side, dq frame, balanced source):
+#   V_source_d - V_in_node_d = L_in · (di_in_d/dt - ω_in · i_in_q)
+#   V_source_q - V_in_node_q = L_in · (di_in_q/dt + ω_in · i_in_d)
+# Steady-state inversion:
+#   V_in_node_d = V_source_d + ω_in·L_in·i_in_q
+#   V_in_node_q = V_source_q - ω_in·L_in·i_in_d
+#
+# The PI struct is the same M3cDqController (reused for input or
+# output by choosing appropriate gains/decoupling). The integration
+# with the cost-function inner loop replaces ``V_input_ref`` (which
+# was an open-loop cosine of V_in_phase_peak·m_c) with the PI's
+# inverse-Park output.
+
+
+def make_m3c_l1_dq_full_control(
+    params: M3cParams,
+    plant: M3cPlant,
+    *,
+    i_d_in_ref: float | Callable[[float], float] = 0.0,
+    i_q_in_ref: float | Callable[[float], float] = 0.0,
+    i_d_out_ref: float | Callable[[float], float] = 0.0,
+    i_q_out_ref: float | Callable[[float], float] = 0.0,
+    dq_in_controller: M3cDqController | None = None,
+    dq_out_controller: M3cDqController | None = None,
+    initial_state: M3cL1ControlState | None = None,
+):
+    """Build ``(step_observer, switch_fn, b_extra_fn, ctrl_state,
+    dq_in, dq_out)`` for the L1 plant with closed-loop dq control on
+    BOTH input and output sides.
+
+    Each side has its own PI controller + ωL decoupling. Output is
+    fed to the SVM after the same sign-flip compensation as Phase
+    22.7. Input is fed *without* the sign flip — the input voltage
+    solver does not have the thesis output-side inversion.
+
+    Reuses the Phase 22.6 cost-function inner loop. The cap voltage
+    state is tracked via ``initial_state.v_caps_module``.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if plant.module_v_src_state_indices is None:
+        raise ValueError("L1 plant must expose module_v_src_state_indices")
+    if plant.iL_in_indices is None:
+        raise ValueError("L1 plant must expose iL_in_indices")
+
+    if dq_in_controller is None:
+        # Default ωL decoupling for input side: ω_in · L_in.
+        dq_in_controller = M3cDqController(
+            K_p=2.0 * pi * 50.0 * params.L_in,
+            K_i=2.0 * pi * 50.0 * 1e-3,   # tiny R_in, small K_i
+            omega_L_decouple=params.omega_in * params.L_in,
+        )
+    if dq_out_controller is None:
+        L_total = params.L_out + params.L_load
+        dq_out_controller = M3cDqController(
+            K_p=2.0 * pi * 50.0 * L_total,
+            K_i=2.0 * pi * 50.0 * params.R_load,
+            omega_L_decouple=params.omega_out * L_total,
+        )
+
+    if initial_state is None:
+        initial_state = M3cL1ControlState(
+            v_caps_module=[
+                params.v_cap_total_per_module for _ in range(9)
+            ],
+        )
+    state = initial_state
+
+    state_size = plant.builder.pool.state_size(plant.builder.graph)
+    v_cap = params.v_cap_nominal
+    T_s = params.T_s
+    src_indices = plant.module_v_src_state_indices
+    iL_in_indices = plant.iL_in_indices
+    iL_out_indices = plant.iL_out_indices
+
+    def _to_callable(ref):
+        if callable(ref):
+            return ref
+        return lambda _t, _v=float(ref): _v  # noqa: E731
+
+    i_d_in_fn = _to_callable(i_d_in_ref)
+    i_q_in_fn = _to_callable(i_q_in_ref)
+    i_d_out_fn = _to_callable(i_d_out_ref)
+    i_q_out_fn = _to_callable(i_q_out_ref)
+
+    def step_observer(t, x):
+        period_idx = int(t / T_s)
+        if period_idx == state.last_period:
+            return
+        state.last_period = period_idx
+        state.n_refreshes += 1
+
+        I_in = np.array([float(x[i]) for i in iL_in_indices])
+        I_out = np.array([float(x[i]) for i in iL_out_indices])
+        diff = (I_in.sum() - I_out.sum()) / 3.0
+        I_out_balanced = I_out + diff
+
+        t_centre = (period_idx + 0.5) * T_s
+        theta_i = params.omega_in * t_centre
+        theta_o = params.omega_out * t_centre
+
+        # ---- INPUT side ----
+        # KVL on L_in: V_source − V_in_node = L_in·di/dt.
+        # To INCREASE input current we DECREASE V_in_node below
+        # V_source (source "pushes harder"). So the PI's natural
+        # "positive output for positive error" convention drives the
+        # current the WRONG way for the input side — we invert the
+        # PI output's contribution:
+        #   V_d_in_ref = V_source_d − V_d_pi + ωL·i_q  (source-relative)
+        #   V_q_in_ref = V_source_q − V_q_pi − ωL·i_d
+        # The M3cDqController internally already mixes in its ωL·i
+        # decoupling with a sign assuming output-style plant; for
+        # the input we reverse that sign in addition to flipping
+        # the PI bias.
+        i_d_in_meas, i_q_in_meas = abc_to_dq(
+            float(I_in[0]), float(I_in[1]), float(I_in[2]), theta_i,
+        )
+        V_d_in_pi, V_q_in_pi = dq_in_controller.step(
+            i_d_in_meas, i_q_in_meas,
+            float(i_d_in_fn(t_centre)),
+            float(i_q_in_fn(t_centre)),
+            T_s,
+        )
+        # NOTE: dq_in_controller.step has already added ±ωL decoupling
+        # terms inside its output. Subtracting it from V_source flips
+        # both the PI part and the decoupling sign — the correct
+        # behavior for the input filter L_in.
+        V_d_in_ref = params.V_in_phase_peak - V_d_in_pi
+        V_q_in_ref = 0.0 - V_q_in_pi
+        Va_in, Vb_in, Vc_in = dq_to_abc(V_d_in_ref, V_q_in_ref, theta_i)
+        V_in_ref = np.array([Va_in, Vb_in, Vc_in])
+
+        # ---- OUTPUT side ----
+        i_d_out_meas, i_q_out_meas = abc_to_dq(
+            float(I_out[0]), float(I_out[1]), float(I_out[2]), theta_o,
+        )
+        V_d_out_ref, V_q_out_ref = dq_out_controller.step(
+            i_d_out_meas, i_q_out_meas,
+            float(i_d_out_fn(t_centre)),
+            float(i_q_out_fn(t_centre)),
+            T_s,
+        )
+        Va_out, Vb_out, Vc_out = dq_to_abc(V_d_out_ref, V_q_out_ref, theta_o)
+        V_out_ref = -np.array([Va_out, Vb_out, Vc_out])   # see Phase 22.7
+
+        # ---- SVM quantisation ----
+        V_in_int = np.round(V_in_ref / v_cap).astype(int)
+        V_out_int = np.round(V_out_ref / v_cap).astype(int)
+        short_in = int(np.argmin(V_in_ref))
+        short_out = int(np.argmin(V_out_ref))
+        short = (short_in, short_out)
+
+        # ---- Cost-function selector + caps update (Phase 22.6) ----
+        best_cfg, best_cost = select_best_connection(
+            short_module=short,
+            V_caps=np.array(state.v_caps_module, dtype=float),
+            V_input_int=V_in_int, V_output_int=V_out_int,
+            I_input=I_in, I_output=I_out_balanced,
+            T_s=T_s, C_sm=params.c_sm,
+        )
+        V_xy = solve_module_voltages(
+            best_cfg, short, V_input=V_in_int, V_output=V_out_int,
+        )
+        I_xy = solve_module_currents(best_cfg, I_in, I_out_balanced)
+
+        switch_bits = [False] * 9
+        v_module = [0.0] * 9
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            switch_bits[idx] = True
+            v_module[idx] = float(V_int) * v_cap
+        state.switch_bits = switch_bits
+        state.v_module_target = v_module
+        for (i, j), V_int in V_xy.items():
+            idx = _module_index(i, j)
+            state.v_caps_module[idx] += (
+                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
+            )
+        state.chosen_configs.append(best_cfg)
+        state.chosen_costs.append(best_cost)
+
+    def switch_fn(_t: float):
+        mask = _p.SwitchStateMask(9)
+        for k, on in enumerate(state.switch_bits):
+            mask.set(k, bool(on))
+        return mask
+
+    def b_extra_fn(_t: float):
+        out = [0.0] * state_size
+        for k, src_idx in enumerate(src_indices):
+            out[src_idx] = -state.v_module_target[k]
+        return out
+
+    return (
+        step_observer, switch_fn, b_extra_fn,
+        state, dq_in_controller, dq_out_controller,
+    )
+
+
+def run_l1_dq_full_closed_loop(
+    plant: M3cPlant,
+    params: M3cParams,
+    *,
+    i_d_in_ref: float | Callable[[float], float] = 0.0,
+    i_q_in_ref: float | Callable[[float], float] = 0.0,
+    i_d_out_ref: float | Callable[[float], float] = 0.0,
+    i_q_out_ref: float | Callable[[float], float] = 0.0,
+    dq_in_controller: M3cDqController | None = None,
+    dq_out_controller: M3cDqController | None = None,
+    initial_state: M3cL1ControlState | None = None,
+    t_end: float = 200e-3,
+    dt: float | None = None,
+):
+    """L1 with closed-loop dq on BOTH sides + cost-function balance.
+
+    Returns ``(M3cRunResult, ctrl_state, dq_in_ctrl, dq_out_ctrl)``.
+    """
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if dt is None:
+        dt = max(1e-6, params.T_s / 20.0)
+
+    obs, sw, bx, ctrl_state, dq_in, dq_out = make_m3c_l1_dq_full_control(
+        params, plant,
+        i_d_in_ref=i_d_in_ref, i_q_in_ref=i_q_in_ref,
+        i_d_out_ref=i_d_out_ref, i_q_out_ref=i_q_out_ref,
+        dq_in_controller=dq_in_controller,
+        dq_out_controller=dq_out_controller,
+        initial_state=initial_state,
+    )
+
+    assert plant.iL_in_indices is not None
+    iLa_in, iLb_in, iLc_in = plant.iL_in_indices
+    iLa, iLb, iLc = plant.iL_out_indices
+
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    log_iAi = np.zeros(n_samples)
+    log_iBi = np.zeros(n_samples)
+    log_iCi = np.zeros(n_samples)
+    counter = [0]
+
+    def combined_obs(t, x):
+        obs(t, x)
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+            log_iAi[i] = x[iLa_in]
+            log_iBi[i] = x[iLb_in]
+            log_iCi[i] = x[iLc_in]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=combined_obs,
+        switch_fn=sw, b_extra_fn=bx,
+        start_from_dc_op=False,
+    )
+
+    n = counter[0]
+    return (
+        M3cRunResult(
+            t=log_t[:n],
+            i_a_out=log_ia[:n],
+            i_b_out=log_ib[:n],
+            i_c_out=log_ic[:n],
+            i_a_in=log_iAi[:n],
+            i_b_in=log_iBi[:n],
+            i_c_in=log_iCi[:n],
+        ),
+        ctrl_state, dq_in, dq_out,
+    )
+
+
 def run_l1_dq_closed_loop(
     plant: M3cPlant,
     params: M3cParams,

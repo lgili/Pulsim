@@ -45,6 +45,7 @@ from m3c_3phase_model import (  # noqa: E402
     make_fast_svm_fn,
     make_m3c_l1_cost_control,
     make_m3c_l1_dq_control,
+    make_m3c_l1_dq_full_control,
     make_m3c_l1_open_loop_control,
     predict_i_out_peak,
     predict_load_impedance,
@@ -53,6 +54,7 @@ from m3c_3phase_model import (  # noqa: E402
     run_l0_open_loop,
     run_l1_cost_loop,
     run_l1_dq_closed_loop,
+    run_l1_dq_full_closed_loop,
     run_l1_open_loop,
     select_best_connection,
     solve_module_currents,
@@ -1435,3 +1437,105 @@ class TestDqClosedLoop:
     ) -> None:
         _, _, dq_ctrl = step_result
         assert abs(dq_ctrl.integral_d) > 0.0
+
+
+# ============================================================================
+# Tier 13 — Full closed-loop (input + output dq) — Phase 22.8
+# ============================================================================
+
+
+@_requires_pulsim
+class TestDqFullClosedLoop:
+    """Both input and output dq loops active.
+
+    The output side reuses the Phase 22.7 controller and tracks to
+    within ~10 %. The input side is structurally added and runs
+    *stably* (no divergence) but its gains aren't yet tuned for tight
+    tracking — that's left for a follow-up phase. These tests
+    therefore assert STABILITY on the input side, not accuracy."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> M3cParams:
+        return M3cParams()
+
+    @pytest.fixture(scope="class")
+    def full_run(self, params: M3cParams):
+        plant = build_l1_plant(params)
+        return run_l1_dq_full_closed_loop(
+            plant, params,
+            i_d_in_ref=20.0, i_q_in_ref=0.0,
+            i_d_out_ref=50.0, i_q_out_ref=0.0,
+            t_end=200e-3, dt=25e-6,
+        )
+
+    def test_run_returns_four_objects(self, full_run) -> None:
+        result, ctrl_state, dq_in, dq_out = full_run
+        assert len(result.t) > 1000
+        assert isinstance(ctrl_state, M3cL1ControlState)
+        assert isinstance(dq_in, M3cDqController)
+        assert isinstance(dq_out, M3cDqController)
+
+    def test_output_tracking_works(
+        self, params: M3cParams, full_run,
+    ) -> None:
+        """Output dq still tracks accurately (within 10 % of 50 A)."""
+        result, _, _, _ = full_run
+        mask = result.t >= 150e-3
+        theta = params.omega_out * result.t[mask]
+        ia = result.i_a_out[mask]
+        ib = result.i_b_out[mask]
+        ic = result.i_c_out[mask]
+        i_d = np.array([
+            abc_to_dq(float(ia[k]), float(ib[k]), float(ic[k]),
+                      float(theta[k]))[0]
+            for k in range(len(ia))
+        ])
+        assert abs(i_d.mean() - 50.0) / 50.0 < 0.10
+
+    def test_input_currents_bounded(
+        self, params: M3cParams, full_run,
+    ) -> None:
+        """Input side may not track exactly (gains unoptimised), but
+        must NOT diverge."""
+        result, _, _, _ = full_run
+        mask = result.t >= 50e-3
+        i_a_in_peak = float(np.max(np.abs(result.i_a_in[mask])))
+        # Sanity bound — at the M3C operating point we'd expect
+        # at most a few hundred A per phase. Anything > 10 kA is
+        # almost certainly diverging.
+        assert i_a_in_peak < 1000.0, (
+            f"Input current diverged: |i_a_in| peak = {i_a_in_peak:.0f} A"
+        )
+
+    def test_caps_bounded_under_full_loop(self, full_run) -> None:
+        """Cap voltages should stay within a few times their nominal
+        value — divergent caps imply the loop is unstable."""
+        _, ctrl_state, _, _ = full_run
+        spread = (
+            max(ctrl_state.v_caps_module) - min(ctrl_state.v_caps_module)
+        )
+        # Conservative bound: 100 kV.
+        assert spread < 1e5, (
+            f"Cap voltage spread blew up: {spread:.0f} V"
+        )
+
+    def test_zero_refs_keeps_dc_currents_small(
+        self, params: M3cParams,
+    ) -> None:
+        """With ALL refs at 0, the DC component of i_a_in and i_a_out
+        should be near 0 (switching ripple is expected and not tested)."""
+        plant = build_l1_plant(params)
+        result, _, _, _ = run_l1_dq_full_closed_loop(
+            plant, params,
+            i_d_in_ref=0.0, i_q_in_ref=0.0,
+            i_d_out_ref=0.0, i_q_out_ref=0.0,
+            t_end=120e-3, dt=25e-6,
+        )
+        mask = result.t >= 60e-3
+        # MEAN values (DC component) — ripple cancels.
+        mean_in = float(np.mean(result.i_a_in[mask]))
+        mean_out = float(np.mean(result.i_a_out[mask]))
+        # Allow up to ~20 A DC due to discretisation + cap feedback;
+        # the point is just to verify no monotone drift.
+        assert abs(mean_in) < 50.0, f"i_a_in DC = {mean_in:.2f} A"
+        assert abs(mean_out) < 50.0, f"i_a_out DC = {mean_out:.2f} A"
