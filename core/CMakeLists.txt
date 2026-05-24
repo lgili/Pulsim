@@ -199,6 +199,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4/test_assemble.cpp
         tests/layer4/test_cache.cpp
         tests/layer4/test_integration_chopper.cpp
+        tests/layer4/test_pwl_cache_rank1.cpp   # Layer 4 V8 — rank-1 fast path
     )
     target_link_libraries(pulsim_core_layer4_tests
         PRIVATE
