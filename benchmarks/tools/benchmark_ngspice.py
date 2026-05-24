@@ -25,6 +25,7 @@ from benchmark_runner import (
     normalize_periodic_mode,
     parse_value,
     run_pulsim,
+    suite_root,
     yaml,
 )
 
@@ -1128,7 +1129,7 @@ def count_parity_scenarios(
     scenarios = manifest.get("scenarios", {})
     total = 0
     for entry in manifest.get("benchmarks", []):
-        circuit_path = (manifest_path.parent / entry["path"]).resolve()
+        circuit_path = (suite_root(manifest_path) / entry["path"]).resolve()
         try:
             netlist = load_yaml(circuit_path)
         except Exception:
@@ -1189,7 +1190,7 @@ def run_manifest(
     hard_config_error = backend == "ltspice" and backend_config.error is not None
 
     for entry in manifest.get("benchmarks", []):
-        circuit_path = (manifest_path.parent / entry["path"]).resolve()
+        circuit_path = (suite_root(manifest_path) / entry["path"]).resolve()
         netlist = load_yaml(circuit_path)
         bench_meta = netlist.get("benchmark", {})
         benchmark_id = bench_meta.get("id", circuit_path.stem)
@@ -1260,7 +1261,7 @@ def run_manifest(
                 _emit_progress_for_last()
             continue
 
-        spice_path = (manifest_path.parent / spice_rel).resolve()
+        spice_path = (suite_root(manifest_path) / spice_rel).resolve()
         if not spice_path.exists():
             for scenario_name in scenario_names:
                 results.append(

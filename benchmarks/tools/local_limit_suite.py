@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import benchmark_runner as br
+from benchmark_runner import suite_root
 
 try:
     import yaml
@@ -106,7 +107,7 @@ def _materialize_manifest(
         src_rel = entry.get("path")
         if not src_rel:
             continue
-        src_path = (manifest_path.parent / src_rel).resolve()
+        src_path = (suite_root(manifest_path) / src_rel).resolve()
         netlist = br.load_yaml(src_path)
 
         benchmark_meta = netlist.get("benchmark", {}) if isinstance(netlist.get("benchmark"), dict) else {}

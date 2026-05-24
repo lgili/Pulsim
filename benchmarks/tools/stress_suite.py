@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from benchmark_runner import ScenarioResult, load_yaml, run_benchmarks, yaml
+from benchmark_runner import ScenarioResult, load_yaml, run_benchmarks, suite_root, yaml
 
 # Onda 1.5: shared rich-based terminal UI.
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ def build_benchmark_index(benchmarks_manifest_path: Path) -> Tuple[Dict[str, Any
 
     for entry in manifest.get("benchmarks", []):
         circuit_rel = Path(entry["path"])
-        circuit_path = (benchmarks_manifest_path.parent / circuit_rel).resolve()
+        circuit_path = (suite_root(benchmarks_manifest_path) / circuit_rel).resolve()
         netlist = load_yaml(circuit_path)
         benchmark_meta = netlist.get("benchmark", {})
         benchmark_id = benchmark_meta.get("id", circuit_path.stem)
@@ -299,7 +299,7 @@ def run_stress_suite(
                 mode="w",
                 suffix=f"_{tier_name}.yaml",
                 prefix="stress_",
-                dir=str(benchmarks_manifest_path.parent),
+                dir=str(suite_root(benchmarks_manifest_path)),
                 delete=False,
                 encoding="utf-8",
             ) as handle:

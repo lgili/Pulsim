@@ -371,6 +371,24 @@ def apply_validation_window(
     return filtered_times, filtered_values
 
 
+def suite_root(manifest_path: Path) -> Path:
+    """Return the `benchmarks/` suite root from any manifest path.
+
+    Post structural reorg (REORG_PLAN.md Phase C+D+E), manifests live
+    at `benchmarks/manifests/<name>.yaml` and all `path:` / `_netlist:`
+    / `baseline:` entries are resolved relative to the suite root
+    (`benchmarks/` itself), NOT relative to the manifest's own parent.
+
+    For backward compatibility with the pre-reorg layout (manifest
+    directly in `benchmarks/`), this helper falls back to
+    `manifest_path.parent` when the parent is not named `manifests`.
+    """
+    parent = manifest_path.parent
+    if parent.name == "manifests":
+        return parent.parent
+    return parent
+
+
 def count_scenarios(
     benchmarks_path: Path,
     selected: Optional[List[str]] = None,
@@ -383,7 +401,7 @@ def count_scenarios(
     scenarios = manifest.get("scenarios", {})
     total = 0
     for entry in manifest.get("benchmarks", []):
-        circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
+        circuit_path = (suite_root(benchmarks_path) / entry["path"]).resolve()
         try:
             netlist = load_yaml(circuit_path)
         except Exception:
@@ -437,7 +455,7 @@ def run_benchmarks(
         )
 
     for entry in manifest.get("benchmarks", []):
-        circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
+        circuit_path = (suite_root(benchmarks_path) / entry["path"]).resolve()
         netlist = load_yaml(circuit_path)
         bench_meta = netlist.get("benchmark", {})
         benchmark_id = bench_meta.get("id", circuit_path.stem)
@@ -622,7 +640,7 @@ def run_benchmarks(
                                     status = "failed"
                                     message = "Missing baseline path"
                                 else:
-                                    baseline_path = (benchmarks_path.parent / baseline_rel).resolve()
+                                    baseline_path = (suite_root(benchmarks_path) / baseline_rel).resolve()
                                     if not baseline_path.exists() and generate_baselines:
                                         baseline_path.parent.mkdir(parents=True, exist_ok=True)
                                         with open(output_path, "r", encoding="utf-8") as src, open(
