@@ -24,6 +24,7 @@ sys.path.insert(0, str(_M3C_DIR))
 from m3c_3phase_model import (  # noqa: E402
     ALL_VALID_CONFIGURATIONS,
     LG_TRANSFORM_MATRIX,
+    M3cCapOuterLoop,
     M3cDqController,
     M3cL1ControlState,
     M3cParams,
@@ -55,6 +56,7 @@ from m3c_3phase_model import (  # noqa: E402
     run_l1_cost_loop,
     run_l1_dq_closed_loop,
     run_l1_dq_full_closed_loop,
+    run_l1_dq_full_closed_loop_with_cap_loop,
     run_l1_open_loop,
     select_best_connection,
     solve_module_currents,
@@ -1532,10 +1534,97 @@ class TestDqFullClosedLoop:
             t_end=120e-3, dt=25e-6,
         )
         mask = result.t >= 60e-3
-        # MEAN values (DC component) — ripple cancels.
         mean_in = float(np.mean(result.i_a_in[mask]))
         mean_out = float(np.mean(result.i_a_out[mask]))
-        # Allow up to ~20 A DC due to discretisation + cap feedback;
-        # the point is just to verify no monotone drift.
         assert abs(mean_in) < 50.0, f"i_a_in DC = {mean_in:.2f} A"
         assert abs(mean_out) < 50.0, f"i_a_out DC = {mean_out:.2f} A"
+
+
+# ============================================================================
+# Tier 14 — Capacitor voltage outer loop (Phase 22.9)
+# ============================================================================
+
+
+class TestCapOuterLoop:
+    """Proportional outer-loop unit tests for M3cCapOuterLoop."""
+
+    def test_zero_error_zero_correction(self) -> None:
+        loop = M3cCapOuterLoop(K_p=0.05, v_cap_target=24000.0)
+        out = loop.apply(50.0, np.full(9, 24000.0))
+        assert out == pytest.approx(50.0)
+        assert loop.last_error == pytest.approx(0.0)
+        assert loop.last_correction == pytest.approx(0.0)
+
+    def test_positive_error_decreases_i_d_ref(self) -> None:
+        """Caps over-charged (mean > target) → reduce input current."""
+        loop = M3cCapOuterLoop(K_p=0.01, v_cap_target=24000.0)
+        v_caps_over = np.full(9, 25000.0)  # +1000 V overshoot
+        out = loop.apply(100.0, v_caps_over)
+        assert loop.last_error == pytest.approx(1000.0)
+        assert loop.last_correction == pytest.approx(-10.0)
+        assert out == pytest.approx(90.0)
+
+    def test_negative_error_increases_i_d_ref(self) -> None:
+        """Caps under-charged → draw more input current."""
+        loop = M3cCapOuterLoop(K_p=0.02, v_cap_target=24000.0)
+        v_caps_low = np.full(9, 22000.0)  # -2000 V undershoot
+        out = loop.apply(0.0, v_caps_low)
+        assert loop.last_error == pytest.approx(-2000.0)
+        assert loop.last_correction == pytest.approx(+40.0)
+        assert out == pytest.approx(40.0)
+
+
+@_requires_pulsim
+class TestCapOuterLoopIntegration:
+    """Full L1 + dq + cap-outer-loop simulation."""
+
+    @pytest.fixture(scope="class")
+    def params(self) -> M3cParams:
+        return M3cParams()
+
+    @pytest.fixture(scope="class")
+    def comparison(self, params: M3cParams):
+        plant_no = build_l1_plant(params)
+        res_no, ctrl_no, _, _ = run_l1_dq_full_closed_loop(
+            plant_no, params,
+            i_d_in_ref=0.0, i_d_out_ref=50.0,
+            t_end=200e-3, dt=25e-6,
+        )
+        plant_yes = build_l1_plant(params)
+        res_yes, ctrl_yes, _, _, cap = (
+            run_l1_dq_full_closed_loop_with_cap_loop(
+                plant_yes, params,
+                i_d_in_ref=0.0, i_d_out_ref=50.0,
+                t_end=200e-3, dt=25e-6,
+            )
+        )
+        return ctrl_no, ctrl_yes, cap
+
+    def test_cap_loop_reduces_spread(self, comparison) -> None:
+        """Cap loop should give a *smaller* v_caps spread than the
+        plain dq-only loop after the same simulation."""
+        ctrl_no, ctrl_yes, _ = comparison
+        spread_no = (
+            max(ctrl_no.v_caps_module) - min(ctrl_no.v_caps_module)
+        )
+        spread_yes = (
+            max(ctrl_yes.v_caps_module) - min(ctrl_yes.v_caps_module)
+        )
+        assert spread_yes < spread_no, (
+            f"Cap loop made it worse: spread_no={spread_no:.0f} V "
+            f"vs spread_yes={spread_yes:.0f} V"
+        )
+
+    def test_cap_loop_produces_nonzero_correction(
+        self, comparison,
+    ) -> None:
+        _, _, cap = comparison
+        # The loop should be active (non-trivial correction by 200 ms).
+        assert abs(cap.last_correction) > 0.1
+
+    def test_caps_stay_bounded_under_cap_loop(self, comparison) -> None:
+        _, ctrl_yes, _ = comparison
+        spread = (
+            max(ctrl_yes.v_caps_module) - min(ctrl_yes.v_caps_module)
+        )
+        assert spread < 50_000.0

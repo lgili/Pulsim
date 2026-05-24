@@ -2520,6 +2520,89 @@ def make_m3c_l1_dq_full_control(
     )
 
 
+def run_l1_dq_full_closed_loop_with_cap_loop(
+    plant: M3cPlant,
+    params: M3cParams,
+    *,
+    i_d_in_ref: float | Callable[[float], float] = 0.0,
+    i_q_in_ref: float | Callable[[float], float] = 0.0,
+    i_d_out_ref: float | Callable[[float], float] = 0.0,
+    i_q_out_ref: float | Callable[[float], float] = 0.0,
+    cap_outer_loop: M3cCapOuterLoop | None = None,
+    dq_in_controller: M3cDqController | None = None,
+    dq_out_controller: M3cDqController | None = None,
+    initial_state: M3cL1ControlState | None = None,
+    t_end: float = 200e-3,
+    dt: float | None = None,
+):
+    """Same as :func:`run_l1_dq_full_closed_loop` but with the cap-
+    voltage outer loop active. Returns ``(result, ctrl_state, dq_in,
+    dq_out, cap_loop)``."""
+    if _p is None:
+        raise RuntimeError("pulsim required")
+    if dt is None:
+        dt = max(1e-6, params.T_s / 20.0)
+
+    obs, sw, bx, ctrl_state, dq_in, dq_out, cap_loop = (
+        make_m3c_l1_dq_full_control_with_cap_loop(
+            params, plant,
+            i_d_in_ref=i_d_in_ref, i_q_in_ref=i_q_in_ref,
+            i_d_out_ref=i_d_out_ref, i_q_out_ref=i_q_out_ref,
+            cap_outer_loop=cap_outer_loop,
+            dq_in_controller=dq_in_controller,
+            dq_out_controller=dq_out_controller,
+            initial_state=initial_state,
+        )
+    )
+
+    assert plant.iL_in_indices is not None
+    iLa_in, iLb_in, iLc_in = plant.iL_in_indices
+    iLa, iLb, iLc = plant.iL_out_indices
+    n_samples = int(round(t_end / dt)) + 1
+    log_t = np.zeros(n_samples)
+    log_ia = np.zeros(n_samples)
+    log_ib = np.zeros(n_samples)
+    log_ic = np.zeros(n_samples)
+    log_iAi = np.zeros(n_samples)
+    log_iBi = np.zeros(n_samples)
+    log_iCi = np.zeros(n_samples)
+    counter = [0]
+
+    def combined_obs(t, x):
+        obs(t, x)
+        i = counter[0]
+        if i < n_samples:
+            log_t[i] = t
+            log_ia[i] = x[iLa]
+            log_ib[i] = x[iLb]
+            log_ic[i] = x[iLc]
+            log_iAi[i] = x[iLa_in]
+            log_iBi[i] = x[iLb_in]
+            log_iCi[i] = x[iLc_in]
+        counter[0] += 1
+
+    _p.simulate(
+        plant.builder, t_end=t_end, dt=dt,
+        step_observer=combined_obs,
+        switch_fn=sw, b_extra_fn=bx,
+        start_from_dc_op=False,
+    )
+
+    n = counter[0]
+    return (
+        M3cRunResult(
+            t=log_t[:n],
+            i_a_out=log_ia[:n],
+            i_b_out=log_ib[:n],
+            i_c_out=log_ic[:n],
+            i_a_in=log_iAi[:n],
+            i_b_in=log_iBi[:n],
+            i_c_in=log_iCi[:n],
+        ),
+        ctrl_state, dq_in, dq_out, cap_loop,
+    )
+
+
 def run_l1_dq_full_closed_loop(
     plant: M3cPlant,
     params: M3cParams,
@@ -2599,6 +2682,115 @@ def run_l1_dq_full_closed_loop(
         ),
         ctrl_state, dq_in, dq_out,
     )
+
+
+# =============================================================================
+# Phase 22.9 — Capacitor voltage outer loop (Sec 5.6.3)
+# =============================================================================
+#
+# The Phase 22.6 inner cost function picks the *least-imbalancing*
+# configuration each T_s, but it can't fight a net power imbalance:
+# if more energy is flowing INTO the caps than OUT, all 9 caps slowly
+# drift up regardless of which config is chosen.
+#
+# The outer loop closes this by adjusting the input active current
+# reference ``i_d_in_ref`` based on the average cap voltage error:
+#
+#     mean_V_cap_err = mean(v_caps_module) - N · v_cap_nominal
+#     Δi_d_in = K_outer · mean_V_cap_err   (positive = bring in more power)
+#
+# A simple proportional outer loop suffices in steady state. The
+# user can pre-compose a desired i_d_in_ref schedule with a callable
+# closure that adds Δi_d_in inside it — or use the convenience
+# wrapper ``make_m3c_l1_dq_full_control_with_cap_loop`` below.
+
+
+@dataclass
+class M3cCapOuterLoop:
+    """Proportional outer loop that adjusts i_d_in_ref to keep the
+    mean module-level cap voltage at ``v_cap_total_per_module``.
+
+    Sign convention: positive ``v_caps_mean - target`` means caps are
+    OVER-CHARGED → loop should DECREASE the active power drawn from
+    the input (smaller i_d_in_ref). So the correction is:
+
+        Δi_d_in = -K_p · (V_caps_mean − V_target)
+
+    Use ``apply`` to compute the corrected reference given the
+    base reference plus the current state.
+    """
+
+    K_p: float = 0.01           # A per V of cap error
+    v_cap_target: float = 0.0   # set by factory below
+    last_error: float = 0.0
+    last_correction: float = 0.0
+
+    def apply(self, base_i_d_in_ref: float, v_caps_module) -> float:
+        v_mean = float(np.mean(v_caps_module))
+        err = v_mean - self.v_cap_target
+        delta = -self.K_p * err
+        self.last_error = err
+        self.last_correction = delta
+        return float(base_i_d_in_ref + delta)
+
+
+def make_m3c_l1_dq_full_control_with_cap_loop(
+    params: M3cParams,
+    plant: M3cPlant,
+    *,
+    i_d_in_ref: float | Callable[[float], float] = 0.0,
+    i_q_in_ref: float | Callable[[float], float] = 0.0,
+    i_d_out_ref: float | Callable[[float], float] = 0.0,
+    i_q_out_ref: float | Callable[[float], float] = 0.0,
+    cap_outer_loop: M3cCapOuterLoop | None = None,
+    dq_in_controller: M3cDqController | None = None,
+    dq_out_controller: M3cDqController | None = None,
+    initial_state: M3cL1ControlState | None = None,
+):
+    """Like :func:`make_m3c_l1_dq_full_control` but with the Sec 5.6.3
+    outer cap-voltage loop modulating ``i_d_in_ref``.
+
+    Returns ``(step_observer, switch_fn, b_extra_fn, ctrl_state,
+    dq_in, dq_out, cap_loop)``.
+    """
+    if cap_outer_loop is None:
+        cap_outer_loop = M3cCapOuterLoop(
+            K_p=0.01,
+            v_cap_target=params.v_cap_total_per_module,
+        )
+
+    # Normalise base refs to callables (we wrap i_d_in_ref).
+    def _to_callable(ref):
+        return ref if callable(ref) else (
+            lambda _t, _v=float(ref): _v  # noqa: E731
+        )
+    base_i_d_in_fn = _to_callable(i_d_in_ref)
+
+    # Initial state shared with the controller closures below.
+    if initial_state is None:
+        initial_state = M3cL1ControlState(
+            v_caps_module=[
+                params.v_cap_total_per_module for _ in range(9)
+            ],
+        )
+
+    def i_d_in_with_cap_correction(t):
+        return cap_outer_loop.apply(
+            float(base_i_d_in_fn(t)),
+            initial_state.v_caps_module,
+        )
+
+    obs, sw, bx, state, dq_in, dq_out = make_m3c_l1_dq_full_control(
+        params, plant,
+        i_d_in_ref=i_d_in_with_cap_correction,
+        i_q_in_ref=i_q_in_ref,
+        i_d_out_ref=i_d_out_ref,
+        i_q_out_ref=i_q_out_ref,
+        dq_in_controller=dq_in_controller,
+        dq_out_controller=dq_out_controller,
+        initial_state=initial_state,
+    )
+    return obs, sw, bx, state, dq_in, dq_out, cap_outer_loop
 
 
 def run_l1_dq_closed_loop(
