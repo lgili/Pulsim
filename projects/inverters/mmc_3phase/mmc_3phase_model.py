@@ -262,6 +262,62 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
 
 
 # =============================================================================
+# IGBT-aware: compute lumped R_b equivalent of an IGBT level-1 conduction
+# =============================================================================
+#
+# A physically motivated alternative to a manually-tuned ``R_b`` is to
+# derive it from the per-SM IGBT level-1 conduction parameters
+# (``V_CE_sat``, ``R_CE_sat``). For an arm with N SMs in series, the
+# instantaneous conduction drop is approximately:
+#
+#   v_drop(i) ≈ N · V_CE_sat · sign(i) + N · R_CE_sat · i
+#
+# A linear-equivalent ``R_b`` that delivers the SAME peak voltage drop
+# at a chosen operating peak current ``I_op``:
+#
+#   R_b_eq = N · R_CE_sat + N · V_CE_sat / I_op
+#
+# This formula understates the V_F0 step-at-zero-crossings (no jump at
+# i = 0), so it can't predict the small zero-crossing distortion that
+# real IGBTs introduce. But it correctly captures the *peak* voltage
+# drop and *RMS power dissipation* — the dominant effect that bumps
+# the AC current peak down. Sousa's thesis Sec 4.1 ``R_b = 0.675 Ω``
+# is exactly this kind of one-knob lump.
+#
+# Notebook 04 ("MMC com IGBT level-1") uses this formula to sweep
+# realistic IGBT-equivalent ``R_b`` values and compare the impact on
+# THD, peak/RMS current and v_C ripple against Sousa's Tabela 4.2.
+# Future work: replacing the lumped R_b with a true nonlinear element
+# (anti-parallel IdealDiode pairs) needs further pulsim Newton work —
+# the DC operating point of an MMC with 12 anti-parallel diode pairs
+# is presently singular (off-state both diodes block; small G_off
+# leakage not enough to keep the MNA matrix conditioned).
+
+
+def igbt_equivalent_r_b(
+    *, n_sm: int, V_CE_sat: float, R_CE_sat: float, I_op: float,
+) -> float:
+    """Linear-equivalent arm resistance for an N-SM half-bridge whose
+    IGBTs have ``V_CE_sat`` knee and ``R_CE_sat`` on-state slope per
+    switch, sized to match the peak voltage drop at operating peak
+    current ``I_op``.
+
+    Returns:
+        ``R_b_eq = N · R_CE_sat + N · V_CE_sat / I_op``  [Ω]
+
+    Use the returned value in :class:`GeanThesisParams` and pass to
+    :func:`build_l1_plant` / :func:`build_l2_plant` to model an MMC
+    with IGBT-level-1 conduction physics, without needing pulsim's
+    nonlinear-diode infrastructure.
+    """
+    if n_sm <= 0:
+        raise ValueError(f"n_sm must be positive (got {n_sm})")
+    if I_op <= 0:
+        raise ValueError(f"I_op must be positive (got {I_op})")
+    return n_sm * R_CE_sat + n_sm * V_CE_sat / I_op
+
+
+# =============================================================================
 # Run drivers + metrics
 # =============================================================================
 
