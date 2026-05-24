@@ -6,8 +6,8 @@
 - [x] 1.2 Add `PULSIM_HAVE_KLU=1` compile definition + `SuiteSparse::KLU`
       INTERFACE link to `pulsim_core` in `core/CMakeLists.txt`, conditional
       on `PULSIM_HAVE_KLU` being set by step 1.1.
-- [ ] 1.3 Update CI matrix to install `libsuitesparse-dev` on Linux + `suite-sparse` via brew on macOS
-- [ ] 1.4 Document new optional dependency in top-level `README.md` "Build prerequisites" section
+- [x] 1.3 Update CI matrix to install `libsuitesparse-dev` on Linux + `suite-sparse` via brew on macOS (`.github/workflows/ci.yml` patched across all 5 matrix entries + coverage job)
+- [x] 1.4 Document new optional dependency in top-level `README.md` "Build prerequisites" section, with install commands for macOS / Debian / Fedora + the `-DPULSIM_ENABLE_KLU=OFF` opt-out
 
 ## 2. KluSolver implementation
 
