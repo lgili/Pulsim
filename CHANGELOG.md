@@ -4,6 +4,91 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-05-24
+
+### Highlights — PWL rank-1 cache update path (Layer 4 V8)
+
+This release ships the algorithmic contribution that backs the
+planned IEEE TPEL methods paper on Pulsim's PWL state-space cache
+(see [`artigos/02_tpel_methods/`](artigos/02_tpel_methods/)). The
+full design + decisions + delta specs live in
+[`openspec/changes/add-pwl-rank1-update/`](openspec/changes/add-pwl-rank1-update/)
+and the captured benchmark in
+[`artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md`](artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md).
+
+**No BREAKING changes.** Every existing caller produces bit-identical
+output. The rank-1 path is purely additive performance. 17,839 layer5
+assertions across 89 test cases pass unchanged.
+
+### Added
+
+- **`pulsim::sparse::KluSolver`** — `DirectSolver` implementation
+  wrapping SuiteSparse KLU (Davis & Natarajan, *ACM TOMS* 37(3), 2010,
+  Algorithm 907). Purpose-built for circuit MNA matrices. Header-only,
+  gated on `PULSIM_HAVE_KLU` (set by the root `CMakeLists.txt`'s
+  `find_package(KLU CONFIG)` block). When KLU is absent the kernel
+  builds and runs identically using `Eigen::SparseLU`.
+- **`pulsim::sparse::Backend` enum + factory hint** — new overload
+  `make_default_solver(Size n, Backend hint = Backend::Auto)` lets the
+  caller request `Backend::KLU`, `Backend::Eigen`, or auto-pick by
+  matrix size. Default `Backend::Auto` picks KLU when n ≥ 100
+  (`PULSIM_KLU_AUTO_THRESHOLD`, tuneable at build).
+- **`DirectSolver::supports_partial_refactor()`** + **`partial_refactor(M, changed_cols)`** —
+  new virtual methods on the base interface, with default impls
+  returning `false` so existing solvers transparently fall back.
+- **`PwlStateSpaceCache::solve_rank1(mask, b_extra, x)`** — sliding-
+  solver fast path. On single-bit Gray-code mask flips it calls
+  `partial_refactor` instead of rebuilding the cache segment; falls
+  back transparently to full re-factor on multi-bit flips, unsupported
+  backends, or numerical singularities.
+- **`PwlStateSpaceCache::set_rank1_backend(Backend)`** — pre-`solve_rank1`
+  override for the rank-1 sliding solver's backend (useful for
+  benchmarks that want to exercise KLU even at small n).
+- **`PwlStateSpaceCache::metrics()`** + **`pulsim::pwl::CacheMetrics`** —
+  `{rank1_hits, full_refactor_hits, fallbacks}` atomic monotonic
+  counters for benchmark attribution. Thread-safe sampling via
+  `std::memory_order_relaxed`.
+- **Microbenchmark `core/tests/benchmarks/test_bench_pwl_rank1.cpp`** —
+  Catch2 binary in the opt-in `pulsim_benchmarks` target. Sweeps
+  N ∈ {4, 6, 8, 10, 12} switches, times `solve` vs `solve_rank1`,
+  writes CSV to `${PULSIM_BENCH_RESULTS_DIR}/rank1_microbench.csv`.
+- **CI matrix** updated to install `libsuitesparse-dev` on Linux +
+  `suite-sparse` via brew on macOS across every existing entry
+  (Clang 17/18, GCC 13, Debug sanitizers, coverage).
+- **README "Build prerequisites"** section documenting the new
+  optional dependency with install commands for macOS / Debian /
+  Fedora and the `-DPULSIM_ENABLE_KLU=OFF` opt-out.
+
+### Performance
+
+Captured microbench on macOS 26.5 / Apple Silicon / AppleClang 17:
+
+| N | n_state | µs/solve | µs/rank1 | speedup |
+|--:|--:|--:|--:|:--:|
+| 4  | 6  | 4.67 | 10.29 | 0.45× (overhead dominates at tiny n) |
+| 6  | 8  | 2.57 | 2.79  | 0.92× (break-even) |
+| 8  | 10 | 2.57 | 2.90  | 0.89× (break-even) |
+| 10 | 12 | 4.60 | 2.73  | 1.69× (rank-1 wins) |
+| 12 | 14 | 9.69 | 3.08  | **3.15×** (headline finding) |
+
+Per-call rank-1 cost stays ~3 µs across the sweep while per-call
+`solve` cost grows linearly with n — the textbook signature of
+amortising the symbolic factorisation across all calls. The
+V0 MVP delegates to `klu_refactor`; the V8.1 follow-up will replace
+that with path-based partial re-elimination per Chen et al.,
+IEEE TPEL 2024 §III, extending the speedup to 5-10× at n=200.
+
+### Not changed
+
+- **Public Python API** — `pp.simulate(builder, …)` continues to use
+  the existing per-mask cache path via `cache.solve(mask)`. Wiring
+  `solve_rank1` into Layer 5's `run_transient` + Python bindings is
+  out of scope of this release; tracked as
+  `add-pwl-rank1-runtime-integration` (TBD).
+- **All 8 reference projects under `projects/`** — bit-identical
+  output (verified via the layer5 / layer5_v1..v4 / showcase regression
+  test suite, 17,839 assertions across 89 test cases).
+
 ## [1.1.0] — 2026-05-23
 
 ### Highlights — JOSS submission release

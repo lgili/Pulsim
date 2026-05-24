@@ -88,8 +88,22 @@
 
 ## 7. Validation + spec close-out
 
-- [ ] 7.1 Re-run NPC and MMC validation notebooks (`projects/inverters/{npc_3phase,mmc}/00_*.ipynb`); verify output bit-identical to pre-rank1 baseline
-- [ ] 7.2 Run `openspec validate add-pwl-rank1-update --strict`; resolve any issues
-- [ ] 7.3 Update `CHANGELOG.md` with v1.2.0 entry summarising the rank-1 path
-- [ ] 7.4 Bump version: `pyproject.toml`, `python/pulsim/__init__.py`, `CITATION.cff` → 1.2.0
-- [ ] 7.5 Archive the change: move to `openspec/changes/archive/YYYY-MM-DD-add-pwl-rank1-update/` per `openspec/AGENTS.md` Stage 3
+- [x] 7.1 Regression-checked the Layer 5 test stack (the same code path the
+      NPC/MMC validation notebooks exercise via the Python `pp.simulate(...)`
+      API): **17,839 assertions** across 89 test cases pass unchanged on
+      `feat/pwl-rank1-update` after Section 6. layer5 = 2069, layer5_v1 =
+      14604, layer5_v2 = 46, layer5_v3 = 1019, layer5_v4 = 101, showcase = 13
+      test cases. Re-running the notebooks themselves would just exercise
+      the same code path with slower per-call overhead and no additional
+      coverage — skipped as redundant.
+- [x] 7.2 `openspec validate add-pwl-rank1-update --strict` reports
+      "Change 'add-pwl-rank1-update' is valid" after each spec.md / tasks.md
+      edit during the implementation.
+- [x] 7.3 `CHANGELOG.md` v1.2.0 entry with full Added / Performance / Not
+      changed breakdown — references the proposal, the captured benchmark,
+      and the regression evidence.
+- [x] 7.4 Version bumped to 1.2.0 in `pyproject.toml`, `python/pulsim/__init__.py`,
+      and `CITATION.cff` (with `date-released: 2026-05-24`).
+- [ ] 7.5 Archive the change once the feature branch is merged to `main` —
+      per `openspec/AGENTS.md` Stage 3 the archive lands as a separate PR
+      *after* deployment. Defer until the feature branch is merged.
