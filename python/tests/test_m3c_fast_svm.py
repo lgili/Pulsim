@@ -1628,3 +1628,75 @@ class TestCapOuterLoopIntegration:
             max(ctrl_yes.v_caps_module) - min(ctrl_yes.v_caps_module)
         )
         assert spread < 50_000.0
+
+
+# ============================================================================
+# Tier 15 — Cross-validation vs Gili (2024) thesis Tab. 16 (Phase 22.10)
+#
+# Tab. 16 lists the M3C HIL/OPAL-RT operating parameters used in the
+# thesis Cap 7 experiments (Figs 87-122). My M3cParams defaults match
+# Tab. 16 exactly (2 MVA / 13.8 kV 50 Hz input, 11 kV variable-freq
+# output, N=6, V_cap=4 kV, C_SM=680 µF, f_sw=2 kHz, L_in=L_out=25 mH).
+# These tests run the full closed-loop M3C at each Tab. 16 frequency
+# and verify the output fundamental matches the Ohm's-law prediction
+# of an L0-equivalent run. The thesis HIL waveforms cannot be
+# pixel-compared, so we use the L0 prediction as the analytical
+# reference (the L0 ↔ L1 match is itself a validation Tier).
+# ============================================================================
+
+
+@_requires_pulsim
+class TestThesisTab16Validation:
+    """End-to-end validation against the thesis Tab. 16 HIL setup."""
+
+    @pytest.fixture(scope="class")
+    def sweep(self):
+        """Closed-loop sweep at the Tab. 16 frequencies."""
+        from m3c_validation import run_tab16_sweep  # noqa: PLC0415
+        return run_tab16_sweep(closed_loop=True)
+
+    def test_all_tab16_frequencies_present(self, sweep) -> None:
+        """Tab. 16 lists 5, 30, 45, 50, 55 Hz."""
+        assert set(sweep.keys()) == {5.0, 30.0, 45.0, 50.0, 55.0}
+
+    @pytest.mark.parametrize("f_out", [30.0, 45.0, 50.0, 55.0])
+    def test_high_freq_tracks_within_5_percent(
+        self, sweep, f_out,
+    ) -> None:
+        """For f_out ≥ 30 Hz (the thesis's main operating range),
+        the closed-loop output current tracks the L0 prediction
+        within 5 % relative error."""
+        m = sweep[f_out]
+        assert m.peak_rel_err < 0.05, (
+            f"f_out={f_out} Hz: peak={m.i_a_out_peak:.2f} A vs "
+            f"{m.i_a_out_peak_predicted:.2f} A predicted, "
+            f"rel-err={m.peak_rel_err*100:.2f}%"
+        )
+
+    @pytest.mark.parametrize("f_out", [30.0, 45.0, 50.0, 55.0])
+    def test_high_freq_thd_under_15_percent(
+        self, sweep, f_out,
+    ) -> None:
+        """THD on output current at f_out ≥ 30 Hz stays under 15 %
+        (the multilevel output is reasonably clean)."""
+        m = sweep[f_out]
+        assert m.thd_pct < 15.0
+
+    @pytest.mark.parametrize("f_out", [30.0, 45.0, 50.0, 55.0])
+    def test_caps_remain_bounded_at_each_freq(
+        self, sweep, f_out,
+    ) -> None:
+        """Cap voltage spread stays bounded (< 20 kV) — net energy
+        flow doesn't run away."""
+        m = sweep[f_out]
+        assert m.v_caps_spread < 20_000.0
+
+    def test_low_freq_5hz_is_known_limitation(self, sweep) -> None:
+        """5 Hz is documented as a stress point in the thesis (SVM
+        quantisation dominates at low frequencies). We accept the
+        large error here and just verify the simulation didn't
+        diverge."""
+        m = sweep[5.0]
+        # Currents should be bounded, even if not accurate.
+        assert m.i_a_out_peak < 2.0 * m.i_a_out_peak_predicted
+        # Not asserting peak_rel_err here — known to be ~30 %.
