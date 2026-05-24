@@ -51,6 +51,15 @@ RULES: dict[str, list[Rule]] = {
             description="Python runtime __version__",
         ),
     ],
+    "python/bindings.cpp": [
+        Rule(
+            pattern=re.compile(
+                r'(?m)^\s{4}m\.attr\("__version__"\)\s*=\s*"[^"]+";$'
+            ),
+            replacement='    m.attr("__version__") = "{version}";',
+            description="pybind11 module __version__ attribute",
+        ),
+    ],
     "docs/python/conf.py": [
         Rule(
             pattern=re.compile(r"(?m)^version\s*=\s*'[^']+'$"),
