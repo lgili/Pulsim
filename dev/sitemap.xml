@@ -57,6 +57,50 @@
          <lastmod>2026-05-24</lastmod>
     </url>
     <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/01-introduction/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/02-mna-foundations/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/03-trapezoidal-companion/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/04-pwl-state-space-cache/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/05-sparse-lu-foundations/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/06-pulsim-sparse-lu/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/07-rank1-partial-refactor/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/08-benchmarks/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/09-architecture-walkthrough/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/10-paper-figures-index/</loc>
+         <lastmod>2026-05-24</lastmod>
+    </url>
+    <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/</loc>
          <lastmod>2026-05-24</lastmod>
     </url>

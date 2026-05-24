@@ -1,0 +1,2427 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/how-pulsim-works/06-pulsim-sparse-lu/">
+      
+      
+        <link rel="prev" href="../05-sparse-lu-foundations/">
+      
+      
+        <link rel="next" href="../07-rank1-partial-refactor/">
+      
+      
+      <link rel="icon" href="../../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>6 — PulsimSparseLuSolver - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#6-pulsimsparselusolver-our-in-house-implementation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              6 — PulsimSparseLuSolver
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#61-why-in-house-the-2026-05-24-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.1 Why in-house? The 2026-05-24 decision
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#62-the-lifecycle-analyze-factorize-solve-partial_refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.2 The lifecycle: analyze → factorize → solve → partial_refactor
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.2 The lifecycle: analyze → factorize → solve → partial_refactor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#analyzem-symbolic-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      analyze(M) — symbolic phase
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#factorizem-numeric-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      factorize(M) — numeric phase
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solveb-x-triangular-solve" class="md-nav__link">
+    <span class="md-ellipsis">
+      solve(b, x) — triangular solve
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#partial_refactornew_m-changed_cols-chapter-7s-contribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      partial_refactor(new_M, changed_cols) — chapter 7's contribution
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#63-what-went-wrong-and-what-we-learned" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.3 What went wrong, and what we learned
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.3 What went wrong, and what we learned">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bug-1-zero-pivot-at-column-2-of-the-buck-like-88" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bug 1: zero pivot at column 2 of the buck-like 8×8
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bug-2-solve-identity-m-cdot-x-b-10-on-the-same-88" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bug 2: solve identity \(\|M \cdot x - b\| = 1.0\) on the same 8×8
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bug-3-err-025-on-the-spd-33-after-the-dynamic-pattern-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bug 3: err = 0.25 on the SPD 3×3 after the dynamic-pattern fix
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#64-the-pivot-row-swap-visualised" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.4 The pivot-row swap, visualised
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#65-the-backend-factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.5 The Backend factory
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#66-test-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.6 Test coverage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#67-where-the-code-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.7 Where the code lives
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#68-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.8 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#69-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.9 Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#61-why-in-house-the-2026-05-24-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.1 Why in-house? The 2026-05-24 decision
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#62-the-lifecycle-analyze-factorize-solve-partial_refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.2 The lifecycle: analyze → factorize → solve → partial_refactor
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.2 The lifecycle: analyze → factorize → solve → partial_refactor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#analyzem-symbolic-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      analyze(M) — symbolic phase
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#factorizem-numeric-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      factorize(M) — numeric phase
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solveb-x-triangular-solve" class="md-nav__link">
+    <span class="md-ellipsis">
+      solve(b, x) — triangular solve
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#partial_refactornew_m-changed_cols-chapter-7s-contribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      partial_refactor(new_M, changed_cols) — chapter 7's contribution
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#63-what-went-wrong-and-what-we-learned" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.3 What went wrong, and what we learned
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.3 What went wrong, and what we learned">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bug-1-zero-pivot-at-column-2-of-the-buck-like-88" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bug 1: zero pivot at column 2 of the buck-like 8×8
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bug-2-solve-identity-m-cdot-x-b-10-on-the-same-88" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bug 2: solve identity \(\|M \cdot x - b\| = 1.0\) on the same 8×8
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bug-3-err-025-on-the-spd-33-after-the-dynamic-pattern-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bug 3: err = 0.25 on the SPD 3×3 after the dynamic-pattern fix
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#64-the-pivot-row-swap-visualised" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.4 The pivot-row swap, visualised
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#65-the-backend-factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.5 The Backend factory
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#66-test-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.6 Test coverage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#67-where-the-code-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.7 Where the code lives
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#68-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.8 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#69-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.9 Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/how-pulsim-works/06-pulsim-sparse-lu.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/how-pulsim-works/06-pulsim-sparse-lu.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="6-pulsimsparselusolver-our-in-house-implementation">6. PulsimSparseLuSolver — Our In-House Implementation<a class="headerlink" href="#6-pulsimsparselusolver-our-in-house-implementation" title="Permanent link">&para;</a></h1>
+<p>Chapter 5 covered the theory: RCM ordering, elimination trees,
+Gilbert-Peierls left-looking factorisation, threshold partial
+pivoting. This chapter is the implementation. v1.3.0 of Pulsim
+replaced SuiteSparse KLU with <code>pulsim::sparse::PulsimSparseLuSolver</code>
+— ~900 lines of header-only C++23 over <code>Eigen::SparseMatrix</code> as
+a passive CSC container.</p>
+<p>By the end of this chapter you'll know:</p>
+<ul>
+<li>The four-method <code>DirectSolver</code> lifecycle and what each phase
+  computes</li>
+<li>Why the symbolic-then-numeric pipeline that chapter 5 hinted
+  at had to be <strong>abandoned</strong> in our implementation (and what
+  replaced it)</li>
+<li>The three bugs we hit and the lessons they teach about sparse
+  LU implementation</li>
+<li>How <code>Backend::Pulsim</code> plugs into the solver factory and where
+  <code>Backend::Eigen</code> remains as the benchmark baseline</li>
+</ul>
+<hr />
+<h2 id="61-why-in-house-the-2026-05-24-decision">6.1 Why in-house? The 2026-05-24 decision<a class="headerlink" href="#61-why-in-house-the-2026-05-24-decision" title="Permanent link">&para;</a></h2>
+<p>The original v8 plan was to vendor SuiteSparse KLU (Davis &amp;
+Natarajan, <em>ACM TOMS</em> 37(3), 2010) via <code>find_package(KLU)</code>. KLU
+is excellent — battle-tested in dozens of circuit simulators
+(including ngspice, Xyce, and PowerWorld) — and it would have
+shipped in one week.</p>
+<p>The project owner rejected this on 2026-05-24:</p>
+<blockquote>
+<p><em>"vamos fazer a nossa do zero se precisa. pode se basear na
+deles mas vamos implementar a nossa nem que demorre"</em>
+(let's build our own from scratch, basing it on theirs but
+implementing ours even if it takes time)</p>
+</blockquote>
+<p>The reasoning, articulated in the OpenSpec proposal
+<code>replace-klu-with-pulsim-sparse-lu</code>:</p>
+<ol>
+<li>
+<p><strong>The TPEL paper's algorithmic novelty must be ours.</strong>
+   Path-based partial refactorisation (chapter 7) is the
+   contribution. Vendoring a third-party LU implementation
+   would have made the contribution a "patch to KLU" rather
+   than "a new sparse-LU library", which is a much narrower
+   claim.</p>
+</li>
+<li>
+<p><strong>The build supply chain matters.</strong> SuiteSparse adds
+   <code>libsuitesparse-dev</code> to every Linux CI matrix entry, plus
+   <code>find_package(KLU)</code> to every downstream build script. By
+   v1.3.0, removing those was a one-paragraph diff to CI and
+   a 76-line drop from <code>CMakeLists.txt</code>. Less surface area for
+   downstream users to manage.</p>
+</li>
+<li>
+<p><strong>Educational value.</strong> A header-only ~900-line implementation
+   is a teaching artefact. Students reading the Pulsim source
+   can see exactly how Gilbert-Peierls + RCM + threshold
+   pivoting plug together. KLU is excellent code but it's
+   distributed as a compiled library — most users never read it.</p>
+</li>
+</ol>
+<p>The trade-off was 4-6 weeks of focused work (chapters 6-7's
+material) + the TPEL submission slipped from October 2026 to
+Q1 2027.</p>
+<hr />
+<h2 id="62-the-lifecycle-analyze-factorize-solve-partial_refactor">6.2 The lifecycle: <code>analyze</code> → <code>factorize</code> → <code>solve</code> → <code>partial_refactor</code><a class="headerlink" href="#62-the-lifecycle-analyze-factorize-solve-partial_refactor" title="Permanent link">&para;</a></h2>
+<p><code>PulsimSparseLuSolver</code> implements the <code>DirectSolver</code> interface
+from <code>core/include/pulsim/sparse/solver.hpp</code>:</p>
+<pre class="mermaid"><code>stateDiagram-v2
+    [*] --&gt; Uninitialised : construct
+    Uninitialised --&gt; Analysed : analyze M
+    Analysed --&gt; Factorised : factorize M
+    Factorised --&gt; Factorised : solve b -&gt; x  (repeatable)
+    Factorised --&gt; Factorised : partial_refactor new_M, cols  (v1.3+)
+    Analysed --&gt; Uninitialised : analyze a different M
+    Factorised --&gt; Uninitialised : analyze a different M
+    Factorised --&gt; Singular : factorize fails  numerically
+    Singular --&gt; Uninitialised : analyze again</code></pre>
+<p><em>Figure 6.1 — <code>PulsimSparseLuSolver</code> lifecycle state diagram.
+The diamond between <code>Factorised</code> states is the production hot
+path: once factorised, the same solver can serve unlimited
+<code>solve(b, x)</code> calls or get a partial-refactor update for an
+incremental matrix change.</em></p>
+<p>Each phase has a strict contract:</p>
+<h3 id="analyzem-symbolic-phase"><code>analyze(M)</code> — symbolic phase<a class="headerlink" href="#analyzem-symbolic-phase" title="Permanent link">&para;</a></h3>
+<p><strong>Input:</strong> a square sparse matrix <span class="arithmatex">\(M\)</span> with a fixed sparsity
+pattern. Values can be anything; only the pattern is read.</p>
+<p><strong>Output:</strong> the solver has computed and stored:</p>
+<ul>
+<li><code>Pcol_</code> — column permutation under RCM ordering</li>
+<li><code>etree_parent_</code> — elimination tree (Davis 2006 §4.10)</li>
+<li><code>l_col_ptr_</code>, <code>l_row_idx_</code> — symbolic <span class="arithmatex">\(L\)</span> pattern in CSC</li>
+<li><code>u_col_ptr_</code>, <code>u_row_idx_</code> — symbolic <span class="arithmatex">\(U\)</span> pattern in CSC</li>
+</ul>
+<p><strong>Cost:</strong> <span class="arithmatex">\(O(\mathrm{nnz}(M) + n)\)</span> — linear in the input size.
+~30 µs typical on the buck-like 8×8 fixture.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">bool</span><span class="w"> </span><span class="nf">analyze</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">Matrix</span><span class="o">&amp;</span><span class="w"> </span><span class="n">M</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">M</span><span class="p">.</span><span class="n">rows</span><span class="p">()</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">M</span><span class="p">.</span><span class="n">cols</span><span class="p">()</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">M</span><span class="p">.</span><span class="n">rows</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="n">n_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">Index</span><span class="o">&gt;</span><span class="p">(</span><span class="n">M</span><span class="p">.</span><span class="n">rows</span><span class="p">());</span>
+
+<span class="w">    </span><span class="c1">// Step 1: symmetric adjacency |M| + |M^T|</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">adj</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">build_symmetric_adjacency_</span><span class="p">(</span><span class="n">M</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Step 2: RCM column permutation (George 1971)</span>
+<span class="w">    </span><span class="n">Pcol_</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">compute_rcm_ordering_</span><span class="p">(</span><span class="n">adj</span><span class="p">);</span>
+<span class="w">    </span><span class="n">Pinv_col_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">invert_permutation_</span><span class="p">(</span><span class="n">Pcol_</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Step 3: elimination tree via Davis 2006 §4.10 disjoint-</span>
+<span class="w">    </span><span class="c1">//         set ancestor compression on the permuted adjacency</span>
+<span class="w">    </span><span class="n">etree_parent_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_etree_</span><span class="p">(</span><span class="n">adj</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Step 4: symbolic L+U pattern — for each permuted col k,</span>
+<span class="w">    </span><span class="c1">//         walk etree from each U direct row to collect</span>
+<span class="w">    </span><span class="c1">//         inherited fill (marker-array technique)</span>
+<span class="w">    </span><span class="n">compute_symbolic_pattern_</span><span class="p">(</span><span class="n">adj</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">analyzed_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>(The <code>_</code> suffix on private helpers follows Pulsim's house style.)</p>
+<h3 id="factorizem-numeric-phase"><code>factorize(M)</code> — numeric phase<a class="headerlink" href="#factorizem-numeric-phase" title="Permanent link">&para;</a></h3>
+<p><strong>Input:</strong> the same <span class="arithmatex">\(M\)</span> (or a different <span class="arithmatex">\(M\)</span> with the same
+sparsity pattern as the one analyzed). Values matter.</p>
+<p><strong>Output:</strong> numeric <span class="arithmatex">\(L\)</span> and <span class="arithmatex">\(U\)</span> values stored in <code>l_values_</code> /
+<code>u_values_</code>, parallel to the index arrays from <code>analyze</code>.
+The row permutation <code>Prow_</code> is also fixed by this call (chapter
+5 §5.7 explains why pivoting changes <code>Prow_</code>).</p>
+<p><strong>Cost:</strong> <span class="arithmatex">\(O(\mathrm{nnz}(L) + \mathrm{nnz}(U))\)</span> + the partial-
+pivoting overhead. ~50-100 µs typical.</p>
+<p>This is where the implementation diverged from the textbook in
+two important ways — see §6.3 for the gory detail.</p>
+<h3 id="solveb-x-triangular-solve"><code>solve(b, x)</code> — triangular solve<a class="headerlink" href="#solveb-x-triangular-solve" title="Permanent link">&para;</a></h3>
+<p><strong>Input:</strong> RHS vector <span class="arithmatex">\(b\)</span>.</p>
+<p><strong>Output:</strong> solution <span class="arithmatex">\(x\)</span> such that <span class="arithmatex">\(M \cdot x = b\)</span>, written
+in-place into the user's <code>x</code> buffer.</p>
+<p><strong>Cost:</strong> <span class="arithmatex">\(O(\mathrm{nnz}(L) + \mathrm{nnz}(U))\)</span> — the
+<strong>reusable</strong> part. This is the hot-path cost the PWL cache
+(chapter 4) is built around. Typical: ~5 µs.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">solve</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">Vector</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">factorized_</span><span class="p">)</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">logic_error</span><span class="p">(</span><span class="cm">/*...*/</span><span class="p">);</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n_</span><span class="p">;</span>
+<span class="w">    </span><span class="n">Vector</span><span class="w"> </span><span class="n">y</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Step 1: apply row permutation to b: y = P_row * b</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="p">[</span><span class="n">Prow_</span><span class="p">[</span><span class="n">i</span><span class="p">]];</span>
+
+<span class="w">    </span><span class="c1">// Step 2: forward subs on L (unit lower)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">];</span>
+<span class="w">            </span><span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">l_values_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">y</span><span class="p">[</span><span class="n">k</span><span class="p">];</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Step 3: back subs on U (diagonal at the LAST slot of each col)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="o">--</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">diag_p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w">  </span><span class="n">u_kk</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">u_values_</span><span class="p">[</span><span class="n">diag_p</span><span class="p">];</span>
+<span class="w">        </span><span class="n">y</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="n">u_kk</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">diag_p</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">];</span>
+<span class="w">            </span><span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">u_values_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">y</span><span class="p">[</span><span class="n">k</span><span class="p">];</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Step 4: apply inverse column permutation: x = Pcol^-1 * y</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">Pcol_</span><span class="p">[</span><span class="n">k</span><span class="p">]]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">y</span><span class="p">[</span><span class="n">k</span><span class="p">];</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The "diagonal at the LAST slot" convention in step 3 matters:
+it lets the back-subs loop find <span class="arithmatex">\(U_{kk}\)</span> in <span class="arithmatex">\(O(1)\)</span> without
+scanning the column. Chapter 6 §6.4 explains why this convention
+took one debugging cycle to get right.</p>
+<h3 id="partial_refactornew_m-changed_cols-chapter-7s-contribution"><code>partial_refactor(new_M, changed_cols)</code> — chapter 7's contribution<a class="headerlink" href="#partial_refactornew_m-changed_cols-chapter-7s-contribution" title="Permanent link">&para;</a></h3>
+<p>Reuses the analyzed pattern + row permutation; updates <span class="arithmatex">\(L\)</span> and
+<span class="arithmatex">\(U\)</span> values along the etree path of the changed columns. Detailed
+in chapter 7.</p>
+<hr />
+<h2 id="63-what-went-wrong-and-what-we-learned">6.3 What went wrong, and what we learned<a class="headerlink" href="#63-what-went-wrong-and-what-we-learned" title="Permanent link">&para;</a></h2>
+<p>The implementation arc had <strong>three bugs</strong> that every sparse-LU
+beginner is likely to hit. They're worth documenting because the
+fixes embed a lot of the discipline of getting sparse direct
+right.</p>
+<h3 id="bug-1-zero-pivot-at-column-2-of-the-buck-like-88">Bug 1: zero pivot at column 2 of the buck-like 8×8<a class="headerlink" href="#bug-1-zero-pivot-at-column-2-of-the-buck-like-88" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> <code>factorize</code> returns false on a matrix that should
+clearly be non-singular.</p>
+<p><strong>Root cause:</strong> the buck-like 8×8 fixture has <code>M[7, 7] = 0</code> (the
+voltage-source augmentation row's diagonal — chapter 2 §2.3
+explains why). Without partial pivoting, the natural-order
+elimination tries to divide by zero at column 7's pivot.</p>
+<p><strong>Fix:</strong> implement partial pivoting (chapter 5 §5.7) inside the
+GP inner loop:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Step 3a: partial pivoting — find argmax |x[i]| for i &gt;= k</span>
+<span class="n">Index</span><span class="w">   </span><span class="n">i_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k</span><span class="p">;</span>
+<span class="n">Real</span><span class="w">    </span><span class="n">x_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">k</span><span class="p">]);</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">x_max</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">i_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="p">;</span>
+<span class="w">        </span><span class="n">x_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">x_max</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">PIVOT_TOL</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">numeric_singular_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Swap rows i_max and k in x AND in all already-stored L cols</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">i_max</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">k</span><span class="p">],</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">i_max</span><span class="p">]);</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">j</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">j</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">j</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">];</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w">     </span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i_max</span><span class="p">;</span>
+<span class="w">            </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">i_max</span><span class="p">)</span><span class="w"> </span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">Prow_</span><span class="p">[</span><span class="n">k</span><span class="p">],</span><span class="w"> </span><span class="n">Prow_</span><span class="p">[</span><span class="n">i_max</span><span class="p">]);</span>
+<span class="w">    </span><span class="c1">// ...update Pinv_row_ too</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Lesson:</strong> any production sparse LU must implement partial
+pivoting from day 1. The "skip pivoting for now, add it later"
+shortcut works for academic toy problems but fails on the very
+first real circuit fixture you throw at it.</p>
+<h3 id="bug-2-solve-identity-m-cdot-x-b-10-on-the-same-88">Bug 2: solve identity <span class="arithmatex">\(\|M \cdot x - b\| = 1.0\)</span> on the same 8×8<a class="headerlink" href="#bug-2-solve-identity-m-cdot-x-b-10-on-the-same-88" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> <code>factorize</code> succeeds; <code>solve(b, x)</code> returns an <span class="arithmatex">\(x\)</span>
+that doesn't satisfy <span class="arithmatex">\(M \cdot x = b\)</span> at all. Worst-case error
+<span class="arithmatex">\(\sim 100\%\)</span>.</p>
+<p><strong>Root cause:</strong> the symbolic pattern from <code>analyze</code> was computed
+<strong>pre-pivoting</strong>, assuming <code>Prow = Pcol</code> (which holds for a
+diagonally-dominant matrix but not in general). Partial pivoting
+mutated <code>Prow_</code> in ways the pre-pivot pattern didn't anticipate
+— specifically, <span class="arithmatex">\(U[2, 4] = -1\)</span> ended up at row 2 only <em>after</em>
+column 2's pivot rearranged the row permutation. The
+factorisation went looking for storage slots that the symbolic
+phase hadn't allocated, dropped the entry on the floor, and
+returned a corrupted <span class="arithmatex">\(L+U\)</span>.</p>
+<p><strong>Fix:</strong> <strong>discover the <span class="arithmatex">\(L+U\)</span> pattern dynamically from <span class="arithmatex">\(x\)</span>'s
+runtime nonzeros</strong>, ignoring the pre-pivot symbolic pattern
+(which becomes diagnostic-only).</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Step 4: store new column&#39;s L+U entries dynamically.</span>
+<span class="c1">// IGNORES the pre-pivot symbolic pattern.</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">VALUE_TOL</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// upper or diagonal — store in U[:, k]</span>
+<span class="w">            </span><span class="n">u_row_idx_</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
+<span class="w">            </span><span class="n">u_values_</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// lower — store in L[:, k] (will become L[i, k] / x[k])</span>
+<span class="w">            </span><span class="n">l_row_idx_</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
+<span class="w">            </span><span class="n">l_values_</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">k</span><span class="p">]);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Lesson:</strong> the symbolic-then-numeric pipeline (analyse the
+pattern once, fill in values per call) is the textbook strategy
+<strong>only when you don't pivot</strong>. Once partial pivoting enters the
+picture, the pattern is no longer fixed at <code>analyze</code> time — it
+depends on the specific matrix values. Dynamic pattern discovery
+is slightly more expensive but bug-free.</p>
+<p>This is why <code>analyze</code> in our implementation still computes a
+symbolic pattern (<code>l_col_ptr_</code> etc. get populated) but
+<code>factorize</code> then <strong>overwrites</strong> those arrays with the actually-
+observed pattern. The symbolic phase is now just (a) a budget
+estimate for memory allocation, and (b) a diagnostic check.</p>
+<p><img alt="Dynamic pattern discovery vs symbolic prediction" class="center" loading="lazy" src="../_figures/output/fig62_dynamic_pattern.png" width="700" /></p>
+<p><em>Figure 6.2 — Pattern discovered by <code>factorize</code> on the buck-like
+8×8 fixture. The pre-pivot symbolic prediction (left) missed
+several entries that the actual factorisation produced (middle),
+because partial pivoting rearranged rows in ways the symbolic
+phase couldn't predict. Dynamic-pattern discovery (right)
+records every nonzero in <span class="arithmatex">\(x\)</span> at factorisation time, capturing
+the actual fill. The "missed" entries highlighted in red on the
+middle panel are the ones that caused bug 2.</em></p>
+<h3 id="bug-3-err-025-on-the-spd-33-after-the-dynamic-pattern-fix">Bug 3: <code>err = 0.25</code> on the SPD 3×3 after the dynamic-pattern fix<a class="headerlink" href="#bug-3-err-025-on-the-spd-33-after-the-dynamic-pattern-fix" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> even after bug 2 was fixed, the 3×3 SPD test case
+gave a 25% solve error. The bug 2 fix worked for the 8×8 but
+broke the 3×3 — which is the OPPOSITE pattern from what we'd
+expect.</p>
+<p><strong>Root cause:</strong> <code>l_col_ptr_[k + 1]</code> was being set at the
+<strong>start</strong> of column <span class="arithmatex">\(k+1\)</span>'s storage section, AFTER the L-update
+loop at column <span class="arithmatex">\(k+1\)</span> had already read it as 0. Specifically:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// BUGGY (this is what we had):</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ... L-updates from j &lt; k read l_col_ptr_[j+1] ...</span>
+<span class="w">    </span><span class="c1">// ... factorise column k, push to l_values_/row_idx_ ...</span>
+<span class="w">    </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">n_entries_pushed</span><span class="p">;</span><span class="w">  </span><span class="c1">// SET HERE</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The bug: at iteration <span class="arithmatex">\(k = 0\)</span>, the L-update inner loop reads
+<code>l_col_ptr_[1]</code> to know how much of column 0 to apply. But
+<code>l_col_ptr_[1]</code> doesn't get set until AFTER iteration 0's body.
+For the 8×8 it happened to work because the pattern was wide
+enough that the read returned a "safe" value; for the 3×3 it
+read garbage.</p>
+<p><strong>Fix:</strong> move the <code>l_col_ptr_[k+1]</code> update to the <strong>END of
+column <span class="arithmatex">\(k\)</span>'s storage</strong> — <em>before</em> the next iteration's L-update
+loop tries to read it:</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// L-updates from j &lt; k — reads l_col_ptr_[j+1]</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">j</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">j</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">j</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">x</span><span class="p">[</span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">]]</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">l_values_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">j</span><span class="p">];</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Partial pivoting + dynamic pattern discovery (steps 3a, 4)</span>
+<span class="w">    </span><span class="c1">// ...</span>
+
+<span class="w">    </span><span class="c1">// CRITICAL: set the *next* column&#39;s start pointer to the</span>
+<span class="w">    </span><span class="c1">// current end of L storage BEFORE moving on to k+1.</span>
+<span class="w">    </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">Index</span><span class="o">&gt;</span><span class="p">(</span><span class="n">l_values_</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
+<span class="w">    </span><span class="n">u_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">Index</span><span class="o">&gt;</span><span class="p">(</span><span class="n">u_values_</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Lesson:</strong> CSC storage's <code>col_ptr</code> array has a very specific
+<strong>when</strong> semantic that's easy to mis-encode. The invariant is:
+"after iteration <span class="arithmatex">\(k\)</span> has fully populated column <span class="arithmatex">\(k\)</span>'s storage,
+<code>col_ptr[k+1]</code> MUST equal the current end-of-storage index, so
+iteration <span class="arithmatex">\(k+1\)</span>'s L-update loop reads correct bounds for
+column <span class="arithmatex">\(k\)</span>."</p>
+<hr />
+<h2 id="64-the-pivot-row-swap-visualised">6.4 The pivot-row swap, visualised<a class="headerlink" href="#64-the-pivot-row-swap-visualised" title="Permanent link">&para;</a></h2>
+<p>When partial pivoting kicks in at column <span class="arithmatex">\(k = 2\)</span> of the buck-like
+8×8 (because <span class="arithmatex">\(M[7, 7] = 0\)</span> propagates through), the algorithm
+swaps row <span class="arithmatex">\(k = 2\)</span> with the row <span class="arithmatex">\(i = 7\)</span> that has the largest
+<span class="arithmatex">\(|x[i]|\)</span>. Here's what that does to the stored <span class="arithmatex">\(L\)</span>:</p>
+<p><img alt="Pivot row swap visualisation on the buck-like 8x8" class="center" loading="lazy" src="../_figures/output/fig63_pivot_swap.png" width="700" /></p>
+<p><em>Figure 6.3 — The pivot-row swap at column <span class="arithmatex">\(k = 2\)</span> of the buck-
+like 8×8. Left: the partially-built <span class="arithmatex">\(L\)</span> before the swap (columns
+0 and 1 fully populated; column 2 has the dense workspace <span class="arithmatex">\(x\)</span>
+loaded). Centre: the workspace finds its argmax at row 7 — so
+rows 2 and 7 swap, both in <span class="arithmatex">\(x\)</span> and in the already-stored
+columns 0 and 1 of <span class="arithmatex">\(L\)</span> (the highlighted entries). Right: the
+final <span class="arithmatex">\(L\)</span> after the swap, ready for column 2's pivot
+normalisation. The row permutation <code>Prow_</code> records the swap so
+<code>solve</code> knows to apply it to the RHS.</em></p>
+<p>The set of nonzero rows per column is <strong>invariant</strong> under
+relabeling — we don't allocate new storage slots, we just
+rename which row index they're stored at. This is the
+implementation trick that makes partial pivoting cheap in our
+CSC scheme.</p>
+<hr />
+<h2 id="65-the-backend-factory">6.5 The <code>Backend</code> factory<a class="headerlink" href="#65-the-backend-factory" title="Permanent link">&para;</a></h2>
+<p><code>make_default_solver(n, hint)</code> in
+<code>core/include/pulsim/sparse/solver.hpp</code> returns the right
+solver based on the user's hint:</p>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">Backend</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Auto</span><span class="p">,</span><span class="w"> </span><span class="n">Eigen</span><span class="p">,</span><span class="w"> </span><span class="n">Pulsim</span><span class="w"> </span><span class="p">};</span>
+
+<span class="kr">inline</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">DirectSolver</span><span class="o">&gt;</span>
+<span class="n">make_default_solver</span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">Backend</span><span class="w"> </span><span class="n">hint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Backend</span><span class="o">::</span><span class="n">Auto</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">hint</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">Backend</span><span class="o">::</span><span class="no">Auto</span><span class="p">:</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">Backend</span><span class="o">::</span><span class="no">Pulsim</span><span class="p">:</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">PulsimSparseLuSolver</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">Backend</span><span class="o">::</span><span class="no">Eigen</span><span class="p">:</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">SparseLuSolver</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">PulsimSparseLuSolver</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Since v1.3.0:</p>
+<ul>
+<li><code>Backend::Auto</code> → <code>PulsimSparseLuSolver</code> (the new default)</li>
+<li><code>Backend::Pulsim</code> → <code>PulsimSparseLuSolver</code> (explicit)</li>
+<li><code>Backend::Eigen</code> → <code>SparseLuSolver</code> (the Eigen reference, kept
+  intentionally as the benchmark baseline for chapter 8's
+  3-backend microbench)</li>
+</ul>
+<p>The PWL cache's <code>solve(mask, ...)</code> always uses whatever
+<code>make_default_solver</code> returns. The <code>solve_rank1(mask, ...)</code>
+path lets you override via <code>set_rank1_backend(Backend)</code> — used
+by the benchmark fixture to compare the three backends side-by-
+side under identical workloads.</p>
+<hr />
+<h2 id="66-test-coverage">6.6 Test coverage<a class="headerlink" href="#66-test-coverage" title="Permanent link">&para;</a></h2>
+<p><code>core/tests/layer0/test_pulsim_lu_solver.cpp</code> has <strong>227
+assertions across 41 test cases</strong> at v1.3.0:</p>
+<table>
+<thead>
+<tr>
+<th>Test family</th>
+<th>What it pins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>analyze</code> on SPD 3×3 + buck-like 8×8 + edge cases (0×0, non-square)</td>
+<td>Symbolic phase correctness</td>
+</tr>
+<tr>
+<td><code>factorize</code> identity <span class="arithmatex">\((L+I) \cdot U == P_{\mathrm{row}} \cdot M \cdot P_{\mathrm{col}}\)</span> on both fixtures</td>
+<td>Numeric phase correctness within <span class="arithmatex">\(10^{-12}\)</span></td>
+</tr>
+<tr>
+<td>Singular-matrix detection (all-zero column) returns false</td>
+<td>Failure-path handling</td>
+</tr>
+<tr>
+<td><code>solve</code> matches <code>Eigen::SparseLU</code> within <span class="arithmatex">\(10^{-10}\)</span></td>
+<td>Reference parity</td>
+</tr>
+<tr>
+<td><code>solve</code> before <code>factorize</code> throws</td>
+<td>Lifecycle enforcement</td>
+</tr>
+<tr>
+<td>Multiple <code>solve</code> calls after one <code>factorize</code> work</td>
+<td>Hot-path reuse</td>
+</tr>
+<tr>
+<td>Re-factorise after <code>analyze</code> produces fresh values</td>
+<td>Re-entrancy</td>
+</tr>
+<tr>
+<td><code>partial_refactor</code> parity vs fresh-factorise (single-col change)</td>
+<td>Chapter 7's contract</td>
+</tr>
+<tr>
+<td>Path-cache reuse on repeated same-column perturbation</td>
+<td>Chapter 7's lazy-union behaviour</td>
+</tr>
+<tr>
+<td><code>analyze</code> invalidates path cache</td>
+<td>Chapter 7's invalidation semantics</td>
+</tr>
+<tr>
+<td><code>Backend::Pulsim</code>/<code>Auto</code> factory return the right type</td>
+<td>Factory contract</td>
+</tr>
+</tbody>
+</table>
+<p>Zero regression vs the pre-rewrite baseline across all 17,275
+kernel assertions when the v1.3.0 PR merged.</p>
+<hr />
+<h2 id="67-where-the-code-lives">6.7 Where the code lives<a class="headerlink" href="#67-where-the-code-lives" title="Permanent link">&para;</a></h2>
+<p>The whole implementation is in <strong>one file</strong>:
+<code>core/include/pulsim/sparse/pulsim_lu_solver.hpp</code> (~900 lines).
+Header-only by design so downstream consumers (the PWL cache,
+the AC sweep, future complex specialisation per
+<code>add-pulsim-complex-sparse-lu</code>) get template instantiation for
+free.</p>
+<p>Line-region breakdown:</p>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>Lines</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Doxygen + includes + namespace setup</td>
+<td>1-50</td>
+<td>references + Eigen alias typedefs</td>
+</tr>
+<tr>
+<td>Private state + ctor</td>
+<td>50-150</td>
+<td><code>Pcol_</code>, <code>Pinv_col_</code>, <code>etree_parent_</code>, <code>l_*</code>, <code>u_*</code>, <code>Prow_</code>, <code>Pinv_row_</code>, flags</td>
+</tr>
+<tr>
+<td><code>analyze</code></td>
+<td>150-350</td>
+<td>RCM + etree + symbolic pattern (~200 lines)</td>
+</tr>
+<tr>
+<td><code>factorize</code></td>
+<td>350-600</td>
+<td>GP left-looking + partial pivoting + dynamic pattern (~250 lines)</td>
+</tr>
+<tr>
+<td><code>solve</code></td>
+<td>600-680</td>
+<td>forward+back substitution</td>
+</tr>
+<tr>
+<td><code>partial_refactor</code> + <code>compute_path_</code> + cache</td>
+<td>680-880</td>
+<td>chapter 7's contribution (~200 lines)</td>
+</tr>
+<tr>
+<td>Factory + ODR-safe inline definitions at bottom</td>
+<td>880-900</td>
+<td><code>make_default_solver</code> impl</td>
+</tr>
+</tbody>
+</table>
+<p>For ~900 lines of header-only C++23, the code carries a complete
+sparse direct LU with partial pivoting, fill-reducing ordering,
+elimination-tree symbolic analysis, and incremental update —
+roughly 1/10 the size of SuiteSparse KLU's compiled equivalent
+(which has additional features like BTF that Pulsim's MVP omits).</p>
+<hr />
+<h2 id="68-takeaways">6.8 Takeaways<a class="headerlink" href="#68-takeaways" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>PulsimSparseLuSolver</code> is a <strong>header-only ~900-line C++23</strong>
+  implementation of full sparse direct LU. Zero third-party LU
+  dependency.</li>
+<li>Lifecycle is <strong><code>analyze</code> → <code>factorize</code> → <code>solve</code> (×N)</strong> with
+  <code>partial_refactor</code> as the v1.3.0 fast-path addition.</li>
+<li>The textbook <strong>symbolic-then-numeric</strong> pipeline (chapter 5
+  §5.4) had to be abandoned: partial pivoting changes the
+  pattern post-<code>analyze</code>. We use <strong>dynamic pattern discovery</strong>
+  from <span class="arithmatex">\(x\)</span>'s runtime nonzeros instead.</li>
+<li>Three bugs taught the implementation discipline:
+  partial pivoting is mandatory (bug 1), the symbolic pattern
+  is just a budget estimate (bug 2), and CSC <code>col_ptr</code>
+  invariants need careful sequencing (bug 3).</li>
+<li><code>Backend::Eigen</code> (= <code>SparseLuSolver</code>) is <strong>kept intentionally</strong>
+  as the benchmark baseline for chapter 8.</li>
+</ul>
+<h2 id="69-further-reading">6.9 Further reading<a class="headerlink" href="#69-further-reading" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>SuiteSparse KLU</strong> — Davis &amp; Natarajan, "Algorithm 907: KLU,
+  A Direct Sparse Solver for Circuit Simulation Problems",
+  <em>ACM TOMS</em> 37(3), 2010. The reference implementation of a
+  circuit-specialised sparse LU. We borrowed its threshold-
+  pivoting design (<code>PIVOT_THRESH = 1e-3</code>); the rest is ours.</li>
+<li><strong>The OpenSpec proposal</strong> <code>replace-klu-with-pulsim-sparse-lu/</code>
+  (archived 2026-05-24) has the section-by-section task
+  history.</li>
+<li><strong>In Pulsim</strong> — <code>core/include/pulsim/sparse/pulsim_lu_solver.hpp</code>
+  is the single header. Heavy doxy-commented; reads like a
+  textbook walkthrough.</li>
+<li><strong>In this doc set</strong> — <a href="../07-rank1-partial-refactor/">Chapter 7</a>
+  is the path-based partial refactor that lands on top.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../05-sparse-lu-foundations/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 5 — Sparse Direct LU Foundations">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                5 — Sparse Direct LU Foundations
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../07-rank1-partial-refactor/" class="md-footer__link md-footer__link--next" aria-label="Next: 7 — Path-Based Partial Refactorisation">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                7 — Path-Based Partial Refactorisation
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>
