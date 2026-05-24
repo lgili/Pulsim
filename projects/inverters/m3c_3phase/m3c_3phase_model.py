@@ -1734,6 +1734,12 @@ class M3cL1ControlState:
     n_refreshes: int = 0
     chosen_configs: list = field(default_factory=list)
     chosen_costs: list = field(default_factory=list)
+    # Trajectory of v_caps_module sampled at each T_s tick (one row per
+    # tick, 9 columns). Populated by all the cost-based step_observers
+    # so that long-run notebooks can plot cap balance over time.
+    v_caps_module_history: list = field(default_factory=list)
+    # T_s tick centre time for each row in v_caps_module_history.
+    refresh_t_centres: list = field(default_factory=list)
 
 
 def make_m3c_l1_cost_control(
@@ -1877,6 +1883,8 @@ def make_m3c_l1_cost_control(
         # Diagnostics.
         state.chosen_configs.append(best_cfg)
         state.chosen_costs.append(best_cost)
+        state.v_caps_module_history.append(list(state.v_caps_module))
+        state.refresh_t_centres.append(float(t_centre))
 
     def switch_fn(_t: float):
         mask = _p.SwitchStateMask(9)
@@ -2295,6 +2303,8 @@ def make_m3c_l1_dq_control(
         # Diagnostics.
         state.chosen_configs.append(best_cfg)
         state.chosen_costs.append(best_cost)
+        state.v_caps_module_history.append(list(state.v_caps_module))
+        state.refresh_t_centres.append(float(t_centre))
 
     def switch_fn(_t: float):
         mask = _p.SwitchStateMask(9)
@@ -2501,6 +2511,8 @@ def make_m3c_l1_dq_full_control(
             )
         state.chosen_configs.append(best_cfg)
         state.chosen_costs.append(best_cost)
+        state.v_caps_module_history.append(list(state.v_caps_module))
+        state.refresh_t_centres.append(float(t_centre))
 
     def switch_fn(_t: float):
         mask = _p.SwitchStateMask(9)
