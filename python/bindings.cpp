@@ -1769,6 +1769,92 @@ void init_module(py::module_& m) {
           "C++ hotpath: L1 multilevel forward-Euler step. Returns "
           "`(v_C_next, v_b, s_b)` where `s_b` is the integer "
           "PS-PWM switching count for this step.");
+
+    m.def("_cpp_mmc_arm_equivalent_step",
+          [](Real v_C,
+             py::array_t<std::int8_t, py::array::c_style |
+                                          py::array::forcecast> bit_s1,
+             py::array_t<std::int8_t, py::array::c_style |
+                                          py::array::forcecast> bit_s2,
+             py::array_t<Real, py::array::c_style |
+                                  py::array::forcecast> in_dead_time_until,
+             py::array_t<Real, py::array::c_style |
+                                  py::array::forcecast> last_toggle_time,
+             Real m_ref, Real i_b, Real dt, Real t,
+             Index n_sm, Real c_arm, Real f_carrier,
+             Real t_dead, Real t_min, Real r_p_inv) {
+              if (bit_s1.size() != n_sm || bit_s2.size() != n_sm ||
+                  in_dead_time_until.size() != n_sm ||
+                  last_toggle_time.size() != n_sm) {
+                  throw std::invalid_argument(
+                      "L2 state arrays must all have length n_sm");
+              }
+              const auto res = mmc::mmc_arm_equivalent_step(
+                  v_C,
+                  bit_s1.mutable_data(),
+                  bit_s2.mutable_data(),
+                  in_dead_time_until.mutable_data(),
+                  last_toggle_time.mutable_data(),
+                  m_ref, i_b, dt, t, n_sm, c_arm, f_carrier,
+                  t_dead, t_min, r_p_inv);
+              // ``v_C`` was passed by value; pack the updated copy
+              // into the return tuple. The four arrays were mutated
+              // in place via their numpy buffers.
+              return py::make_tuple(
+                  v_C, res.v_b,
+                  static_cast<py::int_>(res.s_w),
+                  static_cast<py::int_>(res.s_u));
+          },
+          py::arg("v_C"), py::arg("bit_s1"), py::arg("bit_s2"),
+          py::arg("in_dead_time_until"), py::arg("last_toggle_time"),
+          py::arg("m_ref"), py::arg("i_b"), py::arg("dt"),
+          py::arg("t"), py::arg("n_sm"), py::arg("c_arm"),
+          py::arg("f_carrier"), py::arg("t_dead"), py::arg("t_min"),
+          py::arg("r_p_inv") = Real{0.0},
+          "C++ hotpath: L2 SM-equivalent forward-Euler step "
+          "(dead-time + min-pulse-width). State arrays are mutated "
+          "in place. Returns `(v_C_next, v_b, s_w, s_u)`.");
+
+    m.def("_cpp_mmc_arm_detailed_step",
+          [](py::array_t<Real, py::array::c_style |
+                                  py::array::forcecast> v_C_per_sm,
+             py::array_t<std::int8_t, py::array::c_style |
+                                          py::array::forcecast> insertion_mask,
+             Real m_ref, Real i_b, Real dt, Real t,
+             Index n_sm, Real c_sm, Real f_carrier,
+             const std::string& sm_type,
+             const std::string& balancing, Real r_p_inv_per_sm) {
+              if (v_C_per_sm.size() != n_sm ||
+                  insertion_mask.size() != n_sm) {
+                  throw std::invalid_argument(
+                      "L3 state arrays must have length n_sm");
+              }
+              const mmc::SubmoduleType type =
+                  (sm_type == "full_bridge")
+                      ? mmc::SubmoduleType::FullBridge
+                      : mmc::SubmoduleType::HalfBridge;
+              const mmc::BalancingScheme scheme =
+                  (balancing == "none")
+                      ? mmc::BalancingScheme::None
+                      : mmc::BalancingScheme::SortAndSelect;
+              const auto res = mmc::mmc_arm_detailed_step(
+                  v_C_per_sm.mutable_data(),
+                  insertion_mask.mutable_data(),
+                  m_ref, i_b, dt, t, n_sm, c_sm, f_carrier,
+                  type, scheme, r_p_inv_per_sm);
+              return py::make_tuple(
+                  res.v_b, static_cast<py::int_>(res.s_b));
+          },
+          py::arg("v_C_per_sm"), py::arg("insertion_mask"),
+          py::arg("m_ref"), py::arg("i_b"), py::arg("dt"),
+          py::arg("t"), py::arg("n_sm"), py::arg("c_sm"),
+          py::arg("f_carrier"),
+          py::arg("sm_type") = "half_bridge",
+          py::arg("balancing") = "sort_and_select",
+          py::arg("r_p_inv_per_sm") = Real{0.0},
+          "C++ hotpath: L3 detailed per-SM forward-Euler step. "
+          "`v_C_per_sm` and `insertion_mask` are mutated in place. "
+          "Returns `(v_b, s_b)`.");
 }
 
 }  // namespace pulsim_kernel_bindings

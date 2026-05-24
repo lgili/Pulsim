@@ -58,26 +58,19 @@ from typing import Callable, Literal
 
 import numpy as np
 
-# C++ hotpath: prefer the kernel-side PS-PWM quantizer + L1 step when
-# the native extension is available (Phase 20.11 — header in
-# ``core/include/pulsim/mmc/arm.hpp``). The pure-Python fallbacks
-# below remain as the canonical reference.
-#
-# The L0 step uses pure Python deliberately: its arithmetic body is
-# so small (a handful of float ops) that pybind11 marshalling cost
-# eats the savings — empirically about 0.5× through the C++ port.
-# The C++ helper is still bound as ``_cpp_avg_step`` for users who
-# want to amortise the call in a tight C++ loop.
-try:
-    from ._pulsim import (  # type: ignore[import-not-found]
-        _cpp_ps_pwm_switching_function as _cpp_ps_pwm,
-        _cpp_mmc_arm_multilevel_step as _cpp_ml_step,
-    )
-    _HAS_CPP_MMC = True
-except ImportError:  # pragma: no cover
-    _cpp_ps_pwm = None  # type: ignore[assignment]
-    _cpp_ml_step = None  # type: ignore[assignment]
-    _HAS_CPP_MMC = False
+# Phase 20.12 — all MMC step functions live in C++ now
+# (``core/include/pulsim/mmc/arm.hpp``). The Python module is a thin
+# orchestrator: dataclasses, builder helpers, observers, and
+# time-series drivers all delegate the per-step math to the kernel.
+# There is no pure-Python fallback by design: a single implementation
+# is the only contract worth maintaining.
+from ._pulsim import (  # type: ignore[import-not-found]
+    _cpp_ps_pwm_switching_function as _cpp_ps_pwm,
+    _cpp_mmc_arm_average_step as _cpp_avg_step,
+    _cpp_mmc_arm_multilevel_step as _cpp_ml_step,
+    _cpp_mmc_arm_equivalent_step as _cpp_eq_step,
+    _cpp_mmc_arm_detailed_step as _cpp_dt_step,
+)
 
 __all__ = [
     "MmcArmAverageParams",
@@ -222,20 +215,11 @@ def mmc_arm_average_step(
         only if you also resolve the high-frequency modulation content
         in ``m_b(t)``.
     """
-    if dt <= 0:
-        raise ValueError(f"dt must be > 0 (got {dt})")
-
-    # NB: this layer keeps its pure-Python implementation. The L0 step
-    # is so simple (a handful of float ops) that the pybind11
-    # marshalling cost of calling the C++ helper would dominate the
-    # work — empirically a 2× slowdown vs the inlined CPython arithmetic.
-    # The C++ helper is still available as ``_cpp_avg_step`` for users
-    # who can amortise the call (e.g., looping in C++).
-    v_b = m_b * v_C
-    # dv_C/dt = (m_b · i_b - v_C / R_p) / C
-    leak = (v_C / params.r_p) if params.r_p is not None else 0.0
-    dv_dt = (m_b * i_b - leak) / params.c_arm
-    v_C_next = v_C + dt * dv_dt
+    r_p_inv = (1.0 / params.r_p) if params.r_p is not None else 0.0
+    v_C_next, v_b = _cpp_avg_step(
+        float(v_C), float(m_b), float(i_b),
+        float(dt), float(params.c_arm), float(r_p_inv),
+    )
     return v_C_next, v_b
 
 
@@ -952,33 +936,10 @@ def ps_pwm_switching_function(
     Returns:
         ``s_b`` — integer switching count.
     """
-    if _HAS_CPP_MMC:
-        return int(_cpp_ps_pwm(
-            float(m_ref), float(t), int(n_sm),
-            float(f_carrier), sm_type,
-        ))
-
-    # Pure-Python reference (kept as the canonical implementation).
-    if sm_type == "half_bridge":
-        m = max(0.0, min(1.0, m_ref))
-        s_b = 0
-        for k in range(n_sm):
-            phase = (t * f_carrier + k / n_sm) % 1.0
-            tri = 2.0 * phase if phase < 0.5 else 2.0 * (1.0 - phase)
-            if m > tri:
-                s_b += 1
-        return s_b
-    # full_bridge
-    m_clamped = max(-1.0, min(1.0, m_ref))
-    sign = 1 if m_clamped >= 0 else -1
-    m_abs = abs(m_clamped)
-    s_b = 0
-    for k in range(n_sm):
-        phase = (t * f_carrier + k / n_sm) % 1.0
-        tri = 2.0 * phase if phase < 0.5 else 2.0 * (1.0 - phase)
-        if m_abs > tri:
-            s_b += 1
-    return sign * s_b
+    return int(_cpp_ps_pwm(
+        float(m_ref), float(t), int(n_sm),
+        float(f_carrier), sm_type,
+    ))
 
 
 # ----------------------------------------------------------------------
@@ -1018,28 +979,14 @@ def mmc_arm_multilevel_step(
     """
     if dt <= 0:
         raise ValueError(f"dt must be > 0 (got {dt})")
-
-    if _HAS_CPP_MMC:
-        r_p_inv = (1.0 / params.r_p) if params.r_p is not None else 0.0
-        v_C_next, v_b, s_b_cpp = _cpp_ml_step(
-            float(v_C), float(m_ref), float(i_b),
-            float(dt), float(t), int(params.n_sm),
-            float(params.c_arm), float(params.f_carrier),
-            params.sm_type, float(r_p_inv),
-        )
-        return v_C_next, v_b, int(s_b_cpp)
-
-    # Pure-Python reference (kept as the canonical implementation).
-    s_b = ps_pwm_switching_function(
-        m_ref, t, params.n_sm, params.f_carrier,
-        sm_type=params.sm_type,
+    r_p_inv = (1.0 / params.r_p) if params.r_p is not None else 0.0
+    v_C_next, v_b, s_b_cpp = _cpp_ml_step(
+        float(v_C), float(m_ref), float(i_b),
+        float(dt), float(t), int(params.n_sm),
+        float(params.c_arm), float(params.f_carrier),
+        params.sm_type, float(r_p_inv),
     )
-    m_b = s_b / params.n_sm
-    v_b = m_b * v_C
-    leak = (v_C / params.r_p) if params.r_p is not None else 0.0
-    dv_dt = (m_b * i_b - leak) / params.c_arm
-    v_C_next = v_C + dt * dv_dt
-    return v_C_next, v_b, s_b
+    return v_C_next, v_b, int(s_b_cpp)
 
 
 @dataclass(frozen=True)
@@ -1308,20 +1255,6 @@ def make_l2_state(params: MmcArmEquivalentParams) -> MmcArmEquivalentState:
     )
 
 
-def _ps_pwm_targets(
-    m_ref: float, t: float, n_sm: int, f_carrier: float,
-) -> np.ndarray:
-    """Per-SM PS-PWM target bits at time t. Returns ``int8`` array."""
-    m = max(0.0, min(1.0, m_ref))
-    targets = np.zeros(n_sm, dtype=np.int8)
-    for k in range(n_sm):
-        phase = (t * f_carrier + k / n_sm) % 1.0
-        tri = 2.0 * phase if phase < 0.5 else 2.0 * (1.0 - phase)
-        if m > tri:
-            targets[k] = 1
-    return targets
-
-
 def mmc_arm_equivalent_step(
     state: MmcArmEquivalentState,
     m_ref: float,
@@ -1333,7 +1266,9 @@ def mmc_arm_equivalent_step(
     """Advance the L2 SM-equivalent arm by one forward-Euler step.
 
     Mutates ``state`` in place (advances ``state.v_C`` and the
-    per-SM switching arrays).
+    per-SM switching arrays). All computation runs in the C++
+    kernel (``core/include/pulsim/mmc/arm.hpp``); this wrapper
+    forwards the state arrays as numpy buffers.
 
     Args:
         state: Live L2 state (see :func:`make_l2_state`).
@@ -1357,51 +1292,19 @@ def mmc_arm_equivalent_step(
     if dt <= 0:
         raise ValueError(f"dt must be > 0 (got {dt})")
 
-    n = params.n_sm
-    targets = _ps_pwm_targets(m_ref, t, n, params.f_carrier)
-
-    # --- Per-SM state machine ---
-    for k in range(n):
-        if state.in_dead_time_until[k] > 0 and t >= state.in_dead_time_until[k]:
-            # Dead-time elapsed → commit the toggle. The target at
-            # this exact moment becomes the new s1; s2 is its complement.
-            state.bit_s1[k] = targets[k]
-            state.bit_s2[k] = 1 - targets[k]
-            state.in_dead_time_until[k] = -np.inf
-        elif state.in_dead_time_until[k] <= 0:
-            # Not currently in dead-time — check whether a toggle is needed.
-            if int(targets[k]) != int(state.bit_s1[k]):
-                # Min-pulse-width guard: suppress if too soon.
-                if params.t_min > 0 and (
-                    t - state.last_toggle_time[k] < params.t_min
-                ):
-                    continue  # suppress this toggle
-                # Begin dead-time: open both switches.
-                state.bit_s1[k] = 0
-                state.bit_s2[k] = 0
-                state.in_dead_time_until[k] = t + params.t_dead
-                state.last_toggle_time[k] = t
-                # If t_dead == 0, the transition completes at this same
-                # instant — emulate by committing here.
-                if params.t_dead == 0.0:
-                    state.bit_s1[k] = targets[k]
-                    state.bit_s2[k] = 1 - targets[k]
-                    state.in_dead_time_until[k] = -np.inf
-
-    s_w = int(state.bit_s1.sum())
-    s_u = int(((state.bit_s1 == 0) & (state.bit_s2 == 0)).sum())
-
-    # Free-wheel SMs route current through the body diodes:
-    #   i_b > 0 ⇒ D2 conducts ⇒ SM bypassed (v_SM = 0)
-    #   i_b < 0 ⇒ D1 conducts ⇒ SM inserted (v_SM = v_C_SM)
-    s_eff = s_w + (s_u if i_b < 0 else 0)
-    m_b_eff = s_eff / float(n)
-    v_b = m_b_eff * state.v_C
-
-    leak = (state.v_C / params.r_p) if params.r_p is not None else 0.0
-    dv_dt = (m_b_eff * i_b - leak) / params.c_arm
-    state.v_C = state.v_C + dt * dv_dt
-    return v_b, s_w, s_u
+    r_p_inv = (1.0 / params.r_p) if params.r_p is not None else 0.0
+    v_C_next, v_b, s_w, s_u = _cpp_eq_step(
+        float(state.v_C),
+        state.bit_s1, state.bit_s2,
+        state.in_dead_time_until, state.last_toggle_time,
+        float(m_ref), float(i_b), float(dt), float(t),
+        int(params.n_sm), float(params.c_arm),
+        float(params.f_carrier),
+        float(params.t_dead), float(params.t_min),
+        float(r_p_inv),
+    )
+    state.v_C = v_C_next
+    return v_b, int(s_w), int(s_u)
 
 
 @dataclass(frozen=True)
@@ -1682,14 +1585,10 @@ def _balance_select(
 ) -> np.ndarray:
     """Return a boolean mask of length N picking the ``s_b`` SMs to insert.
 
-    Args:
-        v_C_per_sm: Current per-SM voltages.
-        s_b: Switching count from PS-PWM (0..N).
-        i_b: Arm current (sign drives the selection).
-        scheme: ``"sort_and_select"`` or ``"none"``.
-
-    Returns:
-        Length-N boolean array; exactly ``s_b`` entries are True.
+    Thin numpy-friendly wrapper around the C++
+    :func:`pulsim::mmc::balance_select` for visibility in tests
+    (the per-step path goes via :func:`mmc_arm_detailed_step` →
+    ``_cpp_dt_step``, which calls the same kernel routine).
     """
     n = len(v_C_per_sm)
     if s_b <= 0:
@@ -1700,7 +1599,6 @@ def _balance_select(
         mask = np.zeros(n, dtype=bool)
         mask[:s_b] = True
         return mask
-    # sort_and_select: charging ⇒ insert lowest; discharging ⇒ insert highest.
     order = np.argsort(v_C_per_sm, kind="stable")
     mask = np.zeros(n, dtype=bool)
     if i_b >= 0:
@@ -1720,7 +1618,10 @@ def mmc_arm_detailed_step(
 ) -> "tuple[float, int, np.ndarray]":
     """Advance the L3 detailed arm by one forward-Euler step.
 
-    Mutates ``state.v_C_per_sm`` in place.
+    Mutates ``state.v_C_per_sm`` in place. All inner-loop math
+    (PS-PWM quantizer, sort-and-select balancer, per-SM dynamics)
+    runs in the C++ kernel; this wrapper allocates the insertion
+    mask buffer and dispatches.
 
     Args:
         state: Live L3 state (see :func:`make_l3_state`).
@@ -1740,28 +1641,23 @@ def mmc_arm_detailed_step(
     if dt <= 0:
         raise ValueError(f"dt must be > 0 (got {dt})")
 
-    s_b = ps_pwm_switching_function(
-        m_ref, t, params.n_sm, params.f_carrier,
-        sm_type=params.sm_type,
+    # Per-step scratch — could be cached on `state` if profiling
+    # shows it as a hot allocation, but at N ≤ 30 the overhead is
+    # negligible compared with the C++ step body.
+    insertion = np.zeros(params.n_sm, dtype=np.int8)
+    r_p_inv_per_sm = (
+        (1.0 / (params.r_p * params.n_sm))
+        if params.r_p is not None else 0.0
     )
-    insertion = _balance_select(
-        state.v_C_per_sm, s_b, i_b, params.balancing,
+    v_b, s_b_int = _cpp_dt_step(
+        state.v_C_per_sm, insertion,
+        float(m_ref), float(i_b), float(dt), float(t),
+        int(params.n_sm), float(params.c_sm),
+        float(params.f_carrier),
+        params.sm_type, params.balancing,
+        float(r_p_inv_per_sm),
     )
-
-    v_b = float(state.v_C_per_sm[insertion].sum())
-
-    if params.r_p is not None:
-        # Distribute the arm-equivalent loss uniformly: each SM sees
-        # r_p · n_sm as its individual loss so the *sum* discharge
-        # current matches the L0/L1/L2 single-resistor model.
-        r_per_sm = params.r_p * params.n_sm
-        leak_per_sm = state.v_C_per_sm / r_per_sm
-    else:
-        leak_per_sm = 0.0
-
-    dv_dt = (insertion.astype(np.float64) * i_b - leak_per_sm) / params.c_sm
-    state.v_C_per_sm = state.v_C_per_sm + dt * dv_dt
-    return v_b, s_b, insertion
+    return float(v_b), int(s_b_int), insertion.astype(bool)
 
 
 @dataclass(frozen=True)

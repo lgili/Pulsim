@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Benchmark: MMC L0/L1 hot-path Python vs C++ implementations.
+"""Benchmark: per-step cost of the MMC L0/L1/L2/L3 layers.
 
-The C++ helpers in ``core/include/pulsim/mmc/arm.hpp`` are header-
-only and exposed via three private bindings on ``pulsim._pulsim``:
+Since Phase 20.12 every MMC step function in ``pulsim.mmc`` is a
+thin dispatch into the C++ kernel
+(``core/include/pulsim/mmc/arm.hpp``). This script measures the
+wall-clock cost of each layer's step function on a workload sized
+to a realistic per-arm simulation.
 
-  * ``_cpp_ps_pwm_switching_function``  ← inner N-SM carrier loop
-  * ``_cpp_mmc_arm_average_step``       ← L0 single forward-Euler step
-  * ``_cpp_mmc_arm_multilevel_step``    ← L1 step (PS-PWM + L0 dynamics)
-
-``pulsim/mmc.py`` dispatches to those at runtime when the kernel
-extension is loaded (``_HAS_CPP_MMC = True``). This script measures
-the wall-clock speedup on a workload representative of the per-
-observer call in a real simulation: thousands of repeated calls per
-arm per simulation, per-step dt.
+Numbers reported are µs/call; multiply by (n_arms × n_steps) to
+estimate the per-simulation contribution.
 """
 
 from __future__ import annotations
@@ -20,114 +16,95 @@ from __future__ import annotations
 import math
 import time
 
+import numpy as np
+
 import pulsim as p
 import pulsim.mmc as mmc_mod
 
+
 # Iteration counts large enough that timer noise is negligible.
-N_PS_PWM    = 200_000   # PS-PWM-only loop
-N_AVG_STEP  = 200_000   # L0 step
-N_ML_STEP   = 200_000   # L1 step
+N_PS_PWM    = 200_000
+N_AVG_STEP  = 200_000
+N_ML_STEP   = 200_000
+N_EQ_STEP   = 200_000
+N_DT_STEP   =  50_000     # L3 sorts per call, so 50k is plenty.
 
 
-def bench_ps_pwm() -> None:
-    print(f"\nps_pwm_switching_function (N={N_PS_PWM} calls, n_sm=8):")
-    n_sm = 8
-    f_carrier = 1000.0
+def bench(name: str, n: int, fn) -> None:
+    # Warm-up to remove first-call effects (e.g., JIT-warmed numpy
+    # routines or cold-cache pages on the array buffers).
+    fn(min(2000, n))
+    t0 = time.perf_counter()
+    fn(n)
+    elapsed = time.perf_counter() - t0
+    print(f"  {name:38s} {elapsed*1e3:7.1f} ms  "
+          f"({elapsed/n*1e6:5.2f} µs/call)")
 
-    # C++
+
+def bench_ps_pwm(n: int) -> None:
     cpp = mmc_mod._cpp_ps_pwm  # type: ignore[attr-defined]
-    t0 = time.perf_counter()
-    for k in range(N_PS_PWM):
+    for k in range(n):
         cpp(0.5 + 0.4 * math.sin(k * 1e-3),
-            k * 1e-5, n_sm, f_carrier, "half_bridge")
-    t_cpp = time.perf_counter() - t0
-
-    # Python (force-disable C++ dispatch)
-    save = mmc_mod._HAS_CPP_MMC
-    mmc_mod._HAS_CPP_MMC = False
-    try:
-        t0 = time.perf_counter()
-        for k in range(N_PS_PWM):
-            mmc_mod.ps_pwm_switching_function(
-                0.5 + 0.4 * math.sin(k * 1e-3),
-                k * 1e-5, n_sm, f_carrier,
-                sm_type="half_bridge",
-            )
-        t_py = time.perf_counter() - t0
-    finally:
-        mmc_mod._HAS_CPP_MMC = save
-
-    print(f"  Python : {t_py*1e3:7.1f} ms   ({t_py/N_PS_PWM*1e6:5.2f} µs/call)")
-    print(f"  C++    : {t_cpp*1e3:7.1f} ms   ({t_cpp/N_PS_PWM*1e6:5.2f} µs/call)")
-    print(f"  speedup: {t_py/t_cpp:5.1f}×")
+            k * 1e-5, 8, 1000.0, "half_bridge")
 
 
-def bench_avg_step() -> None:
-    print(f"\nmmc_arm_average_step (N={N_AVG_STEP} calls):")
+def bench_avg_step(n: int) -> None:
     params = p.MmcArmAverageParams(n_sm=10, c_sm=1e-3, v_c0=500.0)
-
-    t0 = time.perf_counter()
     v_C = params.v_c0
-    for k in range(N_AVG_STEP):
+    for _ in range(n):
         v_C, _ = mmc_mod.mmc_arm_average_step(v_C, 0.5, 4.0, 1e-6, params)
-    t_cpp = time.perf_counter() - t0
-
-    save = mmc_mod._HAS_CPP_MMC
-    mmc_mod._HAS_CPP_MMC = False
-    try:
-        t0 = time.perf_counter()
-        v_C = params.v_c0
-        for k in range(N_AVG_STEP):
-            v_C, _ = mmc_mod.mmc_arm_average_step(v_C, 0.5, 4.0, 1e-6, params)
-        t_py = time.perf_counter() - t0
-    finally:
-        mmc_mod._HAS_CPP_MMC = save
-
-    print(f"  Python : {t_py*1e3:7.1f} ms   ({t_py/N_AVG_STEP*1e6:5.2f} µs/call)")
-    print(f"  C++    : {t_cpp*1e3:7.1f} ms   ({t_cpp/N_AVG_STEP*1e6:5.2f} µs/call)")
-    print(f"  speedup: {t_py/t_cpp:5.1f}×")
 
 
-def bench_ml_step() -> None:
-    print(f"\nmmc_arm_multilevel_step (N={N_ML_STEP} calls, n_sm=8):")
+def bench_ml_step(n: int) -> None:
     params = p.MmcArmMultilevelParams(
         n_sm=8, c_sm=1e-3, v_c0=500.0, f_carrier=1000.0,
     )
-
-    t0 = time.perf_counter()
     v_C = params.v_c0
-    for k in range(N_ML_STEP):
+    for k in range(n):
         v_C, _, _ = mmc_mod.mmc_arm_multilevel_step(
             v_C, 0.5, 4.0, 1e-6, k * 1e-6, params,
         )
-    t_cpp = time.perf_counter() - t0
 
-    save = mmc_mod._HAS_CPP_MMC
-    mmc_mod._HAS_CPP_MMC = False
-    try:
-        t0 = time.perf_counter()
-        v_C = params.v_c0
-        for k in range(N_ML_STEP):
-            v_C, _, _ = mmc_mod.mmc_arm_multilevel_step(
-                v_C, 0.5, 4.0, 1e-6, k * 1e-6, params,
-            )
-        t_py = time.perf_counter() - t0
-    finally:
-        mmc_mod._HAS_CPP_MMC = save
 
-    print(f"  Python : {t_py*1e3:7.1f} ms   ({t_py/N_ML_STEP*1e6:5.2f} µs/call)")
-    print(f"  C++    : {t_cpp*1e3:7.1f} ms   ({t_cpp/N_ML_STEP*1e6:5.2f} µs/call)")
-    print(f"  speedup: {t_py/t_cpp:5.1f}×")
+def bench_eq_step(n: int) -> None:
+    params = p.MmcArmEquivalentParams(
+        n_sm=8, c_sm=1e-3, v_c0=500.0,
+        f_carrier=1000.0, t_dead=20e-6, t_min=0.0,
+    )
+    state = p.make_l2_state(params)
+    for k in range(n):
+        mmc_mod.mmc_arm_equivalent_step(
+            state, 0.5, 4.0, 1e-6, k * 1e-6, params,
+        )
+
+
+def bench_dt_step(n: int) -> None:
+    params = p.MmcArmDetailedParams(
+        n_sm=8, c_sm=1e-3, v_c0=500.0,
+        f_carrier=1000.0, balancing="sort_and_select",
+    )
+    state = p.make_l3_state(params)
+    for k in range(n):
+        mmc_mod.mmc_arm_detailed_step(
+            state, 0.5, 4.0, 1e-6, k * 1e-6, params,
+        )
 
 
 def main() -> None:
     print("=" * 64)
-    print("MMC hot-path benchmark — pulsim Python vs C++")
+    print("MMC per-step benchmark — all layers run in C++")
     print("=" * 64)
-    print(f"_HAS_CPP_MMC = {mmc_mod._HAS_CPP_MMC}")
-    bench_ps_pwm()
-    bench_avg_step()
-    bench_ml_step()
+    print()
+    print("Layer                                 Wall time   Per call")
+    print("-" * 64)
+    bench("L0:  ps_pwm_switching_function (N=8)", N_PS_PWM, bench_ps_pwm)
+    bench("L0:  mmc_arm_average_step",            N_AVG_STEP, bench_avg_step)
+    bench("L1:  mmc_arm_multilevel_step (N=8)",   N_ML_STEP,  bench_ml_step)
+    bench("L2:  mmc_arm_equivalent_step (N=8)",   N_EQ_STEP,  bench_eq_step)
+    bench("L3:  mmc_arm_detailed_step (N=8)",     N_DT_STEP,  bench_dt_step)
+    print()
+    print("Note: per-arm step rate scales linearly with N_SM for L0/L1, "
+          "and with N·log(N) for L3 (sort-and-select).")
 
 
 if __name__ == "__main__":
