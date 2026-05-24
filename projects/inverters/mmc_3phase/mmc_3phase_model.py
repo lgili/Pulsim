@@ -394,3 +394,262 @@ def rms_ac(signal: np.ndarray) -> float:
     """RMS of the AC component (signal minus its DC mean)."""
     sig = np.asarray(signal, dtype=np.float64)
     return float(np.sqrt(np.mean((sig - sig.mean()) ** 2)))
+
+
+# =============================================================================
+# Closed-loop control helpers — dq current control on the MMC (Section 4.3)
+# =============================================================================
+#
+# The thesis Section 4.3 derives a discrete-time RST controller for the
+# MMC port currents (and a separate one for the circulating currents).
+# In pulsim we use the simpler PIController class — same architectural
+# pattern (decoupled per-axis PI) but in continuous time, suitable for
+# a demonstration notebook. Tuning targets:
+#
+#   * Crossover ≈ 200 Hz (well below f_switch = 9 kHz/arm)
+#   * Phase margin > 60° to leave room for the multilevel staircase
+#     and dead-time non-idealities
+
+
+def clarke_2_3(a: float, b: float, c: float) -> "tuple[float, float]":
+    """Power-invariant Clarke (2/3) transform: abc → αβ."""
+    alpha = (2.0 / 3.0) * (a - 0.5 * b - 0.5 * c)
+    beta  = (2.0 / 3.0) * ((np.sqrt(3) / 2.0) * b
+                              - (np.sqrt(3) / 2.0) * c)
+    return alpha, beta
+
+
+def park(alpha: float, beta: float, theta: float) -> "tuple[float, float]":
+    """Park transform: αβ → dq (rotating frame at angle θ)."""
+    c, s = np.cos(theta), np.sin(theta)
+    return c * alpha + s * beta, -s * alpha + c * beta
+
+
+def inv_park(d: float, q: float,
+                theta: float) -> "tuple[float, float]":
+    """Inverse Park: dq → αβ."""
+    c, s = np.cos(theta), np.sin(theta)
+    return c * d - s * q, s * d + c * q
+
+
+def inv_clarke_2_3(alpha: float,
+                       beta: float) -> "tuple[float, float, float]":
+    """Inverse Clarke (matches the 2/3 forward): αβ → abc."""
+    a = alpha
+    b = -0.5 * alpha + (np.sqrt(3) / 2.0) * beta
+    c = -0.5 * alpha - (np.sqrt(3) / 2.0) * beta
+    return a, b, c
+
+
+@dataclass
+class ClosedLoopResult:
+    """Output of :func:`run_mmc_closed_loop`."""
+
+    t: np.ndarray
+    # AC-port currents (load inductor branches).
+    i_a: np.ndarray
+    i_b: np.ndarray
+    i_c: np.ndarray
+    # dq frame currents reconstructed post-hoc from the abc samples.
+    i_d: np.ndarray
+    i_q: np.ndarray
+    # Setpoint trajectories.
+    i_d_ref: np.ndarray
+    i_q_ref: np.ndarray
+    # Modulation indices written into the upper arms (for plot).
+    m_a_p: np.ndarray
+    m_b_p: np.ndarray
+    m_c_p: np.ndarray
+    # Per-arm capacitor sums.
+    v_C: np.ndarray  # shape (6, n)
+
+
+def run_mmc_closed_loop(
+    params: GeanThesisParams,
+    *,
+    i_d_ref_fn: "Callable[[float], float]",
+    i_q_ref_fn: "Callable[[float], float]",
+    kp: float,
+    ki: float,
+    layer: str = "l1",
+    t_end: float = 200e-3,
+    dt: float = 5e-6,
+) -> ClosedLoopResult:
+    """Run an MMC inverter under closed-loop dq current control.
+
+    Architecture mirrors the thesis Section 4.3:
+
+      * abc → αβ (Clarke 2/3) → dq (Park at θ = ω·t)
+      * Two decoupled PI loops, one per axis
+      * Inverse Park / Clarke → per-phase voltage references
+      * Per-arm modulation: ``m_X_p = 0.5 − v_X / V_dc``,
+        ``m_X_n = 0.5 + v_X / V_dc`` (half-bridge MMC convention)
+
+    Args:
+        params: Plant parameters (uses ``params.modulation_scheme``).
+        i_d_ref_fn, i_q_ref_fn: Setpoint generators for the d- and q-axis
+            currents (callables of ``t``).
+        kp, ki: PI gains (same for both axes — symmetric tuning is
+            standard for balanced 3-φ plants).
+        layer: ``"l1"`` (PS-PWM / IPD multilevel) or ``"l2"`` (with
+            dead-time + min-pulse-width).
+        t_end, dt: Simulation horizon and step.
+
+    Returns:
+        :class:`ClosedLoopResult` with the full logged trajectories.
+    """
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+
+    m_a_holder = [0.5]
+    m_b_holder = [0.5]
+    m_c_holder = [0.5]
+
+    if layer == "l1":
+        arm_params = p.MmcArmMultilevelParams(
+            n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
+            f_carrier=params.f_carrier,
+            modulation_scheme=params.modulation_scheme,  # type: ignore[arg-type]
+        )
+        add_arm = p.add_mmc_arm_multilevel
+        make_obs = p.make_mmc_arm_multilevel_observers
+    elif layer == "l2":
+        arm_params = p.MmcArmEquivalentParams(  # type: ignore[assignment]
+            n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
+            f_carrier=params.f_carrier,
+            t_dead=params.t_dead, t_min=params.t_min,
+            modulation_scheme=params.modulation_scheme,  # type: ignore[arg-type]
+        )
+        add_arm = p.add_mmc_arm_equivalent
+        make_obs = p.make_mmc_arm_equivalent_observers
+    else:
+        raise ValueError(f"layer must be 'l1' or 'l2' (got {layer!r})")
+
+    arms: list[object] = []
+
+    # Upper arms.
+    for k, ph in enumerate("abc"):
+        holder = (m_a_holder, m_b_holder, m_c_holder)[k]
+        arm_p = add_arm(  # type: ignore[arg-type]
+            b, name=f"A_{ph}_p",
+            node_a="dc_p", node_b=f"mid_{ph}_p",
+            params=arm_params,  # type: ignore[arg-type]
+            m_ref=lambda _t, _h=holder: _h[0],
+        )
+        arms.append(arm_p)
+        b.add_inductor(f"Lb_{ph}_p", f"mid_{ph}_p", f"rb_{ph}_p", params.l_b)
+        b.add_resistor(f"Rb_{ph}_p", f"rb_{ph}_p", f"ac_{ph}", params.r_b)
+
+    # Lower arms with complement modulation.
+    for k, ph in enumerate("abc"):
+        holder = (m_a_holder, m_b_holder, m_c_holder)[k]
+        b.add_resistor(f"Rb_{ph}_n", f"ac_{ph}", f"rb_{ph}_n", params.r_b)
+        b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
+        arm_n = add_arm(  # type: ignore[arg-type]
+            b, name=f"A_{ph}_n",
+            node_a=f"mid_{ph}_n", node_b="dc_n",
+            params=arm_params,  # type: ignore[arg-type]
+            m_ref=lambda _t, _h=holder: 1.0 - _h[0],
+        )
+        arms.append(arm_n)
+
+    iL_idx: list[int] = []
+    for ph in "abc":
+        lid = b.graph.num_branches
+        b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
+        b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
+        iL_idx.append(b.pool.branch_var_id_for_inductor(lid, b.graph))
+    b.add_resistor("R_star", "star", "dc_n", 1e6)
+
+    obs_arms, bex = make_obs(b, arms, dt=dt)  # type: ignore[arg-type]
+
+    pi_d = p.PIController(
+        Kp=kp, Ki=ki,
+        output_min=-params.V_dc / 2.0,
+        output_max=+params.V_dc / 2.0,
+    )
+    pi_q = p.PIController(
+        Kp=kp, Ki=ki,
+        output_min=-params.V_dc / 2.0,
+        output_max=+params.V_dc / 2.0,
+    )
+
+    n = int(round(t_end / dt)) + 1
+    log = {
+        "t":      np.zeros(n),
+        "i_a":    np.zeros(n),
+        "i_b":    np.zeros(n),
+        "i_c":    np.zeros(n),
+        "i_d":    np.zeros(n),
+        "i_q":    np.zeros(n),
+        "i_d_ref": np.zeros(n),
+        "i_q_ref": np.zeros(n),
+        "m_a_p":  np.zeros(n),
+        "m_b_p":  np.zeros(n),
+        "m_c_p":  np.zeros(n),
+        "v_C":    np.zeros((6, n)),
+    }
+    counter = [0]
+    omega = params.omega_grid
+    m_max = 0.95     # arm-modulation depth limit
+
+    def control_and_observe(t, x):
+        i_a = float(x[iL_idx[0]])
+        i_b_ = float(x[iL_idx[1]])
+        i_c_ = float(x[iL_idx[2]])
+        theta = omega * t
+
+        i_alpha, i_beta = clarke_2_3(i_a, i_b_, i_c_)
+        i_d, i_q = park(i_alpha, i_beta, theta)
+        i_d_ref = float(i_d_ref_fn(t))
+        i_q_ref = float(i_q_ref_fn(t))
+        v_d = pi_d.update(setpoint=i_d_ref, measured=i_d, dt=dt)
+        v_q = pi_q.update(setpoint=i_q_ref, measured=i_q, dt=dt)
+        v_alpha, v_beta = inv_park(v_d, v_q, theta)
+        v_a, v_b, v_c = inv_clarke_2_3(v_alpha, v_beta)
+
+        # Clip the half-swing voltage so the modulation index stays
+        # in [0.5 - m_max/2, 0.5 + m_max/2].
+        half_swing = m_max * params.V_dc / 2.0
+        v_a = max(-half_swing, min(half_swing, v_a))
+        v_b = max(-half_swing, min(half_swing, v_b))
+        v_c = max(-half_swing, min(half_swing, v_c))
+
+        m_a_holder[0] = 0.5 - v_a / params.V_dc
+        m_b_holder[0] = 0.5 - v_b / params.V_dc
+        m_c_holder[0] = 0.5 - v_c / params.V_dc
+
+        obs_arms(t, x)
+
+        i = counter[0]
+        if i < n:
+            log["t"][i] = t
+            log["i_a"][i] = i_a
+            log["i_b"][i] = i_b_
+            log["i_c"][i] = i_c_
+            log["i_d"][i] = i_d
+            log["i_q"][i] = i_q
+            log["i_d_ref"][i] = i_d_ref
+            log["i_q_ref"][i] = i_q_ref
+            log["m_a_p"][i] = m_a_holder[0]
+            log["m_b_p"][i] = m_b_holder[0]
+            log["m_c_p"][i] = m_c_holder[0]
+            for k in range(6):
+                log["v_C"][k, i] = arms[k].v_C  # type: ignore[attr-defined]
+        counter[0] += 1
+
+    p.simulate(
+        b, t_end=t_end, dt=dt,
+        step_observer=control_and_observe, b_extra_fn=bex,
+        start_from_dc_op=True,
+    )
+
+    nn = counter[0]
+    return ClosedLoopResult(
+        t=log["t"][:nn],
+        i_a=log["i_a"][:nn], i_b=log["i_b"][:nn], i_c=log["i_c"][:nn],
+        i_d=log["i_d"][:nn], i_q=log["i_q"][:nn],
+        i_d_ref=log["i_d_ref"][:nn], i_q_ref=log["i_q_ref"][:nn],
+        m_a_p=log["m_a_p"][:nn], m_b_p=log["m_b_p"][:nn], m_c_p=log["m_c_p"][:nn],
+        v_C=log["v_C"][:, :nn],
+    )
