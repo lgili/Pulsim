@@ -79,17 +79,49 @@ class DriveSimParams:
     # Boost stage
     f_sw_pfc: float = 65.0e3           # boost switching frequency [Hz]
     duty_pfc: float = 0.45             # constant duty (open-loop mode)
-    V_link_target: float = 380.0       # bus voltage the PFC loop regulates to
+    V_link_target: float = 380.0       # bus voltage the outer V loop regulates to
     pfc_closed_loop: bool = False      # if True, modulate D(t) with the
-                                        # rectified-envelope trajectory
-                                        # (= what an ideal CCM avg-current PFC
-                                        # controller produces). Disabled by
-                                        # default because the single-knob
-                                        # trajectory cannot simultaneously
-                                        # satisfy current-shaping AND V_link
-                                        # regulation without an outer voltage
-                                        # PI loop (open-loop V_link drifts
-                                        # ±15 % off target).
+                                        # rectified-envelope feed-forward
+                                        # trajectory only (no measurement
+                                        # feedback). Kept for ablation.
+    pfc_cascade_loop: bool = False     # if True, run the textbook cascade:
+                                        # outer V_link PI loop → current
+                                        # reference scale K_amp → inner I_L002
+                                        # PI loop → duty cycle. Same
+                                        # architecture as a real avg-current-
+                                        # mode PFC controller (Erickson §18).
+                                        # OFF by default because the gains
+                                        # in DriveSimParams are conservative
+                                        # (designed for OP 2.3) — flip on for
+                                        # ablation studies or current-shape
+                                        # comparisons against PSIM, where it
+                                        # delivers an I_L002 envelope that
+                                        # tracks |V_rect|·K_amp instead of
+                                        # the discontinuous open-loop pulse.
+    # Outer voltage loop gains — designed for ~ 5 Hz crossover.
+    # We pick a deliberately low bandwidth because the K_amp → V_link
+    # plant has a 1/s pole at the bus cap (290 k / s for OP 2.3) and
+    # we need plenty of phase margin against the 2·f_line ripple
+    # the L001-bridge tank injects at high amplitude. Tuned by
+    # iterating on the 200 ms cascade settling test.
+    pfc_Kp_v: float = 8.0e-5           # A/(V·V) — current-ref scale per error
+    pfc_Ki_v: float = 0.005            # integral (s⁻¹·A/V/V)
+    pfc_K_amp_max: float = 0.08        # anti-windup clip (max A per peak V)
+    pfc_v_lp_alpha: float = 0.0003     # LP filter on V_link feedback —
+                                        # τ ≈ 1/(alpha·dt) ≈ 7 ms (heavy
+                                        # enough to suppress 2·f_line ripple)
+    # Inner current loop gains — designed for ~ 300 Hz crossover.
+    # We deliberately keep this BELOW one PWM period (15 µs @ 65 kHz)
+    # so the PI loop reacts to *cycle-averaged* current, not to the
+    # instantaneous PWM ripple. A separate LP filter on the I_L002
+    # feedback (``pfc_i_lp_alpha``) gives the same effect explicitly.
+    pfc_Kp_i: float = 0.005            # Duty per A error
+    pfc_Ki_i: float = 30.0             # Duty per (A·s)
+    pfc_i_lp_alpha: float = 0.05       # LP on i_L002 feedback —
+                                        # τ ≈ 40 µs ≈ 2.6 PWM cycles
+                                        # (cuts switching ripple cleanly)
+    # Soft-start
+    pfc_soft_start: float = 0.030      # seconds — smooth-ramp K_amp 0→target
 
     # Inverter stage
     f_sw_inv: float = 5.0e3            # IPM SPWM carrier [Hz]
@@ -142,8 +174,10 @@ def make_sim_params(op: OperatingPoint) -> DriveSimParams:
 class FrontendSwitchMap:
     """Switch-index map for the front-end sim (boost MOSFETs only).
 
-    Also carries the inductor branch IDs so the result-extraction code
-    can look up i_L001 / i_L002 by name instead of hard-coding indices.
+    Also carries the inductor branch IDs and the *state-vector* indices
+    the closed-loop PFC controller needs to feed back V_link, V_rect
+    and I_L002. Captured at build time so subsequent edits to the
+    ``add_*`` order don't break the indexing.
     """
 
     t001_mosfet: int = -1
@@ -151,6 +185,10 @@ class FrontendSwitchMap:
     total_switches: int = 0
     l001_branch: int = -1
     l002_branch: int = -1
+    # State-vector indices for controller feedback (filled after build)
+    state_idx_vlink:  int = -1
+    state_idx_rect_p: int = -1
+    state_idx_iL002:  int = -1
 
 
 def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwitchMap]":
@@ -266,7 +304,159 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
     b.add_resistor("R_load_eq", "vlink", "gnd", R_load_eq)
 
     sw_map.total_switches = int(b.graph.num_switches)
+
+    # Capture state-vector indices the closed-loop controller needs.
+    # Node voltages live at the first ``num_nodes`` slots; inductor
+    # currents come after, located by ``branch_var_id_for_inductor``.
+    sw_map.state_idx_vlink  = int(b.node_id_of("vlink"))
+    sw_map.state_idx_rect_p = int(b.node_id_of("rect_p"))
+    sw_map.state_idx_iL002  = int(
+        b.pool.branch_var_id_for_inductor(int(sw_map.l002_branch), b.graph)
+    )
+
     return b, sw_map
+
+
+# ---------------------------------------------------------------------------
+# Cascade PFC controller — outer V_link PI + inner I_L002 PI
+# ---------------------------------------------------------------------------
+
+
+class PfcCascadeController:
+    """Average-current-mode boost PFC controller (Erickson §18.4).
+
+    Two loops in cascade:
+
+    * **Outer voltage loop** — slow (≪ 2·f_line). PI on ``V_link``
+      error generates ``K_amp``, the *amplitude* of the inner-loop
+      current reference. Heavy LP filter on the V_link feedback
+      removes the 2·f_line bus ripple so it doesn't show up as line-
+      frequency distortion on the input current.
+
+    * **Inner current loop** — fast (~ 1 kHz). PI on ``I_L002``
+      error plus a CCM feed-forward term ``D_ff = 1 − V_rect/V_link``
+      generates the boost duty cycle. The reference is shaped as
+      ``I_L002* = K_amp · |V_rect(t)|`` so the line current follows
+      the voltage envelope — that's the unity-PF mechanism.
+
+    Soft-start ramps K_amp from 0 to its steady-state value over
+    ``sp.pfc_soft_start`` seconds to keep the inrush bounded.
+
+    Used as a *pair* with ``simulate``: pass ``ctrl`` as both the
+    ``switch_fn`` (via ``ctrl.switch_fn(t)``) and the ``step_observer``
+    (via ``ctrl.observe(t, state)``).
+    """
+
+    def __init__(self, sp: DriveSimParams, sw_map: FrontendSwitchMap):
+        import pulsim as p
+
+        self.sp = sp
+        self.N = int(sw_map.total_switches)
+        self.idx_T001 = int(sw_map.t001_mosfet)
+        self.idx_T002 = int(sw_map.t002_mosfet)
+        self.idx_vlink  = int(sw_map.state_idx_vlink)
+        self.idx_rect_p = int(sw_map.state_idx_rect_p)
+        self.idx_iL002  = int(sw_map.state_idx_iL002)
+        self._SwitchStateMask = p.SwitchStateMask
+
+        self.pwm_period = 1.0 / float(sp.f_sw_pfc)
+
+        # Outer voltage loop state
+        # With pre-charge enabled (default for cascade mode) the bus
+        # starts at V_link_target — initialise the LP filter at the
+        # same value so the V loop starts at zero error and the
+        # soft-start ramp can take over.
+        self.V_link_lp = float(sp.V_link_target)
+
+        # K_amp_steady is the expected operating-point K_amp for the
+        # current OP — derived from the power-balance equation
+        # ``I_L_pk = 2·P/V_pk`` and ``K_amp = I_L_pk/V_pk``. Anti-
+        # windup clips both the proportional and integral terms to
+        # ±50 % around this value so the loop can't pump > 1.5× the
+        # rated power into the bus. Eliminates the 8 Hz limit-cycle
+        # we'd otherwise see with a fixed K_amp_max.
+        import math
+        V_pk = math.sqrt(2.0) * float(sp.op.V_ac)
+        I_L_pk_steady = 2.0 * float(sp.op.P_in_target) / max(V_pk, 1.0)
+        self.K_amp_steady = I_L_pk_steady / max(V_pk, 1.0)
+        self.K_amp_max = min(float(sp.pfc_K_amp_max),
+                              self.K_amp_steady * 1.5)
+        # Seed integrator at the FF estimate so we start near the
+        # operating point and only let the loop trim small errors.
+        self.v_int = self.K_amp_steady
+        self.K_amp = 0.0
+
+        # Inner current loop state
+        self.i_int = 0.0
+        self.duty = float(sp.duty_pfc)              # init to FF estimate
+        self.i_L002_lp = 0.0                         # LP-filtered i_L002 feedback
+
+        # Bookkeeping for variable-dt observer calls
+        self.last_obs_t = -1.0
+
+    # ------------------------------------------------------------------
+    # step_observer side — runs the cascade at each macro step
+    # ------------------------------------------------------------------
+    def observe(self, t: float, state) -> None:
+        sp = self.sp
+
+        # Estimate the macro-step dt for the PI integrators.
+        dt = (t - self.last_obs_t) if self.last_obs_t >= 0.0 else float(sp.dt)
+        if dt <= 0.0:
+            dt = float(sp.dt)
+        self.last_obs_t = float(t)
+
+        V_link = float(state[self.idx_vlink])
+        V_rect = float(state[self.idx_rect_p])
+        I_L002 = float(state[self.idx_iL002])
+
+        # Heavy LP on V_link → remove 2·f_line ripple before V loop.
+        a = float(sp.pfc_v_lp_alpha)
+        self.V_link_lp += a * (V_link - self.V_link_lp)
+
+        # OUTER voltage loop: PI on V_link error → K_amp
+        e_v = float(sp.V_link_target) - self.V_link_lp
+        self.v_int += float(sp.pfc_Ki_v) * e_v * dt
+        # Anti-windup: K_amp lives in [0, K_amp_max] A/V
+        # Clamp integrator to the same range so it can't wind up
+        # against the K_amp clip and then stall on its way back.
+        self.v_int = max(0.0, min(self.v_int, self.K_amp_max))
+        K_amp_raw = float(sp.pfc_Kp_v) * e_v + self.v_int
+        K_amp_raw = max(0.0, min(K_amp_raw, self.K_amp_max))
+
+        # Soft-start ramp during the first ``pfc_soft_start`` seconds
+        if t < float(sp.pfc_soft_start) and sp.pfc_soft_start > 0:
+            ramp = max(0.0, t / float(sp.pfc_soft_start))
+            self.K_amp = K_amp_raw * ramp
+        else:
+            self.K_amp = K_amp_raw
+
+        # LP filter the i_L002 feedback so the inner loop reacts to
+        # the *cycle-averaged* current, not the PWM ripple.
+        ai = float(sp.pfc_i_lp_alpha)
+        self.i_L002_lp += ai * (I_L002 - self.i_L002_lp)
+
+        # INNER current loop: PI on i_L002 error → duty correction
+        I_ref = self.K_amp * abs(V_rect)
+        e_i = I_ref - self.i_L002_lp
+        self.i_int += float(sp.pfc_Ki_i) * e_i * dt
+        self.i_int = max(-0.3, min(self.i_int, 0.3))
+
+        # Feed-forward CCM duty + PI correction
+        D_ff = 1.0 - (abs(V_rect) / max(V_link, 1.0)) if V_link > 1.0 else 0.5
+        D = D_ff + float(sp.pfc_Kp_i) * e_i + self.i_int
+        self.duty = max(0.02, min(D, 0.95))
+
+    # ------------------------------------------------------------------
+    # switch_fn side — sample the duty into a PWM gate signal
+    # ------------------------------------------------------------------
+    def switch_fn(self, t: float):
+        phase = (t % self.pwm_period) / self.pwm_period
+        on = phase < self.duty
+        mask = self._SwitchStateMask(self.N)
+        mask.set(self.idx_T001, bool(on))
+        mask.set(self.idx_T002, bool(on))
+        return mask
 
 
 def _make_frontend_switch_fn(sp: DriveSimParams, sw_map: FrontendSwitchMap):
@@ -485,7 +675,7 @@ class InverterResult:
 def simulate_frontend(sp: DriveSimParams,
                        *, t_end: Optional[float] = None,
                        dt: Optional[float] = None,
-                       precharge_vlink: bool = False,
+                       precharge_vlink: Optional[bool] = None,
                        ) -> FrontendResult:
     """Run the front-end (rectifier + boost) sim with the inverter
     replaced by a constant-power resistor on the bus.
@@ -506,7 +696,27 @@ def simulate_frontend(sp: DriveSimParams,
     dt = float(dt) if dt is not None else float(sp.dt)
 
     b, sw_map = _build_frontend(sp)
-    sw_fn = _make_frontend_switch_fn(sp, sw_map)
+
+    # Pick the switch_fn / observer pair based on the control mode.
+    # Default is the closed-loop cascade (V + I PI). Falls back to the
+    # open-loop trajectory if explicitly disabled — kept for ablation
+    # studies and for comparing against the constant-duty baseline.
+    observer = None
+    if bool(sp.pfc_cascade_loop):
+        ctrl = PfcCascadeController(sp, sw_map)
+        sw_fn = ctrl.switch_fn
+        observer = ctrl.observe
+        # Cascade benefits from pre-charge: V loop starts at the right
+        # operating point and we don't waste the 30 ms soft-start
+        # window charging the bus from 0 V.
+        if precharge_vlink is None:
+            precharge_vlink = True
+    else:
+        sw_fn = _make_frontend_switch_fn(sp, sw_map)
+        # Open-loop doesn't tolerate pre-charge well: the inductor
+        # currents would have to be pre-loaded too to stay consistent.
+        if precharge_vlink is None:
+            precharge_vlink = False
 
     init_state = None
     if precharge_vlink:
@@ -515,16 +725,16 @@ def simulate_frontend(sp: DriveSimParams,
                            max_event_iterations=4, progress=False)
         state_len = len(list(res0.states[0]))
         init = np.zeros(state_len, dtype=float)
-        for n in ("vlink", "n_c009_esr", "n_c010_esr"):
-            try:
-                init[b.node_id_of(n)] = float(sp.V_link_target)
-            except Exception:
-                pass
+        # Pre-charge ONLY the cap+ terminal of C009/C010. Setting both
+        # terminals to V_link_target gives V_cap = 0 V (no stored
+        # energy) and the bus collapses on the first solve step. The
+        # ESR-side nodes stay at ground so V_cap = V_link_target.
+        init[b.node_id_of("vlink")] = float(sp.V_link_target)
         init_state = list(init)
 
     res = p.simulate(
         b, t_end=t_end, dt=dt, switch_fn=sw_fn,
-        initial_state=init_state,
+        initial_state=init_state, step_observer=observer,
         max_event_iterations=12, progress=False,
     )
 
@@ -547,27 +757,16 @@ def simulate_frontend(sp: DriveSimParams,
     # doesn't poison the loss integrals downstream.
     i_L001 = np.clip(i_L001, -30.0, +30.0)
 
-    # Reconstruct the boost-MOSFET gate schedule at each sample so we
-    # can split I_L002 into i_T_total (MOSFET branch) and i_D002 (diode
-    # branch) without re-running the solver.
-    import math
-    if sp.pfc_closed_loop:
-        V_pk = float(math.sqrt(2.0) * sp.op.V_ac)
-        omega = 2.0 * math.pi * float(sp.op.f_line)
-        V_link_tgt = float(sp.V_link_target)
-        D_avg_ideal = 1.0 - (2.0 * V_pk / math.pi) / V_link_tgt
-        D_avg_const = 1.0 - V_pk / V_link_tgt
-        K_load = D_avg_const / max(D_avg_ideal, 0.01)
-        pwm_period_pfc = 1.0 / float(sp.f_sw_pfc)
-        v_rect = np.abs(V_pk * np.sin(omega * times))
-        D_inst = (1.0 - v_rect / V_link_tgt) * K_load
-        D_inst = np.clip(D_inst, 0.02, 0.85)
-        phase = (times % pwm_period_pfc) / pwm_period_pfc
-        sw_state = phase < D_inst
-    else:
-        pwm_period_pfc = 1.0 / float(sp.f_sw_pfc)
-        phase = (times % pwm_period_pfc) / pwm_period_pfc
-        sw_state = phase < float(sp.duty_pfc)
+    # Reconstruct the boost-MOSFET gate schedule from the simulated
+    # ``v_sw_pfc`` node — this works irrespective of the control mode
+    # (constant duty, open-loop trajectory, or full closed-loop
+    # cascade). When the MOSFET is ON, v_sw_pfc is clamped near
+    # ``n_shunt`` (≈ 0 V); when OFF and D002 is conducting,
+    # v_sw_pfc ≈ v_link. A threshold at half v_link cleanly separates
+    # the two states for the loss-extraction split.
+    v_sw   = states[:, nid("sw_pfc")]
+    v_link = states[:, nid("vlink")]
+    sw_state = v_sw < (v_link * 0.5)
 
     # When sw is ON, I_L002 flows through T001‖T002 (paralleled, so each
     # carries half). When sw is OFF, I_L002 flows through D002.

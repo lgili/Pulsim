@@ -91,29 +91,33 @@ losses are back-computed from power balance instead:
 closed-loop sim ends up emitting and the resulting numbers track to
 within a few percent.
 
-## Known limitations of the open-loop model
+## PFC control modes
 
-1. **No closed-loop PFC controller** — boost duty is fixed at the
-   CCM-gain estimate `D = 1 − V_in_pk/V_link_target`. A real
-   PFC modulates D continuously to track `|V_ac|` and regulate
-   `V_link`. The closed-loop modulation trajectory is also offered
-   via `sp.pfc_closed_loop = True` (see
-   `_make_frontend_switch_fn`), but without an outer voltage PI
-   loop V_link drifts ±15 % — disabled by default. As a result
-   the boost spends most of the cycle near DCM and the simulated
-   `I_L002_rms` is much lower than the PSIM target.
+The front-end supports three control modes, selectable via flags on
+`DriveSimParams`:
 
-2. **L001-C006-bridge tank rings past ≈ 50 ms** because there's
+| Mode | Flags | Description |
+|------|-------|------------|
+| **Open-loop, constant duty** *(default)* | both flags `False` | Boost MOSFET fires at a fixed duty `D = 1 − V_in_pk/V_link_target` derived from the CCM gain formula. Stable but the boost only conducts near the line peaks → `I_L002_rms` ~ 15 × lower than PSIM. Used for the headline validation numbers because it gives the cleanest steady-state V_link without controller-induced ringing. |
+| **Feed-forward trajectory** | `sp.pfc_closed_loop = True` | Modulates `D(t) = (1 − V_rect(t)/V_link_target) · K_load` (the textbook CCM steady-state duty trajectory). Shapes the current well but cannot regulate V_link without an outer loop. |
+| **Full cascade — V outer + I inner PI** | `sp.pfc_cascade_loop = True` | Real avg-current-mode PFC controller (Erickson §18.4): outer V_link PI generates `K_amp`, inner I_L002 PI generates duty. Implemented as `PfcCascadeController` (wired via `switch_fn` + `step_observer` pair, see source). Gives a properly shaped sinusoidal `I_L002` envelope at unity PF. Gains in `DriveSimParams` are tuned for OP 2.3; OP 2.2 (low line) and OP 2.4 (max load) need per-OP scaling — left as a follow-up. |
+
+## Known limitations of the default open-loop model
+
+1. **L001-C006-bridge tank rings past ≈ 50 ms** because there's
    no current-loop damping. All sims default to ≤ 60 ms and KPIs
    are extracted from the middle 40 % (30 %–70 %) of the window
    where the L001 state is well-behaved.
 
-3. **Boost-leg conduction losses lean low** (P_cond_T1/T2 -90 %)
+2. **Boost-leg conduction losses lean low** (P_cond_T1/T2 -90 %)
    because the open-loop boost only conducts near the line peaks.
    The boost *peak* current matches PSIM (~5 A at OP 2.3), but the
-   cycle-RMS is ~15 × lower than PSIM's closed-loop value.
+   cycle-RMS is ~15 × lower than PSIM's closed-loop value. Flip
+   `sp.pfc_cascade_loop = True` to enable the full V+I PI cascade,
+   which shapes the inductor current to the line envelope (unity-PF
+   behaviour) — at the cost of needing per-OP gain re-tuning.
 
-4. **Compressor is a 3φ RL load** (no back-EMF source). Speed is
+3. **Compressor is a 3φ RL load** (no back-EMF source). Speed is
    set by the SPWM frequency × slip assumption rather than torque
    balance.
 
