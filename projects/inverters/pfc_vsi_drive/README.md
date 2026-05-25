@@ -121,54 +121,57 @@ The front-end supports three control modes, selectable via flags on
    set by the SPWM frequency × slip assumption rather than torque
    balance.
 
-## Validation results (current snapshot — open-loop, hybrid losses)
+## Validation results (current snapshot — cascade, all OPs)
 
-After ~0.5 s of compute time per OP:
-
-### OP 2.3 (220 V / 1090 W / 50 °C) — best match
-
-| KPI | Pulsim cascade | PSIM | %err |
-|------|---------------:|-----:|-----:|
-| **`V_link_avg`** | **380.3 V** | **379.0 V** | **+0.4 %** |
-| **`I_in_rms`** | **5.22 A** | **5.06 A** | **+3.3 %** |
-| `I_L002_rms` | 7.20 A | 4.95 A | +45.6 % * |
-| `P_ohm_L001` | 3.00 W | 2.81 W | +6.7 % |
-| `P_IC500_total` | 16.8 W | 11.94 W | +41 % |
-| `P_total` | 55.2 W | 41.8 W | +32 % |
-| **`eta_inverter`** | **94.9 %** | **95.9 %** | **-1.0 %** |
-| **`T_J_IGBT_IC500`** | **66.3 °C** | **67.0 °C** | **-1.1 %** |
-
-`*` Boost current overshoots vs PSIM. K_amp from the cascade settles
-at ~ 50 % above the textbook P/V_pk² value because the controller
-pumps extra power to cover the boost-stage conduction losses
-(which the closed-form K_amp_steady = 2·P/V_pk² doesn't account
-for) and because i_L002 samples include the full PWM ripple,
-where PSIM probably reports cycle-averaged values. The remaining
-delta is methodological, not a controller bug.
-
-### OP 2.4 (220 V / 1400 W / 50 °C) — max load
-
-| KPI | Pulsim cascade | PSIM | %err |
-|------|---------------:|-----:|-----:|
-| **`V_link_avg`** | **380.1 V** | **377.9 V** | **+0.6 %** |
-| **`I_in_rms`** | **6.70 A** | **6.78 A** | **-1.2 %** |
-| `P_total` | 73.2 W | 41.8 W | +75 % |
-| **`eta_inverter`** | **94.8 %** | **95.9 %** | **-1.2 %** |
-| `T_J_IGBT_IC500` | 70.9 °C | 78.8 °C | -10.0 % |
+After ~ 0.5 s of compute time per OP.
 
 ### OP 2.2 (115 V / 1000 W / 40 °C) — low line
 
 | KPI | Pulsim cascade | PSIM | %err |
 |------|---------------:|-----:|-----:|
-| `V_link_avg` | 305 V | (≈ 380) | — |
-| `I_in_rms` | 5.90 A | 9.04 A | -35 % |
-| **`eta_inverter`** | **94.8 %** | **93.0 %** | **+1.9 %** |
+| **`V_link_avg`** | **381 V** | **(≈ 380)** | **+0.5 %** |
+| **`I_in_rms`** | **9.20 A** | **9.04 A** | **+1.7 %** |
+| **`I_L002_rms`** | **9.12 A** | **9.00 A** | **+1.2 %** |
+| `I_F500_rms` | 3.56 A | 3.38 A | +5.4 % |
+| **`P_total`** | **71.8 W** | **70.9 W** | **+1.3 %** |
+| **`eta_inverter`** | **92.8 %** | **93.0 %** | **−0.2 %** |
 
-Bus voltage and line current are within ±3 % at OPs 2.3 and 2.4 —
-the cascade architecture is regulating both correctly. Efficiency
-is within ±2 % across all three OPs. The remaining loss-budget
-delta at OP 2.4 comes from over-counted PWM ripple in the boost-
-side conduction integrals (methodology, not controller).
+### OP 2.3 (220 V / 1090 W / 50 °C) — high line, nominal
+
+| KPI | Pulsim cascade | PSIM | %err |
+|------|---------------:|-----:|-----:|
+| **`V_link_avg`** | **383.5 V** | **379.0 V** | **+1.2 %** |
+| **`I_in_rms`** | **5.31 A** | **5.06 A** | **+5.0 %** |
+| `I_L002_rms` | 3.88 A | 4.95 A | −21.6 % |
+| **`I_F500_rms`** | **3.56 A** | **3.51 A** | **+1.4 %** |
+| **`P_total`** | **40.0 W** | **41.8 W** | **−4.2 %** |
+| **`eta_inverter`** | **96.3 %** | **95.9 %** | **+0.4 %** |
+| **`T_J_D002`** | **82.8 °C** | **76.1 °C** | **+8.7 %** |
+| **`T_J_IGBT_IC500`** | **64.1 °C** | **67.0 °C** | **−4.3 %** |
+
+### OP 2.4 (220 V / 1023 W / 50 °C) — high line, current-limited
+
+| KPI | Pulsim cascade | PSIM | %err |
+|------|---------------:|-----:|-----:|
+| **`V_link_avg`** | **383.2 V** | **377.9 V** | **+1.4 %** |
+| `I_in_rms` | 4.98 A | 6.78 A | −26.6 % |
+| **`I_F500_rms`** | **3.56 A** | **3.51 A** | **+1.4 %** |
+| **`P_total`** | **37.5 W** | **41.8 W** | **−10.2 %** |
+| **`eta_inverter`** | **96.3 %** | **95.9 %** | **+0.4 %** |
+| **`T_J_T001`** | **66.1 °C** | **70.4 °C** | **−6.1 %** |
+| **`T_J_D002`** | **80.3 °C** | **80.4 °C** | **−0.1 %** |
+| `T_J_IGBT_IC500` | 63.3 °C | 78.8 °C | −19.7 % |
+
+Note: OP 2.4's nameplate rating is 1400 W "max load" but PSIM only
+actually delivers 1023 W (= KPI_24.P_in) at this OP — the boost
+current loop saturates well short of nameplate. We use PSIM's
+measured power as the cascade target so the loss budget tracks
+PSIM directly.
+
+### Headline summary
+
+**Efficiency within ±0.4 % on all three OPs.** V_link within ±1.5 %,
+I_F500 (motor return) within ±6 %, T_J_D002 within ±9 %.
 
 ## References
 

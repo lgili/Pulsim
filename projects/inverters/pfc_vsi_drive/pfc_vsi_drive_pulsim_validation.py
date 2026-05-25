@@ -58,7 +58,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from bom import (  # noqa: E402  — after sys.path bootstrap
-    C006, C009, C010, COMPRESSOR_PARAMS,
+    C006, C009, C010, C011, COMPRESSOR_PARAMS,
     D001, D002, F500, IC500, L001, L002,
     R002, R003, R036, R508, T001, T002,
 )
@@ -280,18 +280,14 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
     # rated line current.
     b.add_resistor("R_L001_snub", "n_l001_d", "gnd", 5.0e3)
 
-    # X-cap (C006, EMI filter) + bulk smoothing cap on the
-    # rectified bus.
-    #
-    # The PSIM reference also includes a 470 µF electrolytic on
-    # ``rect_p`` (in addition to the small X-cap). Without it the
-    # bridge enters deep DCM, V_rect collapses between line peaks,
-    # and the boost stage has to compensate with much higher
-    # peak inductor current than the design actually carries
-    # (PSIM's I_L002 ≈ I_in only matches when the bridge stays
-    # in CCM). The bleeder also suppresses the L001-C006 tank.
+    # X-cap (C006, EMI filter) + bulk smoothing cap (C011) on the
+    # rectified bus. C011 matches the 470 µF electrolytic PSIM
+    # includes on rect_p — keeps the bridge in CCM across the line
+    # cycle. Without it the boost stage has to compensate for V_rect
+    # collapsing between line peaks with much higher peak inductor
+    # current than the design actually carries.
     b.add_capacitor("C006", "rect_p", "gnd", float(C006.C))
-    b.add_capacitor("C_rect_smooth", "rect_p", "gnd", 470.0e-6)
+    b.add_capacitor("C011", "rect_p", "gnd", float(C011.C))
     b.add_resistor("R_C006_bleed", "rect_p", "gnd", 10.0e3)
 
     # Boost inductor + DCR

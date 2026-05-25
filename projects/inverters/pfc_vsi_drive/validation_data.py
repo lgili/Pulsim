@@ -55,9 +55,14 @@ OP_23 = OperatingPoint(
 )
 OP_24 = OperatingPoint(
     id="OP_2.4",
-    label="220 V / 50 Hz / 1400 W / 50 °C (high-line, max load)",
-    V_ac=220.0, f_line=50.0, P_in_target=1400.0,
+    label="220 V / 50 Hz / 1023 W / 50 °C (high-line, current-limited)",
+    V_ac=220.0, f_line=50.0, P_in_target=1023.0,
     T_amb=50.0, speed_rpm=3500.0,
+    # Spec nameplate is 1400 W "max load" but PSIM only delivers
+    # 1023 W (= KPI_24.P_in) at this OP — the boost current loop
+    # saturates well short of the rated value. We use PSIM's
+    # *measured* power as the target so our cascade pumps the same
+    # amount and the loss budget tracks PSIM directly.
 )
 OPERATING_POINTS = (OP_22, OP_23, OP_24)
 
