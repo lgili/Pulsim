@@ -311,6 +311,8 @@ __all__ = [
     "simulate",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
+    # add-python-builder-ergonomics (v1.5).
+    "Cancelled",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
     "ClosedLoop",
@@ -494,6 +496,14 @@ if _HAS_SCOPE:
     __all__.append("LiveScope")
 
 
+# add-python-builder-ergonomics (v1.5) — patch IC + alias helpers onto
+# CircuitBuilder, define Cancelled exception, expose simulate-wrapped
+# analyses with `should_continue` cancellation.
+from . import _builder_ergonomics as _berg
+_berg.install(CircuitBuilder)
+Cancelled = _berg.Cancelled
+
+
 class NameNotFoundError(KeyError):
     """Raised by :meth:`SimulationResult.v` / `.i` / `.power` and the
     :class:`CircuitBuilder` lookup helpers when a requested name
@@ -554,6 +564,13 @@ def _result_v(self, name: str, t=None):
             "wrapper is attached automatically, or set "
             "result._builder = builder by hand."
         )
+    # add-python-builder-ergonomics: consult the alias map first.
+    # If `name` is a registered alias for a node, route through to
+    # the canonical name's node_id_of.
+    alias = builder._resolve_alias(name) if hasattr(
+        builder, "_resolve_alias") else None
+    if alias is not None and alias[0] == "node":
+        name = alias[1]
     try:
         idx = builder.node_id_of(name)
     except IndexError:
@@ -605,6 +622,11 @@ def _result_i(self, name: str, t=None):
             "_builder reference. Use pulsim.simulate(...) so the "
             "wrapper is attached automatically."
         )
+    # Same alias resolution as `.v`.
+    alias = builder._resolve_alias(name) if hasattr(
+        builder, "_resolve_alias") else None
+    if alias is not None and alias[0] == "branch":
+        name = alias[1]
     try:
         b_id = builder.branch_index_of(name)
     except IndexError:
@@ -787,6 +809,22 @@ def simulate(
                 obs(t, x)
 
         step_observer = _composed_observer
+
+    # add-python-builder-ergonomics: if the caller didn't pass an
+    # explicit initial_state but the builder has recorded ICs via
+    # `set_initial`, synthesise the ndarray from them.
+    if initial_state is None and getattr(
+        builder, "_pulsim_ic", None):
+        try:
+            initial_state = builder.initial_state_vector()
+        except Exception as exc:  # noqa: BLE001 — be permissive
+            import warnings as _w
+            _w.warn(
+                f"simulate: failed to auto-synthesise initial_state "
+                f"from builder ICs ({exc!r}); falling back to zero.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     # Build the PWL cache.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)

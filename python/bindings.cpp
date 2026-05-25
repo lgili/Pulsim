@@ -160,7 +160,9 @@ void init_module(py::module_& m) {
     py::class_<builder::CircuitBuilder>(m, "CircuitBuilder",
         "High-level v2 circuit constructor. Hides the "
         "two-object Graph + DevicePool setup; users pass "
-        "string node names and SI-unit parameter values.")
+        "string node names and SI-unit parameter values.",
+        py::dynamic_attr())  // allow Python-side metadata
+                              // (initial conditions, aliases)
         .def(py::init<>())
         .def("node", &builder::CircuitBuilder::node,
               py::arg("name"),

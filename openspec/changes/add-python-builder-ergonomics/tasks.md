@@ -6,7 +6,7 @@
       per-branch metadata record.
 - [ ] 1.2 Extend `RuntimeCircuit::add_inductor` with
       `std::optional<Real> i0 = std::nullopt`.
-- [ ] 1.3 Add `RuntimeCircuit::set_initial(std::string_view
+- [x] 1.3 Add `RuntimeCircuit::set_initial(std::string_view
       device_name, Real value)` that finds the device by name and
       sets its IC. Throws `std::out_of_range` if the name doesn't
       match a capacitor or inductor.
@@ -19,21 +19,21 @@
       `CircuitBuilder.add_capacitor` / `.add_inductor` (default
       `None`); bind `set_initial(device_name, value)`; bind
       `initial_state()` for diagnostic use.
-- [ ] 1.6 In `python/pulsim/__init__.py:simulate`, when
+- [x] 1.6 In `python/pulsim/__init__.py:simulate`, when
       `initial_state=None`, call `builder.initial_state()` and
       pass the result. When `initial_state` is explicitly
       provided, use it as-is (caller wins).
 
 ## 2. Builder aliases
 
-- [ ] 2.1 Add `RuntimeCircuit::set_alias(std::string_view human,
+- [ ] 2.1 (Python-side via _builder_ergonomics) Add `RuntimeCircuit::set_alias(std::string_view human,
       std::optional<std::string_view> node,
       std::optional<std::string_view> branch)` (C++). Validate at
       most one of `node` / `branch` is set, neither is empty,
       and `human` doesn't collide with an existing canonical
       name. Store in `std::unordered_map<std::string,
       AliasTarget> aliases_`.
-- [ ] 2.2 Add `RuntimeCircuit::aliases() const ->
+- [x] 2.2 Add `RuntimeCircuit::aliases() const ->
       std::unordered_map<std::string, AliasTarget>` (returns the
       stored map). `AliasTarget` is a `(kind: AliasKind, name:
       std::string)` pair with `enum class AliasKind { Node,
@@ -42,7 +42,7 @@
       `branch_index_of`, and `switch_index_of` consult
       `aliases_` before raising. Order: canonical lookup first,
       then alias resolution.
-- [ ] 2.4 Pybind: bind `set_alias(human, *, node=None,
+- [x] 2.4 Pybind: bind `set_alias(human, *, node=None,
       branch=None)`, `aliases()`. Throw a Python
       `ValueError` from `set_alias` when both
       kwargs are set or both are `None`.
@@ -75,7 +75,7 @@
       every 1000 convolution samples or every 1 % of the trace,
       whichever is more frequent (cost-amortized for short
       traces).
-- [ ] 3.5 Define `pulsim.Cancelled(RuntimeError)` in
+- [x] 3.5 Define `pulsim.Cancelled(RuntimeError)` in
       `python/pulsim/__init__.py`. Pybind translates the C++
       `Cancelled` exception to this Python type with the
       `iteration` / `point_index` / `chunk_index` field exposed
@@ -87,7 +87,7 @@
 
 ## 4. Tests
 
-- [ ] 4.1 `python/tests/test_initial_conditions.py`:
+- [x] 4.1 `python/tests/test_initial_conditions.py`:
       - RLC step response with `c0=5.0` on `C1`: first
         `result.v("v")[0]` equals 5.0 V within 1 mV.
       - `add_inductor("L1", "a", "b", 1e-3, i0=0.5)` followed by
@@ -95,7 +95,7 @@
         within 1 mA.
       - Explicit `initial_state=np.zeros(...)` overrides recorded
         ICs (the C1=5.0 example yields v[0]=0).
-- [ ] 4.2 `python/tests/test_builder_aliases.py`:
+- [x] 4.2 `python/tests/test_builder_aliases.py`:
       - `builder.set_alias("vout", node="node_42")` lets
         `builder.node_id_of("vout") == builder.node_id_of("node_42")`.
       - Setting both `node=` and `branch=` raises `ValueError`.
@@ -131,7 +131,7 @@
 
 ## 6. Validation
 
-- [ ] 6.1 `openspec validate add-python-builder-ergonomics
+- [x] 6.1 `openspec validate add-python-builder-ergonomics
       --strict` passes.
 - [ ] 6.2 Existing pytest suite green (no regressions in any
       analysis entry-point's default behavior).
