@@ -629,15 +629,34 @@ class InverterSwitchMap:
 
 
 def _build_inverter(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, InverterSwitchMap]":
-    """Build the 3-phase IGBT IPM driving the compressor as a 3φ star
-    RL load, with the boost replaced by an ideal DC voltage source at
-    ``sp.V_link_target``.
+    """Build the 3-phase IGBT IPM driving the compressor as a real
+    PMSM (per phase: ``Rs + Ls + back-EMF source``), with the boost
+    replaced by an ideal DC voltage source at ``sp.V_link_target``.
 
-    R508 sense resistor sits between the IPM's DC- return and ``gnd``,
+    Per-phase topology
+    ------------------
+    ::
+
+        mid_x ── R_s ── L_s ── + e_x(t) ── motor_n
+
+    where ``e_x(t) = V_emf_pk · sin(2π·f_motor·t + φ_x)`` is the
+    back-EMF for phase x ∈ {a, b, c} with φ_a=0, φ_b=−2π/3,
+    φ_c=+2π/3. ``V_emf_pk = Ke · ω_mech`` from ``COMPRESSOR_PARAMS``.
+
+    Adding a real back-EMF is what bounds the motor phase current to
+    its physical value (the back-EMF and the SPWM phase voltage
+    cancel out most of the inverter output; only the *difference*
+    drives current through ``R_s + jωL_s``). Without it, modelling
+    the motor as pure RL forces the user to pick an artificial R
+    that over-estimates the stator losses and under-estimates the
+    PWM-cycle current ripple.
+
+    R508 sense resistor sits between the IPM's DC- return and gnd,
     matching the schematic (current through R508 = I_F500 magnitude).
     """
     import pulsim as p
-    from pulsim.topology import add_three_phase_vsi, add_three_phase_rl_load
+    import math
+    from pulsim.topology import add_three_phase_vsi
 
     b = p.CircuitBuilder()
     sw_map = InverterSwitchMap()
@@ -666,15 +685,44 @@ def _build_inverter(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, InverterSwi
         b.add_diode(tag, anode, cathode, 1.0 / 0.05, 1e-9,
                     V_th=float(IC500.V_F_diode))
 
-    # Compressor as 3φ star RL
-    add_three_phase_rl_load(
-        b, "Motor",
-        node_a="mid_a", node_b="mid_b", node_c="mid_c",
-        node_neutral="motor_n",
-        R=float(sp.R_load), L=float(sp.L_load),
-        topology="star",
-    )
-    b.add_resistor("R_motor_n_gnd", "motor_n", "gnd", 1.0e-3)
+    # ---- 3φ PMSM ---------------------------------------------------
+    # Per-phase chain: mid_x → R_s → L_s → V_emf_x → motor_n
+    # Back-EMF synchronised with the SPWM modulation (phase=0 for A,
+    # −120° / +120° for B / C).
+    Rs       = float(COMPRESSOR_PARAMS["Rs"])
+    Ls       = float(COMPRESSOR_PARAMS["Ld"])      # surface PMSM: Ld=Lq
+    Ke       = float(COMPRESSOR_PARAMS["Ke"])
+    pp       = int(COMPRESSOR_PARAMS["pole_pairs"])
+    omega_m  = 2.0 * math.pi * float(sp.f_motor) / pp   # mech ω [rad/s]
+    V_emf_pk = Ke * omega_m                              # phase-pk back-EMF
+
+    # Modulation phase of phase A's SPWM (zero by default in
+    # make_three_phase_spwm_fn) — align the back-EMF reference here.
+    phi_a, phi_b, phi_c = 0.0, -2.0 * math.pi / 3.0, +2.0 * math.pi / 3.0
+    for tag, mid, n_int, phi in [
+        ("a", "mid_a", "n_a_int", phi_a),
+        ("b", "mid_b", "n_b_int", phi_b),
+        ("c", "mid_c", "n_c_int", phi_c),
+    ]:
+        # mid → Rs → n_int_rs → Ls → n_int_emf → emf → motor_n
+        n_rs  = f"n_{tag}_rs"
+        n_emf = f"n_{tag}_emf"
+        b.add_resistor(f"Rs_{tag}", mid, n_rs, Rs)
+        b.add_inductor(f"Ls_{tag}", n_rs, n_emf, Ls)
+        b.add_sine_voltage_source(
+            f"emf_{tag}", n_emf, "motor_n",
+            v_dc=0.0, v_amplitude=V_emf_pk,
+            frequency=float(sp.f_motor), phase=phi,
+        )
+    # Motor-neutral handling: in a real 3-phase Y winding the
+    # neutral is *floating* — the common-mode V_link/2 average of
+    # the SPWM outputs lands naturally on the neutral, so no DC
+    # current flows through the stator. A low-impedance tie to gnd
+    # (1 mΩ) would clamp the neutral and force a V_link/2 DC bias
+    # across every phase Z, exploding the current to hundreds of
+    # amps. We use a 10 MΩ bleed: ample MNA reference for KCL,
+    # negligible DC draw (38 µA at V_link/2 = 190 V).
+    b.add_resistor("R_motor_n_gnd", "motor_n", "gnd", 10.0e6)
 
     sw_map.total_switches = int(b.graph.num_switches)
     return b, sw_map

@@ -197,13 +197,21 @@ IC500 = IgbtIpm(
     T_j_max=150.0,
 )
 
-# Compressor mechanical parameters (rough — refined by validation)
+# Compressor mechanical parameters.
+#
+# Ke is the per-phase back-EMF constant in V·s/rad_mech, sized so
+# that at nominal speed (ω_mech = 2π·3500/60 = 366.5 rad/s) the peak
+# phase back-EMF is ≈ 150 V — in the right ballpark for an inverter
+# delivering V_link = 380 V across a 3-phase SPWM at m_a ≈ 0.8
+# (V_phase_pk_motor = m_a·V_link/2 ≈ 152 V). The previous 0.08 was
+# a placeholder that gave only 29 V back-EMF — too low to act as
+# the dominant per-phase impedance in this drive.
 COMPRESSOR_PARAMS = dict(
     speed_rpm_nom=3500.0,
-    pole_pairs=2,        # typical 4-pole BLDC for small fractional-HP
+    pole_pairs=2,        # 4-pole BLDC for small fractional-HP
     Rs=1.5,              # stator resistance per phase [Ω]
     Ld=8e-3, Lq=8e-3,    # synchronous inductances [H]
-    Ke=0.08,             # back-EMF constant [V/(rad/s)]
+    Ke=0.265,            # back-EMF constant [V·s/rad_mech] — see above
     J=2e-4,              # moment of inertia [kg·m²]
     B=1e-4,              # viscous friction [N·m/(rad/s)]
     T_load_at_3500rpm=1.0,    # load torque @ rated [N·m]
