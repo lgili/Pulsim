@@ -227,8 +227,8 @@ class LossBreakdown:
     T_J_IC500: float = 0.0
 
 
-def compute_losses(sim_result, *, settle_fraction: float = 0.3,
-                   end_fraction: float = 0.7,
+def compute_losses(sim_result, *, settle_fraction: float = 0.7,
+                   end_fraction: float = 1.0,
                    ) -> LossBreakdown:
     """Build a ``LossBreakdown`` from a ``DriveSimResult`` using
     *direct waveform integration* of the simulated branch currents.
@@ -333,8 +333,9 @@ def compute_losses(sim_result, *, settle_fraction: float = 0.3,
 
     # ---- Magnetics --------------------------------------------------
     # L002 sits in the boost loop where the sim is clean → integrate
-    # directly. L001 sits on the line where i_in is noisy → use the
-    # analytical I_in_rms_est for a clean DCR loss.
+    # the *true* RMS (including PWM ripple), which is what actually
+    # heats the winding. L001 sits on the line where i_in is noisy
+    # → use the analytical I_in_rms_est for a clean DCR loss.
     P_ohm_L002 = float(L002.DCR) * float(np.mean(i_L002 ** 2))
     P_mag_L002 = float(L002.P_core_nom)
     P_ohm_L001 = float(L001.DCR) * I_in_rms_est ** 2

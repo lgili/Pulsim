@@ -45,7 +45,7 @@ def main() -> int:
     print()
 
     sp = make_sim_params(OP_23)
-    sp.t_end = 0.04          # 2 line cycles
+    sp.t_end = 0.20          # 10 line cycles — cascade convergence window
     sp.dt = 2.0e-6
     print(f"  duty_pfc:     {sp.duty_pfc:.3f}")
     print(f"  f_sw_pfc:     {sp.f_sw_pfc/1e3:.1f} kHz")
@@ -78,9 +78,9 @@ def main() -> int:
     print(f"        → {len(inv.times)} samples in {dt_inv:.2f}s")
     print()
 
-    # Discard first half (transient) for steady-state KPIs
-    n_fe = len(fe.times) // 2
-    n_inv = len(inv.times) // 2
+    # Use the LAST 30 % (steady state after cascade settling)
+    n_fe = int(len(fe.times) * 0.7)
+    n_inv = int(len(inv.times) * 0.7)
 
     v_ac_ss   = fe.v_ac[n_fe:]
     v_link_ss = fe.v_link[n_fe:]

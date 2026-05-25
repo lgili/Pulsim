@@ -71,7 +71,7 @@ def _build_kpi_row(name: str, pulsim: float, psim) -> Dict[str, object]:
 
 
 def extract_kpis(result: DriveSimResult, losses: LossBreakdown,
-                 *, settle_fraction: float = 0.3, end_fraction: float = 0.7,
+                 *, settle_fraction: float = 0.7, end_fraction: float = 1.0,
                  ) -> Dict[str, float]:
     """Pull the Pulsim numbers that match the ``KpiSet`` fields."""
     fe = result.frontend
@@ -171,14 +171,14 @@ def main() -> int:
         print()
         print(f">>> {op.id} — {op.label}")
         sp = make_sim_params(op)
-        # 3 line cycles (60 ms @ 50 Hz / 50 ms @ 60 Hz) keeps us
-        # inside the stable horizon of the open-loop front-end. KPIs
-        # are extracted from the middle 50 % of that window so the
-        # zero-crossing transients are well filtered out.
+        # 10 line cycles default so the closed-loop cascade has time
+        # to settle (V loop BW ≈ 30 Hz → ~30 ms settling). KPIs are
+        # extracted from the LAST 30 % of the window where the
+        # controller is in steady state.
         if args.quick:
-            sp.t_end = 2.0 / op.f_line
-        else:
             sp.t_end = 3.0 / op.f_line
+        else:
+            sp.t_end = 10.0 / op.f_line
         sp.dt = 2.0e-6
 
         t0 = time.time()
