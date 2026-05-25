@@ -56,6 +56,7 @@
 #include "pulsim/sources/pwm_switch_fn.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
+#include "pulsim/streaming/live_ring.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 #include "pulsim/yaml/loader.hpp"
@@ -1134,6 +1135,71 @@ void init_module(py::module_& m) {
     // Python binding to construct + use the C++ refresh
     // directly (no Python roundtrip). For custom refresh
     // logic, drop down to the C++ API.
+    // ---- LiveRing — backs ``pulsim.NativeLiveStream`` --------------------
+    //
+    // C++ ring buffer holding the (t, x) stream during a transient.
+    // ``simulate(live_stream=…)`` attaches an instance via
+    // ``NativeLiveStream.attach(state_size)`` which constructs
+    // ``LiveRingHandle(...)`` here. The kernel pushes samples into
+    // this buffer under ``py::gil_scoped_release``; a separate
+    // (GUI) thread reads ``t_buf``/``x_buf`` as numpy views.
+    py::class_<streaming::LiveRing, std::shared_ptr<streaming::LiveRing>>(
+        m, "LiveRingHandle",
+        "Fixed-capacity SPSC ring buffer for live ``(t, x)`` "
+        "streaming. Constructed by ``NativeLiveStream.attach()``; "
+        "read via the zero-copy ``t_buf`` / ``x_buf`` numpy views.")
+        .def(py::init([](std::size_t capacity,
+                          std::size_t state_size,
+                          std::size_t decimate) {
+                  return std::make_shared<streaming::LiveRing>(
+                      capacity, state_size, decimate);
+              }),
+              py::arg("capacity"),
+              py::arg("state_size"),
+              py::arg("decimate") = 1,
+              "Allocate the (t, x) ring. ``capacity`` must be > 0; "
+              "``decimate`` defaults to 1 (no decimation).")
+        .def_property_readonly("capacity",
+            &streaming::LiveRing::capacity)
+        .def_property_readonly("state_size",
+            &streaming::LiveRing::state_size)
+        .def_property_readonly("decimate",
+            &streaming::LiveRing::decimate)
+        .def("get_head", &streaming::LiveRing::head,
+            "Monotonic count of samples ever pushed. Wrap into "
+            "slot index via ``% capacity``.")
+        .def("request_stop", &streaming::LiveRing::request_stop,
+            "Ask the simulation to halt at the next step boundary.")
+        .def("stopped", &streaming::LiveRing::stopped,
+            "True iff ``request_stop`` was called.")
+        .def_property_readonly("t_buf",
+            [](streaming::LiveRing& self) {
+                // Zero-copy numpy view. The capsule keeps the
+                // LiveRing alive while the array references it.
+                return py::array_t<Real>(
+                    { self.capacity() },        // shape
+                    { sizeof(Real) },           // strides
+                    self.t_data(),              // data
+                    py::cast(&self)             // owner — keeps alive
+                );
+            },
+            "Numpy view of the ring's time buffer, shape "
+            "``(capacity,)``. Zero-copy; aliases the C++ memory.")
+        .def_property_readonly("x_buf",
+            [](streaming::LiveRing& self) {
+                const std::size_t c = self.capacity();
+                const std::size_t n = self.state_size();
+                return py::array_t<Real>(
+                    { c, n },                                    // shape
+                    { sizeof(Real) * n, sizeof(Real) },          // strides
+                    self.x_data(),                               // data
+                    py::cast(&self)                              // owner
+                );
+            },
+            "Numpy view of the ring's state buffer, shape "
+            "``(capacity, state_size)``. Zero-copy; aliases the "
+            "C++ memory.");
+
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
            const topology::Graph& graph,
@@ -1145,7 +1211,8 @@ void init_module(py::module_& m) {
            bool enable_nonlinear_refresh,
            StepObserverFn step_observer,
            py::object initial_state,
-           ShouldContinueFn should_continue) {
+           ShouldContinueFn should_continue,
+           std::shared_ptr<streaming::LiveRing> live_ring) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -1157,6 +1224,35 @@ void init_module(py::module_& m) {
             if (!initial_state.is_none()) {
                 x_init = initial_state.cast<Vector>();
                 x_init_ptr = &x_init;
+            }
+            // Live-streaming hook: if the caller supplied a
+            // ``LiveRing`` we wrap the user-supplied
+            // step_observer + should_continue with composites that
+            // also push samples and honour the ring's stop flag.
+            // The composites are GIL-free in their LiveRing parts
+            // (atomics only); the user-supplied callbacks still
+            // re-acquire the GIL via pybind11 trampolines.
+            StepObserverFn observer_eff = step_observer;
+            ShouldContinueFn continue_eff = should_continue;
+            if (live_ring) {
+                auto ring = live_ring;  // shared_ptr copy into closure
+                auto user_obs = step_observer;
+                observer_eff = [ring, user_obs](Real t, const Vector& x) {
+                    if (user_obs) {
+                        user_obs(t, x);
+                    }
+                    if (ring->should_decimate()) {
+                        ring->push(t, x.data(),
+                                   static_cast<std::size_t>(x.size()));
+                    }
+                };
+                auto user_cont = should_continue;
+                continue_eff = [ring, user_cont]() {
+                    if (ring->stopped()) {
+                        return false;
+                    }
+                    return user_cont ? user_cont() : true;
+                };
             }
             // RELEASE the GIL during the heavy kernel loop so the
             // GUI / main thread can run. The std::function callbacks
@@ -1173,9 +1269,9 @@ void init_module(py::module_& m) {
                                           switch_fn, b_extra_fn,
                                           start_from_dc_op,
                                           nl_refresh,
-                                          step_observer,
+                                          observer_eff,
                                           x_init_ptr,
-                                          should_continue);
+                                          continue_eff);
             }
             return result;
         },
@@ -1187,6 +1283,7 @@ void init_module(py::module_& m) {
         py::arg("step_observer") = StepObserverFn{},
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
+        py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
@@ -1932,7 +2029,8 @@ void init_module(py::module_& m) {
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
            py::object initial_state,
-           ShouldContinueFn should_continue) {
+           ShouldContinueFn should_continue,
+           std::shared_ptr<streaming::LiveRing> live_ring) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -1941,6 +2039,31 @@ void init_module(py::module_& m) {
             // Build a step_observer that calls the chain DIRECTLY in
             // C++ — no Python roundtrip per step.
             auto step_observer = chain.make_step_observer(chain_dt);
+            // Wrap with a LiveRing push when streaming is requested.
+            // Both layers are GIL-free in the hot path: chain step is
+            // C++ and ``LiveRing::push`` uses only atomics + memcpy.
+            StepObserverFn observer_eff = step_observer;
+            ShouldContinueFn continue_eff = should_continue;
+            if (live_ring) {
+                auto ring = live_ring;
+                auto chain_obs = step_observer;
+                observer_eff = [ring, chain_obs](Real t, const Vector& x) {
+                    if (chain_obs) {
+                        chain_obs(t, x);
+                    }
+                    if (ring->should_decimate()) {
+                        ring->push(t, x.data(),
+                                   static_cast<std::size_t>(x.size()));
+                    }
+                };
+                auto user_cont = should_continue;
+                continue_eff = [ring, user_cont]() {
+                    if (ring->stopped()) {
+                        return false;
+                    }
+                    return user_cont ? user_cont() : true;
+                };
+            }
             Vector x_init;
             const Vector* x_init_ptr = nullptr;
             if (!initial_state.is_none()) {
@@ -1954,9 +2077,9 @@ void init_module(py::module_& m) {
                                           switch_fn, b_extra_fn,
                                           start_from_dc_op,
                                           nl_refresh,
-                                          step_observer,
+                                          observer_eff,
                                           x_init_ptr,
-                                          should_continue);
+                                          continue_eff);
             }
             return result;
         },
@@ -1968,6 +2091,7 @@ void init_module(py::module_& m) {
         py::arg("enable_nonlinear_refresh") = false,
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
+        py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
         "Run transient with a BlockChain as the per-step observer. "
         "The chain's step is invoked directly in C++ each step — "
         "no Python interpreter cost per step. Equivalent to "
