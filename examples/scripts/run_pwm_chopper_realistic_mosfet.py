@@ -66,11 +66,9 @@ def main() -> None:
                       start_from_dc_op=True, max_newton_iterations=50)
     print(f"  samples: {res.num_steps()}")
 
-    drain_idx = builder.node_id_of("drain")
-    gate_idx  = builder.node_id_of("V_g")
     times = np.asarray(res.times) * 1e6   # µs
-    v_drain = np.array([s[drain_idx] for s in res.states])
-    v_gate  = np.array([s[gate_idx]  for s in res.states])
+    v_drain = res.v("drain")
+    v_gate  = res.v("V_g")
 
     print(f"  V_drain range: [{v_drain.min():.2f}, {v_drain.max():.2f}] V "
           f"(target ~[1.45, 8])")

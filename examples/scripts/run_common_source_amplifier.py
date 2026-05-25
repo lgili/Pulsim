@@ -67,10 +67,8 @@ def main() -> None:
                      progress=True)
     print(f"  samples: {res.num_steps()}")
 
-    gate_idx  = builder.node_id_of("gate")
-    drain_idx = builder.node_id_of("drain")
-    v_gate  = np.array([s[gate_idx]  for s in res.states])
-    v_drain = np.array([s[drain_idx] for s in res.states])
+    v_gate  = res.v("gate")
+    v_drain = res.v("drain")
 
     # Steady-state stats over the last 50% of samples.
     k_skip = len(v_drain) // 2
