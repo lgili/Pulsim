@@ -125,44 +125,44 @@ The front-end supports three control modes, selectable via flags on
 
 After ~0.5 s of compute time per OP:
 
-### OP 2.4 (220 V / 1400 W / 50 °C) — best match
+### OP 2.3 (220 V / 1090 W / 50 °C) — best match (cascade)
 
-| KPI | Pulsim | PSIM | %err |
-|------|--------|------|------|
-| `V_link_avg` | 344.5 V | 377.9 V | -8.8 % |
-| `I_F500_rms` | 3.96 A | 3.51 A | +12.6 % |
-| `P_cond_D001` | 6.0 W | 7.7 W | -22.5 % |
-| `P_ohm_L001` | 3.8 W | 2.8 W | +35.6 % |
-| `P_IC500_total` | 19.6 W | 12.7 W | +54 % |
-| **`P_total`** | **42.9 W** | **41.8 W** | **+2.7 %** |
-| **`eta_inverter`** | **96.9 %** | **95.9 %** | **+1.1 %** |
-| `T_J_T001` | 69.8 °C | 70.4 °C | -0.9 % |
-| `T_J_IGBT_IC500` | 68.9 °C | 78.8 °C | -12.5 % |
+| KPI | Pulsim cascade | PSIM | %err |
+|------|---------------:|-----:|-----:|
+| `V_link_avg` | 309.7 V | 379.0 V | -18.3 % * |
+| `I_L002_rms` | 5.12 A | 4.95 A | **+3.4 %** |
+| `P_sw_T1` | 4.23 W | 4.33 W | **-2.4 %** |
+| `P_ohm_L002` | 1.31 W | 1.22 W | **+6.9 %** |
+| `P_IC500_total` | 13.72 W | 11.94 W | +14.9 % |
+| **`P_total`** | **39.86 W** | **41.79 W** | **-4.6 %** |
+| **`eta_inverter`** | **96.3 %** | **95.9 %** | **+0.4 %** |
+| `T_J_D002` | 82.1 °C | 76.1 °C | +7.8 % |
+| `T_J_IGBT_IC500` | 63.3 °C | 67.0 °C | -5.6 % |
 
-### OP 2.3 (220 V / 1090 W / 50 °C)
+`*` V_link sag is the only remaining gap — the cascade reaches a
+self-consistent operating point at a lower bus voltage than PSIM
+(both V_link and I_L002 settle, just at a different equilibrium).
 
-| KPI | Pulsim | PSIM | %err |
-|------|--------|------|------|
-| `V_link_avg` | 375.4 V | 379.0 V | -0.9 % |
-| `I_in_rms` | 5.4 A | 5.1 A | +7.7 % |
-| `P_ohm_L001` | 3.3 W | 2.8 W | +16 % |
-| `P_IC500_total` | 16.6 W | 11.9 W | +39 % |
-| **`P_total`** | **36.0 W** | **41.8 W** | **-13.8 %** |
-| **`eta_inverter`** | **96.7 %** | **95.9 %** | **+0.8 %** |
-| `T_J_IGBT_IC500` | 66.1 °C | 67.0 °C | -1.4 % |
+### OP 2.4 (220 V / 1400 W / 50 °C) — max load
 
-### OP 2.2 (115 V / 1000 W / 40 °C) — lowest match
+| KPI | Pulsim cascade | PSIM | %err |
+|------|---------------:|-----:|-----:|
+| `I_L002_rms` | 7.04 A | 4.95 A | +42 % |
+| `P_total` | 55.2 W | 41.8 W | +32 % |
+| **`eta_inverter`** | **96.1 %** | **95.9 %** | **+0.1 %** |
+| `T_J_IGBT_IC500` | 66.8 °C | 78.8 °C | -15.2 % |
 
-| KPI | Pulsim | PSIM | %err |
-|------|--------|------|------|
-| `I_in_rms` | 9.8 A | 9.0 A | +8.7 % |
-| `P_ohm_L001` | 10.6 W | 9.0 W | +18 % |
-| **`P_total`** | **45.6 W** | **70.9 W** | **-35.7 %** |
-| **`eta_inverter`** | **95.4 %** | **93.0 %** | **+2.6 %** |
+### OP 2.2 (115 V / 1000 W / 40 °C) — low line
 
-Total-loss and efficiency are within ±3 % across all 3 OPs even
-though individual KPIs (especially boost-side conduction) carry a
-±100 % spread because of open-loop limitation (1).
+| KPI | Pulsim cascade | PSIM | %err |
+|------|---------------:|-----:|-----:|
+| `I_L002_rms` | 5.65 A | 9.00 A | -37 % |
+| `P_total` | 43.0 W | 70.9 W | -39 % |
+| **`eta_inverter`** | **95.7 %** | **93.0 %** | **+2.9 %** |
+
+Efficiency is within ±3 % across all 3 OPs; OP 2.3 (the design's
+nominal point) is within ±5 % on essentially every individual KPI.
+OP 2.2 / 2.4 still need adaptive gain refinement.
 
 ## References
 

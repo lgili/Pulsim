@@ -84,39 +84,31 @@ class DriveSimParams:
                                         # rectified-envelope feed-forward
                                         # trajectory only (no measurement
                                         # feedback). Kept for ablation.
-    pfc_cascade_loop: bool = False     # if True, run the textbook cascade:
-                                        # outer V_link PI loop → current
-                                        # reference scale K_amp → inner I_L002
-                                        # PI loop → duty cycle. Same
-                                        # architecture as a real avg-current-
-                                        # mode PFC controller (Erickson §18).
-                                        # OFF by default because the gains
-                                        # in DriveSimParams are conservative
-                                        # (designed for OP 2.3) — flip on for
-                                        # ablation studies or current-shape
-                                        # comparisons against PSIM, where it
-                                        # delivers an I_L002 envelope that
-                                        # tracks |V_rect|·K_amp instead of
-                                        # the discontinuous open-loop pulse.
-    # Outer voltage loop gains — designed for ~ 5 Hz crossover.
-    # We pick a deliberately low bandwidth because the K_amp → V_link
-    # plant has a 1/s pole at the bus cap (290 k / s for OP 2.3) and
-    # we need plenty of phase margin against the 2·f_line ripple
-    # the L001-bridge tank injects at high amplitude. Tuned by
-    # iterating on the 200 ms cascade settling test.
-    pfc_Kp_v: float = 8.0e-5           # A/(V·V) — current-ref scale per error
-    pfc_Ki_v: float = 0.005            # integral (s⁻¹·A/V/V)
-    pfc_K_amp_max: float = 0.08        # anti-windup clip (max A per peak V)
+    pfc_cascade_loop: bool = True      # Default ON — runs the textbook
+                                        # avg-current-mode cascade
+                                        # (Erickson §18.4): outer V_link PI
+                                        # loop → K_amp → inner I_L002 PI loop
+                                        # → duty cycle. Wired via
+                                        # ``PfcCascadeController`` with gains
+                                        # derived from the operating-point
+                                        # plant model (V_pk, V_link, L_boost,
+                                        # C_bus) so the same crossover holds
+                                        # across the 3 OPs. Set to False to
+                                        # fall back to the constant-duty
+                                        # baseline for ablation.
+    # Outer voltage loop — target bandwidth (Hz). The controller
+    # derives Kp_v/Ki_v from this and the bus-capacitor / load
+    # plant model at construction time, so the loop has the same
+    # crossover across the 3 OPs (different P_in, V_ac).
+    pfc_v_bw_hz: float = 10.0          # Hz — voltage loop crossover
+    pfc_K_amp_max: float = 0.10        # absolute safety clip (A per peak V)
     pfc_v_lp_alpha: float = 0.0003     # LP filter on V_link feedback —
                                         # τ ≈ 1/(alpha·dt) ≈ 7 ms (heavy
                                         # enough to suppress 2·f_line ripple)
-    # Inner current loop gains — designed for ~ 300 Hz crossover.
-    # We deliberately keep this BELOW one PWM period (15 µs @ 65 kHz)
-    # so the PI loop reacts to *cycle-averaged* current, not to the
-    # instantaneous PWM ripple. A separate LP filter on the I_L002
-    # feedback (``pfc_i_lp_alpha``) gives the same effect explicitly.
-    pfc_Kp_i: float = 0.005            # Duty per A error
-    pfc_Ki_i: float = 30.0             # Duty per (A·s)
+    # Inner current loop — target bandwidth. Kp_i/Ki_i derived from
+    # the boost-stage plant (V_link/L) so the inner-loop crossover
+    # is operating-point independent.
+    pfc_i_bw_hz: float = 1000.0        # Hz — current loop crossover
     pfc_i_lp_alpha: float = 0.05       # LP on i_L002 feedback —
                                         # τ ≈ 40 µs ≈ 2.6 PWM cycles
                                         # (cuts switching ripple cleanly)
@@ -228,18 +220,26 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
     )
     b.add_resistor("R_ac_b_gnd", "ac_b", "gnd", 1.0e-3)
 
-    # F500 fuse + L001 EMI input choke + DCR.
+    # F500 fuse + L001 EMI input choke (modelled as pure DCR).
     #
-    # In an *open-loop* sim the bridge enters DCM at every line
-    # zero-crossing and the L001-C006 tank rings; past ~50 ms the
-    # solver diverges. We therefore keep all sims short (default
-    # ``sp.t_end`` ≤ 60 ms = 3 line cycles at 50 Hz) and extract
-    # KPIs from the middle of that window where the waveforms are
-    # well-behaved (see ``simulate_frontend``).
+    # L001 is a common-mode / differential-mode EMI filter — it is
+    # invisible to the line-frequency boost-stage behaviour but, in
+    # any open-loop sim *and even closed-loop* the
+    # L001-C006-bridge MNA matrix becomes near-singular whenever
+    # the bridge enters DCM and the solver converges to a fixed-
+    # point that's physically wrong (we observed i_L001 stuck at
+    # -1034 A through multiple line cycles). Snubber resistors and
+    # diode-leakage bumps did not break the singularity.
+    #
+    # The cleanest fix is to drop the L's inductive behaviour and
+    # carry just its DCR — that removes the inductor branch row
+    # entirely from MNA, the singularity is gone, the rest of the
+    # boost stage is unchanged, and the loss budget for the L001
+    # DCR matches PSIM cleanly (P_ohm_L001 is back-derived from
+    # I_in_rms analytically in losses.py).
     b.add_resistor("F500", "ac_a", "n_f500", float(F500.R_cold))
-    sw_map.l001_branch = int(b.graph.num_branches)
-    b.add_inductor("L001", "n_f500", "n_l001", float(L001.L))
-    b.add_resistor("R_L001_DCR", "n_l001", "n_l001_d", float(L001.DCR))
+    b.add_resistor("R_L001_DCR", "n_f500", "n_l001_d", float(L001.DCR))
+    sw_map.l001_branch = -1     # no inductor branch — L is suppressed
 
     # Bridge rectifier
     add_bridge_rectifier(
@@ -250,6 +250,15 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
         g_off=1.0 / float(D001.R_off),
         V_th=float(D001.V_F),
     )
+    # Damping snubber from the L001 downstream node to ground.
+    # Without this path, when the bridge is in DCM the L001 inductor
+    # has only the 1 GΩ diode-leakage path for its stored current,
+    # the MNA matrix becomes near-singular, and the solver picks
+    # unphysical i_L values (we saw peaks of −1 kA). A 5 kΩ shunt
+    # to gnd dissipates the ringing in < 1 ms and adds ~ 20 mA of
+    # quiescent leakage at V_pk = 311 V — negligible vs the 5 A
+    # rated line current.
+    b.add_resistor("R_L001_snub", "n_l001_d", "gnd", 5.0e3)
 
     # X-cap on rectified bus + small bleeder.
     #
@@ -349,6 +358,7 @@ class PfcCascadeController:
 
     def __init__(self, sp: DriveSimParams, sw_map: FrontendSwitchMap):
         import pulsim as p
+        import math
 
         self.sp = sp
         self.N = int(sw_map.total_switches)
@@ -361,35 +371,60 @@ class PfcCascadeController:
 
         self.pwm_period = 1.0 / float(sp.f_sw_pfc)
 
-        # Outer voltage loop state
-        # With pre-charge enabled (default for cascade mode) the bus
-        # starts at V_link_target — initialise the LP filter at the
-        # same value so the V loop starts at zero error and the
-        # soft-start ramp can take over.
-        self.V_link_lp = float(sp.V_link_target)
+        # ---- Adaptive gain calculation -------------------------------
+        # Inner current loop plant:  dI_L/dD = V_link / L  (s-domain)
+        #   |G_plant_i(s)| = V_link / (L · s)
+        # PI compensator C_i(s) = Kp_i + Ki_i/s.
+        # At crossover ω_i (rad/s): |C_i · G_plant_i| = 1 →
+        #   Kp_i = ω_i · L / V_link
+        # Pick Ki_i = ω_i · Kp_i  (PI zero at the crossover).
+        L_boost = 1.4e-3                              # H (L002 from BoM)
+        V_link = float(sp.V_link_target)
+        omega_i = 2.0 * math.pi * float(sp.pfc_i_bw_hz)
+        self.Kp_i = omega_i * L_boost / max(V_link, 1.0)
+        self.Ki_i = omega_i * self.Kp_i
+
+        # Outer voltage loop plant:  dV_link / dK_amp ≈ V_pk²/(2·V·C·s)
+        #   For OP 2.3: ~289 k / s. PI compensator: Kp_v + Ki_v/s.
+        # At crossover ω_v: Kp_v · V_pk²/(2·V·C·ω_v) = 1 →
+        #   Kp_v = 2·V·C·ω_v / V_pk²
+        # Pick Ki_v = (ω_v / 10) · Kp_v  (zero a decade below ω_v
+        # for ≥ 60° phase margin against the L001 tank resonance).
+        V_pk = math.sqrt(2.0) * float(sp.op.V_ac)
+        C_bus = 440e-6                                # F (C009 + C010 parallel)
+        omega_v = 2.0 * math.pi * float(sp.pfc_v_bw_hz)
+        self.Kp_v = 2.0 * V_link * C_bus * omega_v / max(V_pk * V_pk, 1.0)
+        self.Ki_v = (omega_v / 10.0) * self.Kp_v
 
         # K_amp_steady is the expected operating-point K_amp for the
         # current OP — derived from the power-balance equation
         # ``I_L_pk = 2·P/V_pk`` and ``K_amp = I_L_pk/V_pk``. Anti-
-        # windup clips both the proportional and integral terms to
-        # ±50 % around this value so the loop can't pump > 1.5× the
-        # rated power into the bus. Eliminates the 8 Hz limit-cycle
-        # we'd otherwise see with a fixed K_amp_max.
-        import math
-        V_pk = math.sqrt(2.0) * float(sp.op.V_ac)
+        # windup clips track this value tightly so the loop can't
+        # pump > 1.5× the rated power into the bus.
         I_L_pk_steady = 2.0 * float(sp.op.P_in_target) / max(V_pk, 1.0)
         self.K_amp_steady = I_L_pk_steady / max(V_pk, 1.0)
+        # Allow up to 3× the steady-state K_amp so the loop has
+        # transient authority during the soft-start ramp and load
+        # changes. Still hard-clipped at ``pfc_K_amp_max`` to keep
+        # an absolute safety bound.
         self.K_amp_max = min(float(sp.pfc_K_amp_max),
-                              self.K_amp_steady * 1.5)
-        # Seed integrator at the FF estimate so we start near the
-        # operating point and only let the loop trim small errors.
+                              self.K_amp_steady * 3.0)
+
+        # ---- State ---------------------------------------------------
+        # With pre-charge enabled the bus starts at V_link_target —
+        # initialise the LP filter at the same value so the V loop
+        # starts at zero error and only the soft-start ramp drives
+        # K_amp into the operating point.
+        self.V_link_lp = float(sp.V_link_target)
+        # Seed v_int at K_amp_steady so the loop starts close to
+        # the right operating point and only needs to trim errors.
         self.v_int = self.K_amp_steady
         self.K_amp = 0.0
 
         # Inner current loop state
         self.i_int = 0.0
-        self.duty = float(sp.duty_pfc)              # init to FF estimate
-        self.i_L002_lp = 0.0                         # LP-filtered i_L002 feedback
+        self.duty = float(sp.duty_pfc)                # init to FF estimate
+        self.i_L002_lp = 0.0                          # LP-filtered i_L002
 
         # Bookkeeping for variable-dt observer calls
         self.last_obs_t = -1.0
@@ -416,12 +451,12 @@ class PfcCascadeController:
 
         # OUTER voltage loop: PI on V_link error → K_amp
         e_v = float(sp.V_link_target) - self.V_link_lp
-        self.v_int += float(sp.pfc_Ki_v) * e_v * dt
+        self.v_int += self.Ki_v * e_v * dt
         # Anti-windup: K_amp lives in [0, K_amp_max] A/V
         # Clamp integrator to the same range so it can't wind up
         # against the K_amp clip and then stall on its way back.
         self.v_int = max(0.0, min(self.v_int, self.K_amp_max))
-        K_amp_raw = float(sp.pfc_Kp_v) * e_v + self.v_int
+        K_amp_raw = self.Kp_v * e_v + self.v_int
         K_amp_raw = max(0.0, min(K_amp_raw, self.K_amp_max))
 
         # Soft-start ramp during the first ``pfc_soft_start`` seconds
@@ -439,12 +474,12 @@ class PfcCascadeController:
         # INNER current loop: PI on i_L002 error → duty correction
         I_ref = self.K_amp * abs(V_rect)
         e_i = I_ref - self.i_L002_lp
-        self.i_int += float(sp.pfc_Ki_i) * e_i * dt
+        self.i_int += self.Ki_i * e_i * dt
         self.i_int = max(-0.3, min(self.i_int, 0.3))
 
         # Feed-forward CCM duty + PI correction
         D_ff = 1.0 - (abs(V_rect) / max(V_link, 1.0)) if V_link > 1.0 else 0.5
-        D = D_ff + float(sp.pfc_Kp_i) * e_i + self.i_int
+        D = D_ff + self.Kp_i * e_i + self.i_int
         self.duty = max(0.02, min(D, 0.95))
 
     # ------------------------------------------------------------------
@@ -742,20 +777,13 @@ def simulate_frontend(sp: DriveSimParams,
     times = np.asarray(res.times, dtype=float)
     nid = lambda n: b.node_id_of(n)
 
-    # Branch current indices into the state vector. Pulsim packs
-    # source/inductor currents past the node-voltage block, and
-    # ``branch_var_id_for_inductor`` returns the absolute state index.
-    # Branch IDs were captured at build time in ``sw_map``.
-    i_L001 = states[:, b.pool.branch_var_id_for_inductor(int(sw_map.l001_branch), b.graph)]
+    # Branch current indices into the state vector. L002 is read
+    # directly; L001 is collapsed to its DCR (no inductor branch)
+    # so the "line current" is back-computed from the voltage drop
+    # across the F500 fuse: ``I_line = (V_ac_a − V_n_f500)/R_F500``.
     i_L002 = states[:, b.pool.branch_var_id_for_inductor(int(sw_map.l002_branch), b.graph)]
-
-    # Defensive numerical clip on i_L001: the open-loop bridge enters
-    # DCM near zero-crossings and i_L001 occasionally takes garbage
-    # values from the solver's algebraic loop. The compressor drive's
-    # physical line current is bounded by < 20 A peak at OP 2.4; any
-    # sample outside ±30 A is solver noise and is squashed so it
-    # doesn't poison the loss integrals downstream.
-    i_L001 = np.clip(i_L001, -30.0, +30.0)
+    v_F500 = states[:, nid("ac_a")] - states[:, nid("n_f500")]
+    i_L001 = v_F500 / float(F500.R_cold)
 
     # Reconstruct the boost-MOSFET gate schedule from the simulated
     # ``v_sw_pfc`` node — this works irrespective of the control mode
