@@ -280,15 +280,18 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
     # rated line current.
     b.add_resistor("R_L001_snub", "n_l001_d", "gnd", 5.0e3)
 
-    # X-cap on rectified bus + small bleeder.
+    # X-cap (C006, EMI filter) + bulk smoothing cap on the
+    # rectified bus.
     #
-    # The bleeder keeps the bridge in conduction across the entire
-    # line cycle: without it, the bridge enters DCM near zero
-    # crossings, the L001-C006 tank has no termination, and the
-    # solver oscillates unbounded in i_L001. A 10 kΩ shunt drains
-    # ~30 mA (≈ 5 W max @ 380V) — negligible vs the 1 kW the boost
-    # processes but enough to suppress the DCM algebraic loop.
+    # The PSIM reference also includes a 470 µF electrolytic on
+    # ``rect_p`` (in addition to the small X-cap). Without it the
+    # bridge enters deep DCM, V_rect collapses between line peaks,
+    # and the boost stage has to compensate with much higher
+    # peak inductor current than the design actually carries
+    # (PSIM's I_L002 ≈ I_in only matches when the bridge stays
+    # in CCM). The bleeder also suppresses the L001-C006 tank.
     b.add_capacitor("C006", "rect_p", "gnd", float(C006.C))
+    b.add_capacitor("C_rect_smooth", "rect_p", "gnd", 470.0e-6)
     b.add_resistor("R_C006_bleed", "rect_p", "gnd", 10.0e3)
 
     # Boost inductor + DCR
