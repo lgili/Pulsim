@@ -1774,13 +1774,11 @@ partial refactor (chapter 7) delivers a <strong>2.7-2.9× wall-clock
 speedup</strong> over the baseline per-mask cache (chapter 4) on the
 N-switch-chain microbench, with <strong>zero pivot fallbacks</strong> across
 all 1999 single-bit Gray-code flips per <span class="arithmatex">\(N\)</span>.</p>
-<p>The full data lives in
-<code>artigos/02_tpel_methods/benchmarks/results/rank1_microbench.csv</code>
-and the discussion in
-<code>artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md</code>. This
-chapter is the docs-side re-presentation of the same data with
-the figures regenerated here so they render in the mkdocs site
-+ get checked in alongside the prose.</p>
+<p>The full data lives in <code>rank1_microbench.csv</code> produced by
+<code>./build/core/pulsim_benchmarks "[rank1][microbench]"</code>. This
+chapter is the docs-side re-presentation of the captured data
+with the figures regenerated here so they render in the mkdocs
+site + get checked in alongside the prose.</p>
 <hr />
 <h2 id="81-the-3-backend-methodology">8.1 The 3-backend methodology<a class="headerlink" href="#81-the-3-backend-methodology" title="Permanent link">&para;</a></h2>
 <p>The microbench (<code>core/tests/benchmarks/test_bench_pwl_rank1.cpp</code>)
@@ -1827,7 +1825,7 @@ contribution:</p>
   gives you for free.</li>
 <li><strong>C vs B</strong> isolates the <em>path-based</em> win — the specific
   benefit of <code>partial_refactor</code> over a full numeric re-factorise.
-  This is the TPEL paper's algorithmic contribution.</li>
+  This is the forthcoming methods paper's algorithmic contribution.</li>
 <li><strong>C vs A</strong> is the headline — what users get when they switch
   from the baseline <code>solve(...)</code> to <code>solve_rank1(...)</code> on a
   workload with Gray-coded single-bit transitions.</li>
@@ -1965,8 +1963,8 @@ little work to amortise.</em></p>
 <p>The decomposition is <strong>multiplicative</strong>: <span class="arithmatex">\(C/A = (B/A) \cdot
 (C/B) \approx 1.7 \times 1.6 \approx 2.7\)</span>. Each contribution
 is real, each pays off at a different stage of the algorithm,
-and they stack cleanly. That's the §VII discussion of the
-TPEL paper.</p>
+and they stack cleanly — the central discussion point of the
+forthcoming methods paper.</p>
 <hr />
 <h2 id="84-the-decomposition-in-bar-form">8.4 The decomposition, in bar form<a class="headerlink" href="#84-the-decomposition-in-bar-form" title="Permanent link">&para;</a></h2>
 <p><img alt="Multiplicative decomposition of the headline speedup" class="center" loading="lazy" src="../_figures/output/fig82_decomposition.png" width="700" /></p>
@@ -1982,8 +1980,8 @@ load-bearing for the headline number.</em></p>
 <p>This figure is the answer to "where does the 2.8× come from?"
 A reviewer asking that question gets a precise, captured-data-
 backed answer: <strong>half from sliding solver, half from path-based
-partial refactor</strong>. The TPEL paper §VII has this figure in the
-discussion section.</p>
+partial refactor</strong>. The forthcoming methods paper carries
+this figure in its discussion section.</p>
 <hr />
 <h2 id="85-per-call-cost-flat-vs-linear">8.5 Per-call cost: flat vs linear<a class="headerlink" href="#85-per-call-cost-flat-vs-linear" title="Permanent link">&para;</a></h2>
 <p><img alt="Per-call cost vs n_state for all three backends" class="center" loading="lazy" src="../_figures/output/fig83_per_call_cost.png" width="700" /></p>
@@ -2060,7 +2058,7 @@ hardware). What's going on:</p>
   is essentially free. Path-based has to track + update mutable
   state, which is more memory traffic per call.</li>
 </ul>
-<p>This is the <strong>honest limitation</strong> the TPEL paper §VII has to
+<p>This is the <strong>honest limitation</strong> the forthcoming methods paper has to
 acknowledge: partial-refactor caching is a <em>medium-to-large
 <span class="arithmatex">\(n\)</span></em> optimisation. For tiny circuits, use the per-mask cache
 directly via <code>solve(mask, ...)</code>. The <code>solve_rank1(mask, ...)</code>
@@ -2088,17 +2086,17 @@ transitions but rarely produce truly bad pivots.</p>
 <p>Result: <strong>zero fallbacks across all 1999 single-bit flips per
 <span class="arithmatex">\(N\)</span></strong> on the captured microbench. This was caught by running
 the benchmark, not by static analysis — empirical tuning of
-that constant was a 2-day debugging cycle. The TPEL paper §VI
-discusses the constant's choice + sensitivity.</p>
+that constant was a 2-day debugging cycle. The forthcoming
+methods paper discusses the constant's choice + sensitivity.</p>
 <hr />
 <h2 id="88-reproducing-the-benchmark">8.8 Reproducing the benchmark<a class="headerlink" href="#88-reproducing-the-benchmark" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Build the bench binary</span>
 cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_benchmarks<span class="w"> </span>-j
 
-<span class="c1"># Run + steer CSV output into the artigos directory</span>
-<span class="nv">PULSIM_BENCH_RESULTS_DIR</span><span class="o">=</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span>/artigos/02_tpel_methods/benchmarks/results<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>./build/core/pulsim_benchmarks<span class="w"> </span><span class="s2">&quot;[rank1][microbench]&quot;</span>
+<span class="c1"># Run; CSV lands in ./bench-results/ by default,</span>
+<span class="c1"># overridable via the PULSIM_BENCH_RESULTS_DIR env var</span>
+./build/core/pulsim_benchmarks<span class="w"> </span><span class="s2">&quot;[rank1][microbench]&quot;</span>
 </code></pre></div>
 <p>Each row of the resulting CSV is one <span class="arithmatex">\(N\)</span> value, with all three
 backends timed on the same fixture. The script
@@ -2115,7 +2113,7 @@ keep in mind:</p>
 <li>
 <p><strong>Synthetic fixture.</strong> The N-switch chain is a clean,
    regular-sparsity reference. Real converters (buck, NPC, MMC)
-   have more irregular MNA structure. The TPEL paper's §VI.B
+   have more irregular MNA structure. The forthcoming methods paper
    will repeat this benchmark on the 10 reference projects in
    <code>projects/</code> — but that requires wiring <code>solve_rank1</code> into
    the Python <code>pp.simulate(...)</code> path first. Tracked under the
@@ -2147,7 +2145,7 @@ keep in mind:</p>
    out of scope.</p>
 </li>
 </ol>
-<p>These four caveats are reproduced verbatim in the TPEL paper's
+<p>These four caveats are reproduced verbatim in a forthcoming methods paper's
 "Limitations" section. Reviewers will look for exactly this
 kind of honest scoping; pretending the microbench answers more
 than it does would invite reject.</p>
@@ -2224,8 +2222,8 @@ chapter 7).</p>
 <p>Captured on the same N-switch chain fixture, driven through
 <strong>random transitions of fixed Hamming distance</strong> <span class="arithmatex">\(\delta \in
 \{1, 2, 3, 4\}\)</span> (vs the v1.3.0 single-bit-only sweep). 1000
-calls per <span class="arithmatex">\((N, \delta)\)</span> cell; full data in
-<code>artigos/02_tpel_methods/benchmarks/results/multi_bit_microbench.csv</code>.</p>
+calls per <span class="arithmatex">\((N, \delta)\)</span> cell; CSV produced locally via
+<code>./build/core/pulsim_benchmarks "[multi_bit][microbench]"</code>.</p>
 <p><img alt="Multi-bit speedup (Pulsim ÷ Eigen) vs Hamming distance, with hit-rate decay" class="center" loading="lazy" src="../_figures/output/fig84_multi_bit_speedup.png" width="780" /></p>
 <p><em>Figure 8.4 — </em><em>Panel A</em><em>: Pulsim path-union ÷ Eigen sliding
 solver, one curve per <span class="arithmatex">\(N\)</span>. The path-union wins on every cell
@@ -2239,10 +2237,9 @@ unions back to full factorize without regression vs v1.3.0.</em></p>
 <p><strong>Headline</strong>: at the typical SMPS <span class="arithmatex">\(n_{\mathrm{state}}\)</span> range
 (12-24), Pulsim's multi-bit path-union beats the Eigen-backed
 sliding solver by <strong>1.3-1.7× on every Hamming distance from 1
-to 4</strong> — and never loses. The discussion in
-<code>artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md</code>
-covers per-cell timing details, the path-walk dedup behaviour,
-and the regime-transition narrative for the TPEL paper §VI.A.</p>
+to 4</strong> — and never loses. Per-cell timing details and the
+path-walk dedup behaviour are reproducible from the captured
+CSV via the bench binary above.</p>
 <h3 id="8112-parametric-sweep-monte-carlo-speedup">8.11.2 Parametric sweep / Monte Carlo speedup<a class="headerlink" href="#8112-parametric-sweep-monte-carlo-speedup" title="Permanent link">&para;</a></h3>
 <p>v1.3.0 built every sweep point's MNA matrix from scratch via
 <code>analyze + factorize</code>. The v1.4.0
@@ -2264,10 +2261,9 @@ per-point cost at <span class="arithmatex">\(n=26\)</span> — Pulsim stays arou
 regardless of sweep length, while the legacy rebuild pays
 <span class="arithmatex">\(\sim 32\,\mu s\)</span> per point.</em></p>
 <p><strong>Headline</strong>: Monte Carlo and parameter sweeps now finish
-<strong>~3× faster</strong> on the v1.4.0 in-house solver path. Full
-analysis (including the "amortised symbolic vs path-based"
-decomposition for the parametric case) lives in
-<code>artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md</code>.</p>
+<strong>~3× faster</strong> on the v1.4.0 in-house solver path. The
+"amortised symbolic vs path-based" decomposition for the
+parametric case is reproducible from the captured CSV.</p>
 <p>The corresponding user-facing helpers are
 <code>pulsim.sweep.sweep_path_aware(...)</code> and
 <code>pulsim.sweep.monte_carlo_path_aware(...)</code> — drop-in replacements
@@ -2289,7 +2285,7 @@ numerically interchangeable on the AC-sweep workload.</em></p>
 <p>The v1.4.0 contribution is a software-supply-chain win — the
 in-house complex LU means there is no <code>Eigen::SparseLU&lt;complex&gt;</code>
 on the production AC-sweep path. <code>Backend::Eigen</code> is retained
-explicitly as the IEEE TPEL §VI.B paper-comparison baseline.</p>
+explicitly as the paper-comparison baseline.</p>
 <h2 id="812-takeaways">8.12 Takeaways<a class="headerlink" href="#812-takeaways" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The v1.3.0 3-backend microbench cleanly <strong>isolates the two
@@ -2323,30 +2319,24 @@ explicitly as the IEEE TPEL §VI.B paper-comparison baseline.</p>
 </ul>
 <h2 id="813-further-reading">8.13 Further reading<a class="headerlink" href="#813-further-reading" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Paper-bound canonical writeups</strong> (one per workload):</li>
-<li><code>artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md</code> —
-    single-bit Gray-code (v1.3.0).</li>
-<li><code>artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md</code> —
-    multi-bit path-union (v1.4.0).</li>
-<li><code>artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md</code>
-    — parametric sweep / Monte Carlo (v1.4.0).</li>
-<li><code>artigos/02_tpel_methods/benchmarks/AC_SWEEP_RESULTS.md</code> —
-    AC sweep complex LU (v1.4.0).</li>
-<li><strong>TPEL paper draft</strong> (under
-  <code>artigos/02_tpel_methods/</code>) — §VI presents this data with
-  full statistical-significance + cross-converter coverage
-  (target submission Q1 2027). The extended §VI.A table
-  splits into single-bit / multi-bit / parametric rows per
-  the v1.4.0 generalisation.</li>
-<li><strong>In Pulsim</strong> — bench sources:</li>
-<li><code>test_bench_pwl_rank1.cpp</code> (v1.3.0 single-bit)</li>
-<li><code>test_bench_multi_bit_rank1.cpp</code> (v1.4.0 multi-bit)</li>
-<li><code>test_bench_parametric_sweep.cpp</code> (v1.4.0 parametric)</li>
-<li><code>test_bench_ac_sweep.cpp</code> (v1.4.0 AC complex)</li>
+<li><strong>Bench sources</strong> (one Catch2 binary per workload, all under
+  <code>core/tests/benchmarks/</code>):</li>
+<li><code>test_bench_pwl_rank1.cpp</code> — single-bit Gray-code (v1.3.0)</li>
+<li><code>test_bench_multi_bit_rank1.cpp</code> — multi-bit path-union (v1.4.0)</li>
+<li><code>test_bench_parametric_sweep.cpp</code> — parametric sweep (v1.4.0)</li>
+<li><code>test_bench_ac_sweep.cpp</code> — AC complex LU (v1.4.0)
+  Each binary writes its CSV under <code>bench-results/</code> by default;
+  point <code>PULSIM_BENCH_RESULTS_DIR</code> elsewhere if you want to
+  collect outputs alongside other artefacts.</li>
 <li><strong>In this doc set</strong> — <a href="../07-rank1-partial-refactor/">Chapter 7</a>
   for the algorithm being measured;
   <a href="../09-architecture-walkthrough/">Chapter 9</a> for where the
   bench fits into the 10-layer stack.</li>
+<li>A <strong>methods-oriented manuscript</strong> characterising the in-house
+  sparse-LU kernel + path-based partial-refactorisation across
+  the four workloads above is in preparation. The draft lives
+  outside this repository until publication; the captured data
+  here (CSVs + figures) is exactly what feeds the paper.</li>
 </ul>
 
 

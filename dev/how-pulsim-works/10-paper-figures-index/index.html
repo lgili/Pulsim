@@ -1714,7 +1714,7 @@ covering the multi-bit / parametric / AC-sweep contributions.</p>
 <td>7.1</td>
 <td><a href="../07-rank1-partial-refactor/#73-the-path-walk-visualised">§7.3</a></td>
 <td>Etree path walk for a changed column</td>
-<td><strong>§VII (TPEL contribution)</strong></td>
+<td><strong>§VII (methods-paper contribution)</strong></td>
 <td>✅ rendered</td>
 </tr>
 <tr>
@@ -1807,7 +1807,7 @@ covering the multi-bit / parametric / AC-sweep contributions.</p>
 <li><strong>PNG</strong> is for the docs site (mkdocs serves them; KaTeX
   renders inline)</li>
 <li><strong>PDF</strong> is for paper inclusion via <code>\includegraphics{...}</code> in
-  the TPEL paper LaTeX</li>
+  the methods paper LaTeX</li>
 </ul>
 <p>Mermaid diagrams render natively in the docs site. For paper
 inclusion, export to PDF via the Mermaid CLI:</p>
@@ -1854,7 +1854,19 @@ the standard entry point.</p>
 <tbody>
 <tr>
 <td>8.1, 8.2, 8.3</td>
-<td><code>artigos/02_tpel_methods/benchmarks/results/rank1_microbench.csv</code></td>
+<td><code>rank1_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[rank1][microbench]"</code></td>
+</tr>
+<tr>
+<td>8.4</td>
+<td><code>multi_bit_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[multi_bit][microbench]"</code></td>
+</tr>
+<tr>
+<td>8.5</td>
+<td><code>parametric_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[parametric][microbench]"</code></td>
+</tr>
+<tr>
+<td>8.6</td>
+<td><code>ac_sweep_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[ac_sweep][microbench]"</code></td>
 </tr>
 </tbody>
 </table>
@@ -1863,16 +1875,16 @@ fixtures (the buck-like 8×8 from <code>core/tests/layer0/</code>), or
 representative-data tables embedded in the script. The split
 is intentional: chapters 1-7 illustrate concepts that don't
 need a kernel build to demonstrate; chapter 8 measures the
-captured numbers that the TPEL paper's headline claim rests on.</p>
+captured numbers that the forthcoming methods paper's headline claim rests on.</p>
 <p>When the microbench is recaptured (e.g. on different hardware,
 a new compiler, or under future-Pulsim improvements), the CSV
 updates and figures 8.1-8.3 regenerate automatically. Hardware-
 identifier metadata in the CSV header captures the provenance.</p>
 <hr />
 <h2 id="cross-paper-reuse">Cross-paper reuse<a class="headerlink" href="#cross-paper-reuse" title="Permanent link">&para;</a></h2>
-<p>The eventual TPEL paper draft (under
-<code>artigos/02_tpel_methods/</code>) will pull figures directly from
-this directory:</p>
+<p>The forthcoming methods paper draft (kept outside this
+repository until publication) pulls figures directly from this
+directory:</p>
 <div class="highlight"><pre><span></span><code><span class="c">% In the paper&#39;s source.tex:</span>
 <span class="k">\includegraphics</span><span class="na">[width=\columnwidth]</span><span class="nb">{</span>
     ../../docs/how-pulsim-works/<span class="nb">_</span>figures/output/fig81<span class="nb">_</span>speedup<span class="nb">_</span>vs<span class="nb">_</span>n.pdf
@@ -1888,7 +1900,7 @@ trace each figure back to its generator.</p>
 <hr />
 <h2 id="whats-not-here-yet">What's NOT here (yet)<a class="headerlink" href="#whats-not-here-yet" title="Permanent link">&para;</a></h2>
 <p>Some paper-bound figures are not yet in this index — they'll
-land as the TPEL draft progresses:</p>
+land as the methods paper draft progresses:</p>
 <ul>
 <li><strong>Per-converter benchmark</strong> on the 10 reference projects
   (deferred to <code>add-pwl-rank1-runtime-integration</code> proposal).
@@ -1902,18 +1914,20 @@ land as the TPEL draft progresses:</p>
   implementation of <code>add-pulsim-complex-sparse-lu</code> (the next
   major architectural change after v1.3.0).</li>
 </ul>
-<p>These show up as "TBD" in the TPEL paper draft outline and
+<p>These show up as "TBD" in a forthcoming methods paper draft outline and
 will be added to this index once captured.</p>
 <hr />
 <h2 id="cross-references">Cross-references<a class="headerlink" href="#cross-references" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The <strong>TPEL paper draft</strong> under
-  <code>artigos/02_tpel_methods/</code></li>
+<li>The <strong>forthcoming methods paper</strong> kept outside this
+  repository until publication (final venue + submission
+  date TBD)</li>
 <li>The <strong>OpenSpec proposals</strong> under <code>openspec/changes/archive/</code>
   for <code>add-pwl-rank1-update</code>, <code>add-pwl-rank1-partial-refactor</code>,
-  <code>replace-klu-with-pulsim-sparse-lu</code></li>
-<li><strong><code>RANK1_RESULTS.md</code></strong> at the canonical writeup of the
-  microbench</li>
+  <code>replace-klu-with-pulsim-sparse-lu</code>,
+  <code>add-pulsim-complex-sparse-lu</code>, <code>add-generalised-path-refactor</code></li>
+<li>The <strong>captured CSVs</strong> above, regenerable via
+  <code>./build/core/pulsim_benchmarks</code> with the appropriate Catch2 tag</li>
 <li><strong><a href="../09-architecture-walkthrough/">Chapter 9 — Architecture Walkthrough</a></strong>
   for where each algorithm lives in the layer stack</li>
 </ul>

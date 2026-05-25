@@ -1623,7 +1623,7 @@ seen what's being measured.</p>
 <tr>
 <td>7</td>
 <td><a href="07-rank1-partial-refactor/">Path-Based Partial Refactorisation</a></td>
-<td><strong>The algorithmic contribution of the TPEL paper.</strong> Etree-walk path computation, threshold pivot fault, lazy-union varying-set caching</td>
+<td><strong>The algorithmic contribution of the forthcoming methods paper.</strong> Etree-walk path computation, threshold pivot fault, lazy-union varying-set caching</td>
 <td>Path walk diagram, single-bit-flip update example, fault-and-recover flow</td>
 </tr>
 <tr>
@@ -1641,7 +1641,7 @@ seen what's being measured.</p>
 <tr>
 <td>10</td>
 <td><a href="10-paper-figures-index/">Paper Figures Index</a></td>
-<td>Every figure regenerated for the IEEE TPEL methods paper, with provenance + the script that built it</td>
+<td>Every figure regenerated for the forthcoming methods paper, with provenance + the script that built it</td>
 <td>Reference grid of all paper-bound figures</td>
 </tr>
 </tbody>
@@ -1662,7 +1662,7 @@ for paper inclusion via the Mermaid CLI:</p>
 <div class="highlight"><pre><span></span><code>npx<span class="w"> </span>@mermaid-js/mermaid-cli<span class="w"> </span>-i<span class="w"> </span>diagram.mmd<span class="w"> </span>-o<span class="w"> </span>diagram.pdf<span class="w"> </span>-t<span class="w"> </span>neutral
 </code></pre></div>
 <p>This makes the whole chapter set the <strong>canonical source</strong> for the
-TPEL paper's figure inventory. When a figure changes here, the
+methods paper's figure inventory. When a figure changes here, the
 paper version regenerates from the same script — no manual sync.</p>
 <hr />
 <h2 id="how-the-math-works">How the math works<a class="headerlink" href="#how-the-math-works" title="Permanent link">&para;</a></h2>
@@ -1707,9 +1707,11 @@ the conceptual layer on top.</p>
 <li><a href="../performance-tuning/">Performance Tuning</a> — practical
   advice on <code>dt</code>, cache lazy/eager modes, and when to override
   the auto solver backend</li>
-<li><a href="https://github.com/lgili/Pulsim/tree/main/artigos/02_tpel_methods"><code>artigos/02_tpel_methods/</code></a>
-  — the IEEE TPEL methods paper draft, currently slipping to Q1
-  2027 — uses figures from this doc set</li>
+<li>A methods-oriented manuscript characterising the in-house
+  sparse-LU kernel + path-based partial-refactorisation on
+  reference SMPS topologies is in preparation. Until publication
+  the draft lives outside this repository to keep the public
+  surface focused on the released software.</li>
 </ul>
 
 
