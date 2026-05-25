@@ -867,14 +867,17 @@ def simulate_frontend(sp: DriveSimParams,
         # Layer 5 V5 kernel guards (post-solve, see solver/options.hpp):
         #   * freeze_di_max = 50 A catches sudden kiloamp jumps in
         #     the inductor's branch current.
-        #   * abs_clamp = 30 A catches the slower drift form of the
-        #     same failure (i_L walking past physical bounds at
-        #     < 50 A/step over many line cycles). The drive's worst-
-        #     case physical line current is < 25 A peak even at
-        #     OP 2.4, so 30 A leaves comfortable margin while
-        #     bounding the rectifier-DCM divergence.
+        #   * abs_clamp = 100 A catches the slower drift form of the
+        #     same failure. Loose enough that the bridge can carry
+        #     legitimate inrush peaks (≈ 30-60 A at line peak when
+        #     C006 is briefly charging), tight enough to bound the
+        #     ≥ 1 kA solver garbage when the bridge is in deep DCM.
+        #     A previous attempt at 30 A was too tight — it clipped
+        #     real bridge conduction, V_rect collapsed to < 15 V at
+        #     line peak (should be 309 V), and the boost stage
+        #     starved.
         inductor_freeze_di_max=50.0,
-        inductor_abs_clamp=30.0,
+        inductor_abs_clamp=100.0,
         progress=False,
     )
 
