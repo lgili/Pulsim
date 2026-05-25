@@ -1027,18 +1027,60 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#811-takeaways" class="md-nav__link">
+  <a href="#811-v140-generalised-path-based-update-framework" class="md-nav__link">
     <span class="md-ellipsis">
-      8.11 Takeaways
+      8.11 v1.4.0 — Generalised path-based update framework
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8.11 v1.4.0 — Generalised path-based update framework">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#8111-multi-bit-path-union-speedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.11.1 Multi-bit path-union speedup
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8112-parametric-sweep-monte-carlo-speedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.11.2 Parametric sweep / Monte Carlo speedup
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8113-ac-sweep-complex-sparse-lu-v140" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.11.3 AC sweep complex sparse LU (v1.4.0)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#812-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.12 Takeaways
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#812-further-reading" class="md-nav__link">
+  <a href="#813-further-reading" class="md-nav__link">
     <span class="md-ellipsis">
-      8.12 Further reading
+      8.13 Further reading
     </span>
   </a>
   
@@ -1632,18 +1674,60 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#811-takeaways" class="md-nav__link">
+  <a href="#811-v140-generalised-path-based-update-framework" class="md-nav__link">
     <span class="md-ellipsis">
-      8.11 Takeaways
+      8.11 v1.4.0 — Generalised path-based update framework
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8.11 v1.4.0 — Generalised path-based update framework">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#8111-multi-bit-path-union-speedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.11.1 Multi-bit path-union speedup
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8112-parametric-sweep-monte-carlo-speedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.11.2 Parametric sweep / Monte Carlo speedup
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8113-ac-sweep-complex-sparse-lu-v140" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.11.3 AC sweep complex sparse LU (v1.4.0)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#812-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      8.12 Takeaways
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#812-further-reading" class="md-nav__link">
+  <a href="#813-further-reading" class="md-nav__link">
     <span class="md-ellipsis">
-      8.12 Further reading
+      8.13 Further reading
     </span>
   </a>
   
@@ -2118,37 +2202,147 @@ over baseline cache</strong>.</p>
 go get coffee" into "kick off the simulation, see the result
 before you finish hitting Enter on the next command".</p>
 <hr />
-<h2 id="811-takeaways">8.11 Takeaways<a class="headerlink" href="#811-takeaways" title="Permanent link">&para;</a></h2>
+<h2 id="811-v140-generalised-path-based-update-framework">8.11 v1.4.0 — Generalised path-based update framework<a class="headerlink" href="#811-v140-generalised-path-based-update-framework" title="Permanent link">&para;</a></h2>
+<p>v1.3.0 (chapter 7) handles <strong>single-bit switch flips</strong> via the
+path-based partial refactor. v1.4.0 generalises that machinery
+to two additional SMPS-relevant cases that the literature does
+not cover:</p>
+<ol>
+<li><strong>Multi-bit switch transitions</strong> (Hamming distance <span class="arithmatex">\(\ge 2\)</span>
+   between consecutive masks — common in SPWM with multiple legs
+   commutating in the same timestep, and in multilevel converter
+   commutation patterns).</li>
+<li><strong>Parametric value changes</strong> (sweep / Monte Carlo workloads
+   where R, L, C, or source V change between simulation runs).</li>
+</ol>
+<p>The mechanism is the same etree-path walk; what changes is
+<strong>how the affected columns are identified</strong> and <strong>when the
+cost-vs-fallback gate fires</strong> (the
+<span class="arithmatex">\(\mathrm{MAX\_PATH\_LENGTH\_RATIO} = 0.6\)</span> heuristic from
+chapter 7).</p>
+<h3 id="8111-multi-bit-path-union-speedup">8.11.1 Multi-bit path-union speedup<a class="headerlink" href="#8111-multi-bit-path-union-speedup" title="Permanent link">&para;</a></h3>
+<p>Captured on the same N-switch chain fixture, driven through
+<strong>random transitions of fixed Hamming distance</strong> <span class="arithmatex">\(\delta \in
+\{1, 2, 3, 4\}\)</span> (vs the v1.3.0 single-bit-only sweep). 1000
+calls per <span class="arithmatex">\((N, \delta)\)</span> cell; full data in
+<code>artigos/02_tpel_methods/benchmarks/results/multi_bit_microbench.csv</code>.</p>
+<p><img alt="Multi-bit speedup (Pulsim ÷ Eigen) vs Hamming distance, with hit-rate decay" class="center" loading="lazy" src="../_figures/output/fig84_multi_bit_speedup.png" width="780" /></p>
+<p><em>Figure 8.4 — </em><em>Panel A</em><em>: Pulsim path-union ÷ Eigen sliding
+solver, one curve per <span class="arithmatex">\(N\)</span>. The path-union wins on every cell
+(<span class="arithmatex">\(\ge 1.25\times\)</span>); the bigger the Hamming distance, the more
+often we fall back to full factorize and the smaller the gap.
+</em><em>Panel B</em><em>: Fraction of calls that successfully took the
+path-union path. Decays gracefully from <span class="arithmatex">\(\sim 45\%\)</span> at
+<span class="arithmatex">\(\delta = 2\)</span> to <span class="arithmatex">\(\sim 10\%\)</span> at <span class="arithmatex">\(\delta = 4\)</span> — the
+<span class="arithmatex">\(\mathrm{MAX\_PATH\_LENGTH\_RATIO}\)</span> gate correctly routes wide
+unions back to full factorize without regression vs v1.3.0.</em></p>
+<p><strong>Headline</strong>: at the typical SMPS <span class="arithmatex">\(n_{\mathrm{state}}\)</span> range
+(12-24), Pulsim's multi-bit path-union beats the Eigen-backed
+sliding solver by <strong>1.3-1.7× on every Hamming distance from 1
+to 4</strong> — and never loses. The discussion in
+<code>artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md</code>
+covers per-cell timing details, the path-walk dedup behaviour,
+and the regime-transition narrative for the TPEL paper §VI.A.</p>
+<h3 id="8112-parametric-sweep-monte-carlo-speedup">8.11.2 Parametric sweep / Monte Carlo speedup<a class="headerlink" href="#8112-parametric-sweep-monte-carlo-speedup" title="Permanent link">&para;</a></h3>
+<p>v1.3.0 built every sweep point's MNA matrix from scratch via
+<code>analyze + factorize</code>. The v1.4.0
+<code>PwlStateSpaceCache::refactor_parametric</code> API keeps the
+symbolic factor AND most of the L+U entries valid; only the
+columns of <span class="arithmatex">\(J\)</span> that depend on the changed parameter need
+re-elimination, via the etree-path machinery.</p>
+<p>The bench (<code>core/tests/benchmarks/test_bench_parametric_sweep.cpp</code>)
+sweeps R_load through <span class="arithmatex">\(\{50, 100, 500, 1000\}\)</span> values on
+parallel-leg buck fixtures of <span class="arithmatex">\(\{2, 4, 8\}\)</span> switches.</p>
+<p><img alt="Parametric sweep speedup (Pulsim ÷ legacy rebuild) vs sweep size + per-point cost bar chart" class="center" loading="lazy" src="../_figures/output/fig85_parametric_speedup.png" width="780" /></p>
+<p><em>Figure 8.5 — </em><em>Panel A</em><em>: Pulsim path-based vs the legacy
+"rebuild the cache per sweep point" pattern. Speedup is
+</em><em>3.0–3.7× on every <span class="arithmatex">\((n_{\mathrm{state}}, n_{\mathrm{points}})\)</span>
+cell</em><em>, with zero fallbacks. The small-<span class="arithmatex">\(n\)</span> noise floor lifts
+the 50-point row at <span class="arithmatex">\(n=8\)</span> to <span class="arithmatex">\(5.2\times\)</span> but converges to the
+steady <span class="arithmatex">\(\sim 3.4\times\)</span> for 100+ points. </em><em>Panel B</em><em>: Absolute
+per-point cost at <span class="arithmatex">\(n=26\)</span> — Pulsim stays around <span class="arithmatex">\(9-10\,\mu s\)</span>
+regardless of sweep length, while the legacy rebuild pays
+<span class="arithmatex">\(\sim 32\,\mu s\)</span> per point.</em></p>
+<p><strong>Headline</strong>: Monte Carlo and parameter sweeps now finish
+<strong>~3× faster</strong> on the v1.4.0 in-house solver path. Full
+analysis (including the "amortised symbolic vs path-based"
+decomposition for the parametric case) lives in
+<code>artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md</code>.</p>
+<p>The corresponding user-facing helpers are
+<code>pulsim.sweep.sweep_path_aware(...)</code> and
+<code>pulsim.sweep.monte_carlo_path_aware(...)</code> — drop-in replacements
+for the legacy <code>sweep</code> / <code>monte_carlo</code> with the same
+<code>SweepResult</code> shape. Auto-fallback for unknown parameter names
+keeps existing user code working unchanged.</p>
+<h3 id="8113-ac-sweep-complex-sparse-lu-v140">8.11.3 AC sweep complex sparse LU (v1.4.0)<a class="headerlink" href="#8113-ac-sweep-complex-sparse-lu-v140" title="Permanent link">&para;</a></h3>
+<p>v1.4.0 ships in the same release window. The headline isn't a
+speedup — it's "no third-party LU on the production path":</p>
+<p><img alt="AC sweep per-frequency cost (Pulsim vs Eigen) and Pulsim ÷ Eigen ratio" class="center" loading="lazy" src="../_figures/output/fig86_ac_sweep_parity.png" width="780" /></p>
+<p><em>Figure 8.6 — </em><em>Panel A</em><em>: per-frequency cost vs matrix size
+<span class="arithmatex">\(n\)</span> for both backends on log-log axes. </em><em>Panel B</em><em>: Pulsim ÷
+Eigen ratio. At SMPS-typical <span class="arithmatex">\(n\)</span> (8-32) the two solvers are
+within </em><em>1.0-1.2×</em><em> of each other; Eigen pulls ahead at
+<span class="arithmatex">\(n \ge 64\)</span> due to its reachability-based sparse triangular
+solve (a v1.6.0+ optimisation candidate for Pulsim). Parity
+<span class="arithmatex">\(\le 4\times 10^{-21}\)</span> at every <span class="arithmatex">\(n\)</span> — both solvers are
+numerically interchangeable on the AC-sweep workload.</em></p>
+<p>The v1.4.0 contribution is a software-supply-chain win — the
+in-house complex LU means there is no <code>Eigen::SparseLU&lt;complex&gt;</code>
+on the production AC-sweep path. <code>Backend::Eigen</code> is retained
+explicitly as the IEEE TPEL §VI.B paper-comparison baseline.</p>
+<h2 id="812-takeaways">8.12 Takeaways<a class="headerlink" href="#812-takeaways" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The 3-backend microbench cleanly <strong>isolates the two algorithmic
-  contributions</strong>: amortised-symbolic factor (B/A ≈ 1.7×) ×
-  path-based factor (C/B ≈ 1.6×) = headline (C/A ≈ 2.7-2.9×).</li>
-<li>The headline win <strong>saturates at <span class="arithmatex">\(n_{\mathrm{state}} \ge 14\)</span></strong>
+<li>The v1.3.0 3-backend microbench cleanly <strong>isolates the two
+  algorithmic contributions</strong>: amortised-symbolic factor (B/A
+  ≈ 1.7×) × path-based factor (C/B ≈ 1.6×) = headline
+  (C/A ≈ 2.7-2.9×).</li>
+<li>The v1.3.0 headline saturates at <span class="arithmatex">\(n_{\mathrm{state}} \ge 14\)</span>
   and projects to roughly <span class="arithmatex">\(10\times\)</span> at MMC scale based on the
   flat-vs-linear per-call cost scaling.</li>
-<li><strong>Zero fallbacks</strong> across 1999 single-bit flips per <span class="arithmatex">\(N\)</span> at
-  <span class="arithmatex">\(\mathrm{PIVOT\_THRESH} = 10^{-3}\)</span> — chapter 7's pivot rule
-  was tuned empirically from the captured data.</li>
-<li><strong>Honest limitations</strong> are documented up-front: synthetic
-  fixture, single-bit-only, single-threaded, <span class="arithmatex">\(n \le 26\)</span>. The
-  TPEL paper §VI's Limitations section uses these same four
-  caveats verbatim.</li>
-<li>For real SMPS users: <code>pp.simulate(...)</code> is well above the
-  small-<span class="arithmatex">\(n\)</span> crossover; the v1.3.0 fast-path is on by default
-  and "just works".</li>
+<li><strong>v1.4.0 generalises</strong> the same path-based machinery to two
+  more SMPS cases: multi-bit switch transitions (1.3-1.7× over
+  Eigen sliding solver) and parametric sweeps / Monte Carlo
+  (3.0-3.7× over legacy per-point rebuild).</li>
+<li><strong>v1.4.0 ships the in-house complex sparse LU</strong> so AC sweeps
+  no longer require <code>Eigen::SparseLU&lt;complex&gt;</code> in production.
+  Parity within 1.0-1.2× of Eigen at SMPS sizes; the
+  supply-chain win is the headline.</li>
+<li><strong>Zero fallbacks</strong> across the single-bit Gray-code workload,
+  the parametric sweep, AND the bulk of the multi-bit
+  transitions — the <span class="arithmatex">\(\mathrm{PIVOT\_THRESH} = 10^{-3}\)</span> +
+  <span class="arithmatex">\(\mathrm{MAX\_PATH\_LENGTH\_RATIO} = 0.6\)</span> heuristics hold up
+  empirically across every captured workload.</li>
+<li><strong>Honest limitations</strong> are documented up-front in each
+  RESULTS.md: synthetic fixtures, <span class="arithmatex">\(n \le 128\)</span>, single-threaded.</li>
+<li>For real SMPS users: <code>pp.simulate(...)</code> keeps the v1.3.0 fast
+  path on by default. The new
+  <code>pp.sweep_path_aware(...)</code> /
+  <code>pp.monte_carlo_path_aware(...)</code> helpers are drop-in
+  replacements for parameter studies; the v1.4.0
+  <code>run_mna_sweep(...)</code> complex solver is also on by default.</li>
 </ul>
-<h2 id="812-further-reading">8.12 Further reading<a class="headerlink" href="#812-further-reading" title="Permanent link">&para;</a></h2>
+<h2 id="813-further-reading">8.13 Further reading<a class="headerlink" href="#813-further-reading" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md</code></strong> —
-  the canonical writeup. This chapter is a docs-side
-  re-presentation; that file is the paper-bound reference.</li>
+<li><strong>Paper-bound canonical writeups</strong> (one per workload):</li>
+<li><code>artigos/02_tpel_methods/benchmarks/RANK1_RESULTS.md</code> —
+    single-bit Gray-code (v1.3.0).</li>
+<li><code>artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md</code> —
+    multi-bit path-union (v1.4.0).</li>
+<li><code>artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md</code>
+    — parametric sweep / Monte Carlo (v1.4.0).</li>
+<li><code>artigos/02_tpel_methods/benchmarks/AC_SWEEP_RESULTS.md</code> —
+    AC sweep complex LU (v1.4.0).</li>
 <li><strong>TPEL paper draft</strong> (under
   <code>artigos/02_tpel_methods/</code>) — §VI presents this data with
   full statistical-significance + cross-converter coverage
-  (target submission Q1 2027).</li>
-<li><strong>In Pulsim</strong> — <code>core/tests/benchmarks/test_bench_pwl_rank1.cpp</code>
-  is the bench source. ~200 lines of Catch2-driven C++ that
-  produces the captured CSV.</li>
+  (target submission Q1 2027). The extended §VI.A table
+  splits into single-bit / multi-bit / parametric rows per
+  the v1.4.0 generalisation.</li>
+<li><strong>In Pulsim</strong> — bench sources:</li>
+<li><code>test_bench_pwl_rank1.cpp</code> (v1.3.0 single-bit)</li>
+<li><code>test_bench_multi_bit_rank1.cpp</code> (v1.4.0 multi-bit)</li>
+<li><code>test_bench_parametric_sweep.cpp</code> (v1.4.0 parametric)</li>
+<li><code>test_bench_ac_sweep.cpp</code> (v1.4.0 AC complex)</li>
 <li><strong>In this doc set</strong> — <a href="../07-rank1-partial-refactor/">Chapter 7</a>
   for the algorithm being measured;
   <a href="../09-architecture-walkthrough/">Chapter 9</a> for where the

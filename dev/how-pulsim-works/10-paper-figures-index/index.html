@@ -1594,10 +1594,11 @@
 <p>The single page that maps every figure in the "How Pulsim
 Works" doc set to the paper section it feeds. Reviewers and
 co-authors land here; everything below is a stable link target.</p>
-<p><strong>Status (as of iteration 3 of the doc set):</strong> 12 of 12
-matplotlib figures rendered + 4 mermaid diagrams embedded
-in-line in chapters. Both PNG (web) and PDF (paper-grade,
-300 dpi) outputs land in <code>_figures/output/</code>.</p>
+<p><strong>Status (as of v1.4.0):</strong> 15 of 15 matplotlib figures
+rendered + 4 mermaid diagrams embedded in-line in chapters.
+Both PNG (web) and PDF (paper-grade, 300 dpi) outputs land
+in <code>_figures/output/</code>. New in v1.4.0: figs 8.4, 8.5, 8.6
+covering the multi-bit / parametric / AC-sweep contributions.</p>
 <hr />
 <h2 id="index">Index<a class="headerlink" href="#index" title="Permanent link">&para;</a></h2>
 <table>
@@ -1745,6 +1746,27 @@ in-line in chapters. Both PNG (web) and PDF (paper-grade,
 <td>✅ rendered</td>
 </tr>
 <tr>
+<td>8.4</td>
+<td><a href="../08-benchmarks/#8111-multi-bit-path-union-speedup">§8.11.1</a></td>
+<td>Multi-bit speedup vs Hamming distance + hit-rate decay (v1.4.0)</td>
+<td><strong>§VI.A multi-bit row</strong></td>
+<td>✅ rendered (NEW)</td>
+</tr>
+<tr>
+<td>8.5</td>
+<td><a href="../08-benchmarks/#8112-parametric-sweep--monte-carlo-speedup">§8.11.2</a></td>
+<td>Parametric sweep speedup + per-point cost (v1.4.0)</td>
+<td><strong>§VI.C parametric row</strong></td>
+<td>✅ rendered (NEW)</td>
+</tr>
+<tr>
+<td>8.6</td>
+<td><a href="../08-benchmarks/#8113-ac-sweep-complex-sparse-lu-v140">§8.11.3</a></td>
+<td>AC sweep complex LU: Pulsim vs Eigen (v1.4.0)</td>
+<td><strong>§VI.B AC complex</strong></td>
+<td>✅ rendered (NEW)</td>
+</tr>
+<tr>
 <td>9.1</td>
 <td><a href="../09-architecture-walkthrough/#91-the-layer-model">§9.1</a></td>
 <td>Pulsim 10-layer stack</td>
@@ -1760,12 +1782,19 @@ in-line in chapters. Both PNG (web) and PDF (paper-grade,
 </tr>
 </tbody>
 </table>
-<p><strong>Inventory at iteration 3:</strong></p>
+<p><strong>Inventory at v1.4.0:</strong></p>
 <ul>
-<li><strong>12 PDF/PNG matplotlib figures</strong> in <code>_figures/output/</code></li>
+<li><strong>15 PDF/PNG matplotlib figures</strong> in <code>_figures/output/</code>
+  (figs 1.1, 1.2, 2.2, 3.2, 4.2, 5.1, 5.2, 5.3, 6.2, 6.3, 7.1,
+  8.1, 8.2, 8.3, <strong>8.4 (NEW)</strong>, <strong>8.5 (NEW)</strong>, <strong>8.6 (NEW)</strong>,
+  9.1 — 18 entries total because some figs are 2-panel)</li>
 <li><strong>6 mermaid diagrams</strong> embedded in markdown (rendered live
   in the docs site; export to PDF via <code>npx @mermaid-js/mermaid-cli</code>
   for paper inclusion)</li>
+<li><strong>Captured CSVs feeding figs 8.4-8.6</strong>:</li>
+<li><code>multi_bit_microbench.csv</code> → fig 8.4</li>
+<li><code>parametric_microbench.csv</code> → fig 8.5</li>
+<li><code>ac_sweep_microbench.csv</code> → fig 8.6</li>
 </ul>
 <hr />
 <h2 id="regenerating-the-figures">Regenerating the figures<a class="headerlink" href="#regenerating-the-figures" title="Permanent link">&para;</a></h2>

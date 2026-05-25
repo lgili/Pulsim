@@ -1880,8 +1880,26 @@ Pulsim's v1.3.0 contribution is <strong>path-based partial
 refactorisation</strong>: when consecutive masks differ by a single
 switch bit (the common case under Gray-coded PWM), we recompute
 <span class="arithmatex">\(L\)</span> and <span class="arithmatex">\(U\)</span> only along the <em>etree path</em> of the affected column —
-typically <span class="arithmatex">\(O(\sqrt{n})\)</span> work instead of <span class="arithmatex">\(O(\mathrm{nnz})\)</span>.
-Chapter 7 is dedicated to this algorithm and its provenance.</p>
+typically <span class="arithmatex">\(O(\sqrt{n})\)</span> work instead of <span class="arithmatex">\(O(\mathrm{nnz})\)</span>.</p>
+<p><strong>v1.4.0 generalises</strong> the same machinery to two additional
+SMPS-relevant cases that no open-source simulator currently
+exploits:</p>
+<ul>
+<li><strong>Multi-bit switch transitions</strong> (SPWM with multiple legs
+  commutating in the same timestep) via the <strong>union of etree
+  paths</strong>.</li>
+<li><strong>Parametric value changes</strong> (R, L, C, V_source updates for
+  sweep / Monte Carlo workloads) via the same path-walk over
+  the columns that depend on the changed parameter.</li>
+</ul>
+<p>Chapter 7 is dedicated to the algorithm and its provenance;
+chapter 8 §8.11 covers the v1.4.0 multi-bit + parametric
+generalisations with captured speedup tables.</p>
+<p><strong>v1.4.0</strong> also ships the in-house complex sparse LU
+(<code>PulsimComplexSparseLuSolver = PulsimSparseLuSolverT&lt;std::complex&lt;Real&gt;&gt;</code>),
+which moves AC sweeps off <code>Eigen::SparseLU&lt;complex&gt;</code> in the
+production path — a software-supply-chain win documented in
+chapter 8 §8.11.3.</p>
 <hr />
 <h2 id="15-what-this-gets-you">1.5 What this gets you<a class="headerlink" href="#15-what-this-gets-you" title="Permanent link">&para;</a></h2>
 <p>Per the v1.3.0 microbenchmark (full details in

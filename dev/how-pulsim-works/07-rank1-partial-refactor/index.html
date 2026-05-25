@@ -1046,9 +1046,9 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#multi-bit-transitions-fall-back" class="md-nav__link">
+  <a href="#wide-path-unions-still-fall-back-v140-update" class="md-nav__link">
     <span class="md-ellipsis">
-      Multi-bit transitions fall back
+      Wide path-unions still fall back (v1.4.0 update)
     </span>
   </a>
   
@@ -1762,9 +1762,9 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#multi-bit-transitions-fall-back" class="md-nav__link">
+  <a href="#wide-path-unions-still-fall-back-v140-update" class="md-nav__link">
     <span class="md-ellipsis">
-      Multi-bit transitions fall back
+      Wide path-unions still fall back (v1.4.0 update)
     </span>
   </a>
   
@@ -2143,16 +2143,34 @@ majority of single-bit transitions and that the
 "headline TPEL claim" is non-vacuous.</p>
 <hr />
 <h2 id="77-what-the-algorithm-does-not-do">7.7 What the algorithm does NOT do<a class="headerlink" href="#77-what-the-algorithm-does-not-do" title="Permanent link">&para;</a></h2>
-<p>Three explicit non-features, deferred to follow-up proposals:</p>
-<h3 id="multi-bit-transitions-fall-back">Multi-bit transitions fall back<a class="headerlink" href="#multi-bit-transitions-fall-back" title="Permanent link">&para;</a></h3>
-<p>If <code>changed_cols.size() &gt; 1</code> <em>for a single transition</em> (not the
-cumulative <code>varying_set_</code>), the resulting path is the union of
-each column's path. Path length can grow to <span class="arithmatex">\(O(n)\)</span> in worst
-cases. For SPWM with multiple legs commutating in one timestep,
-this is common; the <code>PwlStateSpaceCache::solve_rank1</code> wrapper
-detects the Hamming distance and routes multi-bit transitions
-to full <code>factorize</code> instead of <code>partial_refactor</code>. The
-single-bit-flip workload is what chapter 8's benchmark measures.</p>
+<p>Three explicit non-features, deferred to follow-up proposals.</p>
+<h3 id="wide-path-unions-still-fall-back-v140-update">Wide path-unions still fall back (v1.4.0 update)<a class="headerlink" href="#wide-path-unions-still-fall-back-v140-update" title="Permanent link">&para;</a></h3>
+<p>Up to v1.3.0 the cache routed any <strong>multi-bit transition</strong> to
+full <code>factorize</code> unconditionally. v1.4.0 lifts that restriction
+— <code>PwlStateSpaceCache::solve_rank1</code> now consults the
+<span class="arithmatex">\(\mathrm{MAX\_PATH\_LENGTH\_RATIO} = 0.6\)</span> gate via a new
+<code>PulsimSparseLuSolverT&lt;Scalar&gt;::partial_refactor_count_path</code>
+query method:</p>
+<ul>
+<li><span class="arithmatex">\(\delta = 1\)</span> (single-bit flip): always attempt
+  <code>partial_refactor</code> (v1.3.0 behaviour preserved — single-bit
+  paths are always short on real fixtures).</li>
+<li><span class="arithmatex">\(\delta \ge 2\)</span> (multi-bit): compute the union of etree paths
+  for all affected columns. If the union covers <span class="arithmatex">\(\le 60\%\)</span> of
+  <span class="arithmatex">\(n\)</span>, attempt <code>partial_refactor</code>; otherwise fall back to fresh
+  <code>factorize</code>.</li>
+</ul>
+<p>The captured multi-bit microbench (chapter 8 §8.11.1, Fig 8.4)
+shows the gate fires correctly: <span class="arithmatex">\(\sim 45\%\)</span> of <span class="arithmatex">\(\delta = 2\)</span>
+transitions take the path-union, decaying to <span class="arithmatex">\(\sim 10\%\)</span> at
+<span class="arithmatex">\(\delta = 4\)</span>, with <strong>no regression</strong> at <span class="arithmatex">\(\delta = 1\)</span> vs v1.3.0.
+Parametric value changes (chapter 8 §8.11.2) use the same gate
+and the same <code>partial_refactor_count_path</code> query.</p>
+<p><strong>What does still fall back</strong> is the case where the union path
+is genuinely so wide (&gt;60 % of <span class="arithmatex">\(n\)</span>) that path-based update
+would cost the same as a fresh factorize. The gate keeps the
+solver from doing pointless work; the wall-clock cost matches
+the v1.3.0 baseline in those cases.</p>
 <h3 id="sparsity-pattern-changes-are-detected-and-rejected">Sparsity pattern changes are detected and rejected<a class="headerlink" href="#sparsity-pattern-changes-are-detected-and-rejected" title="Permanent link">&para;</a></h3>
 <p>If <code>new_M</code> has nonzeros at positions the analyzed pattern
 doesn't include, the path-based update would produce wrong
