@@ -1,0 +1,2428 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/how-pulsim-works/07-rank1-partial-refactor/">
+      
+      
+        <link rel="prev" href="../06-pulsim-sparse-lu/">
+      
+      
+        <link rel="next" href="../08-benchmarks/">
+      
+      
+      <link rel="icon" href="../../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>7 — Path-Based Partial Refactorisation - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#7-path-based-partial-refactorisation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              7 — Path-Based Partial Refactorisation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#71-the-problem-and-the-intuition" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.1 The problem and the intuition
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#72-the-algorithm-in-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.2 The algorithm in detail
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.2 The algorithm in detail">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-maintain-a-lazy-varying_set_" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1: maintain a lazy varying_set_
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-recompute-the-etree-path-only-if-varying_set_-grew" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2: recompute the etree path (only if varying_set_ grew)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-re-eliminate-each-path-column" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3: re-eliminate each path column
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#73-the-path-walk-visualised" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.3 The path walk, visualised
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#74-the-pivot-fault-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.4 The pivot-fault fallback
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#75-the-lazy-union-why-we-accumulate-varying_set_" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.5 The lazy union: why we accumulate varying_set_
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.5 The lazy union: why we accumulate varying_set_">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-a-same-switch-keeps-toggling-steady-state-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern A: same switch keeps toggling (steady-state PWM)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-b-new-switch-joins-the-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern B: new switch joins the rotation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-c-analyze-is-called-again-eg-dt-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern C: analyze is called again (e.g. dt changes)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#76-the-diagnostic-counters" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.6 The diagnostic counters
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#77-what-the-algorithm-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.7 What the algorithm does NOT do
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.7 What the algorithm does NOT do">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#wide-path-unions-still-fall-back-v140-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      Wide path-unions still fall back (v1.4.0 update)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sparsity-pattern-changes-are-detected-and-rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sparsity pattern changes are detected and rejected
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-support-for-multi-thread-or-gpu-parallelism" class="md-nav__link">
+    <span class="md-ellipsis">
+      No support for multi-thread or GPU parallelism
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#78-test-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.8 Test coverage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#79-provenance-and-historical-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.9 Provenance and historical context
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#710-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.10 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#711-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.11 Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#71-the-problem-and-the-intuition" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.1 The problem and the intuition
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#72-the-algorithm-in-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.2 The algorithm in detail
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.2 The algorithm in detail">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-maintain-a-lazy-varying_set_" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1: maintain a lazy varying_set_
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-recompute-the-etree-path-only-if-varying_set_-grew" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2: recompute the etree path (only if varying_set_ grew)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-re-eliminate-each-path-column" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3: re-eliminate each path column
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#73-the-path-walk-visualised" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.3 The path walk, visualised
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#74-the-pivot-fault-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.4 The pivot-fault fallback
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#75-the-lazy-union-why-we-accumulate-varying_set_" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.5 The lazy union: why we accumulate varying_set_
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.5 The lazy union: why we accumulate varying_set_">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-a-same-switch-keeps-toggling-steady-state-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern A: same switch keeps toggling (steady-state PWM)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-b-new-switch-joins-the-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern B: new switch joins the rotation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-c-analyze-is-called-again-eg-dt-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern C: analyze is called again (e.g. dt changes)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#76-the-diagnostic-counters" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.6 The diagnostic counters
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#77-what-the-algorithm-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.7 What the algorithm does NOT do
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.7 What the algorithm does NOT do">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#wide-path-unions-still-fall-back-v140-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      Wide path-unions still fall back (v1.4.0 update)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sparsity-pattern-changes-are-detected-and-rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sparsity pattern changes are detected and rejected
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-support-for-multi-thread-or-gpu-parallelism" class="md-nav__link">
+    <span class="md-ellipsis">
+      No support for multi-thread or GPU parallelism
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#78-test-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.8 Test coverage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#79-provenance-and-historical-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.9 Provenance and historical context
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#710-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.10 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#711-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      7.11 Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/how-pulsim-works/07-rank1-partial-refactor.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/how-pulsim-works/07-rank1-partial-refactor.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="7-path-based-partial-refactorisation">7. Path-Based Partial Refactorisation<a class="headerlink" href="#7-path-based-partial-refactorisation" title="Permanent link">&para;</a></h1>
+<p><strong>The algorithmic contribution that backs the IEEE TPEL methods
+paper.</strong> Chapter 6 left us with a full sparse LU. This chapter
+explains how — when the matrix changes by <em>one column</em> between
+consecutive solves — we update <span class="arithmatex">\(L\)</span> and <span class="arithmatex">\(U\)</span> in
+<span class="arithmatex">\(O(|\text{path}|) \approx O(\sqrt{n})\)</span> work rather than
+re-factorising in <span class="arithmatex">\(O(\mathrm{nnz} \log n)\)</span>.</p>
+<p>The technique is <strong>path-based partial refactorisation</strong>, first
+described by Chan, Brandwajn &amp; Tinney (PICA-86, 1986) for power-
+system fault analysis and generalised to circuit MNA by
+Dinkelbach, Liegmann &amp; Riedel in <em>Energies</em> 14:7989 (2021).
+Pulsim implements the Dinkelbach formulation as the
+<code>partial_refactor(new_M, changed_cols)</code> entry point on
+<code>PulsimSparseLuSolver</code>.</p>
+<hr />
+<h2 id="71-the-problem-and-the-intuition">7.1 The problem and the intuition<a class="headerlink" href="#71-the-problem-and-the-intuition" title="Permanent link">&para;</a></h2>
+<p>After the PWL cache (chapter 4), Pulsim's biggest remaining cost
+is <strong>first-encounter of a new mask</strong>: the cache pays a full
+<code>analyze + factorize</code> for every mask not previously seen, even
+if that mask differs from the last one by just a single switch
+bit (the common case under Gray-coded PWM).</p>
+<p>To make first-encounter cheap, we need an algorithm that updates
+the existing <span class="arithmatex">\(L\)</span> and <span class="arithmatex">\(U\)</span> factors <em>incrementally</em> when the matrix
+changes. Classical updates (Sherman-Morrison, Woodbury) work for
+<strong>dense</strong> rank-1 updates; they're <span class="arithmatex">\(O(n^2)\)</span> per update — fine
+for <span class="arithmatex">\(n = 5\)</span> but unusable at <span class="arithmatex">\(n = 200\)</span>.</p>
+<p>The path-based approach exploits a structural fact:</p>
+<blockquote>
+<p>Changing one column <span class="arithmatex">\(c\)</span> of <span class="arithmatex">\(M\)</span> from <span class="arithmatex">\(M_{\mathrm{old}}\)</span> to
+<span class="arithmatex">\(M_{\mathrm{new}}\)</span> only affects <span class="arithmatex">\(L\)</span> and <span class="arithmatex">\(U\)</span> entries along the
+<strong>etree path</strong> of column <span class="arithmatex">\(c\)</span> (after permutation): the chain
+<span class="arithmatex">\(c \to \mathrm{parent}[c] \to \mathrm{grandparent}[c] \to
+\cdots \to \text{root}\)</span>.</p>
+</blockquote>
+<p>Every column off that path is untouched. Updating the path is
+<span class="arithmatex">\(O(|\text{path}|) = O(\sqrt{n})\)</span> on average for chain-like SMPS
+topologies (the path length is the etree depth of the changed
+column, which is <span class="arithmatex">\(\sim \sqrt{n}\)</span> for banded matrices).</p>
+<p>Why does it work? Because:</p>
+<ol>
+<li>The etree captures fill propagation (chapter 5 §5.5). If
+   <span class="arithmatex">\(L[i, c] = 0\)</span> then there's no "downstream" effect from
+   column <span class="arithmatex">\(c\)</span> on column <span class="arithmatex">\(i\)</span>. The path-vs-non-path distinction
+   is exactly the same distinction symbolic factorisation uses
+   to predict pattern.</li>
+<li>Sparsity-pattern invariance (chapter 2 §2.6 — switch toggles
+   change values, not the sparsity pattern). The etree
+   structure stays valid under value changes; only the numeric
+   <span class="arithmatex">\(L+U\)</span> entries on the path need re-computing.</li>
+</ol>
+<p>So the algorithm is: <strong>for each changed column <span class="arithmatex">\(c\)</span>, walk the
+etree up to the root and re-eliminate exactly those columns.</strong></p>
+<hr />
+<h2 id="72-the-algorithm-in-detail">7.2 The algorithm in detail<a class="headerlink" href="#72-the-algorithm-in-detail" title="Permanent link">&para;</a></h2>
+<p><code>PulsimSparseLuSolver::partial_refactor(new_M, changed_cols)</code>
+does three things:</p>
+<h3 id="step-1-maintain-a-lazy-varying_set_">Step 1: maintain a lazy <code>varying_set_</code><a class="headerlink" href="#step-1-maintain-a-lazy-varying_set_" title="Permanent link">&para;</a></h3>
+<p>Per call, the user passes a <code>std::span&lt;const Index&gt;</code> of
+"changed columns". We accumulate the union of every column ever
+passed across the lifetime of the solver:</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">set</span><span class="o">&lt;</span><span class="n">Index</span><span class="o">&gt;</span><span class="w"> </span><span class="n">varying_set_</span><span class="p">;</span><span class="w">  </span><span class="c1">// ORIGINAL coord, not permuted</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="nf">partial_refactor</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">Matrix</span><span class="o">&amp;</span><span class="w"> </span><span class="n">new_M</span><span class="p">,</span>
+<span class="w">                       </span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="o">&gt;</span><span class="w"> </span><span class="n">changed_cols</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">factorized_</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">changed_cols</span><span class="p">.</span><span class="n">empty</span><span class="p">())</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">  </span><span class="c1">// no-op</span>
+
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">varying_grew</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">changed_cols</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">it</span><span class="p">,</span><span class="w"> </span><span class="n">inserted</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">varying_set_</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">inserted</span><span class="p">)</span><span class="w"> </span><span class="n">varying_grew</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// ... step 2 follows</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The lazy union is the right thing because under typical PWM
+the same switch bits toggle repeatedly. Once we've seen
+columns <span class="arithmatex">\(\{2, 5, 7\}\)</span>, the path we compute covers all three;
+subsequent calls with <span class="arithmatex">\(\{2\}\)</span> alone hit the cache.</p>
+<h3 id="step-2-recompute-the-etree-path-only-if-varying_set_-grew">Step 2: recompute the etree path (only if <code>varying_set_</code> grew)<a class="headerlink" href="#step-2-recompute-the-etree-path-only-if-varying_set_-grew" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">varying_grew</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">path_valid_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">compute_path_</span><span class="p">();</span><span class="w">   </span><span class="c1">// populates path_ (permuted-col order, sorted asc)</span>
+<span class="w">    </span><span class="n">path_valid_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>compute_path_</code> walks from each <code>varying_set_</code> entry up to the
+root using an <code>in_path</code> bitmap to dedupe:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">compute_path_</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="w"> </span><span class="n">in_path</span><span class="p">(</span><span class="n">n_</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">orig_c</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">varying_set_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Index</span><span class="w"> </span><span class="n">permuted_c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Pinv_col_</span><span class="p">[</span><span class="n">orig_c</span><span class="p">];</span>
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">permuted_c</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">-1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">in_path</span><span class="p">[</span><span class="n">permuted_c</span><span class="p">])</span><span class="w"> </span><span class="k">break</span><span class="p">;</span><span class="w">  </span><span class="c1">// already covered</span>
+<span class="w">            </span><span class="n">in_path</span><span class="p">[</span><span class="n">permuted_c</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">            </span><span class="n">permuted_c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">etree_parent_</span><span class="p">[</span><span class="n">permuted_c</span><span class="p">];</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// Materialize ascending-sorted list</span>
+<span class="w">    </span><span class="n">path_</span><span class="p">.</span><span class="n">clear</span><span class="p">();</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n_</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">in_path</span><span class="p">[</span><span class="n">k</span><span class="p">])</span><span class="w"> </span><span class="n">path_</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">k</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="o">++</span><span class="n">path_compute_count_</span><span class="p">;</span><span class="w">  </span><span class="c1">// diagnostic</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The result <code>path_</code> is a sorted list of permuted column indices
+that need re-elimination. For a single-bit flip on a banded
+matrix, <code>path_.size()</code> is the depth of the changed column in the
+etree — typically <span class="arithmatex">\(\sqrt{n}\)</span> to <span class="arithmatex">\(\log n\)</span> depending on the
+specific topology.</p>
+<h3 id="step-3-re-eliminate-each-path-column">Step 3: re-eliminate each path column<a class="headerlink" href="#step-3-re-eliminate-each-path-column" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">k_path</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">path_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Load x from new_M[Prow_, Pcol_[k_path]]</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Real</span><span class="o">&gt;</span><span class="w"> </span><span class="n">x</span><span class="p">(</span><span class="n">n_</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">);</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">orig_c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Pcol_</span><span class="p">[</span><span class="n">k_path</span><span class="p">];</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">it</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Matrix</span><span class="o">::</span><span class="n">InnerIterator</span><span class="p">(</span><span class="n">new_M</span><span class="p">,</span><span class="w"> </span><span class="n">orig_c</span><span class="p">);</span><span class="w"> </span><span class="n">it</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">it</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">x</span><span class="p">[</span><span class="n">Pinv_row_</span><span class="p">[</span><span class="n">it</span><span class="p">.</span><span class="n">row</span><span class="p">()]]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">it</span><span class="p">.</span><span class="n">value</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Apply L-updates from columns j &lt; k_path (path or non-path,</span>
+<span class="w">    </span><span class="c1">// values are correct in both cases)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k_path</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">j</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mf">0.0</span><span class="p">)</span><span class="w"> </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">j</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">j</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">];</span>
+<span class="w">            </span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">l_values_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">j</span><span class="p">];</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// KLU-style threshold pivot check</span>
+<span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">pivot_mag</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">k_path</span><span class="p">]);</span>
+<span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">x_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_path</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n_</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">x_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">max</span><span class="p">(</span><span class="n">x_max</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">x_max</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">pivot_mag</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">PIVOT_THRESH</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Need a row swap the existing Prow_ doesn&#39;t permit</span>
+<span class="w">        </span><span class="n">invalidate_path_cache_</span><span class="p">();</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span><span class="w">        </span><span class="c1">// &lt;-- caller falls back to factorize</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Update L+U values in-place AT THE EXISTING CSC SLOTS.</span>
+<span class="w">    </span><span class="c1">// No new allocation; pattern is unchanged.</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_col_ptr_</span><span class="p">[</span><span class="n">k_path</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">u_col_ptr_</span><span class="p">[</span><span class="n">k_path</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">];</span>
+<span class="w">        </span><span class="n">u_values_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k_path</span><span class="p">];</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k_path</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"> </span><span class="o">++</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l_row_idx_</span><span class="p">[</span><span class="n">p</span><span class="p">];</span>
+<span class="w">        </span><span class="n">l_values_</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">x</span><span class="p">[</span><span class="n">k_path</span><span class="p">];</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">  </span><span class="c1">// success — caller can solve() against the updated factors</span>
+</code></pre></div>
+<p>Three things make this fast:</p>
+<ol>
+<li><strong>Path is short</strong>: <span class="arithmatex">\(O(\sqrt{n})\)</span> for banded topologies.</li>
+<li><strong>L-updates from prior columns hit the cache</strong>: we read
+   <code>l_values_[p]</code> from the existing CSC storage, no per-column
+   scan.</li>
+<li><strong>No re-allocation</strong>: the L+U pattern is assumed unchanged
+   (sparsity-pattern invariance per chapter 2 §2.6), so we just
+   overwrite values at existing slots.</li>
+</ol>
+<p>The whole <code>partial_refactor</code> for a single-bit flip on the
+buck-like 8×8 fixture runs in <span class="arithmatex">\(\sim 1.5\)</span> µs vs the full
+<code>factorize</code>'s <span class="arithmatex">\(\sim 5\)</span> µs — a 3× single-call speedup that
+multiplies into the chapter 8 benchmark's 2.7-2.9× headline
+after the L-update overhead amortises across longer paths.</p>
+<hr />
+<h2 id="73-the-path-walk-visualised">7.3 The path walk, visualised<a class="headerlink" href="#73-the-path-walk-visualised" title="Permanent link">&para;</a></h2>
+<p>For the buck-like 8×8 fixture (etree from chapter 5 fig 5.2):
+columns <span class="arithmatex">\(\{0, 1, \ldots, 7\}\)</span> form a near-linear chain with
+column 7 as root. Suppose switch <span class="arithmatex">\(S_2\)</span> toggles, changing
+column <span class="arithmatex">\(c = 2\)</span> of <span class="arithmatex">\(M\)</span>.</p>
+<p><img alt="Etree path walk for a column-2 change" class="center" loading="lazy" src="../_figures/output/fig71_etree_path.png" width="600" /></p>
+<p><em>Figure 7.1 — Path walk from changed column <span class="arithmatex">\(c = 2\)</span> up to the
+etree root on the buck-like 8×8 fixture. The orange columns
+<span class="arithmatex">\(\{2, 3, 4, 5, 6, 7\}\)</span> are the path — every column whose stored
+<span class="arithmatex">\(L\)</span> and <span class="arithmatex">\(U\)</span> entries need re-computing. Columns <span class="arithmatex">\(\{0, 1\}\)</span> are
+</em><em>off the path</em><em> — their stored values are still valid post-
+update. Path length is 6 out of 8 columns (<span class="arithmatex">\(75\%\)</span>), so on this
+small fixture path-based isn't yet hugely faster than full
+factorise; the win grows with <span class="arithmatex">\(n\)</span> as the path length scales as
+<span class="arithmatex">\(O(\sqrt{n})\)</span> while full factorise scales as <span class="arithmatex">\(O(n)\)</span>.</em></p>
+<p>For larger matrices the win gets pronounced. On the
+N-switch-chain microbench from chapter 8, at <span class="arithmatex">\(n = 26\)</span> the path
+length for a single-bit flip averages <strong>5</strong>, so the path-based
+update touches <span class="arithmatex">\(5/26 \approx 19\%\)</span> of columns — and the
+captured wall-clock speedup is <strong>2.68× vs full factorise</strong> at
+that <span class="arithmatex">\(n\)</span>.</p>
+<hr />
+<h2 id="74-the-pivot-fault-fallback">7.4 The pivot-fault fallback<a class="headerlink" href="#74-the-pivot-fault-fallback" title="Permanent link">&para;</a></h2>
+<p>What if a path column's pivot check fails? The threshold rule:</p>
+<div class="arithmatex">\[
+|x[k]| \;\ge\; \mathrm{PIVOT\_THRESH} \cdot \max_{i \ge k} |x[i]|
+\]</div>
+<p>with <span class="arithmatex">\(\mathrm{PIVOT\_THRESH} = 10^{-3}\)</span> (KLU-style). If this
+fails for any <span class="arithmatex">\(k\)</span> on the path — i.e. the partial update would
+need a row swap that the existing <span class="arithmatex">\(P_{\mathrm{row}}\)</span> doesn't
+permit — <code>partial_refactor</code> returns <code>false</code>:</p>
+<pre class="mermaid"><code>flowchart TD
+    A[solve_rank1 mask, b, x] --&gt; B{cache.partial_refactor M_new, changed_cols}
+    B --&gt;|true| C[solve b, x using updated L+U]
+    B --&gt;|false| D[invalidate_path_cache_]
+    D --&gt; E[caller falls back to full factorize]
+    E --&gt; F[increment fallbacks counter]
+    F --&gt; C
+    C --&gt; G[return]</code></pre>
+<p><em>Figure 7.2 — Fault recovery flow. The fast path (green chain:
+partial_refactor → solve) handles the common single-bit-flip
+case. The fallback path (red chain: invalidate → full
+re-factorise → solve) handles the rare pivot-fault case. Every
+fallback increments a counter (<code>fallbacks</code> in <code>CacheMetrics</code>)
+so the caller can monitor how often the fast path engages.</em></p>
+<p>The captured benchmark (chapter 8) shows <strong>zero fallbacks
+across 1999 single-bit flips per N</strong> at <span class="arithmatex">\(\mathrm{PIVOT\_THRESH}
+= 10^{-3}\)</span> on the N-switch-chain fixture. The threshold is
+loose enough to absorb the natural pivot-magnitude swings of
+circuit MNA matrices; tightening to <span class="arithmatex">\(10^{-2}\)</span> would force ~5%
+fallback rate; loosening to <span class="arithmatex">\(10^{-5}\)</span> would risk producing
+inaccurate L+U values. The <span class="arithmatex">\(10^{-3}\)</span> sweet spot is the
+KLU-recommended default and matches the production-grade
+threshold-pivoting literature (Demmel 1997 §3.4).</p>
+<hr />
+<h2 id="75-the-lazy-union-why-we-accumulate-varying_set_">7.5 The lazy union: why we accumulate <code>varying_set_</code><a class="headerlink" href="#75-the-lazy-union-why-we-accumulate-varying_set_" title="Permanent link">&para;</a></h2>
+<p>The cache's contract is "compute the path once per <code>varying_set_</code>
+change, reuse forever". Three call patterns make this useful:</p>
+<h3 id="pattern-a-same-switch-keeps-toggling-steady-state-pwm">Pattern A: same switch keeps toggling (steady-state PWM)<a class="headerlink" href="#pattern-a-same-switch-keeps-toggling-steady-state-pwm" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>call 1:  partial_refactor(M_S2on,  changed_cols=[2])
+call 2:  partial_refactor(M_S2off, changed_cols=[2])
+call 3:  partial_refactor(M_S2on,  changed_cols=[2])
+...
+</code></pre></div>
+<p><code>varying_set_ = {2}</code> after call 1; subsequent calls don't grow
+it. <code>compute_path_</code> runs once on call 1; calls 2, 3, …, N all
+reuse <code>path_</code>. Per-call cost: <span class="arithmatex">\(O(|\text{path}|) + O(0)\)</span> — no
+path recompute.</p>
+<h3 id="pattern-b-new-switch-joins-the-rotation">Pattern B: new switch joins the rotation<a class="headerlink" href="#pattern-b-new-switch-joins-the-rotation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>call N:    partial_refactor(M_S2..., changed_cols=[2])      ← reuses
+call N+1:  partial_refactor(M_S2S5, changed_cols=[2, 5])    ← grows
+call N+2:  partial_refactor(M_S2S5, changed_cols=[2, 5])    ← reuses
+</code></pre></div>
+<p><code>varying_set_</code> grows on call N+1; <code>compute_path_</code> runs again,
+producing a path that covers both columns' etree ancestors
+(usually a superset of either column's individual path). Calls
+from N+2 onward hit the cached path.</p>
+<h3 id="pattern-c-analyze-is-called-again-eg-dt-changes">Pattern C: <code>analyze</code> is called again (e.g. dt changes)<a class="headerlink" href="#pattern-c-analyze-is-called-again-eg-dt-changes" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>cache.set_dt(new_dt);   // triggers re-analyze under the hood
+call M:  partial_refactor(M_new, changed_cols=[2])
+</code></pre></div>
+<p><code>analyze</code> calls <code>invalidate_path_cache_()</code> which clears
+<code>varying_set_</code>, <code>path_</code>, and sets <code>path_valid_ = false</code>. Call M
+recomputes from scratch. This is the cache-invalidation
+contract.</p>
+<hr />
+<h2 id="76-the-diagnostic-counters">7.6 The diagnostic counters<a class="headerlink" href="#76-the-diagnostic-counters" title="Permanent link">&para;</a></h2>
+<p>The cache exposes <code>CacheMetrics</code> for monitoring:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">CacheMetrics</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">rank1_hits</span><span class="p">;</span><span class="w">          </span><span class="c1">// successful partial_refactor + solve</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">full_refactor_hits</span><span class="p">;</span><span class="w">  </span><span class="c1">// fell back to full factorize</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">fallbacks</span><span class="p">;</span><span class="w">           </span><span class="c1">// path-cache invalidations</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>Three useful invariants:</p>
+<ol>
+<li><code>rank1_hits + full_refactor_hits + fallbacks == total
+   solve_rank1 calls</code></li>
+<li><code>full_refactor_hits ≥ 1</code> always (first encounter of any
+   mask is a full factorise; there's no prior factor to update)</li>
+<li><code>fallbacks == 0</code> is the "healthy" state for well-conditioned
+   circuit MNA workloads at <code>PIVOT_THRESH = 1e-3</code></li>
+</ol>
+<p>The chapter 4 V8 unit test
+(<code>core/tests/layer4/test_pwl_cache_rank1.cpp</code>, test 5.1)
+asserts <code>rank1_hits &gt;= 8</code> out of 15 single-bit flips on the
+4-bit Gray-code sweep, proving the fast path engages on the
+majority of single-bit transitions and that the
+"headline TPEL claim" is non-vacuous.</p>
+<hr />
+<h2 id="77-what-the-algorithm-does-not-do">7.7 What the algorithm does NOT do<a class="headerlink" href="#77-what-the-algorithm-does-not-do" title="Permanent link">&para;</a></h2>
+<p>Three explicit non-features, deferred to follow-up proposals.</p>
+<h3 id="wide-path-unions-still-fall-back-v140-update">Wide path-unions still fall back (v1.4.0 update)<a class="headerlink" href="#wide-path-unions-still-fall-back-v140-update" title="Permanent link">&para;</a></h3>
+<p>Up to v1.3.0 the cache routed any <strong>multi-bit transition</strong> to
+full <code>factorize</code> unconditionally. v1.4.0 lifts that restriction
+— <code>PwlStateSpaceCache::solve_rank1</code> now consults the
+<span class="arithmatex">\(\mathrm{MAX\_PATH\_LENGTH\_RATIO} = 0.6\)</span> gate via a new
+<code>PulsimSparseLuSolverT&lt;Scalar&gt;::partial_refactor_count_path</code>
+query method:</p>
+<ul>
+<li><span class="arithmatex">\(\delta = 1\)</span> (single-bit flip): always attempt
+  <code>partial_refactor</code> (v1.3.0 behaviour preserved — single-bit
+  paths are always short on real fixtures).</li>
+<li><span class="arithmatex">\(\delta \ge 2\)</span> (multi-bit): compute the union of etree paths
+  for all affected columns. If the union covers <span class="arithmatex">\(\le 60\%\)</span> of
+  <span class="arithmatex">\(n\)</span>, attempt <code>partial_refactor</code>; otherwise fall back to fresh
+  <code>factorize</code>.</li>
+</ul>
+<p>The captured multi-bit microbench (chapter 8 §8.11.1, Fig 8.4)
+shows the gate fires correctly: <span class="arithmatex">\(\sim 45\%\)</span> of <span class="arithmatex">\(\delta = 2\)</span>
+transitions take the path-union, decaying to <span class="arithmatex">\(\sim 10\%\)</span> at
+<span class="arithmatex">\(\delta = 4\)</span>, with <strong>no regression</strong> at <span class="arithmatex">\(\delta = 1\)</span> vs v1.3.0.
+Parametric value changes (chapter 8 §8.11.2) use the same gate
+and the same <code>partial_refactor_count_path</code> query.</p>
+<p><strong>What does still fall back</strong> is the case where the union path
+is genuinely so wide (&gt;60 % of <span class="arithmatex">\(n\)</span>) that path-based update
+would cost the same as a fresh factorize. The gate keeps the
+solver from doing pointless work; the wall-clock cost matches
+the v1.3.0 baseline in those cases.</p>
+<h3 id="sparsity-pattern-changes-are-detected-and-rejected">Sparsity pattern changes are detected and rejected<a class="headerlink" href="#sparsity-pattern-changes-are-detected-and-rejected" title="Permanent link">&para;</a></h3>
+<p>If <code>new_M</code> has nonzeros at positions the analyzed pattern
+doesn't include, the path-based update would produce wrong
+answers (it only updates values at existing CSC slots). The
+implementation includes a pattern-change check; if triggered,
+it falls back. For PWL switching this is essentially never
+triggered (chapter 2 §2.6 — switch toggles preserve sparsity
+pattern), but the check is there as a safety net.</p>
+<h3 id="no-support-for-multi-thread-or-gpu-parallelism">No support for multi-thread or GPU parallelism<a class="headerlink" href="#no-support-for-multi-thread-or-gpu-parallelism" title="Permanent link">&para;</a></h3>
+<p><code>partial_refactor</code> is strictly serial. The path is short enough
+(<span class="arithmatex">\(O(\sqrt{n})\)</span>) that parallelism overhead would dominate. For
+very large MNA matrices (<span class="arithmatex">\(n &gt; 1000\)</span>) this could be revisited,
+but it's outside the SMPS regime Pulsim targets.</p>
+<hr />
+<h2 id="78-test-coverage">7.8 Test coverage<a class="headerlink" href="#78-test-coverage" title="Permanent link">&para;</a></h2>
+<p><code>core/tests/layer0/test_pulsim_lu_solver.cpp</code> covers
+<code>partial_refactor</code> with 7 test cases:</p>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>What it asserts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single-col perturbation produces same solve output as fresh factorise</td>
+<td>Numerical correctness within <span class="arithmatex">\(10^{-12}\)</span></td>
+</tr>
+<tr>
+<td>Repeated same <code>changed_cols</code> → <code>path_compute_count</code> stays at 1</td>
+<td>Lazy-union cache works</td>
+</tr>
+<tr>
+<td>Empty <code>changed_cols</code> is a no-op, count stays at 0</td>
+<td>Edge case</td>
+</tr>
+<tr>
+<td>New column joins <code>varying_set_</code> → path recomputed (count 1 → 2)</td>
+<td>Path-cache invalidation on growth</td>
+</tr>
+<tr>
+<td><code>analyze()</code> clears path cache</td>
+<td>Cross-method invalidation contract</td>
+</tr>
+<tr>
+<td><code>supports_partial_refactor()</code> returns true</td>
+<td>Capability advertisement</td>
+</tr>
+<tr>
+<td><code>partial_refactor</code> before <code>factorize</code> returns false</td>
+<td>Lifecycle enforcement</td>
+</tr>
+</tbody>
+</table>
+<p>Plus <code>core/tests/layer4/test_pwl_cache_rank1.cpp</code> covers the
+<code>solve_rank1</code> wrapper end-to-end on a 4-switch Gray-code sweep.</p>
+<hr />
+<h2 id="79-provenance-and-historical-context">7.9 Provenance and historical context<a class="headerlink" href="#79-provenance-and-historical-context" title="Permanent link">&para;</a></h2>
+<p>The path-based partial refactorisation pattern has a 40-year
+history in power-system analysis:</p>
+<ul>
+<li>
+<p><strong>Chan, Brandwajn &amp; Tinney 1986</strong> (PICA-86 conference,
+  "Sparse vector and matrix updating") — the original
+  publication. Applied to network sensitivity analysis for
+  contingency studies (what happens to the steady-state if line
+  X breaks?). Path computation was via the bordered factorisation
+  matrix.</p>
+</li>
+<li>
+<p><strong>Vempati, Slutsker, Tinney 1992</strong> (IEEE Trans. Power Syst.
+  7(3)) — refined the path-finding algorithm to use the
+  elimination tree directly, making the path walk <span class="arithmatex">\(O(|\text{path}|)\)</span>
+  instead of <span class="arithmatex">\(O(\mathrm{nnz})\)</span>.</p>
+</li>
+<li>
+<p><strong>Dinkelbach, Liegmann &amp; Riedel 2021</strong> (<em>Energies</em> 14:7989)
+  — generalised to MNA circuit simulation with partial pivoting</p>
+</li>
+<li>
+<p>threshold pivot fault check. The Pulsim implementation
+  follows this paper directly; the KLU <code>klu_partial</code> symbol
+  uses the same algorithmic skeleton.</p>
+</li>
+<li>
+<p><strong>Pulsim's v1.3.0 implementation</strong> (this chapter) — first
+  open-source, header-only C++23 implementation that we're
+  aware of, packaged as a directly-callable
+  <code>partial_refactor(new_M, changed_cols)</code> API on a general-
+  purpose sparse LU solver. The
+  <code>add-pwl-rank1-partial-refactor</code> OpenSpec proposal documents
+  the requirements + scenarios.</p>
+</li>
+</ul>
+<p>The IEEE TPEL methods paper draft frames this lineage with
+explicit credit to Chan/Brandwajn/Tinney and Dinkelbach; the
+Pulsim contribution is positioned as "an open-source
+implementation + an integration with the PWL state-space cache
+that yields 2.7-2.9× wall-clock speedup on the captured
+microbench".</p>
+<hr />
+<h2 id="710-takeaways">7.10 Takeaways<a class="headerlink" href="#710-takeaways" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>partial_refactor(new_M, changed_cols)</code></strong> updates <span class="arithmatex">\(L\)</span> and
+  <span class="arithmatex">\(U\)</span> along the etree path of the changed columns in
+  <span class="arithmatex">\(O(|\text{path}|) \approx O(\sqrt{n})\)</span> work — vs
+  <span class="arithmatex">\(O(\mathrm{nnz} \log n)\)</span> for a full re-factorise.</li>
+<li>The algorithm comes from <strong>Chan/Brandwajn/Tinney 1986</strong> with
+  the modern etree-walk derivation from <strong>Dinkelbach 2021</strong>.</li>
+<li><strong>Threshold pivot check</strong> (<code>PIVOT_THRESH = 1e-3</code>) ensures
+  numerical stability; failures route to full re-factorise via
+  a clean fallback path.</li>
+<li><strong>Lazy <code>varying_set_</code></strong> caches the computed path; repeat call
+  patterns (steady-state PWM) hit the cache and pay zero path-
+  recompute cost.</li>
+<li>Captured speedup on the chapter 8 microbench: <strong>2.7-2.9× at
+  <span class="arithmatex">\(n_{\mathrm{state}} \ge 14\)</span></strong>, with zero fallbacks across
+  1999 single-bit flips per <span class="arithmatex">\(n\)</span>.</li>
+<li>The contribution backs the IEEE TPEL methods paper (target
+  submission Q1 2027).</li>
+</ul>
+<h2 id="711-further-reading">7.11 Further reading<a class="headerlink" href="#711-further-reading" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Chan, Brandwajn &amp; Tinney 1986</strong> — "Sparse vector and matrix
+  updating", PICA-86 proceedings. Original path-based update
+  paper.</li>
+<li><strong>Dinkelbach, Liegmann &amp; Riedel 2021</strong> — "MNA-Based State
+  Space Models for Real-Time Simulation of Power Electronics",
+  <em>Energies</em> 14:7989. The reference Pulsim implements directly.</li>
+<li><strong>KLU <code>klu_partial</code></strong> — Davis &amp; Natarajan 2010 (<em>ACM TOMS</em>
+  37(3)) — the production reference for the threshold-pivot
+  check.</li>
+<li><strong>In Pulsim</strong> — <code>core/include/pulsim/sparse/pulsim_lu_solver.hpp</code>
+  lines 680-880, the <code>partial_refactor</code> + <code>compute_path_</code> +
+  <code>invalidate_path_cache_</code> implementation.</li>
+<li><strong>In this doc set</strong> — <a href="../08-benchmarks/">Chapter 8</a> measures
+  the speedup contributions of this algorithm in isolation.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../06-pulsim-sparse-lu/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 6 — PulsimSparseLuSolver">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                6 — PulsimSparseLuSolver
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../08-benchmarks/" class="md-footer__link md-footer__link--next" aria-label="Next: 8 — Benchmarks">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                8 — Benchmarks
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>
