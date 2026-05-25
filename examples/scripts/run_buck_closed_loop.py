@@ -31,7 +31,6 @@ What to look for:
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -115,37 +114,32 @@ def main() -> None:
     )
 
     # Low-pass filter on feedback attenuates the LC resonance peak.
+    # Runs every `dt` (composed observer below), so its bandwidth stays
+    # at ~500 Hz independent of the PI's PWM-rate sample throttle.
     lpf = p.FirstOrderLowPass(tau=TAU_LPF)
-
-    duty       = [0.50]
-    last_pi_t  = [-1.0]
 
     setpoint_fn = make_setpoint_with_step(
         T_LOAD_STEP, v_pre=V_REF, v_post=V_REF + 2.0,
     )
 
-    # --- Observer: filter V_out, then sample PI at PWM rate --------------
-    def observe(t: float, x) -> None:
-        v_out_raw = float(x[vout_idx])
-        # LPF runs every dt to keep its bandwidth ~500 Hz independent
-        # of the PI sample rate.
-        v_out_filt = lpf.update(input_value=v_out_raw, dt=DT)
-        sp = setpoint_fn(t)
-        if t - last_pi_t[0] >= T_PWM:
-            dt_pi = (t - last_pi_t[0]) if last_pi_t[0] >= 0 else T_PWM
-            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
-                                  dt=dt_pi)
-            last_pi_t[0] = t
+    # `bind_pi_to_switch` packages the throttled PI update + PWM
+    # switch_fn into one handle. We read the already-filtered LPF
+    # state via `measured=` (the LPF itself runs every `dt` in the
+    # composed observer below).
+    loop = p.bind_pi_to_switch(
+        builder,
+        pi=pi,
+        measured=lambda x: lpf.state,
+        setpoint=setpoint_fn,
+        switch="Q1",
+        freq=F_PWM,
+    )
 
-    # --- PWM driver: reads the latest duty from the shared list ------------
-    num_switches = builder.graph.num_switches
-
-    def switch_fn(t: float):
-        phase = math.fmod(t, T_PWM) / T_PWM
-        m = p.SwitchStateMask(num_switches)
-        if phase < duty[0]:
-            m.set(0, True)
-        return m
+    # Compose: LPF still ticks every dt (for ~500 Hz bandwidth),
+    # then forward to the PI loop's throttled observer.
+    def combined_observer(t: float, x) -> None:
+        lpf.update(input_value=float(x[vout_idx]), dt=DT)
+        loop.step_observer(t, x)
 
     # --- Run ---------------------------------------------------------------
     print(f"\n  Closed-loop buck:")
@@ -155,35 +149,27 @@ def main() -> None:
     res = p.simulate(
         builder,
         t_end=T_END, dt=DT, t_start=0.0,
-        switch_fn=switch_fn,
-        step_observer=observe,
+        switch_fn=loop.switch_fn,
+        step_observer=combined_observer,
         start_from_dc_op=False,
         max_event_iterations=8,
     )
     print(f"  samples: {res.num_steps()}")
 
-    # Replay observer for duty/error history (post-hoc cosmetic plot).
-    pi2 = p.PIController(
-        Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
-    )
-    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
-    duty_history = np.zeros(res.num_steps())
-    error_history = np.zeros(res.num_steps())
-    last_t = [-1.0]
-    d_curr = [0.5]
-    for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out_filt = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
-        sp = setpoint_fn(t)
-        if t - last_t[0] >= T_PWM:
-            dt_pi = (t - last_t[0]) if last_t[0] >= 0 else T_PWM
-            d_curr[0] = pi2.update(setpoint=sp, measured=v_out_filt,
-                                     dt=dt_pi)
-            last_t[0] = t
-        duty_history[k]  = d_curr[0]
-        error_history[k] = sp - v_out_filt
-
+    # Duty / error history captured live by the loop helper. Resample
+    # to the per-sample grid for the cosmetic plot.
     times = np.asarray(res.times) * 1e3   # ms
-    v_out_arr = np.array([s[vout_idx] for s in res.states])
+    v_out_arr = res.v("vout")
+
+    if loop.duty_history:
+        d_times = np.asarray([t for t, _ in loop.duty_history])
+        d_vals  = np.asarray([d for _, d in loop.duty_history])
+        e_vals  = np.asarray([e for _, e in loop.error_history])
+        duty_history  = np.interp(res.times, d_times, d_vals, left=d_vals[0])
+        error_history = np.interp(res.times, d_times, e_vals, left=e_vals[0])
+    else:
+        duty_history  = np.zeros(res.num_steps())
+        error_history = np.zeros(res.num_steps())
 
     # --- Quick KPI ---------------------------------------------------------
     pre_step  = v_out_arr[(times >= 0.5) & (times < 1.0)]

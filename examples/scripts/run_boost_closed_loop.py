@@ -24,7 +24,6 @@ Stress points vs buck:
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -99,7 +98,6 @@ def make_setpoint_step(t_step: float, v_pre: float, v_post: float,
 def main() -> None:
     builder = build_plant()
     vout_idx = builder.node_id_of("vout")
-    sw_idx   = builder.node_id_of("sw")
     print(f"  num_branches:   {builder.num_branches}")
     print(f"  num_switches:   {builder.graph.num_switches}")
 
@@ -109,31 +107,27 @@ def main() -> None:
         output_min=DUTY_MIN, output_max=DUTY_MAX,
         integrator_state=0.40,   # warm-start at the expected duty
     )
-    # LPF on the V_out measurement damps the LC ring before it reaches the PI.
+    # LPF on the V_out measurement damps the LC ring before it reaches
+    # the PI. Runs every `dt` (composed observer below).
     lpf = p.FirstOrderLowPass(tau=TAU_LPF)
-    duty = [0.40]
 
     setpoint_fn = make_setpoint_step(T_STEP, V_REF, V_REF_2)
-    last_pi_t = [-1.0]
 
-    def observe(t: float, x) -> None:
-        v_out_raw = float(x[vout_idx])
-        v_out_filt = lpf.update(input_value=v_out_raw, dt=DT)
-        sp = setpoint_fn(t)
-        if t - last_pi_t[0] >= T_PWM:
-            dt_pi = (t - last_pi_t[0]) if last_pi_t[0] >= 0 else T_PWM
-            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
-                                  dt=dt_pi)
-            last_pi_t[0] = t
+    # `bind_pi_to_switch` packages the throttled PI update + PWM
+    # switch_fn into one handle; we read the LPF state (which ticks
+    # every `dt` in the composed observer below).
+    loop = p.bind_pi_to_switch(
+        builder,
+        pi=pi,
+        measured=lambda x: lpf.state,
+        setpoint=setpoint_fn,
+        switch="Q1",
+        freq=F_PWM,
+    )
 
-    num_switches = builder.graph.num_switches
-
-    def switch_fn(t: float):
-        phase = math.fmod(t, T_PWM) / T_PWM
-        m = p.SwitchStateMask(num_switches)
-        if phase < duty[0]:
-            m.set(0, True)
-        return m
+    def combined_observer(t: float, x) -> None:
+        lpf.update(input_value=float(x[vout_idx]), dt=DT)
+        loop.step_observer(t, x)
 
     print(f"\n  Closed-loop boost:")
     print(f"    PI(Kp={KP}, Ki={KI}), duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
@@ -141,36 +135,24 @@ def main() -> None:
     res = p.simulate(
         builder,
         t_end=T_END, dt=DT,
-        switch_fn=switch_fn,
-        step_observer=observe,
+        switch_fn=loop.switch_fn,
+        step_observer=combined_observer,
         max_event_iterations=8,
     )
     print(f"  samples: {res.num_steps()}")
 
-    # Replay PI for plotting.
-    pi2 = p.PIController(
-        Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
-        integrator_state=0.40,
-    )
-    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
-    duty_history = np.zeros(res.num_steps())
-    setpoint_history = np.zeros(res.num_steps())
-    last_t = [-1.0]
-    d_curr = [0.40]
-    for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out_filt = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
-        sp = setpoint_fn(t)
-        if t - last_t[0] >= T_PWM:
-            dt_pi = (t - last_t[0]) if last_t[0] >= 0 else T_PWM
-            d_curr[0] = pi2.update(setpoint=sp, measured=v_out_filt,
-                                      dt=dt_pi)
-            last_t[0] = t
-        duty_history[k] = d_curr[0]
-        setpoint_history[k] = sp
+    # Duty captured live; resample to per-sample grid for the plot.
+    if loop.duty_history:
+        d_times = np.asarray([t for t, _ in loop.duty_history])
+        d_vals  = np.asarray([d for _, d in loop.duty_history])
+        duty_history = np.interp(res.times, d_times, d_vals, left=d_vals[0])
+    else:
+        duty_history = np.zeros(res.num_steps())
+    setpoint_history = np.asarray([setpoint_fn(t) for t in res.times])
 
     times = np.asarray(res.times) * 1e3
-    v_out_arr = np.array([s[vout_idx] for s in res.states])
-    v_sw_arr  = np.array([s[sw_idx]   for s in res.states])
+    v_out_arr = res.v("vout")
+    v_sw_arr  = res.v("sw")
 
     # KPI
     pre_step  = v_out_arr[(times >= 1.0) & (times < T_STEP*1e3)]

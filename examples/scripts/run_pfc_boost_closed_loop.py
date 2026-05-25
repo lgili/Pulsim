@@ -28,7 +28,7 @@ Stress for the kernel:
 from __future__ import annotations
 
 import math
-from math import pi as PI, sin, fabs
+from math import fabs
 from pathlib import Path
 
 import numpy as np
@@ -113,45 +113,41 @@ def main() -> None:
     pi_i = p.PIController(Kp=KP_I, Ki=KI_I,
                             output_min=DUTY_MIN, output_max=DUTY_MAX)
     lpf_v = p.FirstOrderLowPass(tau=TAU_LPF_V)
-
-    duty = [0.5]
-    K_amp = [2.0]                 # current-amplitude command
-
-    last_v_t = [-1.0]
     V_LOOP_DT = 2.0e-3            # outer loop runs at 500 Hz
 
+    # Outer voltage loop — throttled to 500 Hz so it doesn't fight the
+    # 120 Hz bus ripple. `bind_pi_to_duty_callable` returns a getter for
+    # the latest output (here = current-amplitude command, NOT duty).
+    K_amp_get, v_loop_observer, _v_hist = p.bind_pi_to_duty_callable(
+        builder,
+        pi=pi_v,
+        measured=lambda x: lpf_v.state,
+        setpoint=V_BUS_REF,
+        freq=1.0 / V_LOOP_DT,
+    )
+
+    # Inner current loop fires every dt (not throttled — must track the
+    # |sin| envelope), so we keep it as a tight inline update.
+    duty = [0.5]
+
     def observe(t: float, x) -> None:
-        v_bus_raw = float(x[vbus_idx])
-        i_L   = float(x[iL_idx])
-        v_ac  = float(x[ac_l_idx])
+        # LPF on bus voltage every dt → outer loop reads its state.
+        lpf_v.update(input_value=float(x[vbus_idx]), dt=DT)
+        v_loop_observer(t, x)
 
-        # LPF on bus voltage to attenuate the 120 Hz ripple before
-        # it reaches the outer loop.
-        v_bus_filt = lpf_v.update(input_value=v_bus_raw, dt=DT)
-
-        # Outer voltage loop runs slowly so it doesn't fight the
-        # 120 Hz inherent ripple.
-        if t - last_v_t[0] >= V_LOOP_DT:
-            dt_v = (t - last_v_t[0]) if last_v_t[0] >= 0 else V_LOOP_DT
-            K_amp[0] = pi_v.update(
-                setpoint=V_BUS_REF, measured=v_bus_filt, dt=dt_v,
-            )
-            last_v_t[0] = t
-
-        # Inner current loop fires every dt to track |sin| envelope.
-        i_ref = K_amp[0] * fabs(v_ac) / V_AC_PEAK
-        duty[0] = pi_i.update(setpoint=i_ref, measured=i_L, dt=DT)
+        # Inner current loop, every dt: i_ref tracks |v_ac| × K_amp.
+        i_ref = K_amp_get() * fabs(float(x[ac_l_idx])) / V_AC_PEAK
+        duty[0] = pi_i.update(setpoint=i_ref,
+                                 measured=float(x[iL_idx]), dt=DT)
 
     num_switches = builder.graph.num_switches
+    q1_idx = builder.switch_index_of("Q1")
 
     def switch_fn(t: float):
         phase = math.fmod(t, T_PWM) / T_PWM
         m = p.SwitchStateMask(num_switches)
-        # The MOSFET Q1 is bit 4 in the switch order:
-        # 0..3 = D1..D4 (diodes, kind=Switch), 4 = Q1 (mosfet),
-        # 5 = D_boost.
         if phase < duty[0]:
-            m.set(4, True)
+            m.set(q1_idx, True)
         return m
 
     print(f"\n  PFC boost CL:")
@@ -168,8 +164,8 @@ def main() -> None:
     print(f"  samples: {res.num_steps()}")
 
     times = np.asarray(res.times) * 1e3   # ms
-    v_bus_arr = np.array([s[vbus_idx] for s in res.states])
-    v_ac_arr  = np.array([s[ac_l_idx] for s in res.states])
+    v_bus_arr = res.v("vbus")
+    v_ac_arr  = res.v("ac_l")
     i_L_arr   = np.array([s[iL_idx]   for s in res.states])
 
     # KPI

@@ -1195,7 +1195,7 @@ def bind_pi_to_switch(
     *,
     pi: PIController,
     measured: "Callable[[object], float]",
-    setpoint: float,
+    setpoint: "float | Callable[[float], float]",
     switch,
     freq: float,
     t_start: float = 0.0,
@@ -1219,7 +1219,9 @@ def bind_pi_to_switch(
         Callable ``state_vec -> float`` extracting the feedback
         signal. Typical: ``lambda x: x[builder.node_id_of("vout")]``.
     setpoint
-        Reference value passed straight to ``pi.update``.
+        Reference value passed to ``pi.update``. Accepts either a
+        constant ``float`` or a callable ``t -> float`` for time-
+        varying references (load-step setpoints, ramping commands).
     switch
         Either a device name (resolved via
         ``builder.switch_index_of``) or an integer bit position.
@@ -1288,6 +1290,11 @@ def bind_pi_to_switch(
             mask.set(idx, True)
         return mask
 
+    # Setpoint can be a constant (most common) or a callable
+    # `t -> float` for time-varying references (load steps,
+    # ramping commands).
+    _sp_is_callable = callable(setpoint)
+
     def step_observer(t: float, x) -> None:
         # Throttle: skip until at least one T_PWM has elapsed since
         # the last update. Prevents the loop from chasing PWM ripple.
@@ -1295,8 +1302,9 @@ def bind_pi_to_switch(
             return
         last_tick[0] = t
         m = float(measured(x))
-        error = setpoint - m
-        new_duty = pi.update(setpoint=setpoint, measured=m, dt=T_PWM)
+        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
+        error = sp - m
+        new_duty = pi.update(setpoint=sp, measured=m, dt=T_PWM)
         duty_state[0] = float(new_duty)
         duty_history.append((t, duty_state[0]))
         error_history.append((t, error))
@@ -1314,7 +1322,7 @@ def bind_pi_to_duty_callable(
     *,
     pi: PIController,
     measured: "Callable[[object], float]",
-    setpoint: float,
+    setpoint: "float | Callable[[float], float]",
     freq: float,
     t_start: float = 0.0,
 ):
@@ -1359,12 +1367,15 @@ def bind_pi_to_duty_callable(
     def duty_get() -> float:
         return duty_state[0]
 
+    _sp_is_callable = callable(setpoint)
+
     def step_observer(t: float, x) -> None:
         if t - last_tick[0] < T_PWM:
             return
         last_tick[0] = t
+        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         new_duty = pi.update(
-            setpoint=setpoint,
+            setpoint=sp,
             measured=float(measured(x)),
             dt=T_PWM,
         )
