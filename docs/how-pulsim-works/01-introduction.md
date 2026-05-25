@@ -194,7 +194,27 @@ refactorisation**: when consecutive masks differ by a single
 switch bit (the common case under Gray-coded PWM), we recompute
 $L$ and $U$ only along the *etree path* of the affected column —
 typically $O(\sqrt{n})$ work instead of $O(\mathrm{nnz})$.
-Chapter 7 is dedicated to this algorithm and its provenance.
+
+**v1.4.0 generalises** the same machinery to two additional
+SMPS-relevant cases that no open-source simulator currently
+exploits:
+
+* **Multi-bit switch transitions** (SPWM with multiple legs
+  commutating in the same timestep) via the **union of etree
+  paths**.
+* **Parametric value changes** (R, L, C, V_source updates for
+  sweep / Monte Carlo workloads) via the same path-walk over
+  the columns that depend on the changed parameter.
+
+Chapter 7 is dedicated to the algorithm and its provenance;
+chapter 8 §8.11 covers the v1.4.0 multi-bit + parametric
+generalisations with captured speedup tables.
+
+**v1.4.0** also ships the in-house complex sparse LU
+(`PulsimComplexSparseLuSolver = PulsimSparseLuSolverT<std::complex<Real>>`),
+which moves AC sweeps off `Eigen::SparseLU<complex>` in the
+production path — a software-supply-chain win documented in
+chapter 8 §8.11.3.
 
 ---
 

@@ -157,7 +157,7 @@ data + first-principles cost analysis):
   - `core/tests/benchmarks/` — two new bench files
   - `artigos/02_tpel_methods/benchmarks/` — two new writeups
   - `docs/how-pulsim-works/08-benchmarks.md` — extension
-- **Target release**: v1.5.0 (after `add-pulsim-complex-sparse-lu`
+- **Target release**: v1.4.0 (after `add-pulsim-complex-sparse-lu`
   ships in v1.4.0; both proposals are independent and can be
   developed in parallel)
 - **Scope estimate**: ~3-4 weeks. Part A is small (~1 week) since

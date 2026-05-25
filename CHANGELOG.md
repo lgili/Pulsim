@@ -4,6 +4,306 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-05-24
+
+### Highlights — In-house complex sparse LU + generalised path-based update framework
+
+This release bundles **two algorithmic contributions** that were
+originally scoped as separate releases but ship together as
+v1.4.0 since neither had been tagged yet:
+
+**A. In-house complex sparse LU** (per
+[`openspec/changes/add-pulsim-complex-sparse-lu/`](openspec/changes/add-pulsim-complex-sparse-lu/)) —
+templates `PulsimSparseLuSolver` on `Scalar` and migrates
+`run_mna_sweep` to the new `PulsimComplexSparseLuSolver`
+(= `PulsimSparseLuSolverT<std::complex<Real>>`). Completes the
+v1.3.0 "no third-party LU in production" agenda — the AC sweep
+code path no longer compiles `Eigen::SparseLU<complex>`.
+`Backend::Eigen` is retained as the IEEE TPEL §VI.B
+paper-comparison baseline.
+
+**B. Generalised path-based update framework** (per
+[`openspec/changes/add-generalised-path-refactor/`](openspec/changes/add-generalised-path-refactor/)) —
+generalises the v1.3.0 single-bit path-based partial refactor to
+**three SMPS-relevant use cases** that no open-source
+power-electronics simulator currently exploits:
+
+1. **Multi-bit switch transitions** (Part A) — SPWM with multiple
+   legs commutating simultaneously, multilevel commutation patterns.
+   v1.3.0 unconditionally routed those to full `factorize()`; v1.4.0
+   attempts the union of etree paths when the union covers ≤
+   `MAX_PATH_LENGTH_RATIO` (default `0.6`) of the matrix.
+2. **Parametric value changes** (Part B) — `R`, `L`, `C`, source `V`
+   updates for sweep / Monte Carlo / design-optimisation workloads.
+   v1.3.0 forced a fresh `analyze + factorize` rebuild per sweep
+   point (~100 µs/point cold path); v1.4.0 reuses both the symbolic
+   factor AND most of L+U via the same path-union machinery.
+3. **Single-bit Gray-code flips** (preserved from v1.3.0) — same
+   2.7-2.9× speedup at n_state ≥ 12 documented in
+   `RANK1_RESULTS.md`.
+
+User-facing Python helpers `sweep_path_aware` /
+`monte_carlo_path_aware` ship as drop-in replacements for `sweep` /
+`monte_carlo`. Auto-fallback to the legacy path when the swept
+parameter name is unknown to the builder; the user sees a
+`RuntimeWarning` and the same `SweepResult` shape.
+
+### Performance — Part A multi-bit microbench
+
+Captured 2026-05-24 on macOS Apple Silicon (see
+[`artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md`](artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md)).
+Pulsim path-union speedup vs the v1.3.0 emulation (Eigen sliding
+solver = full factorize per flip):
+
+| n_state | δ = 1 | δ = 2 | δ = 3 | δ = 4 |
+|--------:|------:|------:|------:|------:|
+| 10      | 3.12× | 1.62× | 1.61× | 1.42× |
+| 14      | 1.72× | 1.58× | 1.58× | 1.42× |
+| 18      | 1.56× | 1.28× | 1.51× | 1.25× |
+| 22      | 1.36× | 1.42× | 1.54× | 1.51× |
+| 26      | 1.55× | 1.46× | 1.33× | 1.42× |
+
+Multi-bit hit rate decays gracefully with δ:
+~40–50 % of 2-bit transitions take the path-union path,
+~20–25 % at δ = 3, ~8–19 % at δ = 4. The remainder gracefully
+fall back to full factorize without regression vs v1.3.0.
+
+### Performance — Part B parametric microbench
+
+Captured 2026-05-24 on the same hardware (see
+[`artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md`](artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md)).
+Pulsim `refactor_parametric` speedup vs the legacy rebuild-the-
+cache-from-scratch-per-sweep-point pattern (current
+`pulsim.sweep.sweep(...)` semantics):
+
+| n_state | 50 pts | 100 pts | 500 pts | 1000 pts |
+|--------:|-------:|--------:|--------:|---------:|
+| 8       | 5.18×  | 3.29×   | 3.55×   | 3.68×    |
+| 14      | 3.57×  | 3.02×   | 3.51×   | 3.35×    |
+| 26      | 3.53×  | 3.31×   | 3.38×   | 3.40×    |
+
+**Zero fallbacks across all 12 (n_switches × n_sweep_points)
+cells** — every refactor_parametric call took the path-based
+update successfully on this fixture family.
+
+### Added
+
+- **`pulsim::sparse::MAX_PATH_LENGTH_RATIO`** — compile-time
+  tunable (default `0.6`). Path-based update is skipped when the
+  union-path length exceeds this fraction of `n`. See
+  `openspec/changes/add-generalised-path-refactor/design.md`
+  Decision 2 for the empirical break-even rationale.
+- **`DirectSolverT<Scalar>::partial_refactor_count_path(changed_cols)`**
+  — virtual query method. Returns the length of the union path that
+  `partial_refactor` would walk **without executing the refactor**.
+  Used by `solve_rank1` to consult `MAX_PATH_LENGTH_RATIO` before
+  attempting path-based update on multi-bit transitions.
+  Default implementation returns 0; `PulsimSparseLuSolverT<Scalar>`
+  overrides with the real walk.
+- **`PulsimSparseLuSolverT<Scalar>::partial_refactor_count_path`**
+  — production implementation. Walks the etree path of each column
+  in the **hypothetical union** of `varying_set_ + changed_cols`,
+  deduplicates via an in-path bitmap. Pure read-only — does not
+  mutate solver state. Companion `partial_refactor_path_ratio`
+  wraps `count_path / n` for the common comparison expression.
+- **`pulsim::pwl::CacheMetrics::multi_bit_rank1_hits`** — new
+  counter for multi-bit successes via path-union `partial_refactor`.
+  v1.3.0 routed all multi-bit transitions to `full_refactor_hits`;
+  v1.4.0 splits them between this new counter (success path) and
+  `full_refactor_hits` (path too long → fallback).
+  Invariant: `rank1_hits + multi_bit_rank1_hits + full_refactor_hits
+  + fallbacks == N`.
+- **`pulsim::pwl::DevicePool::columns_affected_by_switch(sw_idx,
+  graph)`** — new helper returning the MNA columns affected by
+  toggling switch `sw_idx`. Mirrors the
+  `branch_var_id_for_source` access pattern. Used by
+  `compute_changed_columns_` and (in a future cycle) by Python
+  bindings exposing the switch→column map.
+- **`core/tests/benchmarks/test_bench_multi_bit_rank1.cpp`** —
+  3-backend microbench across `(N, δ) ∈ {8,12,16,20,24} × {1,2,3,4}`.
+  1000 random transitions per cell.
+- **`artigos/02_tpel_methods/benchmarks/MULTI_BIT_RESULTS.md`** +
+  `multi_bit_microbench.csv` — full writeup mirroring
+  `RANK1_RESULTS.md`'s structure.
+- **7 new C++ unit tests** in `core/tests/layer0/test_pulsim_lu_solver.cpp`
+  (4 spec-mandated v1.4.0 scenarios: multi-col `partial_refactor`,
+  monotone `count_path`, empty-input no-op, `MAX_PATH_LENGTH_RATIO`
+  range gate) and `core/tests/layer4/test_pwl_cache_rank1.cpp`
+  (3 cache-level scenarios: 2-bit transition routing, telemetry
+  invariant under mixed Hamming workload, 4-bit transition correctness).
+
+#### Part B — parametric refactor
+
+- **`pulsim::pwl::ParametricRefactorResult`** + **`ParametricRefactorMode`**
+  + **`ParametricUpdate`** — new public types in `cache.hpp`.
+  Result invariant: `path_refactor_hits + fallback_hits ==
+  masks_processed`.
+- **`PwlStateSpaceCache::refactor_parametric`** — new C++ API
+  with two overloads:
+  - Single-param: `refactor_parametric(branch_id, new_value, mode)`
+  - Batch: `refactor_parametric(span<const ParametricUpdate>, mode)`
+  Pushes parameter updates through the pool, walks every active
+  mask (or just the rank-1 mask in `Mode::CurrentOnly`),
+  re-assembles `(J, b)` at the new values, and calls
+  `partial_refactor(new_J, affected_cols)` for each segment.
+  Falls back to fresh `factorize()` when path too long
+  (gated by `MAX_PATH_LENGTH_RATIO`) or backend lacks
+  `partial_refactor` support.
+- **`DevicePool::columns_affected_by_branch(branch_id, graph)`**
+  — returns the MNA columns that depend on a branch's stored
+  parameter value(s). Resistor/Switch/Capacitor → both endpoint
+  cols; Inductor → its branch-current col; VoltageSource →
+  empty (RHS-only). Unsupported device kinds → empty (falls back).
+- **`DevicePool::update_resistor_R / update_inductor_L /
+  update_capacitor_C / update_voltage_source_V`** — value
+  mutators dispatching on the stored variant via
+  `std::get_if`. Throws `std::out_of_range` on kind mismatch.
+- **`CircuitBuilder::branch_id_of(name)`** — inverse of
+  `name_of(branch_id)`. Throws on unknown name.
+- **`CircuitBuilder::update_resistor_R(name, R_ohms)` (+ inductor /
+  capacitor / voltage_source variants)** — convenience wrappers
+  that combine `branch_id_of` + the pool mutator. Designed for
+  the user-facing parametric refactor pattern:
+  ```python
+  b.update_resistor_R("R_load", 3.0)
+  cache.refactor_parametric(b.branch_id_of("R_load"), 3.0)
+  ```
+- **pybind11 bindings** for all of the above — `ParametricRefactorResult`
+  + `ParametricRefactorMode` enum + cache methods + builder helpers
+  exposed to Python via `python/bindings.cpp`. Smoke-tested
+  end-to-end on the `pulsim 1.4.0` wheel.
+- **`core/tests/layer4/test_pwl_cache_parametric.cpp`** — 6 new
+  test cases / 57 assertions covering: single-param sweep parity
+  vs fresh-rebuild within 1e-10, two-param simultaneous parity,
+  empty-updates no-op, unsupported-kind throws, `Mode::CurrentOnly`
+  processes 1 mask, telemetry invariant over 10 sweep points.
+- **`core/tests/benchmarks/test_bench_parametric_sweep.cpp`** —
+  3-backend microbench across `(n_switches, n_sweep_points) ∈
+  {2,4,8} × {50,100,500,1000}` on parallel-leg buck fixtures.
+- **`artigos/02_tpel_methods/benchmarks/PARAMETRIC_RESULTS.md`**
+  + `parametric_microbench.csv` — full writeup.
+
+#### Part C — In-house complex sparse LU (AC sweep migration)
+
+- **`pulsim::sparse::PulsimSparseLuSolverT<Scalar>`** — the
+  templated class. Backward-compat type aliases keep every Layer 1-9
+  call site source-compatible:
+  ```cpp
+  using PulsimSparseLuSolver        = PulsimSparseLuSolverT<Real>;
+  using PulsimComplexSparseLuSolver = PulsimSparseLuSolverT<std::complex<Real>>;
+  ```
+- **`pulsim::sparse::DirectSolverT<Scalar=Real>`** — the templated
+  abstract base. `DirectSolver = DirectSolverT<Real>` for backward
+  compat. Same pattern for `SparseLuSolverT<Scalar=Real>` /
+  `SparseLuSolver = SparseLuSolverT<Real>`.
+- **`pulsim::sparse::make_default_solver_t<Scalar>(n, hint)`** —
+  template factory. The non-template
+  `make_default_solver(n, hint)` is now a shim that dispatches to
+  `make_default_solver_t<Real>(n, hint)`.
+- **`pulsim::VectorT<Scalar>`** and **`pulsim::sparse::MatrixT<Scalar>`** /
+  **`pulsim::sparse::TripletT<Scalar>`** templates with
+  `Vector` / `Matrix` / `Triplet` backward-compat aliases for `Real`.
+- **`core/tests/layer0/test_pulsim_lu_solver_complex.cpp`** — 5 new
+  test cases / 31 assertions covering the complex specialisation:
+  Hermitian PD identity, asymmetric MNA 8×8 (forces partial pivoting
+  at the zero-diagonal voltage-source row), single-column
+  partial_refactor parity, solve-before-factorize lifecycle, factory
+  dispatch.
+- **`core/tests/analysis/test_mna_sweep.cpp`** — 2 integration
+  tests through `run_mna_sweep`: RC low-pass within 0.1 dB / 1°
+  of `1/(1+jωRC)` across 50 frequencies; series RLC peak within
+  1.5 % of `1/(2π√(LC))` (Q ≈ 5).
+- **`core/tests/benchmarks/test_bench_ac_sweep.cpp`** — 2-backend
+  AC sweep microbench across `n ∈ {8, 16, 32, 64, 128}`,
+  100 log-spaced frequencies from 1 Hz to 1 MHz.
+- **`artigos/02_tpel_methods/benchmarks/AC_SWEEP_RESULTS.md`** +
+  `ac_sweep_microbench.csv` — full writeup of the
+  Pulsim-vs-Eigen parity story.
+
+### Changed
+
+- **`core/include/pulsim/analysis/mna_sweep.hpp`** —
+  `Eigen::SparseLU<ComplexSparseMatrix, COLAMDOrdering<Index>>`
+  replaced with `sparse::PulsimComplexSparseLuSolver`. Lifecycle:
+  `analyze(M)` → `factorize(M)` → `solve(b, x)`, all returning
+  `bool` (vs Eigen's `info()` enum). `ComplexSparseMatrix` switched
+  from RowMajor to ColMajor to match the in-house solver's CSC
+  input format (no transpose-and-copy per frequency).
+  `#include <Eigen/SparseLU>` removed — no longer needed on the
+  production path.
+- **`PwlStateSpaceCache` constructor** — `pool` parameter changed
+  from `const DevicePool&` to `DevicePool&`. Existing callers that
+  pass a non-const builder pool continue to compile unchanged.
+  Required so `refactor_parametric` can drive `pool.update_*`.
+- **`PwlStateSpaceCache::try_make_segment`** — segments are now
+  built with `Backend::Auto` (= Pulsim in-house LU) by default,
+  not the Eigen baseline. Numerically bit-identical on real-scalar
+  SPD matrices; enables `refactor_parametric` to use
+  `partial_refactor` on the cached segment factors without an
+  explicit `set_segment_backend` step.
+- **`PwlStateSpaceCache::solve_rank1`** — multi-bit routing logic
+  rewritten. For `delta_bits >= 2`, the cache now:
+  1. Computes the deduped `changed_cols` set via
+     `compute_changed_columns_`.
+  2. Queries `solver.partial_refactor_count_path(changed_cols)`.
+  3. If `path_length / n ≤ MAX_PATH_LENGTH_RATIO`, calls
+     `partial_refactor`; on success counts `multi_bit_rank1_hits++`.
+  4. Otherwise calls `factorize()` and counts `full_refactor_hits++`.
+  Single-bit transitions (`delta_bits == 1`) keep v1.3.0 behavior:
+  always try `partial_refactor` without the ratio gate.
+- **`compute_changed_columns_`** now deduplicates via `std::set<Index>`
+  before returning. Switches sharing a node (common in half/full-bridge
+  topologies) previously produced duplicate column entries. v1.4.0's
+  `partial_refactor_count_path` requires a canonical input to give
+  a meaningful answer to the ratio gate, so dedup happens at the call
+  site.
+
+### Removed
+
+- **Implicit production dependency on `Eigen::SparseLU<std::complex<Real>>`**.
+  The Eigen complex SparseLU instantiation is no longer compiled
+  into the AC sweep code path. `Backend::Eigen` keeps the path
+  explicitly available for paper-comparison purposes.
+
+### Migration notes
+
+- **`CacheMetrics` ABI**: the struct grew a new field
+  (`multi_bit_rank1_hits`). Existing callers reading
+  `rank1_hits` / `full_refactor_hits` / `fallbacks` continue to
+  compile + work. Code that pinned `full_refactor_hits == N` for
+  N multi-bit transitions will see those calls land in
+  `multi_bit_rank1_hits` instead — update test fixtures to use the
+  telemetry invariant `rank1 + multi_bit + full + fallbacks == N`.
+- **`solve_rank1` behavior on Eigen backend** (no
+  `partial_refactor` support): unchanged. Every transition falls
+  back to full factorize and counts under `full_refactor_hits`.
+- **Pulsim backend behavior on a 4-switch n_state=6 fixture**: a
+  small fraction (~3-5 %) of multi-bit transitions now hit
+  `fallbacks` instead of `full_refactor_hits` because the pivot
+  threshold check on the wider path rejects more often. Telemetry
+  invariant still holds; numerical correctness still within 1e-10
+  vs fresh-factorise. Documented in `MULTI_BIT_RESULTS.md`.
+- **`PulsimSparseLuSolverT<Real>`** is bit-identical to v1.3.0's
+  `PulsimSparseLuSolver` modulo the rename — every Layer 1-9
+  consumer that uses the unparameterised name keeps compiling
+  unchanged.
+
+### Regression test summary
+
+- **498 / 498 C++ tests pass** (up from 478 in v1.3.0; +20 new
+  tests: 5 complex-solver unit + 2 mna_sweep integration +
+  7 multi-bit spec scenarios + 6 parametric refactor cases).
+- **6 / 6 Python tests pass** (`test_sweep_path_aware.py` —
+  KPI parity vs legacy, two-param sweep, unknown-name fallback,
+  MC, result shape).
+- **`pulsim 1.4.0`** Python wheel builds + imports clean.
+  `cache.refactor_parametric(b.branch_id_of("R_load"), 3.0)`
+  smoke-tested end-to-end.
+- Existing rank-1 microbench (single-bit Gray-code, all N ∈ {4..24})
+  shows the same 2.7-2.9× speedup as v1.3.0 — the complex solver
+  templatisation, multi-bit routing, and parametric refactor all
+  change dispatch logic without regressing the v1.3.0 hot path.
+
 ## [1.3.0] — 2026-05-24
 
 ### Highlights — In-house sparse LU + path-based partial refactorization

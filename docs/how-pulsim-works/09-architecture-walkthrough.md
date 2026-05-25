@@ -106,14 +106,24 @@ are what assemble those entries.
 discretisation (chapter 3), DC operating-point solver,
 Newton-refinement on nonlinear devices, the
 **`solve_rank1(...)` v1.3.0 fast-path** (chapter 7's algorithm
-plugged in here).
+plugged in here, extended by v1.4.0 to handle multi-bit
+transitions via path-union; chapter 8 §8.11.1), and the
+**`refactor_parametric(...)` v1.4.0 API** for sweep / Monte
+Carlo workloads (chapter 8 §8.11.2).
 
 **Headers:** `core/include/pulsim/pwl/cache.hpp`,
-`core/include/pulsim/pwl/dc_op.hpp`.
+`core/include/pulsim/pwl/dc_op.hpp`,
+`core/include/pulsim/pwl/device_pool.hpp` (v1.4.0 added
+`columns_affected_by_branch / update_* / kind_of` for the
+parametric refactor pipeline).
 
 **Tests:**
-- `core/tests/layer4/` — cache + rank1 fast-path (the v1.3.0
-  PR landed 5 new tests here for the partial-refactor path)
+- `core/tests/layer4/test_pwl_cache_rank1.cpp` — single-bit
+  Gray-code rank-1 fast path + v1.4.0 multi-bit routing
+- `core/tests/layer4/test_pwl_cache_parametric.cpp` — v1.4.0
+  parametric refactor (6 cases / 57 assertions covering
+  single-param sweep parity, two-param simultaneous,
+  Mode::CurrentOnly, telemetry invariant)
 - `core/tests/layer4_v1/` through `layer4_v10/` — historical
   feature additions, each one a deliverable from a prior
   OpenSpec proposal (DC OP, Newton globalization, LM-Newton,
@@ -348,8 +358,19 @@ Pulsim releases follow semantic versioning:
   Python facade (Layer 9). Hasn't happened post-1.0.
 - **Minor** (1.2 → 1.3): new feature, possibly with breaking
   changes to the C++ kernel-builder API (Layer 6) or removed
-  deprecated APIs. v1.3.0 was the in-house sparse LU release.
-- **Patch** (1.3.0 → 1.3.1): bug fix, no API change.
+  deprecated APIs.
+  - **v1.3.0** — In-house real sparse LU
+    ([`replace-klu-with-pulsim-sparse-lu`](../../openspec/changes/archive/)).
+  - **v1.4.0** — Complex sparse LU specialisation; AC sweep
+    migrated off `Eigen::SparseLU<complex>`
+    ([`add-pulsim-complex-sparse-lu`](../../openspec/changes/archive/)).
+  - **v1.4.0** — Generalised path-based update framework: multi-bit
+    transitions via path-union AND parametric refactor for sweeps
+    + Monte Carlo
+    ([`add-generalised-path-refactor`](../../openspec/changes/archive/)).
+    Python helpers `sweep_path_aware` / `monte_carlo_path_aware`
+    land as drop-in replacements for `sweep` / `monte_carlo`.
+- **Patch** (1.4.0 → 1.5.1): bug fix, no API change.
 
 Each minor release has:
 

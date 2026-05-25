@@ -365,8 +365,14 @@ void init_module(py::module_& m) {
               &builder::CircuitBuilder::graph,
               py::return_value_policy::reference_internal,
               "Const ref to the internal Graph.")
+        // The non-const + const `pool()` overloads (v1.4.0) make
+        // taking the member-function pointer ambiguous; cast to the
+        // const overload explicitly for the read-only property.
+        // Python users that need to mutate the pool go through the
+        // `update_*` helpers below.
         .def_property_readonly("pool",
-              &builder::CircuitBuilder::pool,
+              static_cast<const pwl::DevicePool& (builder::CircuitBuilder::*)() const noexcept>(
+                  &builder::CircuitBuilder::pool),
               py::return_value_policy::reference_internal,
               "Const ref to the internal DevicePool.")
         .def_property_readonly("num_branches",
@@ -385,6 +391,57 @@ void init_module(py::module_& m) {
               "User-supplied component name for `branch_id`, set by "
               "the `add_*` call. Returns an empty string if the "
               "branch was never registered or had no name.")
+        .def("branch_id_of",
+              &builder::CircuitBuilder::branch_id_of,
+              py::arg("name"),
+              "Inverse of name_of: lookup the branch_id for a "
+              "user-supplied component name. v1.4.0+ — used by "
+              "the parametric refactor pipeline to translate "
+              "user-facing strings like 'L_out' into the pool's "
+              "branch_id for update_* calls. Raises ValueError "
+              "if the name was never registered.")
+        .def("update_resistor_R",
+              [](builder::CircuitBuilder& self,
+                  std::string_view name, Real new_R_ohms) {
+                  self.pool().update_resistor_R(
+                      self.branch_id_of(name), new_R_ohms);
+              },
+              py::arg("name"), py::arg("new_R_ohms"),
+              "Update a resistor's R value (ohms) by component name. "
+              "Topology unchanged. Designed for the parametric "
+              "refactor pipeline: pair with PwlStateSpaceCache."
+              "refactor_parametric(branch_id_of(name), new_R_ohms) "
+              "to push the change through to every active mask.")
+        .def("update_inductor_L",
+              [](builder::CircuitBuilder& self,
+                  std::string_view name, Real new_L_henries) {
+                  self.pool().update_inductor_L(
+                      self.branch_id_of(name), new_L_henries);
+              },
+              py::arg("name"), py::arg("new_L_henries"),
+              "Update an inductor's L value (henries) by component "
+              "name. See update_resistor_R for the parametric "
+              "refactor usage.")
+        .def("update_capacitor_C",
+              [](builder::CircuitBuilder& self,
+                  std::string_view name, Real new_C_farads) {
+                  self.pool().update_capacitor_C(
+                      self.branch_id_of(name), new_C_farads);
+              },
+              py::arg("name"), py::arg("new_C_farads"),
+              "Update a capacitor's C value (farads) by component "
+              "name. See update_resistor_R for the parametric "
+              "refactor usage.")
+        .def("update_voltage_source_V",
+              [](builder::CircuitBuilder& self,
+                  std::string_view name, Real new_V) {
+                  self.pool().update_voltage_source_V(
+                      self.branch_id_of(name), new_V);
+              },
+              py::arg("name"), py::arg("new_V"),
+              "Update a DC voltage source's V value by component "
+              "name. Pure-RHS update — no LU refactor needed; the "
+              "next solve() picks up the change via b_constant.")
         .def("components",
               [](const builder::CircuitBuilder& self) {
                   // Adapter consumed by `pulsim.schematic` — yields one
@@ -635,14 +692,71 @@ void init_module(py::module_& m) {
               &pwl::DevicePool::state_size,
               py::arg("graph"),
               "Total state-vector size for this pool + graph "
-              "(= num_active_nodes + num_sources + num_inductors).");
+              "(= num_active_nodes + num_sources + num_inductors).")
+        // v1.4.0 — kind_of helps Python clients (sweep_path_aware
+        // etc.) dispatch the right update_* mutator from a
+        // branch_id alone. The returned StoredKind enum is bound
+        // below as a sibling type so `.name` gives the canonical
+        // string ("Resistor", "Inductor", …).
+        .def("kind_of",
+              &pwl::DevicePool::kind_of,
+              py::arg("branch_id"),
+              "Return the StoredKind enum for `branch_id`. Used by "
+              "the v1.4.0 parametric refactor pipeline to pick the "
+              "right update_* mutator from a string-based component "
+              "name lookup.");
+
+    // The StoredKind enum (sibling of DevicePool) — v1.4.0 exposes
+    // it for sweep_path_aware's auto-dispatch over device kinds.
+    // The kernel maintains the full taxonomy in DevicePool::Entry's
+    // std::variant; we mirror just the cases relevant to parametric
+    // refactor here (the others are not user-facing). New variants
+    // added to the kernel must be appended below to keep the Python
+    // enum exhaustive.
+    py::enum_<pwl::DevicePool::StoredKind>(m, "StoredKind",
+        "Device kind stored in DevicePool. v1.4.0+ — exposed so "
+        "Python helpers (sweep_path_aware etc.) can auto-dispatch "
+        "update_* mutators per device type.")
+        .value("Resistor",            pwl::DevicePool::StoredKind::Resistor)
+        .value("VoltageSource",       pwl::DevicePool::StoredKind::VoltageSource)
+        .value("Switch",              pwl::DevicePool::StoredKind::Switch)
+        .value("Capacitor",           pwl::DevicePool::StoredKind::Capacitor)
+        .value("Inductor",            pwl::DevicePool::StoredKind::Inductor)
+        .value("Diode",               pwl::DevicePool::StoredKind::Diode)
+        .value("NonlinearDiode",      pwl::DevicePool::StoredKind::NonlinearDiode)
+        .value("CurrentSource",       pwl::DevicePool::StoredKind::CurrentSource)
+        .value("PWMVoltageSource",    pwl::DevicePool::StoredKind::PWMVoltageSource)
+        .value("SineVoltageSource",   pwl::DevicePool::StoredKind::SineVoltageSource)
+        .value("PulseVoltageSource",  pwl::DevicePool::StoredKind::PulseVoltageSource)
+        .value("MosfetLevel1",        pwl::DevicePool::StoredKind::MosfetLevel1)
+        .value("IgbtLevel1",          pwl::DevicePool::StoredKind::IgbtLevel1)
+        .value("VCVS",                pwl::DevicePool::StoredKind::VCVS)
+        .value("SaturableInductor",   pwl::DevicePool::StoredKind::SaturableInductor);
+
+    // ---- ParametricRefactorResult (v1.4.0) -------------------------------
+    py::class_<pwl::ParametricRefactorResult>(m,
+        "ParametricRefactorResult",
+        "Return value of PwlStateSpaceCache.refactor_parametric. "
+        "Invariant: path_refactor_hits + fallback_hits == masks_processed.")
+        .def_readonly("masks_processed",
+                       &pwl::ParametricRefactorResult::masks_processed)
+        .def_readonly("path_refactor_hits",
+                       &pwl::ParametricRefactorResult::path_refactor_hits)
+        .def_readonly("fallback_hits",
+                       &pwl::ParametricRefactorResult::fallback_hits)
+        .def_readonly("wall_time_us",
+                       &pwl::ParametricRefactorResult::wall_time_us);
+
+    py::enum_<pwl::ParametricRefactorMode>(m, "ParametricRefactorMode")
+        .value("AllActive",   pwl::ParametricRefactorMode::AllActive)
+        .value("CurrentOnly", pwl::ParametricRefactorMode::CurrentOnly);
 
     // ---- PwlStateSpaceCache ----------------------------------------------
     py::class_<pwl::PwlStateSpaceCache>(m, "PwlStateSpaceCache",
         "PWL state-space cache. Pre-factors the MNA matrix "
         "for every reachable switch combination + dt.")
         .def(py::init<const topology::Graph&,
-                       const pwl::DevicePool&>(),
+                       pwl::DevicePool&>(),
               py::arg("graph"), py::arg("pool"),
               py::keep_alive<1, 2>(),
               py::keep_alive<1, 3>())
@@ -652,7 +766,37 @@ void init_module(py::module_& m) {
               }, py::arg("dt") = 0.0,
               "Build the PWL cache eagerly. dt=0 means "
               "static-only (no trap companion).")
-        .def("dt", &pwl::PwlStateSpaceCache::dt);
+        .def("dt", &pwl::PwlStateSpaceCache::dt)
+        // v1.4.0 — Part B parametric refactor API.
+        .def("refactor_parametric",
+              [](pwl::PwlStateSpaceCache& self,
+                  Index branch_id, Real new_value,
+                  pwl::ParametricRefactorMode mode) {
+                  return self.refactor_parametric(branch_id, new_value, mode);
+              },
+              py::arg("branch_id"), py::arg("new_value"),
+              py::arg("mode") = pwl::ParametricRefactorMode::AllActive,
+              "Path-based refactor of every active mask's cached "
+              "LU factor for a single parameter change. Returns a "
+              "ParametricRefactorResult. The branch_id is looked up "
+              "via CircuitBuilder.branch_id_of(name).")
+        .def("refactor_parametric_batch",
+              [](pwl::PwlStateSpaceCache& self,
+                  const std::vector<std::pair<Index, Real>>& updates,
+                  pwl::ParametricRefactorMode mode) {
+                  std::vector<pwl::ParametricUpdate> us;
+                  us.reserve(updates.size());
+                  for (const auto& [bid, val] : updates) {
+                      us.push_back({bid, val});
+                  }
+                  return self.refactor_parametric(
+                      std::span<const pwl::ParametricUpdate>(
+                          us.data(), us.size()), mode);
+              },
+              py::arg("updates"),
+              py::arg("mode") = pwl::ParametricRefactorMode::AllActive,
+              "Batch parametric refactor — takes a list of "
+              "(branch_id, new_value) tuples for simultaneous updates.");
 
     // ---- SimulationOptions / SimulationResult ----------------------------
     using namespace pulsim::solver;

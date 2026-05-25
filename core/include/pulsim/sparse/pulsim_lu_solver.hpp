@@ -4,7 +4,10 @@
 // Pulsim — Layer 0: PulsimSparseLuSolver (in-house sparse LU)
 // =============================================================================
 //
-// `openspec/changes/replace-klu-with-pulsim-sparse-lu` Sections 2-5.
+// `openspec/changes/replace-klu-with-pulsim-sparse-lu` Sections 2-5 (v1.3.0).
+// Templatized on `Scalar` in v1.4.0 via
+// `openspec/changes/add-pulsim-complex-sparse-lu` so the same code path
+// drives both real-valued PWL state-space MNA and complex-valued AC sweeps.
 //
 // In-house C++23 sparse LU implementation. Uses `Eigen::SparseMatrix` only as
 // a passive matrix container — neither `Eigen::SparseLU` nor any third-party
@@ -25,6 +28,21 @@
 //   * Section 5: path-based partial refactor with pivot-fault
 //     detection (Chan/Brandwajn/Tinney 1986, Dinkelbach 2021 §3)
 //
+// Complex template (v1.4.0):
+//   The whole class body is `template <typename Scalar = Real>
+//   class PulsimSparseLuSolverT`. The pivoting / threshold logic uses
+//   `std::abs(Scalar)` which returns the underlying magnitude type
+//   (`Real`) for both `double` and `std::complex<double>` — so the
+//   existing comparisons keep meaning "largest magnitude column entry".
+//   Zero comparisons use `Scalar{0}`.
+//
+//   Backward-compat aliases (following the `MatrixT`/`Matrix` and
+//   `DirectSolverT`/`DirectSolver` pattern):
+//     * `PulsimSparseLuSolver`        = `PulsimSparseLuSolverT<Real>`
+//     * `PulsimComplexSparseLuSolver` = `PulsimSparseLuSolverT<std::complex<Real>>`
+//   Every Layer 1-9 consumer that writes `PulsimSparseLuSolver solver;`
+//   keeps compiling — the alias points back at the same instantiation.
+//
 // References cited throughout:
 //   [1] Davis, *Direct Methods for Sparse Linear Systems*, SIAM 2006.
 //   [2] George, "Computer Implementation of the Finite Element
@@ -41,6 +59,7 @@
 #include "pulsim/sparse/solver.hpp"
 
 #include <algorithm>
+#include <complex>
 #include <cstdint>
 #include <limits>
 #include <queue>
@@ -51,15 +70,37 @@
 
 namespace pulsim::sparse {
 
-class PulsimSparseLuSolver final : public DirectSolver {
-public:
-    PulsimSparseLuSolver() noexcept = default;
-    ~PulsimSparseLuSolver() override = default;
+// -----------------------------------------------------------------------------
+// MAX_PATH_LENGTH_RATIO (v1.4.0 — openspec/changes/add-generalised-path-refactor).
+//
+// Compile-time tunable. When `partial_refactor_count_path(changed_cols)`
+// returns a path length L such that `L / n > MAX_PATH_LENGTH_RATIO`, the
+// caller should prefer a fresh `factorize()` because the path-based
+// update would cost approximately the same as a full factorisation
+// (which also avoids potential floating-point drift from accumulating
+// path-based updates).
+//
+// 0.6 is the empirical break-even on the chapter 8 microbench data;
+// see `openspec/changes/add-generalised-path-refactor/design.md` Decision 2.
+// Tune in the same file + recompile if benchmark data warrants.
+// -----------------------------------------------------------------------------
+inline constexpr Real MAX_PATH_LENGTH_RATIO = Real{0.6};
 
-    PulsimSparseLuSolver(const PulsimSparseLuSolver&) = delete;
-    PulsimSparseLuSolver& operator=(const PulsimSparseLuSolver&) = delete;
-    PulsimSparseLuSolver(PulsimSparseLuSolver&&) = delete;
-    PulsimSparseLuSolver& operator=(PulsimSparseLuSolver&&) = delete;
+// The `Scalar = Real` default lives on the forward declaration in
+// `solver.hpp`; C++ forbids restating it here.
+template <typename Scalar>
+class PulsimSparseLuSolverT final : public DirectSolverT<Scalar> {
+public:
+    using MatrixType = typename DirectSolverT<Scalar>::MatrixType;
+    using VectorType = typename DirectSolverT<Scalar>::VectorType;
+
+    PulsimSparseLuSolverT() noexcept = default;
+    ~PulsimSparseLuSolverT() override = default;
+
+    PulsimSparseLuSolverT(const PulsimSparseLuSolverT&) = delete;
+    PulsimSparseLuSolverT& operator=(const PulsimSparseLuSolverT&) = delete;
+    PulsimSparseLuSolverT(PulsimSparseLuSolverT&&) = delete;
+    PulsimSparseLuSolverT& operator=(PulsimSparseLuSolverT&&) = delete;
 
     /// Symbolic factorization: computes the fill-reducing column
     /// permutation, the elimination tree, and the symbolic non-zero
@@ -69,7 +110,7 @@ public:
     ///   * Section 2 — RCM column ordering, etree, symbolic L+U
     ///     pattern. Returns true on valid input; false on
     ///     `M.rows() != M.cols()` or `M.rows() == 0`.
-    [[nodiscard]] bool analyze(const Matrix& M) override {
+    [[nodiscard]] bool analyze(const MatrixType& M) override {
         analyzed_   = false;
         factorized_ = false;
         l_col_ptr_.clear();
@@ -133,10 +174,17 @@ public:
     /// `numeric_singular_ = true` and a `false` return; this signals
     /// genuine rank deficiency (no row swap can rescue it) and the
     /// caller is expected to surface the failure.
-    [[nodiscard]] bool factorize(const Matrix& M) override {
+    ///
+    /// Complex specialisation: `std::abs(Scalar)` returns `Real` for
+    /// both `double` and `std::complex<double>`, so the pivot-magnitude
+    /// comparisons keep semantics across both Scalar types. Pivot
+    /// extraction stores `Scalar` values; `1 / pivot` is well-defined
+    /// for the complex specialisation as long as the magnitude check
+    /// just above guarantees `|pivot| > 0`.
+    [[nodiscard]] bool factorize(const MatrixType& M) override {
         if (!analyzed_) {
             throw std::logic_error(
-                "PulsimSparseLuSolver::factorize called before analyze");
+                "PulsimSparseLuSolverT::factorize called before analyze");
         }
         factorized_       = false;
         numeric_singular_ = false;
@@ -176,19 +224,19 @@ public:
         u_values_.clear();
 
         // Dense workspace for the current column. Reused across the k loop.
-        std::vector<Real> x(static_cast<std::size_t>(n_), Real{0});
+        std::vector<Scalar> x(static_cast<std::size_t>(n_), Scalar{0});
 
-        const int*  Ap = M.outerIndexPtr();
-        const int*  Ai = M.innerIndexPtr();
-        const Real* Ax = M.valuePtr();
+        const Index*  Ap = M.outerIndexPtr();
+        const Index*  Ai = M.innerIndexPtr();
+        const Scalar* Ax = M.valuePtr();
 
         constexpr Real PIVOT_TOL = Real{1e-14};
 
         for (Index k = 0; k < n_; ++k) {
             // ---- Step 1: load column k of M[Prow_, Pcol_] into x --------
-            std::fill(x.begin(), x.end(), Real{0});
+            std::fill(x.begin(), x.end(), Scalar{0});
             const Index orig_col = Pcol_[static_cast<std::size_t>(k)];
-            for (int p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
+            for (Index p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
                 const Index orig_row = Ai[p];
                 const Index perm_row = Pinv_row_[static_cast<std::size_t>(orig_row)];
                 x[static_cast<std::size_t>(perm_row)] = Ax[p];
@@ -202,8 +250,8 @@ public:
             // reachability-based sparse triangular solve is the next
             // optimization.
             for (Index j = 0; j < k; ++j) {
-                const Real xj = x[static_cast<std::size_t>(j)];
-                if (xj == Real{0}) continue;
+                const Scalar xj = x[static_cast<std::size_t>(j)];
+                if (xj == Scalar{0}) continue;
                 for (Index q = l_col_ptr_[static_cast<std::size_t>(j)];
                      q < l_col_ptr_[static_cast<std::size_t>(j + 1)]; ++q) {
                     const Index i = l_row_idx_[static_cast<std::size_t>(q)];
@@ -227,6 +275,11 @@ public:
             // constraint rows (zero diagonal at the source's branch-
             // current variable). Without pivoting, M_perm has zero on
             // the diagonal at that position and factorization fails.
+            //
+            // Complex specialisation: `std::abs` of `std::complex<Real>`
+            // returns the magnitude `Real`, so "largest magnitude"
+            // remains the well-defined pivot criterion (matches LAPACK
+            // ZGETRF semantics).
             Index i_max     = k;
             Real  max_abs   = std::abs(x[static_cast<std::size_t>(k)]);
             for (Index i = k + 1; i < n_; ++i) {
@@ -264,7 +317,7 @@ public:
             }
 
             // ---- Step 3b: pivot check + numeric extraction ---------------
-            const Real pivot = x[static_cast<std::size_t>(k)];
+            const Scalar pivot = x[static_cast<std::size_t>(k)];
             if (std::abs(pivot) < PIVOT_TOL) {
                 numeric_singular_ = true;
                 return false;
@@ -277,8 +330,8 @@ public:
             // column's push so that the NEXT iteration's L-update
             // loop sees the correct slice for j ≤ k.
             for (Index i = 0; i < k; ++i) {
-                const Real xi = x[static_cast<std::size_t>(i)];
-                if (xi != Real{0}) {
+                const Scalar xi = x[static_cast<std::size_t>(i)];
+                if (xi != Scalar{0}) {
                     u_row_idx_.push_back(i);
                     u_values_.push_back(xi);
                 }
@@ -291,10 +344,10 @@ public:
             // Store L[:, k] — dynamically discover nonzero rows
             // i ∈ (k, n). Values scaled by 1/pivot to give L unit-
             // lower-triangular form. Same end-of-push col_ptr update.
-            const Real inv_pivot = Real{1} / pivot;
+            const Scalar inv_pivot = Scalar{1} / pivot;
             for (Index i = k + 1; i < n_; ++i) {
-                const Real xi = x[static_cast<std::size_t>(i)];
-                if (xi != Real{0}) {
+                const Scalar xi = x[static_cast<std::size_t>(i)];
+                if (xi != Scalar{0}) {
                     l_row_idx_.push_back(i);
                     l_values_.push_back(xi * inv_pivot);
                 }
@@ -314,16 +367,16 @@ public:
     ///   3. y ← U \ y               (back substitution; U is upper, diagonal stored last)
     ///   4. x[Pcol[k]] ← y[k]       (apply inverse column permutation to recover x)
     /// Throws `std::logic_error` if called before a successful `factorize`.
-    void solve(const Vector& b, Vector& x) const override {
+    void solve(const VectorType& b, VectorType& x) const override {
         if (!factorized_) {
             throw std::logic_error(
-                "PulsimSparseLuSolver::solve called before factorize "
+                "PulsimSparseLuSolverT::solve called before factorize "
                 "(or factorize returned false). Call factorize(M) first "
                 "and check its return value.");
         }
 
         // Apply row permutation: y[i] = b[Prow[i]].
-        Vector y(static_cast<Index>(n_));
+        VectorType y(static_cast<Index>(n_));
         for (Index i = 0; i < n_; ++i) {
             y[i] = b[Prow_[static_cast<std::size_t>(i)]];
         }
@@ -332,7 +385,7 @@ public:
         // For each column k of L, propagate the now-known y[k] downward:
         // y[i] -= L[i, k] * y[k] for every (i, val) stored in L[:, k].
         for (Index k = 0; k < n_; ++k) {
-            const Real yk = y[k];
+            const Scalar yk = y[k];
             for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
                  q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 const Index i = l_row_idx_[static_cast<std::size_t>(q)];
@@ -347,9 +400,9 @@ public:
         // y[k] backwards through column k's above-diagonal entries.
         for (Index k = n_ - 1; k >= 0; --k) {
             const Index diag_slot = u_col_ptr_[static_cast<std::size_t>(k + 1)] - 1;
-            const Real  ukk       = u_values_[static_cast<std::size_t>(diag_slot)];
+            const Scalar ukk      = u_values_[static_cast<std::size_t>(diag_slot)];
             y[k] /= ukk;
-            const Real yk = y[k];
+            const Scalar yk = y[k];
             for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
                  q < diag_slot; ++q) {
                 const Index i = u_row_idx_[static_cast<std::size_t>(q)];
@@ -404,7 +457,7 @@ public:
     /// On any failure mode, invalidates the path cache and returns
     /// `false`. The caller then falls back to a full `factorize(new_M)`.
     [[nodiscard]] bool partial_refactor(
-        const Matrix& new_M,
+        const MatrixType& new_M,
         std::span<const Index> changed_cols) override {
         if (!factorized_) {
             return false;  // need a prior factor to refactor over
@@ -436,11 +489,11 @@ public:
         }
 
         // 3. Re-eliminate path columns
-        std::vector<Real> x(static_cast<std::size_t>(n_), Real{0});
+        std::vector<Scalar> x(static_cast<std::size_t>(n_), Scalar{0});
         std::vector<bool> in_pattern(static_cast<std::size_t>(n_), false);
-        const int*  Ap = new_M.outerIndexPtr();
-        const int*  Ai = new_M.innerIndexPtr();
-        const Real* Ax = new_M.valuePtr();
+        const Index*  Ap = new_M.outerIndexPtr();
+        const Index*  Ai = new_M.innerIndexPtr();
+        const Scalar* Ax = new_M.valuePtr();
 
         constexpr Real PIVOT_TOL        = Real{1e-14};
         // Threshold-pivoting tolerance: the cached pivot is acceptable
@@ -454,9 +507,9 @@ public:
 
         for (Index k : path_) {
             // ---- Load x = new_M[Prow, Pcol[k]] -------------------------
-            std::fill(x.begin(), x.end(), Real{0});
+            std::fill(x.begin(), x.end(), Scalar{0});
             const Index orig_col = Pcol_[static_cast<std::size_t>(k)];
-            for (int p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
+            for (Index p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
                 const Index orig_row = Ai[p];
                 const Index perm_row = Pinv_row_[static_cast<std::size_t>(orig_row)];
                 x[static_cast<std::size_t>(perm_row)] = Ax[p];
@@ -464,8 +517,8 @@ public:
 
             // ---- L-updates from j < k ---------------------------------
             for (Index j = 0; j < k; ++j) {
-                const Real xj = x[static_cast<std::size_t>(j)];
-                if (xj == Real{0}) continue;
+                const Scalar xj = x[static_cast<std::size_t>(j)];
+                if (xj == Scalar{0}) continue;
                 for (Index q = l_col_ptr_[static_cast<std::size_t>(j)];
                      q < l_col_ptr_[static_cast<std::size_t>(j + 1)]; ++q) {
                     const Index i = l_row_idx_[static_cast<std::size_t>(q)];
@@ -475,7 +528,7 @@ public:
             }
 
             // ---- Pivot-fault check ------------------------------------
-            const Real pivot = x[static_cast<std::size_t>(k)];
+            const Scalar pivot = x[static_cast<std::size_t>(k)];
             const Real pivot_abs = std::abs(pivot);
             if (pivot_abs < PIVOT_TOL) {
                 invalidate_path_cache_();
@@ -511,7 +564,7 @@ public:
             // Verify no x[i] != 0 falls outside the existing pattern.
             bool pattern_ok = true;
             for (Index i = 0; i < n_; ++i) {
-                if (x[static_cast<std::size_t>(i)] != Real{0} &&
+                if (x[static_cast<std::size_t>(i)] != Scalar{0} &&
                     !in_pattern[static_cast<std::size_t>(i)]) {
                     pattern_ok = false;
                     break;
@@ -544,7 +597,7 @@ public:
                     x[static_cast<std::size_t>(i)];
             }
             // Update L[:, k]'s values (scaled by 1/pivot).
-            const Real inv_pivot = Real{1} / pivot;
+            const Scalar inv_pivot = Scalar{1} / pivot;
             for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
                  q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 const Index i = l_row_idx_[static_cast<std::size_t>(q)];
@@ -561,6 +614,74 @@ public:
     /// changed_cols calls.
     [[nodiscard]] std::uint64_t path_compute_count() const noexcept {
         return path_compute_count_;
+    }
+
+    /// Query: how many columns of the LU factor would
+    /// `partial_refactor(new_M, changed_cols)` re-eliminate?
+    ///
+    /// Returns the length of the union path that `partial_refactor`
+    /// would walk **without executing the refactor**. Pure read-only
+    /// query — does not mutate `varying_set_`, `path_`, or any solver
+    /// state. Callers use this with `MAX_PATH_LENGTH_RATIO` to decide
+    /// between path-based update and a fresh `factorize()`.
+    ///
+    /// Algorithm: simulate the insertion of every column in
+    /// `changed_cols` into `varying_set_` (without committing), then
+    /// walk each member's etree path up to the root. Dedupe via an
+    /// `in_path` bitmap so each path column is counted exactly once.
+    ///
+    /// Edge cases:
+    ///   * `changed_cols` empty AND `varying_set_` empty → returns 0.
+    ///   * Already-cached path (`changed_cols` ⊆ `varying_set_` and
+    ///     `path_valid_`) → returns `path_.size()` directly without
+    ///     re-walking the etree.
+    ///   * Out-of-range column index → silently skipped (matches
+    ///     `partial_refactor`'s pattern of returning false on
+    ///     out-of-range, but the query is non-mutating so we return
+    ///     a best-effort count over the in-range entries).
+    [[nodiscard]] Index partial_refactor_count_path(
+        std::span<const Index> changed_cols) const noexcept override {
+        if (!factorized_ || n_ == 0) {
+            return Index{0};
+        }
+        // Check whether changed_cols would expand varying_set_.
+        bool would_grow = !path_valid_;
+        for (Index c : changed_cols) {
+            if (c < 0 || c >= n_) continue;
+            if (!varying_set_.contains(c)) {
+                would_grow = true;
+                break;
+            }
+        }
+        if (!would_grow) {
+            return static_cast<Index>(path_.size());
+        }
+        // Walk the hypothetical union path WITHOUT mutating state.
+        std::vector<bool> in_path(static_cast<std::size_t>(n_), false);
+        Index count = 0;
+        auto walk_from = [&](Index orig_c) {
+            if (orig_c < 0 || orig_c >= n_) return;
+            Index k = Pinv_col_[static_cast<std::size_t>(orig_c)];
+            while (k != Index{-1} &&
+                   !in_path[static_cast<std::size_t>(k)]) {
+                in_path[static_cast<std::size_t>(k)] = true;
+                ++count;
+                k = etree_parent_[static_cast<std::size_t>(k)];
+            }
+        };
+        for (Index c : varying_set_) walk_from(c);
+        for (Index c : changed_cols)   walk_from(c);
+        return count;
+    }
+
+    /// Convenience: returns the ratio
+    /// `partial_refactor_count_path(cols) / n`. Equivalent to the
+    /// `MAX_PATH_LENGTH_RATIO` comparison expression in caller code.
+    [[nodiscard]] Real partial_refactor_path_ratio(
+        std::span<const Index> changed_cols) const noexcept {
+        if (n_ == 0) return Real{0};
+        return static_cast<Real>(partial_refactor_count_path(changed_cols))
+               / static_cast<Real>(n_);
     }
 
     // -------------------------------------------------------------------------
@@ -615,10 +736,10 @@ public:
     /// `Eigen::SparseMatrix`. The implicit unit diagonal is NOT included
     /// (caller should add identity for `L * U == P_row · M · P_col`
     /// checks). Returns an n×n matrix; empty if not factorized.
-    [[nodiscard]] Matrix extract_L_matrix() const {
-        Matrix L(static_cast<Index>(n_), static_cast<Index>(n_));
+    [[nodiscard]] MatrixType extract_L_matrix() const {
+        MatrixType L(static_cast<Index>(n_), static_cast<Index>(n_));
         if (!factorized_) return L;
-        std::vector<Triplet> trips;
+        std::vector<TripletT<Scalar>> trips;
         trips.reserve(l_row_idx_.size());
         for (Index k = 0; k < n_; ++k) {
             for (Index p = l_col_ptr_[static_cast<std::size_t>(k)];
@@ -628,15 +749,15 @@ public:
             }
         }
         L.setFromTriplets(trips.begin(), trips.end());
-        compress_in_place(L);
+        L.makeCompressed();
         return L;
     }
 
     /// Extract the upper-triangular U factor (including the diagonal).
-    [[nodiscard]] Matrix extract_U_matrix() const {
-        Matrix U(static_cast<Index>(n_), static_cast<Index>(n_));
+    [[nodiscard]] MatrixType extract_U_matrix() const {
+        MatrixType U(static_cast<Index>(n_), static_cast<Index>(n_));
         if (!factorized_) return U;
-        std::vector<Triplet> trips;
+        std::vector<TripletT<Scalar>> trips;
         trips.reserve(u_row_idx_.size());
         for (Index k = 0; k < n_; ++k) {
             for (Index p = u_col_ptr_[static_cast<std::size_t>(k)];
@@ -646,7 +767,7 @@ public:
             }
         }
         U.setFromTriplets(trips.begin(), trips.end());
-        compress_in_place(U);
+        U.makeCompressed();
         return U;
     }
 
@@ -663,17 +784,21 @@ private:
     // This is the standard input format for both RCM and Davis 2006 §4.10
     // etree computation when M is structurally asymmetric (typical for
     // circuit MNA with controlled sources).
+    //
+    // Note: the adjacency depends only on the SPARSITY PATTERN of M, not
+    // on its values, so this routine is Scalar-agnostic — we only ever
+    // touch `outerIndexPtr()` and `innerIndexPtr()`.
 
     using AdjacencyList = std::vector<std::vector<Index>>;
 
-    [[nodiscard]] AdjacencyList build_symmetric_adjacency_(const Matrix& M) const {
+    [[nodiscard]] AdjacencyList build_symmetric_adjacency_(const MatrixType& M) const {
         const Index n = static_cast<Index>(M.rows());
         AdjacencyList adj(static_cast<std::size_t>(n));
-        const int* Ap = M.outerIndexPtr();
-        const int* Ai = M.innerIndexPtr();
+        const Index* Ap = M.outerIndexPtr();
+        const Index* Ai = M.innerIndexPtr();
 
         for (Index j = 0; j < n; ++j) {
-            for (int p = Ap[j]; p < Ap[j + 1]; ++p) {
+            for (Index p = Ap[j]; p < Ap[j + 1]; ++p) {
                 const Index i = Ai[p];
                 if (i != j) {
                     adj[static_cast<std::size_t>(i)].push_back(j);
@@ -944,8 +1069,11 @@ private:
     std::vector<Index> u_row_idx_;
 
     // Section 3 — numeric storage parallel to the symbolic CSC pattern.
-    std::vector<Real> l_values_;   // same length as l_row_idx_
-    std::vector<Real> u_values_;   // same length as u_row_idx_
+    // Templatized on Scalar (v1.4.0): real-valued for PWL state-space MNA,
+    // complex-valued for AC sweeps. Lengths still mirror l_row_idx_ /
+    // u_row_idx_ exactly.
+    std::vector<Scalar> l_values_;   // same length as l_row_idx_
+    std::vector<Scalar> u_values_;   // same length as u_row_idx_
 
     // Section 5 — path-based partial refactor state.
     // `varying_set_` holds the union of all ORIGINAL column indices ever
@@ -972,29 +1100,57 @@ private:
 };
 
 // -----------------------------------------------------------------------------
+// Backward-compat type aliases (v1.4.0+).
+//
+// Following the codebase pattern (`MatrixT<Scalar>` + `Matrix = MatrixT<Real>`;
+// `DirectSolverT<Scalar>` + `DirectSolver = DirectSolverT<Real>`):
+//
+//   * `PulsimSparseLuSolver`        — real-valued specialisation. Every
+//     Layer 1-9 consumer that writes `PulsimSparseLuSolver solver;`
+//     or `std::make_unique<PulsimSparseLuSolver>()` compiles unchanged.
+//   * `PulsimComplexSparseLuSolver` — new complex specialisation,
+//     consumed by `core/include/pulsim/analysis/mna_sweep.hpp` for AC
+//     sweeps.
+// -----------------------------------------------------------------------------
+using PulsimSparseLuSolver        = PulsimSparseLuSolverT<Real>;
+using PulsimComplexSparseLuSolver = PulsimSparseLuSolverT<std::complex<Real>>;
+
+// -----------------------------------------------------------------------------
 // Pulsim-aware factory implementation.
 //
 // Declared in `solver.hpp`; defined here at the bottom of
-// `pulsim_lu_solver.hpp` so `PulsimSparseLuSolver` is a complete type at
-// the point we call `std::make_unique<PulsimSparseLuSolver>()`. Same
+// `pulsim_lu_solver.hpp` so `PulsimSparseLuSolverT` is a complete type at
+// the point we call `std::make_unique<PulsimSparseLuSolverT<...>>()`. Same
 // pattern V0 used for KLU; ODR-safe because only ONE definition of the
 // 2-arg overload exists per build.
 //
-// `Backend::Auto` returns `PulsimSparseLuSolver` since v1.3.0 — the
-// in-house solver is the default for the rank-1 PWL cache fast-path
+// `Backend::Auto` returns `PulsimSparseLuSolverT<Scalar>` since v1.3.0 —
+// the in-house solver is the default for the rank-1 PWL cache fast-path
 // because it implements `partial_refactor`. `Backend::Eigen` remains
 // available for parity testing + as a non-rank-1 baseline.
+//
+// Two factory entry points (v1.4.0+):
+//   * `make_default_solver_t<Scalar>(n, hint)` — template factory used by
+//     `mna_sweep.hpp` for the complex case.
+//   * `make_default_solver(n, hint)` — non-template legacy shim that
+//     dispatches to `make_default_solver_t<Real>(n, hint)`. Every Layer
+//     1-9 consumer continues to call this overload unchanged.
 // -----------------------------------------------------------------------------
-inline std::unique_ptr<DirectSolver> make_default_solver(
-    [[maybe_unused]] Size n, Backend hint) {
+template <typename Scalar>
+[[nodiscard]] inline std::unique_ptr<DirectSolverT<Scalar>>
+make_default_solver_t([[maybe_unused]] Size n, Backend hint) {
     switch (hint) {
         case Backend::Eigen:
-            return std::make_unique<SparseLuSolver>();
+            return std::make_unique<SparseLuSolverT<Scalar>>();
         case Backend::Pulsim:
         case Backend::Auto:
         default:
-            return std::make_unique<PulsimSparseLuSolver>();
+            return std::make_unique<PulsimSparseLuSolverT<Scalar>>();
     }
+}
+
+inline std::unique_ptr<DirectSolver> make_default_solver(Size n, Backend hint) {
+    return make_default_solver_t<Real>(n, hint);
 }
 
 }  // namespace pulsim::sparse
