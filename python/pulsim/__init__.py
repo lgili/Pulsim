@@ -800,9 +800,9 @@ def simulate(
             )
         loops = list(closed_loops)
         n_sw_compose = builder.graph.num_switches
-        per_switch_fns = [l.switch_fn for l in loops]
+        per_switch_fns = [loop.switch_fn for loop in loops]
         switch_fn = make_combined_switch_fn(n_sw_compose, per_switch_fns)
-        per_observers = [l.step_observer for l in loops]
+        per_observers = [loop.step_observer for loop in loops]
 
         def _composed_observer(t: float, x) -> None:
             for obs in per_observers:
