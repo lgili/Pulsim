@@ -48,7 +48,6 @@ the next call shouldn't fire.
 from __future__ import annotations
 
 import warnings
-from typing import Any
 
 
 class Cancelled(RuntimeError):

@@ -36,6 +36,7 @@ All controllers are stateful — instantiate ONE per loop and call
 from __future__ import annotations
 
 import math
+from collections.abc import Callable  # noqa: F401 — used in string annotations
 from dataclasses import dataclass, field
 
 
