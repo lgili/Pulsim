@@ -65,7 +65,6 @@ class TestBuilderLookups:
         # only holds for state-variable branches (inductors / sources).
         b, res = buck
         states = np.asarray(res.states)
-        n_nodes = b.graph.num_nodes
         # For an inductor, the state-vector column is
         # `pool.branch_var_id_for_inductor(branch_id, graph)` — not
         # simply `n_nodes + branch_index_of(name)`. The proposal's

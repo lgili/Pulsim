@@ -36,7 +36,7 @@ covering the multi-bit / parametric / AC-sweep contributions.
 | 8.2 | [§8.4](08-benchmarks.md#84-the-decomposition-in-bar-form) | Multiplicative decomposition stacked bars | **§VIII.A decomposition** | ✅ rendered |
 | 8.3 | [§8.5](08-benchmarks.md#85-per-call-cost-flat-vs-linear) | Per-call cost vs $n_{\mathrm{state}}$ (flat vs linear) | **§VIII.B asymptotic scaling** | ✅ rendered |
 | 8.4 | [§8.11.1](08-benchmarks.md#8111-multi-bit-path-union-speedup) | Multi-bit speedup vs Hamming distance + hit-rate decay (v1.4.0) | **§VI.A multi-bit row** | ✅ rendered (NEW) |
-| 8.5 | [§8.11.2](08-benchmarks.md#8112-parametric-sweep--monte-carlo-speedup) | Parametric sweep speedup + per-point cost (v1.4.0) | **§VI.C parametric row** | ✅ rendered (NEW) |
+| 8.5 | [§8.11.2](08-benchmarks.md#8112-parametric-sweep-monte-carlo-speedup) | Parametric sweep speedup + per-point cost (v1.4.0) | **§VI.C parametric row** | ✅ rendered (NEW) |
 | 8.6 | [§8.11.3](08-benchmarks.md#8113-ac-sweep-complex-sparse-lu-v140) | AC sweep complex LU: Pulsim vs Eigen (v1.4.0) | **§VI.B AC complex** | ✅ rendered (NEW) |
 | 9.1 | [§9.1](09-architecture-walkthrough.md#91-the-layer-model) | Pulsim 10-layer stack | §I.B kernel architecture | ✅ rendered |
 | 9.2 | [§9.3](09-architecture-walkthrough.md#93-cross-layer-dependency-graph) | Cross-layer dependency DAG | §I.B (appendix) | mermaid (no PDF) |

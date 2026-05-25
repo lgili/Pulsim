@@ -34,6 +34,7 @@
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/voltage_source.hpp"
+#include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -389,7 +390,7 @@ public:
     /// land on the *node* voltage column of the capacitor's
     /// positive terminal; inductor and source ICs land on their
     /// pool-mapped current state-vector slot.
-    [[nodiscard]] Vector initial_state() const {
+    [[nodiscard]] pulsim::Vector initial_state() const {
         // State size: node voltages + every state-branch current.
         // We don't have a single API for "state size" — count by
         // probing the pool for each branch.
@@ -400,7 +401,8 @@ public:
                 ++n_state_extras;
             }
         }
-        Vector x0 = Vector::Zero(static_cast<int>(n_nodes + n_state_extras));
+        pulsim::Vector x0 = pulsim::Vector::Zero(
+            static_cast<int>(n_nodes + n_state_extras));
         for (const auto& [b_id, value] : initial_conditions_) {
             if (b_id < 0 || b_id >= graph_.num_branches()) continue;
             // Inductor / source: write into the pool-mapped state

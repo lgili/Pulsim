@@ -240,7 +240,7 @@ it returns `(duty_get, step_observer, history)` so the caller
 composes the switch_fn manually with both bits.
 
 A complete buck closed-loop in ~25 lines lives at
-[`examples/scripts/run_buck_with_helper.py`](../examples/scripts/run_buck_with_helper.py).
+[`examples/scripts/run_buck_with_helper.py`](https://github.com/lgili/Pulsim/blob/main/examples/scripts/run_buck_with_helper.py).
 
 ### 5.3 Builder ergonomics (`add-python-builder-ergonomics`)
 
