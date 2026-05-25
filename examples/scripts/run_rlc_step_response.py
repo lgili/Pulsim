@@ -85,9 +85,8 @@ def main() -> None:
                        progress=True)
     print(f"  samples: {res.num_steps()}")
 
-    # Quick steady-state check via raw state-vector access.
-    vc_idx = builder.node_id_of("vc")
-    v_c   = np.array([s[vc_idx]  for s in res.states])
+    # Quick steady-state check via the v1.5 named accessor.
+    v_c = res.v("vc")
     final_window = v_c[int(0.9 * len(v_c)):]
     print(f"  V_C (last 10% mean) = {final_window.mean():.3f} V "
           f"(target 10.000 V)")

@@ -40,11 +40,13 @@
 
 #include <format>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace pulsim::builder {
 
@@ -334,7 +336,8 @@ public:
 
     CircuitBuilder& add_capacitor(
         std::string_view name, std::string_view from,
-        std::string_view to, Real C_farads) {
+        std::string_view to, Real C_farads,
+        std::optional<Real> c0 = std::nullopt) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = add_branch_(
@@ -342,12 +345,16 @@ public:
             topology::BranchKind::PassiveLinear);
         pool_.add_capacitor(
             b_id, models::Capacitor::Params{C_farads});
+        if (c0.has_value()) {
+            initial_conditions_.emplace(b_id, *c0);
+        }
         return *this;
     }
 
     CircuitBuilder& add_inductor(
         std::string_view name, std::string_view from,
-        std::string_view to, Real L_henries) {
+        std::string_view to, Real L_henries,
+        std::optional<Real> i0 = std::nullopt) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = add_branch_(
@@ -355,7 +362,79 @@ public:
             topology::BranchKind::PassiveLinear);
         pool_.add_inductor(
             b_id, models::Inductor::Params{L_henries});
+        if (i0.has_value()) {
+            initial_conditions_.emplace(b_id, *i0);
+        }
         return *this;
+    }
+
+    /// Record (or override) an initial condition for a named
+    /// capacitor or inductor branch — useful when the IC isn't
+    /// known at `add_capacitor` / `add_inductor` time (e.g., set
+    /// from a GUI's right-click menu after the device is dropped).
+    ///
+    /// Throws `std::out_of_range` if `name` doesn't match a
+    /// registered branch. Does NOT validate the kind — passing a
+    /// resistor's name is accepted but silently ignored at
+    /// :meth:`initial_state` synthesis time.
+    void set_initial(std::string_view name, Real value) {
+        const Index b_id = branch_id_of(name);  // throws if unknown
+        initial_conditions_[b_id] = value;
+    }
+
+    /// Synthesise the flat initial-state vector from recorded ICs.
+    /// Returns a `Vector` of size
+    /// `num_nodes + num_state_branches` (the same shape
+    /// `pulsim.simulate(initial_state=…)` expects). Capacitor ICs
+    /// land on the *node* voltage column of the capacitor's
+    /// positive terminal; inductor and source ICs land on their
+    /// pool-mapped current state-vector slot.
+    [[nodiscard]] Vector initial_state() const {
+        // State size: node voltages + every state-branch current.
+        // We don't have a single API for "state size" — count by
+        // probing the pool for each branch.
+        const Index n_nodes = graph_.num_nodes();
+        Index n_state_extras = 0;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            if (pool_.is_inductor(b) || pool_.is_voltage_source(b)) {
+                ++n_state_extras;
+            }
+        }
+        Vector x0 = Vector::Zero(static_cast<int>(n_nodes + n_state_extras));
+        for (const auto& [b_id, value] : initial_conditions_) {
+            if (b_id < 0 || b_id >= graph_.num_branches()) continue;
+            // Inductor / source: write into the pool-mapped state
+            // column.
+            if (pool_.is_inductor(b_id)) {
+                const Index col = pool_.branch_var_id_for_inductor(
+                    b_id, graph_);
+                if (col >= 0 && col < x0.size()) {
+                    x0(col) = value;
+                }
+            } else if (pool_.is_voltage_source(b_id)) {
+                const Index col = pool_.branch_var_id_for_source(
+                    b_id, graph_);
+                if (col >= 0 && col < x0.size()) {
+                    x0(col) = value;
+                }
+            } else if (pool_.is_capacitor(b_id)) {
+                // Cap IC → node voltage of the positive terminal.
+                const auto& br = graph_.branch(b_id);
+                if (br.from >= 0 && br.from < n_nodes) {
+                    x0(br.from) = value;
+                }
+            }
+            // Resistors and other kinds: silently ignored.
+        }
+        return x0;
+    }
+
+    /// Returns the recorded `{branch_id: value}` IC map (read-only
+    /// view; rarely useful from Python — :meth:`initial_state` is
+    /// the consumer).
+    [[nodiscard]] const std::unordered_map<Index, Real>&
+    initial_conditions() const noexcept {
+        return initial_conditions_;
     }
 
     /// Add a binary switched diode (Layer 5 V2's
@@ -675,32 +754,189 @@ public:
         for (const auto& [b_id, n] : branch_names_) {
             if (n == name) return b_id;
         }
+        // Alias fallback (Node aliases not allowed here; only
+        // Branch-kind aliases resolve to a branch id).
+        const auto a_it = aliases_.find(std::string{name});
+        if (a_it != aliases_.end() &&
+            a_it->second.kind == AliasKind::Branch) {
+            return branch_id_of(a_it->second.target);
+        }
         throw std::out_of_range(std::format(
             "CircuitBuilder::branch_id_of: component name \"{}\" "
             "was never registered", name));
     }
 
+    /// Bit position of `name` in the `SwitchStateMask` produced by
+    /// `switch_fn(t)`. Counts only `BranchKind::Switch` branches, in
+    /// builder-call order (which matches Layer 4's enumeration).
+    ///
+    /// PulsimGUI's compat shim used to reconstruct this map by hand
+    /// (`pending_gate_signals`) — exposing it here lets the GUI drop
+    /// ~150 lines of bookkeeping.
+    ///
+    /// Throws `std::out_of_range` if `name` isn't registered, or if
+    /// `name` refers to a non-switching branch (passive / source /
+    /// nonlinear).
+    [[nodiscard]] Index switch_index_of(std::string_view name) const {
+        const Index b_id = branch_id_of(name);  // throws if unknown
+        const auto& br = graph_.branch(b_id);
+        if (br.kind != topology::BranchKind::Switch) {
+            throw std::out_of_range(std::format(
+                "CircuitBuilder::switch_index_of: branch \"{}\" is "
+                "not a switching device (kind={})",
+                name, branch_kind_name_(br.kind)));
+        }
+        // Count Switch-kind branches with id < b_id.
+        Index idx = 0;
+        for (Index i = 0; i < b_id; ++i) {
+            if (graph_.branch(i).kind == topology::BranchKind::Switch) {
+                ++idx;
+            }
+        }
+        return idx;
+    }
+
+    /// Lightweight POD describing one registered device. Returned by
+    /// `devices()` — useful for GUI introspection and the
+    /// "enumerate every component" pattern that PulsimGUI hits often.
+    struct DeviceInfo {
+        std::string              name;
+        std::string              kind;       // BranchKind name
+        std::vector<std::string> terminals;  // node names (from, to)
+    };
+
+    /// Enumerate every device the builder has accepted, in `add_*`
+    /// call order. Anonymous branches (no name) are skipped — they
+    /// only come from internal helpers (snubber RC expansion,
+    /// transformer parallel branches, …) that the caller didn't name.
+    [[nodiscard]] std::vector<DeviceInfo> devices() const {
+        std::vector<DeviceInfo> out;
+        out.reserve(static_cast<std::size_t>(graph_.num_branches()));
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            const auto name_view = name_of(b_id);
+            if (name_view.empty()) continue;
+            const auto& br = graph_.branch(b_id);
+            DeviceInfo info;
+            info.name = std::string(name_view);
+            info.kind = branch_kind_name_(br.kind);
+            info.terminals = {
+                node_name_or_ground_(br.from),
+                node_name_or_ground_(br.to),
+            };
+            out.push_back(std::move(info));
+        }
+        return out;
+    }
+
     /// Look up a previously-registered node by name. Throws
     /// `std::out_of_range` if not found. The "gnd" alias is
-    /// handled here too.
+    /// handled here too. Any caller-registered alias from
+    /// :meth:`set_alias` resolves transparently.
     [[nodiscard]] Index node_id_of(std::string_view name) const {
         if (is_ground_alias_(name)) {
             return graph_.ground();
         }
         const auto it = node_map_.find(name);
-        if (it == node_map_.end()) {
-            throw std::out_of_range(std::format(
-                "CircuitBuilder::node_id_of: node \"{}\" was never "
-                "registered",
-                name));
+        if (it != node_map_.end()) {
+            return it->second;
         }
-        return it->second;
+        // Fall back to alias resolution before raising.
+        const auto a_it = aliases_.find(std::string{name});
+        if (a_it != aliases_.end() &&
+            a_it->second.kind == AliasKind::Node) {
+            return node_id_of(a_it->second.target);
+        }
+        throw std::out_of_range(std::format(
+            "CircuitBuilder::node_id_of: node \"{}\" was never "
+            "registered",
+            name));
+    }
+
+    /// `set_alias` / `aliases` / `AliasKind` — add-python-builder-
+    /// ergonomics (v1.5). Lets the GUI attach human-readable node
+    /// or branch names to round-trip through pulsim files without
+    /// maintaining a parallel registry.
+    enum class AliasKind : std::uint8_t { Node, Branch };
+    struct AliasTarget {
+        AliasKind   kind;
+        std::string target;  // canonical name in node_map_ or
+                              // branch_names_.
+    };
+
+    /// Register a human-readable alias for an existing node or
+    /// branch. Exactly one of ``node`` / ``branch`` must be
+    /// non-empty. The alias name SHALL NOT collide with an existing
+    /// canonical name. Empty inputs raise ``std::invalid_argument``.
+    void set_alias(std::string_view human_name,
+                   std::optional<std::string_view> node,
+                   std::optional<std::string_view> branch) {
+        if (human_name.empty()) {
+            throw std::invalid_argument(
+                "set_alias: human_name must be non-empty.");
+        }
+        const bool has_node = node.has_value() && !node->empty();
+        const bool has_branch = branch.has_value() && !branch->empty();
+        if (has_node == has_branch) {
+            throw std::invalid_argument(
+                "set_alias: pass exactly one of node= or branch=.");
+        }
+        // Collision check against canonical names.
+        if (node_map_.contains(std::string{human_name})) {
+            throw std::invalid_argument(std::format(
+                "set_alias: \"{}\" is already a canonical node name.",
+                human_name));
+        }
+        // Branch-name canonical check via the existing helper.
+        try {
+            (void)branch_id_of(human_name);
+            throw std::invalid_argument(std::format(
+                "set_alias: \"{}\" is already a canonical branch / "
+                "device name.",
+                human_name));
+        } catch (const std::out_of_range&) {
+            // Good: not a registered branch name.
+        }
+        AliasKind kind = has_node ? AliasKind::Node : AliasKind::Branch;
+        std::string target = has_node ? std::string{*node}
+                                       : std::string{*branch};
+        aliases_[std::string{human_name}] = AliasTarget{kind,
+                                                         std::move(target)};
+    }
+
+    /// Read-only access to the registered alias map. Bound to
+    /// Python as ``{human_name: (kind, target)}``.
+    [[nodiscard]] const std::unordered_map<std::string, AliasTarget>&
+    aliases() const noexcept {
+        return aliases_;
     }
 
 private:
     [[nodiscard]] static constexpr bool is_ground_alias_(
         std::string_view name) noexcept {
         return name == "gnd" || name == "GND" || name == "0";
+    }
+
+    /// Human-readable BranchKind label — used in error messages
+    /// (`switch_index_of` rejection) and in `devices()[i].kind`.
+    /// Matches the lowercase enum-name convention the GUI expects.
+    [[nodiscard]] static constexpr std::string_view branch_kind_name_(
+        topology::BranchKind k) noexcept {
+        switch (k) {
+            case topology::BranchKind::PassiveLinear: return "passive";
+            case topology::BranchKind::Source:        return "source";
+            case topology::BranchKind::Switch:        return "switch";
+            case topology::BranchKind::Nonlinear:     return "nonlinear";
+        }
+        return "unknown";
+    }
+
+    /// Node name lookup that handles the ground sentinel (-1) by
+    /// returning "gnd". Used by `devices()` to build the terminals
+    /// list. The graph stores user-supplied names in `Node::name`.
+    [[nodiscard]] std::string node_name_or_ground_(Index id) const {
+        if (id == topology::Graph::ground()) return "gnd";
+        if (id < 0 || id >= graph_.num_nodes()) return "";
+        return graph_.node(id).name;
     }
 
     Index resolve_node_(std::string_view name) {
@@ -757,6 +993,14 @@ private:
     std::unordered_map<std::string, Index,
                         NodeKeyHash, std::equal_to<>> node_map_;
     numeric::Dictionary<Index, std::string> branch_names_;
+    // add-python-builder-ergonomics: per-branch IC storage, consumed
+    // by `initial_state()`. Keyed by branch_id so `set_initial` and
+    // the IC-aware overloads of add_capacitor / add_inductor share
+    // the same backing dict.
+    std::unordered_map<Index, Real>         initial_conditions_;
+    // Alias storage. Mutable through `set_alias`; consulted by the
+    // canonical lookups (`node_id_of`, `branch_id_of`).
+    std::unordered_map<std::string, AliasTarget> aliases_;
 };
 
 }  // namespace pulsim::builder

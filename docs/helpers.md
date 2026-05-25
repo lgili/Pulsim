@@ -170,3 +170,159 @@ p.scope(b, res, signals=["sw", "vout"],
 
 Same plot, one quarter the code, time units auto-picked, no
 manual `node_id_of` calls.
+
+---
+
+## 5. v1.5 — named lookups + closed-loop + ergonomics
+
+The v1.5 surface lands three additive helpers — every existing
+script keeps working unchanged.
+
+### 5.1 Named result accessors (`add-python-named-lookups`)
+
+`result.v(name)` / `result.i(name)` / `result.power(name)` resolve
+node / branch / device names without raw column arithmetic:
+
+```python
+res = p.simulate(b, t_end=20e-3, dt=2e-6, switch_fn=pwm)
+
+# Instead of:
+states = np.asarray(res.states)
+v_out  = states[:, b.node_id_of("vout")]
+i_L1   = states[:, b.graph.num_nodes + b.branch_index_of("L1")]
+
+# Just:
+v_out = res.v("vout")          # full series
+v_end = res.v("vout", t=-1)    # scalar
+i_L1  = res.i("L1")            # branch current (inductor / source only)
+p_R   = res.power("R_L")       # avg dissipation
+```
+
+Builder introspection:
+
+```python
+b.switch_index_of("Q1")   # bit position in SwitchStateMask
+b.branch_index_of("L1")   # branch_id offset (alias of branch_id_of)
+b.devices()               # [DeviceInfo(name, kind, terminals), …]
+```
+
+Unknown names raise `pulsim.NameNotFoundError(KeyError)` with
+`suggestions` from `difflib.get_close_matches`.
+
+### 5.2 PI + PWM closed-loop helper (`add-python-closed-loop-helper`)
+
+Replaces the 30-line closure-with-mutable-list pattern with one
+call:
+
+```python
+pi = p.PIController(Kp=0.08, Ki=40.0, output_min=0.05, output_max=0.95)
+loop = p.bind_pi_to_switch(
+    b, pi=pi,
+    measured=lambda x: x[b.node_id_of("vout")],
+    setpoint=5.0,
+    switch="Q1",        # name or int index
+    freq=10e3,
+)
+res = p.simulate(b, t_end=20e-3, dt=2e-6, closed_loops=[loop])
+
+# Inspect the loop's history post-run:
+ts, ds = np.asarray(loop.duty_history).T  # (N,) (N,)
+```
+
+For circuits with multiple independent loops, pass the list:
+`p.simulate(..., closed_loops=[loop_a, loop_b])`. The helper
+composes their `switch_fn`s via `make_combined_switch_fn` and
+fans out the `step_observer`s automatically.
+
+For one PI driving multiple switches (e.g. half-bridge
+complementary pair), use `p.bind_pi_to_duty_callable(...)` instead:
+it returns `(duty_get, step_observer, history)` so the caller
+composes the switch_fn manually with both bits.
+
+A complete buck closed-loop in ~25 lines lives at
+[`examples/scripts/run_buck_with_helper.py`](../examples/scripts/run_buck_with_helper.py).
+
+### 5.3 Builder ergonomics (`add-python-builder-ergonomics`)
+
+**Initial conditions** as `add_*` kwargs:
+
+```python
+b.add_capacitor("Cout", "vout", "gnd", 220e-6, c0=12.0)  # IC=12 V
+b.add_inductor("L1", "sw", "vout", 220e-6, i0=0.5)       # IC=0.5 A
+# Or post-hoc:
+b.set_initial("Cout", 12.0)
+# Synthesised automatically when simulate(initial_state=None):
+res = p.simulate(b, t_end=20e-3, dt=2e-6)  # Cout starts at 12 V.
+```
+
+**GUI-friendly aliases** for human-readable names:
+
+```python
+b.set_alias("vin", node="net_42")
+b.aliases()                # {"vin": ("node", "net_42")}
+res.v("vin") == res.v("net_42")   # alias resolves transparently
+```
+
+**Cancellation** via `should_continue=` on every long-running entry
+point:
+
+```python
+cancel_event = threading.Event()
+
+# GUI Run button reuses one builder for many runs; Cancel button:
+res = p.simulate(b, t_end=20e-3, dt=2e-6,
+                 should_continue=lambda: not cancel_event.is_set())
+
+T_j = p.compute_temperature(t, p_loss, stages,
+                              should_continue=lambda: not cancel_event.is_set())
+
+x_dc = p.compute_dc_op(b,
+                         should_continue=lambda: not cancel_event.is_set())
+```
+
+All raise `pulsim.Cancelled(RuntimeError)` with a typed
+`.where` and `.point_index` attribute pinpointing where the
+cancellation fired.
+
+---
+
+## 6. v1.5 migration status — examples + notebooks
+
+### Scripts (`examples/scripts/`) — migrated
+
+The 18 scripts most exercised by users picked up the v1.5 idioms in
+the same PR that introduced the helpers:
+
+| Family | Scripts | Idiom migrated |
+|---|---|---|
+| Closed-loop (PI + PWM) | `run_{buck,boost,flyback,boost_saturable,pfc_boost}_closed_loop.py` | `current_duty = [...]` closure → `bind_pi_to_switch` |
+| Open-loop / single-shot | `run_{buck,boost_realistic_mosfet_v14,ldo_with_opamp,common_source_amplifier,flyback,phase_shift_full_bridge,pwm_chopper_realistic_mosfet,three_phase_inverter,3phase_rectifier_grid,thermal_buck,rlc_step_response,half_wave_rectifier,dc_motor_speed}.py` | `states[:, node_id_of(name)]` → `res.v(name)`; `pool.branch_var_id_for_inductor(...)` → `res.i(name)` |
+| Reference | `run_buck_with_helper.py` | New — 30-line minimal showcase |
+
+All 18 scripts produce numerically-equivalent KPIs to their
+pre-migration baselines (verified within ±1% for closed-loop scripts
+where the throttle-cadence detail can cause sub-percent drift; bit-
+equal for open-loop scripts where the migration is just a different
+spelling of the same column read).
+
+### Notebooks (`examples/notebooks/`, `projects/*/*/*.ipynb`) — pending
+
+The 29 pulsim-using notebooks pre-date the v1.3 namespace flatten and
+still target the **v0 `ps.Circuit()` API**: `add_pwm_voltage_source`
++ `add_virtual_component("pi_controller", ...)` + period-by-period
+`run_transient_compat` loops. Migrating them to v1.5 requires:
+
+1. Rewrite `ps.Circuit()` → `ps.CircuitBuilder()` (different add_*
+   signatures, no virtual components).
+2. Replace the virtual `pi_controller` with a Python-side
+   `bind_pi_to_switch(...)` call.
+3. Collapse the per-period `for period in range(n_periods)` loop
+   into a single `pulsim.simulate(..., closed_loops=[loop])`.
+4. Re-execute every notebook so the rendered plots reflect the new
+   solver path (the period-by-period vs `simulate(...)` paths have
+   slightly different switching-edge resolution and would produce
+   visibly different waveforms — the existing PNGs in the notebook
+   outputs would mislead readers post-rewrite).
+
+That's a separate effort tracked under a future "legacy notebook
+modernisation" change.

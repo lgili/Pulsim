@@ -96,12 +96,9 @@ def main() -> None:
     print(f"  samples: {res.num_steps()}")
 
     # Phase-leg midpoints.
-    a_idx = builder.node_id_of("mid_a")
-    b_idx = builder.node_id_of("mid_b")
-    c_idx = builder.node_id_of("mid_c")
     times = np.asarray(res.times) * 1e3   # ms
-    v_a = np.array([s[a_idx] for s in res.states])
-    v_b = np.array([s[b_idx] for s in res.states])
+    v_a = res.v("mid_a")
+    v_b = res.v("mid_b")
 
     # Line-to-line.
     v_ab = v_a - v_b

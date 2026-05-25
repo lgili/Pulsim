@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/continuation.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
@@ -177,6 +178,9 @@ namespace detail {
 /// Unified DC operating-point solver with strategy selection.
 ///
 /// Returns the state vector at DC equilibrium. Throws on failure.
+/// When ``should_continue`` is non-empty, it is invoked between
+/// fallback strategies (Auto mode) and the call throws
+/// :class:`analysis::Cancelled` if the callback returned ``false``.
 [[nodiscard]] inline Vector compute_dc_op_with_strategy(
     const topology::Graph& graph,
     const DevicePool& pool,
@@ -184,7 +188,8 @@ namespace detail {
     DCStrategy strategy = DCStrategy::Auto,
     Real t_eval = Real{0},
     const PseudoTransientConfig& pt_cfg = {},
-    const SourceSteppingConfig& ss_cfg = {}) {
+    const SourceSteppingConfig& ss_cfg = {},
+    const analysis::ShouldContinueFn& should_continue = {}) {
 
     auto try_naive = [&]() -> Vector {
         return compute_dc_op(graph, pool, mask, t_eval);
@@ -198,6 +203,7 @@ namespace detail {
                                               ss_cfg, t_eval);
     };
 
+    analysis::check_cancellation(should_continue, "compute_dc_op");
     switch (strategy) {
     case DCStrategy::Naive:           return try_naive();
     case DCStrategy::PseudoTransient: return try_pt();
@@ -206,9 +212,13 @@ namespace detail {
         // Try naive first — fastest path.
         try { return try_naive(); }
         catch (const std::exception&) { /* fall through */ }
+        analysis::check_cancellation(should_continue,
+                                      "compute_dc_op", 1);
         // Then pseudo-transient.
         try { return try_pt(); }
         catch (const std::exception&) { /* fall through */ }
+        analysis::check_cancellation(should_continue,
+                                      "compute_dc_op", 2);
         // Finally source-stepping (most robust, slowest).
         return try_ss();
     }

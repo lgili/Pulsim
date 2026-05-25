@@ -131,10 +131,8 @@ def main() -> None:
     )
 
     times = np.asarray(res.times)
-    states = np.asarray(res.states)
-    i_arm = states[:, b.pool.branch_var_id_for_inductor(
-        motor.inductor_branch_id, b.graph)]
-    v_leg = states[:, b.node_id_of("leg")]
+    i_arm = res.i("M_L")
+    v_leg = res.v("leg")
 
     # Reconstruct ω(t) by re-running motor.mech in a clean pass.
     # (The original `motor` object holds only the FINAL state.)

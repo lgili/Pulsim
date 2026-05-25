@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
@@ -170,7 +171,8 @@ assemble_E_matrix(const topology::Graph& graph,
     const topology::SwitchStateMask& mask,
     const std::vector<Real>& freqs,
     Size input_state_idx,
-    Size output_node_idx) {
+    Size output_node_idx,
+    const ShouldContinueFn& should_continue = {}) {
 
     // 1. Assemble the static (R + algebraic-constraint) MNA matrix.
     //    dt=0 → no trap-companion contribution from L/C, so J
@@ -234,6 +236,8 @@ assemble_E_matrix(const topology::Graph& graph,
                                                           Real{0}};
 
     for (std::size_t k = 0; k < freqs.size(); ++k) {
+        check_cancellation(should_continue, "run_mna_sweep",
+                            static_cast<long>(k));
         const Real omega = Real{2} * Real{3.141592653589793238462643}
                               * freqs[k];
         const Complex j_omega{Real{0}, omega};

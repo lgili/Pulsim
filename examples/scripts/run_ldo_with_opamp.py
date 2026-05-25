@@ -81,11 +81,9 @@ def main() -> None:
     )
     print(f"  samples: {res.num_steps()}")
 
-    vout_idx  = builder.node_id_of("vout")
-    vgate_idx = builder.node_id_of("vgate")
     times = np.asarray(res.times) * 1e3   # ms
-    v_out  = np.array([s[vout_idx]  for s in res.states])
-    v_gate = np.array([s[vgate_idx] for s in res.states])
+    v_out  = res.v("vout")
+    v_gate = res.v("vgate")
 
     k_skip = int(0.7 * res.num_steps())
     v_mean = v_out[k_skip:].mean()

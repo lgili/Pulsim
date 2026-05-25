@@ -84,22 +84,17 @@ def main() -> None:
     res = p.simulate(b, t_end=T_END, dt=DT,
                        max_event_iterations=8)
     times = np.asarray(res.times)
-    states = np.asarray(res.states)
 
     # Per-phase voltages (line-to-neutral) and currents (into the rectifier).
-    n_idx = b.node_id_of("n")
-    va = states[:, b.node_id_of("a")] - states[:, n_idx]
-    vb = states[:, b.node_id_of("b")] - states[:, n_idx]
-    vc = states[:, b.node_id_of("c")] - states[:, n_idx]
-    # Line currents — derive from line-impedance voltage drop:
-    # i_x = (V(x) − V(x1)) / R_line + ... but the inductor branch
-    # current is exactly what we want.
-    # Inductor branches (line impedance L on each phase). Order:
-    # branches 0/1/2 = grid sources, 3/4 = Zline_R_a / Zline_L_a,
-    # 5/6 = Zline_R_b / Zline_L_b, 7/8 = Zline_R_c / Zline_L_c.
-    iL_a = states[:, b.pool.branch_var_id_for_inductor(4, b.graph)]
-    iL_b = states[:, b.pool.branch_var_id_for_inductor(6, b.graph)]
-    iL_c = states[:, b.pool.branch_var_id_for_inductor(8, b.graph)]
+    v_n = res.v("n")
+    va = res.v("a") - v_n
+    vb = res.v("b") - v_n
+    vc = res.v("c") - v_n
+    # Line currents — Zline_L_x inductor branches carry the per-phase
+    # line current directly.
+    iL_a = res.i("Zline_L_a")
+    iL_b = res.i("Zline_L_b")
+    iL_c = res.i("Zline_L_c")
 
     # Skip the first cycle (transient).
     mask = times > 20e-3
@@ -118,8 +113,7 @@ def main() -> None:
         t=t_ss, frequency=F_GRID)
 
     # DC bus + power.
-    v_dc = states[:, b.node_id_of("vdc_p")] - \
-              states[:, b.node_id_of("vdc_n")]
+    v_dc = res.v("vdc_p") - res.v("vdc_n")
     p_inst = p.instantaneous_power_3phase(va, vb, vc,
                                               iL_a, iL_b, iL_c)
 
