@@ -498,6 +498,8 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    inductor_freeze_di_max: float = 0.0,
+    inductor_abs_clamp: float = 0.0,
     progress: "bool | int | str" = False,
     initial_state=None,
     should_continue=None,
@@ -572,6 +574,10 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if inductor_freeze_di_max > 0:
+        opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
+    if inductor_abs_clamp > 0:
+        opts.inductor_abs_clamp = float(inductor_abs_clamp)
 
     # Default switch_fn: all switches closed.
     if switch_fn is None:

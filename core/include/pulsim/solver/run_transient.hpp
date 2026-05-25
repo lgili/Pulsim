@@ -755,6 +755,49 @@ inline SimulationResult run_transient(
                 result.commutation_events.push_back(ev);
             }
 
+            // 4b. Floating-inductor freeze guard (Layer 5 V5).
+            //
+            // When ``opts.inductor_freeze_di_max > 0``, walk every
+            // tracked inductor and snap its branch current back to
+            // the previous step's value whenever the per-step change
+            // exceeds the configured bound. Catches the rare
+            // near-singular MNA configurations where an inductor's
+            // loop has no closed conduction path (rectifier in deep
+            // DCM, series-blocking diode briefly open, etc.) and
+            // the LU solve emits a kiloamp-scale unphysical jump.
+            // See ``inductor_freeze_di_max`` in options.hpp.
+            if (!corrected &&
+                (opts.inductor_freeze_di_max > Real{0} ||
+                 opts.inductor_abs_clamp > Real{0})) {
+                for (const auto& e : history.entries()) {
+                    if (e.kind != pwl::DevicePool::StoredKind::Inductor) {
+                        continue;
+                    }
+                    Real i_new = x[e.inductor_branch_var_id];
+                    // Step-to-step jump guard: snap back to i_prev
+                    // when the solver emits an unphysical kilo-amp
+                    // delta (rectifier in DCM, etc.).
+                    if (opts.inductor_freeze_di_max > Real{0}) {
+                        const Real di  = i_new - e.i_prev;
+                        const Real adi = di < Real{0} ? -di : di;
+                        if (adi > opts.inductor_freeze_di_max) {
+                            i_new = e.i_prev;
+                        }
+                    }
+                    // Absolute clamp: catches the *slow drift* form
+                    // of the same failure where the per-step delta
+                    // stays below the freeze threshold but i_L walks
+                    // monotonically past physical bounds over many
+                    // line cycles.
+                    if (opts.inductor_abs_clamp > Real{0}) {
+                        const Real lim = opts.inductor_abs_clamp;
+                        if (i_new >  lim) i_new =  lim;
+                        if (i_new < -lim) i_new = -lim;
+                    }
+                    x[e.inductor_branch_var_id] = i_new;
+                }
+            }
+
             // 5. Commit history for the next step (skipped if
             //    the substep correction already advanced it).
             if (!corrected) {

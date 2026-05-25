@@ -233,26 +233,19 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
     )
     b.add_resistor("R_ac_b_gnd", "ac_b", "gnd", 1.0e-3)
 
-    # F500 fuse + L001 EMI input choke (modelled as pure DCR).
+    # F500 fuse + L001 EMI input choke + DCR.
     #
-    # L001 is a common-mode / differential-mode EMI filter — it is
-    # invisible to the line-frequency boost-stage behaviour but, in
-    # any open-loop sim *and even closed-loop* the
-    # L001-C006-bridge MNA matrix becomes near-singular whenever
-    # the bridge enters DCM and the solver converges to a fixed-
-    # point that's physically wrong (we observed i_L001 stuck at
-    # -1034 A through multiple line cycles). Snubber resistors and
-    # diode-leakage bumps did not break the singularity.
-    #
-    # The cleanest fix is to drop the L's inductive behaviour and
-    # carry just its DCR — that removes the inductor branch row
-    # entirely from MNA, the singularity is gone, the rest of the
-    # boost stage is unchanged, and the loss budget for the L001
-    # DCR matches PSIM cleanly (P_ohm_L001 is back-derived from
-    # I_in_rms analytically in losses.py).
+    # L001 is restored as a real inductor now that the kernel has the
+    # ``inductor_freeze_di_max`` guard (Layer 5 V5): when the bridge
+    # enters DCM and the inductor's MNA constraint becomes near-
+    # singular, the post-solve guard snaps i_L001 back to its
+    # previous value instead of letting the LU solve emit
+    # kiloamp-scale unphysical jumps. ``simulate_frontend`` passes
+    # ``inductor_freeze_di_max = 50.0`` to enable it.
     b.add_resistor("F500", "ac_a", "n_f500", float(F500.R_cold))
-    b.add_resistor("R_L001_DCR", "n_f500", "n_l001_d", float(L001.DCR))
-    sw_map.l001_branch = -1     # no inductor branch — L is suppressed
+    sw_map.l001_branch = int(b.graph.num_branches)
+    b.add_inductor("L001", "n_f500", "n_l001", float(L001.L))
+    b.add_resistor("R_L001_DCR", "n_l001", "n_l001_d", float(L001.DCR))
 
     # Bridge rectifier
     add_bridge_rectifier(
@@ -799,20 +792,30 @@ def simulate_frontend(sp: DriveSimParams,
     res = p.simulate(
         b, t_end=t_end, dt=dt, switch_fn=sw_fn,
         initial_state=init_state, step_observer=observer,
-        max_event_iterations=12, progress=False,
+        max_event_iterations=12,
+        # Layer 5 V5 kernel guards (post-solve, see solver/options.hpp):
+        #   * freeze_di_max = 50 A catches sudden kiloamp jumps in
+        #     the inductor's branch current.
+        #   * abs_clamp = 30 A catches the slower drift form of the
+        #     same failure (i_L walking past physical bounds at
+        #     < 50 A/step over many line cycles). The drive's worst-
+        #     case physical line current is < 25 A peak even at
+        #     OP 2.4, so 30 A leaves comfortable margin while
+        #     bounding the rectifier-DCM divergence.
+        inductor_freeze_di_max=50.0,
+        inductor_abs_clamp=30.0,
+        progress=False,
     )
 
     states = np.asarray([list(v) for v in res.states], dtype=float)
     times = np.asarray(res.times, dtype=float)
     nid = lambda n: b.node_id_of(n)
 
-    # Branch current indices into the state vector. L002 is read
-    # directly; L001 is collapsed to its DCR (no inductor branch)
-    # so the "line current" is back-computed from the voltage drop
-    # across the F500 fuse: ``I_line = (V_ac_a − V_n_f500)/R_F500``.
+    # Branch current indices into the state vector. L001 and L002
+    # are both real inductor branches now (the kernel freeze guard
+    # keeps i_L001 physical even when the bridge is in DCM).
+    i_L001 = states[:, b.pool.branch_var_id_for_inductor(int(sw_map.l001_branch), b.graph)]
     i_L002 = states[:, b.pool.branch_var_id_for_inductor(int(sw_map.l002_branch), b.graph)]
-    v_F500 = states[:, nid("ac_a")] - states[:, nid("n_f500")]
-    i_L001 = v_F500 / float(F500.R_cold)
 
     # Reconstruct the boost-MOSFET gate schedule from the simulated
     # ``v_sw_pfc`` node — this works irrespective of the control mode

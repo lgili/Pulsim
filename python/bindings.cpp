@@ -688,6 +688,10 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("inductor_freeze_di_max",
+                        &SimulationOptions::inductor_freeze_di_max)
+        .def_readwrite("inductor_abs_clamp",
+                        &SimulationOptions::inductor_abs_clamp)
         .def("valid", &SimulationOptions::valid)
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);
