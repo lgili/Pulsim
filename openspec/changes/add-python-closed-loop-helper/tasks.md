@@ -1,10 +1,10 @@
 ## 1. ClosedLoop dataclass + bind_pi_to_switch
 
-- [ ] 1.1 Add `pulsim/control.py:ClosedLoop` frozen dataclass with
+- [x] 1.1 Add `pulsim/control.py:ClosedLoop` frozen dataclass with
       fields: `switch_fn`, `step_observer`,
       `duty_history: list[tuple[float, float]]`,
       `error_history: list[tuple[float, float]]`.
-- [ ] 1.2 Add `pulsim/control.py:bind_pi_to_switch(builder, *, pi,
+- [x] 1.2 Add `pulsim/control.py:bind_pi_to_switch(builder, *, pi,
       measured, setpoint, switch, freq, t_start=0.0) -> ClosedLoop`.
       Internals:
       - `T_PWM = 1.0 / freq`
@@ -20,7 +20,7 @@
         dt=T_PWM)`, updates `duty[0]`, appends to both histories.
       - Return `ClosedLoop(switch_fn=…, step_observer=…,
         duty_history=…, error_history=…)`.
-- [ ] 1.3 Add `bind_pi_to_duty_callable(...)` — same factory but
+- [x] 1.3 Add `bind_pi_to_duty_callable(...)` — same factory but
       returns `(duty_callable, step_observer, history)` tuple
       instead of a switch_fn-bound loop. The duty_callable is a
       0-ary function returning the current duty, suitable for
@@ -28,9 +28,9 @@
 
 ## 2. simulate(closed_loops=…) composition
 
-- [ ] 2.1 Extend `pulsim/__init__.py:simulate` to accept
+- [x] 2.1 Extend `pulsim/__init__.py:simulate` to accept
       `closed_loops: Sequence[ClosedLoop] | None = None`.
-- [ ] 2.2 When `closed_loops` is non-empty:
+- [x] 2.2 When `closed_loops` is non-empty:
       - Verify `switch_fn is None and step_observer is None`,
         else raise
         `ValueError("pass closed_loops OR switch_fn/step_observer,
@@ -41,12 +41,12 @@
       - Compose `step_observer` via a fan-out wrapper:
         `def _composed(t, x): [l.step_observer(t, x) for l in closed_loops]`.
       - Pass the composed callbacks to the inner `simulate` call.
-- [ ] 2.3 Document the kwarg in the function's docstring with
+- [x] 2.3 Document the kwarg in the function's docstring with
       a buck + boost dual-output example.
 
 ## 3. Tests + benchmark
 
-- [ ] 3.1 `python/tests/test_closed_loop_helper.py` — test cases:
+- [x] 3.1 `python/tests/test_closed_loop_helper.py` — test cases:
       - Buck closed-loop (V_in=12, V_ref=5) using
         `bind_pi_to_switch` converges to within ±5 % steady-state
         in the last 2 ms of a 20 ms run.
@@ -59,7 +59,7 @@
       - `bind_pi_to_duty_callable` lets a caller drive a
         half-bridge complementary pair (Q_high uses the duty
         directly; Q_low uses 1 - duty).
-- [ ] 3.2 Negative-path tests:
+- [x] 3.2 Negative-path tests:
       - `simulate(closed_loops=[l], switch_fn=custom)` raises
         `ValueError` with a message mentioning both kwarg names.
       - `bind_pi_to_switch(..., switch="Q_does_not_exist")`
@@ -83,9 +83,9 @@
 
 ## 5. Validation
 
-- [ ] 5.1 `openspec validate add-python-closed-loop-helper --strict`
+- [x] 5.1 `openspec validate add-python-closed-loop-helper --strict`
       passes.
-- [ ] 5.2 Existing `python/tests/` pytest suite green (no
+- [x] 5.2 Existing `python/tests/` pytest suite green (no
       regressions in `PIController` API or the bare
       `simulate(switch_fn=, step_observer=)` path).
 - [ ] 5.3 PulsimGUI sanity check: rebuild

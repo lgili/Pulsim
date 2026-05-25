@@ -66,6 +66,10 @@ from ._pulsim import (  # type: ignore[import-not-found]
 from .control import (
     PIController,
     PIDController,
+    # add-python-closed-loop-helper (v1.5)
+    ClosedLoop,
+    bind_pi_to_switch,
+    bind_pi_to_duty_callable,
     Comparator,
     RateLimiter,
     SampleHold,
@@ -307,8 +311,11 @@ __all__ = [
     "simulate",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
-    # Closed-loop control building blocks (Phase 2).
+    # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
+    "ClosedLoop",
+    "bind_pi_to_switch",
+    "bind_pi_to_duty_callable",
     "PIDController",
     "Comparator",
     "RateLimiter",
@@ -706,6 +713,7 @@ def simulate(
     progress: "bool | int | str" = False,
     initial_state=None,
     should_continue=None,
+    closed_loops=None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -757,6 +765,29 @@ def simulate(
     SimulationResult
         The full per-sample state-vector history.
     """
+    # add-python-closed-loop-helper composition: when caller passes
+    # one or more `ClosedLoop` instances, derive `switch_fn` and
+    # `step_observer` from them. Mutually exclusive with explicit
+    # `switch_fn=` / `step_observer=` to avoid silent override.
+    if closed_loops:
+        if switch_fn is not None or step_observer is not None:
+            raise ValueError(
+                "pass closed_loops OR switch_fn/step_observer, not "
+                "both — the helper composes both callbacks "
+                "internally."
+            )
+        loops = list(closed_loops)
+        n_sw_compose = builder.graph.num_switches
+        per_switch_fns = [l.switch_fn for l in loops]
+        switch_fn = make_combined_switch_fn(n_sw_compose, per_switch_fns)
+        per_observers = [l.step_observer for l in loops]
+
+        def _composed_observer(t: float, x) -> None:
+            for obs in per_observers:
+                obs(t, x)
+
+        step_observer = _composed_observer
+
     # Build the PWL cache.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build(dt)
