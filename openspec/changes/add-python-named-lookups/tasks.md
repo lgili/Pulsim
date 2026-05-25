@@ -75,15 +75,15 @@
 
 ## 4. Docs + examples
 
-- [ ] 4.1 Update `docs/tutorials/api-reference.md` to feature
+- [x] 4.1 Update `docs/tutorials/api-reference.md` to feature
       `result.v(name)` / `result.i(name)` / `result.power(name)`
       as the recommended pattern. Add a "deprecated pattern"
       callout for the raw `result.states[:, idx]` access (still
       supported, just less ergonomic).
-- [ ] 4.2 Update `python/scripts/test_cl_buck.py` to use the new
+- [x] 4.2 Update `python/scripts/test_cl_buck.py` to use the new
       accessors — it's the canonical closed-loop sample, should
       demonstrate the idiom.
-- [ ] 4.3 Add a docstring example to `SimulationResult.v` showing
+- [x] 4.3 Add a docstring example to `SimulationResult.v` showing
       the typical buck-converter usage.
 
 ## 5. Validation
@@ -93,7 +93,7 @@
 - [ ] 5.2 Existing `python/tests/` pytest suite green (no
       regressions in `device_loss_summary`, `node_id_of`, or
       transient solver behavior).
-- [ ] 5.3 Build artefacts re-export the new symbols from
+- [x] 5.3 Build artefacts re-export the new symbols from
       `pulsim.__init__` (`v`, `i`, `power` are methods so no
       module-level exports needed; verify `pulsim.NameNotFoundError`
       is reachable as `pulsim.NameNotFoundError`).

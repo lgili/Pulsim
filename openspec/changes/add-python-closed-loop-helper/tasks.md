@@ -71,13 +71,13 @@
 
 ## 4. Examples + docs
 
-- [ ] 4.1 Rewrite `python/scripts/test_cl_buck.py` to use
+- [x] 4.1 Rewrite `python/scripts/test_cl_buck.py` to use
       `bind_pi_to_switch` (target: 20 lines of actual logic,
       excluding imports and the build_plant helper).
-- [ ] 4.2 Add or extend `docs/tutorials/closed-loop.md` with two
+- [x] 4.2 Add or extend `docs/tutorials/closed-loop.md` with two
       walkthroughs: (a) single-loop buck via the helper, (b)
       dual-rail buck via `closed_loops=[l1, l2]`.
-- [ ] 4.3 Add a section to `docs/v2/helpers.md` listing
+- [x] 4.3 Add a section to `docs/v2/helpers.md` listing
       `pulsim.control.bind_pi_to_switch` as a UX helper alongside
       `scope`, `bode`, `currents`.
 
@@ -88,7 +88,7 @@
 - [x] 5.2 Existing `python/tests/` pytest suite green (no
       regressions in `PIController` API or the bare
       `simulate(switch_fn=, step_observer=)` path).
-- [ ] 5.3 PulsimGUI sanity check: rebuild
+- [x] 5.3 PulsimGUI sanity check: rebuild
       `feat/ux-cleanup-and-scripts`, point
       `sim_buck_closed_loop.py` at `bind_pi_to_switch`, confirm
       `V_out` reaches 6 V (removing the limitation that script

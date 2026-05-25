@@ -118,13 +118,13 @@
 
 ## 5. Docs
 
-- [ ] 5.1 Update `docs/tutorials/basics.md` to show
+- [x] 5.1 Update `docs/tutorials/basics.md` to show
       `add_capacitor("Cout", "vout", "gnd", 220e-6, c0=12.0)` as
       the recommended IC pattern.
-- [ ] 5.2 Add or extend `docs/tutorials/gui-integration.md`
+- [x] 5.2 Add or extend `docs/tutorials/gui-integration.md`
       explaining how `set_alias` round-trips GUI human labels
       through pulsim — concrete example with a YAML round-trip.
-- [ ] 5.3 Update each long-running entry-point's docstring with
+- [x] 5.3 Update each long-running entry-point's docstring with
       the `should_continue` kwarg, including a recipe for
       "wrap a `threading.Event` into the callback for GUI
       Cancel buttons".
@@ -135,7 +135,7 @@
       --strict` passes.
 - [x] 6.2 Existing pytest suite green (no regressions in any
       analysis entry-point's default behavior).
-- [ ] 6.3 PulsimGUI sanity check: pass
+- [x] 6.3 PulsimGUI sanity check: pass
       `should_continue=lambda: not cancel_event.is_set()` to
       `compute_dc_op` and confirm the GUI cancel button preempts
       a 50-frequency Bode sweep in under one frequency point
