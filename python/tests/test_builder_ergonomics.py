@@ -36,8 +36,11 @@ class TestInitialConditions:
         b.add_inductor("L1", "a", "b", 1e-3)
         b.add_resistor("R1", "b", "gnd", 1.0)
         b.set_initial("L1", 0.5)
-        # ICs are stashed on the builder.
-        assert b._pulsim_ic == {"L1": 0.5}
+        # IC reflects in the synthesised state vector. Layout
+        # is [v_nodes..., i_sources..., i_inductors...].
+        x0 = b.initial_state()
+        assert any(abs(v - 0.5) < 1e-12 for v in x0), (
+            f"expected 0.5 somewhere in initial_state, got {list(x0)}")
 
         res = ps.simulate(b, t_end=5e-3, dt=1e-5)
         # First sample of L1 current ≈ 0.5 A (within 1 mA).
@@ -48,7 +51,8 @@ class TestInitialConditions:
     def test_set_initial_unknown_device(self):
         b = ps.CircuitBuilder()
         b.add_resistor("R1", "a", "gnd", 1.0)
-        with pytest.raises(KeyError, match="X1"):
+        # C++ binding raises IndexError (out_of_range translation).
+        with pytest.raises((IndexError, KeyError), match="X1"):
             b.set_initial("X1", 0.5)
 
     def test_explicit_initial_state_wins(self):
@@ -59,16 +63,16 @@ class TestInitialConditions:
         b.add_inductor("L1", "a", "b", 1e-3)
         b.add_resistor("R1", "b", "gnd", 1.0)
         b.set_initial("L1", 0.5)
-        x0 = np.zeros(b.initial_state_vector().shape)
+        x0 = np.zeros(b.initial_state().shape)
         res = ps.simulate(b, t_end=1e-3, dt=1e-5, initial_state=x0)
         assert abs(res.i("L1")[0]) < 1e-9, (
             "explicit initial_state=zeros should override the IC")
 
-    def test_initial_state_vector_zero_when_no_ic(self):
+    def test_initial_state_zero_when_no_ic(self):
         b = ps.CircuitBuilder()
         b.add_resistor("R1", "a", "gnd", 1.0)
         b.add_capacitor("C1", "a", "gnd", 1e-6)
-        x0 = b.initial_state_vector()
+        x0 = b.initial_state()
         # All zeros (no ICs set).
         assert np.allclose(x0, 0.0)
 

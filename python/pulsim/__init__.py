@@ -811,20 +811,19 @@ def simulate(
         step_observer = _composed_observer
 
     # add-python-builder-ergonomics: if the caller didn't pass an
-    # explicit initial_state but the builder has recorded ICs via
-    # `set_initial`, synthesise the ndarray from them.
-    if initial_state is None and getattr(
-        builder, "_pulsim_ic", None):
+    # explicit initial_state, ask the builder for its recorded ICs.
+    # The C++ `initial_state()` synthesises from `c0=` / `i0=` /
+    # `set_initial` calls. Returns an all-zero vector when no ICs
+    # were set; we only override the simulate path when there's at
+    # least one non-zero entry to avoid forcing a needless copy.
+    if initial_state is None:
         try:
-            initial_state = builder.initial_state_vector()
-        except Exception as exc:  # noqa: BLE001 — be permissive
-            import warnings as _w
-            _w.warn(
-                f"simulate: failed to auto-synthesise initial_state "
-                f"from builder ICs ({exc!r}); falling back to zero.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            import numpy as _np_check
+            candidate = builder.initial_state()
+            if _np_check.any(_np_check.asarray(candidate) != 0.0):
+                initial_state = candidate
+        except Exception:  # noqa: BLE001 — test mocks etc.
+            pass
 
     # Build the PWL cache.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)

@@ -346,12 +346,55 @@ def install(builder_cls) -> None:
     """Patch the named methods onto ``builder_cls``. Called once at
     ``pulsim`` module-import time so every ``CircuitBuilder`` instance
     transparently gains the helpers.
+
+    pulsim 1.5+ exposes ``set_initial`` / ``initial_state`` /
+    ``set_alias`` / ``aliases`` directly from C++; this installer is
+    therefore mostly a no-op on a fresh build. We keep the Python
+    fallbacks (gated by ``hasattr``) for two reasons:
+
+    1. Test mocks that build a partial CircuitBuilder analog without
+       the C++ helpers (PulsimGUI's `pulsim_v0_compat.py` until it
+       picks up the C++ methods).
+    2. ``_resolve_alias`` — the Python wrapper consulted by
+       :meth:`SimulationResult.v` / `.i` / `.power`. Wraps the C++
+       ``aliases()`` dict in a uniform interface.
     """
-    builder_cls.set_initial         = _set_initial          # type: ignore[attr-defined]
-    builder_cls.initial_state_vector = _initial_state_vector  # type: ignore[attr-defined]
-    builder_cls.set_alias           = _set_alias            # type: ignore[attr-defined]
-    builder_cls.aliases             = _aliases              # type: ignore[attr-defined]
-    builder_cls._resolve_alias      = _resolve_alias        # type: ignore[attr-defined]
+    if not hasattr(builder_cls, "set_alias"):
+        builder_cls.set_alias = _set_alias        # type: ignore[attr-defined]
+    if not hasattr(builder_cls, "aliases"):
+        builder_cls.aliases   = _aliases          # type: ignore[attr-defined]
+    # _resolve_alias bridges to whatever the host implementation of
+    # `aliases()` returns — works for both C++ and Python sides.
+    builder_cls._resolve_alias = _resolve_alias_native  # type: ignore[attr-defined]
+    if not hasattr(builder_cls, "set_initial"):
+        builder_cls.set_initial = _set_initial             # type: ignore[attr-defined]
+    if not hasattr(builder_cls, "initial_state"):
+        builder_cls.initial_state = _initial_state_vector   # type: ignore[attr-defined]
+
+
+def _resolve_alias_native(self, name: str):
+    """Consult the builder's :meth:`aliases` map (C++ or Python
+    side) for ``name``. Returns ``(kind, target)`` tuple or ``None``.
+
+    Handles both shapes the underlying dict can take:
+    - C++ binding: ``{name: ("node"|"branch", target)}`` tuples.
+    - Python fallback: same shape via ``_aliases``.
+    """
+    try:
+        amap = self.aliases()
+    except Exception:  # noqa: BLE001 — defensive
+        return None
+    entry = amap.get(name)
+    if entry is None:
+        return None
+    # entry is either (kind_str, target_str) or AliasTarget-like.
+    if isinstance(entry, tuple) and len(entry) == 2:
+        return entry
+    kind = getattr(entry, "kind", None)
+    target = getattr(entry, "target", None)
+    if kind is not None and target is not None:
+        return (str(kind), str(target))
+    return None
 
 
 __all__ = [

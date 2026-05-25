@@ -1,21 +1,21 @@
 ## 1. Initial conditions on passives
 
-- [ ] 1.1 Extend `RuntimeCircuit::add_capacitor` (in
+- [x] 1.1 Extend `RuntimeCircuit::add_capacitor` (in
       `core/include/pulsim/v1/runtime_circuit.hpp`) with
       `std::optional<Real> c0 = std::nullopt`. Store on the
       per-branch metadata record.
-- [ ] 1.2 Extend `RuntimeCircuit::add_inductor` with
+- [x] 1.2 Extend `RuntimeCircuit::add_inductor` with
       `std::optional<Real> i0 = std::nullopt`.
 - [x] 1.3 Add `RuntimeCircuit::set_initial(std::string_view
       device_name, Real value)` that finds the device by name and
       sets its IC. Throws `std::out_of_range` if the name doesn't
       match a capacitor or inductor.
-- [ ] 1.4 Add `RuntimeCircuit::initial_state() const ->
+- [x] 1.4 Add `RuntimeCircuit::initial_state() const ->
       std::vector<Real>` that synthesises the flat initial-state
       vector from recorded ICs (zero elsewhere). Returns
       `std::vector<Real>(num_nodes + num_branches, 0.0)` if no
       ICs are set.
-- [ ] 1.5 Pybind: bind `c0=` / `i0=` kwargs to
+- [x] 1.5 Pybind: bind `c0=` / `i0=` kwargs to
       `CircuitBuilder.add_capacitor` / `.add_inductor` (default
       `None`); bind `set_initial(device_name, value)`; bind
       `initial_state()` for diagnostic use.
@@ -26,7 +26,7 @@
 
 ## 2. Builder aliases
 
-- [ ] 2.1 (Python-side via _builder_ergonomics) Add `RuntimeCircuit::set_alias(std::string_view human,
+- [x] 2.1 Add `RuntimeCircuit::set_alias(std::string_view human,
       std::optional<std::string_view> node,
       std::optional<std::string_view> branch)` (C++). Validate at
       most one of `node` / `branch` is set, neither is empty,
@@ -38,7 +38,7 @@
       stored map). `AliasTarget` is a `(kind: AliasKind, name:
       std::string)` pair with `enum class AliasKind { Node,
       Branch }`.
-- [ ] 2.3 Make `RuntimeCircuit::node_id_of`,
+- [x] 2.3 Make `RuntimeCircuit::node_id_of`,
       `branch_index_of`, and `switch_index_of` consult
       `aliases_` before raising. Order: canonical lookup first,
       then alias resolution.
@@ -46,7 +46,7 @@
       branch=None)`, `aliases()`. Throw a Python
       `ValueError` from `set_alias` when both
       kwargs are set or both are `None`.
-- [ ] 2.5 Update `SimulationResult.v` / `.i` in
+- [x] 2.5 Update `SimulationResult.v` / `.i` in
       `python/pulsim/__init__.py` to leverage the same alias
       resolution (depends on
       `add-python-named-lookups` for the accessor methods, but
@@ -56,21 +56,21 @@
 
 ## 3. should_continue everywhere
 
-- [ ] 3.1 Define `using ShouldContinueFn =
+- [x] 3.1 Define `using ShouldContinueFn =
       std::function<bool()>` in
       `core/include/pulsim/analysis/cancellation.hpp` (new file).
       Define `class Cancelled : public std::runtime_error`.
-- [ ] 3.2 Add `ShouldContinueFn should_continue = nullptr` param
+- [x] 3.2 Add `ShouldContinueFn should_continue = nullptr` param
       to `compute_dc_op` in
       `core/include/pulsim/analysis/dc_op.hpp`. Inside the Newton
       loop, after each `solve_step()`, invoke
       `if (should_continue && !should_continue()) throw
       Cancelled("compute_dc_op", iteration);`.
-- [ ] 3.3 Same for `run_ac_sweep`
+- [x] 3.3 Same for `run_ac_sweep`
       (`core/include/pulsim/analysis/ac_analysis.hpp`) and
       `run_mna_sweep` (`core/include/pulsim/analysis/mna_sweep.hpp`)
       — call between frequency points / sweep iterations.
-- [ ] 3.4 Same for `compute_temperature` in
+- [x] 3.4 Same for `compute_temperature` in
       `core/include/pulsim/thermal/foster_network.hpp` — call
       every 1000 convolution samples or every 1 % of the trace,
       whichever is more frequent (cost-amortized for short
@@ -80,7 +80,7 @@
       `Cancelled` exception to this Python type with the
       `iteration` / `point_index` / `chunk_index` field exposed
       as an attribute.
-- [ ] 3.6 Bind `should_continue=` kwarg on `compute_dc_op`,
+- [x] 3.6 Bind `should_continue=` kwarg on `compute_dc_op`,
       `run_ac_sweep`, `run_mna_sweep`, `compute_temperature` in
       the existing Python wrappers (`__init__.py`,
       `ac_analysis.py`, `mna_sweep.py`, `thermal.py`).
@@ -103,7 +103,7 @@
       - Alias name colliding with an existing canonical name
         raises `ValueError`.
       - `builder.aliases()` returns the registered map.
-- [ ] 4.3 `python/tests/test_cancellation.py`:
+- [x] 4.3 `python/tests/test_cancellation.py`:
       - `compute_dc_op(..., should_continue=)` that returns False
         after N calls raises `pulsim.Cancelled` with the right
         iteration count.
@@ -133,7 +133,7 @@
 
 - [x] 6.1 `openspec validate add-python-builder-ergonomics
       --strict` passes.
-- [ ] 6.2 Existing pytest suite green (no regressions in any
+- [x] 6.2 Existing pytest suite green (no regressions in any
       analysis entry-point's default behavior).
 - [ ] 6.3 PulsimGUI sanity check: pass
       `should_continue=lambda: not cancel_event.is_set()` to

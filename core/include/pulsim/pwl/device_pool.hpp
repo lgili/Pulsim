@@ -508,6 +508,26 @@ public:
         return num_inductors_;
     }
 
+    /// Cheap predicate set used by builder-level helpers
+    /// (`CircuitBuilder::initial_state`) to dispatch IC placement
+    /// without throwing. Each is O(1) hash lookup.
+    [[nodiscard]] bool is_inductor(Index branch_id) const noexcept {
+        return inductor_branch_var_id_.contains(branch_id);
+    }
+    [[nodiscard]] bool is_voltage_source(Index branch_id) const noexcept {
+        return source_branch_var_id_.contains(branch_id);
+    }
+    [[nodiscard]] bool is_capacitor(Index branch_id) const noexcept {
+        const auto it = entries_.find(branch_id);
+        if (it == entries_.end()) return false;
+        return std::visit(
+            []<typename T>(const T&) noexcept -> bool {
+                return std::is_same_v<std::decay_t<T>,
+                                       models::Capacitor::Params>;
+            },
+            it->second);
+    }
+
     /// Total count of dynamic devices (Capacitor + Inductor). Used
     /// by Layer 5's HistoryState to size itself.
     ///

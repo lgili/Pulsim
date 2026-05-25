@@ -197,7 +197,9 @@ def fit_foster_from_zth(t_samples,
 def compute_temperature(t: np.ndarray,
                             p_loss: np.ndarray,
                             stages,
-                            T_amb_C: float = 25.0) -> np.ndarray:
+                            T_amb_C: float = 25.0,
+                            *,
+                            should_continue=None) -> np.ndarray:
     """Convolve P(t) with Z_th(t) to get ΔT_j(t), then add T_amb.
 
     Uses the standard Foster decomposition: for each pole
@@ -205,6 +207,15 @@ def compute_temperature(t: np.ndarray,
     ``T_i[n+1] = α_i · T_i[n] + R_th · (1 − α_i) · P[n+1]`` with
     α_i = exp(−dt / τ_i), then T_j = Σ T_i. Assumes a uniform dt
     inferred from `t` — for non-uniform sampling, interpolate first.
+
+    Cancellation
+    ------------
+    When ``should_continue`` is non-``None``, it is invoked every
+    1000 samples (or every 1 % of the trace, whichever is more
+    frequent). Returning ``False`` raises :class:`pulsim.Cancelled`
+    with ``where='compute_temperature'`` so a GUI's cancel button
+    can preempt a long convolution within ~1 ms on a 100 kHz / 10 s
+    trace.
     """
     t = np.asarray(t, dtype=float)
     p = np.asarray(p_loss, dtype=float)
@@ -216,7 +227,14 @@ def compute_temperature(t: np.ndarray,
     # Per-pole IIR state.
     state = np.zeros(len(stages))
     T_out = np.zeros_like(p)
+    # Cancellation cadence: min(1000, 1% of trace).
+    check_interval = max(1, min(1000, len(p) // 100))
     for n in range(len(p)):
+        if should_continue is not None and n % check_interval == 0:
+            if not should_continue():
+                from . import Cancelled as _Cancelled
+                raise _Cancelled("compute_temperature",
+                                  point_index=n)
         delta = 0.0
         for i, s in enumerate(stages):
             alpha = math.exp(-dt / s.tau_s)

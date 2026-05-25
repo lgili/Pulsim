@@ -28,6 +28,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/analysis/mna_sweep.hpp"
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/blockchain/block_adapters.hpp"
@@ -70,6 +71,16 @@ void init_module(py::module_& m) {
     m.attr("__version__") = "1.3.0";
 
     using namespace pulsim;
+
+    // add-python-builder-ergonomics (v1.5): register the C++
+    // `Cancelled` exception with pybind11 so calls into the kernel
+    // that throw `analysis::Cancelled` surface as a typed
+    // `pulsim._CxxCancelled` Python exception. The user-facing
+    // `pulsim.Cancelled` (defined in
+    // `python/pulsim/_builder_ergonomics.py`) catches this and
+    // re-raises with its own attribute layout.
+    static py::object cancelled_exc = py::register_exception<
+        analysis::Cancelled>(m, "_CxxCancelled", PyExc_RuntimeError);
 
     // ---- SwitchStateMask -------------------------------------------------
     py::class_<topology::SwitchStateMask>(m, "SwitchStateMask",
@@ -303,14 +314,66 @@ void init_module(py::module_& m) {
               &builder::CircuitBuilder::add_capacitor,
               py::arg("name"), py::arg("from"),
               py::arg("to"), py::arg("C_farads"),
+              py::arg("c0") = std::nullopt,
               py::return_value_policy::reference,
-              "Add a linear capacitor. C in farads.")
+              "Add a linear capacitor. C in farads.\n"
+              "Optional `c0` records an initial voltage (V) on the\n"
+              "capacitor — consumed by `simulate(initial_state=None)`\n"
+              "to seed the cap's positive-terminal node.")
         .def("add_inductor",
               &builder::CircuitBuilder::add_inductor,
               py::arg("name"), py::arg("from"),
               py::arg("to"), py::arg("L_henries"),
+              py::arg("i0") = std::nullopt,
               py::return_value_policy::reference,
-              "Add a linear inductor. L in henries.")
+              "Add a linear inductor. L in henries.\n"
+              "Optional `i0` records an initial current (A) flowing\n"
+              "from the `from` terminal toward `to` — consumed by\n"
+              "`simulate(initial_state=None)`.")
+        .def("set_initial",
+              &builder::CircuitBuilder::set_initial,
+              py::arg("name"), py::arg("value"),
+              "Record or override an initial condition for a named\n"
+              "capacitor (volts) or inductor (amps). Raises\n"
+              "out_of_range if the name doesn't match a registered\n"
+              "branch.")
+        .def("set_alias",
+              [](builder::CircuitBuilder& self,
+                  std::string_view human_name,
+                  std::optional<std::string_view> node,
+                  std::optional<std::string_view> branch) {
+                  self.set_alias(human_name, node, branch);
+              },
+              py::arg("human_name"),
+              py::arg("node") = std::nullopt,
+              py::arg("branch") = std::nullopt,
+              "Register an alias `human_name` for an existing node or\n"
+              "branch — exactly one of `node` / `branch` must be set.\n"
+              "Raises ValueError on empty input, alias collision\n"
+              "with a canonical name, or both/neither kwargs.")
+        .def("aliases",
+              [](const builder::CircuitBuilder& self) {
+                  // Return as Python dict {human: (kind_str, target)}.
+                  py::dict out;
+                  for (const auto& [name, target] : self.aliases()) {
+                      const char* kind_str =
+                          target.kind == builder::CircuitBuilder::AliasKind::Node
+                              ? "node" : "branch";
+                      out[py::cast(name)] = py::make_tuple(
+                          kind_str, target.target);
+                  }
+                  return out;
+              },
+              "Return the registered `{human_name: (kind, target)}` map\n"
+              "for round-tripping through GUI file formats. `kind` is\n"
+              "the string \"node\" or \"branch\".")
+        .def("initial_state",
+              &builder::CircuitBuilder::initial_state,
+              "Synthesise the flat initial-state vector from recorded\n"
+              "ICs. Returns a numpy array of size num_nodes +\n"
+              "num_state_branches with each IC slot populated and zero\n"
+              "elsewhere. Consumed by `pulsim.simulate` when\n"
+              "`initial_state=None`.")
         .def("add_saturable_inductor",
               &builder::CircuitBuilder::add_saturable_inductor,
               py::arg("name"), py::arg("from"),
@@ -1166,7 +1229,8 @@ void init_module(py::module_& m) {
             Real pt_dt_max,
             Size pt_max_iters,
             Real pt_tol_res,
-            Size ss_n_steps) {
+            Size ss_n_steps,
+            analysis::ShouldContinueFn should_continue) {
             pwl::PseudoTransientConfig pt;
             pt.dt_init = pt_dt_init;
             pt.dt_max  = pt_dt_max;
@@ -1175,7 +1239,8 @@ void init_module(py::module_& m) {
             pwl::SourceSteppingConfig ss;
             ss.n_steps = ss_n_steps;
             return pwl::compute_dc_op_with_strategy(
-                graph, pool, mask, strategy, t_eval, pt, ss);
+                graph, pool, mask, strategy, t_eval, pt, ss,
+                std::move(should_continue));
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
         py::arg("strategy") = pwl::DCStrategy::Auto,
@@ -1185,9 +1250,13 @@ void init_module(py::module_& m) {
         py::arg("pt_max_iters") = Size{500},
         py::arg("pt_tol_res") = Real{1e-7},
         py::arg("ss_n_steps") = Size{10},
+        py::arg("should_continue") = analysis::ShouldContinueFn{},
         "Compute the DC operating-point state vector with strategy "
         "selection. Returns a numpy array of length "
-        "pool.state_size(graph).");
+        "pool.state_size(graph).\n"
+        "Optional `should_continue` is invoked between fallback\n"
+        "strategies in Auto mode; raises pulsim.Cancelled when it\n"
+        "returns False.");
 
     // ---- Naive DC entry point (matches the Python wrapper's `naive`) ----
     m.def("compute_dc_op",
@@ -1220,17 +1289,22 @@ void init_module(py::module_& m) {
             const topology::SwitchStateMask& mask,
             const std::vector<Real>& freqs,
             Size input_state_idx,
-            Size output_node_idx) {
+            Size output_node_idx,
+            analysis::ShouldContinueFn should_continue) {
             return analysis::run_mna_sweep(
                 graph, pool, mask, freqs,
-                input_state_idx, output_node_idx);
+                input_state_idx, output_node_idx,
+                std::move(should_continue));
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
         py::arg("freqs"), py::arg("input_state_idx"),
         py::arg("output_node_idx"),
+        py::arg("should_continue") = analysis::ShouldContinueFn{},
         "Direct kernel AC sweep via complex sparse LU at each "
         "frequency. Returns a MnaSweepKernelResult with parallel "
-        "freqs/H arrays.");
+        "freqs/H arrays.\n"
+        "Optional `should_continue` is invoked between frequency\n"
+        "points; raises pulsim.Cancelled when it returns False.");
 
     // ---- Control blocks (Phase A.1 in kernel) ----------------------------
     //
