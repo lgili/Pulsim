@@ -30,7 +30,7 @@ covering the multi-bit / parametric / AC-sweep contributions.
 | 6.1 | [§6.2](06-pulsim-sparse-lu.md) | `PulsimSparseLuSolver` lifecycle state diagram | §VI.A in-house impl | mermaid (no PDF) |
 | 6.2 | [§6.3](06-pulsim-sparse-lu.md) | Dynamic pattern discovery vs symbolic prediction | §VI.B implementation detail | ✅ rendered |
 | 6.3 | [§6.4](06-pulsim-sparse-lu.md) | Pivot-row swap visualisation | §VI.C partial pivoting | ✅ rendered |
-| 7.1 | [§7.3](07-rank1-partial-refactor.md#73-the-path-walk-visualised) | Etree path walk for a changed column | **§VII (TPEL contribution)** | ✅ rendered |
+| 7.1 | [§7.3](07-rank1-partial-refactor.md#73-the-path-walk-visualised) | Etree path walk for a changed column | **§VII (methods-paper contribution)** | ✅ rendered |
 | 7.2 | [§7.4](07-rank1-partial-refactor.md#74-the-pivot-fault-fallback) | Pivot fault recovery flow | **§VII.B fault recovery** | mermaid (no PDF) |
 | 8.1 | [§8.3](08-benchmarks.md#83-speedup-vs-n_mathrmstate) | Captured speedups B/A, C/B, C/A vs $n_{\mathrm{state}}$ | **§VIII.A captured speedup** | ✅ rendered |
 | 8.2 | [§8.4](08-benchmarks.md#84-the-decomposition-in-bar-form) | Multiplicative decomposition stacked bars | **§VIII.A decomposition** | ✅ rendered |
@@ -71,7 +71,7 @@ Outputs land in `docs/how-pulsim-works/_figures/output/` as
 - **PNG** is for the docs site (mkdocs serves them; KaTeX
   renders inline)
 - **PDF** is for paper inclusion via `\includegraphics{...}` in
-  the TPEL paper LaTeX
+  the methods paper LaTeX
 
 Mermaid diagrams render natively in the docs site. For paper
 inclusion, export to PDF via the Mermaid CLI:
@@ -120,14 +120,17 @@ Two figures pull from real captured data:
 
 | Figure | Data source |
 |---|---|
-| 8.1, 8.2, 8.3 | `artigos/02_tpel_methods/benchmarks/results/rank1_microbench.csv` |
+| 8.1, 8.2, 8.3 | `rank1_microbench.csv` produced by `./build/core/pulsim_benchmarks "[rank1][microbench]"` |
+| 8.4 | `multi_bit_microbench.csv` produced by `./build/core/pulsim_benchmarks "[multi_bit][microbench]"` |
+| 8.5 | `parametric_microbench.csv` produced by `./build/core/pulsim_benchmarks "[parametric][microbench]"` |
+| 8.6 | `ac_sweep_microbench.csv` produced by `./build/core/pulsim_benchmarks "[ac_sweep][microbench]"` |
 
 Every other figure is computed from closed-form math, synthetic
 fixtures (the buck-like 8×8 from `core/tests/layer0/`), or
 representative-data tables embedded in the script. The split
 is intentional: chapters 1-7 illustrate concepts that don't
 need a kernel build to demonstrate; chapter 8 measures the
-captured numbers that the TPEL paper's headline claim rests on.
+captured numbers that the forthcoming methods paper's headline claim rests on.
 
 When the microbench is recaptured (e.g. on different hardware,
 a new compiler, or under future-Pulsim improvements), the CSV
@@ -138,9 +141,9 @@ identifier metadata in the CSV header captures the provenance.
 
 ## Cross-paper reuse
 
-The eventual TPEL paper draft (under
-`artigos/02_tpel_methods/`) will pull figures directly from
-this directory:
+The forthcoming methods paper draft (kept outside this
+repository until publication) pulls figures directly from this
+directory:
 
 ```latex
 % In the paper's source.tex:
@@ -162,7 +165,7 @@ trace each figure back to its generator.
 ## What's NOT here (yet)
 
 Some paper-bound figures are not yet in this index — they'll
-land as the TPEL draft progresses:
+land as the methods paper draft progresses:
 
 - **Per-converter benchmark** on the 10 reference projects
   (deferred to `add-pwl-rank1-runtime-integration` proposal).
@@ -176,19 +179,21 @@ land as the TPEL draft progresses:
   implementation of `add-pulsim-complex-sparse-lu` (the next
   major architectural change after v1.3.0).
 
-These show up as "TBD" in the TPEL paper draft outline and
+These show up as "TBD" in a forthcoming methods paper draft outline and
 will be added to this index once captured.
 
 ---
 
 ## Cross-references
 
-- The **TPEL paper draft** under
-  `artigos/02_tpel_methods/`
+- The **forthcoming methods paper** kept outside this
+  repository until publication (final venue + submission
+  date TBD)
 - The **OpenSpec proposals** under `openspec/changes/archive/`
   for `add-pwl-rank1-update`, `add-pwl-rank1-partial-refactor`,
-  `replace-klu-with-pulsim-sparse-lu`
-- **`RANK1_RESULTS.md`** at the canonical writeup of the
-  microbench
+  `replace-klu-with-pulsim-sparse-lu`,
+  `add-pulsim-complex-sparse-lu`, `add-generalised-path-refactor`
+- The **captured CSVs** above, regenerable via
+  `./build/core/pulsim_benchmarks` with the appropriate Catch2 tag
 - **[Chapter 9 — Architecture Walkthrough](09-architecture-walkthrough.md)**
   for where each algorithm lives in the layer stack

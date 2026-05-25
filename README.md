@@ -74,8 +74,9 @@ matrix container.
 ## Performance
 
 Numbers captured 2026-05-24 on macOS / Apple Silicon (-O3 -DNDEBUG).
-Full writeups in [`artigos/02_tpel_methods/benchmarks/`](artigos/02_tpel_methods/benchmarks/);
-reproducible via `cmake --build build --target pulsim_benchmarks`.
+Reproducible end-to-end via `cmake --build build --target pulsim_benchmarks`
+followed by `./build/core/pulsim_benchmarks "[rank1][microbench]"` (and
+the analogous tags `[multi_bit]`, `[parametric]`, `[ac_sweep]`).
 
 ### 1) Single-bit rank-1 (v1.3.0, N-switch chain)
 
@@ -126,8 +127,8 @@ Hit rate decays gracefully: ~45 % path-union at δ=2 → ~10 % at δ=4
 | 128 | 46.13 | 91.52 | 1.98× (Eigen faster) | 4×10⁻²¹ |
 
 Both solvers numerically interchangeable. v1.4.0 contribution is
-**no third-party LU on the production path**; Eigen kept explicitly
-as the IEEE TPEL §VI.B paper-comparison baseline.
+**no third-party LU on the production path**; `Backend::Eigen` is
+kept explicitly available as a paper-comparison baseline.
 
 ---
 
@@ -275,7 +276,7 @@ sparse-LU backend. Pulsim deliberately doesn't:
 | ❌ Not used | Why |
 |---|---|
 | **SuiteSparse / KLU** | The v1.3.0 in-house LU replaces KLU completely. No SuiteSparse linkage, no licensing complexity. |
-| **Eigen::SparseLU<complex>** | Replaced in v1.4.0 by the in-house complex specialisation. `Backend::Eigen` is retained explicitly as the IEEE TPEL paper-comparison baseline. |
+| **Eigen::SparseLU<complex>** | Replaced in v1.4.0 by the in-house complex specialisation. `Backend::Eigen` is retained explicitly as a paper-comparison baseline. |
 | **dpsim / dwf / PSCAD vendored code** | Pulsim's algorithms are entirely first-party; the methods paper claims ours, not someone else's. |
 | **Runtime Python in kernel** | The C++ kernel has zero Python dependency. `pybind11` only crosses the boundary at the API surface. |
 | **Heavy installer / multi-step build** | `pip install pulsim` or `cmake --build`; no make-then-make-install dance. |

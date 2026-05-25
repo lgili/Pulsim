@@ -39,7 +39,7 @@ The project owner rejected this on 2026-05-24:
 The reasoning, articulated in the OpenSpec proposal
 `replace-klu-with-pulsim-sparse-lu`:
 
-1. **The TPEL paper's algorithmic novelty must be ours.**
+1. **The methods paper's algorithmic novelty must be ours.**
    Path-based partial refactorisation (chapter 7) is the
    contribution. Vendoring a third-party LU implementation
    would have made the contribution a "patch to KLU" rather
@@ -60,7 +60,7 @@ The reasoning, articulated in the OpenSpec proposal
    distributed as a compiled library — most users never read it.
 
 The trade-off was 4-6 weeks of focused work (chapters 6-7's
-material) + the TPEL submission slipped from October 2026 to
+material) + the methods paper submission slipped from October 2026 to
 Q1 2027.
 
 ---

@@ -450,4 +450,4 @@ For Python users:
   log of "what changed and why" in the Pulsim kernel.
 - **In this doc set** — [Chapter 10](10-paper-figures-index.md)
   is the figure index that maps every diagram in this section
-  to the IEEE TPEL paper section that uses it.
+  to the methods paper section that uses it.

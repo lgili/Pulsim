@@ -1,6 +1,6 @@
 # 7. Path-Based Partial Refactorisation
 
-**The algorithmic contribution that backs the IEEE TPEL methods
+**The algorithmic contribution that backs the forthcoming methods
 paper.** Chapter 6 left us with a full sparse LU. This chapter
 explains how — when the matrix changes by *one column* between
 consecutive solves — we update $L$ and $U$ in
@@ -342,7 +342,7 @@ The chapter 4 V8 unit test
 asserts `rank1_hits >= 8` out of 15 single-bit flips on the
 4-bit Gray-code sweep, proving the fast path engages on the
 majority of single-bit transitions and that the
-"headline TPEL claim" is non-vacuous.
+"headline methods-paper claim" is non-vacuous.
 
 ---
 
@@ -450,12 +450,11 @@ history in power-system analysis:
   `add-pwl-rank1-partial-refactor` OpenSpec proposal documents
   the requirements + scenarios.
 
-The IEEE TPEL methods paper draft frames this lineage with
-explicit credit to Chan/Brandwajn/Tinney and Dinkelbach; the
-Pulsim contribution is positioned as "an open-source
-implementation + an integration with the PWL state-space cache
-that yields 2.7-2.9× wall-clock speedup on the captured
-microbench".
+The forthcoming methods paper frames this lineage with explicit
+credit to Chan/Brandwajn/Tinney and Dinkelbach; the Pulsim
+contribution is positioned as "an open-source implementation +
+an integration with the PWL state-space cache that yields
+2.7-2.9× wall-clock speedup on the captured microbench".
 
 ---
 
@@ -476,7 +475,7 @@ microbench".
 - Captured speedup on the chapter 8 microbench: **2.7-2.9× at
   $n_{\mathrm{state}} \ge 14$**, with zero fallbacks across
   1999 single-bit flips per $n$.
-- The contribution backs the IEEE TPEL methods paper (target
+- The contribution backs the forthcoming methods paper (target
   submission Q1 2027).
 
 ## 7.11 Further reading
