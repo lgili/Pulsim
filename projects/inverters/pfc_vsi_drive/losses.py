@@ -227,121 +227,145 @@ class LossBreakdown:
     T_J_IC500: float = 0.0
 
 
-def compute_losses(sim_result, *, settle_fraction: float = 0.5,
+def compute_losses(sim_result, *, settle_fraction: float = 0.3,
+                   end_fraction: float = 0.7,
                    ) -> LossBreakdown:
-    """Build a ``LossBreakdown`` from a ``DriveSimResult``.
+    """Build a ``LossBreakdown`` from a ``DriveSimResult`` using
+    *direct waveform integration* of the simulated branch currents.
 
-    ``settle_fraction`` discards the first fraction of each waveform
-    (default 50 %) to drop the start-up transient before computing
-    RMS/AVG/PK statistics.
+    Each device's loss is computed as a time-domain integral over the
+    settled window ``[settle_fraction, end_fraction]`` of the sim:
+
+      * Resistive / DCR / ESR / shunt: ``P = mean(I(t)² · R)``
+      * Diode conduction: ``P = mean(I(t) · V_F + I(t)² · R_on)``
+        evaluated only where ``I(t) > 0`` so the off-state shunt
+        leakage doesn't pollute the integral.
+      * MOSFET conduction: ``P = mean(I_D(t)² · R_DS_on)`` over the
+        ON intervals only.
+      * Switching: analytical (energy-per-event × f_sw) — Pulsim's
+        instantaneous-switching events have no associated loss in the
+        sim itself.
+
+    This sidesteps the ``CCM / DCM`` analytical formulas which assume
+    a constant-duty boost in continuous conduction — neither of which
+    holds for the open-loop PFC operating point.
     """
     sp = sim_result.sim_params
     op = sp.op
     fe = sim_result.frontend
     inv = sim_result.inverter
 
-    # ---- Front-end currents -----------------------------------------
-    # The boost-leg shunt sits between ``n_shunt`` and ``gnd`` with
-    # resistance ``R_shunt_eq``. Reading the voltage across it gives
-    # I_shunt = I_T001 + I_T002 (= the boost current envelope).
-    # Index into FrontendResult.states.
-    # We need node-ID mapping from the builder, but we only have the
-    # states matrix. The smoke test shows ``v_link`` is at the bus.
-    # For loss extraction we use the *envelope* approach: each
-    # component's RMS is back-derived from the per-stage averaged
-    # power balance + the BoM resistances.
-    #
-    # Estimates here are deliberately conservative: where the sim
-    # doesn't expose the branch current directly, we use the algebraic
-    # relationship between bus voltage, load, and duty cycle.
+    n_fe_lo = int(len(fe.times) * settle_fraction)
+    n_fe_hi = int(len(fe.times) * end_fraction)
+    n_in_lo = int(len(inv.times) * settle_fraction)
+    n_in_hi = int(len(inv.times) * end_fraction)
 
-    n_fe = int(len(fe.times) * settle_fraction)
-    n_inv = int(len(inv.times) * settle_fraction)
+    # --- Slice all waveforms into the settled window -----------------
+    v_ac   = fe.v_ac[n_fe_lo:n_fe_hi]
+    v_link = fe.v_link[n_fe_lo:n_fe_hi]
+    i_in   = fe.i_in[n_fe_lo:n_fe_hi]
+    i_L002 = fe.i_L002[n_fe_lo:n_fe_hi]
+    i_T001 = fe.i_T001[n_fe_lo:n_fe_hi]
+    i_T002 = fe.i_T002[n_fe_lo:n_fe_hi]
+    i_D002 = fe.i_D002[n_fe_lo:n_fe_hi]
+    i_Cbus = fe.i_Cbus[n_fe_lo:n_fe_hi]
+    v_shunt_inv = inv.v_n_shunt_inv[n_in_lo:n_in_hi]
 
-    v_link_avg = _avg(fe.v_link[n_fe:])
-    v_link_rms = _rms(fe.v_link[n_fe:])
-    v_in_rms = _rms(fe.v_ac[n_fe:])
+    v_link_avg = _avg(v_link)
+    v_in_rms   = _rms(v_ac)
+    # i_in (the simulated line current) is intentionally NOT used for
+    # loss extraction here — it's contaminated by the open-loop bridge
+    # DCM oscillation. The line-current scale is back-derived from
+    # power balance instead (``I_in_rms_est`` below).
+    _ = i_in  # silence "unused" hint
 
-    # Average input power = V_link² / R_eq (constant-power load model)
+    # --- Line-current reference (from power balance) -----------------
+    # The simulated i_in / i_L001 is contaminated by the open-loop
+    # bridge-DCM oscillation. We back out the *expected* line current
+    # from the power being delivered to the bus, which is a much more
+    # reliable basis for the rectifier-side loss model. PSIM does the
+    # same thing under the hood — its line current is a steady-state
+    # consequence of the closed-loop controller, not a free state.
     R_eq = float(sp.V_link_target ** 2 / max(op.P_in_target, 1.0))
     P_link_load = float(v_link_avg ** 2 / R_eq)
-
-    # Input AC current — back from P_in / V_in / PF (assume PF=0.95 for
-    # the open-loop case; PSIM reports PF≈0.97-0.98 at high line).
     PF_assumed = 0.95
-    I_in_rms = float(P_link_load / max(v_in_rms * PF_assumed, 1.0))
+    I_in_rms_est = float(P_link_load / max(v_in_rms * PF_assumed, 1.0))
+    # Sinusoid → half-wave avg = (I_pk·2/π), pk = √2·rms
+    I_in_pk = I_in_rms_est * np.sqrt(2.0)
 
-    # ---- Rectifier (D001) ----
-    # Each bridge diode carries half the total input cycle, so its
-    # I_avg ≈ I_in_rms·√2/π and I_rms ≈ I_in_rms/√2 (sinusoidal
-    # half-wave). Total bridge has 2 forward-conducting diodes at any
-    # instant — losses scale ×2.
-    I_D001_avg = I_in_rms * np.sqrt(2.0) / np.pi
-    I_D001_rms = I_in_rms / np.sqrt(2.0)
-    P_D001_single = diode_conduction(I_D001_avg, I_D001_rms,
-                                      V_F=float(D001.V_F),
-                                      R_on=float(D001.R_on))
-    # Two diodes always conduct in any given half-cycle
-    P_cond_D001 = 2.0 * P_D001_single
+    # ---- Bridge rectifier (D001) — analytical from power balance ----
+    # 2 diodes always conduct in a half-wave full-bridge. Each diode
+    # sees a half-cycle of |I_in(t)| = I_pk·|sin|, so:
+    #     I_avg_per_diode = I_pk / π
+    #     I_rms_per_diode = I_pk / 2
+    I_D001_avg = I_in_pk / np.pi
+    I_D001_rms = I_in_pk / 2.0
+    P_cond_D001 = 2.0 * (float(D001.V_F) * I_D001_avg
+                          + float(D001.R_on) * I_D001_rms ** 2)
 
-    # ---- Boost MOSFETs (T001 / T002) ----
-    # Boost RMS current per device ≈ I_L002_rms · √D / √2 (CCM, sinusoid)
-    I_L002_rms = float(P_link_load / max(v_in_rms, 1.0)) * np.sqrt(2.0)
-    I_T_rms_each = I_L002_rms * np.sqrt(float(sp.duty_pfc)) / np.sqrt(2.0)
-    I_T_pk_each  = I_L002_rms * np.sqrt(2.0)
+    # ---- Boost MOSFETs (T001 / T002) --------------------------------
+    P_cond_T1 = float(T001.R_DS_on) * float(np.mean(i_T001 ** 2))
+    P_cond_T2 = float(T002.R_DS_on) * float(np.mean(i_T002 ** 2))
 
-    P_cond_T1 = mosfet_conduction(I_T_rms_each, float(T001.R_DS_on))
-    P_cond_T2 = mosfet_conduction(I_T_rms_each, float(T002.R_DS_on))
-    # Switching loss — datasheet E_on/E_off measured at 12A/400V typ.
+    # Switching loss — energy per event × f_sw, scaled to actual I_pk.
+    i_T_pk_each = float(np.max(np.abs(i_T001))) if len(i_T001) else 0.0
     P_sw_T1 = mosfet_switching(
-        I_T_pk_each, sp.V_link_target, sp.f_sw_pfc,
+        i_T_pk_each, v_link_avg, sp.f_sw_pfc,
         E_on=float(T001.E_on or 0.0), E_off=float(T001.E_off or 0.0),
         I_ref_datasheet=12.0, V_ref_datasheet=400.0,
     )
     P_sw_T2 = mosfet_switching(
-        I_T_pk_each, sp.V_link_target, sp.f_sw_pfc,
+        i_T_pk_each, v_link_avg, sp.f_sw_pfc,
         E_on=float(T002.E_on or 0.0), E_off=float(T002.E_off or 0.0),
         I_ref_datasheet=12.0, V_ref_datasheet=400.0,
     )
 
-    # ---- Boost SiC diode (D002) ----
-    # D002 carries the boost output current during the (1-D) interval.
-    I_D002_avg = I_L002_rms * (1.0 - float(sp.duty_pfc)) / np.sqrt(2.0)
-    I_D002_rms = I_L002_rms * np.sqrt(1.0 - float(sp.duty_pfc)) / np.sqrt(2.0)
-    P_cond_D002 = diode_conduction(I_D002_avg, I_D002_rms,
-                                    V_F=float(D002.V_F), R_on=float(D002.R_on))
-    # SiC Schottky → negligible Qrr — use ≈ 50 nC equivalent
-    P_sw_D002 = diode_switching(I_T_pk_each, sp.V_link_target, sp.f_sw_pfc,
+    # ---- Boost SiC diode (D002) -------------------------------------
+    i_D002_pos = np.where(i_D002 > 0.01, i_D002, 0.0)
+    P_cond_D002 = float(D002.V_F) * float(np.mean(i_D002_pos)) \
+                  + float(D002.R_on) * float(np.mean(i_D002_pos ** 2))
+    # SiC Schottky → ≈ 0 reverse recovery; use a 50 nC equivalent
+    # to keep the switching contribution non-zero for thermal margin.
+    P_sw_D002 = diode_switching(i_T_pk_each, v_link_avg, sp.f_sw_pfc,
                                  Q_rr=50e-9)
 
-    # ---- Magnetics ----
-    P_ohm_L002 = inductor_dcr(I_L002_rms, float(L002.DCR))
+    # ---- Magnetics --------------------------------------------------
+    # L002 sits in the boost loop where the sim is clean → integrate
+    # directly. L001 sits on the line where i_in is noisy → use the
+    # analytical I_in_rms_est for a clean DCR loss.
+    P_ohm_L002 = float(L002.DCR) * float(np.mean(i_L002 ** 2))
     P_mag_L002 = float(L002.P_core_nom)
-    P_ohm_L001 = inductor_dcr(I_in_rms, float(L001.DCR))
+    P_ohm_L001 = float(L001.DCR) * I_in_rms_est ** 2
 
-    # ---- DC bus capacitors ----
-    # Bus ripple current ≈ I_L002_rms · √(D - D²)  (rectangular pulse model)
-    I_Cbus_rms = I_L002_rms * np.sqrt(max(float(sp.duty_pfc) -
-                                          float(sp.duty_pfc) ** 2, 0.0))
-    I_each = I_Cbus_rms / np.sqrt(2.0)  # two caps in parallel
-    P_esr_C009 = capacitor_esr(I_each, float(C009.esr_at_5khz))
-    P_esr_C010 = capacitor_esr(I_each, float(C010.esr_at_5khz))
+    # ---- DC bus capacitors (C009 + C010 in parallel) ----------------
+    # Each carries half the i_Cbus ripple current.
+    i_Cbus_each = i_Cbus / 2.0
+    P_esr_C009 = float(C009.esr_at_5khz) * float(np.mean(i_Cbus_each ** 2))
+    P_esr_C010 = float(C010.esr_at_5khz) * float(np.mean(i_Cbus_each ** 2))
 
-    # ---- Boost shunts ----
-    I_shunt_each = I_T_rms_each * np.sqrt(2.0) / 3.0  # split across 3 R in parallel ≈ I_T/3
-    P_R002 = resistor_ohmic(I_shunt_each, float(R002.R))
-    P_R003 = resistor_ohmic(I_shunt_each, float(R003.R))
-    P_R036 = resistor_ohmic(I_shunt_each, float(R036.R))
+    # ---- Boost shunts (R002/R003/R036 in parallel) ------------------
+    # Total source current of T001‖T002 splits across the 3 shunts.
+    i_shunt_total = i_T001 + i_T002
+    i_shunt_each = i_shunt_total / 3.0
+    P_R002 = float(R002.R) * float(np.mean(i_shunt_each ** 2))
+    P_R003 = float(R003.R) * float(np.mean(i_shunt_each ** 2))
+    P_R036 = float(R036.R) * float(np.mean(i_shunt_each ** 2))
 
-    # ---- Inverter shunt (R508) — from sim ----
-    v_shunt_inv = inv.v_n_shunt_inv[n_inv:]
-    I_R508_rms = float(_rms(v_shunt_inv) / float(R508.R))
-    P_R508 = resistor_ohmic(I_R508_rms, float(R508.R))
+    # ---- Inverter shunt (R508) — direct from simulated v_n_shunt_inv ----
+    i_R508 = v_shunt_inv / float(R508.R)
+    P_R508 = float(R508.R) * float(np.mean(i_R508 ** 2))
 
-    # ---- IPM (IC500) total ----
-    # IGBT conduction: each IGBT carries I_phase·√3/π avg, I_phase/2 rms
-    I_phase_rms = float(P_link_load / (3.0 * 0.85 * max(sp.V_link_target, 1.0)))
-    I_phase_pk  = I_phase_rms * np.sqrt(2.0)
+    # ---- IPM (IC500) total ------------------------------------------
+    # The 6 IGBTs share the load current symmetrically. We back the
+    # per-phase RMS out of the bus-side power balance instead of from
+    # ``i_R508`` directly — ``i_R508`` is dominated by the PWM-cycle
+    # ripple, whose peak overstates the per-IGBT envelope by a large
+    # factor.
+    I_dc_inverter = P_link_load / max(v_link_avg, 1.0)
+    # Balanced 3φ at PF ≈ 1: I_phase_rms ≈ I_dc / √3 (line-current
+    # convention; see Mohan §11.3).
+    I_phase_rms = I_dc_inverter / np.sqrt(3.0)
+    I_phase_pk = I_phase_rms * np.sqrt(2.0)
     I_IGBT_avg = I_phase_pk / np.pi
     I_IGBT_rms = I_phase_rms / np.sqrt(2.0)
     P_cond_IGBT = 6.0 * igbt_conduction(I_IGBT_avg, I_IGBT_rms,
@@ -352,29 +376,46 @@ def compute_losses(sim_result, *, settle_fraction: float = 0.5,
         E_on=float(IC500.E_on or 0.0), E_off=float(IC500.E_off or 0.0),
         I_ref_datasheet=10.0, V_ref_datasheet=300.0,
     )
-    # Free-wheel diode losses (approx 30 % of IGBT loss for SPWM at PF<1)
+    # Free-wheel diodes (≈ 30 % of IGBT loss for SPWM at PF<1)
     P_FWD = 0.3 * (P_cond_IGBT + P_sw_IGBT)
-    P_IC500_total = P_cond_IGBT + P_sw_IGBT + P_FWD
+    P_IC500_total = float(P_cond_IGBT + P_sw_IGBT + P_FWD)
 
-    # ---- Totals & efficiency ----
+    # ---- Totals & efficiency ----------------------------------------
+    # Coerce every accumulator to a plain Python float so the
+    # downstream dataclass + comparison code never sees numpy
+    # scalar types (avoids type-checker noise + JSON-serialisation
+    # weirdness).
+    P_cond_D001 = float(P_cond_D001)
+    P_cond_T1   = float(P_cond_T1)
+    P_cond_T2   = float(P_cond_T2)
+    P_cond_D002 = float(P_cond_D002)
+    P_ohm_L002  = float(P_ohm_L002)
+    P_ohm_L001  = float(P_ohm_L001)
+    P_esr_C009  = float(P_esr_C009)
+    P_esr_C010  = float(P_esr_C010)
+    P_R002      = float(P_R002)
+    P_R003      = float(P_R003)
+    P_R036      = float(P_R036)
+    P_R508      = float(P_R508)
+
     P_total_semi = (P_cond_D001 + P_cond_T1 + P_sw_T1 + P_cond_T2 + P_sw_T2
                     + P_cond_D002 + P_sw_D002 + P_IC500_total)
     P_total_ohm = (P_ohm_L002 + P_mag_L002 + P_ohm_L001
                    + P_esr_C009 + P_esr_C010
                    + P_R002 + P_R003 + P_R036 + P_R508)
-    P_overhead = 0.5714 + 0.2857 + 0.2857 + 1.0  # relays + SMPS
-    P_total = P_total_semi + P_total_ohm + P_overhead
-    eta_inverter = (op.P_in_target - P_total) / max(op.P_in_target, 1.0)
+    P_overhead = 0.5714 + 0.2857 + 0.2857 + 1.0  # relays + SMPS (PSIM static)
+    P_total = float(P_total_semi + P_total_ohm + P_overhead)
+    eta_inverter = float((op.P_in_target - P_total) / max(op.P_in_target, 1.0))
 
-    # ---- Thermal (junction temperature) ----
+    # ---- Thermal (junction temperature) -----------------------------
     T_J_D001 = junction_temperature(THERMAL["D001"].R_th_ja,
-                                      P_cond_D001, op.T_amb)
+                                      float(P_cond_D001), op.T_amb)
     T_J_T001 = junction_temperature(THERMAL["T001"].R_th_ja,
-                                      P_cond_T1 + P_sw_T1, op.T_amb)
+                                      float(P_cond_T1 + P_sw_T1), op.T_amb)
     T_J_D002 = junction_temperature(THERMAL["D002"].R_th_ja,
-                                      P_cond_D002 + P_sw_D002, op.T_amb)
+                                      float(P_cond_D002 + P_sw_D002), op.T_amb)
     T_J_IC500 = junction_temperature(THERMAL["IC500"].R_th_ja,
-                                       P_IC500_total / 6.0, op.T_amb)
+                                       float(P_IC500_total / 6.0), op.T_amb)
 
     return LossBreakdown(
         P_cond_D001=P_cond_D001,

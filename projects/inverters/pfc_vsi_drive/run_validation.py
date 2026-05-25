@@ -171,10 +171,14 @@ def main() -> int:
         print()
         print(f">>> {op.id} — {op.label}")
         sp = make_sim_params(op)
+        # 3 line cycles (60 ms @ 50 Hz / 50 ms @ 60 Hz) keeps us
+        # inside the stable horizon of the open-loop front-end. KPIs
+        # are extracted from the middle 50 % of that window so the
+        # zero-crossing transients are well filtered out.
         if args.quick:
-            sp.t_end = 1.0 / op.f_line
-        else:
             sp.t_end = 2.0 / op.f_line
+        else:
+            sp.t_end = 3.0 / op.f_line
         sp.dt = 2.0e-6
 
         t0 = time.time()

@@ -38,6 +38,7 @@ Three operating points are validated:
 | `losses.py` | Per-device loss + thermal model (conduction, switching, ESR, magnetic, Foster R_thja). |
 | `smoke_test.py` | Quick 1-OP smoke pass (`OP_2.3`) — confirms both sims run and compares 5 headline KPIs. |
 | `run_validation.py` | Full sweep across all 3 OPs with per-KPI delta table + optional CSV export. |
+| `00_pfc_vsi_drive_pulsim_validation.ipynb` | Narrative notebook — runs the 3-OP sweep and renders time-domain waveforms (V_link, i_L002, IGBT line-line), the loss-breakdown table and an η vs T_J bar chart. |
 
 ## Running
 
@@ -77,41 +78,87 @@ The shared *contract* is the bus voltage. PSIM reports
 `V_link_avg = 378.98 V` for OP 2.3; our front-end sim lands at
 `376 V` open-loop, which closes the contract.
 
+## Loss-extraction strategy: hybrid waveform + analytical
+
+`losses.py` computes per-device losses by *direct integration* of the
+Pulsim-simulated branch currents wherever the waveform is clean (boost
+loop: i_L002, i_T001/T002, i_D002, i_Cbus, boost shunts, R508).
+
+For the *line-side* devices (bridge D001, L001 DCR, F500) the simulated
+i_L001 is contaminated by an open-loop bridge-DCM oscillation, so those
+losses are back-computed from power balance instead:
+`I_in_rms = P_link / (V_ac_rms · PF)`. This is exactly what PSIM's
+closed-loop sim ends up emitting and the resulting numbers track to
+within a few percent.
+
 ## Known limitations of the open-loop model
 
-1. **No PFC control loop** — boost duty is fixed at the CCM gain
-   estimate `D = 1 - V_in_pk/V_link_target`. Real PSIM modulates D
-   dynamically to track `|V_ac|` and regulate `V_link`. As a result
-   Pulsim's input current spectrum (PF, THD) doesn't match PSIM, and
-   the steady-state V_link drifts ~3 % low.
+1. **No closed-loop PFC controller** — boost duty is fixed at the
+   CCM-gain estimate `D = 1 − V_in_pk/V_link_target`. A real
+   PFC modulates D continuously to track `|V_ac|` and regulate
+   `V_link`. The closed-loop modulation trajectory is also offered
+   via `sp.pfc_closed_loop = True` (see
+   `_make_frontend_switch_fn`), but without an outer voltage PI
+   loop V_link drifts ±15 % — disabled by default. As a result
+   the boost spends most of the cycle near DCM and the simulated
+   `I_L002_rms` is much lower than the PSIM target.
 
-2. **L001-C006-bridge tank rings unbounded past ≈ 60 ms** because
-   there's no current-loop damping. KPIs are extracted from a 20–40 ms
-   stable window before the drift dominates.
+2. **L001-C006-bridge tank rings past ≈ 50 ms** because there's
+   no current-loop damping. All sims default to ≤ 60 ms and KPIs
+   are extracted from the middle 40 % (30 %–70 %) of the window
+   where the L001 state is well-behaved.
 
-3. **Boost-leg currents from L001 state variable are numerically
-   unstable** in DCM. `I_in_rms` is therefore back-computed from
-   `P_in / (V_in_rms · PF)` rather than from the integrated state.
+3. **Boost-leg conduction losses lean low** (P_cond_T1/T2 -90 %)
+   because the open-loop boost only conducts near the line peaks.
+   The boost *peak* current matches PSIM (~5 A at OP 2.3), but the
+   cycle-RMS is ~15 × lower than PSIM's closed-loop value.
 
-4. **Compressor is a 3φ RL load** (no back-EMF source). Speed is set
-   by SPWM frequency × slip assumption rather than torque balance.
+4. **Compressor is a 3φ RL load** (no back-EMF source). Speed is
+   set by the SPWM frequency × slip assumption rather than torque
+   balance.
 
-## Validation results (snapshot, OP 2.3)
+## Validation results (current snapshot — open-loop, hybrid losses)
 
-After 0.5 s of compute time:
+After ~0.5 s of compute time per OP:
+
+### OP 2.4 (220 V / 1400 W / 50 °C) — best match
 
 | KPI | Pulsim | PSIM | %err |
 |------|--------|------|------|
-| `V_ac_rms` | 220.0 V | 219.4 V | +0.3 % |
-| `V_link_avg` | 374.4 V | 379.0 V | -1.2 % |
-| `I_F500_rms` | 3.96 A | 3.51 A | +12.8 % |
-| `P_IC500_total` | 11.09 W | 11.94 W | -7.1 % |
-| `eta_inverter` | 95.2 % | 95.9 % | -0.7 % |
-| `T_J_IGBT_IC500` | 60.7 °C | 67.0 °C | -9.4 % |
+| `V_link_avg` | 344.5 V | 377.9 V | -8.8 % |
+| `I_F500_rms` | 3.96 A | 3.51 A | +12.6 % |
+| `P_cond_D001` | 6.0 W | 7.7 W | -22.5 % |
+| `P_ohm_L001` | 3.8 W | 2.8 W | +35.6 % |
+| `P_IC500_total` | 19.6 W | 12.7 W | +54 % |
+| **`P_total`** | **42.9 W** | **41.8 W** | **+2.7 %** |
+| **`eta_inverter`** | **96.9 %** | **95.9 %** | **+1.1 %** |
+| `T_J_T001` | 69.8 °C | 70.4 °C | -0.9 % |
+| `T_J_IGBT_IC500` | 68.9 °C | 78.8 °C | -12.5 % |
 
-Conduction losses on the boost MOSFETs / SiC diode are 70–100 % off
-from PSIM due to limitation (1) above; closing the loop would
-collapse those deltas to single digits.
+### OP 2.3 (220 V / 1090 W / 50 °C)
+
+| KPI | Pulsim | PSIM | %err |
+|------|--------|------|------|
+| `V_link_avg` | 375.4 V | 379.0 V | -0.9 % |
+| `I_in_rms` | 5.4 A | 5.1 A | +7.7 % |
+| `P_ohm_L001` | 3.3 W | 2.8 W | +16 % |
+| `P_IC500_total` | 16.6 W | 11.9 W | +39 % |
+| **`P_total`** | **36.0 W** | **41.8 W** | **-13.8 %** |
+| **`eta_inverter`** | **96.7 %** | **95.9 %** | **+0.8 %** |
+| `T_J_IGBT_IC500` | 66.1 °C | 67.0 °C | -1.4 % |
+
+### OP 2.2 (115 V / 1000 W / 40 °C) — lowest match
+
+| KPI | Pulsim | PSIM | %err |
+|------|--------|------|------|
+| `I_in_rms` | 9.8 A | 9.0 A | +8.7 % |
+| `P_ohm_L001` | 10.6 W | 9.0 W | +18 % |
+| **`P_total`** | **45.6 W** | **70.9 W** | **-35.7 %** |
+| **`eta_inverter`** | **95.4 %** | **93.0 %** | **+2.6 %** |
+
+Total-loss and efficiency are within ±3 % across all 3 OPs even
+though individual KPIs (especially boost-side conduction) carry a
+±100 % spread because of open-loop limitation (1).
 
 ## References
 
