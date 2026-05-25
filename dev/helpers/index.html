@@ -815,6 +815,81 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#5-v15-named-lookups-closed-loop-ergonomics" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. v1.5 — named lookups + closed-loop + ergonomics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. v1.5 — named lookups + closed-loop + ergonomics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-named-result-accessors-add-python-named-lookups" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1 Named result accessors (add-python-named-lookups)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-pi-pwm-closed-loop-helper-add-python-closed-loop-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.2 PI + PWM closed-loop helper (add-python-closed-loop-helper)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-builder-ergonomics-add-python-builder-ergonomics" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.3 Builder ergonomics (add-python-builder-ergonomics)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-v15-migration-status-examples-notebooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. v1.5 migration status — examples + notebooks
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. v1.5 migration status — examples + notebooks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scripts-examplesscripts-migrated" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scripts (examples/scripts/) — migrated
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notebooks-examplesnotebooks-projectsipynb-pending" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notebooks (examples/notebooks/, projects/*/*/*.ipynb) — pending
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1709,6 +1784,81 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#5-v15-named-lookups-closed-loop-ergonomics" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. v1.5 — named lookups + closed-loop + ergonomics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. v1.5 — named lookups + closed-loop + ergonomics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-named-result-accessors-add-python-named-lookups" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1 Named result accessors (add-python-named-lookups)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-pi-pwm-closed-loop-helper-add-python-closed-loop-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.2 PI + PWM closed-loop helper (add-python-closed-loop-helper)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-builder-ergonomics-add-python-builder-ergonomics" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.3 Builder ergonomics (add-python-builder-ergonomics)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-v15-migration-status-examples-notebooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. v1.5 migration status — examples + notebooks
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. v1.5 migration status — examples + notebooks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scripts-examplesscripts-migrated" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scripts (examples/scripts/) — migrated
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notebooks-examplesnotebooks-projectsipynb-pending" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notebooks (examples/notebooks/, projects/*/*/*.ipynb) — pending
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1887,6 +2037,146 @@ kwarg is just sugar for the common case.</p>
 </code></pre></div>
 <p>Same plot, one quarter the code, time units auto-picked, no
 manual <code>node_id_of</code> calls.</p>
+<hr />
+<h2 id="5-v15-named-lookups-closed-loop-ergonomics">5. v1.5 — named lookups + closed-loop + ergonomics<a class="headerlink" href="#5-v15-named-lookups-closed-loop-ergonomics" title="Permanent link">&para;</a></h2>
+<p>The v1.5 surface lands three additive helpers — every existing
+script keeps working unchanged.</p>
+<h3 id="51-named-result-accessors-add-python-named-lookups">5.1 Named result accessors (<code>add-python-named-lookups</code>)<a class="headerlink" href="#51-named-result-accessors-add-python-named-lookups" title="Permanent link">&para;</a></h3>
+<p><code>result.v(name)</code> / <code>result.i(name)</code> / <code>result.power(name)</code> resolve
+node / branch / device names without raw column arithmetic:</p>
+<div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-6</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+
+<span class="c1"># Instead of:</span>
+<span class="n">states</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">)</span>
+<span class="n">v_out</span>  <span class="o">=</span> <span class="n">states</span><span class="p">[:,</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">)]</span>
+<span class="n">i_L1</span>   <span class="o">=</span> <span class="n">states</span><span class="p">[:,</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_nodes</span> <span class="o">+</span> <span class="n">b</span><span class="o">.</span><span class="n">branch_index_of</span><span class="p">(</span><span class="s2">&quot;L1&quot;</span><span class="p">)]</span>
+
+<span class="c1"># Just:</span>
+<span class="n">v_out</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">)</span>          <span class="c1"># full series</span>
+<span class="n">v_end</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="n">t</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>    <span class="c1"># scalar</span>
+<span class="n">i_L1</span>  <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">&quot;L1&quot;</span><span class="p">)</span>            <span class="c1"># branch current (inductor / source only)</span>
+<span class="n">p_R</span>   <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">power</span><span class="p">(</span><span class="s2">&quot;R_L&quot;</span><span class="p">)</span>       <span class="c1"># avg dissipation</span>
+</code></pre></div>
+<p>Builder introspection:</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">&quot;Q1&quot;</span><span class="p">)</span>   <span class="c1"># bit position in SwitchStateMask</span>
+<span class="n">b</span><span class="o">.</span><span class="n">branch_index_of</span><span class="p">(</span><span class="s2">&quot;L1&quot;</span><span class="p">)</span>   <span class="c1"># branch_id offset (alias of branch_id_of)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">devices</span><span class="p">()</span>               <span class="c1"># [DeviceInfo(name, kind, terminals), …]</span>
+</code></pre></div>
+<p>Unknown names raise <code>pulsim.NameNotFoundError(KeyError)</code> with
+<code>suggestions</code> from <code>difflib.get_close_matches</code>.</p>
+<h3 id="52-pi-pwm-closed-loop-helper-add-python-closed-loop-helper">5.2 PI + PWM closed-loop helper (<code>add-python-closed-loop-helper</code>)<a class="headerlink" href="#52-pi-pwm-closed-loop-helper-add-python-closed-loop-helper" title="Permanent link">&para;</a></h3>
+<p>Replaces the 30-line closure-with-mutable-list pattern with one
+call:</p>
+<div class="highlight"><pre><span></span><code><span class="n">pi</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">PIController</span><span class="p">(</span><span class="n">Kp</span><span class="o">=</span><span class="mf">0.08</span><span class="p">,</span> <span class="n">Ki</span><span class="o">=</span><span class="mf">40.0</span><span class="p">,</span> <span class="n">output_min</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">output_max</span><span class="o">=</span><span class="mf">0.95</span><span class="p">)</span>
+<span class="n">loop</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">bind_pi_to_switch</span><span class="p">(</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">pi</span><span class="o">=</span><span class="n">pi</span><span class="p">,</span>
+    <span class="n">measured</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">)],</span>
+    <span class="n">setpoint</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>
+    <span class="n">switch</span><span class="o">=</span><span class="s2">&quot;Q1&quot;</span><span class="p">,</span>        <span class="c1"># name or int index</span>
+    <span class="n">freq</span><span class="o">=</span><span class="mf">10e3</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-6</span><span class="p">,</span> <span class="n">closed_loops</span><span class="o">=</span><span class="p">[</span><span class="n">loop</span><span class="p">])</span>
+
+<span class="c1"># Inspect the loop&#39;s history post-run:</span>
+<span class="n">ts</span><span class="p">,</span> <span class="n">ds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">loop</span><span class="o">.</span><span class="n">duty_history</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>  <span class="c1"># (N,) (N,)</span>
+</code></pre></div>
+<p>For circuits with multiple independent loops, pass the list:
+<code>p.simulate(..., closed_loops=[loop_a, loop_b])</code>. The helper
+composes their <code>switch_fn</code>s via <code>make_combined_switch_fn</code> and
+fans out the <code>step_observer</code>s automatically.</p>
+<p>For one PI driving multiple switches (e.g. half-bridge
+complementary pair), use <code>p.bind_pi_to_duty_callable(...)</code> instead:
+it returns <code>(duty_get, step_observer, history)</code> so the caller
+composes the switch_fn manually with both bits.</p>
+<p>A complete buck closed-loop in ~25 lines lives at
+<a href="https://github.com/lgili/Pulsim/blob/main/examples/scripts/run_buck_with_helper.py"><code>examples/scripts/run_buck_with_helper.py</code></a>.</p>
+<h3 id="53-builder-ergonomics-add-python-builder-ergonomics">5.3 Builder ergonomics (<code>add-python-builder-ergonomics</code>)<a class="headerlink" href="#53-builder-ergonomics-add-python-builder-ergonomics" title="Permanent link">&para;</a></h3>
+<p><strong>Initial conditions</strong> as <code>add_*</code> kwargs:</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">&quot;Cout&quot;</span><span class="p">,</span> <span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="mf">220e-6</span><span class="p">,</span> <span class="n">c0</span><span class="o">=</span><span class="mf">12.0</span><span class="p">)</span>  <span class="c1"># IC=12 V</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">&quot;L1&quot;</span><span class="p">,</span> <span class="s2">&quot;sw&quot;</span><span class="p">,</span> <span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="mf">220e-6</span><span class="p">,</span> <span class="n">i0</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>       <span class="c1"># IC=0.5 A</span>
+<span class="c1"># Or post-hoc:</span>
+<span class="n">b</span><span class="o">.</span><span class="n">set_initial</span><span class="p">(</span><span class="s2">&quot;Cout&quot;</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">)</span>
+<span class="c1"># Synthesised automatically when simulate(initial_state=None):</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-6</span><span class="p">)</span>  <span class="c1"># Cout starts at 12 V.</span>
+</code></pre></div>
+<p><strong>GUI-friendly aliases</strong> for human-readable names:</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;vin&quot;</span><span class="p">,</span> <span class="n">node</span><span class="o">=</span><span class="s2">&quot;net_42&quot;</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">aliases</span><span class="p">()</span>                <span class="c1"># {&quot;vin&quot;: (&quot;node&quot;, &quot;net_42&quot;)}</span>
+<span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">&quot;vin&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">&quot;net_42&quot;</span><span class="p">)</span>   <span class="c1"># alias resolves transparently</span>
+</code></pre></div>
+<p><strong>Cancellation</strong> via <code>should_continue=</code> on every long-running entry
+point:</p>
+<div class="highlight"><pre><span></span><code><span class="n">cancel_event</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+
+<span class="c1"># GUI Run button reuses one builder for many runs; Cancel button:</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-6</span><span class="p">,</span>
+                 <span class="n">should_continue</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="ow">not</span> <span class="n">cancel_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">())</span>
+
+<span class="n">T_j</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">compute_temperature</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">p_loss</span><span class="p">,</span> <span class="n">stages</span><span class="p">,</span>
+                              <span class="n">should_continue</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="ow">not</span> <span class="n">cancel_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">())</span>
+
+<span class="n">x_dc</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">compute_dc_op</span><span class="p">(</span><span class="n">b</span><span class="p">,</span>
+                         <span class="n">should_continue</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="ow">not</span> <span class="n">cancel_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">())</span>
+</code></pre></div>
+<p>All raise <code>pulsim.Cancelled(RuntimeError)</code> with a typed
+<code>.where</code> and <code>.point_index</code> attribute pinpointing where the
+cancellation fired.</p>
+<hr />
+<h2 id="6-v15-migration-status-examples-notebooks">6. v1.5 migration status — examples + notebooks<a class="headerlink" href="#6-v15-migration-status-examples-notebooks" title="Permanent link">&para;</a></h2>
+<h3 id="scripts-examplesscripts-migrated">Scripts (<code>examples/scripts/</code>) — migrated<a class="headerlink" href="#scripts-examplesscripts-migrated" title="Permanent link">&para;</a></h3>
+<p>The 18 scripts most exercised by users picked up the v1.5 idioms in
+the same PR that introduced the helpers:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Scripts</th>
+<th>Idiom migrated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Closed-loop (PI + PWM)</td>
+<td><code>run_{buck,boost,flyback,boost_saturable,pfc_boost}_closed_loop.py</code></td>
+<td><code>current_duty = [...]</code> closure → <code>bind_pi_to_switch</code></td>
+</tr>
+<tr>
+<td>Open-loop / single-shot</td>
+<td><code>run_{buck,boost_realistic_mosfet_v14,ldo_with_opamp,common_source_amplifier,flyback,phase_shift_full_bridge,pwm_chopper_realistic_mosfet,three_phase_inverter,3phase_rectifier_grid,thermal_buck,rlc_step_response,half_wave_rectifier,dc_motor_speed}.py</code></td>
+<td><code>states[:, node_id_of(name)]</code> → <code>res.v(name)</code>; <code>pool.branch_var_id_for_inductor(...)</code> → <code>res.i(name)</code></td>
+</tr>
+<tr>
+<td>Reference</td>
+<td><code>run_buck_with_helper.py</code></td>
+<td>New — 30-line minimal showcase</td>
+</tr>
+</tbody>
+</table>
+<p>All 18 scripts produce numerically-equivalent KPIs to their
+pre-migration baselines (verified within ±1% for closed-loop scripts
+where the throttle-cadence detail can cause sub-percent drift; bit-
+equal for open-loop scripts where the migration is just a different
+spelling of the same column read).</p>
+<h3 id="notebooks-examplesnotebooks-projectsipynb-pending">Notebooks (<code>examples/notebooks/</code>, <code>projects/*/*/*.ipynb</code>) — pending<a class="headerlink" href="#notebooks-examplesnotebooks-projectsipynb-pending" title="Permanent link">&para;</a></h3>
+<p>The 29 pulsim-using notebooks pre-date the v1.3 namespace flatten and
+still target the <strong>v0 <code>ps.Circuit()</code> API</strong>: <code>add_pwm_voltage_source</code>
++ <code>add_virtual_component("pi_controller", ...)</code> + period-by-period
+<code>run_transient_compat</code> loops. Migrating them to v1.5 requires:</p>
+<ol>
+<li>Rewrite <code>ps.Circuit()</code> → <code>ps.CircuitBuilder()</code> (different add_*
+   signatures, no virtual components).</li>
+<li>Replace the virtual <code>pi_controller</code> with a Python-side
+   <code>bind_pi_to_switch(...)</code> call.</li>
+<li>Collapse the per-period <code>for period in range(n_periods)</code> loop
+   into a single <code>pulsim.simulate(..., closed_loops=[loop])</code>.</li>
+<li>Re-execute every notebook so the rendered plots reflect the new
+   solver path (the period-by-period vs <code>simulate(...)</code> paths have
+   slightly different switching-edge resolution and would produce
+   visibly different waveforms — the existing PNGs in the notebook
+   outputs would mislead readers post-rewrite).</li>
+</ol>
+<p>That's a separate effort tracked under a future "legacy notebook
+modernisation" change.</p>
 
 
 
