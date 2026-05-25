@@ -283,3 +283,46 @@ x_dc = p.compute_dc_op(b,
 All raise `pulsim.Cancelled(RuntimeError)` with a typed
 `.where` and `.point_index` attribute pinpointing where the
 cancellation fired.
+
+---
+
+## 6. v1.5 migration status — examples + notebooks
+
+### Scripts (`examples/scripts/`) — migrated
+
+The 18 scripts most exercised by users picked up the v1.5 idioms in
+the same PR that introduced the helpers:
+
+| Family | Scripts | Idiom migrated |
+|---|---|---|
+| Closed-loop (PI + PWM) | `run_{buck,boost,flyback,boost_saturable,pfc_boost}_closed_loop.py` | `current_duty = [...]` closure → `bind_pi_to_switch` |
+| Open-loop / single-shot | `run_{buck,boost_realistic_mosfet_v14,ldo_with_opamp,common_source_amplifier,flyback,phase_shift_full_bridge,pwm_chopper_realistic_mosfet,three_phase_inverter,3phase_rectifier_grid,thermal_buck,rlc_step_response,half_wave_rectifier,dc_motor_speed}.py` | `states[:, node_id_of(name)]` → `res.v(name)`; `pool.branch_var_id_for_inductor(...)` → `res.i(name)` |
+| Reference | `run_buck_with_helper.py` | New — 30-line minimal showcase |
+
+All 18 scripts produce numerically-equivalent KPIs to their
+pre-migration baselines (verified within ±1% for closed-loop scripts
+where the throttle-cadence detail can cause sub-percent drift; bit-
+equal for open-loop scripts where the migration is just a different
+spelling of the same column read).
+
+### Notebooks (`examples/notebooks/`, `projects/*/*/*.ipynb`) — pending
+
+The 29 pulsim-using notebooks pre-date the v1.3 namespace flatten and
+still target the **v0 `ps.Circuit()` API**: `add_pwm_voltage_source`
++ `add_virtual_component("pi_controller", ...)` + period-by-period
+`run_transient_compat` loops. Migrating them to v1.5 requires:
+
+1. Rewrite `ps.Circuit()` → `ps.CircuitBuilder()` (different add_*
+   signatures, no virtual components).
+2. Replace the virtual `pi_controller` with a Python-side
+   `bind_pi_to_switch(...)` call.
+3. Collapse the per-period `for period in range(n_periods)` loop
+   into a single `pulsim.simulate(..., closed_loops=[loop])`.
+4. Re-execute every notebook so the rendered plots reflect the new
+   solver path (the period-by-period vs `simulate(...)` paths have
+   slightly different switching-edge resolution and would produce
+   visibly different waveforms — the existing PNGs in the notebook
+   outputs would mislead readers post-rewrite).
+
+That's a separate effort tracked under a future "legacy notebook
+modernisation" change.
