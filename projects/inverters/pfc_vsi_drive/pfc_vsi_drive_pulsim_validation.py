@@ -107,7 +107,13 @@ class DriveSimParams:
                                         # < 5 % steady-state V_link error
                                         # and < 10 % I_L002 overshoot across
                                         # OPs 2.3 / 2.4.
-    pfc_K_amp_max: float = 0.10        # absolute safety clip (A per peak V)
+    pfc_K_amp_max: float = 0.15        # absolute safety clip (A per peak V).
+                                        # Sized for low-line OPs where
+                                        # K_amp_steady = 2·P/V_pk² is large
+                                        # (= 0.0756 at OP 2.2 115V / 1kW)
+                                        # so the loop has > 1× margin
+                                        # without saturating against the
+                                        # absolute rail.
     pfc_v_lp_alpha: float = 0.0003     # LP filter on V_link feedback —
                                         # τ ≈ 1/(alpha·dt) ≈ 7 ms (heavy
                                         # enough to suppress 2·f_line ripple)
