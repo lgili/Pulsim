@@ -31,10 +31,10 @@ seen what's being measured.
 | 4 | [PWL State-Space Cache](04-pwl-state-space-cache.md) | The architectural pivot — pre-build one matrix per switch mask, never re-assemble at runtime | Cache build-vs-solve lifecycle, mask transition diagram, 50× speedup decomposition |
 | 5 | [Sparse Direct LU Foundations](05-sparse-lu-foundations.md) | Why direct (not iterative), why sparse (not dense), how RCM ordering + elimination trees + Gilbert-Peierls left-looking work | Fill comparison (natural vs RCM vs COLAMD), elimination tree, sparsity-pattern evolution |
 | 6 | [PulsimSparseLuSolver](06-pulsim-sparse-lu.md) | Our in-house C++23 sparse LU: `analyze` → `factorize` → `solve` lifecycle, partial-pivoting threshold check, why we ditched SuiteSparse KLU | Lifecycle state diagram, dynamic-pattern discovery, pivot-row swap visualization |
-| 7 | [Path-Based Partial Refactorisation](07-rank1-partial-refactor.md) | **The algorithmic contribution of the TPEL paper.** Etree-walk path computation, threshold pivot fault, lazy-union varying-set caching | Path walk diagram, single-bit-flip update example, fault-and-recover flow |
+| 7 | [Path-Based Partial Refactorisation](07-rank1-partial-refactor.md) | **The algorithmic contribution of the forthcoming methods paper.** Etree-walk path computation, threshold pivot fault, lazy-union varying-set caching | Path walk diagram, single-bit-flip update example, fault-and-recover flow |
 | 8 | [Benchmarks](08-benchmarks.md) | What the numbers actually mean: the 3-backend decomposition, why the speedup is real, and where the algorithm doesn't help | Speedup vs $n$ plot, per-call cost flat vs linear scaling, fallback-rate heatmap |
 | 9 | [Architecture Walkthrough](09-architecture-walkthrough.md) | The 10-layer codebase, from `Layer 0` (numeric types) to `Layer 9` (the Python `simulate()` ergonomic facade) | Layer-stack figure, layered dependency graph |
-| 10 | [Paper Figures Index](10-paper-figures-index.md) | Every figure regenerated for the IEEE TPEL methods paper, with provenance + the script that built it | Reference grid of all paper-bound figures |
+| 10 | [Paper Figures Index](10-paper-figures-index.md) | Every figure regenerated for the forthcoming methods paper, with provenance + the script that built it | Reference grid of all paper-bound figures |
 
 ---
 
@@ -60,7 +60,7 @@ npx @mermaid-js/mermaid-cli -i diagram.mmd -o diagram.pdf -t neutral
 ```
 
 This makes the whole chapter set the **canonical source** for the
-TPEL paper's figure inventory. When a figure changes here, the
+methods paper's figure inventory. When a figure changes here, the
 paper version regenerates from the same script — no manual sync.
 
 ---
@@ -117,6 +117,8 @@ the conceptual layer on top.
 - [Performance Tuning](../performance-tuning.md) — practical
   advice on `dt`, cache lazy/eager modes, and when to override
   the auto solver backend
-- [`artigos/02_tpel_methods/`](https://github.com/lgili/Pulsim/tree/main/artigos/02_tpel_methods)
-  — the IEEE TPEL methods paper draft, currently slipping to Q1
-  2027 — uses figures from this doc set
+- A methods-oriented manuscript characterising the in-house
+  sparse-LU kernel + path-based partial-refactorisation on
+  reference SMPS topologies is in preparation. Until publication
+  the draft lives outside this repository to keep the public
+  surface focused on the released software.
