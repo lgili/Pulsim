@@ -123,6 +123,39 @@ void init_module(py::module_& m) {
         .def_readwrite("kappa",
                         &models::IdealDiode::Params::kappa);
 
+    // ---- CircuitBuilder::DeviceInfo --------------------------------------
+    py::class_<builder::CircuitBuilder::DeviceInfo>(m, "DeviceInfo",
+        "Lightweight POD describing one registered device — name +\n"
+        "topological kind + terminal node names. Returned by\n"
+        "`CircuitBuilder.devices()`. Useful for GUI introspection\n"
+        "and the 'enumerate every component' pattern that PulsimGUI\n"
+        "hits often.")
+        .def_readonly("name",
+              &builder::CircuitBuilder::DeviceInfo::name)
+        .def_readonly("kind",
+              &builder::CircuitBuilder::DeviceInfo::kind,
+              "Topological kind: 'passive', 'source', 'switch',\n"
+              "or 'nonlinear'. Finer device-family detail (e.g.\n"
+              "MOSFET vs IGBT) is not exposed at this level — query\n"
+              "the DevicePool for that.")
+        .def_readonly("terminals",
+              &builder::CircuitBuilder::DeviceInfo::terminals,
+              "Ordered list of node names the device is wired to,\n"
+              "in the same order the original `add_*` call passed\n"
+              "them (e.g. `['vin', 'sw']` for a MOSFET).")
+        .def("__repr__",
+              [](const builder::CircuitBuilder::DeviceInfo& d) {
+                  std::string ts;
+                  for (std::size_t i = 0; i < d.terminals.size(); ++i) {
+                      if (i) ts += ", ";
+                      ts += "\"" + d.terminals[i] + "\"";
+                  }
+                  return std::format(
+                      "DeviceInfo(name=\"{}\", kind=\"{}\", "
+                      "terminals=[{}])",
+                      d.name, d.kind, ts);
+              });
+
     // ---- CircuitBuilder ---------------------------------------------------
     py::class_<builder::CircuitBuilder>(m, "CircuitBuilder",
         "High-level v2 circuit constructor. Hides the "
@@ -400,6 +433,27 @@ void init_module(py::module_& m) {
               "user-facing strings like 'L_out' into the pool's "
               "branch_id for update_* calls. Raises ValueError "
               "if the name was never registered.")
+        .def("branch_index_of",
+              &builder::CircuitBuilder::branch_id_of,
+              py::arg("name"),
+              "Alias for branch_id_of, named to match the\n"
+              "`SimulationResult.i(name)` accessor's promise that\n"
+              "the returned int is the post-node state-vector\n"
+              "offset (`state_idx == num_nodes + branch_index_of(name)`).")
+        .def("switch_index_of",
+              &builder::CircuitBuilder::switch_index_of,
+              py::arg("name"),
+              "Bit position of `name` in the SwitchStateMask\n"
+              "produced by `switch_fn(t)`. Counts only switching\n"
+              "branches (MOSFET / IGBT / binary diode / explicit\n"
+              "add_switch) in builder-call order. Raises\n"
+              "out_of_range if `name` is a passive or source.")
+        .def("devices",
+              &builder::CircuitBuilder::devices,
+              "Ordered list of DeviceInfo records for every named\n"
+              "device the builder has accepted. Anonymous branches\n"
+              "(snubber RC expansion, transformer parallels) are\n"
+              "skipped. List order matches `add_*` call order.")
         .def("update_resistor_R",
               [](builder::CircuitBuilder& self,
                   std::string_view name, Real new_R_ohms) {
@@ -847,7 +901,8 @@ void init_module(py::module_& m) {
 
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
-        "`states` arrays, plus event diagnostics.")
+        "`states` arrays, plus event diagnostics.",
+        py::dynamic_attr())  // allow `result._builder = b` from Python
         .def_readonly("times", &SimulationResult::times)
         .def_readonly("states", &SimulationResult::states)
         .def_readonly("event_iteration_count",

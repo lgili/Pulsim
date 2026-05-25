@@ -1,49 +1,49 @@
 ## 1. CircuitBuilder lookup helpers (C++ + bindings)
 
-- [ ] 1.1 Add `BranchId branch_index_of(std::string_view name) const`
+- [x] 1.1 Add `BranchId branch_index_of(std::string_view name) const`
       to `RuntimeCircuit` in
       `core/include/pulsim/v1/runtime_circuit.hpp`. Implementation
       walks the existing `branches_` vector and returns the index
       of the entry whose `name == name`. Throw `std::out_of_range`
       with a name + suggestion message when no match.
-- [ ] 1.2 Add `SwitchIdx switch_index_of(std::string_view name) const`
+- [x] 1.2 Add `SwitchIdx switch_index_of(std::string_view name) const`
       — looks up only switching branches (MOSFET / IGBT / diode
       / `add_switch`); raises `std::out_of_range` if `name` is
       a passive or source, with a message that names the device's
       actual kind.
-- [ ] 1.3 Add `std::vector<DeviceInfo> devices() const` returning
+- [x] 1.3 Add `std::vector<DeviceInfo> devices() const` returning
       `DeviceInfo { std::string name; std::string kind;
       std::vector<std::string> terminals; }` in `add_*` call
       order. `kind` is one of `"resistor" / "capacitor" /
       "inductor" / "diode" / "mosfet" / "igbt" / "switch" /
       "voltage_source" / "current_source" / "transformer" / …`.
-- [ ] 1.4 Expose all three via pybind11 in
+- [x] 1.4 Expose all three via pybind11 in
       `python/src/pulsim_bindings.cpp` next to the existing
       `node_id_of` binding. `DeviceInfo` is bound as a named
       tuple (`py::class_<DeviceInfo>` with `.def_readonly`
       fields).
-- [ ] 1.5 Wire the three methods through `CircuitBuilder` (the
+- [x] 1.5 Wire the three methods through `CircuitBuilder` (the
       Python-facing class) — they delegate to the underlying
       `RuntimeCircuit`.
 
 ## 2. SimulationResult named accessors (Python)
 
-- [ ] 2.1 In `python/pulsim/__init__.py`, extend `simulate()` to
+- [x] 2.1 In `python/pulsim/__init__.py`, extend `simulate()` to
       attach the source builder to the returned `SimulationResult`
       as `result._builder` so the accessor methods can resolve
       names without forcing callers to re-pass the builder.
-- [ ] 2.2 Add `SimulationResult.v(self, name, t=None) -> np.ndarray`
+- [x] 2.2 Add `SimulationResult.v(self, name, t=None) -> np.ndarray`
       that returns
       `np.asarray(self.states)[t_slice, self._builder.node_id_of(name)]`
       where `t_slice = slice(None) if t is None else t`. Returns a
       scalar `float64` when `t` is a single int.
-- [ ] 2.3 Add `SimulationResult.i(self, name, t=None) -> np.ndarray`
+- [x] 2.3 Add `SimulationResult.i(self, name, t=None) -> np.ndarray`
       analogously, but with the column index
       `self._builder.graph.num_nodes + self._builder.branch_index_of(name)`.
-- [ ] 2.4 Add `SimulationResult.power(self, device_name) -> float`
+- [x] 2.4 Add `SimulationResult.power(self, device_name) -> float`
       returning the device's total power loss from the existing
       `device_loss_summary(self, self._builder)` helper. One-liner.
-- [ ] 2.5 Add `pulsim.NameNotFoundError(KeyError)` exception with
+- [x] 2.5 Add `pulsim.NameNotFoundError(KeyError)` exception with
       attributes `name: str`, `kind: Literal["node", "branch",
       "switch"]`, `suggestions: list[str]`. Wrap the bare
       `KeyError` / `IndexError` from the C++ binding at the
@@ -53,7 +53,7 @@
 
 ## 3. Tests
 
-- [ ] 3.1 `python/tests/test_named_lookups.py` — build a buck
+- [x] 3.1 `python/tests/test_named_lookups.py` — build a buck
       circuit (`V1`, `Q1`, `D1`, `L1`, `Cout`, `R_L`) and verify:
       - `np.array_equal(result.v("vout"),
         np.asarray(result.states)[:, builder.node_id_of("vout")])`
@@ -63,13 +63,13 @@
       - `builder.switch_index_of("Q1") == 0` (single switching
         device)
       - `builder.devices()` enumerates 6 entries in `add_*` order.
-- [ ] 3.2 Negative-path: `result.v("typo_node")` raises
+- [x] 3.2 Negative-path: `result.v("typo_node")` raises
       `pulsim.NameNotFoundError` with
       `suggestions == ["vout"]` (the closest match).
-- [ ] 3.3 Type test: `result.v("vout", t=-1)` returns scalar
+- [x] 3.3 Type test: `result.v("vout", t=-1)` returns scalar
       `float`, not 0-d ndarray. Use `isinstance(..., float)` in
       the assertion.
-- [ ] 3.4 Power accessor: `result.power("Q1")` equals
+- [x] 3.4 Power accessor: `result.power("Q1")` equals
       `device_loss_summary(result, builder)["Q1"]["P_total"]`
       within machine precision.
 
@@ -88,7 +88,7 @@
 
 ## 5. Validation
 
-- [ ] 5.1 `openspec validate add-python-named-lookups --strict`
+- [x] 5.1 `openspec validate add-python-named-lookups --strict`
       passes.
 - [ ] 5.2 Existing `python/tests/` pytest suite green (no
       regressions in `device_loss_summary`, `node_id_of`, or

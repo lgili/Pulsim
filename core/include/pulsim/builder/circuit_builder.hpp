@@ -680,6 +680,68 @@ public:
             "was never registered", name));
     }
 
+    /// Bit position of `name` in the `SwitchStateMask` produced by
+    /// `switch_fn(t)`. Counts only `BranchKind::Switch` branches, in
+    /// builder-call order (which matches Layer 4's enumeration).
+    ///
+    /// PulsimGUI's compat shim used to reconstruct this map by hand
+    /// (`pending_gate_signals`) — exposing it here lets the GUI drop
+    /// ~150 lines of bookkeeping.
+    ///
+    /// Throws `std::out_of_range` if `name` isn't registered, or if
+    /// `name` refers to a non-switching branch (passive / source /
+    /// nonlinear).
+    [[nodiscard]] Index switch_index_of(std::string_view name) const {
+        const Index b_id = branch_id_of(name);  // throws if unknown
+        const auto& br = graph_.branch(b_id);
+        if (br.kind != topology::BranchKind::Switch) {
+            throw std::out_of_range(std::format(
+                "CircuitBuilder::switch_index_of: branch \"{}\" is "
+                "not a switching device (kind={})",
+                name, branch_kind_name_(br.kind)));
+        }
+        // Count Switch-kind branches with id < b_id.
+        Index idx = 0;
+        for (Index i = 0; i < b_id; ++i) {
+            if (graph_.branch(i).kind == topology::BranchKind::Switch) {
+                ++idx;
+            }
+        }
+        return idx;
+    }
+
+    /// Lightweight POD describing one registered device. Returned by
+    /// `devices()` — useful for GUI introspection and the
+    /// "enumerate every component" pattern that PulsimGUI hits often.
+    struct DeviceInfo {
+        std::string              name;
+        std::string              kind;       // BranchKind name
+        std::vector<std::string> terminals;  // node names (from, to)
+    };
+
+    /// Enumerate every device the builder has accepted, in `add_*`
+    /// call order. Anonymous branches (no name) are skipped — they
+    /// only come from internal helpers (snubber RC expansion,
+    /// transformer parallel branches, …) that the caller didn't name.
+    [[nodiscard]] std::vector<DeviceInfo> devices() const {
+        std::vector<DeviceInfo> out;
+        out.reserve(static_cast<std::size_t>(graph_.num_branches()));
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            const auto name_view = name_of(b_id);
+            if (name_view.empty()) continue;
+            const auto& br = graph_.branch(b_id);
+            DeviceInfo info;
+            info.name = std::string(name_view);
+            info.kind = branch_kind_name_(br.kind);
+            info.terminals = {
+                node_name_or_ground_(br.from),
+                node_name_or_ground_(br.to),
+            };
+            out.push_back(std::move(info));
+        }
+        return out;
+    }
+
     /// Look up a previously-registered node by name. Throws
     /// `std::out_of_range` if not found. The "gnd" alias is
     /// handled here too.
@@ -701,6 +763,29 @@ private:
     [[nodiscard]] static constexpr bool is_ground_alias_(
         std::string_view name) noexcept {
         return name == "gnd" || name == "GND" || name == "0";
+    }
+
+    /// Human-readable BranchKind label — used in error messages
+    /// (`switch_index_of` rejection) and in `devices()[i].kind`.
+    /// Matches the lowercase enum-name convention the GUI expects.
+    [[nodiscard]] static constexpr std::string_view branch_kind_name_(
+        topology::BranchKind k) noexcept {
+        switch (k) {
+            case topology::BranchKind::PassiveLinear: return "passive";
+            case topology::BranchKind::Source:        return "source";
+            case topology::BranchKind::Switch:        return "switch";
+            case topology::BranchKind::Nonlinear:     return "nonlinear";
+        }
+        return "unknown";
+    }
+
+    /// Node name lookup that handles the ground sentinel (-1) by
+    /// returning "gnd". Used by `devices()` to build the terminals
+    /// list. The graph stores user-supplied names in `Node::name`.
+    [[nodiscard]] std::string node_name_or_ground_(Index id) const {
+        if (id == topology::Graph::ground()) return "gnd";
+        if (id < 0 || id >= graph_.num_nodes()) return "";
+        return graph_.node(id).name;
     }
 
     Index resolve_node_(std::string_view name) {
