@@ -54,6 +54,7 @@ Energy density per cycle = ∮ H dB (J/m³).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Dict
 
@@ -69,6 +70,11 @@ __all__ = [
     "core_loss_jiles_atherton",
     "fit_ja_from_bh_curve",
     "BHLoopResult",
+    # In-loop hysteretic-inductor (Python device — reuses the
+    # linear-inductor MNA path).
+    "HystereticInductor",
+    "add_hysteretic_inductor",
+    "make_hysteretic_inductor_observer",
 ]
 
 
@@ -159,20 +165,30 @@ def list_reference_materials() -> list:
 
 def _langevin(x: float) -> float:
     """Langevin function L(x) = coth(x) − 1/x. Numerically robust
-    near zero via Taylor expansion."""
+    near zero (Taylor) AND at large |x| (coth saturates to ±1).
+    Without the large-|x| guard, sinh/cosh overflow to inf for
+    |x| ≳ 710 and the ratio gives NaN — typical in heavily-driven
+    saturable cores."""
     ax = abs(x)
     if ax < 1e-4:
         # L(x) ≈ x/3 − x³/45 + …
         return x * (1.0 / 3.0 - x * x / 45.0)
+    if ax > 30.0:
+        # coth(x) ≈ 1 + 2·e^(-2|x|), so L(x) ≈ sign(x) - 1/x.
+        return (1.0 if x > 0 else -1.0) - 1.0 / x
     return float(np.cosh(x) / np.sinh(x) - 1.0 / x)
 
 
 def _langevin_deriv(x: float) -> float:
-    """dL/dx. Robust near zero (Taylor)."""
+    """dL/dx. Robust near zero (Taylor) and at large |x| where
+    sinh²(x) overflows."""
     ax = abs(x)
     if ax < 1e-4:
         # L'(x) ≈ 1/3 − x²/15 + …
         return 1.0 / 3.0 - x * x / 15.0
+    if ax > 30.0:
+        # 1/sinh²(x) → 0 for large |x|; L'(x) ≈ 1/x².
+        return 1.0 / (x * x)
     sinh_x = np.sinh(x)
     return float(1.0 / (x * x) - 1.0 / (sinh_x * sinh_x))
 
@@ -272,10 +288,43 @@ class JilesAthertonModel:
 
         dM_dH = (1.0 - p.c) * dM_irr_dH + dM_rev_dH
 
-        # Forward-Euler integration.
-        self.M = self.M + dM_dH * dH
+        # Forward-Euler integration with two safeguards:
+        #   (1) Sub-step on |dH| if the jump per step is too large
+        #       (forward Euler diverges when |dH| ≳ a, the Langevin
+        #       shape parameter).
+        #   (2) Hard clamp M to ±Ms (saturation magnetization) so
+        #       any residual numerical overshoot doesn't propagate
+        #       across steps.
+        max_dH = max(0.5 * p.a, 1.0)
+        n_sub = max(1, int(math.ceil(abs(dH) / max_dH)))
+        dH_sub = dH / n_sub
+        # Re-evaluate dM/dH at each sub-step for stability when n_sub > 1.
+        for _ in range(n_sub):
+            H_sub = self._H_prev + dH_sub
+            He_s = H_sub + p.alpha * self.M
+            x_s = He_s / p.a if p.a > 0 else 0.0
+            M_an_s = p.Ms * _langevin(x_s)
+            dM_an_dHe_s = ((p.Ms / p.a) * _langevin_deriv(x_s)
+                                if p.a > 0 else 0.0)
+            denom_s = p.k * sign_dH - p.alpha * (M_an_s - self.M)
+            if abs(denom_s) < denom_floor:
+                dM_irr_s = 0.0
+            else:
+                dM_irr_s = (M_an_s - self.M) / denom_s
+            rev_d_s = 1.0 - p.c * p.alpha * dM_an_dHe_s
+            dM_rev_s = (p.c * dM_an_dHe_s / rev_d_s
+                              if abs(rev_d_s) > 1e-12
+                              else p.c * dM_an_dHe_s)
+            dM_dH_s = (1.0 - p.c) * dM_irr_s + dM_rev_s
+            self.M += dM_dH_s * dH_sub
+            # Saturation clamp.
+            if self.M > p.Ms:
+                self.M = p.Ms
+            elif self.M < -p.Ms:
+                self.M = -p.Ms
+            self._H_prev = H_sub
 
-        self._H_prev = H
+        self._H_prev = H   # restore final position after sub-steps
         self.H = H
         self.B = _MU0 * (H + self.M)
         return self.B
@@ -579,3 +628,192 @@ def fit_ja_from_bh_curve(B_array,
                     k=best_v if field_name == "k" else params.k,
                 )
         return params
+
+
+# =============================================================================
+# In-loop hysteretic inductor — Python device that PARTICIPATES in MNA
+# =============================================================================
+#
+# Wires the JilesAthertonModel into a real circuit using the same
+# "linear inductor + dummy voltage source modulated by observer"
+# pattern that already powers ``add_pmsm`` / ``add_bldc`` /
+# ``add_induction_motor``. No C++ kernel changes needed.
+#
+# Decomposition (B-H constitutive split):
+#
+#   B = μ_0 · (H + M)
+#   λ = N · A · B = N·A·μ_0·H + N·A·μ_0·M
+#       = L_0 · i + ψ_M(M)             (because H = N·i/l_m)
+#
+# where
+#     L_0 = N² · A · μ_0 / l_m         (air-core inductance — linear)
+#     ψ_M = N · A · μ_0 · M            (magnetization-contribution flux)
+#
+# Differentiating wrt time:
+#     v_L = dλ/dt = L_0·di/dt  +  dψ_M/dt
+#         = L_0·di/dt  +  N·A·μ_0·dM/dt
+#
+# The first term is just a linear inductor (handled by the kernel
+# trivially). The second term is a per-step voltage that the JA
+# observer computes from the rotor-flux-style ODE — it appears as
+# a "back-EMF" injected into ``b_extra`` at the dummy voltage
+# source's branch row. The observer ALSO reads back the current
+# at every step to feed the JA model with the actual H.
+#
+# Trade-offs vs a fully kernel-coupled implicit C++ device:
+#   * Pro: zero C++ changes, ships on every wheel that has motors.
+#   * Pro: stays within the proven observer pattern.
+#   * Con: forward-Euler integration of M (the JA ODE is integrated
+#     at the simulation dt). For typical SMPS / mains-transformer
+#     work this is plenty — the JA dynamics live at the mains /
+#     switching scale, well above the simulator's dt.
+
+@dataclass
+class HystereticInductor:
+    """A hysteretic-core inductor backed by a Jiles-Atherton model.
+
+    Returned by :func:`add_hysteretic_inductor`. Stash the
+    handle to (a) read the live ``M`` / ``B`` / ``H`` per-step
+    via the observer, and (b) pass it back to
+    :func:`make_hysteretic_inductor_observer` for the
+    ``step_observer`` + ``b_extra_fn`` pair the simulator
+    needs.
+    """
+    name: str
+    params: "JilesAthertonParams"
+    N_turns: int
+    """Number of turns on the coil."""
+    l_m: float
+    """Mean magnetic path length [m]."""
+    A_core: float
+    """Effective core cross-sectional area [m²]."""
+    L_0: float
+    """Air-core inductance L_0 = N²·A·μ_0/l_m [H] — the LINEAR
+    component the kernel sees on the MNA branch."""
+    inductor_branch_id: int = -1
+    bemf_source_id: int = -1
+    # Live observer state (snapshotted between steps for diagnostics).
+    M: float = 0.0
+    H: float = 0.0
+    B: float = 0.0
+
+
+def add_hysteretic_inductor(builder,
+                                *,
+                                name: str,
+                                from_node: str,
+                                to_node: str,
+                                params: "JilesAthertonParams",
+                                N_turns: int,
+                                l_m: float,
+                                A_core: float,
+                                ) -> "HystereticInductor":
+    """Add a Jiles-Atherton hysteretic inductor between two nodes.
+
+    Topology:
+
+        from_node ──[ L_0 ]── (mid) ──[ V_M ]── to_node
+
+    where ``L_0 = N²·A·μ_0/l_m`` is the linear air-core inductance
+    and ``V_M`` is a dummy voltage source that the JA observer
+    modulates to encode ``N·A·μ_0·dM/dt`` — the hysteresis
+    contribution to ``v_L = dλ/dt``.
+
+    Parameters
+    ----------
+    name
+        Prefix for the added components (``{name}_L0`` and
+        ``{name}_V_M``).
+    from_node, to_node
+        Terminal node names.
+    params
+        :class:`JilesAthertonParams` — the 5-parameter JA set.
+        See :func:`reference_material` for catalog lookup or
+        :func:`fit_ja_from_bh_curve` for fitting from measurements.
+    N_turns
+        Number of turns on the coil.
+    l_m
+        Mean magnetic path length [m].
+    A_core
+        Effective core cross-sectional area [m²].
+
+    Returns
+    -------
+    HystereticInductor
+        Handle to pass to :func:`make_hysteretic_inductor_observer`.
+    """
+    if N_turns <= 0 or l_m <= 0.0 or A_core <= 0.0:
+        raise ValueError(
+            f"Non-physical geometry: N={N_turns}, l_m={l_m}, "
+            f"A_core={A_core}. All must be positive.")
+    L_0 = (N_turns ** 2) * A_core * _MU0 / l_m
+    mid = f"{name}_mid"
+    ind_id = builder.graph.num_branches
+    builder.add_inductor(f"{name}_L0", from_node, mid, float(L_0))
+    src_id = builder.graph.num_branches
+    builder.add_voltage_source(f"{name}_V_M", mid, to_node, 0.0)
+    return HystereticInductor(
+        name=name,
+        params=params,
+        N_turns=int(N_turns),
+        l_m=float(l_m),
+        A_core=float(A_core),
+        L_0=float(L_0),
+        inductor_branch_id=ind_id,
+        bemf_source_id=src_id,
+    )
+
+
+def make_hysteretic_inductor_observer(builder,
+                                            hyst: "HystereticInductor",
+                                            *,
+                                            dt: float):
+    """Build the ``(step_observer, b_extra_fn)`` pair to attach a
+    :class:`HystereticInductor` to a running simulation.
+
+    The observer:
+      1. Reads the inductor current ``i_L`` from the state vector.
+      2. Computes ``H = N·i_L / l_m``.
+      3. Advances the JA model state ``M`` by one ``dt``.
+      4. Writes back ``V_M = N·A·μ_0·dM/dt`` into ``b_extra``
+         at the dummy voltage source's row (negated to match the
+         kernel's source-row sign convention).
+
+    The ``hyst`` handle is updated in place each step so the
+    caller can read ``hyst.M``, ``hyst.B``, ``hyst.H`` between
+    sim steps for live plotting / channel logging.
+    """
+    state_size = builder.pool.state_size(builder.graph)
+    ind_idx = builder.pool.branch_var_id_for_inductor(
+        hyst.inductor_branch_id, builder.graph)
+    src_idx = builder.pool.branch_var_id_for_source(
+        hyst.bemf_source_id, builder.graph)
+
+    model = JilesAthertonModel(hyst.params)
+    # Coupling constant ψ_M = N · A · μ_0 · M → dψ_M/dt = const · dM/dt.
+    psi_coupling = hyst.N_turns * hyst.A_core * _MU0
+
+    # Snapshot the previous M to compute dM/dt → V_M each step.
+    state = {"M_prev": 0.0, "v_M": 0.0}
+
+    def step_observer(t, x):
+        i_L = float(x[ind_idx])
+        H = (hyst.N_turns / hyst.l_m) * i_L
+        model.update(H, dt)
+        dM = model.M - state["M_prev"]
+        state["M_prev"] = model.M
+        # V_M = N·A·μ_0·dM/dt.
+        state["v_M"] = psi_coupling * (dM / max(dt, 1e-18))
+        # Live diagnostics on the handle.
+        hyst.M = model.M
+        hyst.H = H
+        hyst.B = model.B
+
+    def b_extra_fn(t):
+        out = [0.0] * state_size
+        # Same sign convention as motors: source row carries +V; the
+        # observer injects -V so the EMF appears in the loop direction.
+        out[src_idx] = -state["v_M"]
+        return out
+
+    return step_observer, b_extra_fn

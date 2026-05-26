@@ -226,6 +226,9 @@ from .hysteresis import (
     core_loss_jiles_atherton,
     fit_ja_from_bh_curve,
     BHLoopResult,
+    HystereticInductor,
+    add_hysteretic_inductor,
+    make_hysteretic_inductor_observer,
 )
 from .spice_import import (
     SpiceElement,

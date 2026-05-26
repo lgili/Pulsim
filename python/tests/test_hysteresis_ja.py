@@ -186,3 +186,64 @@ def test_ja_fit_round_trip():
     assert rel_err < 0.30, (
         f"Fitted loop area {area_fit:.3g} vs truth {area_truth:.3g} "
         f"differs by {rel_err*100:.1f} %.")
+
+
+# -----------------------------------------------------------------------
+# In-loop HystereticInductor (Phase 2.2 — kernel-coupled path)
+# -----------------------------------------------------------------------
+
+_HAS_HYST_DEV = hasattr(pulsim, "add_hysteretic_inductor")
+
+
+@pytest.mark.skipif(not _HAS_HYST_DEV,
+                       reason="add_hysteretic_inductor not in build")
+def test_add_hysteretic_inductor_topology():
+    """``add_hysteretic_inductor`` adds L_0 and V_M branches and
+    computes L_0 = N²·A·μ_0/l_m correctly."""
+    b = pulsim.CircuitBuilder()
+    p = pulsim.reference_material("ferrite_n87")
+    N, l_m, A = 100, 0.05, 1e-4
+    hyst = pulsim.add_hysteretic_inductor(
+        b, name="L1", from_node="a", to_node="b",
+        params=p, N_turns=N, l_m=l_m, A_core=A,
+    )
+    L0_expected = N * N * A * (4 * math.pi * 1e-7) / l_m
+    assert hyst.L_0 == pytest.approx(L0_expected, rel=1e-9)
+    assert hyst.inductor_branch_id >= 0
+    assert hyst.bemf_source_id > hyst.inductor_branch_id
+    # 2 branches added (the L0 inductor + the V_M source).
+    assert b.graph.num_branches >= 2
+
+
+@pytest.mark.skipif(not _HAS_HYST_DEV,
+                       reason="add_hysteretic_inductor not in build")
+def test_hysteretic_inductor_drives_voltage_source_in_loop():
+    """End-to-end smoke: a series Vsrc + HystereticInductor + R loop
+    runs without NaN, and the inductor handle's M state evolves."""
+    b = pulsim.CircuitBuilder()
+    # 50 V peak / 50 Hz mains source.
+    V_amp = 50.0
+    b.add_sine_voltage_source("Vs", "a", "gnd", 0.0, V_amp, 50.0, 0.0)
+    b.add_resistor("Rs", "a", "n1", 1.0)
+    p = pulsim.reference_material("ferrite_n87")
+    hyst = pulsim.add_hysteretic_inductor(
+        b, name="L_core",
+        from_node="n1", to_node="gnd",
+        params=p, N_turns=100, l_m=0.05, A_core=1e-4,
+    )
+    obs, b_extra = pulsim.make_hysteretic_inductor_observer(
+        b, hyst, dt=100e-6)
+    res = pulsim.simulate(
+        b, t_end=0.05, dt=100e-6,
+        switch_fn=lambda t: pulsim.SwitchStateMask(0),
+        step_observer=obs,
+        b_extra_fn=b_extra,
+    )
+    assert res.num_steps() > 0
+    assert math.isfinite(hyst.M)
+    assert math.isfinite(hyst.B)
+    assert math.isfinite(hyst.H)
+    # Some magnetization should have built up — the 50V·50Hz source
+    # exercises the core well above its initial state.
+    assert abs(hyst.M) > 1.0, (
+        f"M failed to build up — got {hyst.M} A/m")
