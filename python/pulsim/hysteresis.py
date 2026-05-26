@@ -286,7 +286,13 @@ class JilesAthertonModel:
         else:
             dM_rev_dH = p.c * dM_an_dHe
 
-        dM_dH = (1.0 - p.c) * dM_irr_dH + dM_rev_dH
+        # NOTE: ``dM_dH`` is RE-evaluated inside the sub-step loop
+        # below at the sub-step's intermediate H value (that's what
+        # makes the sub-stepping numerically stable). The outer-scope
+        # quantities ``dM_irr_dH`` / ``dM_rev_dH`` are still useful
+        # diagnostics for the JA model fitter but are not used by
+        # the integration step itself.
+        del dM_irr_dH, dM_rev_dH
 
         # Forward-Euler integration with two safeguards:
         #   (1) Sub-step on |dH| if the jump per step is too large
