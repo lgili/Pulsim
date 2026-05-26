@@ -116,7 +116,7 @@ def build_l0_plant(params: GeanThesisParams) -> MmcPlant:
     pattern. No PS-PWM, no carrier ripple → the *analytical reference*.
     """
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
 
     m_a, m_b_, m_c = make_phase_mref_fns(params)
 
@@ -146,7 +146,7 @@ def build_l0_plant(params: GeanThesisParams) -> MmcPlant:
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = p.add_mmc_arm_average(
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params, m_b=lower_refs[k],
         )
         arms.append(arm_n)
@@ -159,7 +159,7 @@ def build_l0_plant(params: GeanThesisParams) -> MmcPlant:
         iL_indices.append(
             b.pool.branch_var_id_for_inductor(l_id, b.graph),
         )
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     return MmcPlant(builder=b, arms=arms,
                     iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -312,7 +312,7 @@ def test_dc_zero_input(params: GeanThesisParams) -> BaselineResult:
     ``v_C`` should stay exactly at ``v_c_init``.
     """
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
     arm_params = p.MmcArmAverageParams(
         n_sm=params.n_sm, c_sm=params.c_sm, v_c0=params.v_c_init,
         sm_type="half_bridge",
@@ -333,7 +333,7 @@ def test_dc_zero_input(params: GeanThesisParams) -> BaselineResult:
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = p.add_mmc_arm_average(
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params, m_b=m_const,
         )
         arms.append(arm_n)
@@ -343,7 +343,7 @@ def test_dc_zero_input(params: GeanThesisParams) -> BaselineResult:
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
         iL_indices.append(b.pool.branch_var_id_for_inductor(l_id, b.graph))
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     plant = MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
