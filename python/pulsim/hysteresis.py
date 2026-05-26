@@ -63,8 +63,12 @@ import numpy as np
 __all__ = [
     "JilesAthertonParams",
     "JilesAthertonModel",
+    "reference_material",
+    "list_reference_materials",
     "compute_bh_loop",
     "core_loss_jiles_atherton",
+    "fit_ja_from_bh_curve",
+    "BHLoopResult",
 ]
 
 
@@ -141,6 +145,12 @@ def reference_material(name: str) -> JilesAthertonParams:
         raise KeyError(
             f"unknown reference material {name!r}; "
             f"available: {avail}")
+
+
+def list_reference_materials() -> list:
+    """Names of materials with pre-fitted Jiles-Atherton parameter
+    sets — useful for ``pulsim.catalog()``-style discovery."""
+    return sorted(_REFERENCE_MATERIALS)
 
 
 # =============================================================================
@@ -450,3 +460,122 @@ def core_loss_jiles_atherton(result,
         A_core=A_core,
         period=period,
         M0=M0)
+
+
+# =============================================================================
+# Curve fitting — derive J-A parameters from a measured B-H trace
+# =============================================================================
+
+def fit_ja_from_bh_curve(B_array,
+                              H_array,
+                              *,
+                              p0: JilesAthertonParams | None = None,
+                              max_iter: int = 400,
+                              ) -> JilesAthertonParams:
+    """Least-squares fit of the five Jiles-Atherton parameters to a
+    measured B-H loop.
+
+    Parameters
+    ----------
+    B_array, H_array
+        Sample pairs along a measured B-H loop, one full period.
+        For best fit quality supply 200+ samples covering both
+        ascending and descending branches.
+    p0
+        Initial-guess parameters. Default uses the ``ferrite_n87``
+        catalog entry. Pass an entry from :func:`reference_material`
+        when fitting to a known material family.
+    max_iter
+        Maximum number of optimizer iterations (``scipy.optimize.
+        least_squares``). Increase if the residual is still
+        decreasing at exit; decrease for a faster, rougher fit.
+
+    Returns
+    -------
+    JilesAthertonParams
+        Best-fit parameters minimising the RMS B-error along the
+        provided trace.
+
+    Notes
+    -----
+    Requires :mod:`scipy.optimize`. Falls back to a simple
+    coordinate-descent if scipy isn't available — much slower and
+    less accurate, but still produces sane numbers for the catalog
+    materials.
+
+    The fit replays the supplied ``H_array`` through a fresh
+    :class:`JilesAthertonModel` and minimises ``Σ (B_pred − B_meas)²``.
+    Wall-clock cost ≈ ``n_samples · max_iter / 5000`` seconds on a
+    modern laptop (200 samples × 200 iter ≈ 10 s).
+    """
+    B_arr = np.asarray(B_array, dtype=np.float64)
+    H_arr = np.asarray(H_array, dtype=np.float64)
+    if B_arr.shape != H_arr.shape or B_arr.size < 8:
+        raise ValueError(
+            "B_array and H_array must be the same shape and "
+            "contain at least 8 sample pairs.")
+    if p0 is None:
+        p0 = _REFERENCE_MATERIALS["ferrite_n87"]
+
+    def _residuals(theta):
+        Ms, a, alpha, c, k = theta
+        if Ms <= 0 or a <= 0 or k <= 0 or not (0.0 <= c <= 1.0):
+            return np.full_like(B_arr, 1e6)
+        params = JilesAthertonParams(
+            Ms=Ms, a=a, alpha=alpha, c=c, k=k)
+        model = JilesAthertonModel(params)
+        B_pred = np.empty_like(B_arr)
+        for i, H in enumerate(H_arr):
+            B_pred[i] = model.update(float(H), 1.0)
+        return B_pred - B_arr
+
+    try:
+        from scipy.optimize import least_squares
+        theta0 = np.array([p0.Ms, p0.a, p0.alpha, p0.c, p0.k],
+                              dtype=np.float64)
+        bounds = (np.array([1e3, 1.0, 1e-6, 0.0, 1.0]),
+                       np.array([5e6, 1e4, 1.0, 1.0, 1e4]))
+        result = least_squares(_residuals, theta0, bounds=bounds,
+                                       max_nfev=int(max_iter))
+        Ms_f, a_f, alpha_f, c_f, k_f = result.x
+        return JilesAthertonParams(
+            Ms=float(Ms_f), a=float(a_f),
+            alpha=float(alpha_f), c=float(c_f), k=float(k_f))
+    except ImportError:
+        # Coordinate-descent fallback (works without scipy).
+        params = JilesAthertonParams(
+            Ms=p0.Ms, a=p0.a, alpha=p0.alpha, c=p0.c, k=p0.k)
+        names_and_steps = [("Ms", 0.1), ("a", 0.05), ("alpha", 0.05),
+                                ("c", 0.02), ("k", 0.05)]
+        for _ in range(max(20, max_iter // 25)):
+            for field_name, frac in names_and_steps:
+                value = getattr(params, field_name)
+                trials = [value * (1 + frac), value, value * (1 - frac)]
+                best_err = float("inf")
+                best_v = value
+                for v in trials:
+                    if field_name == "c" and not (0.0 <= v <= 1.0):
+                        continue
+                    if v <= 0 and field_name != "alpha":
+                        continue
+                    theta = np.array([
+                        v if field_name == "Ms" else params.Ms,
+                        v if field_name == "a" else params.a,
+                        v if field_name == "alpha" else params.alpha,
+                        v if field_name == "c" else params.c,
+                        v if field_name == "k" else params.k,
+                    ])
+                    res = _residuals(theta)
+                    err = float(np.sqrt(np.mean(res ** 2)))
+                    if err < best_err:
+                        best_err = err
+                        best_v = v
+                params = JilesAthertonParams(
+                    Ms=best_v if field_name == "Ms" else params.Ms,
+                    a=best_v if field_name == "a" else params.a,
+                    alpha=best_v if field_name == "alpha"
+                              else params.alpha,
+                    c=best_v if field_name == "c" else params.c,
+                    k=best_v if field_name == "k" else params.k,
+                )
+        return params

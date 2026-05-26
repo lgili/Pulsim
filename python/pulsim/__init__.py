@@ -217,6 +217,16 @@ from .observers import (
     SlidingModeObserver,
     FluxMRASObserver,
 )
+from .hysteresis import (
+    JilesAthertonParams,
+    JilesAthertonModel,
+    reference_material,
+    list_reference_materials,
+    compute_bh_loop,
+    core_loss_jiles_atherton,
+    fit_ja_from_bh_curve,
+    BHLoopResult,
+)
 from .spice_import import (
     SpiceElement,
     parse_spice_value,
@@ -445,6 +455,15 @@ __all__ = [
     # Sensorless observers (Phase 2.3).
     "SlidingModeObserver",
     "FluxMRASObserver",
+    # Magnetic hysteresis — Jiles-Atherton (Phase 2.2).
+    "JilesAthertonParams",
+    "JilesAthertonModel",
+    "reference_material",
+    "list_reference_materials",
+    "compute_bh_loop",
+    "core_loss_jiles_atherton",
+    "fit_ja_from_bh_curve",
+    "BHLoopResult",
     # SPICE netlist import (Phase E.10).
     "SpiceElement",
     "parse_spice_value",
