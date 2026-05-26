@@ -322,7 +322,7 @@ class TestThreePhaseDcAc:
         n_before = b.graph.num_branches
         mmc = p.add_mmc_three_phase_dc_ac(
             b,
-            dc_pos="dc_p", dc_neg="dc_n",
+            dc_pos="dc_p", dc_neg="gnd",
             ac_nodes=("ac_a", "ac_b", "ac_c"),
             n_sm=10, c_sm=1e-3, l_b=1e-3,
             v_c0=100.0,
@@ -348,7 +348,7 @@ class TestThreePhaseDcAc:
         b = p.CircuitBuilder()
         mmc = p.add_mmc_three_phase_dc_ac(
             b,
-            dc_pos="dc_p", dc_neg="dc_n",
+            dc_pos="dc_p", dc_neg="gnd",
             ac_nodes=("ac_a", "ac_b", "ac_c"),
             n_sm=4, c_sm=1e-3, l_b=1e-3,
             v_c0=200.0,
@@ -369,7 +369,7 @@ class TestThreePhaseDcAc:
         b = p.CircuitBuilder()
         mmc = p.add_mmc_three_phase_dc_ac(
             b,
-            dc_pos="dc_p", dc_neg="dc_n",
+            dc_pos="dc_p", dc_neg="gnd",
             ac_nodes=("ac_a", "ac_b", "ac_c"),
             n_sm=4, c_sm=1e-3, l_b=1e-3,
             sm_type="full_bridge",
@@ -385,7 +385,7 @@ class TestThreePhaseDcAc:
         b = p.CircuitBuilder()
         mmc = p.add_mmc_three_phase_dc_ac(
             b,
-            dc_pos="dc_p", dc_neg="dc_n",
+            dc_pos="dc_p", dc_neg="gnd",
             ac_nodes=("ac_a", "ac_b", "ac_c"),
             n_sm=4, c_sm=1e-3, l_b=1e-3,
             v_c0=200.0,
@@ -404,10 +404,10 @@ class TestThreePhaseDcAc:
         v_c0 = V_dc            # matched: v_C = V_dc so m=0.5 gives V_arm = 100 V
 
         b = p.CircuitBuilder()
-        b.add_voltage_source("Vdc", "dc_p", "dc_n", V_dc)
+        b.add_voltage_source("Vdc", "dc_p", "gnd", V_dc)
         mmc = p.add_mmc_three_phase_dc_ac(
             b,
-            dc_pos="dc_p", dc_neg="dc_n",
+            dc_pos="dc_p", dc_neg="gnd",
             ac_nodes=("ac_a", "ac_b", "ac_c"),
             n_sm=n_sm, c_sm=c_sm, l_b=l_b,
             v_c0=v_c0,
@@ -419,9 +419,9 @@ class TestThreePhaseDcAc:
         # a path from each phase midpoint to gnd. Add huge bleed
         # resistors so MNA is well-posed but they draw negligible
         # current.
-        b.add_resistor("R_bleed_a", "ac_a", "dc_n", 1e9)
-        b.add_resistor("R_bleed_b", "ac_b", "dc_n", 1e9)
-        b.add_resistor("R_bleed_c", "ac_c", "dc_n", 1e9)
+        b.add_resistor("R_bleed_a", "ac_a", "gnd", 1e9)
+        b.add_resistor("R_bleed_b", "ac_b", "gnd", 1e9)
+        b.add_resistor("R_bleed_c", "ac_c", "gnd", 1e9)
 
         dt = 1e-5
         obs, bex = p.make_mmc_arms_observer(b, mmc.all_arms, dt=dt)
@@ -445,7 +445,7 @@ class TestThreePhaseDcAc:
         with pytest.raises(ValueError, match="ac_nodes"):
             p.add_mmc_three_phase_dc_ac(
                 b,
-                dc_pos="dc_p", dc_neg="dc_n",
+                dc_pos="dc_p", dc_neg="gnd",
                 ac_nodes=("a", "b"),  # type: ignore[arg-type]
                 n_sm=4, c_sm=1e-3, l_b=1e-3,
                 m_signals=(0.5, 0.5, 0.5),
@@ -456,7 +456,7 @@ class TestThreePhaseDcAc:
         with pytest.raises(ValueError, match="l_b"):
             p.add_mmc_three_phase_dc_ac(
                 b,
-                dc_pos="dc_p", dc_neg="dc_n",
+                dc_pos="dc_p", dc_neg="gnd",
                 ac_nodes=("a", "b", "c"),
                 n_sm=4, c_sm=1e-3, l_b=0.0,
                 m_signals=(0.5, 0.5, 0.5),
@@ -467,7 +467,7 @@ class TestThreePhaseDcAc:
         with pytest.raises(ValueError, match="m_signals"):
             p.add_mmc_three_phase_dc_ac(
                 b,
-                dc_pos="dc_p", dc_neg="dc_n",
+                dc_pos="dc_p", dc_neg="gnd",
                 ac_nodes=("a", "b", "c"),
                 n_sm=4, c_sm=1e-3, l_b=1e-3,
                 m_signals=(0.5, 0.5),  # neither 3 nor 6
