@@ -72,6 +72,91 @@ _CURSOR_A_COLOR = "#ffb300"
 _CURSOR_B_COLOR = "#ff5252"
 
 
+# QSS applied to ad-hoc QDialogs (FFT modal, math-channel add).
+# Without this, modal dialogs inherit the platform's native theme
+# (light on macOS) and show black text on white — unreadable on
+# the dark scope. Keep the surface in sync with the main toolbar.
+_DIALOG_QSS = f"""
+    QDialog {{
+        background: {_BG_COLOR};
+        color: {_TEXT_COLOR};
+    }}
+    QLabel {{
+        color: {_TEXT_COLOR};
+    }}
+    QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QTextEdit, QPlainTextEdit {{
+        background: {_PANEL_COLOR};
+        color: {_TEXT_COLOR};
+        border: 1px solid {_GRID_COLOR};
+        padding: 2px 4px;
+        border-radius: 3px;
+        selection-background-color: {_ACCENT_COLOR};
+    }}
+    QComboBox QAbstractItemView {{
+        background: {_PANEL_COLOR};
+        color: {_TEXT_COLOR};
+        selection-background-color: {_ACCENT_COLOR};
+        selection-color: white;
+    }}
+    QPushButton {{
+        background: {_GRID_COLOR};
+        color: {_TEXT_COLOR};
+        border: 1px solid {_GRID_COLOR};
+        padding: 5px 12px;
+        border-radius: 3px;
+    }}
+    QPushButton:hover {{
+        background: {_ACCENT_COLOR};
+        color: white;
+    }}
+    QPushButton:default {{
+        background: {_ACCENT_COLOR};
+        color: white;
+        border: 1px solid {_ACCENT_COLOR};
+    }}
+    QTableWidget, QTableView {{
+        background: {_PANEL_COLOR};
+        alternate-background-color: {_BG_COLOR};
+        color: {_TEXT_COLOR};
+        gridline-color: {_GRID_COLOR};
+        border: 1px solid {_GRID_COLOR};
+    }}
+    QTableWidget::item, QTableView::item {{
+        color: {_TEXT_COLOR};
+        padding: 3px 6px;
+    }}
+    QTableWidget::item:selected, QTableView::item:selected {{
+        background: {_ACCENT_COLOR};
+        color: white;
+    }}
+    QHeaderView::section {{
+        background: {_GRID_COLOR};
+        color: {_TEXT_COLOR};
+        border: none;
+        padding: 4px 8px;
+        font-weight: 600;
+    }}
+    QGroupBox {{
+        color: {_TEXT_COLOR};
+        border: 1px solid {_GRID_COLOR};
+        border-radius: 3px;
+        margin-top: 8px;
+        padding-top: 8px;
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 8px;
+        padding: 0 4px;
+    }}
+    QFormLayout > QLabel {{
+        color: {_TEXT_COLOR};
+    }}
+    QDialogButtonBox QPushButton {{
+        min-width: 80px;
+    }}
+"""
+
+
 # ============================================================================
 # SMPS / trigger numpy helpers — pure numpy, easy to unit-test offline.
 # ============================================================================
@@ -694,27 +779,70 @@ class LiveScope:
         self._win = QtWidgets.QMainWindow()
         self._win.setWindowTitle(self.title)
         self._win.resize(1280, 760)
+        # Comprehensive dark QSS: cobre QMainWindow + todos os widgets
+        # filhos (labels, buttons, combos, spinboxes, tooltips, message
+        # boxes). Sem isso, controles novos (e dialogs nativos do macOS)
+        # voltam pro tema claro padrão e ficam texto preto em fundo
+        # branco - ilegível em cima do plot escuro.
         self._win.setStyleSheet(f"""
-            QMainWindow {{ background: {_BG_COLOR}; }}
-            QLabel      {{ color: {_TEXT_COLOR}; }}
-            QCheckBox   {{ color: {_TEXT_COLOR}; padding: 2px 6px; }}
+            QMainWindow, QDialog, QWidget {{
+                background: {_BG_COLOR}; color: {_TEXT_COLOR};
+            }}
+            QFrame {{ color: {_TEXT_COLOR}; }}
+            QLabel {{ color: {_TEXT_COLOR}; background: transparent; }}
+            QCheckBox {{ color: {_TEXT_COLOR}; padding: 2px 6px; background: transparent; }}
+            QGroupBox {{
+                color: {_TEXT_COLOR};
+                border: 1px solid {_GRID_COLOR};
+                border-radius: 3px;
+                margin-top: 8px; padding-top: 8px;
+                background: transparent;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; left: 8px; padding: 0 4px;
+                color: {_TEXT_COLOR};
+            }}
             QPushButton {{
                 background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
                 border: 1px solid {_GRID_COLOR}; padding: 6px 12px;
                 border-radius: 4px;
             }}
-            QPushButton:hover {{ background: {_GRID_COLOR}; }}
+            QPushButton:hover {{ background: {_GRID_COLOR}; color: {_TEXT_COLOR}; }}
             QPushButton:checked {{
                 background: {_ACCENT_COLOR}; color: white;
                 border: 1px solid {_ACCENT_COLOR};
+            }}
+            QPushButton:disabled {{
+                background: #2a2d35; color: #6e7280;
+                border: 1px solid #2a2d35;
             }}
             QPushButton#stopBtn {{
                 background: {_DANGER_COLOR}; color: white;
                 font-weight: 700; padding: 6px 18px;
             }}
             QPushButton#stopBtn:hover {{ background: #d35858; }}
-            QPushButton#stopBtn:disabled {{
-                background: #555; color: #aaa;
+            QPushButton#stopBtn:disabled {{ background: #555; color: #aaa; }}
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
+            QTextEdit, QPlainTextEdit {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                border: 1px solid {_GRID_COLOR}; padding: 2px 4px;
+                border-radius: 3px;
+                selection-background-color: {_ACCENT_COLOR};
+                selection-color: white;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                selection-background-color: {_ACCENT_COLOR};
+                selection-color: white;
+            }}
+            QComboBox::drop-down {{
+                border: none; background: {_PANEL_COLOR};
+                width: 18px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                background: {_PANEL_COLOR};
+                border: 1px solid {_GRID_COLOR};
             }}
             QSlider::groove:horizontal {{
                 background: {_PANEL_COLOR}; height: 4px;
@@ -724,6 +852,34 @@ class LiveScope:
                 background: {_ACCENT_COLOR}; width: 14px;
                 margin: -5px 0; border-radius: 7px;
             }}
+            QToolTip {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                border: 1px solid {_GRID_COLOR};
+                padding: 4px 6px;
+            }}
+            QMessageBox, QInputDialog {{
+                background: {_BG_COLOR}; color: {_TEXT_COLOR};
+            }}
+            QMessageBox QLabel, QInputDialog QLabel {{ color: {_TEXT_COLOR}; }}
+            QTableWidget, QTableView, QListWidget, QTreeWidget {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                alternate-background-color: {_BG_COLOR};
+                gridline-color: {_GRID_COLOR};
+                border: 1px solid {_GRID_COLOR};
+                selection-background-color: {_ACCENT_COLOR};
+                selection-color: white;
+            }}
+            QHeaderView::section {{
+                background: {_GRID_COLOR}; color: {_TEXT_COLOR};
+                border: none; padding: 4px 8px; font-weight: 600;
+            }}
+            QScrollBar:vertical, QScrollBar:horizontal {{
+                background: {_BG_COLOR}; border: none;
+            }}
+            QScrollBar::handle {{
+                background: {_GRID_COLOR}; border-radius: 4px;
+            }}
+            QScrollBar::handle:hover {{ background: {_ACCENT_COLOR}; }}
         """)
         central = QtWidgets.QWidget()
         central.setStyleSheet(f"background: {_BG_COLOR};")
@@ -1852,6 +2008,7 @@ class LiveScope:
 
         # Build the dialog.
         dlg = QtWidgets.QDialog(self._win)
+        dlg.setStyleSheet(_DIALOG_QSS)
         dlg.setWindowTitle(
             f"FFT — {name}  "
             f"({n_pts} samples, fs={1.0/dt/1e3:.2f} kHz)"
@@ -1930,6 +2087,7 @@ class LiveScope:
         but with a UI + lazy curve / ring creation so the math trace
         starts drawing on the next tick."""
         dlg = QtWidgets.QDialog(self._win)
+        dlg.setStyleSheet(_DIALOG_QSS)
         dlg.setWindowTitle("Add Math Channel")
         dlg.resize(560, 320)
         form = QtWidgets.QFormLayout(dlg)
