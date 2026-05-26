@@ -213,6 +213,10 @@ from .motors import (
     make_induction_motor_observer,
     im_parameters_from_nameplate,
 )
+from .observers import (
+    SlidingModeObserver,
+    FluxMRASObserver,
+)
 from .spice_import import (
     SpiceElement,
     parse_spice_value,
@@ -438,6 +442,9 @@ __all__ = [
     "add_induction_motor",
     "make_induction_motor_observer",
     "im_parameters_from_nameplate",
+    # Sensorless observers (Phase 2.3).
+    "SlidingModeObserver",
+    "FluxMRASObserver",
     # SPICE netlist import (Phase E.10).
     "SpiceElement",
     "parse_spice_value",
