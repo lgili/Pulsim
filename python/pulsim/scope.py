@@ -36,6 +36,7 @@ Usage:
 from __future__ import annotations
 
 import csv
+import sys
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -152,6 +153,204 @@ def _ripple_stats(y: np.ndarray) -> dict:
     }
 
 
+# ============================================================================
+# Math-channel expression parser — pure stdlib (no simpleeval dependency).
+#
+# Compiles a string expression like ``"V(vout) * I(L1)"`` into an
+# ``ast.Expression`` tree that we then evaluate against per-tick
+# numpy arrays. The grammar is a strict subset of Python: binary ops,
+# unary ops, parentheses, function calls (whitelisted), and ``Name``
+# nodes that resolve to other signal names.
+#
+# Why not ``eval()``: a math channel string comes from the user but
+# we don't want it to be able to do ``__import__`` or attribute access
+# or arbitrary calls. AST validation catches everything before we
+# evaluate, so the runtime path is provably side-effect-free.
+# ============================================================================
+
+import ast as _ast  # noqa: E402
+
+_MATH_FUNCS = {
+    "abs":   np.abs,
+    "sqrt":  np.sqrt,
+    "sign":  np.sign,
+    "sin":   np.sin,
+    "cos":   np.cos,
+    "tan":   np.tan,
+    "exp":   np.exp,
+    "log":   np.log,
+    "log10": np.log10,
+    "minimum": np.minimum,
+    "maximum": np.maximum,
+}
+_MATH_AGGS = {
+    # Reductions — collapse the input array to a scalar, then
+    # broadcast back to the batch shape inside _eval_math.
+    "mean": np.mean,
+    "rms":  lambda a: np.sqrt(np.mean(np.asarray(a) ** 2)),
+    "min":  np.min,
+    "max":  np.max,
+    "sum":  np.sum,
+}
+_MATH_CONSTS = {"pi": float(np.pi), "e": float(np.e)}
+
+_MATH_ALLOWED_BIN = (_ast.Add, _ast.Sub, _ast.Mult, _ast.Div,
+                       _ast.Pow, _ast.Mod, _ast.FloorDiv)
+_MATH_ALLOWED_UNARY = (_ast.UAdd, _ast.USub)
+
+
+def _math_collect_names(tree: _ast.Expression) -> List[str]:
+    """Return the set of bare ``Name`` references in ``tree`` — these
+    are the other signals this math channel depends on. Function
+    names that resolve to ``_MATH_FUNCS`` / ``_MATH_AGGS`` are
+    excluded; constants (``pi``, ``e``) likewise."""
+    names: set = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Name):
+            n = node.id
+            if (n in _MATH_FUNCS or n in _MATH_AGGS
+                    or n in _MATH_CONSTS):
+                continue
+            names.add(n)
+    return sorted(names)
+
+
+def _math_validate(tree: _ast.Expression) -> None:
+    """Walk ``tree`` and raise ``ValueError`` on anything outside the
+    grammar: subscript, attribute, comprehension, lambda, ``import``,
+    ``__dunder__`` etc. Done once at compile-time so the per-tick
+    eval path is fast and trusted."""
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Expression):
+            continue
+        if isinstance(node, _ast.Name):
+            n = node.id
+            if n.startswith("_"):
+                raise ValueError(f"math channel: name {n!r} is not allowed")
+            continue
+        if isinstance(node, _ast.Constant):
+            if not isinstance(node.value, (int, float)):
+                raise ValueError(
+                    f"math channel: only numeric literals allowed "
+                    f"(got {type(node.value).__name__})"
+                )
+            continue
+        if isinstance(node, _ast.BinOp):
+            if not isinstance(node.op, _MATH_ALLOWED_BIN):
+                raise ValueError(
+                    f"math channel: operator "
+                    f"{type(node.op).__name__} not allowed"
+                )
+            continue
+        if isinstance(node, _ast.UnaryOp):
+            if not isinstance(node.op, _MATH_ALLOWED_UNARY):
+                raise ValueError(
+                    f"math channel: unary "
+                    f"{type(node.op).__name__} not allowed"
+                )
+            continue
+        if isinstance(node, _ast.Call):
+            if not isinstance(node.func, _ast.Name):
+                raise ValueError("math channel: only direct function calls allowed")
+            fname = node.func.id
+            if fname not in _MATH_FUNCS and fname not in _MATH_AGGS:
+                raise ValueError(
+                    f"math channel: function {fname!r} not in allow-list. "
+                    f"Available: "
+                    f"{sorted(set(_MATH_FUNCS) | set(_MATH_AGGS))}"
+                )
+            if any(node.keywords):
+                raise ValueError("math channel: keyword arguments not allowed")
+            continue
+        # ``ast.walk`` also yields operator-class nodes (Add, Sub,
+        # Mult, …) standalone — they were already vetted via the
+        # parent ``BinOp``/``UnaryOp`` check above. Skip them here.
+        if isinstance(node, _MATH_ALLOWED_BIN + _MATH_ALLOWED_UNARY):
+            continue
+        # Implicit Load context inside Name etc. — benign.
+        if isinstance(node, _ast.Load):
+            continue
+        # Anything else — Subscript, Attribute, Compare, BoolOp,
+        # IfExp, Lambda, Comprehension, etc. — rejected.
+        raise ValueError(
+            f"math channel: node {type(node).__name__} not allowed"
+        )
+
+
+def _math_compile(expr: str) -> _ast.Expression:
+    """Parse + validate. Returns the AST tree ready for eval."""
+    try:
+        tree = _ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"math channel: syntax error — {exc}") from exc
+    _math_validate(tree)
+    return tree
+
+
+def _math_eval(tree: _ast.Expression,
+                ctx: Dict[str, np.ndarray]) -> np.ndarray:
+    """Evaluate ``tree`` against the per-tick signal arrays in
+    ``ctx``. Returns a numpy array broadcast to the input batch
+    shape — scalars from reductions are broadcast back to the
+    array shape of any sibling input so the result fits in a
+    ring buffer push."""
+    sample_shape = None
+    for v in ctx.values():
+        if isinstance(v, np.ndarray) and v.size > 0:
+            sample_shape = v.shape
+            break
+
+    def _go(node):
+        if isinstance(node, _ast.Expression):
+            return _go(node.body)
+        if isinstance(node, _ast.Constant):
+            return float(node.value)
+        if isinstance(node, _ast.Name):
+            n = node.id
+            if n in _MATH_CONSTS:
+                return _MATH_CONSTS[n]
+            if n in ctx:
+                return ctx[n]
+            raise ValueError(f"math channel: unknown name {n!r}")
+        if isinstance(node, _ast.UnaryOp):
+            v = _go(node.operand)
+            return -v if isinstance(node.op, _ast.USub) else v
+        if isinstance(node, _ast.BinOp):
+            a = _go(node.left)
+            b = _go(node.right)
+            op = node.op
+            if isinstance(op, _ast.Add):      return a + b
+            if isinstance(op, _ast.Sub):      return a - b
+            if isinstance(op, _ast.Mult):     return a * b
+            if isinstance(op, _ast.Div):      return a / b
+            if isinstance(op, _ast.Pow):      return a ** b
+            if isinstance(op, _ast.Mod):      return a % b
+            if isinstance(op, _ast.FloorDiv): return a // b
+            raise ValueError(f"math channel: bin op {type(op).__name__}")
+        if isinstance(node, _ast.Call):
+            assert isinstance(node.func, _ast.Name)
+            fname = node.func.id
+            args = [_go(a) for a in node.args]
+            if fname in _MATH_FUNCS:
+                return _MATH_FUNCS[fname](*args)
+            if fname in _MATH_AGGS:
+                # Aggregation produces a scalar; broadcast to batch
+                # shape so the result stacks into ring buffers.
+                scalar = float(_MATH_AGGS[fname](*args))
+                if sample_shape is None:
+                    return scalar
+                return np.full(sample_shape, scalar, dtype=np.float64)
+            raise ValueError(f"math channel: unknown function {fname!r}")
+        raise ValueError(f"math channel: cannot eval {type(node).__name__}")
+
+    out = _go(tree)
+    if not isinstance(out, np.ndarray):
+        if sample_shape is None:
+            return np.array([float(out)], dtype=np.float64)
+        return np.full(sample_shape, float(out), dtype=np.float64)
+    return out.astype(np.float64, copy=False)
+
+
 _Extractor = Callable[[float, np.ndarray], float]
 
 
@@ -168,7 +367,8 @@ class SignalDef:
     """
 
     __slots__ = ("name", "extractor", "color", "unit", "panel",
-                  "fmt", "kind", "state_idx", "chain", "chain_name")
+                  "fmt", "kind", "state_idx", "chain", "chain_name",
+                  "math_expr", "math_tree", "math_deps")
 
     def __init__(self, name: str,
                   extractor: _Extractor,
@@ -179,7 +379,10 @@ class SignalDef:
                   kind: str = "custom",
                   state_idx: int = -1,
                   chain: Any = None,
-                  chain_name: str = ""):
+                  chain_name: str = "",
+                  math_expr: str = "",
+                  math_tree: Optional[Any] = None,
+                  math_deps: Optional[tuple] = None):
         self.name = name
         self.extractor = extractor
         self.color = color
@@ -190,6 +393,14 @@ class SignalDef:
         self.state_idx = state_idx
         self.chain = chain
         self.chain_name = chain_name
+        # kind == "math" additions: ``math_expr`` is the original
+        # user string (for display + serialise); ``math_tree`` is the
+        # pre-compiled validated AST; ``math_deps`` is the tuple of
+        # signal names this channel reads from (evaluated AFTER all
+        # ``state``/``chain``/``custom`` signals in ``_tick``).
+        self.math_expr = math_expr
+        self.math_tree = math_tree
+        self.math_deps = math_deps or ()
 
 
 class _PanelState:
@@ -372,6 +583,71 @@ class LiveScope:
             color=color, unit=unit,
             panel=self._resolve_panel(panel),
             fmt=fmt, kind="chain", chain=chain, chain_name=name)
+        self._signals.append(sig)
+        return self
+
+    def add_math_signal(self, name: str, expr: str, *,
+                          color: Optional[str] = None,
+                          unit: str = "",
+                          panel: Optional[str] = None,
+                          fmt: str = "{:+8.3f}") -> "LiveScope":
+        """Register a derived trace that is a numpy expression over
+        other already-registered signals.
+
+        Parameters
+        ----------
+        name
+            Display name + legend label (also used to refer to this
+            channel from later math expressions).
+        expr
+            Math expression in a restricted Python subset. Available
+            operators: ``+ - * / ** % //``. Available functions:
+            ``abs sqrt sign sin cos tan exp log log10 minimum maximum``
+            plus reductions ``mean rms min max sum`` (these collapse
+            to a scalar then broadcast back to the batch shape).
+            Available constants: ``pi``, ``e``. Other ``Name`` nodes
+            must match an already-registered signal (state / chain /
+            other math).
+        color, unit, panel, fmt
+            Cosmetic options identical to ``add_node_voltage`` etc.
+
+        Examples
+        --------
+        Instantaneous output power (Wpower curve under the ``Power``
+        panel)::
+
+            scope.add_node_voltage("vout", panel="Voltage")
+            scope.add_branch_current(ind_id, label="I(L1)", panel="Current")
+            scope.add_math_signal(
+                "P_out", "vout * I(L1)",
+                color="#e15759", unit="W", panel="Power",
+            )
+
+        Cycle-mean output voltage::
+
+            scope.add_math_signal("Vout_avg", "mean(vout)", panel="Voltage")
+        """
+        try:
+            tree = _math_compile(expr)
+        except ValueError as exc:
+            raise ValueError(
+                f"add_math_signal({name!r}): {exc}"
+            ) from exc
+        deps = _math_collect_names(tree)
+        # Defer dep-existence check: at registration time, other
+        # signals may not have been added yet. Verified at first tick.
+        sig = SignalDef(
+            name,
+            lambda t, x: 0.0,  # placeholder; eval happens vectorized
+            color=color,
+            unit=unit,
+            panel=self._resolve_panel(panel),
+            fmt=fmt,
+            kind="math",
+            math_expr=expr,
+            math_tree=tree,
+            math_deps=tuple(deps),
+        )
         self._signals.append(sig)
         return self
 
@@ -793,6 +1069,32 @@ class LiveScope:
         fft_btn.clicked.connect(self._show_fft_dialog)
         row3.addWidget(fft_btn)
 
+        # ----- Math channel button ----------------------------------------
+        math_btn = QtWidgets.QPushButton("➕ Math")
+        math_btn.setToolTip(
+            "Add a derived trace = numpy expression over existing signals. "
+            "Examples:\n"
+            "  P_out = vout * I(L1)\n"
+            "  V_diff = vin - vout\n"
+            "  V_rms = rms(vout)\n"
+            "Supported ops: + - * / ** % //   "
+            "funcs: abs sqrt sign sin cos tan exp log log10 "
+            "minimum maximum mean rms min max sum   "
+            "consts: pi e"
+        )
+        math_btn.clicked.connect(self._show_add_math_dialog)
+        row3.addWidget(math_btn)
+
+        # ----- Log Y toggle (applies to all panels) -----------------------
+        self._log_y_btn = QtWidgets.QPushButton("Log Y")
+        self._log_y_btn.setCheckable(True)
+        self._log_y_btn.setToolTip(
+            "Toggle log-scale Y for every panel. Useful for "
+            "current-sense signals that span decades."
+        )
+        self._log_y_btn.toggled.connect(self._on_log_y_toggled)
+        row3.addWidget(self._log_y_btn)
+
         row3.addStretch()
         ctrl_layout.addLayout(row3)
 
@@ -1102,7 +1404,15 @@ class LiveScope:
             t_latest = float(t_all[-1])
             n_new = t_all.shape[0]
 
+            # First pass — state / chain / custom signals. Stash each
+            # batch's per-signal array so the math pass below can
+            # reference them without re-reading the ring.
+            batch_signals: Dict[str, np.ndarray] = {}
             for sig in self._signals:
+                if sig.kind == "math":
+                    # Math channels evaluated in a second pass below
+                    # so their dependencies are already populated.
+                    continue
                 if sig.kind == "state":
                     # ONE numpy slice — no Python per-sample work.
                     y_new = x_all[:, sig.state_idx]
@@ -1118,6 +1428,51 @@ class LiveScope:
                           for i in range(n_new)),
                         dtype=np.float64, count=n_new)
                 self._ring_push(sig.name, t_all, y_new)
+                batch_signals[sig.name] = y_new
+
+            # Second pass — math channels. Vectorised eval against
+            # ``batch_signals``; a math channel may depend on any
+            # already-registered state/chain/custom (or other math
+            # registered earlier — added in-order here so chained
+            # math just works as long as deps appear first in the
+            # registration sequence).
+            for sig in self._signals:
+                if sig.kind != "math":
+                    continue
+                missing = [d for d in sig.math_deps
+                            if d not in batch_signals]
+                if missing:
+                    # Unknown dep at first tick — log + zero so user
+                    # gets a visible flat line until they fix the
+                    # expression (vs crashing the scope).
+                    if not getattr(sig, "_math_warned", False):
+                        sys.stderr.write(
+                            f"[LiveScope] math channel {sig.name!r}: "
+                            f"missing dependencies "
+                            f"{missing} — registered names: "
+                            f"{sorted(batch_signals.keys())}\n"
+                        )
+                        sig._math_warned = True  # type: ignore[attr-defined]
+                    y_new = np.zeros(n_new, dtype=np.float64)
+                else:
+                    ctx = {d: batch_signals[d] for d in sig.math_deps}
+                    try:
+                        y_new = _math_eval(sig.math_tree, ctx)
+                        if y_new.shape != t_all.shape:
+                            y_new = np.broadcast_to(
+                                y_new, t_all.shape
+                            ).astype(np.float64, copy=True)
+                    except Exception as exc:  # noqa: BLE001
+                        if not getattr(sig, "_math_warned", False):
+                            sys.stderr.write(
+                                f"[LiveScope] math channel "
+                                f"{sig.name!r}: eval error — "
+                                f"{exc}\n"
+                            )
+                            sig._math_warned = True  # type: ignore[attr-defined]
+                        y_new = np.zeros(n_new, dtype=np.float64)
+                self._ring_push(sig.name, t_all, y_new)
+                batch_signals[sig.name] = y_new
 
             # PLECS/PSIM-style edge trigger. In single mode we scan
             # this batch for the first edge on ``_trigger_source``
@@ -1551,6 +1906,144 @@ class LiveScope:
         # Restore prior pause state when the user dismisses the dialog.
         if not was_paused and self._pause_btn is not None:
             self._pause_btn.setChecked(False)
+
+    # ---- Log Y toggle (applies to all panels) ------------------------
+
+    def _on_log_y_toggled(self, checked: bool) -> None:
+        for ps in self._panels.values():
+            try:
+                ps.plot.setLogMode(y=bool(checked))
+            except Exception:  # noqa: BLE001
+                pass
+        # Auto-range Y after switching modes so the curves fit.
+        for ps in self._panels.values():
+            try:
+                ps.plot.enableAutoRange(axis="y", enable=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # ---- Math channel add dialog -------------------------------------
+
+    def _show_add_math_dialog(self) -> None:
+        """Interactive dialog to register a new math channel after
+        the scope is already running. Mirrors :meth:`add_math_signal`
+        but with a UI + lazy curve / ring creation so the math trace
+        starts drawing on the next tick."""
+        dlg = QtWidgets.QDialog(self._win)
+        dlg.setWindowTitle("Add Math Channel")
+        dlg.resize(560, 320)
+        form = QtWidgets.QFormLayout(dlg)
+        form.setSpacing(8)
+
+        name_edit = QtWidgets.QLineEdit()
+        name_edit.setPlaceholderText("e.g. P_out")
+        form.addRow("Name:", name_edit)
+
+        expr_edit = QtWidgets.QLineEdit()
+        expr_edit.setPlaceholderText("e.g. vout * I(L1)")
+        form.addRow("Expression:", expr_edit)
+
+        unit_edit = QtWidgets.QLineEdit()
+        unit_edit.setPlaceholderText("V, A, W, ...")
+        form.addRow("Unit:", unit_edit)
+
+        panel_combo = QtWidgets.QComboBox()
+        panel_combo.setEditable(True)
+        for p in self._panel_names:
+            panel_combo.addItem(p)
+        panel_combo.setCurrentText(self._panel_names[0])
+        form.addRow("Panel:", panel_combo)
+
+        color_edit = QtWidgets.QLineEdit("#9c27b0")
+        color_edit.setToolTip("Any pyqtgraph-accepted colour, e.g. "
+                                "'#9c27b0', 'red', or RGB tuple.")
+        form.addRow("Color:", color_edit)
+
+        # Helper hint with available names + functions.
+        existing_sigs = ", ".join(s.name for s in self._signals)
+        hint = QtWidgets.QLabel(
+            f"<b>Available signals:</b> {existing_sigs or '(none yet)'}<br>"
+            f"<b>Operators:</b> + - * / ** % //<br>"
+            f"<b>Functions:</b> abs sqrt sign sin cos tan exp log log10 "
+            f"minimum maximum mean rms min max sum<br>"
+            f"<b>Constants:</b> pi e"
+        )
+        hint.setStyleSheet(
+            f"color: {_DIM_COLOR}; font-size: 9pt; padding: 6px 0;"
+        )
+        hint.setWordWrap(True)
+        form.addRow(hint)
+
+        # Validate-on-the-fly status.
+        status = QtWidgets.QLabel("")
+        status.setStyleSheet(f"color: {_ACCENT_COLOR}; font-weight: 600;")
+        form.addRow(status)
+
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        form.addRow(btns)
+        btns.rejected.connect(dlg.reject)
+
+        def _validate_and_accept():
+            name = name_edit.text().strip()
+            expr = expr_edit.text().strip()
+            if not name:
+                status.setText("Name is required.")
+                return
+            if not expr:
+                status.setText("Expression is required.")
+                return
+            if name in {s.name for s in self._signals}:
+                status.setText(f"Signal {name!r} already exists.")
+                return
+            try:
+                _math_compile(expr)
+            except ValueError as exc:
+                status.setText(str(exc))
+                return
+            dlg.accept()
+
+        btns.accepted.connect(_validate_and_accept)
+
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+
+        name = name_edit.text().strip()
+        expr = expr_edit.text().strip()
+        unit = unit_edit.text().strip()
+        color = color_edit.text().strip() or "#9c27b0"
+        panel = panel_combo.currentText().strip() or self._panel_names[0]
+
+        # Register the signal via the public API (handles compile +
+        # deps + appending to ``self._signals``).
+        self.add_math_signal(
+            name, expr, color=color, unit=unit, panel=panel,
+        )
+
+        # Lazy panel / curve / ring creation — the live scope was
+        # already started, so we can't call ``_build_panels`` again.
+        # Allocate this signal's ring buffer.
+        self._ring_t[name] = np.zeros(self._max_points, dtype=np.float64)
+        self._ring_y[name] = np.zeros(self._max_points, dtype=np.float64)
+        self._ring_n[name] = 0
+        self._enabled[name] = True
+
+        # If the panel doesn't exist yet, fall back to the first one.
+        if panel not in self._panels:
+            panel = next(iter(self._panels.keys()))
+        ps = self._panels[panel]
+        sig = self._signals[-1]
+        pen = pg.mkPen(color=color, width=1.6)
+        curve = ps.plot.plot([], [], pen=pen, name=name)
+        ps.curves[name] = curve
+        ps.signals.append(sig)
+
+        # Status feedback.
+        if self._status_label is not None:
+            self._status_label.setText(
+                f"math channel {name} = {expr} added to {panel}"
+            )
 
 
 class _ClickFilter(QtCore.QObject):
