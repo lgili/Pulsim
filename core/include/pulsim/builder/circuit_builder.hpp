@@ -431,6 +431,67 @@ public:
         return x0;
     }
 
+    /// Human-readable names for every entry of the state vector the
+    /// kernel solves. Returns a ``std::vector<std::string>`` of size
+    /// ``pool.state_size(graph)`` — same layout the kernel uses:
+    ///
+    ///   * indices ``[0, num_nodes)``           → ``"V(<node_name>)"``
+    ///   * indices ``[num_nodes, ..)``          → either
+    ///     ``"Is(<branch_name>)"`` for voltage-source currents OR
+    ///     ``"I(<branch_name>)"`` for inductor currents, placed at
+    ///     the slot the pool returns from ``branch_var_id_for_*``.
+    ///
+    /// Unnamed nodes (rare) are reported as ``"V(n<id>)"``; unnamed
+    /// branches as ``"<kind>(b<id>)"``. Useful primarily for the
+    /// live scope: ``pulsim.LiveScope`` / PulsimGUI use these as
+    /// human labels and to resolve ``state_idx`` for new signals
+    /// registered against the running stream.
+    [[nodiscard]] std::vector<std::string> state_var_names() const {
+        const Index n_nodes = graph_.num_nodes();
+        const std::size_t n_state =
+            static_cast<std::size_t>(pool_.state_size(graph_));
+        std::vector<std::string> names(n_state);
+        // Node voltage slots: 0 .. n_nodes - 1.
+        for (Index i = 0; i < n_nodes && static_cast<std::size_t>(i) < n_state;
+              ++i) {
+            const auto& nm = graph_.node(i).name;
+            names[static_cast<std::size_t>(i)] =
+                nm.empty()
+                    ? std::string("V(n") + std::to_string(i) + ")"
+                    : std::string("V(") + nm + ")";
+        }
+        // Branch state slots — pool tells us the column.
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            std::string bname{name_of(b)};
+            if (bname.empty()) {
+                bname = std::string("b") + std::to_string(b);
+            }
+            Index col = -1;
+            std::string prefix;
+            if (pool_.is_voltage_source(b)) {
+                col = pool_.branch_var_id_for_source(b, graph_);
+                prefix = "Is(";
+            } else if (pool_.is_inductor(b)) {
+                col = pool_.branch_var_id_for_inductor(b, graph_);
+                prefix = "I(";
+            } else {
+                continue;
+            }
+            if (col >= 0 && static_cast<std::size_t>(col) < n_state) {
+                names[static_cast<std::size_t>(col)] =
+                    prefix + bname + ")";
+            }
+        }
+        // Sanity: any still-empty slot gets a generic label so the
+        // GUI never sees an empty string (would look broken).
+        for (std::size_t i = 0; i < n_state; ++i) {
+            if (names[i].empty()) {
+                names[i] = std::string("x[") + std::to_string(i) + "]";
+            }
+        }
+        return names;
+    }
+
     /// Returns the recorded `{branch_id: value}` IC map (read-only
     /// view; rarely useful from Python — :meth:`initial_state` is
     /// the consumer).

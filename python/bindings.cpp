@@ -375,6 +375,19 @@ void init_module(py::module_& m) {
               "num_state_branches with each IC slot populated and zero\n"
               "elsewhere. Consumed by `pulsim.simulate` when\n"
               "`initial_state=None`.")
+        .def("state_var_names",
+              &builder::CircuitBuilder::state_var_names,
+              "Human-readable name for every entry of the state vector\n"
+              "the kernel solves. Returns ``list[str]`` of size\n"
+              "``pool.state_size(graph)`` — same layout the kernel uses.\n"
+              "Entries are ``V(<node>)`` for node voltages,\n"
+              "``Is(<branch>)`` for voltage-source currents, and\n"
+              "``I(<branch>)`` for inductor currents.\n"
+              "\n"
+              "Used by ``pulsim.NativeLiveStream`` (the live scope) to\n"
+              "label channels without the caller having to recompute\n"
+              "the layout themselves. ``simulate(live_stream=…)``\n"
+              "auto-fills the names into the stream when attaching.")
         .def("add_saturable_inductor",
               &builder::CircuitBuilder::add_saturable_inductor,
               py::arg("name"), py::arg("from"),

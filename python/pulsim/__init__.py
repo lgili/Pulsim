@@ -929,8 +929,26 @@ def simulate(
     live_ring = None
     if live_stream is not None:
         state_size = builder.pool.state_size(builder.graph)
-        live_stream.attach(state_size)
+        # ``builder.state_var_names()`` returns a labelled list of
+        # the same length as the kernel state vector — passes it
+        # along so live-scope GUIs (``pulsim.LiveScope`` /
+        # PulsimGUI) can resolve names → state indices without
+        # re-computing the layout themselves.
+        names = None
+        try:
+            names = list(builder.state_var_names())
+        except Exception:  # noqa: BLE001 — older binaries lack it
+            names = None
+        live_stream.attach(state_size, names=names)
         live_ring = live_stream.native_ring
+        # Auto-wire pause/stop into ``should_continue`` so the GUI's
+        # pause button actually halts the kernel (instead of letting
+        # samples accumulate during a "display-only" pause). Only when
+        # the caller didn't pass their own should_continue — we don't
+        # want to override a user-supplied cancellation hook.
+        if should_continue is None \
+                and hasattr(live_stream, "should_continue"):
+            should_continue = live_stream.should_continue
 
     # Fast-path: if step_observer carries an attached `_cxx_chain`
     # attribute (set by `MixedDomainBlockChain.make_step_observer`),
@@ -1003,7 +1021,7 @@ def simulate(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 
 # ---------------------------------------------------------------------------
