@@ -671,6 +671,95 @@ class LiveScope:
         self._signals.append(sig)
         return self
 
+    def add_state(self, name: str, *,
+                       label: Optional[str] = None,
+                       color: Optional[str] = None,
+                       unit: Optional[str] = None,
+                       panel: Optional[str] = None,
+                       fmt: str = "{:+8.3f}") -> "LiveScope":
+        """Register a state-vector channel by its kernel-side name.
+
+        The names come from ``builder.state_var_names()`` (exposed
+        through ``stream.channel_names``) and follow the convention:
+
+        * ``"V(<node>)"``     — node voltage (e.g. ``"V(vout)"``)
+        * ``"I(<branch>)"``   — inductor branch current (e.g. ``"I(L1)"``)
+        * ``"Is(<branch>)"``  — voltage-source branch current
+
+        Uses ``stream.state_index_for(name)`` when available
+        (``NativeLiveStream`` with the v1.4.2+ name map). Falls back to
+        parsing the parenthesised name and going through
+        ``builder.node_id_of`` / ``branch_var_id_for_inductor`` so
+        scripts on legacy streams keep working.
+
+        Saves the boilerplate of tracking ``b.graph.num_branches`` by
+        hand before each ``add_inductor`` call.
+        """
+        idx = None
+        if hasattr(self.stream, "state_index_for"):
+            try:
+                idx = self.stream.state_index_for(name)
+            except Exception:  # noqa: BLE001
+                idx = None
+        if idx is None:
+            # Fallback — parse the kernel naming convention manually.
+            idx, default_unit = self._resolve_state_name(name)
+        else:
+            # Pick a default unit from the prefix when caller didn't
+            # set one explicitly.
+            default_unit = "V" if name.startswith("V(") else (
+                "A" if name.startswith(("I(", "Is(")) else "")
+        if idx is None:
+            raise ValueError(
+                f"LiveScope.add_state({name!r}) — name not found in the "
+                f"kernel state layout. Available channel names: "
+                f"{list(getattr(self.stream, 'channel_names', None) or [])}"
+            )
+        nm = label or name
+        sig = SignalDef(nm, lambda t, x, _i=int(idx): float(x[_i]),
+                         color=color,
+                         unit=unit if unit is not None else default_unit,
+                         panel=self._resolve_panel(panel),
+                         fmt=fmt, kind="state", state_idx=int(idx))
+        self._signals.append(sig)
+        return self
+
+    def _resolve_state_name(self, name: str):
+        """Parse ``"V(node)"`` / ``"I(branch)"`` / ``"Is(branch)"`` to
+        a ``(state_idx, default_unit)`` tuple via the builder. Returns
+        ``(None, "")`` when the name doesn't match a known pattern or
+        the builder can't resolve the inner identifier."""
+        if name.startswith("V(") and name.endswith(")"):
+            inner = name[2:-1]
+            try:
+                return int(self.builder.node_id_of(inner)), "V"
+            except Exception:  # noqa: BLE001
+                return None, "V"
+        if name.startswith("I(") and name.endswith(")"):
+            inner = name[2:-1]
+            try:
+                bid = int(self.builder.branch_id_of(inner))
+                return int(
+                    self.builder.pool.branch_var_id_for_inductor(
+                        bid, self.builder.graph)
+                ), "A"
+            except Exception:  # noqa: BLE001
+                return None, "A"
+        if name.startswith("Is(") and name.endswith(")"):
+            inner = name[3:-1]
+            try:
+                bid = int(self.builder.branch_id_of(inner))
+                # Voltage-source branch currents sit at the same column
+                # as inductor branches in the MNA layout — the pool
+                # exposes them via the same helper.
+                return int(
+                    self.builder.pool.branch_var_id_for_inductor(
+                        bid, self.builder.graph)
+                ), "A"
+            except Exception:  # noqa: BLE001
+                return None, "A"
+        return None, ""
+
     def add_math_signal(self, name: str, expr: str, *,
                           color: Optional[str] = None,
                           unit: str = "",
