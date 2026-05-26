@@ -67,6 +67,89 @@ _TEXT_COLOR   = "#d8d9da"
 _DIM_COLOR    = "#7a7e8a"
 _ACCENT_COLOR = "#5b9bd5"
 _DANGER_COLOR = "#c44545"
+_CURSOR_A_COLOR = "#ffb300"
+_CURSOR_B_COLOR = "#ff5252"
+
+
+# ============================================================================
+# SMPS / trigger numpy helpers — pure numpy, easy to unit-test offline.
+# ============================================================================
+
+
+def _zero_crossings(t: np.ndarray, y: np.ndarray,
+                     level: float = 0.0,
+                     direction: str = "rising") -> np.ndarray:
+    """Return interpolated time stamps where ``y(t)`` crosses ``level``.
+
+    ``direction`` ∈ {``"rising"``, ``"falling"``, ``"both"``}.
+    Returns an empty array when no crossing is found in the window.
+    Used for both trigger edge detection and SMPS period measurement.
+    """
+    if t.size < 2:
+        return np.empty(0, dtype=np.float64)
+    y0 = y - level
+    if direction == "rising":
+        cross = (y0[:-1] <= 0.0) & (y0[1:] > 0.0)
+    elif direction == "falling":
+        cross = (y0[:-1] >= 0.0) & (y0[1:] < 0.0)
+    else:
+        cross = ((y0[:-1] <= 0.0) & (y0[1:] > 0.0)) | \
+                ((y0[:-1] >= 0.0) & (y0[1:] < 0.0))
+    idx = np.nonzero(cross)[0]
+    if idx.size == 0:
+        return np.empty(0, dtype=np.float64)
+    t0, t1 = t[idx], t[idx + 1]
+    y_a, y_b = y0[idx], y0[idx + 1]
+    denom = (y_b - y_a)
+    frac = np.where(np.abs(denom) > 1e-30, -y_a / denom, 0.5)
+    return t0 + frac * (t1 - t0)
+
+
+def _detect_period(t: np.ndarray, y: np.ndarray) -> Optional[float]:
+    """Estimate the period of ``y(t)`` via consecutive same-direction
+    zero crossings of the mean-subtracted signal. Falls back to
+    bidirectional crossings × 2 for square / PWM signals where rising
+    crossings alone may be sparse. Returns ``None`` when no period
+    can be inferred (<2 crossings)."""
+    if y.size < 4:
+        return None
+    y_dc = y - float(np.mean(y))
+    crosses = _zero_crossings(t, y_dc, level=0.0, direction="rising")
+    if crosses.size < 2:
+        crosses = _zero_crossings(t, y_dc, level=0.0, direction="both")
+        if crosses.size < 3:
+            return None
+        return float(2.0 * np.median(np.diff(crosses)))
+    return float(np.median(np.diff(crosses)))
+
+
+def _detect_duty(t: np.ndarray, y: np.ndarray) -> Optional[float]:
+    """Estimate duty cycle of a switching signal: fraction of samples
+    above the median. Returns ``None`` when no switching is observed
+    (signal entirely above or below the median in the window)."""
+    if y.size < 8:
+        return None
+    threshold = float(np.median(y))
+    high = y > threshold
+    if high.all() or (~high).all():
+        return None
+    return float(np.mean(high))
+
+
+def _ripple_stats(y: np.ndarray) -> dict:
+    """Min / max / mean / peak-to-peak / RMS over the array."""
+    if y.size == 0:
+        return {"min": 0.0, "max": 0.0, "mean": 0.0,
+                "pp": 0.0, "rms": 0.0}
+    y_min = float(np.min(y))
+    y_max = float(np.max(y))
+    return {
+        "min":  y_min,
+        "max":  y_max,
+        "mean": float(np.mean(y)),
+        "pp":   y_max - y_min,
+        "rms":  float(np.sqrt(np.mean(y * y))),
+    }
 
 
 _Extractor = Callable[[float, np.ndarray], float]
@@ -198,6 +281,29 @@ class LiveScope:
         self._focus_signal: Optional[str] = None
         self._stats_label = None
         self._stats_history: Optional[list] = None
+
+        # Trigger state (PLECS/PSIM-style edge trigger).
+        # ``mode``  : "free" (rolling window, default) or "single"
+        #             (freeze after first edge on _trigger_source).
+        # ``source`` : signal name to watch.
+        # ``level`` : voltage / current at which the edge fires.
+        # ``edge``  : "rising" or "falling".
+        # ``fired_at`` : t of the last detected edge — None while
+        #               armed; set to a float when ``single`` fires;
+        #               cleared by Re-arm.
+        self._trigger_mode = "free"
+        self._trigger_source: Optional[str] = None
+        self._trigger_level = 0.0
+        self._trigger_edge = "rising"
+        self._trigger_fired_at: Optional[float] = None
+        self._trigger_armed = True
+        # UI widgets (built lazily in _build_controls).
+        self._trigger_mode_combo = None
+        self._trigger_source_combo = None
+        self._trigger_edge_combo = None
+        self._trigger_level_spin = None
+        self._smps_source_combo = None
+        self._smps_readout = None
 
     # =====================================================================
     # Signal-registration API
@@ -564,11 +670,131 @@ class LiveScope:
         self._cursor_readout.setVisible(False)
         row2.addWidget(self._cursor_readout)
 
+        # Clear + Re-arm: pulled into row2 so they sit next to Pause.
+        self._clear_btn = QtWidgets.QPushButton("🗑 Clear")
+        self._clear_btn.setToolTip(
+            "Drop all ring history and reset trigger state."
+        )
+        self._clear_btn.clicked.connect(self._clear)
+        row2.insertWidget(3, self._clear_btn)
+
         self._stop_btn = QtWidgets.QPushButton("STOP simulation")
         self._stop_btn.setObjectName("stopBtn")
         self._stop_btn.clicked.connect(self._on_stop)
         row2.addWidget(self._stop_btn)
         ctrl_layout.addLayout(row2)
+
+        # =================================================================
+        # Row 3 — Trigger + SMPS macros + FFT (PLECS/PSIM-style controls)
+        # =================================================================
+        row3 = QtWidgets.QHBoxLayout()
+        row3.setSpacing(6)
+
+        # ----- Trigger group ----------------------------------------------
+        trig_box = QtWidgets.QFrame()
+        trig_box.setStyleSheet(
+            f"QFrame {{ border: 1px solid {_GRID_COLOR}; "
+            f"border-radius: 4px; padding: 2px 6px; }}")
+        trig_layout = QtWidgets.QHBoxLayout(trig_box)
+        trig_layout.setContentsMargins(4, 2, 4, 2)
+        trig_layout.setSpacing(4)
+        trig_layout.addWidget(QtWidgets.QLabel("⊳ Trigger"))
+
+        self._trigger_mode_combo = QtWidgets.QComboBox()
+        self._trigger_mode_combo.addItems(["Free Run", "Single"])
+        self._trigger_mode_combo.currentTextChanged.connect(self._on_trigger_mode)
+        self._trigger_mode_combo.setToolTip(
+            "Free Run: rolling window. "
+            "Single: freeze on the first edge of Source crossing Level."
+        )
+        trig_layout.addWidget(self._trigger_mode_combo)
+
+        self._trigger_source_combo = QtWidgets.QComboBox()
+        for sig in self._signals:
+            self._trigger_source_combo.addItem(sig.name)
+        self._trigger_source_combo.currentTextChanged.connect(
+            lambda name: setattr(self, "_trigger_source", name or None)
+        )
+        if self._signals:
+            self._trigger_source = self._signals[0].name
+        self._trigger_source_combo.setToolTip("Signal to watch for edge.")
+        trig_layout.addWidget(self._trigger_source_combo)
+
+        self._trigger_edge_combo = QtWidgets.QComboBox()
+        self._trigger_edge_combo.addItems(["rising", "falling"])
+        self._trigger_edge_combo.currentTextChanged.connect(
+            lambda val: setattr(self, "_trigger_edge", val)
+        )
+        trig_layout.addWidget(self._trigger_edge_combo)
+
+        self._trigger_level_spin = QtWidgets.QDoubleSpinBox()
+        self._trigger_level_spin.setRange(-1e9, 1e9)
+        self._trigger_level_spin.setDecimals(4)
+        self._trigger_level_spin.setSingleStep(0.1)
+        self._trigger_level_spin.setSuffix(" (level)")
+        self._trigger_level_spin.valueChanged.connect(
+            lambda val: setattr(self, "_trigger_level", float(val))
+        )
+        trig_layout.addWidget(self._trigger_level_spin)
+
+        rearm_btn = QtWidgets.QPushButton("Re-arm")
+        rearm_btn.setToolTip("Clear the last fired trigger and re-arm.")
+        rearm_btn.clicked.connect(self._rearm_trigger)
+        trig_layout.addWidget(rearm_btn)
+        row3.addWidget(trig_box)
+
+        # ----- SMPS macros group ------------------------------------------
+        smps_box = QtWidgets.QFrame()
+        smps_box.setStyleSheet(
+            f"QFrame {{ border: 1px solid {_GRID_COLOR}; "
+            f"border-radius: 4px; padding: 2px 6px; }}")
+        smps_layout = QtWidgets.QHBoxLayout(smps_box)
+        smps_layout.setContentsMargins(4, 2, 4, 2)
+        smps_layout.setSpacing(4)
+        smps_layout.addWidget(QtWidgets.QLabel("⚡ Measure"))
+
+        self._smps_source_combo = QtWidgets.QComboBox()
+        for sig in self._signals:
+            self._smps_source_combo.addItem(sig.name)
+        self._smps_source_combo.setToolTip(
+            "Source signal for the SMPS measurement macros."
+        )
+        smps_layout.addWidget(self._smps_source_combo)
+
+        for label, slot, tip in (
+            ("Tsw", self._measure_tsw,
+             "Detect switching period + frequency from zero-crossings."),
+            ("Duty", self._measure_duty,
+             "Detect duty cycle from samples above the median."),
+            ("Ripple", self._measure_ripple,
+             "min / max / mean / p-p / RMS over visible range "
+             "(or cursor span when cursors are on)."),
+        ):
+            b = QtWidgets.QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            smps_layout.addWidget(b)
+
+        self._smps_readout = QtWidgets.QLabel("—")
+        self._smps_readout.setStyleSheet(
+            f"color: {_ACCENT_COLOR}; "
+            f"font-family: 'SF Mono', Menlo, monospace; "
+            f"font-size: 9pt; font-weight: 700;")
+        self._smps_readout.setMinimumWidth(160)
+        smps_layout.addWidget(self._smps_readout)
+        row3.addWidget(smps_box)
+
+        # ----- FFT button -------------------------------------------------
+        fft_btn = QtWidgets.QPushButton("📈 FFT")
+        fft_btn.setToolTip(
+            "Compute FFT + THD% on the focused signal in the visible window. "
+            "Pauses the display automatically when clicked while running."
+        )
+        fft_btn.clicked.connect(self._show_fft_dialog)
+        row3.addWidget(fft_btn)
+
+        row3.addStretch()
+        ctrl_layout.addLayout(row3)
 
         self._main_layout.addWidget(ctrl_box)
 
@@ -893,6 +1119,20 @@ class LiveScope:
                         dtype=np.float64, count=n_new)
                 self._ring_push(sig.name, t_all, y_new)
 
+            # PLECS/PSIM-style edge trigger. In single mode we scan
+            # this batch for the first edge on ``_trigger_source``
+            # crossing ``_trigger_level`` in the chosen ``_trigger_edge``
+            # direction. When found, auto-pauses the display via the
+            # existing Pause button (re-use that ``_paused`` state
+            # machine instead of inventing a new one). Re-arm clears
+            # the fired flag and resumes.
+            if (self._trigger_mode == "single" and self._trigger_armed):
+                self._check_trigger_in_new_samples(t_all, x_all)
+                if (self._trigger_fired_at is not None
+                        and self._pause_btn is not None
+                        and not self._paused):
+                    self._pause_btn.setChecked(True)
+
             # Window trim — same cutoff for every signal so curves
             # stay aligned.
             self._ring_trim_window(t_latest - self.window_seconds)
@@ -1004,8 +1244,25 @@ class LiveScope:
         if n == 0:
             self._stats_label.setText(f"stats[{name}]: ---")
             return
-        a = self._ring_y[name][:n]
-        # Sliding-window stats over what's currently displayed.
+        t_full = self._ring_t[name][:n]
+        a_full = self._ring_y[name][:n]
+        # When cursors A/B are on, stats live ONLY between them — same
+        # convention PLECS uses. Otherwise full ring buffer (sliding
+        # window).
+        scope_tag = ""
+        if (self._cursors_enabled
+                and self._cursor_a_pos is not None
+                and self._cursor_b_pos is not None):
+            x_lo = min(self._cursor_a_pos, self._cursor_b_pos)
+            x_hi = max(self._cursor_a_pos, self._cursor_b_pos)
+            mask = (t_full >= x_lo) & (t_full <= x_hi)
+            if mask.any():
+                a = a_full[mask]
+                scope_tag = "[A-B]"
+            else:
+                a = a_full
+        else:
+            a = a_full
         v_min = float(a.min())
         v_max = float(a.max())
         v_mean = float(a.mean())
@@ -1014,12 +1271,286 @@ class LiveScope:
         sig = next((s for s in self._signals if s.name == name), None)
         unit = sig.unit if sig else ""
         self._stats_label.setText(
-            f"stats[{name}]:  "
+            f"stats[{name}]{scope_tag}:  "
             f"min={v_min:+.4g}{unit}  "
             f"max={v_max:+.4g}{unit}  "
             f"mean={v_mean:+.4g}{unit}  "
             f"rms={v_rms:.4g}{unit}  "
             f"p-p={v_pp:.4g}{unit}")
+
+    # =====================================================================
+    # PLECS/PSIM-style additions: Clear, Trigger, SMPS macros, FFT.
+    # All methods below are pure-Python and depend only on the existing
+    # ring buffers (self._ring_t, self._ring_y, self._ring_n).
+    # =====================================================================
+
+    def _clear(self) -> None:
+        """Drop every ring sample and reset trigger state. Same
+        button label as on a bench scope."""
+        for name in list(self._ring_n.keys()):
+            self._ring_n[name] = 0
+        for sig in self._signals:
+            curve = None
+            panel = self._panels.get(sig.panel)
+            if panel is not None:
+                curve = panel.curves.get(sig.name)
+            if curve is not None:
+                curve.clear()
+        self._trigger_fired_at = None
+        self._trigger_armed = True
+        if self._smps_readout is not None:
+            self._smps_readout.setText("—")
+        # Wake the display from any frozen state.
+        if self._status_label is not None:
+            self._status_label.setText("cleared")
+
+    # ---- Trigger ----------------------------------------------------
+
+    def _on_trigger_mode(self, label: str) -> None:
+        self._trigger_mode = (
+            "single" if label.lower().startswith("single") else "free"
+        )
+        if self._trigger_mode == "free":
+            self._trigger_fired_at = None
+            self._trigger_armed = True
+
+    def _rearm_trigger(self) -> None:
+        self._trigger_fired_at = None
+        self._trigger_armed = True
+        # If single-trigger auto-paused us, resume.
+        if self._paused and self._pause_btn is not None:
+            self._pause_btn.setChecked(False)
+
+    def _check_trigger_in_new_samples(self, t_new: np.ndarray,
+                                         x_new: np.ndarray) -> None:
+        """Detect the first edge of ``_trigger_source`` crossing
+        ``_trigger_level`` in this batch. Sets ``_trigger_fired_at``
+        and disarms when a crossing is found."""
+        if not self._trigger_source:
+            return
+        sig = next(
+            (s for s in self._signals if s.name == self._trigger_source),
+            None,
+        )
+        if sig is None or sig.kind != "state":
+            # Trigger only on state-vector signals — chain/custom
+            # extractors don't produce per-sample arrays here.
+            return
+        if sig.state_idx >= x_new.shape[1]:
+            return
+        y = x_new[:, sig.state_idx]
+        crosses = _zero_crossings(
+            t_new, y,
+            level=self._trigger_level,
+            direction=self._trigger_edge,
+        )
+        if crosses.size == 0:
+            return
+        self._trigger_fired_at = float(crosses[0])
+        self._trigger_armed = False
+
+    # ---- SMPS macros -------------------------------------------------
+
+    def _get_meas_window(self) -> Optional[tuple]:
+        """Return ``(t, y)`` for the SMPS-source signal, clipped to
+        the visible X range — or, when cursors are on, to the cursor
+        span. Returns ``None`` when no data is available."""
+        if self._smps_source_combo is None:
+            return None
+        name = self._smps_source_combo.currentText()
+        if not name or name not in self._ring_n:
+            return None
+        n = self._ring_n[name]
+        if n < 4:
+            return None
+        t_full = self._ring_t[name][:n]
+        y_full = self._ring_y[name][:n]
+        # Source X range from the first panel (panels are X-linked).
+        x_lo = float(t_full[0])
+        x_hi = float(t_full[-1])
+        first_panel = next(iter(self._panels.values()), None)
+        if first_panel is not None:
+            try:
+                (vmin, vmax), _ = first_panel.plot_widget.viewRange()
+                x_lo = max(x_lo, float(vmin))
+                x_hi = min(x_hi, float(vmax))
+            except Exception:  # noqa: BLE001
+                pass
+        if self._cursors_enabled:
+            x_lo = min(self._cursor_a_pos, self._cursor_b_pos)
+            x_hi = max(self._cursor_a_pos, self._cursor_b_pos)
+        mask = (t_full >= x_lo) & (t_full <= x_hi)
+        if not mask.any():
+            return t_full, y_full
+        return t_full[mask], y_full[mask]
+
+    def _measure_tsw(self) -> None:
+        window = self._get_meas_window()
+        if window is None:
+            self._smps_readout.setText("Tsw: need ≥4 samples")
+            return
+        t, y = window
+        Tsw = _detect_period(t, y)
+        if Tsw is None or Tsw <= 0.0:
+            self._smps_readout.setText("Tsw: not detected")
+            return
+        fsw = 1.0 / Tsw
+        self._smps_readout.setText(
+            f"Tsw={Tsw*1e6:.3f} µs  Fsw={fsw/1e3:.3f} kHz"
+        )
+
+    def _measure_duty(self) -> None:
+        window = self._get_meas_window()
+        if window is None:
+            self._smps_readout.setText("Duty: need ≥8 samples")
+            return
+        t, y = window
+        D = _detect_duty(t, y)
+        if D is None:
+            self._smps_readout.setText("Duty: not switching")
+            return
+        self._smps_readout.setText(f"Duty = {D*100:.2f} %")
+
+    def _measure_ripple(self) -> None:
+        window = self._get_meas_window()
+        if window is None:
+            self._smps_readout.setText("Ripple: no samples")
+            return
+        _, y = window
+        s = _ripple_stats(y)
+        self._smps_readout.setText(
+            f"mean={s['mean']:+.4g}  p-p={s['pp']:.4g}  "
+            f"RMS={s['rms']:.4g}"
+        )
+
+    # ---- FFT modal ---------------------------------------------------
+
+    def _show_fft_dialog(self) -> None:
+        """Open a modal pyqtgraph dialog with FFT + THD of the focused
+        signal, computed over the visible X range. Auto-pauses the
+        live display while the dialog is open (cheap and avoids the
+        FFT racing against new samples)."""
+        if not self._focus_signal:
+            QtWidgets.QMessageBox.information(
+                self._win, "FFT",
+                "Click a signal name first to focus it, then click FFT."
+            )
+            return
+        was_paused = self._paused
+        if not was_paused and self._pause_btn is not None:
+            self._pause_btn.setChecked(True)  # also flips self._paused
+        name = self._focus_signal
+        n = self._ring_n.get(name, 0)
+        if n < 16:
+            QtWidgets.QMessageBox.information(
+                self._win, "FFT",
+                f"Not enough samples for {name} (have {n}, need ≥ 16)."
+            )
+            return
+        t_full = self._ring_t[name][:n]
+        y_full = self._ring_y[name][:n]
+        first_panel = next(iter(self._panels.values()), None)
+        if first_panel is not None:
+            try:
+                (vmin, vmax), _ = first_panel.plot_widget.viewRange()
+                mask = (t_full >= float(vmin)) & (t_full <= float(vmax))
+                if mask.sum() >= 16:
+                    t_full = t_full[mask]
+                    y_full = y_full[mask]
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Compute FFT with Hann window.
+        n_pts = y_full.size
+        dt = (t_full[-1] - t_full[0]) / max(1, n_pts - 1)
+        if dt <= 0:
+            QtWidgets.QMessageBox.information(
+                self._win, "FFT",
+                "Sample spacing zero — cannot compute FFT.",
+            )
+            return
+        win = np.hanning(n_pts)
+        y_dc = y_full - float(np.mean(y_full))
+        spec = np.abs(np.fft.rfft(y_dc * win)) * (2.0 / n_pts / np.mean(win))
+        freqs = np.fft.rfftfreq(n_pts, d=dt)
+        # THD: take the highest bin (>0 Hz) as fundamental, sum next
+        # 49 harmonics' powers vs fundamental power, sqrt + percentage.
+        nonzero = spec.copy()
+        nonzero[0] = 0.0
+        fund_idx = int(np.argmax(nonzero))
+        f_fund = float(freqs[fund_idx])
+        a_fund = float(spec[fund_idx])
+        thd_pct = float("nan")
+        if a_fund > 0.0 and f_fund > 0.0:
+            harm_power = 0.0
+            for k in range(2, 50):
+                target = k * f_fund
+                if target >= freqs[-1]:
+                    break
+                idx = int(np.argmin(np.abs(freqs - target)))
+                # Use a small window around the bin to be robust to
+                # spectral leakage.
+                lo = max(0, idx - 1)
+                hi = min(spec.size, idx + 2)
+                harm_power += float(np.max(spec[lo:hi]) ** 2)
+            thd_pct = 100.0 * float(np.sqrt(harm_power)) / a_fund
+
+        # Build the dialog.
+        dlg = QtWidgets.QDialog(self._win)
+        dlg.setWindowTitle(
+            f"FFT — {name}  "
+            f"({n_pts} samples, fs={1.0/dt/1e3:.2f} kHz)"
+        )
+        dlg.resize(900, 520)
+        v = QtWidgets.QVBoxLayout(dlg)
+
+        header = QtWidgets.QLabel(
+            f"<b>Fundamental</b>: {f_fund:.4g} Hz   "
+            f"<b>Amplitude</b>: {a_fund:.4g}   "
+            f"<b>THD</b>: {thd_pct:.3f} %"
+        )
+        header.setStyleSheet(
+            f"color: {_TEXT_COLOR}; "
+            f"font-family: 'SF Mono', Menlo, monospace; "
+            f"padding: 4px;"
+        )
+        v.addWidget(header)
+
+        plot = pg.PlotWidget()
+        plot.setBackground(_BG_COLOR)
+        plot.showGrid(x=True, y=True, alpha=0.25)
+        plot.setLabel("bottom", "Frequency", units="Hz")
+        plot.setLabel("left", "Amplitude")
+        plot.plot(freqs, spec, pen=pg.mkPen(_ACCENT_COLOR, width=1.5))
+        v.addWidget(plot, stretch=1)
+
+        # Harmonic table (top 10 harmonics relative to fundamental).
+        table = QtWidgets.QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels(["Harmonic", "Freq (Hz)", "Amplitude (% of fund.)"])
+        table.horizontalHeader().setStretchLastSection(True)
+        if f_fund > 0.0 and a_fund > 0.0:
+            for k in range(1, 11):
+                target = k * f_fund
+                if target >= freqs[-1]:
+                    break
+                idx = int(np.argmin(np.abs(freqs - target)))
+                row = table.rowCount()
+                table.insertRow(row)
+                table.setItem(row, 0, QtWidgets.QTableWidgetItem(f"{k}"))
+                table.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{freqs[idx]:.3f}"))
+                table.setItem(row, 2, QtWidgets.QTableWidgetItem(
+                    f"{100.0 * float(spec[idx]) / a_fund:.3f}"
+                ))
+        table.setMaximumHeight(180)
+        v.addWidget(table)
+
+        close = QtWidgets.QPushButton("Close")
+        close.clicked.connect(dlg.accept)
+        v.addWidget(close)
+        dlg.exec()
+        # Restore prior pause state when the user dismisses the dialog.
+        if not was_paused and self._pause_btn is not None:
+            self._pause_btn.setChecked(False)
 
 
 class _ClickFilter(QtCore.QObject):
