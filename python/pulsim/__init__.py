@@ -929,7 +929,17 @@ def simulate(
     live_ring = None
     if live_stream is not None:
         state_size = builder.pool.state_size(builder.graph)
-        live_stream.attach(state_size)
+        # ``builder.state_var_names()`` returns a labelled list of
+        # the same length as the kernel state vector — passes it
+        # along so live-scope GUIs (``pulsim.LiveScope`` /
+        # PulsimGUI) can resolve names → state indices without
+        # re-computing the layout themselves.
+        names = None
+        try:
+            names = list(builder.state_var_names())
+        except Exception:  # noqa: BLE001 — older binaries lack it
+            names = None
+        live_stream.attach(state_size, names=names)
         live_ring = live_stream.native_ring
 
     # Fast-path: if step_observer carries an attached `_cxx_chain`

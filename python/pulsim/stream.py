@@ -141,21 +141,52 @@ class NativeLiveStream:
         self._state_size = -1
         self._last_read = 0                # reader's monotonic counter
         self._dropped_samples = 0          # samples we missed (ring overflow)
+        # Channel-name metadata. ``simulate(live_stream=…)`` fills
+        # this from ``builder.state_var_names()`` so the GUI can map
+        # human labels (``"V(vout)"``) to state-vector columns
+        # without recomputing the layout. ``None`` when ``attach()``
+        # was called without names (legacy callers, raw script use).
+        self._channel_names = None         # list[str] | None
+        self._name_to_idx: dict = {}        # name -> column index
 
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
 
-    def attach(self, state_size: int) -> None:
+    def attach(self, state_size: int, names=None) -> None:
         """Allocate the ring buffer for the given state vector size.
         Called automatically by ``simulate(live_stream=…)`` before the
-        kernel runs."""
+        kernel runs.
+
+        Parameters
+        ----------
+        state_size
+            Length of the state vector the kernel will push at each
+            step.
+        names
+            Optional list of human-readable labels for each state
+            column. ``simulate()`` fills this from
+            ``builder.state_var_names()`` so the live scope can
+            resolve names → state indices without the caller
+            recomputing the layout. ``None`` keeps the legacy
+            behaviour (no name map; caller resolves indices itself).
+        """
         from . import _pulsim as _k  # type: ignore[import-not-found]
         self._state_size = int(state_size)
         self._ring = _k.LiveRingHandle(
             capacity=self._capacity,
             state_size=self._state_size,
             decimate=self._decimate)
+        if names is not None:
+            self._channel_names = list(names)
+            # Sanity: lengths must match. We tolerate names too short
+            # (rest stays unnamed) but warn-via-truncation instead of
+            # raising, because a name mismatch shouldn't crash a
+            # running sim.
+            n = min(len(self._channel_names), self._state_size)
+            self._name_to_idx = {
+                self._channel_names[i]: i for i in range(n)
+            }
 
     @property
     def native_ring(self):
@@ -166,6 +197,22 @@ class NativeLiveStream:
     @property
     def attached(self) -> bool:
         return self._ring is not None
+
+    @property
+    def channel_names(self):
+        """List of human-readable labels for each state column, or
+        ``None`` when the stream was attached without names. Length
+        is ``state_size``. Consumed by GUI live scopes to populate
+        the signal-registration combo without re-introspecting the
+        builder."""
+        return self._channel_names
+
+    def state_index_for(self, name: str):
+        """Resolve a label (``"V(vout)"`` / ``"I(L1)"`` / …) to its
+        state-vector column index, or ``None`` if the label isn't
+        known to this stream. Cheap: O(1) dict lookup populated at
+        ``attach()`` time."""
+        return self._name_to_idx.get(name)
 
     # ------------------------------------------------------------------
     # Consumer API (used by LiveScope)
