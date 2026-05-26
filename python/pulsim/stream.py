@@ -150,7 +150,7 @@ class NativeLiveStream:
         """Allocate the ring buffer for the given state vector size.
         Called automatically by ``simulate(live_stream=…)`` before the
         kernel runs."""
-        from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
+        from . import _pulsim as _k  # type: ignore[import-not-found]
         self._state_size = int(state_size)
         self._ring = _k.LiveRingHandle(
             capacity=self._capacity,

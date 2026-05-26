@@ -215,7 +215,7 @@ from .spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
-from .stream import LiveStream
+from .stream import LiveStream, NativeLiveStream
 from .losses import (
     LossAccumulator,
     EfficiencyCalculator,
@@ -437,6 +437,7 @@ __all__ = [
     "spice_to_builder",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
+    "NativeLiveStream",
     # Post-hoc loss + efficiency helpers (parity with v1 surface).
     "LossAccumulator",
     "EfficiencyCalculator",
@@ -736,6 +737,7 @@ def simulate(
     initial_state=None,
     should_continue=None,
     closed_loops=None,
+    live_stream=None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -918,6 +920,18 @@ def simulate(
 
         step_observer = _progress_observer
 
+    # Live streaming hook: when the caller passes a NativeLiveStream
+    # (or any object with ``.attach(state_size)`` + ``.native_ring``),
+    # attach it now so the kernel can push (t, x) samples straight
+    # into its ring buffer during the run. The kernel-side ``live_ring``
+    # path uses atomics only — zero GIL contention with the GUI thread
+    # that polls ``stream.get_new_samples()``.
+    live_ring = None
+    if live_stream is not None:
+        state_size = builder.pool.state_size(builder.graph)
+        live_stream.attach(state_size)
+        live_ring = live_stream.native_ring
+
     # Fast-path: if step_observer carries an attached `_cxx_chain`
     # attribute (set by `MixedDomainBlockChain.make_step_observer`),
     # use `run_transient_with_chain` which invokes the C++ chain
@@ -939,6 +953,8 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
+        if live_ring is not None:
+            kwargs["live_ring"] = live_ring
         res = _k.run_transient_with_chain(
             cache, builder.graph, builder.pool, opts,
             chain=cxx_chain, chain_dt=chain_dt,
@@ -960,6 +976,8 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
+        if live_ring is not None:
+            kwargs["live_ring"] = live_ring
         res = run_transient(
             cache, builder.graph, builder.pool, opts, **kwargs,
         )
