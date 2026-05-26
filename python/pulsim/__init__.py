@@ -931,6 +931,14 @@ def simulate(
         state_size = builder.pool.state_size(builder.graph)
         live_stream.attach(state_size)
         live_ring = live_stream.native_ring
+        # Auto-wire pause/stop into ``should_continue`` so the GUI's
+        # pause button actually halts the kernel (instead of letting
+        # samples accumulate during a "display-only" pause). Only when
+        # the caller didn't pass their own should_continue — we don't
+        # want to override a user-supplied cancellation hook.
+        if should_continue is None \
+                and hasattr(live_stream, "should_continue"):
+            should_continue = live_stream.should_continue
 
     # Fast-path: if step_observer carries an attached `_cxx_chain`
     # attribute (set by `MixedDomainBlockChain.make_step_observer`),

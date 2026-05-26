@@ -1362,9 +1362,27 @@ class LiveScope:
             ps.plot.enableAutoRange(axis="y", enable=True)
 
     def _on_pause_toggled(self, checked: bool) -> None:
+        # Pause is a *real* pause: we tell the stream to block the
+        # kernel inside ``should_continue``, so the simulation actually
+        # stops advancing — no samples are generated, the ring stays
+        # frozen at the last value, and on resume the kernel picks up
+        # exactly where it left off. No gaps, no density artefacts.
         self._paused = checked
         self._pause_btn.setText("▶ Resume display" if checked
                                    else "⏸ Pause display")
+        try:
+            if checked:
+                if hasattr(self.stream, "pause"):
+                    self.stream.pause()
+            else:
+                if hasattr(self.stream, "resume"):
+                    self.stream.resume()
+        except Exception:  # noqa: BLE001
+            # Older streams without pause/resume: scope still freezes
+            # display via ``self._paused``; the kernel keeps running
+            # but data is held in the ring until the next non-paused
+            # tick.
+            pass
 
     def _on_cursors_toggled(self, checked: bool) -> None:
         self._cursors_enabled = checked
@@ -1526,37 +1544,48 @@ class LiveScope:
 
         # Acquire new data. Native stream → one atomic read + numpy
         # view, no queue. Legacy stream → drain the queue.Queue.
+        #
+        # Pause behaviour: pressing Pause sends ``stream.pause()`` which
+        # blocks the kernel inside its ``should_continue`` callback —
+        # no new samples are produced while paused, so the ring stays
+        # frozen at the last sample, the display stays frozen, and at
+        # resume the kernel just continues stepping. No drain-on-pause
+        # gymnastics needed.
         t_latest = 0.0
         is_native = getattr(self.stream, "is_native", False)
         n_batches = 0
         x_all = None
         t_all = None
-        if is_native:
-            samples = self.stream.get_new_samples()
-            if samples is not None and not self._paused:
-                t_all, x_all = samples
-                n_batches = 1   # for status display
-            elif samples is not None:
-                n_batches = 1   # data drained but display paused
-        else:
-            # Drain legacy queue.
-            batches: List[tuple] = []
-            while True:
-                b = self.stream.get_batch(timeout=0.0)
-                if b is None:
-                    break
-                batches.append(b)
-            n_batches = len(batches)
-            if n_batches > 0 and not self._paused:
-                t_all = np.concatenate(
-                    [b[0] for b in batches]
-                ).astype(np.float64, copy=False)
-                x_all = np.concatenate(
-                    [b[1] for b in batches]
-                ).astype(np.float64, copy=False)
+        if not self._paused:
+            if is_native:
+                samples = self.stream.get_new_samples()
+                if samples is not None:
+                    t_all, x_all = samples
+                    n_batches = 1   # for status display
+            else:
+                # Drain legacy queue.
+                batches: List[tuple] = []
+                while True:
+                    b = self.stream.get_batch(timeout=0.0)
+                    if b is None:
+                        break
+                    batches.append(b)
+                n_batches = len(batches)
+                if n_batches > 0:
+                    t_all = np.concatenate(
+                        [b[0] for b in batches]
+                    ).astype(np.float64, copy=False)
+                    x_all = np.concatenate(
+                        [b[1] for b in batches]
+                    ).astype(np.float64, copy=False)
 
         # Vectorized extraction (same code path for both stream types).
-        if t_all is not None and x_all is not None and not self._paused:
+        # Guard against empty batches: native LiveRing can return a
+        # zero-length slice when the producer hasn't advanced between
+        # ticks but ``get_new_samples`` still returned ``(t, x)`` — and
+        # ``float(t_all[-1])`` would raise IndexError and kill the tick.
+        if (t_all is not None and x_all is not None
+                and t_all.size > 0):
             t_latest = float(t_all[-1])
             n_new = t_all.shape[0]
 
@@ -1729,7 +1758,15 @@ class LiveScope:
 
     def _ring_trim_window(self, t_cutoff: float) -> None:
         """Drop samples older than ``t_cutoff`` from every ring.
-        Uses ``np.searchsorted`` — O(log N) per signal."""
+        Uses ``np.searchsorted`` — O(log N) per signal.
+
+        Invariant: never trim down to zero. When ``t_cutoff`` is
+        beyond the entire buffer (a long gap between batches makes
+        every existing sample older than the cutoff), keep the last
+        sample as a marker so the curve continues drawing a flat
+        line at the right edge — much friendlier than the display
+        going completely blank.
+        """
         if t_cutoff <= 0:
             return
         for name, n in list(self._ring_n.items()):
@@ -1741,10 +1778,15 @@ class LiveScope:
             i_cut = int(np.searchsorted(t_buf[:n], t_cutoff, side="left"))
             if i_cut <= 0:
                 continue
+            # Never empty the ring: cap i_cut so at least one sample
+            # (the most recent) survives. Without this, a gap between
+            # batches longer than ``window_seconds`` would zero the
+            # ring and the curve would visually vanish.
+            if i_cut >= n:
+                i_cut = n - 1
             keep = n - i_cut
-            if keep > 0:
-                self._ring_t[name][:keep] = t_buf[i_cut:n]
-                self._ring_y[name][:keep] = self._ring_y[name][i_cut:n]
+            self._ring_t[name][:keep] = t_buf[i_cut:n]
+            self._ring_y[name][:keep] = self._ring_y[name][i_cut:n]
             self._ring_n[name] = keep
 
     def _update_stats(self) -> None:
@@ -1882,7 +1924,14 @@ class LiveScope:
         first_panel = next(iter(self._panels.values()), None)
         if first_panel is not None:
             try:
-                (vmin, vmax), _ = first_panel.plot_widget.viewRange()
+                # _PanelState.plot is a PlotItem — viewRange lives on its
+                # ViewBox. (Don't go through .plot_widget — that attribute
+                # doesn't exist and the AttributeError used to be swallowed
+                # by the broad except, leaving SMPS macros silently scanning
+                # the entire ring instead of the visible window.)
+                (vmin, vmax), _ = (
+                    first_panel.plot.getViewBox().viewRange()
+                )
                 x_lo = max(x_lo, float(vmin))
                 x_hi = min(x_hi, float(vmax))
             except Exception:  # noqa: BLE001
@@ -1963,7 +2012,15 @@ class LiveScope:
         first_panel = next(iter(self._panels.values()), None)
         if first_panel is not None:
             try:
-                (vmin, vmax), _ = first_panel.plot_widget.viewRange()
+                # _PanelState.plot is a PlotItem — viewRange lives on its
+                # ViewBox. Going through .plot_widget would AttributeError
+                # and the previous broad except masked it silently, so the
+                # FFT was always computed over the full ring (often half-
+                # filled with stale zeros → "FFT doesn't calculate anything"
+                # in the dialog).
+                (vmin, vmax), _ = (
+                    first_panel.plot.getViewBox().viewRange()
+                )
                 mask = (t_full >= float(vmin)) & (t_full <= float(vmax))
                 if mask.sum() >= 16:
                     t_full = t_full[mask]

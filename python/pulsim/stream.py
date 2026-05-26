@@ -141,6 +141,16 @@ class NativeLiveStream:
         self._state_size = -1
         self._last_read = 0                # reader's monotonic counter
         self._dropped_samples = 0          # samples we missed (ring overflow)
+        # Pause/resume primitive. The event is SET when running and
+        # CLEAR while paused; ``should_continue`` blocks on it so the
+        # kernel thread sleeps inside the per-step Python callback
+        # (with the GIL released by ``Event.wait``) — no busy-spin,
+        # no lost samples, no jump on resume.
+        self._pause_event = threading.Event()
+        self._pause_event.set()
+        # Wall-clock seconds spent paused — exposed for stats.
+        self._paused_seconds = 0.0
+        self._pause_started_at: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Setup
@@ -212,23 +222,76 @@ class NativeLiveStream:
         return t_view, x_view
 
     def stop(self) -> None:
-        """Signal the kernel to stop at the next step boundary."""
+        """Signal the kernel to stop at the next step boundary.
+        Also wakes ``should_continue`` if it is currently blocked
+        inside a pause — without this, ``stop()`` during a pause
+        would deadlock the kernel forever."""
         if self._ring is not None:
             self._ring.request_stop()
+        self._pause_event.set()
 
     def stopped(self) -> bool:
         if self._ring is None:
             return False
         return self._ring.stopped()
 
+    # ---- Pause / resume ----------------------------------------------
+
+    def pause(self) -> None:
+        """Block the kernel at the next ``should_continue`` boundary.
+        The Python ``Event.wait`` inside the callback releases the
+        GIL while waiting, so the GUI thread keeps running. Idempotent."""
+        import time as _time
+        if self._pause_event.is_set():
+            self._pause_started_at = _time.perf_counter()
+        self._pause_event.clear()
+
+    def resume(self) -> None:
+        """Unblock the kernel so it continues stepping. Idempotent."""
+        import time as _time
+        if not self._pause_event.is_set() \
+                and self._pause_started_at is not None:
+            self._paused_seconds += (
+                _time.perf_counter() - self._pause_started_at)
+            self._pause_started_at = None
+        self._pause_event.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._pause_event.is_set()
+
+    @property
+    def paused_seconds(self) -> float:
+        """Cumulative wall-clock time spent paused. Useful for the
+        scope's status line so the user sees their pause budget."""
+        import time as _time
+        extra = 0.0
+        if self._pause_started_at is not None:
+            extra = _time.perf_counter() - self._pause_started_at
+        return self._paused_seconds + extra
+
     @property
     def should_continue(self):
-        """For symmetry with :class:`LiveStream`. The C++
-        run_transient_with_chain already wires the ring's stop flag
-        into the kernel's should_continue check — this is the
-        explicit Python-side hook for callers that don't use the
-        chain path."""
-        return lambda: not self.stopped()
+        """The ``should_continue() -> bool`` callback to wire into the
+        kernel. Returns False when ``stop()`` was called; otherwise
+        BLOCKS while paused (so the kernel actually freezes time) and
+        returns True when resumed. ``Event.wait`` releases the GIL,
+        so the GUI thread keeps draining ticks even during a pause."""
+        ring = self._ring
+        pause_evt = self._pause_event
+
+        def _check() -> bool:
+            # Fast path — running, just check stop flag.
+            if pause_evt.is_set():
+                return ring is None or not ring.stopped()
+            # Paused. Spin-wait with a short timeout so a concurrent
+            # stop() call wakes us within ~50 ms even if pause_event
+            # never gets set (defensive — stop() does set it).
+            while not pause_evt.wait(timeout=0.05):
+                if ring is not None and ring.stopped():
+                    return False
+            return ring is None or not ring.stopped()
+        return _check
 
     # ------------------------------------------------------------------
     # Stats — names compatible with LiveStream so LiveScope can poll
@@ -308,6 +371,12 @@ class LiveStream:
         self._batch_t: List[float] = []
         self._batch_x: List[np.ndarray] = []
         self._stop_event = threading.Event()
+        # Pause primitive (same semantics as NativeLiveStream — see
+        # there). SET while running, CLEAR while paused.
+        self._pause_event = threading.Event()
+        self._pause_event.set()
+        self._paused_seconds = 0.0
+        self._pause_started_at: Optional[float] = None
         # Optional per-batch hook (called inline on the kernel
         # thread — keep it cheap).
         self._inline_consumer: Optional[
@@ -352,8 +421,51 @@ class LiveStream:
     def should_continue(self):
         """The `should_continue() -> bool` callback for
         ``simulate(...)``. Returns False once :meth:`stop` is
-        called. The kernel checks at the top of each step."""
-        return lambda: not self._stop_event.is_set()
+        called; otherwise BLOCKS while paused (so the kernel actually
+        freezes time). ``Event.wait`` releases the GIL so the GUI
+        thread keeps running even while the kernel is paused."""
+        stop_evt = self._stop_event
+        pause_evt = self._pause_event
+
+        def _check() -> bool:
+            if pause_evt.is_set():
+                return not stop_evt.is_set()
+            while not pause_evt.wait(timeout=0.05):
+                if stop_evt.is_set():
+                    return False
+            return not stop_evt.is_set()
+        return _check
+
+    # ---- Pause / resume ----------------------------------------------
+
+    def pause(self) -> None:
+        """Block the kernel at the next ``should_continue`` boundary."""
+        import time as _time
+        if self._pause_event.is_set():
+            self._pause_started_at = _time.perf_counter()
+        self._pause_event.clear()
+
+    def resume(self) -> None:
+        """Unblock the kernel."""
+        import time as _time
+        if not self._pause_event.is_set() \
+                and self._pause_started_at is not None:
+            self._paused_seconds += (
+                _time.perf_counter() - self._pause_started_at)
+            self._pause_started_at = None
+        self._pause_event.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._pause_event.is_set()
+
+    @property
+    def paused_seconds(self) -> float:
+        import time as _time
+        extra = 0.0
+        if self._pause_started_at is not None:
+            extra = _time.perf_counter() - self._pause_started_at
+        return self._paused_seconds + extra
 
     # ------------------------------------------------------------------
     # Consumer API
@@ -392,8 +504,10 @@ class LiveStream:
     def stop(self) -> None:
         """Signal the simulation to stop at the next step boundary.
         The simulation's `simulate(...)` call returns whatever
-        partial result it has accumulated."""
+        partial result it has accumulated. Also wakes a paused
+        kernel — otherwise stop() during a pause would deadlock."""
         self._stop_event.set()
+        self._pause_event.set()
 
     def stopped(self) -> bool:
         """True if :meth:`stop` was called."""
