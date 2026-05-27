@@ -38,6 +38,15 @@ Honest caveats
   multiple materials offline. Use THIS approach when the
   hysteresis voltage drop matters for the operating point (e.g.
   ferrorresonance, inrush, saturable-reactor design).
+* **Parameter scaling note**: the JA inductor with the demo's
+  ferrite-N87 + N=12 turns + tight 0.10 m mean path acts as a
+  **full magnetizing inductor** (L_eff ≈ L_0·μ_r ≈ 1.27 mH), not
+  the ~1 µH leakage that the original PSFB design assumes. The
+  output voltage (~5 V steady state) is therefore reduced
+  compared to the linear-leakage PSFB (~15 V). This demo
+  validates the **in-loop hysteresis wiring**; using the JA
+  inductor as a true leakage replacement would require either a
+  gapped core (low effective μ_r) or a much smaller turn count.
 """
 
 from __future__ import annotations
@@ -122,7 +131,7 @@ def main():
     # HystereticInductor observer — runs each step, integrates M.
     obs, b_extra = p.make_hysteretic_inductor_observer(b, hyst, dt=DT)
 
-    print(f"  PSFB with HystereticInductor in-loop")
+    print("  PSFB with HystereticInductor in-loop")
     print(f"    V_bus={V_BUS}V  f_pwm={F_PWM/1e3:.0f}kHz "
           f"phase_shift={PHASE:.2f} rad")
     print(f"    JA params: ferrite_n87 (Ms={hyst.params.Ms:.2e})")
@@ -145,7 +154,7 @@ def main():
         hyst.inductor_branch_id, b.graph)
     i_L = states[:, i_idx]
 
-    print(f"\n  Captured inductor (hysteretic) current:")
+    print("\n  Captured inductor (hysteretic) current:")
     print(f"    i_peak    = {float(np.max(np.abs(i_L))):.3f} A")
     print(f"    final M   = {hyst.M:.4e} A/m")
     print(f"    final B   = {hyst.B:.4f} T")
