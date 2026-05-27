@@ -1929,6 +1929,53 @@ void init_module(py::module_& m) {
             py::arg("bemf_source_idx"),
             py::arg("omega_channel"), py::arg("theta_channel"))
 
+        .def("add_induction_motor",
+            [](BlockChain& self,
+                Real J, Real B, Real T_load,
+                Real R_s, Real L_s,
+                Real R_r, Real L_r, Real L_m,
+                int pole_pairs,
+                std::array<Index, 3> phase_inductor_idx,
+                std::array<Index, 3> bemf_source_idx,
+                std::string omega_channel,
+                std::string theta_channel,
+                std::string psi_alpha_channel,
+                std::string psi_beta_channel,
+                std::string torque_channel,
+                std::string slip_channel) {
+                pulsim::motors::Mechanical mech;
+                mech.J_kgm2 = J;
+                mech.B_Nms_per_rad = B;
+                mech.T_load_Nm = T_load;
+                pulsim::motors::add_induction_motor_to_chain(
+                    self, mech,
+                    R_s, L_s, R_r, L_r, L_m, pole_pairs,
+                    phase_inductor_idx, bemf_source_idx,
+                    std::move(omega_channel),
+                    std::move(theta_channel),
+                    std::move(psi_alpha_channel),
+                    std::move(psi_beta_channel),
+                    std::move(torque_channel),
+                    std::move(slip_channel));
+            },
+            py::arg("J"), py::arg("B"), py::arg("T_load"),
+            py::arg("R_s"), py::arg("L_s"),
+            py::arg("R_r"), py::arg("L_r"), py::arg("L_m"),
+            py::arg("pole_pairs"),
+            py::arg("phase_inductor_idx"),
+            py::arg("bemf_source_idx"),
+            py::arg("omega_channel"), py::arg("theta_channel"),
+            py::arg("psi_alpha_channel") = std::string{},
+            py::arg("psi_beta_channel")  = std::string{},
+            py::arg("torque_channel")    = std::string{},
+            py::arg("slip_channel")      = std::string{},
+            "Squirrel-cage induction motor block (5-state Krause αβ "
+            "model). The user must have already added per-phase Rs + "
+            "σ·Ls + back-EMF dummy source to the builder and resolved "
+            "the per-phase inductor branch-var indices and dummy "
+            "source-row indices. Optional psi/torque/slip channels "
+            "are written when the channel name is non-empty.")
+
         // ---- Thermal blocks (Phase C.1 / C++ port) ----
         .def("add_thermal_power_injection",
             [](BlockChain& self, InputRef P_ref,
