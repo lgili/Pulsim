@@ -970,6 +970,12 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        // Phase 2.4 adaptive RK selector (schema v1.5, wiring v1.6).
+        .def_readwrite("integrator",
+                        &SimulationOptions::integrator)
+        .def_readwrite("rtol", &SimulationOptions::rtol)
+        .def_readwrite("atol", &SimulationOptions::atol)
+        .def_readwrite("dt_init", &SimulationOptions::dt_init)
         .def("valid", &SimulationOptions::valid)
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);

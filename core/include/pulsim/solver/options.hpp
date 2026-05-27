@@ -23,6 +23,7 @@
 #include "pulsim/numeric/types.hpp"
 
 #include <cmath>
+#include <string>
 
 namespace pulsim::solver {
 
@@ -87,6 +88,37 @@ struct SimulationOptions {
     /// V0 corrects ONLY the first detected event per step.
     /// Default `false` to preserve V2.2 behaviour.
     bool enable_substep_state_correction = false;
+
+    // ---- Phase 2.4 adaptive RK selector (v1.5 schema, v1.6 wiring) --
+    //
+    // YAML-facing: lets users declare an adaptive integrator
+    // (`dopri5`, `radau`) plus its tolerances inside `simulation:`.
+    // Today only `"kernel"` is honoured by `run_transient` — Python
+    // `simulate()` reads `integrator` and raises a clear
+    // NotImplementedError for non-kernel choices, pointing at the
+    // v1.6 cache refactor that will expose continuous-time (G, M, b)
+    // for true DAE-aware RK integration.
+    //
+    // Recording the intent today keeps user YAML files
+    // forward-compatible.
+
+    /// Integrator name. `"kernel"` (default) uses the existing
+    /// fixed-dt trap-companion run_transient. `"dopri5"` and
+    /// `"radau"` are reserved for the v1.6 RK path. Anything
+    /// else raises at the Python boundary.
+    std::string integrator = "kernel";
+
+    /// Relative tolerance for adaptive RK integrators. Ignored
+    /// by `"kernel"`.
+    Real rtol = Real{1e-5};
+
+    /// Absolute tolerance for adaptive RK integrators. Ignored
+    /// by `"kernel"`.
+    Real atol = Real{1e-8};
+
+    /// Initial step-size for adaptive RK integrators (0 ⇒ auto
+    /// via Hairer/Wanner heuristic). Ignored by `"kernel"`.
+    Real dt_init = Real{0};
 
     [[nodiscard]] bool valid() const noexcept {
         // All three values must be finite (no NaN, no infinity).

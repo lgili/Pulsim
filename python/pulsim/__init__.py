@@ -789,6 +789,10 @@ def simulate(
     should_continue=None,
     closed_loops=None,
     live_stream=None,
+    integrator: str = "kernel",
+    rtol: float = 1.0e-5,
+    atol: float = 1.0e-8,
+    dt_init: float = 0.0,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -840,10 +844,33 @@ def simulate(
     SimulationResult
         The full per-sample state-vector history.
     """
-    # add-python-closed-loop-helper composition: when caller passes
-    # one or more `ClosedLoop` instances, derive `switch_fn` and
-    # `step_observer` from them. Mutually exclusive with explicit
-    # `switch_fn=` / `step_observer=` to avoid silent override.
+    # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
+    # Today only the kernel trap path is wired into run_transient.
+    # Reject other choices with a clear pointer at the deferred
+    # cache refactor so users get actionable feedback instead of a
+    # silent default-back to "kernel".
+    if integrator not in ("kernel", "default"):
+        if integrator not in ("dopri5", "radau"):
+            raise ValueError(
+                f"simulate(integrator={integrator!r}): unknown "
+                "integrator. Supported names: 'kernel' (default), "
+                "'dopri5', 'radau'."
+            )
+        raise NotImplementedError(
+            f"simulate(integrator={integrator!r}) is reserved for "
+            "the v1.6 cache refactor — `PwlStateSpaceCache` would "
+            "need to expose continuous-time (G, M, b) and the "
+            "Python adaptive RK integrators would need DAE Index-1 "
+            "support (M·dx/dt = g, with M structurally singular "
+            "for augmented MNA). Track this under the "
+            "'add-adaptive-runge-kutta-solvers' OpenSpec proposal. "
+            "For Phase 2.4, the integrator name and its tolerances "
+            "round-trip through `SimulationOptions` and YAML so "
+            "your config stays forward-compatible — drop "
+            "`integrator='kernel'` (or omit) to run today."
+        )
+    _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
+
     if closed_loops:
         if switch_fn is not None or step_observer is not None:
             raise ValueError(

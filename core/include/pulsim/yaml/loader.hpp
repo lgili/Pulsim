@@ -123,6 +123,15 @@ namespace detail {
     return default_value;
 }
 
+[[nodiscard]] inline std::string string_or(
+    const YAML::Node& node, const std::string& field,
+    const std::string& default_value) {
+    if (node[field] && node[field].IsScalar()) {
+        return node[field].as<std::string>();
+    }
+    return default_value;
+}
+
 /// Parse a single device entry; dispatches by `type`.
 inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
@@ -416,6 +425,12 @@ inline void load_simulation_options(
         real_or(sim, "tol_newton_dx", Real{1e-9});
     opts.tol_newton_res =
         real_or(sim, "tol_newton_res", Real{1e-9});
+    // Phase 2.4 adaptive RK selector (schema v1.5, wiring v1.6).
+    opts.integrator =
+        string_or(sim, "integrator", std::string{"kernel"});
+    opts.rtol    = real_or(sim, "rtol",    Real{1e-5});
+    opts.atol    = real_or(sim, "atol",    Real{1e-8});
+    opts.dt_init = real_or(sim, "dt_init", Real{0});
 }
 
 }  // namespace detail
