@@ -14,28 +14,34 @@ can pick it up without re-discovering the context.
 
 ## Post-hoc analysis
 
-### Per-device loss reporting — switches & diodes
+### Per-device loss reporting — switching transients
 
-`pulsim.device_loss_summary(builder, result)` walks every **inductor**
-and **resistor** branch and reports `i_avg`, `i_rms`, `i_peak`, plus
-`P_avg`/`E_total` for resistors (i² · R reconstructed from node
-voltages). It does **not** yet cover switches or diodes:
+`pulsim.device_loss_summary(builder, result)` walks every **resistor**,
+**inductor**, **ideal-switch** and **switched-diode** branch and
+reports `i_avg`, `i_rms`, `i_peak`, plus `P_avg`/`E_total`. The
+switch path requires the caller to forward the same
+`switch_fn=` that drove the simulation (so the per-step mask can
+be sampled deterministically). The diode path infers the
+conducting interval from the node-voltage drop and `V_th`. Optional
+`core_loss_specs=` adds Steinmetz / iGSE core loss on selected
+inductors using the `pulsim.magnetic` material catalogue.
 
-* Switch state per timestep is determined by the user-supplied
-  `switch_fn` and by event-driven commutations from `IdealDiode`;
-  neither path is exposed to Python as a per-step trace today.
-* `SimulationResult.commutation_events` lists the diode-edge
-  timestamps but does not give the full piecewise-constant state
-  array needed for an exact ∫ i² g(t) integration.
+What is **not** covered post-hoc:
 
-**Workaround.** Build a state-aware `step_observer` and feed
-`LossAccumulator.add_sample(P_cond, dt)` from inside it — that path is
-exact and already documented in `pulsim/losses.py`.
+* **Switching-transient energy** (turn-on / turn-off `E_sw`) for
+  MOSFET/IGBT devices — the kernel's discrete trap step doesn't
+  resolve the nanosecond-scale current overlap. Use
+  `LossAccumulator.add_switching_event(E_sw)` from a step observer
+  with datasheet `E_on` / `E_off` numbers when this matters.
+* **Diode reverse-recovery charge** `Q_rr · V_R · f_sw` — same
+  reason; the ideal `SwitchedDiode` model is hard-commuted with no
+  reverse recovery.
 
-**Roadmap.** v1.4 will plumb the kernel-side switch-state stream into
-`SimulationResult` so the post-hoc summary can cover all device kinds.
-Closure tracked as the natural follow-up to
-[`update-electrothermal-component-observability`](openspec/changes/update-electrothermal-component-observability/).
+**Workaround for sub-step accuracy.** Build a state-aware
+`step_observer` and feed `LossAccumulator.add_sample(P_cond, dt)`
+plus `add_switching_event(E_sw)` from inside it — that path is
+exact at the dt grid and lets you plug datasheet switching-energy
+curves.
 
 ---
 
