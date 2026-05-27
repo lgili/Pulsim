@@ -194,3 +194,67 @@ def test_mras_voltage_model_leaky_integrator_no_drift():
         f"ψ_r_ref magnitude {psi_ref_mag:.3f} out of bounded range "
         f"— leaky integrator may have failed.")
     assert math.isfinite(mras.omega_hat)
+
+
+@pytest.mark.skipif(not hasattr(pulsim, "FluxMRASObserver"),
+                       reason="FluxMRASObserver not available")
+def test_mras_normalised_eps_converges_from_cold_start():
+    """With the normalised cross-product (``normalise_eps=True``,
+    default), MRAS must converge to the true electrical speed even
+    when starting from ω̂=0 with empty flux estimates — the classic
+    bootstrap scenario.
+
+    Synthetic excitation: ω_e_true = 200 rad/s, ψ = 0.5 Wb, i = 7 A.
+    Expect lock-in within 500 ms and steady-state error < 5%."""
+    Rs, Ls, Lr, Lm, Rr = 2.46, 0.0948, 0.0948, 0.0874, 1.23
+    sigma = 1.0 - (Lm ** 2) / (Ls * Lr)
+    L_sigma_s = sigma * Ls
+    omega_e_true = 200.0
+    psi_mag = 0.5
+    i_mag = 7.0
+
+    mras = pulsim.FluxMRASObserver(
+        Rs=Rs, Ls=Ls, Lr=Lr, Lm=Lm, Rr=Rr,
+        Kp_mras=200.0, Ki_mras=5000.0,
+        voltage_model_hpf_omega=5.0,
+        normalise_eps=True,
+    )
+    dt = 100e-6
+    theta = 0.0
+    for _ in range(int(0.5 / dt)):
+        theta += omega_e_true * dt
+        if theta >= 2 * math.pi:
+            theta -= 2 * math.pi
+        i_a = i_mag * math.cos(theta)
+        i_b = i_mag * math.sin(theta)
+        dpsi_a = -psi_mag * omega_e_true * math.sin(theta)
+        dpsi_b = +psi_mag * omega_e_true * math.cos(theta)
+        di_a = -i_mag * omega_e_true * math.sin(theta)
+        di_b = +i_mag * omega_e_true * math.cos(theta)
+        v_a = Rs * i_a + L_sigma_s * di_a + (Lm / Lr) * dpsi_a
+        v_b = Rs * i_b + L_sigma_s * di_b + (Lm / Lr) * dpsi_b
+        mras.update(v_alpha=v_a, v_beta=v_b,
+                       i_alpha=i_a, i_beta=i_b, dt=dt)
+
+    err_pct = abs(mras.omega_hat - omega_e_true) / omega_e_true * 100.0
+    assert err_pct < 5.0, (
+        f"MRAS ω̂ failed to converge from cold start: "
+        f"ω̂={mras.omega_hat:.2f}, true={omega_e_true}, "
+        f"err={err_pct:.2f}%")
+
+
+@pytest.mark.skipif(not hasattr(pulsim, "FluxMRASObserver"),
+                       reason="FluxMRASObserver not available")
+def test_mras_raw_eps_preserves_legacy_behavior():
+    """Setting ``normalise_eps=False`` reverts to the original Schauder
+    raw cross-product — useful for reproducing textbook examples.
+    Test just verifies the option works and doesn't crash."""
+    Rs, Ls, Lr, Lm, Rr = 2.46, 0.0948, 0.0948, 0.0874, 1.23
+    mras = pulsim.FluxMRASObserver(
+        Rs=Rs, Ls=Ls, Lr=Lr, Lm=Lm, Rr=Rr,
+        normalise_eps=False,
+    )
+    for _ in range(100):
+        mras.update(v_alpha=1.0, v_beta=0.5,
+                       i_alpha=0.1, i_beta=0.05, dt=1e-4)
+    assert math.isfinite(mras.omega_hat)

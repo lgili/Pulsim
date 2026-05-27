@@ -279,6 +279,32 @@ class FluxMRASObserver:
     zero. Higher = faster lock, but risk of oscillation."""
     Ki_mras: float = 1.0e3
     """MRAS integral gain — eliminates steady-state speed error."""
+    normalise_eps: bool = True
+    """Normalise the cross-product by the flux magnitudes:
+
+        ε_norm = ε / (|ψ_ref| · |ψ_adj|)  =  sin(angle error)
+
+    The original Schauder (1992) formulation uses the raw cross
+    product ``ε = ψ_β^ref · ψ_α^adj − ψ_α^ref · ψ_β^adj``. That
+    quantity carries both the angle error AND the magnitude product
+    — which is fine at steady state when both flux estimates have
+    settled, but it's a known bootstrap-killer: when the adaptive
+    model's |ψ̂| starts small (typical at cold start because high-
+    frequency stator current is heavily attenuated by the
+    1/Tr-pole adaptive model with ω̂=0), the cross product is
+    dominated by magnitude mismatch and the PI loop drives ω̂ in
+    a random direction.
+
+    Normalising recovers pure ``sin(angle error)``, which is what the
+    Lyapunov derivation actually requires. Default ``True`` for new
+    code; set to ``False`` to reproduce the original Schauder
+    behaviour (e.g. for regression tests against textbook
+    examples)."""
+    eps_norm_floor: float = 1e-6
+    """Lower bound on |ψ_ref| and |ψ_adj| in the normalised cross
+    product. Below this both fluxes are treated as zero (ε = 0,
+    no adaptation) — prevents division by ~0 during the very first
+    milliseconds before any flux has built up."""
 
     # Live state.
     psi_r_alpha_ref: float = field(default=0.0, init=False, repr=False)
@@ -370,8 +396,23 @@ class FluxMRASObserver:
         # Schauder cross-product error: ε = ψ̂ × ψ (z-component).
         # With ψ̂ = adaptive, ψ = reference, the PI controller on
         # ε drives ω̂ to the value that aligns ψ̂ with ψ.
-        eps = (self.psi_r_beta_ref  * self.psi_r_alpha_adj
-                  - self.psi_r_alpha_ref * self.psi_r_beta_adj)
+        eps_raw = (self.psi_r_beta_ref  * self.psi_r_alpha_adj
+                      - self.psi_r_alpha_ref * self.psi_r_beta_adj)
+        if self.normalise_eps:
+            # ε / (|ψ_ref|·|ψ_adj|) = sin(angle error). Pure angle
+            # signal — survives the bootstrap regime where |ψ_adj|
+            # is small.
+            psi_ref_mag = math.sqrt(self.psi_r_alpha_ref ** 2
+                                            + self.psi_r_beta_ref ** 2)
+            psi_adj_mag = math.sqrt(self.psi_r_alpha_adj ** 2
+                                            + self.psi_r_beta_adj ** 2)
+            if (psi_ref_mag > self.eps_norm_floor and
+                psi_adj_mag > self.eps_norm_floor):
+                eps = eps_raw / (psi_ref_mag * psi_adj_mag)
+            else:
+                eps = 0.0  # not enough flux yet — skip adaptation
+        else:
+            eps = eps_raw
         self._mras_integ += self.Ki_mras * dt * eps
         self.omega_hat = self.Kp_mras * eps + self._mras_integ
 
