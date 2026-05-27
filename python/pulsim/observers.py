@@ -265,6 +265,15 @@ class FluxMRASObserver:
     for textbook-NEMA-B machines; arbitrary errors otherwise).
     Use :meth:`from_motor` to wire ``Rr`` from an existing
     :class:`pulsim.InductionMotor` handle by construction."""
+    voltage_model_hpf_omega: float = 5.0
+    """Cut-off [rad/s] of the leaky integrator that replaces the
+    pure ∫ in the voltage-driven reference model. A pure integrator
+    of ``(v − Rs·i − σLs·di/dt)`` drifts indefinitely under any DC
+    offset; the standard Tajima-Hori (1993) workaround replaces it
+    with a low-cutoff first-order LPF that high-pass-filters the
+    drift while passing the fundamental. Default 5 rad/s ≈ 0.8 Hz,
+    well below 50/60 Hz mains. Set to 0 to disable (pure
+    integrator)."""
     Kp_mras: float = 50.0
     """MRAS proportional gain — drives the cross-product error to
     zero. Higher = faster lock, but risk of oscillation."""
@@ -333,10 +342,17 @@ class FluxMRASObserver:
         # Stator-frame back-EMF reconstruction.
         e_alpha = v_alpha - self.Rs * i_alpha - L_sigma_s * di_a
         e_beta  = v_beta  - self.Rs * i_beta  - L_sigma_s * di_b
-        # Integrate to get rotor flux (referred to stator side via Lr/Lm).
+        # Tajima-Hori (1993) leaky-integrator replacement for the
+        # pure ∫: dψ/dt = (Lr/Lm)·e − ω_hp · ψ. The cutoff ω_hp
+        # acts as a high-pass at low frequency (rejecting integrator
+        # drift) while passing the fundamental. Disabled when ω_hp
+        # = 0 (pure integrator, original Schauder form).
         scale = self.Lr / self.Lm
-        self.psi_r_alpha_ref += scale * e_alpha * dt
-        self.psi_r_beta_ref  += scale * e_beta  * dt
+        leak = self.voltage_model_hpf_omega
+        self.psi_r_alpha_ref += (
+            scale * e_alpha - leak * self.psi_r_alpha_ref) * dt
+        self.psi_r_beta_ref  += (
+            scale * e_beta  - leak * self.psi_r_beta_ref) * dt
 
         # ---- Adaptive model (current-driven) ----------------------------
         # dψ_rα^adj/dt = (Lm/Tr)·i_α − ψ_rα^adj/Tr − ω̂·ψ_rβ^adj
@@ -351,6 +367,9 @@ class FluxMRASObserver:
         self.psi_r_beta_adj  += dpsi_b * dt
 
         # ---- Adaptation loop -------------------------------------------
+        # Schauder cross-product error: ε = ψ̂ × ψ (z-component).
+        # With ψ̂ = adaptive, ψ = reference, the PI controller on
+        # ε drives ω̂ to the value that aligns ψ̂ with ψ.
         eps = (self.psi_r_beta_ref  * self.psi_r_alpha_adj
                   - self.psi_r_alpha_ref * self.psi_r_beta_adj)
         self._mras_integ += self.Ki_mras * dt * eps
