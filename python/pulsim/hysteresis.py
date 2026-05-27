@@ -817,9 +817,18 @@ def make_hysteretic_inductor_observer(builder,
 
     def b_extra_fn(t):
         out = [0.0] * state_size
-        # Same sign convention as motors: source row carries +V; the
-        # observer injects -V so the EMF appears in the loop direction.
-        out[src_idx] = -state["v_M"]
+        # Total flux linkage of the hysteretic coil:
+        #   λ = L_0·i + N·A·μ_0·M
+        # → dλ/dt = L_0·di/dt + N·A·μ_0·dM/dt = L_0·di/dt + v_M
+        # The branch is:  from_node ── L_0 ── mid ── V_dummy ── to_node
+        # Loop KVL: V_applied = V_L0 + V_dummy_setpoint
+        #         = L_0·di/dt + V_dummy_setpoint
+        # For this to equal dλ/dt we need V_dummy_setpoint = +v_M.
+        # (Earlier sign was inherited from the motor back-EMF pattern by
+        # analogy, but the topology here is single-branch passive — the
+        # hysteresis voltage adds in the SAME direction as the L_0 drop,
+        # not opposite to a separately-driven excitation source.)
+        out[src_idx] = +state["v_M"]
         return out
 
     return step_observer, b_extra_fn
