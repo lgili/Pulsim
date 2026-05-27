@@ -24,6 +24,8 @@ using the deterministic names the YAML loader created (e.g.,
 Supported chain block types:
     - induction_motor
     - hysteretic_inductor
+    - sliding_mode_observer
+    - flux_mras_observer
     - (extend by adding new entries to `_BLOCK_HANDLERS`)
 """
 from __future__ import annotations
@@ -121,9 +123,71 @@ def _add_hysteretic_inductor_block(chain, builder, spec: Mapping[str, Any]):
     )
 
 
+def _add_sliding_mode_observer_block(chain, builder, spec: Mapping[str, Any]):
+    """Wire a PMSM Sliding-Mode Observer (Phase 2.3 C++ port).
+
+    Pure channel-based — no topology indices needed. The block reads
+    ``v_alpha/v_beta/i_alpha/i_beta`` from the chain channel bus and
+    writes ``theta_hat`` / ``omega_hat`` (and optional back-EMF /
+    low-speed-flag channels)."""
+    del builder  # unused: SMO is pure channel I/O
+    kwargs: dict[str, Any] = {
+        "Rs": float(spec["Rs"]),
+        "Ls": float(spec["Ls"]),
+        "v_alpha_channel": str(spec.get("v_alpha_channel", "v_alpha")),
+        "v_beta_channel":  str(spec.get("v_beta_channel",  "v_beta")),
+        "i_alpha_channel": str(spec.get("i_alpha_channel", "i_alpha")),
+        "i_beta_channel":  str(spec.get("i_beta_channel",  "i_beta")),
+        "theta_hat_channel": str(spec.get("theta_hat_channel", "theta_hat")),
+        "omega_hat_channel": str(spec.get("omega_hat_channel", "omega_hat")),
+    }
+    for opt in ("K_sl", "omega_lpf", "Kp_pll", "Ki_pll",
+                "f_init_hz", "epsilon", "low_speed_threshold"):
+        if opt in spec:
+            kwargs[opt] = float(spec[opt])
+    for opt in ("e_alpha_hat_channel", "e_beta_hat_channel",
+                "low_speed_flag_channel"):
+        if opt in spec:
+            kwargs[opt] = str(spec[opt])
+    chain.add_sliding_mode_observer(**kwargs)
+
+
+def _add_flux_mras_observer_block(chain, builder, spec: Mapping[str, Any]):
+    """Wire an IM Flux-MRAS Observer (Phase 2.3 C++ port).
+
+    Pure channel-based — no topology indices needed. Reads
+    ``v_alpha/v_beta/i_alpha/i_beta`` and writes ``omega_hat`` (and
+    optional ψ_adj / ψ_ref channels for telemetry)."""
+    del builder  # unused: MRAS is pure channel I/O
+    kwargs: dict[str, Any] = {
+        "Rs": float(spec["Rs"]),
+        "Ls": float(spec["Ls"]),
+        "Lr": float(spec["Lr"]),
+        "Lm": float(spec["Lm"]),
+        "v_alpha_channel": str(spec.get("v_alpha_channel", "v_alpha")),
+        "v_beta_channel":  str(spec.get("v_beta_channel",  "v_beta")),
+        "i_alpha_channel": str(spec.get("i_alpha_channel", "i_alpha")),
+        "i_beta_channel":  str(spec.get("i_beta_channel",  "i_beta")),
+        "omega_hat_channel": str(spec.get("omega_hat_channel", "omega_hat")),
+    }
+    for opt in ("Rr", "voltage_model_hpf_omega",
+                "Kp_mras", "Ki_mras", "eps_norm_floor"):
+        if opt in spec:
+            kwargs[opt] = float(spec[opt])
+    if "normalise_eps" in spec:
+        kwargs["normalise_eps"] = bool(spec["normalise_eps"])
+    for opt in ("psi_adj_alpha_channel", "psi_adj_beta_channel",
+                "psi_ref_alpha_channel", "psi_ref_beta_channel"):
+        if opt in spec:
+            kwargs[opt] = str(spec[opt])
+    chain.add_flux_mras_observer(**kwargs)
+
+
 _BLOCK_HANDLERS = {
     "induction_motor": _add_induction_motor_block,
     "hysteretic_inductor": _add_hysteretic_inductor_block,
+    "sliding_mode_observer": _add_sliding_mode_observer_block,
+    "flux_mras_observer": _add_flux_mras_observer_block,
 }
 
 
