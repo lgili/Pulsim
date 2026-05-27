@@ -302,6 +302,84 @@ inline void load_device(
             require_real(dev, idx, type, "L_p"),
             require_real(dev, idx, type, "L_s"),
             real_or(dev, "k", Real{1}));
+    } else if (type == "induction_motor") {
+        // Phase 2.1 composite device — the YAML defines the TOPOLOGY
+        // (3× per-phase Rs + σ·Ls + dummy V source). The user wires
+        // the BlockChain (`chain.add_induction_motor(...)`) in Python
+        // using the branch names this loader creates:
+        //   {name}_Rs_{a,b,c}    — per-phase stator resistance
+        //   {name}_Lsig_{a,b,c}  — per-phase stator leakage inductor
+        //   {name}_E_{a,b,c}     — per-phase back-EMF dummy V source
+        // J / B / T_load are accepted for documentation but NOT
+        // consumed at load time (they go to the chain helper).
+        if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
+            dev["phase_nodes"].size() != 3) {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_motor '{}' requires "
+                "phase_nodes: [a, b, c] (sequence of 3 strings)",
+                name));
+        }
+        const Real R_s = require_real(dev, idx, type, "R_s");
+        const Real L_s = require_real(dev, idx, type, "L_s");
+        const Real R_r = require_real(dev, idx, type, "R_r");
+        const Real L_r = require_real(dev, idx, type, "L_r");
+        const Real L_m = require_real(dev, idx, type, "L_m");
+        if (L_m * L_m >= L_s * L_r) {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_motor '{}' has unphysical "
+                "leakage: L_m^2={} must be < L_s*L_r={}",
+                name, L_m * L_m, L_s * L_r));
+        }
+        const Real sigma = Real{1} - (L_m * L_m) / (L_s * L_r);
+        const Real L_sigma_s = sigma * L_s;
+        const std::string neutral =
+            require_string(dev, idx, type, "neutral_node");
+        const char phase_tag[3] = {'a', 'b', 'c'};
+        for (int k = 0; k < 3; ++k) {
+            const std::string p_node =
+                dev["phase_nodes"][k].as<std::string>();
+            const std::string mid_r =
+                name + "_R_mid_" + phase_tag[k];
+            const std::string mid_l =
+                name + "_L_mid_" + phase_tag[k];
+            b.add_resistor(
+                name + "_Rs_" + phase_tag[k],
+                p_node, mid_r, R_s);
+            b.add_inductor(
+                name + "_Lsig_" + phase_tag[k],
+                mid_r, mid_l, L_sigma_s);
+            b.add_voltage_source(
+                name + "_E_" + phase_tag[k],
+                mid_l, neutral, Real{0});
+        }
+    } else if (type == "hysteretic_inductor") {
+        // Phase 2.2 composite device — JA hysteretic inductor. YAML
+        // creates the linear air-core L_0 + dummy v_M source. The user
+        // wires the BlockChain (`chain.add_hysteretic_inductor(...)`)
+        // in Python using the branch names this loader creates:
+        //   {name}_L0   — linear air-core inductor (from → mid)
+        //   {name}_V_M  — dummy V source for hysteresis EMF (mid → to)
+        const int N_turns =
+            static_cast<int>(require_real(dev, idx, type, "N_turns"));
+        const Real l_m = require_real(dev, idx, type, "l_m");
+        const Real A_core = require_real(dev, idx, type, "A_core");
+        if (N_turns <= 0 || l_m <= Real{0} || A_core <= Real{0}) {
+            throw std::runtime_error(std::format(
+                "yaml::load: hysteretic_inductor '{}' has "
+                "non-physical geometry: N_turns={}, l_m={}, A_core={}",
+                name, N_turns, l_m, A_core));
+        }
+        // L_0 = N²·A·μ₀/l_m.
+        constexpr Real MU_0 = Real{4} * Real{3.14159265358979323846}
+                                * Real{1e-7};
+        const Real L_0 =
+            static_cast<Real>(N_turns) * static_cast<Real>(N_turns)
+            * A_core * MU_0 / l_m;
+        const std::string from = require_string(dev, idx, type, "from");
+        const std::string to = require_string(dev, idx, type, "to");
+        const std::string mid = name + "_mid";
+        b.add_inductor(name + "_L0", from, mid, L_0);
+        b.add_voltage_source(name + "_V_M", mid, to, Real{0});
     } else {
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +
@@ -309,10 +387,11 @@ inline void load_device(
             "types: voltage_source, current_source, "
             "pwm_voltage_source, sine_voltage_source, "
             "pulse_voltage_source, resistor, capacitor, "
-            "inductor, diode, nonlinear_diode, switch, "
+            "inductor, saturable_inductor, hysteretic_inductor, "
+            "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, op_amp_ideal, "
-            "transformer");
+            "transformer, induction_motor");
     }
 }
 

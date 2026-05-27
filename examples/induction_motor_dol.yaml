@@ -1,0 +1,38 @@
+# Pulsim YAML showcase: Induction Motor — Direct On Line (DOL) start.
+# Phase 2.1 composite device.
+#
+# YAML defines the TOPOLOGY (3× per-phase Rs + σ·Ls + dummy V source
+# created automatically with deterministic names {IM}_Rs_{a,b,c},
+# {IM}_Lsig_{a,b,c}, {IM}_E_{a,b,c}). The user wires the BlockChain in
+# Python via `chain.add_induction_motor(...)` to drive the rotor-flux
+# observer and back-EMF injection.
+#
+# Reference machine: 4 kW / 400 V / 50 Hz / 4-pole NEMA-B.
+#
+# Use from Python:
+#   loaded = pulsim.load_yaml_file("induction_motor_dol.yaml")
+#   builder = loaded.builder
+#   # ... wire chain with phase + bemf branch indices ...
+
+circuit:
+  devices:
+    # 3-phase mains (set V = 0 here; user injects sine via b_extra)
+    - {type: voltage_source, name: Va, from: a, to: gnd, V: 0.0}
+    - {type: voltage_source, name: Vb, from: b, to: gnd, V: 0.0}
+    - {type: voltage_source, name: Vc, from: c, to: gnd, V: 0.0}
+
+    # Composite IM device — creates 9 branches internally.
+    - type: induction_motor
+      name: IM
+      phase_nodes: [a, b, c]
+      neutral_node: n
+      R_s: 2.4565       # stator resistance per phase [Ω]
+      L_s: 0.09475      # stator self-inductance per phase [H]
+      R_r: 1.22825      # rotor resistance referred to stator [Ω]
+      L_r: 0.09475      # rotor self-inductance referred to stator [H]
+      L_m: 0.087392     # mutual inductance referred to stator [H]
+      pole_pairs: 2     # 4-pole machine
+
+    # Leakage R from neutral to gnd (keeps MNA non-singular for the
+    # floating-neutral Y-connected stator).
+    - {type: resistor, name: R_leak, from: n, to: gnd, R: 1.0e6}

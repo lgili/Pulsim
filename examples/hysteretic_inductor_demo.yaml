@@ -1,0 +1,38 @@
+# Pulsim YAML showcase: hysteretic inductor — 50 V / 50 Hz mains
+# excitation through a ferrite-N87 core (Jiles-Atherton). Phase 2.2.
+#
+# YAML creates the linear L_0 air-core inductor + dummy V_M source
+# (named {name}_L0 and {name}_V_M). The user wires the BlockChain in
+# Python via `chain.add_hysteretic_inductor(...)` so the JA observer
+# integrates M each step and injects v_M = N·A·μ₀·dM/dt.
+#
+# Use from Python:
+#   loaded = pulsim.load_yaml_file("hysteretic_inductor_demo.yaml")
+#   builder = loaded.builder
+#   # ... wire chain with inductor + dummy_V branch indices ...
+
+circuit:
+  devices:
+    - type: sine_voltage_source
+      name: Vs
+      from: a
+      to: gnd
+      v_amplitude: 50.0
+      frequency: 50.0
+
+    - {type: resistor, name: Rs, from: a, to: n1, R: 1.0}
+
+    # Ferrite-N87 core, 100 turns, 50 mm path, 1 cm² cross-section.
+    # L_0 = N²·A·μ_0/l_m = 100²·1e-4·1.26e-6/0.05 ≈ 25.2 µH.
+    - type: hysteretic_inductor
+      name: L_core
+      from: n1
+      to: gnd
+      Ms: 4.0e5    # saturation magnetisation [A/m]
+      a: 50.0      # anhysteretic shape [A/m]
+      alpha: 5e-5  # mean-field coupling
+      c: 0.20      # reversibility (0..1)
+      k: 30.0      # pinning coefficient [A/m]
+      N_turns: 100
+      l_m: 0.05    # mean magnetic path [m]
+      A_core: 1e-4 # cross-section [m²]
