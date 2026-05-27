@@ -20,7 +20,7 @@
 - [ ] 1.3 Add `Integrator` enum + dispatch in `run_transient`.
 - [ ] 1.4 Expose enum on `SimulationOptions::Advanced::Timestep`.
 
-## 1b. Standalone C++ DOPRI5 — done
+## 1b. Standalone C++ DOPRI5 + Radau IIA(3) — done
 
 - [x] 1b.1 Header-only template `DormandPrince5<F>` in
       `core/include/pulsim/integrators/dormand_prince5.hpp` mirroring
@@ -34,6 +34,16 @@
 - [x] 1b.3 Integration tests `test_dopri5_cpp.py`: linear decay
       `dx/dt=-x` matches `e^(-2)` to 1e-6; van der Pol (μ=10) C++ vs
       Python final state within 1% relative; stats fields validated.
+- [x] 1b.4 Header-only template `RadauIIA3<F>` in
+      `core/include/pulsim/integrators/radau_iia3.hpp` — 2-stage,
+      order-3, L-stable implicit RK with Newton inner solver using
+      Eigen PartialPivLU on the 2n×2n stage block. Optional analytical
+      Jacobian; central finite-diff fallback. Step-doubling error
+      estimate (Richardson factor 1/7).
+- [x] 1b.5 Pybind binding `radau_iia3_solve(f, t0, t_end, x0, …)`.
+- [x] 1b.6 Integration tests `test_radau_iia3_cpp.py`: stiff decay
+      (λ=1000) within 1e-5; stiff van der Pol (μ=1000) in < 1000
+      accepted steps; heavy-stiff (μ=1e4) in < 500 steps; stats fields.
 
 ## 2. Dormand-Prince 5(4) — Python implementation shipped
 

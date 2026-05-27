@@ -37,6 +37,7 @@
 #include "pulsim/mmc/arm.hpp"
 #include "pulsim/motors/mechanical.hpp"
 #include "pulsim/integrators/dormand_prince5.hpp"
+#include "pulsim/integrators/radau_iia3.hpp"
 #include "pulsim/magnetics/hysteretic_inductor.hpp"
 #include "pulsim/motors/motor_adapters.hpp"
 #include "pulsim/solver/bdf1.hpp"
@@ -1402,6 +1403,76 @@ void init_module(py::module_& m) {
         "Returns a dict with t, x, n_accepted, n_rejected, n_f_evals. "
         "The Python f(t, x) callable is invoked from C++ with the GIL "
         "re-acquired around each evaluation.");
+
+    m.def("radau_iia3_solve",
+        [](py::function f_py,
+            Real t0, Real t_end,
+            const Eigen::VectorXd& x0,
+            Real rtol, Real atol,
+            Real dt_min, Real dt_max,
+            Real safety,
+            Real growth_max, Real shrink_min,
+            int newton_max_iter, Real newton_tol,
+            Real dt_init) {
+            auto f_cpp = [f_py](Real t, const Eigen::VectorXd& x)
+                -> Eigen::VectorXd {
+                py::gil_scoped_acquire gil;
+                py::object res = f_py(t, x);
+                return py::cast<Eigen::VectorXd>(res);
+            };
+            pulsim::integrators::RadauIIA3<decltype(f_cpp)>
+                solver(f_cpp);
+            solver.rtol = rtol;
+            solver.atol = atol;
+            solver.dt_min = dt_min;
+            solver.dt_max = (dt_max > 0)
+                ? dt_max
+                : std::numeric_limits<Real>::infinity();
+            solver.safety = safety;
+            solver.growth_max = growth_max;
+            solver.shrink_min = shrink_min;
+            solver.newton_max_iter = newton_max_iter;
+            solver.newton_tol = newton_tol;
+
+            py::gil_scoped_release release;
+            auto sol = solver.solve(t0, t_end, x0, dt_init);
+            py::gil_scoped_acquire acquire;
+
+            const Index n_pts = static_cast<Index>(sol.t.size());
+            const Index n_dim = x0.size();
+            py::array_t<Real> t_arr(n_pts);
+            py::array_t<Real> x_arr(
+                std::vector<py::ssize_t>{n_pts, n_dim});
+            auto t_ptr = static_cast<Real*>(t_arr.request().ptr);
+            auto x_ptr = static_cast<Real*>(x_arr.request().ptr);
+            for (Index i = 0; i < n_pts; ++i) {
+                t_ptr[i] = sol.t[i];
+                for (Index j = 0; j < n_dim; ++j) {
+                    x_ptr[i * n_dim + j] = sol.x[i][j];
+                }
+            }
+            return py::dict(
+                "t"_a = std::move(t_arr),
+                "x"_a = std::move(x_arr),
+                "n_accepted"_a = sol.n_accepted,
+                "n_rejected"_a = sol.n_rejected,
+                "n_f_evals"_a = sol.n_f_evals);
+        },
+        py::arg("f"), py::arg("t0"), py::arg("t_end"),
+        py::arg("x0"),
+        py::arg("rtol") = Real{1e-5},
+        py::arg("atol") = Real{1e-8},
+        py::arg("dt_min") = Real{1e-12},
+        py::arg("dt_max") = Real{0.0},
+        py::arg("safety") = Real{0.9},
+        py::arg("growth_max") = Real{5.0},
+        py::arg("shrink_min") = Real{0.2},
+        py::arg("newton_max_iter") = 8,
+        py::arg("newton_tol") = Real{1e-8},
+        py::arg("dt_init") = Real{-1.0},
+        "Radau IIA(3) implicit Runge-Kutta solver (Phase 2.4 C++ port). "
+        "L-stable, order 3 — designed for stiff ODEs. 2-stage Newton "
+        "block per step + step-doubling error estimate.");
 
     m.def("compute_dc_op_with_strategy",
         [](const topology::Graph& graph,
