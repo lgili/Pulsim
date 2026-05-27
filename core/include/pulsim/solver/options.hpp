@@ -89,6 +89,38 @@ struct SimulationOptions {
     /// Default `false` to preserve V2.2 behaviour.
     bool enable_substep_state_correction = false;
 
+    /// Floating-inductor freeze (post-solve guard).
+    ///
+    /// When `> 0`, after each `cache.solve` the solver checks every
+    /// tracked inductor's branch-current change against this bound
+    /// (`|i_new − i_prev| > inductor_freeze_di_max`) and, if exceeded,
+    /// overrides ``x[branch_var_id] = i_prev`` (freezes the state
+    /// for that step). Catches the rare singular configurations
+    /// where the inductor's loop has no closed conduction path —
+    /// e.g. a rectifier in deep DCM or a series-blocking-diode that
+    /// briefly disconnects the inductor — and prevents the solver
+    /// from emitting unphysical i_L values (we observed ~1 kA spikes
+    /// in a 1 kW drive).
+    ///
+    /// Set to 0 (default) to disable the guard. A typical bound for
+    /// power-electronics circuits is `200 A` — that's well above any
+    /// realistic step-to-step change at PWM rates (V_max·dt/L_min
+    /// rarely exceeds 10 A per step) but cleanly catches the
+    /// kiloamp-scale solver failures.
+    Real inductor_freeze_di_max = Real{0};
+
+    /// Absolute inductor-current clamp (post-solve guard).
+    ///
+    /// When `> 0`, after each solve every tracked inductor's branch
+    /// current is hard-clamped to ``[-inductor_abs_clamp, +clamp]``.
+    /// Catches the slow drift form of the floating-inductor failure
+    /// where the solver gradually walks i_L past physical bounds at
+    /// less than ``inductor_freeze_di_max`` per step (we observed
+    /// i_L001 drifting to −1 kA at ~0.1 A/step in a rectifier in DCM).
+    /// Typical PE-circuit bound: 100 A for a 1 kW drive, scaled by
+    /// the design's rated current.
+    Real inductor_abs_clamp = Real{0};
+
     // ---- Phase 2.4 adaptive RK selector (v1.5 schema, v1.6 wiring) --
     //
     // YAML-facing: lets users declare an adaptive integrator
