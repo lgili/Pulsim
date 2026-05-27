@@ -257,6 +257,14 @@ class FluxMRASObserver:
     """Rotor self-inductance referred to stator [H]."""
     Lm: float
     """Mutual inductance referred to stator [H]."""
+    Rr: float = 0.0
+    """Rotor resistance referred to stator [Ω]. **Required for
+    accurate speed estimation** — the rotor time constant
+    ``Tr = Lr / Rr`` drives the adaptive-model dynamics. Default
+    0.0 triggers the legacy heuristic ``Rr ≈ 0.5·Rs`` (works only
+    for textbook-NEMA-B machines; arbitrary errors otherwise).
+    Use :meth:`from_motor` to wire ``Rr`` from an existing
+    :class:`pulsim.InductionMotor` handle by construction."""
     Kp_mras: float = 50.0
     """MRAS proportional gain — drives the cross-product error to
     zero. Higher = faster lock, but risk of oscillation."""
@@ -276,13 +284,16 @@ class FluxMRASObserver:
     @classmethod
     def from_motor(cls, motor, *, Kp_mras: float = 50.0,
                        Ki_mras: float = 1e3) -> "FluxMRASObserver":
-        """Convenience constructor — pulls Rs / Ls / Lr / Lm from
-        an existing :class:`pulsim.InductionMotor` handle."""
+        """Convenience constructor — pulls Rs / Ls / Lr / Lm / **Rr**
+        from an existing :class:`pulsim.InductionMotor` handle. This
+        keeps the observer's rotor time constant in lock-step with
+        the plant's by construction."""
         return cls(
             Rs=motor.R_s_ohm,
             Ls=motor.L_s_H,
             Lr=motor.L_r_H,
             Lm=motor.L_m_H,
+            Rr=motor.R_r_ohm,
             Kp_mras=Kp_mras,
             Ki_mras=Ki_mras,
         )
@@ -305,18 +316,13 @@ class FluxMRASObserver:
         ``(omega_hat, psi_r_alpha_adj, psi_r_beta_adj)``."""
         sigma = 1.0 - (self.Lm ** 2) / (self.Ls * self.Lr)
         L_sigma_s = sigma * self.Ls
-        Tr = self.Lr / max(self.Rs * 0.5, 1e-9)   # rotor TC, guarded
-        # Use Rr proxy if we don't have it directly. The MRAS algorithm
-        # actually wants Tr = Lr/Rr; we assume Rr ≈ 0.5·Rs as a
-        # heuristic when only Rs is supplied. Override Tr via the
-        # ``override_rotor_time_constant`` mechanism in a future
-        # refinement.
-        # NOTE: a future refinement should add Rr explicitly as a
-        # parameter — but the common case is to feed the observer the
-        # SAME Rr the IM uses, so wiring through ``motor.R_r_ohm`` via
-        # ``from_motor`` keeps this consistent. Here we just compute Tr
-        # straight from Rs as a placeholder when the user constructs
-        # the observer directly without going through ``from_motor``.
+        # Rotor time constant: Tr = Lr / Rr. When Rr wasn't supplied
+        # explicitly (Rr <= 0) fall back to the rough heuristic
+        # Rr ≈ 0.5·Rs (NEMA-B-machine ballpark) — accurate only for
+        # textbook designs. Real machines need Rr from a measured
+        # equivalent-circuit; ``from_motor`` wires it in by construction.
+        Rr_eff = self.Rr if self.Rr > 0.0 else (0.5 * self.Rs)
+        Tr = self.Lr / max(Rr_eff, 1e-9)
 
         # ---- Reference model (voltage-driven) ---------------------------
         # Numerical derivative of i_alpha, i_beta (forward-difference).
