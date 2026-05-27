@@ -1,15 +1,17 @@
 # Tasks — add-adaptive-runge-kutta-solvers
 
-> Status (Phase 2.4 — v1.5.1 RC):
-> **Standalone Python integrators ship now**. ``DormandPrince5``
-> and ``RadauIIA3`` are usable today against any user-supplied
-> ``f(t, x)`` callback — great for offline ODE analysis,
-> simulating controllers + linearised plants, or as a reference
-> implementation. **In-kernel coupling** (replacing Tustin /
-> BDF1 inside ``pulsim.simulate``) is deferred to v1.6.0 because
-> the cache currently exposes Tustin-discretised matrices and
-> not the continuous-time ``A``, ``b`` form the adaptive RK
-> integrators need.
+> Status (Phase 2.4 — v1.5.1):
+> **Python DormandPrince5 + RadauIIA3 ship**, plus a **C++ port of
+> DormandPrince5** exposed as `pulsim._pulsim.dopri5_solve(f, t0, t_end,
+> x0, …)`. Both paths are usable today against any user-supplied
+> ``f(t, x)`` callback — offline ODE analysis, controllers + linearised
+> plants, reference implementation.
+>
+> **In-kernel coupling** (replacing Tustin / BDF1 inside
+> ``pulsim.simulate``) and **Radau C++** are still deferred to v1.6.0
+> because the cache currently exposes Tustin-discretised matrices and
+> not the continuous-time ``A``, ``b`` form the adaptive RK integrators
+> need.
 
 ## 1. Integrator scaffolding (C++ kernel — deferred to v1.6.0)
 
@@ -17,6 +19,21 @@
 - [ ] 1.2 Refactor existing Tustin + BDF1 to the concept.
 - [ ] 1.3 Add `Integrator` enum + dispatch in `run_transient`.
 - [ ] 1.4 Expose enum on `SimulationOptions::Advanced::Timestep`.
+
+## 1b. Standalone C++ DOPRI5 — done
+
+- [x] 1b.1 Header-only template `DormandPrince5<F>` in
+      `core/include/pulsim/integrators/dormand_prince5.hpp` mirroring
+      the Python class step-for-step. 7-stage FSAL, embedded 4(5) pair,
+      PI-style step-size controller, Hairer & Wanner §II.4 initial-step
+      heuristic, hard `[dt_min, dt_max]` clamps + growth/shrink limits.
+- [x] 1b.2 Pybind binding `dopri5_solve(f, t0, t_end, x0, …)` calls the
+      Python `f(t, x)` from C++ with GIL re-acquired per evaluation.
+      Returns a dict with `t`, `x`, `n_accepted`, `n_rejected`,
+      `n_f_evals`.
+- [x] 1b.3 Integration tests `test_dopri5_cpp.py`: linear decay
+      `dx/dt=-x` matches `e^(-2)` to 1e-6; van der Pol (μ=10) C++ vs
+      Python final state within 1% relative; stats fields validated.
 
 ## 2. Dormand-Prince 5(4) — Python implementation shipped
 
