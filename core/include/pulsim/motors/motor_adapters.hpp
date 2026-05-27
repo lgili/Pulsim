@@ -120,6 +120,173 @@ namespace detail {
 }  // namespace detail
 
 
+// =============================================================================
+// 3-phase squirrel-cage Induction Motor (IM)
+// =============================================================================
+
+/// Add a 3-phase squirrel-cage induction motor to the chain.
+///
+/// 5-state Krause stationary-αβ model (Krause "Analysis of Electric
+/// Machinery and Drive Systems" § 6.6):
+///
+///   Rotor flux dynamics:
+///     dψ_rα/dt = −ψ_rα / Tr + (Lm / Tr) · i_sα − ω_e · ψ_rβ
+///     dψ_rβ/dt = −ψ_rβ / Tr + (Lm / Tr) · i_sβ + ω_e · ψ_rα
+///   where Tr = Lr / Rr and ω_e = pole_pairs · ω_m.
+///
+///   Stator back-EMF (αβ frame):
+///     e_α = (Lm / Lr) · dψ_rα/dt
+///     e_β = (Lm / Lr) · dψ_rβ/dt
+///   then inverse-Clarke to abc.
+///
+///   Electromagnetic torque (Krause Eq. 6.6-17, amplitude-invariant
+///   Clarke convention):
+///     T_em = (3/2) · pp · (Lm / Lr) · (i_sβ · ψ_rα − i_sα · ψ_rβ)
+///
+/// The user must have already added the per-phase Rs + σ·Ls + back-EMF
+/// source to the builder; pass the resolved branch-var indices for the
+/// per-phase inductor currents and the per-phase dummy-source rows.
+///
+/// Parameters mirror the existing 3-phase motor adapter, plus rotor
+/// parameters (Rr, Lr, Lm) and four optional diagnostic channels.
+inline void add_induction_motor_to_chain(
+    BlockChain& chain,
+    const Mechanical& mech_init,
+    Real R_s_ohm, Real L_s_H,
+    Real R_r_ohm, Real L_r_H, Real L_m_H,
+    int pole_pairs,
+    const std::array<Index, 3>& phase_inductor_idx,
+    const std::array<Index, 3>& bemf_source_idx,
+    std::string omega_channel,
+    std::string theta_channel,
+    std::string psi_alpha_channel = std::string{},
+    std::string psi_beta_channel  = std::string{},
+    std::string torque_channel    = std::string{},
+    std::string slip_channel      = std::string{}) {
+
+    auto mech = std::make_shared<Mechanical>(mech_init);
+    // Rotor flux state — initial value 0 (demagnetised core).
+    auto psi  = std::make_shared<std::array<Real, 2>>(
+        std::array<Real, 2>{Real{0}, Real{0}});
+
+    // Derived constants (computed once, captured into the closure).
+    const Real Rr_safe = (R_r_ohm > Real{1e-30}) ? R_r_ohm : Real{1e-30};
+    const Real Lr_safe = (L_r_H  > Real{1e-30}) ? L_r_H  : Real{1e-30};
+    const Real inv_Tr  = Rr_safe / Lr_safe;        // 1 / Tr = Rr / Lr
+    const Real Lm_inv_Tr = L_m_H * inv_Tr;         // (Lm / Tr) = Lm · Rr / Lr
+    const Real Lm_over_Lr = L_m_H / Lr_safe;
+    const Real sqrt3_over_2 = std::sqrt(Real{3}) / Real{2};
+
+    auto step = [mech, psi,
+                    inv_Tr, Lm_inv_Tr, Lm_over_Lr, sqrt3_over_2,
+                    pole_pairs,
+                    R_s_ohm, L_s_H,
+                    phase_inductor_idx, bemf_source_idx,
+                    omega_channel   = std::move(omega_channel),
+                    theta_channel   = std::move(theta_channel),
+                    psi_alpha_channel = std::move(psi_alpha_channel),
+                    psi_beta_channel  = std::move(psi_beta_channel),
+                    torque_channel    = std::move(torque_channel),
+                    slip_channel      = std::move(slip_channel)]
+                   (ChainContext& ctx) {
+        if (!ctx.x) return;
+        const Index n_state = static_cast<Index>(ctx.x->size());
+        auto safe_read = [&](Index idx) {
+            return (idx >= 0 && idx < n_state) ? (*ctx.x)[idx]
+                                                  : Real{0};
+        };
+
+        // Measured stator currents (αβ frame via amplitude-invariant
+        // Clarke transform; drops the zero-sequence which is OK for a
+        // 3-wire Y-connected machine).
+        const Real i_a = safe_read(phase_inductor_idx[0]);
+        const Real i_b = safe_read(phase_inductor_idx[1]);
+        const Real i_c = safe_read(phase_inductor_idx[2]);
+        const Real i_alpha = (Real{2} / Real{3}) *
+                                (i_a - Real{0.5} * i_b - Real{0.5} * i_c);
+        const Real i_beta  = (Real{2} / Real{3}) * sqrt3_over_2 *
+                                (i_b - i_c);
+
+        const Real omega_m = mech->omega_rad_s;
+        const Real omega_e = static_cast<Real>(pole_pairs) * omega_m;
+
+        // Rotor flux dynamics (Krause Eq. 6.6-12 / 6.6-13).
+        const Real psi_a = (*psi)[0];
+        const Real psi_b = (*psi)[1];
+        const Real dpsi_a = -inv_Tr * psi_a + Lm_inv_Tr * i_alpha
+                                - omega_e * psi_b;
+        const Real dpsi_b = -inv_Tr * psi_b + Lm_inv_Tr * i_beta
+                                + omega_e * psi_a;
+
+        // Induced stator back-EMF reflected from the rotor (αβ).
+        const Real e_alpha = Lm_over_Lr * dpsi_a;
+        const Real e_beta  = Lm_over_Lr * dpsi_b;
+
+        // Inverse Clarke αβ → abc (amplitude-invariant).
+        const Real e_a = e_alpha;
+        const Real e_b = -Real{0.5} * e_alpha + sqrt3_over_2 * e_beta;
+        const Real e_c = -Real{0.5} * e_alpha - sqrt3_over_2 * e_beta;
+
+        // Electromagnetic torque (Krause Eq. 6.6-17).
+        const Real T_em = (Real{1.5}) * static_cast<Real>(pole_pairs) *
+                          Lm_over_Lr *
+                          (i_beta * psi_a - i_alpha * psi_b);
+
+        // Forward-Euler integration of the rotor flux state.
+        (*psi)[0] = psi_a + dpsi_a * ctx.dt;
+        (*psi)[1] = psi_b + dpsi_b * ctx.dt;
+
+        // Mechanical integration (matches the other motor adapters).
+        mech->integrate(ctx.t, T_em, ctx.dt);
+
+        // Diagnostic channels (omitted when the user passes "").
+        ctx.channels[omega_channel] = mech->omega_rad_s;
+        ctx.channels[theta_channel] = mech->theta_rad;
+        if (!psi_alpha_channel.empty()) {
+            ctx.channels[psi_alpha_channel] = (*psi)[0];
+        }
+        if (!psi_beta_channel.empty()) {
+            ctx.channels[psi_beta_channel] = (*psi)[1];
+        }
+        if (!torque_channel.empty()) {
+            ctx.channels[torque_channel] = T_em;
+        }
+        if (!slip_channel.empty()) {
+            // Slip fraction = (ω_psi − ω_m_elec) / ω_psi, clamped
+            // to [-1, 1] for usability when ω_psi ≈ 0.
+            const Real psi_mag = std::sqrt(
+                (*psi)[0] * (*psi)[0] + (*psi)[1] * (*psi)[1]);
+            Real slip = Real{1};
+            if (psi_mag > Real{1e-6} && std::abs(omega_e) > Real{1e-6}) {
+                // Instantaneous flux angular rate from the αβ derivatives.
+                const Real omega_psi = (psi_a * dpsi_b - psi_b * dpsi_a)
+                                       / (psi_mag * psi_mag);
+                slip = (omega_psi - omega_e) /
+                       std::max(std::abs(omega_psi), Real{1e-9});
+            }
+            ctx.channels[slip_channel] =
+                std::clamp(slip, Real{-1}, Real{1});
+        }
+
+        // Back-EMF injection — same sign convention as the PMSM
+        // adapter: source row carries +V_source; we inject −e so the
+        // EMF appears in the loop direction.
+        if (ctx.b_extra) {
+            (*ctx.b_extra)[bemf_source_idx[0]] = -e_a;
+            (*ctx.b_extra)[bemf_source_idx[1]] = -e_b;
+            (*ctx.b_extra)[bemf_source_idx[2]] = -e_c;
+        }
+        (void)R_s_ohm; (void)L_s_H;  // captured for diagnostics
+    };
+    auto reset = [mech, psi]() {
+        mech->reset();
+        (*psi)[0] = Real{0};
+        (*psi)[1] = Real{0};
+    };
+    chain.add(std::move(step), std::move(reset));
+}
+
+
 /// Add a 3-phase PMSM / BLDC motor to the chain. The user must have
 /// already added the per-phase R + L + back-EMF source to the builder
 /// and resolved the state indices.
