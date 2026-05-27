@@ -153,7 +153,7 @@ class MmcPlant:
 def build_l1_plant(params: GeanThesisParams) -> MmcPlant:
     """3-φ MMC inverter using L1 PS-PWM multilevel arms (no dead-time)."""
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
 
     m_a, m_b_, m_c = make_phase_mref_fns(params)
 
@@ -186,7 +186,7 @@ def build_l1_plant(params: GeanThesisParams) -> MmcPlant:
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = p.add_mmc_arm_multilevel(
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params, m_ref=lower_refs[k],
         )
         arms.append(arm_n)
@@ -201,7 +201,7 @@ def build_l1_plant(params: GeanThesisParams) -> MmcPlant:
             b.pool.branch_var_id_for_inductor(l_id, b.graph),
         )
     # Weak star tie for MNA conditioning.
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -210,7 +210,7 @@ def build_l1_plant(params: GeanThesisParams) -> MmcPlant:
 def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
     """3-φ MMC inverter using L2 SM-equivalent arms (dead-time aware)."""
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
 
     m_a, m_b_, m_c = make_phase_mref_fns(params)
 
@@ -242,7 +242,7 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = p.add_mmc_arm_equivalent(
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params, m_ref=lower_refs[k],
         )
         arms.append(arm_n)
@@ -255,7 +255,7 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
         iL_indices.append(
             b.pool.branch_var_id_for_inductor(l_id, b.graph),
         )
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -389,7 +389,7 @@ def build_l1_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
     isn't part of the semiconductor itself).
     """
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
 
     m_a, m_b_, m_c = make_phase_mref_fns(params)
 
@@ -450,7 +450,7 @@ def build_l1_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = p.add_mmc_arm_multilevel(
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params, m_ref=lower_refs[k],
         )
         arms.append(arm_n)
@@ -463,7 +463,7 @@ def build_l1_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
         iL_indices.append(
             b.pool.branch_var_id_for_inductor(l_id, b.graph),
         )
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -473,7 +473,7 @@ def build_l2_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
     """L2 (dead-time aware) MMC plant with anti-parallel SwitchedDiode
     pair per arm (V_CE_sat + R_CE_sat physics)."""
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
 
     m_a, m_b_, m_c = make_phase_mref_fns(params)
 
@@ -535,7 +535,7 @@ def build_l2_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = p.add_mmc_arm_equivalent(
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params, m_ref=lower_refs[k],
         )
         arms.append(arm_n)
@@ -548,7 +548,7 @@ def build_l2_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
         iL_indices.append(
             b.pool.branch_var_id_for_inductor(l_id, b.graph),
         )
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -859,7 +859,7 @@ def run_mmc_closed_loop(
         :class:`ClosedLoopResult` with the full logged trajectories.
     """
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vdc", "dc_p", "dc_n", params.V_dc)
+    b.add_voltage_source("Vdc", "dc_p", "gnd", params.V_dc)
 
     m_a_holder = [0.5]
     m_b_holder = [0.5]
@@ -907,7 +907,7 @@ def run_mmc_closed_loop(
         b.add_inductor(f"Lb_{ph}_n", f"rb_{ph}_n", f"mid_{ph}_n", params.l_b)
         arm_n = add_arm(  # type: ignore[arg-type]
             b, name=f"A_{ph}_n",
-            node_a=f"mid_{ph}_n", node_b="dc_n",
+            node_a=f"mid_{ph}_n", node_b="gnd",
             params=arm_params,  # type: ignore[arg-type]
             m_ref=lambda _t, _h=holder: 1.0 - _h[0],
         )
@@ -919,7 +919,7 @@ def run_mmc_closed_loop(
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
         iL_idx.append(b.pool.branch_var_id_for_inductor(lid, b.graph))
-    b.add_resistor("R_star", "star", "dc_n", 1e6)
+    b.add_resistor("R_star", "star", "gnd", 1e6)
 
     obs_arms, bex = make_obs(b, arms, dt=dt)  # type: ignore[arg-type]
 

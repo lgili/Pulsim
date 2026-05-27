@@ -97,12 +97,9 @@ def main() -> None:
                       switch_fn=ps)
     print(f"  samples: {res.num_steps()}")
 
-    vout_idx = builder.node_id_of("vout")
-    a_idx    = builder.node_id_of("mid_a")
-    b_idx    = builder.node_id_of("mid_b")
     times = np.asarray(res.times) * 1e3
-    v_out = np.array([s[vout_idx] for s in res.states])
-    v_ab  = np.array([s[a_idx] - s[b_idx] for s in res.states])
+    v_out = res.v("vout")
+    v_ab  = res.v("mid_a") - res.v("mid_b")
 
     k_skip = int(0.7 * res.num_steps())
     v_mean = v_out[k_skip:].mean()

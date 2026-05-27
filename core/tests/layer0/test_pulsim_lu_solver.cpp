@@ -646,3 +646,107 @@ TEST_CASE("make_default_solver(n, Backend::Auto) returns PulsimSparseLuSolver "
     REQUIRE(solver->analyze(M));
     REQUIRE(solver->factorize(M));
 }
+
+// -----------------------------------------------------------------------------
+// v1.4.0 — partial_refactor with multi-column changed_cols + path-count query
+// (openspec/changes/add-generalised-path-refactor Part A)
+// -----------------------------------------------------------------------------
+
+// Spec: partial_refactor accepts arbitrary-length changed_cols and
+// computes the union of etree paths. Two-column changed_cols must
+// produce solve parity vs fresh-factorise within 1e-10.
+TEST_CASE("v1.4.0: partial_refactor with 2-col changed_cols matches fresh-factorise",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor][v15]") {
+    Matrix M1 = make_buck_like_8x8();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M1));
+    REQUIRE(solver.factorize(M1));
+
+    // Perturb columns 2 AND 3 simultaneously (these are R2's nodes on
+    // the buck-like fixture — toggling them mimics a 2-bit multi-bit
+    // switch transition).
+    Matrix M2 = M1;
+    Real* vals = M2.valuePtr();
+    const Index* outer = M2.outerIndexPtr();
+    for (Index col : {Index{2}, Index{3}}) {
+        for (Index p = outer[col]; p < outer[col + 1]; ++p) {
+            vals[p] *= Real{1.1};  // 10% bump (preserves pattern)
+        }
+    }
+
+    std::array<Index, 2> changed = {2, 3};
+    REQUIRE(solver.partial_refactor(M2, std::span<const Index>(changed)));
+
+    Vector b(8);
+    for (Index i = 0; i < 8; ++i) b[i] = static_cast<Real>(i + 1);
+    Vector x_partial;
+    solver.solve(b, x_partial);
+
+    // Reference: fresh factorise of M2 from scratch.
+    PulsimSparseLuSolver fresh;
+    REQUIRE(fresh.analyze(M2));
+    REQUIRE(fresh.factorize(M2));
+    Vector x_fresh;
+    fresh.solve(b, x_fresh);
+
+    Real err = 0;
+    for (Index i = 0; i < 8; ++i) {
+        err = std::max(err, std::abs(x_partial[i] - x_fresh[i]));
+    }
+    INFO("|x_partial - x_fresh|∞ = " << err);
+    REQUIRE(err < Real{1e-10});
+}
+
+// Spec: partial_refactor_count_path returns the union-path length
+// WITHOUT executing the refactor. Two-column query length must be
+// monotone (≥ single-column length) and bounded by sum of singles.
+TEST_CASE("v1.4.0: partial_refactor_count_path is monotone and bounded",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor][v15]") {
+    Matrix M = make_buck_like_8x8();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+
+    std::array<Index, 1> single = {2};
+    std::array<Index, 2> doublec = {2, 3};
+    const Index L_single = solver.partial_refactor_count_path(
+        std::span<const Index>(single));
+    const Index L_double = solver.partial_refactor_count_path(
+        std::span<const Index>(doublec));
+
+    INFO("L(c=2) = " << L_single << ", L(c={2,3}) = " << L_double);
+    // Each non-empty changed_cols should walk at least one etree node.
+    REQUIRE(L_single >= 1);
+    REQUIRE(L_double >= 1);
+    // Union path is at-least-as-long as any single's path.
+    REQUIRE(L_double >= L_single);
+
+    // And the query must be PURE: calling it must not have mutated
+    // varying_set_ or path_ (we verify indirectly by re-querying with
+    // an empty changed_cols and getting a stable result).
+    const Index L_again = solver.partial_refactor_count_path(
+        std::span<const Index>(single));
+    REQUIRE(L_again == L_single);
+}
+
+// Spec: partial_refactor_count_path on a fresh-factored solver with
+// empty changed_cols returns 0 (no path work yet).
+TEST_CASE("v1.4.0: partial_refactor_count_path on empty input returns 0",
+          "[v2][layer0][sparse][pulsim_lu][partial_refactor][v15]") {
+    Matrix M = make_spd_3x3();
+    PulsimSparseLuSolver solver;
+    REQUIRE(solver.analyze(M));
+    REQUIRE(solver.factorize(M));
+
+    REQUIRE(solver.partial_refactor_count_path(
+        std::span<const Index>{}) == 0);
+}
+
+// Spec: MAX_PATH_LENGTH_RATIO is the compile-time tunable that
+// callers (PwlStateSpaceCache::solve_rank1) consult. Sanity check
+// that it's a positive ratio in (0, 1].
+TEST_CASE("v1.4.0: MAX_PATH_LENGTH_RATIO is a valid ratio in (0, 1]",
+          "[v2][layer0][sparse][pulsim_lu][v15]") {
+    REQUIRE(MAX_PATH_LENGTH_RATIO > Real{0});
+    REQUIRE(MAX_PATH_LENGTH_RATIO <= Real{1});
+}

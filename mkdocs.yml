@@ -74,15 +74,32 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - tables
+  - footnotes
   - toc:
       permalink: true
   - pymdownx.details
-  - pymdownx.superfences
+  # Mermaid diagrams via custom_fences + Material's built-in mermaid loader.
+  # Used by the "How Pulsim Works" section (etree, path walk, layer stack).
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.inlinehilite
   - pymdownx.highlight
   - pymdownx.snippets
   - pymdownx.tabbed:
       alternate_style: true
+  # KaTeX-rendered math via arithmatex. Used heavily by the "How Pulsim
+  # Works" section for MNA / trapezoidal / sparse-LU equations.
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  # KaTeX (rendered via arithmatex generic mode).
+  - assets/js/katex.js
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js
 
 extra:
   version:
@@ -94,6 +111,8 @@ extra:
 
 extra_css:
   - assets/stylesheets/extra.css
+  # KaTeX styling for math rendering (used by How Pulsim Works section).
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css
 
 nav:
   - Home: index.md
@@ -107,9 +126,24 @@ nav:
       - 'Tutorial 04 — Three-Phase VSI': tutorials/04-3phase-vsi.md
       - 'Tutorial 05 — LDO with Op-Amp': tutorials/05-ldo-feedback.md
       - 'Tutorial 06 — IGBT Boost': tutorials/06-igbt-boost.md
+      - 'Motors — Induction (Phase 2)': motors-induction.md
+      - 'Motors — Sensorless Observers (Phase 2)': motors-sensorless.md
+      - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
       - Gotchas: gotchas.md
+  - How Pulsim Works:
+      - 'Overview': how-pulsim-works/index.md
+      - '1 — Introduction (why SMPS is hard)': how-pulsim-works/01-introduction.md
+      - '2 — MNA Foundations': how-pulsim-works/02-mna-foundations.md
+      - '3 — Trapezoidal Companion Discretisation': how-pulsim-works/03-trapezoidal-companion.md
+      - '4 — PWL State-Space Cache': how-pulsim-works/04-pwl-state-space-cache.md
+      - '5 — Sparse Direct LU Foundations': how-pulsim-works/05-sparse-lu-foundations.md
+      - '6 — PulsimSparseLuSolver': how-pulsim-works/06-pulsim-sparse-lu.md
+      - '7 — Path-Based Partial Refactorisation': how-pulsim-works/07-rank1-partial-refactor.md
+      - '8 — Benchmarks': how-pulsim-works/08-benchmarks.md
+      - '9 — Architecture Walkthrough': how-pulsim-works/09-architecture-walkthrough.md
+      - '10 — Paper Figures Index': how-pulsim-works/10-paper-figures-index.md
   - Internals:
       - Architecture (Layer-by-Layer): internals/README.md
       - 'Layer 0 — Numeric + Sparse': internals/layer0-numeric-and-sparse.md

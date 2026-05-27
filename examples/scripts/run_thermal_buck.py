@@ -133,15 +133,13 @@ def main() -> None:
     )
 
     times = np.asarray(res.times)
-    states = np.asarray(res.states)
-    T_j = states[:, b.node_id_of("T_j")]
-    v_out = states[:, b.node_id_of("vout")]
-    i_L = states[:, L_branch_var]
+    T_j = res.v("T_j")
+    v_out = res.v("vout")
+    i_L = res.i("L1")
 
     # Re-derive instantaneous power for the plot.
     P_inst = np.where(
-        np.abs(states[:, b.node_id_of("sw")] -
-                states[:, b.node_id_of("vin")]) < V_DC*0.5,
+        np.abs(res.v("sw") - res.v("vin")) < V_DC*0.5,
         R_ON_MOS * i_L**2, 0.0,
     )
     # Average power per PWM cycle (smooth out switching).

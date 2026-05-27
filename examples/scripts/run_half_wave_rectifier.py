@@ -57,10 +57,8 @@ def main() -> None:
                        progress=True)
     print(f"  samples: {res.num_steps()}")
 
-    n0_idx = builder.node_id_of("n0")
-    n1_idx = builder.node_id_of("n1")
-    v_in  = np.array([s[n0_idx] for s in res.states])
-    v_out = np.array([s[n1_idx] for s in res.states])
+    v_in  = res.v("n0")
+    v_out = res.v("n1")
     print(f"  v_in  range: [{v_in.min():+.2f}, {v_in.max():+.2f}] V "
           f"(expected ±10)")
     print(f"  v_out range: [{v_out.min():+.2f}, {v_out.max():+.2f}] V "

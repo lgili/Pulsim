@@ -17,25 +17,32 @@
 //      the unit-impulse on the input branch), and read off the output
 //      node voltage as H(jω_k).
 //
-// The complex sparse path uses Eigen's SparseLU<complex<Real>> per
-// frequency (a refactor + solve per ω). For typical SMPS state sizes
-// (≤ 32 states) the per-frequency cost is ~10 µs, making a 100-point
-// sweep finish in a few milliseconds. That's ~200× faster than the
-// existing swept-sine path.
+// The complex sparse path uses the in-house PulsimSparseLuSolver
+// templated on `std::complex<Real>` (per
+// `openspec/changes/add-pulsim-complex-sparse-lu`, v1.4.0+). Each
+// frequency is a fresh `analyze + factorize + solve` cycle. For
+// typical SMPS state sizes (≤ 32 states) the per-frequency cost is
+// ~10 µs, making a 100-point sweep finish in a few milliseconds.
+// That's ~200× faster than the existing swept-sine path. With this
+// migration `Eigen::SparseLU<std::complex<Real>>` is no longer pulled
+// in by production code — it remains available only as a paper-
+// comparison baseline (`Backend::Eigen`).
 //
 // Header-only, C++20.
 
 #pragma once
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/sparse/matrix.hpp"
+#include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <Eigen/Sparse>
-#include <Eigen/SparseLU>
 #include <complex>
 #include <stdexcept>
 #include <vector>
@@ -43,9 +50,17 @@
 namespace pulsim::analysis {
 
 using Complex = std::complex<Real>;
-using ComplexVector = Eigen::Matrix<Complex, Eigen::Dynamic, 1>;
-using ComplexSparseMatrix =
-    Eigen::SparseMatrix<Complex, Eigen::RowMajor, Index>;
+// `VectorT` lives in `pulsim::` (`pulsim/numeric/dense.hpp`);
+// `MatrixT` lives in `pulsim::sparse::` (`pulsim/sparse/matrix.hpp`).
+// Both are templated on Scalar per `add-pulsim-complex-sparse-lu`.
+using ComplexVector = pulsim::VectorT<Complex>;
+// ColMajor (matches `sparse::MatrixT<Complex>`) so the in-house
+// `PulsimSparseLuSolverT<Complex>` can consume it without transpose-
+// and-copy. v1.3.0 used RowMajor here as an Eigen::SparseLU
+// convention — Eigen accepted it via an internal transpose; the
+// in-house solver requires ColMajor (CSC). Triplet-based assembly
+// elsewhere in this header is layout-independent.
+using ComplexSparseMatrix = sparse::MatrixT<Complex>;
 
 /// Result of a single-input / single-output MNA AC sweep.
 ///
@@ -156,7 +171,8 @@ assemble_E_matrix(const topology::Graph& graph,
     const topology::SwitchStateMask& mask,
     const std::vector<Real>& freqs,
     Size input_state_idx,
-    Size output_node_idx) {
+    Size output_node_idx,
+    const ShouldContinueFn& should_continue = {}) {
 
     // 1. Assemble the static (R + algebraic-constraint) MNA matrix.
     //    dt=0 → no trap-companion contribution from L/C, so J
@@ -220,6 +236,8 @@ assemble_E_matrix(const topology::Graph& graph,
                                                           Real{0}};
 
     for (std::size_t k = 0; k < freqs.size(); ++k) {
+        check_cancellation(should_continue, "run_mna_sweep",
+                            static_cast<long>(k));
         const Real omega = Real{2} * Real{3.141592653589793238462643}
                               * freqs[k];
         const Complex j_omega{Real{0}, omega};
@@ -227,21 +245,28 @@ assemble_E_matrix(const topology::Graph& graph,
         ComplexSparseMatrix M = J_c + j_omega * E_c;
         M.makeCompressed();
 
-        Eigen::SparseLU<ComplexSparseMatrix,
-                          Eigen::COLAMDOrdering<Index>> solver;
-        solver.analyzePattern(M);
-        solver.factorize(M);
-        if (solver.info() != Eigen::Success) {
+        // v1.4.0: in-house complex sparse LU (no third-party LU on the
+        // production AC-sweep path). Lifecycle matches the v1.3.0 real
+        // solver — `analyze + factorize + solve`. `analyze` returns
+        // `false` on a malformed pattern; `factorize` returns `false`
+        // on numerical singularity (zero pivot), accessible via
+        // `numeric_singular()`.
+        sparse::PulsimComplexSparseLuSolver solver;
+        if (!solver.analyze(M)) {
             throw std::runtime_error(
-                "run_mna_sweep: complex factorisation failed at f=" +
-                std::to_string(freqs[k]));
+                "run_mna_sweep: complex symbolic analysis (Pulsim) "
+                "failed at f=" + std::to_string(freqs[k]));
         }
-        ComplexVector x = solver.solve(rhs);
-        if (solver.info() != Eigen::Success) {
+        if (!solver.factorize(M)) {
             throw std::runtime_error(
-                "run_mna_sweep: complex solve failed at f=" +
-                std::to_string(freqs[k]));
+                "run_mna_sweep: complex numeric factorisation (Pulsim) "
+                "failed at f=" + std::to_string(freqs[k]) +
+                (solver.numeric_singular()
+                     ? " — matrix is numerically singular"
+                     : ""));
         }
+        ComplexVector x;
+        solver.solve(rhs, x);
         result.H[k] = x[static_cast<Index>(output_node_idx)];
     }
     return result;

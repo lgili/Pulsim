@@ -31,11 +31,14 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -43,27 +46,106 @@
 namespace pulsim::pwl {
 
 /// Telemetry counters for the rank-1 cache update path
-/// (openspec/changes/add-pwl-rank1-update). Monotonically incremented
-/// from inside `PwlStateSpaceCache::solve_rank1`. Use
+/// (openspec/changes/add-pwl-rank1-update, extended by
+/// openspec/changes/add-generalised-path-refactor Part A).
+/// Monotonically incremented from inside
+/// `PwlStateSpaceCache::solve_rank1`. Use
 /// `PwlStateSpaceCache::metrics()` to snapshot.
 ///
-/// * `rank1_hits`         — calls where the new mask differed from the
-///                          previous by exactly one bit AND the underlying
-///                          solver supports partial refactorization, so the
-///                          fast `partial_refactor` path engaged.
-/// * `full_refactor_hits` — calls that hit a full re-factorisation, either
-///                          because of a multi-bit mask change, a
-///                          first-encounter mask, or a no-mask-change
-///                          re-solve (e.g. time-varying source values).
-/// * `fallbacks`          — calls where the rank-1 fast path was attempted
-///                          but had to fall back to a full re-factor (e.g.
-///                          backend without partial-refactor support, or a
-///                          numerical singularity reported by
-///                          `partial_refactor`).
+/// * `rank1_hits`            — fast-path hits where the mask either did not
+///                             change (b_constant refresh + triangular solve
+///                             only) OR changed by exactly one bit AND the
+///                             single-bit `partial_refactor` path engaged.
+///                             v1.3.0 semantics preserved.
+/// * `multi_bit_rank1_hits`  — (v1.4.0+) calls where the mask changed by ≥ 2
+///                             bits AND the multi-bit path-union
+///                             `partial_refactor` path engaged successfully.
+///                             Previously these landed in `full_refactor_hits`
+///                             (the v1.3.0 unconditional multi-bit fallback);
+///                             v1.4.0 routes them through path-based update
+///                             when the union path is short enough.
+/// * `full_refactor_hits`    — fresh `factorize()` because the path-based
+///                             update would be no cheaper than a full
+///                             factorisation (`path_length / n >
+///                             MAX_PATH_LENGTH_RATIO`), or the backend does
+///                             not implement `partial_refactor`, or the
+///                             first-encounter initial factor.
+/// * `fallbacks`             — `partial_refactor` was attempted and returned
+///                             `false` (numerical singularity / pivot fault
+///                             in the path). Distinct from `full_refactor_hits`
+///                             which is the "didn't even try" bucket.
+///
+/// Invariant per
+/// `openspec/changes/add-generalised-path-refactor/specs/pwl-rank1-update`:
+///     `rank1_hits + multi_bit_rank1_hits + full_refactor_hits + fallbacks
+///      == total solve_rank1 calls`.
 struct CacheMetrics {
-    std::uint64_t rank1_hits         = 0;
-    std::uint64_t full_refactor_hits = 0;
-    std::uint64_t fallbacks          = 0;
+    std::uint64_t rank1_hits            = 0;
+    std::uint64_t multi_bit_rank1_hits  = 0;
+    std::uint64_t full_refactor_hits    = 0;
+    std::uint64_t fallbacks             = 0;
+};
+
+/// Result of `PwlStateSpaceCache::refactor_parametric` (v1.4.0,
+/// `openspec/changes/add-generalised-path-refactor` Part B).
+///
+/// Per the spec invariant:
+///   `path_refactor_hits + fallback_hits == masks_processed`.
+///
+/// * `masks_processed`     — total number of cached masks the call
+///                           visited. For `Mode::AllActive` this is
+///                           `segments_.size()`; for
+///                           `Mode::CurrentOnly` it is at most 1 (the
+///                           rank-1 sliding solver's current mask
+///                           if rank-1 has been used).
+/// * `path_refactor_hits`  — segments where `partial_refactor` was
+///                           called AND returned `true`. The headline
+///                           speedup bucket.
+/// * `fallback_hits`       — segments where the path was either too
+///                           long (`affected_cols/n > MAX_PATH_LENGTH_RATIO`),
+///                           the backend doesn't support
+///                           `partial_refactor`, or `partial_refactor`
+///                           was attempted and returned `false`
+///                           (pivot fault). In every case the
+///                           segment was rebuilt via fresh
+///                           `factorize(new_J)`.
+/// * `wall_time_us`        — total wall-clock spent in the call
+///                           (microseconds). Includes re-stamping +
+///                           path-walks + factorizations.
+struct ParametricRefactorResult {
+    std::size_t masks_processed    = 0;
+    std::size_t path_refactor_hits = 0;
+    std::size_t fallback_hits      = 0;
+    double      wall_time_us       = 0.0;
+};
+
+/// Selection mode for `PwlStateSpaceCache::refactor_parametric`.
+///
+/// `AllActive` (default) — process every cached `(mask, segment)`
+/// entry. The right choice for sweep / Monte Carlo workloads where
+/// downstream `simulate()` calls will visit multiple masks across
+/// the transient.
+///
+/// `CurrentOnly` — process just the most-recent rank-1 sliding
+/// solver's mask (if rank-1 has been used). Useful for hot-loop
+/// parameter perturbations (e.g. a closed-loop control study that
+/// trims one gain live) where the user knows only the active mask
+/// matters. A no-op (returns `masks_processed == 0`) when the cache
+/// has not been used via `solve_rank1`.
+enum class ParametricRefactorMode {
+    AllActive,
+    CurrentOnly,
+};
+
+/// Single parameter update: which device (by `branch_id`, obtained
+/// via `CircuitBuilder::branch_id_of(name)`) and its new value.
+/// The pool's mutator dispatch (`update_resistor_R`,
+/// `update_inductor_L`, `update_capacitor_C`,
+/// `update_voltage_source_V`) is selected from the stored device
+/// kind on the corresponding branch.
+struct ParametricUpdate {
+    Index branch_id;
+    Real  new_value;
 };
 
 /// Structured error returned by the non-throwing `try_*` cache API
@@ -97,8 +179,15 @@ struct CacheError {
 
 class PwlStateSpaceCache {
 public:
+    /// v1.4.0: pool stored as a non-const reference so
+    /// `refactor_parametric` can mutate it in place. All read paths
+    /// remain unchanged; existing callers that pass a non-const
+    /// `DevicePool` keep compiling. A `const DevicePool&` argument
+    /// no longer binds — callers that need read-only safety should
+    /// `std::cref(pool)` upstream, but in practice every Layer 1-9
+    /// consumer passes a freshly built non-const pool.
     PwlStateSpaceCache(const topology::Graph& graph,
-                        const DevicePool& pool) noexcept
+                        DevicePool& pool) noexcept
         : graph_{graph}, pool_{pool} {}
 
     /// Build all 2^N segments and pre-factorize each (V1 dt-aware).
@@ -340,25 +429,68 @@ public:
             rank1_hits_.fetch_add(1, std::memory_order_relaxed);
         } else {
             // Mask changed: decide partial vs full refactor.
+            //
+            // v1.4.0 (openspec/changes/add-generalised-path-refactor Part A):
+            // multi-bit flips are no longer unconditionally routed to
+            // full factorize. Instead we compute the affected columns for
+            // EVERY toggled bit (deduplicated), query the solver for the
+            // would-be path length, and:
+            //   - if path-length / n ≤ MAX_PATH_LENGTH_RATIO → try
+            //     partial_refactor on the multi-column changed set
+            //   - else → fall back to full factorize (path-based wouldn't
+            //     be cheaper anyway)
             const std::uint64_t diff = mask.bits() ^ rank1_mask_.bits();
             const int pop = std::popcount(diff);
 
-            const bool partial_eligible =
-                (pop == 1) && rank1_solver_->supports_partial_refactor();
+            const auto changed_cols =
+                compute_changed_columns_(rank1_mask_, mask);
+            const std::span<const Index> changed_cols_span{
+                changed_cols.data(), changed_cols.size()};
+
+            const bool can_try_partial =
+                rank1_solver_->supports_partial_refactor();
+            // Routing rule per
+            // `openspec/changes/add-generalised-path-refactor`
+            // §pwl-rank1-update spec:
+            //   * pop == 1 (single-bit, v1.3.0 case) — always try
+            //     partial_refactor when the backend supports it. The
+            //     captured microbench shows 100% success rate on
+            //     single-bit Gray-code flips; the path is always
+            //     short. No ratio gate needed.
+            //   * pop >= 2 (multi-bit, v1.4.0 NEW) — query
+            //     partial_refactor_count_path() and skip the
+            //     path-based attempt only when the union path covers
+            //     > MAX_PATH_LENGTH_RATIO of the columns (where
+            //     path-based wouldn't save work vs a fresh factorise).
+            bool try_path = can_try_partial;
+            if (try_path && pop > 1) {
+                const Index n_state = static_cast<Index>(
+                    pool_.state_size(graph_));
+                const Index path_len =
+                    rank1_solver_->partial_refactor_count_path(
+                        changed_cols_span);
+                const Real path_ratio = n_state > 0
+                    ? (static_cast<Real>(path_len) /
+                       static_cast<Real>(n_state))
+                    : Real{1};
+                try_path = (path_ratio <= sparse::MAX_PATH_LENGTH_RATIO);
+            }
 
             bool refactored_via_partial = false;
-            if (partial_eligible) {
-                const auto changed_cols =
-                    compute_changed_columns_(rank1_mask_, mask);
+            if (try_path) {
                 refactored_via_partial = rank1_solver_->partial_refactor(
-                    J, std::span<const Index>{
-                        changed_cols.data(), changed_cols.size()});
+                    J, changed_cols_span);
             }
 
             if (refactored_via_partial) {
                 rank1_b_constant_ = b;
                 rank1_mask_       = mask;
-                rank1_hits_.fetch_add(1, std::memory_order_relaxed);
+                if (pop == 1) {
+                    rank1_hits_.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    multi_bit_rank1_hits_.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
             } else {
                 // Full refactor on the same symbolic. The sparsity pattern
                 // is identical across all switch states (only conductance
@@ -372,15 +504,16 @@ public:
                 }
                 rank1_b_constant_ = b;
                 rank1_mask_       = mask;
-                if (partial_eligible) {
-                    // partial_refactor was attempted and returned false.
-                    fallbacks_.fetch_add(1, std::memory_order_relaxed);
-                } else if (pop == 1) {
-                    // Single-bit flip but backend doesn't support
-                    // partial_refactor (e.g. SparseLuSolver).
+                if (try_path) {
+                    // partial_refactor was attempted and returned false
+                    // (numerical/pivot fault) — fall back.
                     fallbacks_.fetch_add(1, std::memory_order_relaxed);
                 } else {
-                    // Multi-bit flip — genuine full refactor.
+                    // Either the backend can't do partial OR the path
+                    // ratio was above MAX_PATH_LENGTH_RATIO → didn't
+                    // even try. Counted under full_refactor_hits, not
+                    // fallbacks (the "didn't try" vs "tried and failed"
+                    // distinction matters for diagnostics).
                     full_refactor_hits_.fetch_add(
                         1, std::memory_order_relaxed);
                 }
@@ -415,11 +548,139 @@ public:
         return {
             .rank1_hits = rank1_hits_.load(
                 std::memory_order_relaxed),
+            .multi_bit_rank1_hits = multi_bit_rank1_hits_.load(
+                std::memory_order_relaxed),
             .full_refactor_hits = full_refactor_hits_.load(
                 std::memory_order_relaxed),
             .fallbacks = fallbacks_.load(
                 std::memory_order_relaxed),
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // v1.4.0 Part B — parametric refactor for sweep / Monte Carlo workloads
+    // -------------------------------------------------------------------------
+    //
+    // Pushes a batch of `(branch_id, new_value)` updates into the pool,
+    // then walks every active mask in `segments_` (or just the
+    // rank-1 sliding solver's mask, per `mode`) and re-stamps + path-
+    // refactors each cached segment at the minimum column set.
+    //
+    // The key win vs the legacy "build_lazy + sweep" pattern: we
+    // **reuse the symbolic factorization** (`analyze`) and the
+    // **majority of L+U entries** across sweep points. Only the
+    // columns of J that depend on the changed parameters need re-
+    // elimination, and only via the etree path of those columns.
+    //
+    // Result invariant: `path_refactor_hits + fallback_hits ==
+    //                    masks_processed`.
+    //
+    // Numerical contract: post-refactor `solve(mask, ...)` matches a
+    // fresh `analyze + factorize + solve` on the updated pool within
+    // 1e-10 (the same tolerance the multi-bit path-union gate
+    // enforces).
+    //
+    // Pre-conditions:
+    //   * `build(...)` or `build_lazy(...)` has been called.
+    //   * Every `updates[i].branch_id` is a registered device whose
+    //     kind matches the `update_*` mutator semantics (Resistor,
+    //     Inductor, Capacitor, VoltageSource). Other kinds silently
+    //     fall back to full-rebuild for every affected mask.
+    //   * Topology is unchanged (graph node/branch structure intact).
+    //     Updating values of a switch is not supported; switches are
+    //     toggled via the mask, not via parametric refactor.
+    [[nodiscard]] ParametricRefactorResult refactor_parametric(
+        std::span<const ParametricUpdate> updates,
+        ParametricRefactorMode mode = ParametricRefactorMode::AllActive) {
+        ParametricRefactorResult result;
+        const auto t0 = std::chrono::steady_clock::now();
+
+        if (updates.empty()) {
+            // No-op. Still report wall_time for telemetry callers.
+            const auto t1 = std::chrono::steady_clock::now();
+            result.wall_time_us =
+                std::chrono::duration<double, std::micro>(t1 - t0).count();
+            return result;
+        }
+
+        // 1. Push the updates into the pool. Each `update_*` mutator
+        //    dispatches on the stored device kind; mismatched kinds
+        //    throw std::out_of_range which propagates to the caller.
+        for (const auto& upd : updates) {
+            apply_parametric_update_(upd);
+        }
+
+        // 2. Build the deduplicated union of columns affected by the
+        //    parameter changes. An empty affected-cols set on any
+        //    branch (e.g. VoltageSource — RHS-only) means that
+        //    branch's change doesn't touch J; only b_constant needs
+        //    re-stamping, which happens during the per-segment
+        //    re-assemble step inside refactor_one_parametric_.
+        std::set<Index> affected_cols_set;
+        for (const auto& upd : updates) {
+            const auto cols =
+                pool_.columns_affected_by_branch(upd.branch_id, graph_);
+            for (Index c : cols) affected_cols_set.insert(c);
+        }
+
+        const std::vector<Index> affected_cols(
+            affected_cols_set.begin(), affected_cols_set.end());
+        const std::span<const Index> affected_cols_span{
+            affected_cols.data(), affected_cols.size()};
+
+        // 3. Pick which segments to process.
+        std::vector<topology::SwitchStateMask> masks_to_process;
+        if (mode == ParametricRefactorMode::CurrentOnly) {
+            if (rank1_initialized_) {
+                masks_to_process.push_back(rank1_mask_);
+            }
+        } else {
+            // AllActive — every cached primary segment AND, if the
+            // rank-1 sliding solver is in use, its mask too.
+            masks_to_process.reserve(segments_.size() +
+                                      (rank1_initialized_ ? 1 : 0));
+            for (const auto& [m, _seg] : segments_) {
+                masks_to_process.push_back(m);
+            }
+            if (rank1_initialized_) {
+                // Avoid double-processing if the rank-1 mask is also
+                // in segments_ (e.g. the user did a mixed
+                // solve + solve_rank1 workflow).
+                if (std::find(masks_to_process.begin(),
+                              masks_to_process.end(),
+                              rank1_mask_) == masks_to_process.end()) {
+                    masks_to_process.push_back(rank1_mask_);
+                }
+            }
+        }
+
+        // 4. For each selected mask, re-assemble J + b at the new
+        //    pool values, then path-refactor (or fall back to full
+        //    factorize when the path covers > MAX_PATH_LENGTH_RATIO
+        //    of n, or when the backend doesn't support partial_refactor).
+        for (const auto& mask : masks_to_process) {
+            ++result.masks_processed;
+            if (refactor_one_parametric_(mask, affected_cols_span)) {
+                ++result.path_refactor_hits;
+            } else {
+                ++result.fallback_hits;
+            }
+        }
+
+        const auto t1 = std::chrono::steady_clock::now();
+        result.wall_time_us =
+            std::chrono::duration<double, std::micro>(t1 - t0).count();
+        return result;
+    }
+
+    /// Convenience overload for the very common one-parameter case:
+    /// `cache.refactor_parametric(branch_id, new_value)`.
+    [[nodiscard]] ParametricRefactorResult refactor_parametric(
+        Index branch_id, Real new_value,
+        ParametricRefactorMode mode = ParametricRefactorMode::AllActive) {
+        ParametricUpdate one{branch_id, new_value};
+        return refactor_parametric(
+            std::span<const ParametricUpdate>(&one, 1), mode);
     }
 
 private:
@@ -433,7 +694,18 @@ private:
         assemble_segment(graph_, pool_, mask, dt, J, b);
         sparse::compress_in_place(J);
 
-        auto solver = sparse::make_default_solver();
+        // v1.4.0: each segment's solver is the Pulsim in-house LU
+        // (`Backend::Auto` → Pulsim since v1.3.0). This gives
+        // `refactor_parametric` access to `partial_refactor` on the
+        // per-mask cached factor; the legacy two-arg
+        // `make_default_solver(state_size, Backend::Auto)` call is
+        // bit-identical to the v1.3.0 result on real-scalar SPD
+        // matrices. The no-arg `make_default_solver()` overload
+        // (Eigen baseline) is now kept only for the showcase /
+        // sanity-check tests that pin the Eigen behaviour for
+        // paper-comparison purposes.
+        auto solver = sparse::make_default_solver(
+            pool_.state_size(graph_), sparse::Backend::Auto);
         if (!solver->analyze(J)) {
             return std::unexpected(CacheError{
                 .kind = CacheError::Kind::StructurallySingular,
@@ -489,44 +761,198 @@ private:
         segments_.emplace(mask, make_segment(mask, dt_));
     }
 
-    /// Compute the list of MNA column indices that change between two
-    /// switch masks. For each bit that differs, the corresponding switch's
-    /// branch contributes its two terminal nodes (from, to). The result
-    /// may contain duplicates if multiple switches share a node — that's
-    /// fine, downstream `partial_refactor` consumers can deduplicate.
+    /// Dispatch a single parametric update to the correct pool
+    /// mutator based on the stored device kind. v1.4.0 supports
+    /// Resistor, Inductor, Capacitor, VoltageSource. Other kinds
+    /// raise std::out_of_range — caller is expected to either avoid
+    /// the update or rebuild the cache from scratch via
+    /// `build_lazy(dt_)`.
+    void apply_parametric_update_(const ParametricUpdate& upd) {
+        const auto kind = pool_.kind_of(upd.branch_id);
+        using SK = DevicePool::StoredKind;
+        switch (kind) {
+            case SK::Resistor:
+                pool_.update_resistor_R(upd.branch_id, upd.new_value);
+                break;
+            case SK::Inductor:
+                pool_.update_inductor_L(upd.branch_id, upd.new_value);
+                break;
+            case SK::Capacitor:
+                pool_.update_capacitor_C(upd.branch_id, upd.new_value);
+                break;
+            case SK::VoltageSource:
+                pool_.update_voltage_source_V(upd.branch_id,
+                                                upd.new_value);
+                break;
+            default:
+                throw std::out_of_range(std::format(
+                    "PwlStateSpaceCache::refactor_parametric: "
+                    "branch {} has device kind {} which is not "
+                    "supported by the v1.4.0 parametric refactor "
+                    "pipeline (Resistor / Inductor / Capacitor / "
+                    "VoltageSource only). Rebuild the cache via "
+                    "build_lazy(dt) after updating this device.",
+                    upd.branch_id, static_cast<int>(kind)));
+        }
+    }
+
+    /// Re-assemble + refactor one (mask, segment) for the parametric
+    /// case. Updates BOTH the primary segment (if cached) AND the
+    /// rank-1 sliding solver (if initialized at this mask) — the
+    /// two paths share a logical mask but have independent solver
+    /// instances. Returns true if every applicable target took the
+    /// path-based update; false if any target fell back to fresh
+    /// `factorize()`. Throws std::runtime_error on fresh-factorize
+    /// numerical singularity (no recovery — the parameter values are
+    /// genuinely problematic).
+    [[nodiscard]] bool refactor_one_parametric_(
+        const topology::SwitchStateMask& mask,
+        std::span<const Index> affected_cols) {
+        // We may update BOTH a primary segment AND the rank-1
+        // sliding solver if the mask matches both. Re-assemble
+        // (J, b) once per target so refactor_solver_'s `std::move`
+        // of new_J doesn't fight between paths.
+        bool any_target_existed = false;
+        bool any_path_succeeded = false;
+
+        auto it = segments_.find(mask);
+        if (it != segments_.end()) {
+            any_target_existed = true;
+            sparse::Matrix new_J;
+            Vector new_b;
+            assemble_segment(graph_, pool_, mask, dt_, new_J, new_b);
+            sparse::compress_in_place(new_J);
+            const bool ok = refactor_solver_(
+                it->second.solver.get(),
+                it->second.J, it->second.b_constant,
+                new_J, new_b, affected_cols);
+            any_path_succeeded = any_path_succeeded || ok;
+        }
+        if (rank1_initialized_ && mask == rank1_mask_) {
+            any_target_existed = true;
+            sparse::Matrix new_J;
+            Vector new_b;
+            assemble_segment(graph_, pool_, mask, dt_, new_J, new_b);
+            sparse::compress_in_place(new_J);
+            // The rank-1 sliding solver doesn't cache J (it
+            // re-assembles every solve_rank1 call), but its
+            // factor + b_constant are stateful and must be
+            // refreshed here so any subsequent solve_rank1 sees
+            // the post-update pool values.
+            sparse::Matrix dummy_old_J;
+            const bool ok = refactor_solver_(
+                rank1_solver_.get(),
+                dummy_old_J,
+                rank1_b_constant_,
+                new_J, new_b, affected_cols);
+            any_path_succeeded = any_path_succeeded || ok;
+        }
+        if (!any_target_existed) {
+            // No cached factor for this mask anywhere. Count as
+            // fallback so the result invariant still holds; the
+            // next solve(mask) will lazily build a fresh segment
+            // from the post-update pool.
+            return false;
+        }
+        return any_path_succeeded;
+    }
+
+    /// Common path-vs-factorize logic shared by primary and rank-1
+    /// segments. Mutates `seg_J` + `seg_b` to the new values on
+    /// return regardless of which path was taken.
+    [[nodiscard]] bool refactor_solver_(
+        sparse::DirectSolver* solver,
+        sparse::Matrix& seg_J, Vector& seg_b,
+        sparse::Matrix& new_J, Vector& new_b,
+        std::span<const Index> affected_cols) {
+        const Index n = static_cast<Index>(pool_.state_size(graph_));
+        const bool can_try_partial =
+            solver->supports_partial_refactor();
+
+        // Decide whether to attempt the path-based update. Same
+        // ratio gate as the multi-bit case: if the union path
+        // covers > MAX_PATH_LENGTH_RATIO of n, the path-based
+        // update wouldn't be cheaper than fresh factorize.
+        bool try_path = can_try_partial && !affected_cols.empty();
+        if (try_path) {
+            const Index path_len =
+                solver->partial_refactor_count_path(affected_cols);
+            const Real ratio = n > 0
+                ? (static_cast<Real>(path_len) / static_cast<Real>(n))
+                : Real{1};
+            try_path = (ratio <= sparse::MAX_PATH_LENGTH_RATIO);
+        }
+
+        bool refactored_via_partial = false;
+        if (try_path) {
+            refactored_via_partial =
+                solver->partial_refactor(new_J, affected_cols);
+        }
+
+        if (!refactored_via_partial) {
+            if (!solver->factorize(new_J)) {
+                throw std::runtime_error(
+                    "PwlStateSpaceCache::refactor_parametric: full "
+                    "factorize fallback failed (numerically singular). "
+                    "Check the updated parameter values.");
+            }
+        }
+
+        // Mutate the cached segment's J + b in place so subsequent
+        // solve() calls return the post-update result.
+        seg_J = std::move(new_J);
+        seg_b = std::move(new_b);
+        return refactored_via_partial;
+    }
+
+    /// Compute the DEDUPED list of MNA column indices that change
+    /// between two switch masks. For each switch bit that differs, the
+    /// affected columns come from
+    /// `DevicePool::columns_affected_by_switch(sw_idx, graph)` (the
+    /// switch's two terminal nodes, skipping ground anchors). Multiple
+    /// switches sharing a node produce a single deduplicated entry.
+    ///
+    /// v1.4.0 (openspec/changes/add-generalised-path-refactor Part A):
+    /// dedup is now done HERE rather than left to the solver, because
+    /// the solver's `partial_refactor_count_path()` query needs a
+    /// canonical input to give a meaningful answer to the
+    /// `MAX_PATH_LENGTH_RATIO` gate. Dedup at the call site keeps the
+    /// solver's API surface narrow (it just walks the set it's given).
     ///
     /// Consumed by `DirectSolver::partial_refactor` overrides that
-    /// implement path-based re-elimination (Chan/Brandwajn/Tinney
-    /// 1986, Dinkelbach et al. 2021). The default `DirectSolver`
-    /// returns false from `partial_refactor`, so this hint goes
-    /// unused on backends that don't support the fast path —
-    /// `solve_rank1`'s fallback to full `factorize` engages
-    /// transparently.
+    /// implement path-based re-elimination. Backends without
+    /// `partial_refactor` support return false; `solve_rank1`'s
+    /// fallback to full `factorize` engages transparently.
     [[nodiscard]] std::vector<Index> compute_changed_columns_(
         const topology::SwitchStateMask& prev_mask,
         const topology::SwitchStateMask& curr_mask) const {
-        std::vector<Index> cols;
         const std::uint64_t diff = prev_mask.bits() ^ curr_mask.bits();
         if (diff == 0) {
-            return cols;
+            return {};
         }
-        cols.reserve(static_cast<std::size_t>(std::popcount(diff)) * 2);
+        // Use a set for in-place dedup. Switches sharing a node (common
+        // in half-bridge / full-bridge topologies where both legs
+        // anchor to the same midpoint) would otherwise produce
+        // duplicate column entries — fine for the solver's path-union
+        // (its in_path bitmap dedupes anyway) but bad for the count
+        // query which counts unique paths.
+        std::set<Index> uniq;
         Size switch_idx = 0;
         for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
             const auto& branch = graph_.branch(b_id);
             if (branch.kind == topology::BranchKind::Switch) {
                 if (((diff >> switch_idx) & 1ULL) != 0ULL) {
-                    cols.push_back(branch.from);
-                    cols.push_back(branch.to);
+                    if (branch.from >= 0) uniq.insert(branch.from);
+                    if (branch.to   >= 0) uniq.insert(branch.to);
                 }
                 ++switch_idx;
             }
         }
-        return cols;
+        return std::vector<Index>(uniq.begin(), uniq.end());
     }
 
     const topology::Graph& graph_;
-    const DevicePool& pool_;
+    DevicePool& pool_;
     numeric::Dictionary<topology::SwitchStateMask, PwlSegment>
         segments_;
     Real dt_ = Real{0};   // 0 = static-only build (V0)
@@ -552,6 +978,7 @@ private:
     // mid-simulation without locking; const-correct for use inside
     // const `solve_rank1` and const `metrics()`.
     mutable std::atomic<std::uint64_t> rank1_hits_{0};
+    mutable std::atomic<std::uint64_t> multi_bit_rank1_hits_{0};
     mutable std::atomic<std::uint64_t> full_refactor_hits_{0};
     mutable std::atomic<std::uint64_t> fallbacks_{0};
 };

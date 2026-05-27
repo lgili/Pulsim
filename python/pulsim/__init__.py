@@ -66,6 +66,10 @@ from ._pulsim import (  # type: ignore[import-not-found]
 from .control import (
     PIController,
     PIDController,
+    # add-python-closed-loop-helper (v1.5)
+    ClosedLoop,
+    bind_pi_to_switch,
+    bind_pi_to_duty_callable,
     Comparator,
     RateLimiter,
     SampleHold,
@@ -149,6 +153,9 @@ from .sweep import (
     SweepResult,
     sweep,
     monte_carlo,
+    # v1.4.0 — path-aware variants exploiting refactor_parametric
+    sweep_path_aware,
+    monte_carlo_path_aware,
 )
 from .kpi import (
     KpiGate,
@@ -169,6 +176,7 @@ from .thermal import (
     compute_temperature,
     add_foster_network,
     make_thermal_observer,
+    device_thermal_summary,
 )
 from .grid import (
     add_three_phase_grid,
@@ -195,12 +203,39 @@ from .motors import (
     DcMotor,
     PMSM,
     BLDC,
+    InductionMotor,
     add_dc_motor,
     make_dc_motor_observer,
     add_pmsm,
     make_pmsm_observer,
     add_bldc,
     make_bldc_observer,
+    add_induction_motor,
+    make_induction_motor_observer,
+    im_parameters_from_nameplate,
+)
+from .observers import (
+    SlidingModeObserver,
+    FluxMRASObserver,
+)
+from .hysteresis import (
+    JilesAthertonParams,
+    JilesAthertonModel,
+    reference_material,
+    list_reference_materials,
+    compute_bh_loop,
+    core_loss_jiles_atherton,
+    fit_ja_from_bh_curve,
+    BHLoopResult,
+    HystereticInductor,
+    add_hysteretic_inductor,
+    make_hysteretic_inductor_observer,
+)
+from .yaml_chain import wire_chain_from_yaml
+from .integrators import (
+    AdaptiveSolution,
+    DormandPrince5,
+    RadauIIA3,
 )
 from .spice_import import (
     SpiceElement,
@@ -208,7 +243,7 @@ from .spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
-from .stream import LiveStream
+from .stream import LiveStream, NativeLiveStream
 from .losses import (
     LossAccumulator,
     EfficiencyCalculator,
@@ -293,6 +328,7 @@ __all__ = [
     "LoadedCircuit",
     "load_yaml_string",
     "load_yaml_file",
+    "wire_chain_from_yaml",
     "make_pwm_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
@@ -302,8 +338,15 @@ __all__ = [
     "make_combined_switch_fn",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
-    # Closed-loop control building blocks (Phase 2).
+    # add-python-named-lookups (v1.5).
+    "NameNotFoundError",
+    # add-python-builder-ergonomics (v1.5).
+    "Cancelled",
+    # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
+    "ClosedLoop",
+    "bind_pi_to_switch",
+    "bind_pi_to_duty_callable",
     "PIDController",
     "Comparator",
     "RateLimiter",
@@ -369,6 +412,8 @@ __all__ = [
     "SweepResult",
     "sweep",
     "monte_carlo",
+    "sweep_path_aware",
+    "monte_carlo_path_aware",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -386,6 +431,7 @@ __all__ = [
     "compute_temperature",
     "add_foster_network",
     "make_thermal_observer",
+    "device_thermal_summary",
     # Three-phase grid helpers (Phase C.2).
     "add_three_phase_grid",
     "add_three_phase_line_impedance",
@@ -408,12 +454,35 @@ __all__ = [
     "DcMotor",
     "PMSM",
     "BLDC",
+    "InductionMotor",
     "add_dc_motor",
     "make_dc_motor_observer",
     "add_pmsm",
     "make_pmsm_observer",
     "add_bldc",
     "make_bldc_observer",
+    "add_induction_motor",
+    "make_induction_motor_observer",
+    "im_parameters_from_nameplate",
+    # Sensorless observers (Phase 2.3).
+    "SlidingModeObserver",
+    "FluxMRASObserver",
+    # Magnetic hysteresis — Jiles-Atherton (Phase 2.2).
+    "JilesAthertonParams",
+    "JilesAthertonModel",
+    "reference_material",
+    "list_reference_materials",
+    "compute_bh_loop",
+    "core_loss_jiles_atherton",
+    "fit_ja_from_bh_curve",
+    "BHLoopResult",
+    "HystereticInductor",
+    "add_hysteretic_inductor",
+    "make_hysteretic_inductor_observer",
+    # Adaptive RK integrators (Phase 2.4).
+    "AdaptiveSolution",
+    "DormandPrince5",
+    "RadauIIA3",
     # SPICE netlist import (Phase E.10).
     "SpiceElement",
     "parse_spice_value",
@@ -421,6 +490,7 @@ __all__ = [
     "spice_to_builder",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
+    "NativeLiveStream",
     # Post-hoc loss + efficiency helpers (parity with v1 surface).
     "LossAccumulator",
     "EfficiencyCalculator",
@@ -480,6 +550,224 @@ if _HAS_SCOPE:
     __all__.append("LiveScope")
 
 
+# add-python-builder-ergonomics (v1.5) — patch IC + alias helpers onto
+# CircuitBuilder, define Cancelled exception, expose simulate-wrapped
+# analyses with `should_continue` cancellation.
+from . import _builder_ergonomics as _berg
+_berg.install(CircuitBuilder)
+Cancelled = _berg.Cancelled
+
+
+class NameNotFoundError(KeyError):
+    """Raised by :meth:`SimulationResult.v` / `.i` / `.power` and the
+    :class:`CircuitBuilder` lookup helpers when a requested name
+    isn't registered. Carries ``name``, ``kind`` (one of
+    ``"node"``, ``"branch"``, ``"switch"``), and up to three
+    fuzzy-matched ``suggestions`` so the caller can hint at a
+    likely typo.
+
+    Subclasses :class:`KeyError` so existing
+    ``try: result.v(name) except KeyError`` patterns keep
+    working.
+    """
+
+    __slots__ = ("name", "kind", "suggestions")
+
+    def __init__(
+        self,
+        name: str,
+        kind: str,
+        suggestions: "list[str] | None" = None,
+    ) -> None:
+        self.name = name
+        self.kind = kind
+        self.suggestions = list(suggestions or [])
+        hint = (
+            f" Did you mean {self.suggestions}?"
+            if self.suggestions else ""
+        )
+        super().__init__(
+            f"{kind} {name!r} is not registered.{hint}"
+        )
+
+
+def _result_v(self, name: str, t=None):
+    """Return the node-voltage trace for ``name``.
+
+    See :class:`NameNotFoundError` for the typed error raised on
+    unknown names. The result wrapper stores the source
+    :class:`CircuitBuilder` as ``self._builder`` so name lookup
+    works without forcing callers to re-pass it.
+
+    Parameters
+    ----------
+    name : str
+        Node name passed to ``CircuitBuilder.add_*`` (or a
+        registered alias when alias support is enabled).
+    t : int | slice | array-like, optional
+        Step selection. ``None`` (default) returns the full
+        per-sample trace as a ``numpy.ndarray``. An ``int``
+        returns a scalar ``float``.
+    """
+    import numpy as _np
+    builder = getattr(self, "_builder", None)
+    if builder is None:
+        raise RuntimeError(
+            "SimulationResult.v requires the result to carry a "
+            "_builder reference. Use pulsim.simulate(...) so the "
+            "wrapper is attached automatically, or set "
+            "result._builder = builder by hand."
+        )
+    # add-python-builder-ergonomics: consult the alias map first.
+    # If `name` is a registered alias for a node, route through to
+    # the canonical name's node_id_of.
+    alias = builder._resolve_alias(name) if hasattr(
+        builder, "_resolve_alias") else None
+    if alias is not None and alias[0] == "node":
+        name = alias[1]
+    try:
+        idx = builder.node_id_of(name)
+    except IndexError:
+        # Pulsim's Graph exposes nodes as a list of dicts
+        # ``[{"id": int, "name": str}, ...]``. We walk it to suggest
+        # close matches when a typo lands here.
+        candidates: list[str] = []
+        try:
+            for node in builder.graph.nodes:
+                n_name = node.get("name") if isinstance(node, dict) \
+                          else getattr(node, "name", "")
+                if n_name:
+                    candidates.append(str(n_name))
+        except Exception:  # noqa: BLE001 — defensive only
+            pass
+        import difflib as _difflib
+        sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
+        raise NameNotFoundError(name, "node", sugg) from None
+    states = _np.asarray(self.states)
+    col = states[:, idx]
+    if t is None:
+        return col
+    return col[t]
+
+
+def _result_i(self, name: str, t=None):
+    """Return the branch-current trace for ``name``.
+
+    The state vector only carries currents for branches that
+    contribute MNA state variables — inductors and independent
+    voltage sources. For resistors / capacitors / diodes /
+    MOSFETs, the current must be reconstructed from node
+    voltages and the device's parameters; that path lives in
+    :mod:`pulsim.losses` (today via
+    :func:`average_power_at_node` and
+    :func:`device_loss_summary`). When called on a non-state
+    branch this method raises :class:`NotImplementedError`
+    pointing the caller at those helpers.
+
+    Sign convention follows the ``add_*`` call: current is
+    positive flowing from the ``from`` terminal to the ``to``
+    terminal.
+    """
+    import numpy as _np
+    builder = getattr(self, "_builder", None)
+    if builder is None:
+        raise RuntimeError(
+            "SimulationResult.i requires the result to carry a "
+            "_builder reference. Use pulsim.simulate(...) so the "
+            "wrapper is attached automatically."
+        )
+    # Same alias resolution as `.v`.
+    alias = builder._resolve_alias(name) if hasattr(
+        builder, "_resolve_alias") else None
+    if alias is not None and alias[0] == "branch":
+        name = alias[1]
+    try:
+        b_id = builder.branch_index_of(name)
+    except IndexError:
+        candidates = [d.name for d in builder.devices()]
+        import difflib as _difflib
+        sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
+        raise NameNotFoundError(name, "branch", sugg) from None
+    # Map branch_id to its state-vector column. Only inductors and
+    # voltage sources have a dedicated current state variable; the
+    # pool exposes the lookup but each device family has its own
+    # accessor in v1.4. Try inductor first (most common case), fall
+    # back to source.
+    state_idx: "int | None" = None
+    for accessor in (
+        "branch_var_id_for_inductor",
+        "branch_var_id_for_source",
+    ):
+        fn = getattr(builder.pool, accessor, None)
+        if fn is None:
+            continue
+        try:
+            state_idx = int(fn(b_id, builder.graph))
+            break
+        except Exception:  # noqa: BLE001 — wrong device kind
+            continue
+    if state_idx is None:
+        raise NotImplementedError(
+            f"branch {name!r} has no MNA current state variable "
+            f"(it's likely a resistor, capacitor, diode, or MOSFET — "
+            f"reconstruct its current via pulsim.losses helpers, e.g. "
+            f"device_loss_summary(result, builder)). result.i() is "
+            f"defined for inductors and voltage sources only."
+        )
+    states = _np.asarray(self.states)
+    col = states[:, state_idx]
+    if t is None:
+        return col
+    return col[t]
+
+
+def _result_power(self, device_name: str) -> float:
+    """Return the average dissipated power for ``device_name``,
+    sourced from :func:`device_loss_summary`.
+
+    Only resistors carry a meaningful ``P_avg`` today (inductors
+    are ideal — no loss; switches/diodes aren't in the summary
+    yet). For other device kinds the method raises
+    :class:`NotImplementedError` with the same migration hint as
+    :meth:`i`.
+    """
+    builder = getattr(self, "_builder", None)
+    if builder is None:
+        raise RuntimeError(
+            "SimulationResult.power requires the result to carry a "
+            "_builder reference. Use pulsim.simulate(...) so the "
+            "wrapper is attached automatically."
+        )
+    # ``device_loss_summary`` returns a list[dict[str, Any]] keyed
+    # by ``name``. Walk it once to find the match.
+    summary = device_loss_summary(builder, self)
+    by_name = {row.get("name"): row for row in summary if "name" in row}
+    if device_name not in by_name:
+        candidates = list(by_name.keys())
+        import difflib as _difflib
+        sugg = _difflib.get_close_matches(device_name, candidates, n=3, cutoff=0.6)
+        raise NameNotFoundError(device_name, "branch", sugg)
+    row = by_name[device_name]
+    if "P_avg" in row:
+        return float(row["P_avg"])
+    raise NotImplementedError(
+        f"device {device_name!r} ({row.get('kind', '?')}) doesn't "
+        f"expose P_avg in device_loss_summary today — only "
+        f"resistors do. Switches / diodes / MOSFETs need the "
+        f"v_ds × i_d reconstruction via the device pool, which "
+        f"isn't bound to Python yet."
+    )
+
+
+# Monkey-patch the methods onto the C++-bound SimulationResult class.
+# We can't subclass it cleanly because run_transient returns the
+# concrete C++ type, but the type itself accepts attribute injection
+# (py::dynamic_attr() on the binding).
+SimulationResult.v = _result_v          # type: ignore[attr-defined]
+SimulationResult.i = _result_i          # type: ignore[attr-defined]
+SimulationResult.power = _result_power  # type: ignore[attr-defined]
+
+
 def simulate(
     builder: CircuitBuilder,
     t_end: float,
@@ -503,6 +791,12 @@ def simulate(
     progress: "bool | int | str" = False,
     initial_state=None,
     should_continue=None,
+    closed_loops=None,
+    live_stream=None,
+    integrator: str = "kernel",
+    rtol: float = 1.0e-5,
+    atol: float = 1.0e-8,
+    dt_init: float = 0.0,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -554,6 +848,67 @@ def simulate(
     SimulationResult
         The full per-sample state-vector history.
     """
+    # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
+    # Today only the kernel trap path is wired into run_transient.
+    # Reject other choices with a clear pointer at the deferred
+    # cache refactor so users get actionable feedback instead of a
+    # silent default-back to "kernel".
+    if integrator not in ("kernel", "default"):
+        if integrator not in ("dopri5", "radau"):
+            raise ValueError(
+                f"simulate(integrator={integrator!r}): unknown "
+                "integrator. Supported names: 'kernel' (default), "
+                "'dopri5', 'radau'."
+            )
+        raise NotImplementedError(
+            f"simulate(integrator={integrator!r}) is reserved for "
+            "the v1.6 cache refactor — `PwlStateSpaceCache` would "
+            "need to expose continuous-time (G, M, b) and the "
+            "Python adaptive RK integrators would need DAE Index-1 "
+            "support (M·dx/dt = g, with M structurally singular "
+            "for augmented MNA). Track this under the "
+            "'add-adaptive-runge-kutta-solvers' OpenSpec proposal. "
+            "For Phase 2.4, the integrator name and its tolerances "
+            "round-trip through `SimulationOptions` and YAML so "
+            "your config stays forward-compatible — drop "
+            "`integrator='kernel'` (or omit) to run today."
+        )
+    _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
+
+    if closed_loops:
+        if switch_fn is not None or step_observer is not None:
+            raise ValueError(
+                "pass closed_loops OR switch_fn/step_observer, not "
+                "both — the helper composes both callbacks "
+                "internally."
+            )
+        loops = list(closed_loops)
+        n_sw_compose = builder.graph.num_switches
+        per_switch_fns = [loop.switch_fn for loop in loops]
+        switch_fn = make_combined_switch_fn(n_sw_compose, per_switch_fns)
+        per_observers = [loop.step_observer for loop in loops]
+
+        def _composed_observer(t: float, x) -> None:
+            for obs in per_observers:
+                obs(t, x)
+
+        step_observer = _composed_observer
+
+    # add-python-builder-ergonomics: if the caller didn't pass an
+    # explicit initial_state, ask the builder for its recorded ICs.
+    # The C++ `initial_state()` synthesises from `c0=` / `i0=` /
+    # `set_initial` calls. Returns an all-zero vector when no ICs
+    # were set; we only override the simulate path when there's at
+    # least one non-zero entry to avoid forcing a needless copy.
+    if initial_state is None:
+        try:
+            import numpy as _np_check
+            candidate = builder.initial_state()
+            if _np_check.any(_np_check.asarray(candidate) != 0.0):
+                initial_state = candidate
+        except Exception:  # noqa: BLE001 — test mocks etc.
+            pass
+
     # Build the PWL cache.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build(dt)
@@ -651,6 +1006,36 @@ def simulate(
 
         step_observer = _progress_observer
 
+    # Live streaming hook: when the caller passes a NativeLiveStream
+    # (or any object with ``.attach(state_size)`` + ``.native_ring``),
+    # attach it now so the kernel can push (t, x) samples straight
+    # into its ring buffer during the run. The kernel-side ``live_ring``
+    # path uses atomics only — zero GIL contention with the GUI thread
+    # that polls ``stream.get_new_samples()``.
+    live_ring = None
+    if live_stream is not None:
+        state_size = builder.pool.state_size(builder.graph)
+        # ``builder.state_var_names()`` returns a labelled list of
+        # the same length as the kernel state vector — passes it
+        # along so live-scope GUIs (``pulsim.LiveScope`` /
+        # PulsimGUI) can resolve names → state indices without
+        # re-computing the layout themselves.
+        names = None
+        try:
+            names = list(builder.state_var_names())
+        except Exception:  # noqa: BLE001 — older binaries lack it
+            names = None
+        live_stream.attach(state_size, names=names)
+        live_ring = live_stream.native_ring
+        # Auto-wire pause/stop into ``should_continue`` so the GUI's
+        # pause button actually halts the kernel (instead of letting
+        # samples accumulate during a "display-only" pause). Only when
+        # the caller didn't pass their own should_continue — we don't
+        # want to override a user-supplied cancellation hook.
+        if should_continue is None \
+                and hasattr(live_stream, "should_continue"):
+            should_continue = live_stream.should_continue
+
     # Fast-path: if step_observer carries an attached `_cxx_chain`
     # attribute (set by `MixedDomainBlockChain.make_step_observer`),
     # use `run_transient_with_chain` which invokes the C++ chain
@@ -672,6 +1057,8 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
+        if live_ring is not None:
+            kwargs["live_ring"] = live_ring
         res = _k.run_transient_with_chain(
             cache, builder.graph, builder.pool, opts,
             chain=cxx_chain, chain_dt=chain_dt,
@@ -693,6 +1080,8 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
+        if live_ring is not None:
+            kwargs["live_ring"] = live_ring
         res = run_transient(
             cache, builder.graph, builder.pool, opts, **kwargs,
         )
@@ -702,6 +1091,14 @@ def simulate(
         import sys as _sys
         _sys.stdout.write("\n")
         _sys.stdout.flush()
+    # Attach the builder so `result.v(name)` / `.i(name)` / `.power(name)`
+    # can resolve names without forcing the caller to re-pass the
+    # builder. The binding enables `py::dynamic_attr()` precisely so
+    # this assignment works.
+    try:
+        res._builder = builder
+    except AttributeError:  # pragma: no cover — pre-dynamic_attr builds
+        pass
     return res
 
 
@@ -710,7 +1107,7 @@ def simulate(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.3.0"
+__version__ = "1.5.0"
 
 
 # ---------------------------------------------------------------------------

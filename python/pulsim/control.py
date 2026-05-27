@@ -36,6 +36,7 @@ All controllers are stateful — instantiate ONE per loop and call
 from __future__ import annotations
 
 import math
+from collections.abc import Callable  # noqa: F401 — used in string annotations
 from dataclasses import dataclass, field
 
 
@@ -1148,3 +1149,238 @@ def gain_margin_from_loop(freqs, L) -> float:
     log_m0, log_m1 = _math.log10(abs(L[i])), _math.log10(abs(L[i + 1]))
     log_m180 = (1 - alpha) * log_m0 + alpha * log_m1
     return -20.0 * log_m180
+
+
+# ---------------------------------------------------------------------------
+# add-python-closed-loop-helper (v1.5) — PI + PWM bound to a switch
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ClosedLoop:
+    """Output of :func:`bind_pi_to_switch` — packages the per-loop
+    callbacks plus their history records into a single immutable
+    handle.
+
+    Why frozen? The fields hold *references* the simulator needs; the
+    history lists are append-only, populated by the captured closure
+    inside the factory. Freezing the dataclass prevents accidental
+    reassignment while leaving the lists mutable.
+
+    Fields
+    ------
+    switch_fn
+        Callable ``t -> SwitchStateMask`` that toggles the bound
+        switch's bit according to the PWM phase test
+        ``(t mod T_PWM) / T_PWM < duty``.
+    step_observer
+        Callable ``(t, x)`` that throttles to one PI update per PWM
+        period (``T_PWM = 1 / freq``), reads the measured signal via
+        the user-supplied lambda, calls ``pi.update(setpoint=…,
+        measured=…, dt=T_PWM)``, and pushes the new duty into the
+        shared state ``switch_fn`` reads on its next invocation.
+    duty_history
+        List of ``(t_seconds, duty_unit)`` tuples appended once per
+        PI tick. Convert to numpy with
+        ``np.asarray(loop.duty_history).T`` to plot.
+    error_history
+        List of ``(t_seconds, error_unit)`` tuples in the same
+        cadence as ``duty_history``.
+    """
+    switch_fn: "Callable[[float], object]"  # noqa: F821 — SwitchStateMask
+    step_observer: "Callable[[float, object], None]"
+    duty_history: "list[tuple[float, float]]"
+    error_history: "list[tuple[float, float]]"
+
+
+def bind_pi_to_switch(
+    builder,
+    *,
+    pi: PIController,
+    measured: "Callable[[object], float]",
+    setpoint: "float | Callable[[float], float]",
+    switch,
+    freq: float,
+    t_start: float = 0.0,
+) -> ClosedLoop:
+    """Return a :class:`ClosedLoop` that wires a PI controller's output
+    into a PWM-driven switch's duty.
+
+    Replaces the ~30 lines of closure-with-mutable-list boilerplate
+    every closed-loop script reinvents.
+
+    Parameters
+    ----------
+    builder
+        Populated :class:`CircuitBuilder`. Used to resolve
+        ``switch`` (when given by name) and to size the
+        ``SwitchStateMask``.
+    pi
+        :class:`PIController` instance. Its ``update`` is called
+        once per PWM period.
+    measured
+        Callable ``state_vec -> float`` extracting the feedback
+        signal. Typical: ``lambda x: x[builder.node_id_of("vout")]``.
+    setpoint
+        Reference value passed to ``pi.update``. Accepts either a
+        constant ``float`` or a callable ``t -> float`` for time-
+        varying references (load-step setpoints, ramping commands).
+    switch
+        Either a device name (resolved via
+        ``builder.switch_index_of``) or an integer bit position.
+    freq
+        PWM carrier frequency in Hz. The PI is throttled to one
+        update per ``T_PWM = 1 / freq``.
+    t_start
+        Simulation start time, used to align the throttle's first
+        tick. Defaults to 0.
+
+    Examples
+    --------
+    A buck closed loop on V_in=12 V, V_ref=5 V::
+
+        pi = ps.PIController(Kp=0.08, Ki=40.0, output_min=0.05,
+                              output_max=0.95)
+        loop = ps.control.bind_pi_to_switch(
+            builder,
+            pi=pi,
+            measured=lambda x: x[builder.node_id_of("vout")],
+            setpoint=5.0,
+            switch="Q1",
+            freq=10e3,
+        )
+        res = ps.simulate(builder, t_end=20e-3, dt=2e-6,
+                          switch_fn=loop.switch_fn,
+                          step_observer=loop.step_observer)
+    """
+    # Import lazily so `pulsim.control` doesn't depend on the C++
+    # binding at module-import time (test fixtures sometimes import
+    # control.py without the kernel).
+    from . import SwitchStateMask as _Mask
+
+    if freq <= 0:
+        raise ValueError(f"freq must be > 0 Hz; got {freq}")
+
+    T_PWM = 1.0 / float(freq)
+
+    # Resolve `switch` to an integer bit position. Accept either a
+    # device name or an integer index — the name path goes through
+    # `add-python-named-lookups`' `switch_index_of`.
+    if isinstance(switch, str):
+        idx = int(builder.switch_index_of(switch))
+    else:
+        idx = int(switch)
+
+    n_switches = int(builder.graph.num_switches)
+    if idx < 0 or idx >= n_switches:
+        raise ValueError(
+            f"switch index {idx} out of range for "
+            f"num_switches={n_switches}"
+        )
+
+    # Shared mutable state — lives in this closure. The factory hides
+    # the `[0.5]` / `[t_start - T_PWM]` lists callers used to write
+    # by hand.
+    duty_state = [0.5]
+    last_tick = [t_start - T_PWM]  # forces immediate first update
+    duty_history: "list[tuple[float, float]]" = []
+    error_history: "list[tuple[float, float]]" = []
+
+    def switch_fn(t: float):
+        mask = _Mask(n_switches)
+        phase = (t % T_PWM) / T_PWM
+        if phase < duty_state[0]:
+            mask.set(idx, True)
+        return mask
+
+    # Setpoint can be a constant (most common) or a callable
+    # `t -> float` for time-varying references (load steps,
+    # ramping commands).
+    _sp_is_callable = callable(setpoint)
+
+    def step_observer(t: float, x) -> None:
+        # Throttle: skip until at least one T_PWM has elapsed since
+        # the last update. Prevents the loop from chasing PWM ripple.
+        if t - last_tick[0] < T_PWM:
+            return
+        last_tick[0] = t
+        m = float(measured(x))
+        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
+        error = sp - m
+        new_duty = pi.update(setpoint=sp, measured=m, dt=T_PWM)
+        duty_state[0] = float(new_duty)
+        duty_history.append((t, duty_state[0]))
+        error_history.append((t, error))
+
+    return ClosedLoop(
+        switch_fn=switch_fn,
+        step_observer=step_observer,
+        duty_history=duty_history,
+        error_history=error_history,
+    )
+
+
+def bind_pi_to_duty_callable(
+    builder,
+    *,
+    pi: PIController,
+    measured: "Callable[[object], float]",
+    setpoint: "float | Callable[[float], float]",
+    freq: float,
+    t_start: float = 0.0,
+):
+    """Like :func:`bind_pi_to_switch` but returns the controller as a
+    ``(duty_get, step_observer, duty_history)`` triple instead of a
+    switch-bound loop.
+
+    Useful when one PI drives multiple switches (e.g., a half-bridge
+    complementary pair where the high-side gets ``duty`` and the
+    low-side gets ``1 - duty``)::
+
+        duty_get, observer, history = ps.control.bind_pi_to_duty_callable(
+            builder, pi=pi, measured=..., setpoint=..., freq=10e3,
+        )
+
+        def switch_fn(t):
+            mask = ps.SwitchStateMask(builder.num_switches)
+            phase = (t % T_PWM) / T_PWM
+            d = duty_get()
+            mask.set(builder.switch_index_of("Q_HIGH"), phase < d)
+            mask.set(builder.switch_index_of("Q_LOW"),  phase >= d)
+            return mask
+
+    Returns
+    -------
+    duty_get : Callable[[], float]
+        Zero-arg function returning the current duty (read by the
+        custom ``switch_fn``).
+    step_observer : Callable[[float, np.ndarray], None]
+        Same throttled PI loop as :func:`bind_pi_to_switch` produces.
+    duty_history : list[tuple[float, float]]
+        Append-only history of ``(t, duty)`` updates.
+    """
+    if freq <= 0:
+        raise ValueError(f"freq must be > 0 Hz; got {freq}")
+
+    T_PWM = 1.0 / float(freq)
+    duty_state = [0.5]
+    last_tick = [t_start - T_PWM]
+    duty_history: "list[tuple[float, float]]" = []
+
+    def duty_get() -> float:
+        return duty_state[0]
+
+    _sp_is_callable = callable(setpoint)
+
+    def step_observer(t: float, x) -> None:
+        if t - last_tick[0] < T_PWM:
+            return
+        last_tick[0] = t
+        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
+        new_duty = pi.update(
+            setpoint=sp,
+            measured=float(measured(x)),
+            dt=T_PWM,
+        )
+        duty_state[0] = float(new_duty)
+        duty_history.append((t, duty_state[0]))
+
+    return duty_get, step_observer, duty_history

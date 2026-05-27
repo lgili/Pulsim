@@ -73,8 +73,7 @@ def main() -> None:
                       switch_fn=pwm, progress="bar")
     print(f"  samples: {res.num_steps()}")
 
-    vout_idx = builder.node_id_of("vout")
-    v_out = np.array([s[vout_idx] for s in res.states])
+    v_out = res.v("vout")
     k_skip = int(0.7 * res.num_steps())
     v_mean   = v_out[k_skip:].mean()
     v_ripple = float(np.ptp(v_out[k_skip:]))

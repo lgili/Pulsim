@@ -6,12 +6,21 @@ current in real time while the closed-loop buck simulation runs in
 a worker thread. The user can:
   * Toggle individual signals via the checkboxes.
   * Click STOP to halt the kernel — partial trace is preserved.
+  * Click ⏸ Pause display — REAL pause: blocks the kernel inside
+    its should_continue callback so no samples are generated; the
+    GUI keeps responding. Click ▶ Resume to continue exactly from
+    where the simulator left off — no gaps, no time jumps.
   * Zoom / pan with the mouse (standard pyqtgraph controls).
 
 This is the integration test for the streaming infrastructure: the
 sim is intentionally LONG (5 s, 50 M steps at 100 ns dt) so the user
 gets a feel for "the scope updates while it runs, I can stop early
 when I see what I need".
+
+Uses the v1.4.2+ ``state_var_names()`` plumbing — the scope's
+``add_state("I(L1)")`` resolves the inductor branch index via
+``stream.channel_names`` instead of the old manual
+``b.graph.num_branches`` boilerplate.
 """
 
 from __future__ import annotations
@@ -34,16 +43,14 @@ def build_plant() -> p.CircuitBuilder:
     b.add_mosfet_with_body_diode("Q1", "vin", "sw",
                                     R_on=1e-3, R_off=1e9, V_F=0.7)
     b.add_diode("D_FW", "gnd", "sw", 1e3, 1e-9, V_th=0.7)
-    # Track the inductor's branch id so the scope can read its current.
-    ind_id = b.graph.num_branches
     b.add_inductor("L1", "sw", "vout", 100e-6)
     b.add_capacitor("Cout", "vout", "gnd", 47e-6)
     b.add_resistor("R_load", "vout", "gnd", 5.0)
-    return b, ind_id
+    return b
 
 
 def main() -> None:
-    b, ind_id = build_plant()
+    b = build_plant()
 
     # Closed-loop controller chain.
     chain = p.MixedDomainBlockChain()
@@ -83,7 +90,10 @@ def main() -> None:
         # Pass the chain observer as step_observer so simulate()
         # routes through `run_transient_with_chain` AND wires the
         # native ring buffer into the C++ kernel — zero Python in
-        # the per-step hot path.
+        # the per-step hot path. simulate() also auto-fills
+        # ``stream.channel_names`` from ``b.state_var_names()`` and
+        # wires the stream's ``should_continue`` so the scope's
+        # pause/stop buttons reach the kernel.
         return p.simulate(
             b, t_end=T_END, dt=DT,
             switch_fn=sw_fn,
@@ -96,11 +106,20 @@ def main() -> None:
           f"(closed-loop PI)")
     print(f"  Simulation: dt={DT*1e9:.0f} ns, t_end={T_END} s "
           f"({int(T_END/DT)} steps nominal)")
-    print("  Live scope opening — close the window or click STOP "
-          "to halt.")
+    print("  Live scope opening — close the window, click ⏸ to "
+          "freeze the kernel, or click STOP to halt.")
 
     sim_thread = threading.Thread(target=run_sim, daemon=True)
     sim_thread.start()
+
+    # The kernel has already been told the state-vector layout, so
+    # ``stream.channel_names`` is now populated. Print it once so
+    # demos can see what `add_state` can look up.
+    # (simulate runs in the worker thread but attach() is synchronous
+    # at the start, so by the time we get here it has run.)
+    sim_thread.join(timeout=0.1)   # tiny wait — attach is the first thing
+    if stream.channel_names:
+        print(f"  Channel names from kernel: {stream.channel_names}")
 
     # Build + start the scope (blocks until the window closes).
     # Multi-panel layout: voltages on top, current in the middle,
@@ -110,20 +129,27 @@ def main() -> None:
                             window_seconds=2.0,
                             update_hz=60.0,
                             title="Pulsim — Buck CL live")
-    scope.add_node_voltage("vin",  panel="Voltage", color="#4e79a7")
-    scope.add_node_voltage("vout", panel="Voltage", color="#f28e2b")
+    # NEW: name-based registration — no more manual branch-id tracking.
+    # ``add_state`` resolves the kernel state layout via the names map
+    # populated at ``stream.attach()`` time.
+    scope.add_state("V(vin)",  label="V(vin)",  panel="Voltage",
+                          color="#4e79a7")
+    scope.add_state("V(vout)", label="V(vout)", panel="Voltage",
+                          color="#f28e2b")
     scope.add_chain_channel(chain, "v_filt", panel="Voltage",
                                  label="v_filt", unit="V",
                                  color="#9467bd")
-    scope.add_branch_current(ind_id, panel="Current",
-                                  label="I(L1)", color="#59a14f")
+    scope.add_state("I(L1)", label="I(L1)", panel="Current",
+                          color="#59a14f")
     scope.add_chain_channel(chain, "duty", panel="Control",
                                  label="duty", color="#e15759",
                                  fmt="{:+6.3f}")
 
     scope.start()
 
-    # Ensure the worker has stopped if user closed the window.
+    # Ensure the worker has stopped if user closed the window. stop()
+    # also wakes a paused kernel so the join below doesn't hang on a
+    # stale pause.
     stream.stop()
     sim_thread.join(timeout=2.0)
     print(f"\n  Done.")
@@ -132,6 +158,8 @@ def main() -> None:
           f"(decimate={stream._decimate})")
     print(f"    samples dropped : {stream.n_batches_dropped:,} "
           f"(ring overflow)")
+    print(f"    time paused     : {stream.paused_seconds:.2f} s "
+          f"(wall-clock)")
 
 
 if __name__ == "__main__":

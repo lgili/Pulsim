@@ -36,6 +36,7 @@ Usage:
 from __future__ import annotations
 
 import csv
+import sys
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -67,6 +68,372 @@ _TEXT_COLOR   = "#d8d9da"
 _DIM_COLOR    = "#7a7e8a"
 _ACCENT_COLOR = "#5b9bd5"
 _DANGER_COLOR = "#c44545"
+_CURSOR_A_COLOR = "#ffb300"
+_CURSOR_B_COLOR = "#ff5252"
+
+
+# QSS applied to ad-hoc QDialogs (FFT modal, math-channel add).
+# Without this, modal dialogs inherit the platform's native theme
+# (light on macOS) and show black text on white — unreadable on
+# the dark scope. Keep the surface in sync with the main toolbar.
+_DIALOG_QSS = f"""
+    QDialog {{
+        background: {_BG_COLOR};
+        color: {_TEXT_COLOR};
+    }}
+    QLabel {{
+        color: {_TEXT_COLOR};
+    }}
+    QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QTextEdit, QPlainTextEdit {{
+        background: {_PANEL_COLOR};
+        color: {_TEXT_COLOR};
+        border: 1px solid {_GRID_COLOR};
+        padding: 2px 4px;
+        border-radius: 3px;
+        selection-background-color: {_ACCENT_COLOR};
+    }}
+    QComboBox QAbstractItemView {{
+        background: {_PANEL_COLOR};
+        color: {_TEXT_COLOR};
+        selection-background-color: {_ACCENT_COLOR};
+        selection-color: white;
+    }}
+    QPushButton {{
+        background: {_GRID_COLOR};
+        color: {_TEXT_COLOR};
+        border: 1px solid {_GRID_COLOR};
+        padding: 5px 12px;
+        border-radius: 3px;
+    }}
+    QPushButton:hover {{
+        background: {_ACCENT_COLOR};
+        color: white;
+    }}
+    QPushButton:default {{
+        background: {_ACCENT_COLOR};
+        color: white;
+        border: 1px solid {_ACCENT_COLOR};
+    }}
+    QTableWidget, QTableView {{
+        background: {_PANEL_COLOR};
+        alternate-background-color: {_BG_COLOR};
+        color: {_TEXT_COLOR};
+        gridline-color: {_GRID_COLOR};
+        border: 1px solid {_GRID_COLOR};
+    }}
+    QTableWidget::item, QTableView::item {{
+        color: {_TEXT_COLOR};
+        padding: 3px 6px;
+    }}
+    QTableWidget::item:selected, QTableView::item:selected {{
+        background: {_ACCENT_COLOR};
+        color: white;
+    }}
+    QHeaderView::section {{
+        background: {_GRID_COLOR};
+        color: {_TEXT_COLOR};
+        border: none;
+        padding: 4px 8px;
+        font-weight: 600;
+    }}
+    QGroupBox {{
+        color: {_TEXT_COLOR};
+        border: 1px solid {_GRID_COLOR};
+        border-radius: 3px;
+        margin-top: 8px;
+        padding-top: 8px;
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 8px;
+        padding: 0 4px;
+    }}
+    QFormLayout > QLabel {{
+        color: {_TEXT_COLOR};
+    }}
+    QDialogButtonBox QPushButton {{
+        min-width: 80px;
+    }}
+"""
+
+
+# ============================================================================
+# SMPS / trigger numpy helpers — pure numpy, easy to unit-test offline.
+# ============================================================================
+
+
+def _zero_crossings(t: np.ndarray, y: np.ndarray,
+                     level: float = 0.0,
+                     direction: str = "rising") -> np.ndarray:
+    """Return interpolated time stamps where ``y(t)`` crosses ``level``.
+
+    ``direction`` ∈ {``"rising"``, ``"falling"``, ``"both"``}.
+    Returns an empty array when no crossing is found in the window.
+    Used for both trigger edge detection and SMPS period measurement.
+    """
+    if t.size < 2:
+        return np.empty(0, dtype=np.float64)
+    y0 = y - level
+    if direction == "rising":
+        cross = (y0[:-1] <= 0.0) & (y0[1:] > 0.0)
+    elif direction == "falling":
+        cross = (y0[:-1] >= 0.0) & (y0[1:] < 0.0)
+    else:
+        cross = ((y0[:-1] <= 0.0) & (y0[1:] > 0.0)) | \
+                ((y0[:-1] >= 0.0) & (y0[1:] < 0.0))
+    idx = np.nonzero(cross)[0]
+    if idx.size == 0:
+        return np.empty(0, dtype=np.float64)
+    t0, t1 = t[idx], t[idx + 1]
+    y_a, y_b = y0[idx], y0[idx + 1]
+    denom = (y_b - y_a)
+    frac = np.where(np.abs(denom) > 1e-30, -y_a / denom, 0.5)
+    return t0 + frac * (t1 - t0)
+
+
+def _detect_period(t: np.ndarray, y: np.ndarray) -> Optional[float]:
+    """Estimate the period of ``y(t)`` via consecutive same-direction
+    zero crossings of the mean-subtracted signal. Falls back to
+    bidirectional crossings × 2 for square / PWM signals where rising
+    crossings alone may be sparse. Returns ``None`` when no period
+    can be inferred (<2 crossings)."""
+    if y.size < 4:
+        return None
+    y_dc = y - float(np.mean(y))
+    crosses = _zero_crossings(t, y_dc, level=0.0, direction="rising")
+    if crosses.size < 2:
+        crosses = _zero_crossings(t, y_dc, level=0.0, direction="both")
+        if crosses.size < 3:
+            return None
+        return float(2.0 * np.median(np.diff(crosses)))
+    return float(np.median(np.diff(crosses)))
+
+
+def _detect_duty(t: np.ndarray, y: np.ndarray) -> Optional[float]:
+    """Estimate duty cycle of a switching signal: fraction of samples
+    above the median. Returns ``None`` when no switching is observed
+    (signal entirely above or below the median in the window)."""
+    if y.size < 8:
+        return None
+    threshold = float(np.median(y))
+    high = y > threshold
+    if high.all() or (~high).all():
+        return None
+    return float(np.mean(high))
+
+
+def _ripple_stats(y: np.ndarray) -> dict:
+    """Min / max / mean / peak-to-peak / RMS over the array."""
+    if y.size == 0:
+        return {"min": 0.0, "max": 0.0, "mean": 0.0,
+                "pp": 0.0, "rms": 0.0}
+    y_min = float(np.min(y))
+    y_max = float(np.max(y))
+    return {
+        "min":  y_min,
+        "max":  y_max,
+        "mean": float(np.mean(y)),
+        "pp":   y_max - y_min,
+        "rms":  float(np.sqrt(np.mean(y * y))),
+    }
+
+
+# ============================================================================
+# Math-channel expression parser — pure stdlib (no simpleeval dependency).
+#
+# Compiles a string expression like ``"V(vout) * I(L1)"`` into an
+# ``ast.Expression`` tree that we then evaluate against per-tick
+# numpy arrays. The grammar is a strict subset of Python: binary ops,
+# unary ops, parentheses, function calls (whitelisted), and ``Name``
+# nodes that resolve to other signal names.
+#
+# Why not ``eval()``: a math channel string comes from the user but
+# we don't want it to be able to do ``__import__`` or attribute access
+# or arbitrary calls. AST validation catches everything before we
+# evaluate, so the runtime path is provably side-effect-free.
+# ============================================================================
+
+import ast as _ast  # noqa: E402
+
+_MATH_FUNCS = {
+    "abs":   np.abs,
+    "sqrt":  np.sqrt,
+    "sign":  np.sign,
+    "sin":   np.sin,
+    "cos":   np.cos,
+    "tan":   np.tan,
+    "exp":   np.exp,
+    "log":   np.log,
+    "log10": np.log10,
+    "minimum": np.minimum,
+    "maximum": np.maximum,
+}
+_MATH_AGGS = {
+    # Reductions — collapse the input array to a scalar, then
+    # broadcast back to the batch shape inside _eval_math.
+    "mean": np.mean,
+    "rms":  lambda a: np.sqrt(np.mean(np.asarray(a) ** 2)),
+    "min":  np.min,
+    "max":  np.max,
+    "sum":  np.sum,
+}
+_MATH_CONSTS = {"pi": float(np.pi), "e": float(np.e)}
+
+_MATH_ALLOWED_BIN = (_ast.Add, _ast.Sub, _ast.Mult, _ast.Div,
+                       _ast.Pow, _ast.Mod, _ast.FloorDiv)
+_MATH_ALLOWED_UNARY = (_ast.UAdd, _ast.USub)
+
+
+def _math_collect_names(tree: _ast.Expression) -> List[str]:
+    """Return the set of bare ``Name`` references in ``tree`` — these
+    are the other signals this math channel depends on. Function
+    names that resolve to ``_MATH_FUNCS`` / ``_MATH_AGGS`` are
+    excluded; constants (``pi``, ``e``) likewise."""
+    names: set = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Name):
+            n = node.id
+            if (n in _MATH_FUNCS or n in _MATH_AGGS
+                    or n in _MATH_CONSTS):
+                continue
+            names.add(n)
+    return sorted(names)
+
+
+def _math_validate(tree: _ast.Expression) -> None:
+    """Walk ``tree`` and raise ``ValueError`` on anything outside the
+    grammar: subscript, attribute, comprehension, lambda, ``import``,
+    ``__dunder__`` etc. Done once at compile-time so the per-tick
+    eval path is fast and trusted."""
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Expression):
+            continue
+        if isinstance(node, _ast.Name):
+            n = node.id
+            if n.startswith("_"):
+                raise ValueError(f"math channel: name {n!r} is not allowed")
+            continue
+        if isinstance(node, _ast.Constant):
+            if not isinstance(node.value, (int, float)):
+                raise ValueError(
+                    f"math channel: only numeric literals allowed "
+                    f"(got {type(node.value).__name__})"
+                )
+            continue
+        if isinstance(node, _ast.BinOp):
+            if not isinstance(node.op, _MATH_ALLOWED_BIN):
+                raise ValueError(
+                    f"math channel: operator "
+                    f"{type(node.op).__name__} not allowed"
+                )
+            continue
+        if isinstance(node, _ast.UnaryOp):
+            if not isinstance(node.op, _MATH_ALLOWED_UNARY):
+                raise ValueError(
+                    f"math channel: unary "
+                    f"{type(node.op).__name__} not allowed"
+                )
+            continue
+        if isinstance(node, _ast.Call):
+            if not isinstance(node.func, _ast.Name):
+                raise ValueError("math channel: only direct function calls allowed")
+            fname = node.func.id
+            if fname not in _MATH_FUNCS and fname not in _MATH_AGGS:
+                raise ValueError(
+                    f"math channel: function {fname!r} not in allow-list. "
+                    f"Available: "
+                    f"{sorted(set(_MATH_FUNCS) | set(_MATH_AGGS))}"
+                )
+            if any(node.keywords):
+                raise ValueError("math channel: keyword arguments not allowed")
+            continue
+        # ``ast.walk`` also yields operator-class nodes (Add, Sub,
+        # Mult, …) standalone — they were already vetted via the
+        # parent ``BinOp``/``UnaryOp`` check above. Skip them here.
+        if isinstance(node, _MATH_ALLOWED_BIN + _MATH_ALLOWED_UNARY):
+            continue
+        # Implicit Load context inside Name etc. — benign.
+        if isinstance(node, _ast.Load):
+            continue
+        # Anything else — Subscript, Attribute, Compare, BoolOp,
+        # IfExp, Lambda, Comprehension, etc. — rejected.
+        raise ValueError(
+            f"math channel: node {type(node).__name__} not allowed"
+        )
+
+
+def _math_compile(expr: str) -> _ast.Expression:
+    """Parse + validate. Returns the AST tree ready for eval."""
+    try:
+        tree = _ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"math channel: syntax error — {exc}") from exc
+    _math_validate(tree)
+    return tree
+
+
+def _math_eval(tree: _ast.Expression,
+                ctx: Dict[str, np.ndarray]) -> np.ndarray:
+    """Evaluate ``tree`` against the per-tick signal arrays in
+    ``ctx``. Returns a numpy array broadcast to the input batch
+    shape — scalars from reductions are broadcast back to the
+    array shape of any sibling input so the result fits in a
+    ring buffer push."""
+    sample_shape = None
+    for v in ctx.values():
+        if isinstance(v, np.ndarray) and v.size > 0:
+            sample_shape = v.shape
+            break
+
+    def _go(node):
+        if isinstance(node, _ast.Expression):
+            return _go(node.body)
+        if isinstance(node, _ast.Constant):
+            return float(node.value)
+        if isinstance(node, _ast.Name):
+            n = node.id
+            if n in _MATH_CONSTS:
+                return _MATH_CONSTS[n]
+            if n in ctx:
+                return ctx[n]
+            raise ValueError(f"math channel: unknown name {n!r}")
+        if isinstance(node, _ast.UnaryOp):
+            v = _go(node.operand)
+            return -v if isinstance(node.op, _ast.USub) else v
+        if isinstance(node, _ast.BinOp):
+            a = _go(node.left)
+            b = _go(node.right)
+            op = node.op
+            if isinstance(op, _ast.Add):      return a + b
+            if isinstance(op, _ast.Sub):      return a - b
+            if isinstance(op, _ast.Mult):     return a * b
+            if isinstance(op, _ast.Div):      return a / b
+            if isinstance(op, _ast.Pow):      return a ** b
+            if isinstance(op, _ast.Mod):      return a % b
+            if isinstance(op, _ast.FloorDiv): return a // b
+            raise ValueError(f"math channel: bin op {type(op).__name__}")
+        if isinstance(node, _ast.Call):
+            assert isinstance(node.func, _ast.Name)
+            fname = node.func.id
+            args = [_go(a) for a in node.args]
+            if fname in _MATH_FUNCS:
+                return _MATH_FUNCS[fname](*args)
+            if fname in _MATH_AGGS:
+                # Aggregation produces a scalar; broadcast to batch
+                # shape so the result stacks into ring buffers.
+                scalar = float(_MATH_AGGS[fname](*args))
+                if sample_shape is None:
+                    return scalar
+                return np.full(sample_shape, scalar, dtype=np.float64)
+            raise ValueError(f"math channel: unknown function {fname!r}")
+        raise ValueError(f"math channel: cannot eval {type(node).__name__}")
+
+    out = _go(tree)
+    if not isinstance(out, np.ndarray):
+        if sample_shape is None:
+            return np.array([float(out)], dtype=np.float64)
+        return np.full(sample_shape, float(out), dtype=np.float64)
+    return out.astype(np.float64, copy=False)
 
 
 _Extractor = Callable[[float, np.ndarray], float]
@@ -85,7 +452,8 @@ class SignalDef:
     """
 
     __slots__ = ("name", "extractor", "color", "unit", "panel",
-                  "fmt", "kind", "state_idx", "chain", "chain_name")
+                  "fmt", "kind", "state_idx", "chain", "chain_name",
+                  "math_expr", "math_tree", "math_deps")
 
     def __init__(self, name: str,
                   extractor: _Extractor,
@@ -96,7 +464,10 @@ class SignalDef:
                   kind: str = "custom",
                   state_idx: int = -1,
                   chain: Any = None,
-                  chain_name: str = ""):
+                  chain_name: str = "",
+                  math_expr: str = "",
+                  math_tree: Optional[Any] = None,
+                  math_deps: Optional[tuple] = None):
         self.name = name
         self.extractor = extractor
         self.color = color
@@ -107,6 +478,14 @@ class SignalDef:
         self.state_idx = state_idx
         self.chain = chain
         self.chain_name = chain_name
+        # kind == "math" additions: ``math_expr`` is the original
+        # user string (for display + serialise); ``math_tree`` is the
+        # pre-compiled validated AST; ``math_deps`` is the tuple of
+        # signal names this channel reads from (evaluated AFTER all
+        # ``state``/``chain``/``custom`` signals in ``_tick``).
+        self.math_expr = math_expr
+        self.math_tree = math_tree
+        self.math_deps = math_deps or ()
 
 
 class _PanelState:
@@ -199,6 +578,29 @@ class LiveScope:
         self._stats_label = None
         self._stats_history: Optional[list] = None
 
+        # Trigger state (PLECS/PSIM-style edge trigger).
+        # ``mode``  : "free" (rolling window, default) or "single"
+        #             (freeze after first edge on _trigger_source).
+        # ``source`` : signal name to watch.
+        # ``level`` : voltage / current at which the edge fires.
+        # ``edge``  : "rising" or "falling".
+        # ``fired_at`` : t of the last detected edge — None while
+        #               armed; set to a float when ``single`` fires;
+        #               cleared by Re-arm.
+        self._trigger_mode = "free"
+        self._trigger_source: Optional[str] = None
+        self._trigger_level = 0.0
+        self._trigger_edge = "rising"
+        self._trigger_fired_at: Optional[float] = None
+        self._trigger_armed = True
+        # UI widgets (built lazily in _build_controls).
+        self._trigger_mode_combo = None
+        self._trigger_source_combo = None
+        self._trigger_edge_combo = None
+        self._trigger_level_spin = None
+        self._smps_source_combo = None
+        self._smps_readout = None
+
     # =====================================================================
     # Signal-registration API
     # =====================================================================
@@ -269,6 +671,160 @@ class LiveScope:
         self._signals.append(sig)
         return self
 
+    def add_state(self, name: str, *,
+                       label: Optional[str] = None,
+                       color: Optional[str] = None,
+                       unit: Optional[str] = None,
+                       panel: Optional[str] = None,
+                       fmt: str = "{:+8.3f}") -> "LiveScope":
+        """Register a state-vector channel by its kernel-side name.
+
+        The names come from ``builder.state_var_names()`` (exposed
+        through ``stream.channel_names``) and follow the convention:
+
+        * ``"V(<node>)"``     — node voltage (e.g. ``"V(vout)"``)
+        * ``"I(<branch>)"``   — inductor branch current (e.g. ``"I(L1)"``)
+        * ``"Is(<branch>)"``  — voltage-source branch current
+
+        Uses ``stream.state_index_for(name)`` when available
+        (``NativeLiveStream`` with the v1.4.2+ name map). Falls back to
+        parsing the parenthesised name and going through
+        ``builder.node_id_of`` / ``branch_var_id_for_inductor`` so
+        scripts on legacy streams keep working.
+
+        Saves the boilerplate of tracking ``b.graph.num_branches`` by
+        hand before each ``add_inductor`` call.
+        """
+        idx = None
+        if hasattr(self.stream, "state_index_for"):
+            try:
+                idx = self.stream.state_index_for(name)
+            except Exception:  # noqa: BLE001
+                idx = None
+        if idx is None:
+            # Fallback — parse the kernel naming convention manually.
+            idx, default_unit = self._resolve_state_name(name)
+        else:
+            # Pick a default unit from the prefix when caller didn't
+            # set one explicitly.
+            default_unit = "V" if name.startswith("V(") else (
+                "A" if name.startswith(("I(", "Is(")) else "")
+        if idx is None:
+            raise ValueError(
+                f"LiveScope.add_state({name!r}) — name not found in the "
+                f"kernel state layout. Available channel names: "
+                f"{list(getattr(self.stream, 'channel_names', None) or [])}"
+            )
+        nm = label or name
+        sig = SignalDef(nm, lambda t, x, _i=int(idx): float(x[_i]),
+                         color=color,
+                         unit=unit if unit is not None else default_unit,
+                         panel=self._resolve_panel(panel),
+                         fmt=fmt, kind="state", state_idx=int(idx))
+        self._signals.append(sig)
+        return self
+
+    def _resolve_state_name(self, name: str):
+        """Parse ``"V(node)"`` / ``"I(branch)"`` / ``"Is(branch)"`` to
+        a ``(state_idx, default_unit)`` tuple via the builder. Returns
+        ``(None, "")`` when the name doesn't match a known pattern or
+        the builder can't resolve the inner identifier."""
+        if name.startswith("V(") and name.endswith(")"):
+            inner = name[2:-1]
+            try:
+                return int(self.builder.node_id_of(inner)), "V"
+            except Exception:  # noqa: BLE001
+                return None, "V"
+        if name.startswith("I(") and name.endswith(")"):
+            inner = name[2:-1]
+            try:
+                bid = int(self.builder.branch_id_of(inner))
+                return int(
+                    self.builder.pool.branch_var_id_for_inductor(
+                        bid, self.builder.graph)
+                ), "A"
+            except Exception:  # noqa: BLE001
+                return None, "A"
+        if name.startswith("Is(") and name.endswith(")"):
+            inner = name[3:-1]
+            try:
+                bid = int(self.builder.branch_id_of(inner))
+                # Voltage-source branch currents sit at the same column
+                # as inductor branches in the MNA layout — the pool
+                # exposes them via the same helper.
+                return int(
+                    self.builder.pool.branch_var_id_for_inductor(
+                        bid, self.builder.graph)
+                ), "A"
+            except Exception:  # noqa: BLE001
+                return None, "A"
+        return None, ""
+
+    def add_math_signal(self, name: str, expr: str, *,
+                          color: Optional[str] = None,
+                          unit: str = "",
+                          panel: Optional[str] = None,
+                          fmt: str = "{:+8.3f}") -> "LiveScope":
+        """Register a derived trace that is a numpy expression over
+        other already-registered signals.
+
+        Parameters
+        ----------
+        name
+            Display name + legend label (also used to refer to this
+            channel from later math expressions).
+        expr
+            Math expression in a restricted Python subset. Available
+            operators: ``+ - * / ** % //``. Available functions:
+            ``abs sqrt sign sin cos tan exp log log10 minimum maximum``
+            plus reductions ``mean rms min max sum`` (these collapse
+            to a scalar then broadcast back to the batch shape).
+            Available constants: ``pi``, ``e``. Other ``Name`` nodes
+            must match an already-registered signal (state / chain /
+            other math).
+        color, unit, panel, fmt
+            Cosmetic options identical to ``add_node_voltage`` etc.
+
+        Examples
+        --------
+        Instantaneous output power (Wpower curve under the ``Power``
+        panel)::
+
+            scope.add_node_voltage("vout", panel="Voltage")
+            scope.add_branch_current(ind_id, label="I(L1)", panel="Current")
+            scope.add_math_signal(
+                "P_out", "vout * I(L1)",
+                color="#e15759", unit="W", panel="Power",
+            )
+
+        Cycle-mean output voltage::
+
+            scope.add_math_signal("Vout_avg", "mean(vout)", panel="Voltage")
+        """
+        try:
+            tree = _math_compile(expr)
+        except ValueError as exc:
+            raise ValueError(
+                f"add_math_signal({name!r}): {exc}"
+            ) from exc
+        deps = _math_collect_names(tree)
+        # Defer dep-existence check: at registration time, other
+        # signals may not have been added yet. Verified at first tick.
+        sig = SignalDef(
+            name,
+            lambda t, x: 0.0,  # placeholder; eval happens vectorized
+            color=color,
+            unit=unit,
+            panel=self._resolve_panel(panel),
+            fmt=fmt,
+            kind="math",
+            math_expr=expr,
+            math_tree=tree,
+            math_deps=tuple(deps),
+        )
+        self._signals.append(sig)
+        return self
+
     # =====================================================================
     # GUI lifecycle
     # =====================================================================
@@ -312,27 +868,70 @@ class LiveScope:
         self._win = QtWidgets.QMainWindow()
         self._win.setWindowTitle(self.title)
         self._win.resize(1280, 760)
+        # Comprehensive dark QSS: cobre QMainWindow + todos os widgets
+        # filhos (labels, buttons, combos, spinboxes, tooltips, message
+        # boxes). Sem isso, controles novos (e dialogs nativos do macOS)
+        # voltam pro tema claro padrão e ficam texto preto em fundo
+        # branco - ilegível em cima do plot escuro.
         self._win.setStyleSheet(f"""
-            QMainWindow {{ background: {_BG_COLOR}; }}
-            QLabel      {{ color: {_TEXT_COLOR}; }}
-            QCheckBox   {{ color: {_TEXT_COLOR}; padding: 2px 6px; }}
+            QMainWindow, QDialog, QWidget {{
+                background: {_BG_COLOR}; color: {_TEXT_COLOR};
+            }}
+            QFrame {{ color: {_TEXT_COLOR}; }}
+            QLabel {{ color: {_TEXT_COLOR}; background: transparent; }}
+            QCheckBox {{ color: {_TEXT_COLOR}; padding: 2px 6px; background: transparent; }}
+            QGroupBox {{
+                color: {_TEXT_COLOR};
+                border: 1px solid {_GRID_COLOR};
+                border-radius: 3px;
+                margin-top: 8px; padding-top: 8px;
+                background: transparent;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; left: 8px; padding: 0 4px;
+                color: {_TEXT_COLOR};
+            }}
             QPushButton {{
                 background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
                 border: 1px solid {_GRID_COLOR}; padding: 6px 12px;
                 border-radius: 4px;
             }}
-            QPushButton:hover {{ background: {_GRID_COLOR}; }}
+            QPushButton:hover {{ background: {_GRID_COLOR}; color: {_TEXT_COLOR}; }}
             QPushButton:checked {{
                 background: {_ACCENT_COLOR}; color: white;
                 border: 1px solid {_ACCENT_COLOR};
+            }}
+            QPushButton:disabled {{
+                background: #2a2d35; color: #6e7280;
+                border: 1px solid #2a2d35;
             }}
             QPushButton#stopBtn {{
                 background: {_DANGER_COLOR}; color: white;
                 font-weight: 700; padding: 6px 18px;
             }}
             QPushButton#stopBtn:hover {{ background: #d35858; }}
-            QPushButton#stopBtn:disabled {{
-                background: #555; color: #aaa;
+            QPushButton#stopBtn:disabled {{ background: #555; color: #aaa; }}
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
+            QTextEdit, QPlainTextEdit {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                border: 1px solid {_GRID_COLOR}; padding: 2px 4px;
+                border-radius: 3px;
+                selection-background-color: {_ACCENT_COLOR};
+                selection-color: white;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                selection-background-color: {_ACCENT_COLOR};
+                selection-color: white;
+            }}
+            QComboBox::drop-down {{
+                border: none; background: {_PANEL_COLOR};
+                width: 18px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                background: {_PANEL_COLOR};
+                border: 1px solid {_GRID_COLOR};
             }}
             QSlider::groove:horizontal {{
                 background: {_PANEL_COLOR}; height: 4px;
@@ -342,6 +941,34 @@ class LiveScope:
                 background: {_ACCENT_COLOR}; width: 14px;
                 margin: -5px 0; border-radius: 7px;
             }}
+            QToolTip {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                border: 1px solid {_GRID_COLOR};
+                padding: 4px 6px;
+            }}
+            QMessageBox, QInputDialog {{
+                background: {_BG_COLOR}; color: {_TEXT_COLOR};
+            }}
+            QMessageBox QLabel, QInputDialog QLabel {{ color: {_TEXT_COLOR}; }}
+            QTableWidget, QTableView, QListWidget, QTreeWidget {{
+                background: {_PANEL_COLOR}; color: {_TEXT_COLOR};
+                alternate-background-color: {_BG_COLOR};
+                gridline-color: {_GRID_COLOR};
+                border: 1px solid {_GRID_COLOR};
+                selection-background-color: {_ACCENT_COLOR};
+                selection-color: white;
+            }}
+            QHeaderView::section {{
+                background: {_GRID_COLOR}; color: {_TEXT_COLOR};
+                border: none; padding: 4px 8px; font-weight: 600;
+            }}
+            QScrollBar:vertical, QScrollBar:horizontal {{
+                background: {_BG_COLOR}; border: none;
+            }}
+            QScrollBar::handle {{
+                background: {_GRID_COLOR}; border-radius: 4px;
+            }}
+            QScrollBar::handle:hover {{ background: {_ACCENT_COLOR}; }}
         """)
         central = QtWidgets.QWidget()
         central.setStyleSheet(f"background: {_BG_COLOR};")
@@ -564,11 +1191,157 @@ class LiveScope:
         self._cursor_readout.setVisible(False)
         row2.addWidget(self._cursor_readout)
 
+        # Clear + Re-arm: pulled into row2 so they sit next to Pause.
+        self._clear_btn = QtWidgets.QPushButton("🗑 Clear")
+        self._clear_btn.setToolTip(
+            "Drop all ring history and reset trigger state."
+        )
+        self._clear_btn.clicked.connect(self._clear)
+        row2.insertWidget(3, self._clear_btn)
+
         self._stop_btn = QtWidgets.QPushButton("STOP simulation")
         self._stop_btn.setObjectName("stopBtn")
         self._stop_btn.clicked.connect(self._on_stop)
         row2.addWidget(self._stop_btn)
         ctrl_layout.addLayout(row2)
+
+        # =================================================================
+        # Row 3 — Trigger + SMPS macros + FFT (PLECS/PSIM-style controls)
+        # =================================================================
+        row3 = QtWidgets.QHBoxLayout()
+        row3.setSpacing(6)
+
+        # ----- Trigger group ----------------------------------------------
+        trig_box = QtWidgets.QFrame()
+        trig_box.setStyleSheet(
+            f"QFrame {{ border: 1px solid {_GRID_COLOR}; "
+            f"border-radius: 4px; padding: 2px 6px; }}")
+        trig_layout = QtWidgets.QHBoxLayout(trig_box)
+        trig_layout.setContentsMargins(4, 2, 4, 2)
+        trig_layout.setSpacing(4)
+        trig_layout.addWidget(QtWidgets.QLabel("⊳ Trigger"))
+
+        self._trigger_mode_combo = QtWidgets.QComboBox()
+        self._trigger_mode_combo.addItems(["Free Run", "Single"])
+        self._trigger_mode_combo.currentTextChanged.connect(self._on_trigger_mode)
+        self._trigger_mode_combo.setToolTip(
+            "Free Run: rolling window. "
+            "Single: freeze on the first edge of Source crossing Level."
+        )
+        trig_layout.addWidget(self._trigger_mode_combo)
+
+        self._trigger_source_combo = QtWidgets.QComboBox()
+        for sig in self._signals:
+            self._trigger_source_combo.addItem(sig.name)
+        self._trigger_source_combo.currentTextChanged.connect(
+            lambda name: setattr(self, "_trigger_source", name or None)
+        )
+        if self._signals:
+            self._trigger_source = self._signals[0].name
+        self._trigger_source_combo.setToolTip("Signal to watch for edge.")
+        trig_layout.addWidget(self._trigger_source_combo)
+
+        self._trigger_edge_combo = QtWidgets.QComboBox()
+        self._trigger_edge_combo.addItems(["rising", "falling"])
+        self._trigger_edge_combo.currentTextChanged.connect(
+            lambda val: setattr(self, "_trigger_edge", val)
+        )
+        trig_layout.addWidget(self._trigger_edge_combo)
+
+        self._trigger_level_spin = QtWidgets.QDoubleSpinBox()
+        self._trigger_level_spin.setRange(-1e9, 1e9)
+        self._trigger_level_spin.setDecimals(4)
+        self._trigger_level_spin.setSingleStep(0.1)
+        self._trigger_level_spin.setSuffix(" (level)")
+        self._trigger_level_spin.valueChanged.connect(
+            lambda val: setattr(self, "_trigger_level", float(val))
+        )
+        trig_layout.addWidget(self._trigger_level_spin)
+
+        rearm_btn = QtWidgets.QPushButton("Re-arm")
+        rearm_btn.setToolTip("Clear the last fired trigger and re-arm.")
+        rearm_btn.clicked.connect(self._rearm_trigger)
+        trig_layout.addWidget(rearm_btn)
+        row3.addWidget(trig_box)
+
+        # ----- SMPS macros group ------------------------------------------
+        smps_box = QtWidgets.QFrame()
+        smps_box.setStyleSheet(
+            f"QFrame {{ border: 1px solid {_GRID_COLOR}; "
+            f"border-radius: 4px; padding: 2px 6px; }}")
+        smps_layout = QtWidgets.QHBoxLayout(smps_box)
+        smps_layout.setContentsMargins(4, 2, 4, 2)
+        smps_layout.setSpacing(4)
+        smps_layout.addWidget(QtWidgets.QLabel("⚡ Measure"))
+
+        self._smps_source_combo = QtWidgets.QComboBox()
+        for sig in self._signals:
+            self._smps_source_combo.addItem(sig.name)
+        self._smps_source_combo.setToolTip(
+            "Source signal for the SMPS measurement macros."
+        )
+        smps_layout.addWidget(self._smps_source_combo)
+
+        for label, slot, tip in (
+            ("Tsw", self._measure_tsw,
+             "Detect switching period + frequency from zero-crossings."),
+            ("Duty", self._measure_duty,
+             "Detect duty cycle from samples above the median."),
+            ("Ripple", self._measure_ripple,
+             "min / max / mean / p-p / RMS over visible range "
+             "(or cursor span when cursors are on)."),
+        ):
+            b = QtWidgets.QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            smps_layout.addWidget(b)
+
+        self._smps_readout = QtWidgets.QLabel("—")
+        self._smps_readout.setStyleSheet(
+            f"color: {_ACCENT_COLOR}; "
+            f"font-family: 'SF Mono', Menlo, monospace; "
+            f"font-size: 9pt; font-weight: 700;")
+        self._smps_readout.setMinimumWidth(160)
+        smps_layout.addWidget(self._smps_readout)
+        row3.addWidget(smps_box)
+
+        # ----- FFT button -------------------------------------------------
+        fft_btn = QtWidgets.QPushButton("📈 FFT")
+        fft_btn.setToolTip(
+            "Compute FFT + THD% on the focused signal in the visible window. "
+            "Pauses the display automatically when clicked while running."
+        )
+        fft_btn.clicked.connect(self._show_fft_dialog)
+        row3.addWidget(fft_btn)
+
+        # ----- Math channel button ----------------------------------------
+        math_btn = QtWidgets.QPushButton("➕ Math")
+        math_btn.setToolTip(
+            "Add a derived trace = numpy expression over existing signals. "
+            "Examples:\n"
+            "  P_out = vout * I(L1)\n"
+            "  V_diff = vin - vout\n"
+            "  V_rms = rms(vout)\n"
+            "Supported ops: + - * / ** % //   "
+            "funcs: abs sqrt sign sin cos tan exp log log10 "
+            "minimum maximum mean rms min max sum   "
+            "consts: pi e"
+        )
+        math_btn.clicked.connect(self._show_add_math_dialog)
+        row3.addWidget(math_btn)
+
+        # ----- Log Y toggle (applies to all panels) -----------------------
+        self._log_y_btn = QtWidgets.QPushButton("Log Y")
+        self._log_y_btn.setCheckable(True)
+        self._log_y_btn.setToolTip(
+            "Toggle log-scale Y for every panel. Useful for "
+            "current-sense signals that span decades."
+        )
+        self._log_y_btn.toggled.connect(self._on_log_y_toggled)
+        row3.addWidget(self._log_y_btn)
+
+        row3.addStretch()
+        ctrl_layout.addLayout(row3)
 
         self._main_layout.addWidget(ctrl_box)
 
@@ -678,9 +1451,27 @@ class LiveScope:
             ps.plot.enableAutoRange(axis="y", enable=True)
 
     def _on_pause_toggled(self, checked: bool) -> None:
+        # Pause is a *real* pause: we tell the stream to block the
+        # kernel inside ``should_continue``, so the simulation actually
+        # stops advancing — no samples are generated, the ring stays
+        # frozen at the last value, and on resume the kernel picks up
+        # exactly where it left off. No gaps, no density artefacts.
         self._paused = checked
         self._pause_btn.setText("▶ Resume display" if checked
                                    else "⏸ Pause display")
+        try:
+            if checked:
+                if hasattr(self.stream, "pause"):
+                    self.stream.pause()
+            else:
+                if hasattr(self.stream, "resume"):
+                    self.stream.resume()
+        except Exception:  # noqa: BLE001
+            # Older streams without pause/resume: scope still freezes
+            # display via ``self._paused``; the kernel keeps running
+            # but data is held in the ring until the next non-paused
+            # tick.
+            pass
 
     def _on_cursors_toggled(self, checked: bool) -> None:
         self._cursors_enabled = checked
@@ -842,41 +1633,60 @@ class LiveScope:
 
         # Acquire new data. Native stream → one atomic read + numpy
         # view, no queue. Legacy stream → drain the queue.Queue.
+        #
+        # Pause behaviour: pressing Pause sends ``stream.pause()`` which
+        # blocks the kernel inside its ``should_continue`` callback —
+        # no new samples are produced while paused, so the ring stays
+        # frozen at the last sample, the display stays frozen, and at
+        # resume the kernel just continues stepping. No drain-on-pause
+        # gymnastics needed.
         t_latest = 0.0
         is_native = getattr(self.stream, "is_native", False)
         n_batches = 0
         x_all = None
         t_all = None
-        if is_native:
-            samples = self.stream.get_new_samples()
-            if samples is not None and not self._paused:
-                t_all, x_all = samples
-                n_batches = 1   # for status display
-            elif samples is not None:
-                n_batches = 1   # data drained but display paused
-        else:
-            # Drain legacy queue.
-            batches: List[tuple] = []
-            while True:
-                b = self.stream.get_batch(timeout=0.0)
-                if b is None:
-                    break
-                batches.append(b)
-            n_batches = len(batches)
-            if n_batches > 0 and not self._paused:
-                t_all = np.concatenate(
-                    [b[0] for b in batches]
-                ).astype(np.float64, copy=False)
-                x_all = np.concatenate(
-                    [b[1] for b in batches]
-                ).astype(np.float64, copy=False)
+        if not self._paused:
+            if is_native:
+                samples = self.stream.get_new_samples()
+                if samples is not None:
+                    t_all, x_all = samples
+                    n_batches = 1   # for status display
+            else:
+                # Drain legacy queue.
+                batches: List[tuple] = []
+                while True:
+                    b = self.stream.get_batch(timeout=0.0)
+                    if b is None:
+                        break
+                    batches.append(b)
+                n_batches = len(batches)
+                if n_batches > 0:
+                    t_all = np.concatenate(
+                        [b[0] for b in batches]
+                    ).astype(np.float64, copy=False)
+                    x_all = np.concatenate(
+                        [b[1] for b in batches]
+                    ).astype(np.float64, copy=False)
 
         # Vectorized extraction (same code path for both stream types).
-        if t_all is not None and x_all is not None and not self._paused:
+        # Guard against empty batches: native LiveRing can return a
+        # zero-length slice when the producer hasn't advanced between
+        # ticks but ``get_new_samples`` still returned ``(t, x)`` — and
+        # ``float(t_all[-1])`` would raise IndexError and kill the tick.
+        if (t_all is not None and x_all is not None
+                and t_all.size > 0):
             t_latest = float(t_all[-1])
             n_new = t_all.shape[0]
 
+            # First pass — state / chain / custom signals. Stash each
+            # batch's per-signal array so the math pass below can
+            # reference them without re-reading the ring.
+            batch_signals: Dict[str, np.ndarray] = {}
             for sig in self._signals:
+                if sig.kind == "math":
+                    # Math channels evaluated in a second pass below
+                    # so their dependencies are already populated.
+                    continue
                 if sig.kind == "state":
                     # ONE numpy slice — no Python per-sample work.
                     y_new = x_all[:, sig.state_idx]
@@ -892,6 +1702,65 @@ class LiveScope:
                           for i in range(n_new)),
                         dtype=np.float64, count=n_new)
                 self._ring_push(sig.name, t_all, y_new)
+                batch_signals[sig.name] = y_new
+
+            # Second pass — math channels. Vectorised eval against
+            # ``batch_signals``; a math channel may depend on any
+            # already-registered state/chain/custom (or other math
+            # registered earlier — added in-order here so chained
+            # math just works as long as deps appear first in the
+            # registration sequence).
+            for sig in self._signals:
+                if sig.kind != "math":
+                    continue
+                missing = [d for d in sig.math_deps
+                            if d not in batch_signals]
+                if missing:
+                    # Unknown dep at first tick — log + zero so user
+                    # gets a visible flat line until they fix the
+                    # expression (vs crashing the scope).
+                    if not getattr(sig, "_math_warned", False):
+                        sys.stderr.write(
+                            f"[LiveScope] math channel {sig.name!r}: "
+                            f"missing dependencies "
+                            f"{missing} — registered names: "
+                            f"{sorted(batch_signals.keys())}\n"
+                        )
+                        sig._math_warned = True  # type: ignore[attr-defined]
+                    y_new = np.zeros(n_new, dtype=np.float64)
+                else:
+                    ctx = {d: batch_signals[d] for d in sig.math_deps}
+                    try:
+                        y_new = _math_eval(sig.math_tree, ctx)
+                        if y_new.shape != t_all.shape:
+                            y_new = np.broadcast_to(
+                                y_new, t_all.shape
+                            ).astype(np.float64, copy=True)
+                    except Exception as exc:  # noqa: BLE001
+                        if not getattr(sig, "_math_warned", False):
+                            sys.stderr.write(
+                                f"[LiveScope] math channel "
+                                f"{sig.name!r}: eval error — "
+                                f"{exc}\n"
+                            )
+                            sig._math_warned = True  # type: ignore[attr-defined]
+                        y_new = np.zeros(n_new, dtype=np.float64)
+                self._ring_push(sig.name, t_all, y_new)
+                batch_signals[sig.name] = y_new
+
+            # PLECS/PSIM-style edge trigger. In single mode we scan
+            # this batch for the first edge on ``_trigger_source``
+            # crossing ``_trigger_level`` in the chosen ``_trigger_edge``
+            # direction. When found, auto-pauses the display via the
+            # existing Pause button (re-use that ``_paused`` state
+            # machine instead of inventing a new one). Re-arm clears
+            # the fired flag and resumes.
+            if (self._trigger_mode == "single" and self._trigger_armed):
+                self._check_trigger_in_new_samples(t_all, x_all)
+                if (self._trigger_fired_at is not None
+                        and self._pause_btn is not None
+                        and not self._paused):
+                    self._pause_btn.setChecked(True)
 
             # Window trim — same cutoff for every signal so curves
             # stay aligned.
@@ -978,7 +1847,15 @@ class LiveScope:
 
     def _ring_trim_window(self, t_cutoff: float) -> None:
         """Drop samples older than ``t_cutoff`` from every ring.
-        Uses ``np.searchsorted`` — O(log N) per signal."""
+        Uses ``np.searchsorted`` — O(log N) per signal.
+
+        Invariant: never trim down to zero. When ``t_cutoff`` is
+        beyond the entire buffer (a long gap between batches makes
+        every existing sample older than the cutoff), keep the last
+        sample as a marker so the curve continues drawing a flat
+        line at the right edge — much friendlier than the display
+        going completely blank.
+        """
         if t_cutoff <= 0:
             return
         for name, n in list(self._ring_n.items()):
@@ -990,10 +1867,15 @@ class LiveScope:
             i_cut = int(np.searchsorted(t_buf[:n], t_cutoff, side="left"))
             if i_cut <= 0:
                 continue
+            # Never empty the ring: cap i_cut so at least one sample
+            # (the most recent) survives. Without this, a gap between
+            # batches longer than ``window_seconds`` would zero the
+            # ring and the curve would visually vanish.
+            if i_cut >= n:
+                i_cut = n - 1
             keep = n - i_cut
-            if keep > 0:
-                self._ring_t[name][:keep] = t_buf[i_cut:n]
-                self._ring_y[name][:keep] = self._ring_y[name][i_cut:n]
+            self._ring_t[name][:keep] = t_buf[i_cut:n]
+            self._ring_y[name][:keep] = self._ring_y[name][i_cut:n]
             self._ring_n[name] = keep
 
     def _update_stats(self) -> None:
@@ -1004,8 +1886,25 @@ class LiveScope:
         if n == 0:
             self._stats_label.setText(f"stats[{name}]: ---")
             return
-        a = self._ring_y[name][:n]
-        # Sliding-window stats over what's currently displayed.
+        t_full = self._ring_t[name][:n]
+        a_full = self._ring_y[name][:n]
+        # When cursors A/B are on, stats live ONLY between them — same
+        # convention PLECS uses. Otherwise full ring buffer (sliding
+        # window).
+        scope_tag = ""
+        if (self._cursors_enabled
+                and self._cursor_a_pos is not None
+                and self._cursor_b_pos is not None):
+            x_lo = min(self._cursor_a_pos, self._cursor_b_pos)
+            x_hi = max(self._cursor_a_pos, self._cursor_b_pos)
+            mask = (t_full >= x_lo) & (t_full <= x_hi)
+            if mask.any():
+                a = a_full[mask]
+                scope_tag = "[A-B]"
+            else:
+                a = a_full
+        else:
+            a = a_full
         v_min = float(a.min())
         v_max = float(a.max())
         v_mean = float(a.mean())
@@ -1014,12 +1913,441 @@ class LiveScope:
         sig = next((s for s in self._signals if s.name == name), None)
         unit = sig.unit if sig else ""
         self._stats_label.setText(
-            f"stats[{name}]:  "
+            f"stats[{name}]{scope_tag}:  "
             f"min={v_min:+.4g}{unit}  "
             f"max={v_max:+.4g}{unit}  "
             f"mean={v_mean:+.4g}{unit}  "
             f"rms={v_rms:.4g}{unit}  "
             f"p-p={v_pp:.4g}{unit}")
+
+    # =====================================================================
+    # PLECS/PSIM-style additions: Clear, Trigger, SMPS macros, FFT.
+    # All methods below are pure-Python and depend only on the existing
+    # ring buffers (self._ring_t, self._ring_y, self._ring_n).
+    # =====================================================================
+
+    def _clear(self) -> None:
+        """Drop every ring sample and reset trigger state. Same
+        button label as on a bench scope."""
+        for name in list(self._ring_n.keys()):
+            self._ring_n[name] = 0
+        for sig in self._signals:
+            curve = None
+            panel = self._panels.get(sig.panel)
+            if panel is not None:
+                curve = panel.curves.get(sig.name)
+            if curve is not None:
+                curve.clear()
+        self._trigger_fired_at = None
+        self._trigger_armed = True
+        if self._smps_readout is not None:
+            self._smps_readout.setText("—")
+        # Wake the display from any frozen state.
+        if self._status_label is not None:
+            self._status_label.setText("cleared")
+
+    # ---- Trigger ----------------------------------------------------
+
+    def _on_trigger_mode(self, label: str) -> None:
+        self._trigger_mode = (
+            "single" if label.lower().startswith("single") else "free"
+        )
+        if self._trigger_mode == "free":
+            self._trigger_fired_at = None
+            self._trigger_armed = True
+
+    def _rearm_trigger(self) -> None:
+        self._trigger_fired_at = None
+        self._trigger_armed = True
+        # If single-trigger auto-paused us, resume.
+        if self._paused and self._pause_btn is not None:
+            self._pause_btn.setChecked(False)
+
+    def _check_trigger_in_new_samples(self, t_new: np.ndarray,
+                                         x_new: np.ndarray) -> None:
+        """Detect the first edge of ``_trigger_source`` crossing
+        ``_trigger_level`` in this batch. Sets ``_trigger_fired_at``
+        and disarms when a crossing is found."""
+        if not self._trigger_source:
+            return
+        sig = next(
+            (s for s in self._signals if s.name == self._trigger_source),
+            None,
+        )
+        if sig is None or sig.kind != "state":
+            # Trigger only on state-vector signals — chain/custom
+            # extractors don't produce per-sample arrays here.
+            return
+        if sig.state_idx >= x_new.shape[1]:
+            return
+        y = x_new[:, sig.state_idx]
+        crosses = _zero_crossings(
+            t_new, y,
+            level=self._trigger_level,
+            direction=self._trigger_edge,
+        )
+        if crosses.size == 0:
+            return
+        self._trigger_fired_at = float(crosses[0])
+        self._trigger_armed = False
+
+    # ---- SMPS macros -------------------------------------------------
+
+    def _get_meas_window(self) -> Optional[tuple]:
+        """Return ``(t, y)`` for the SMPS-source signal, clipped to
+        the visible X range — or, when cursors are on, to the cursor
+        span. Returns ``None`` when no data is available."""
+        if self._smps_source_combo is None:
+            return None
+        name = self._smps_source_combo.currentText()
+        if not name or name not in self._ring_n:
+            return None
+        n = self._ring_n[name]
+        if n < 4:
+            return None
+        t_full = self._ring_t[name][:n]
+        y_full = self._ring_y[name][:n]
+        # Source X range from the first panel (panels are X-linked).
+        x_lo = float(t_full[0])
+        x_hi = float(t_full[-1])
+        first_panel = next(iter(self._panels.values()), None)
+        if first_panel is not None:
+            try:
+                # _PanelState.plot is a PlotItem — viewRange lives on its
+                # ViewBox. (Don't go through .plot_widget — that attribute
+                # doesn't exist and the AttributeError used to be swallowed
+                # by the broad except, leaving SMPS macros silently scanning
+                # the entire ring instead of the visible window.)
+                (vmin, vmax), _ = (
+                    first_panel.plot.getViewBox().viewRange()
+                )
+                x_lo = max(x_lo, float(vmin))
+                x_hi = min(x_hi, float(vmax))
+            except Exception:  # noqa: BLE001
+                pass
+        if self._cursors_enabled:
+            x_lo = min(self._cursor_a_pos, self._cursor_b_pos)
+            x_hi = max(self._cursor_a_pos, self._cursor_b_pos)
+        mask = (t_full >= x_lo) & (t_full <= x_hi)
+        if not mask.any():
+            return t_full, y_full
+        return t_full[mask], y_full[mask]
+
+    def _measure_tsw(self) -> None:
+        window = self._get_meas_window()
+        if window is None:
+            self._smps_readout.setText("Tsw: need ≥4 samples")
+            return
+        t, y = window
+        Tsw = _detect_period(t, y)
+        if Tsw is None or Tsw <= 0.0:
+            self._smps_readout.setText("Tsw: not detected")
+            return
+        fsw = 1.0 / Tsw
+        self._smps_readout.setText(
+            f"Tsw={Tsw*1e6:.3f} µs  Fsw={fsw/1e3:.3f} kHz"
+        )
+
+    def _measure_duty(self) -> None:
+        window = self._get_meas_window()
+        if window is None:
+            self._smps_readout.setText("Duty: need ≥8 samples")
+            return
+        t, y = window
+        D = _detect_duty(t, y)
+        if D is None:
+            self._smps_readout.setText("Duty: not switching")
+            return
+        self._smps_readout.setText(f"Duty = {D*100:.2f} %")
+
+    def _measure_ripple(self) -> None:
+        window = self._get_meas_window()
+        if window is None:
+            self._smps_readout.setText("Ripple: no samples")
+            return
+        _, y = window
+        s = _ripple_stats(y)
+        self._smps_readout.setText(
+            f"mean={s['mean']:+.4g}  p-p={s['pp']:.4g}  "
+            f"RMS={s['rms']:.4g}"
+        )
+
+    # ---- FFT modal ---------------------------------------------------
+
+    def _show_fft_dialog(self) -> None:
+        """Open a modal pyqtgraph dialog with FFT + THD of the focused
+        signal, computed over the visible X range. Auto-pauses the
+        live display while the dialog is open (cheap and avoids the
+        FFT racing against new samples)."""
+        if not self._focus_signal:
+            QtWidgets.QMessageBox.information(
+                self._win, "FFT",
+                "Click a signal name first to focus it, then click FFT."
+            )
+            return
+        was_paused = self._paused
+        if not was_paused and self._pause_btn is not None:
+            self._pause_btn.setChecked(True)  # also flips self._paused
+        name = self._focus_signal
+        n = self._ring_n.get(name, 0)
+        if n < 16:
+            QtWidgets.QMessageBox.information(
+                self._win, "FFT",
+                f"Not enough samples for {name} (have {n}, need ≥ 16)."
+            )
+            return
+        t_full = self._ring_t[name][:n]
+        y_full = self._ring_y[name][:n]
+        first_panel = next(iter(self._panels.values()), None)
+        if first_panel is not None:
+            try:
+                # _PanelState.plot is a PlotItem — viewRange lives on its
+                # ViewBox. Going through .plot_widget would AttributeError
+                # and the previous broad except masked it silently, so the
+                # FFT was always computed over the full ring (often half-
+                # filled with stale zeros → "FFT doesn't calculate anything"
+                # in the dialog).
+                (vmin, vmax), _ = (
+                    first_panel.plot.getViewBox().viewRange()
+                )
+                mask = (t_full >= float(vmin)) & (t_full <= float(vmax))
+                if mask.sum() >= 16:
+                    t_full = t_full[mask]
+                    y_full = y_full[mask]
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Compute FFT with Hann window.
+        n_pts = y_full.size
+        dt = (t_full[-1] - t_full[0]) / max(1, n_pts - 1)
+        if dt <= 0:
+            QtWidgets.QMessageBox.information(
+                self._win, "FFT",
+                "Sample spacing zero — cannot compute FFT.",
+            )
+            return
+        win = np.hanning(n_pts)
+        y_dc = y_full - float(np.mean(y_full))
+        spec = np.abs(np.fft.rfft(y_dc * win)) * (2.0 / n_pts / np.mean(win))
+        freqs = np.fft.rfftfreq(n_pts, d=dt)
+        # THD: take the highest bin (>0 Hz) as fundamental, sum next
+        # 49 harmonics' powers vs fundamental power, sqrt + percentage.
+        nonzero = spec.copy()
+        nonzero[0] = 0.0
+        fund_idx = int(np.argmax(nonzero))
+        f_fund = float(freqs[fund_idx])
+        a_fund = float(spec[fund_idx])
+        thd_pct = float("nan")
+        if a_fund > 0.0 and f_fund > 0.0:
+            harm_power = 0.0
+            for k in range(2, 50):
+                target = k * f_fund
+                if target >= freqs[-1]:
+                    break
+                idx = int(np.argmin(np.abs(freqs - target)))
+                # Use a small window around the bin to be robust to
+                # spectral leakage.
+                lo = max(0, idx - 1)
+                hi = min(spec.size, idx + 2)
+                harm_power += float(np.max(spec[lo:hi]) ** 2)
+            thd_pct = 100.0 * float(np.sqrt(harm_power)) / a_fund
+
+        # Build the dialog.
+        dlg = QtWidgets.QDialog(self._win)
+        dlg.setStyleSheet(_DIALOG_QSS)
+        dlg.setWindowTitle(
+            f"FFT — {name}  "
+            f"({n_pts} samples, fs={1.0/dt/1e3:.2f} kHz)"
+        )
+        dlg.resize(900, 520)
+        v = QtWidgets.QVBoxLayout(dlg)
+
+        header = QtWidgets.QLabel(
+            f"<b>Fundamental</b>: {f_fund:.4g} Hz   "
+            f"<b>Amplitude</b>: {a_fund:.4g}   "
+            f"<b>THD</b>: {thd_pct:.3f} %"
+        )
+        header.setStyleSheet(
+            f"color: {_TEXT_COLOR}; "
+            f"font-family: 'SF Mono', Menlo, monospace; "
+            f"padding: 4px;"
+        )
+        v.addWidget(header)
+
+        plot = pg.PlotWidget()
+        plot.setBackground(_BG_COLOR)
+        plot.showGrid(x=True, y=True, alpha=0.25)
+        plot.setLabel("bottom", "Frequency", units="Hz")
+        plot.setLabel("left", "Amplitude")
+        plot.plot(freqs, spec, pen=pg.mkPen(_ACCENT_COLOR, width=1.5))
+        v.addWidget(plot, stretch=1)
+
+        # Harmonic table (top 10 harmonics relative to fundamental).
+        table = QtWidgets.QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels(["Harmonic", "Freq (Hz)", "Amplitude (% of fund.)"])
+        table.horizontalHeader().setStretchLastSection(True)
+        if f_fund > 0.0 and a_fund > 0.0:
+            for k in range(1, 11):
+                target = k * f_fund
+                if target >= freqs[-1]:
+                    break
+                idx = int(np.argmin(np.abs(freqs - target)))
+                row = table.rowCount()
+                table.insertRow(row)
+                table.setItem(row, 0, QtWidgets.QTableWidgetItem(f"{k}"))
+                table.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{freqs[idx]:.3f}"))
+                table.setItem(row, 2, QtWidgets.QTableWidgetItem(
+                    f"{100.0 * float(spec[idx]) / a_fund:.3f}"
+                ))
+        table.setMaximumHeight(180)
+        v.addWidget(table)
+
+        close = QtWidgets.QPushButton("Close")
+        close.clicked.connect(dlg.accept)
+        v.addWidget(close)
+        dlg.exec()
+        # Restore prior pause state when the user dismisses the dialog.
+        if not was_paused and self._pause_btn is not None:
+            self._pause_btn.setChecked(False)
+
+    # ---- Log Y toggle (applies to all panels) ------------------------
+
+    def _on_log_y_toggled(self, checked: bool) -> None:
+        for ps in self._panels.values():
+            try:
+                ps.plot.setLogMode(y=bool(checked))
+            except Exception:  # noqa: BLE001
+                pass
+        # Auto-range Y after switching modes so the curves fit.
+        for ps in self._panels.values():
+            try:
+                ps.plot.enableAutoRange(axis="y", enable=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # ---- Math channel add dialog -------------------------------------
+
+    def _show_add_math_dialog(self) -> None:
+        """Interactive dialog to register a new math channel after
+        the scope is already running. Mirrors :meth:`add_math_signal`
+        but with a UI + lazy curve / ring creation so the math trace
+        starts drawing on the next tick."""
+        dlg = QtWidgets.QDialog(self._win)
+        dlg.setStyleSheet(_DIALOG_QSS)
+        dlg.setWindowTitle("Add Math Channel")
+        dlg.resize(560, 320)
+        form = QtWidgets.QFormLayout(dlg)
+        form.setSpacing(8)
+
+        name_edit = QtWidgets.QLineEdit()
+        name_edit.setPlaceholderText("e.g. P_out")
+        form.addRow("Name:", name_edit)
+
+        expr_edit = QtWidgets.QLineEdit()
+        expr_edit.setPlaceholderText("e.g. vout * I(L1)")
+        form.addRow("Expression:", expr_edit)
+
+        unit_edit = QtWidgets.QLineEdit()
+        unit_edit.setPlaceholderText("V, A, W, ...")
+        form.addRow("Unit:", unit_edit)
+
+        panel_combo = QtWidgets.QComboBox()
+        panel_combo.setEditable(True)
+        for p in self._panel_names:
+            panel_combo.addItem(p)
+        panel_combo.setCurrentText(self._panel_names[0])
+        form.addRow("Panel:", panel_combo)
+
+        color_edit = QtWidgets.QLineEdit("#9c27b0")
+        color_edit.setToolTip("Any pyqtgraph-accepted colour, e.g. "
+                                "'#9c27b0', 'red', or RGB tuple.")
+        form.addRow("Color:", color_edit)
+
+        # Helper hint with available names + functions.
+        existing_sigs = ", ".join(s.name for s in self._signals)
+        hint = QtWidgets.QLabel(
+            f"<b>Available signals:</b> {existing_sigs or '(none yet)'}<br>"
+            f"<b>Operators:</b> + - * / ** % //<br>"
+            f"<b>Functions:</b> abs sqrt sign sin cos tan exp log log10 "
+            f"minimum maximum mean rms min max sum<br>"
+            f"<b>Constants:</b> pi e"
+        )
+        hint.setStyleSheet(
+            f"color: {_DIM_COLOR}; font-size: 9pt; padding: 6px 0;"
+        )
+        hint.setWordWrap(True)
+        form.addRow(hint)
+
+        # Validate-on-the-fly status.
+        status = QtWidgets.QLabel("")
+        status.setStyleSheet(f"color: {_ACCENT_COLOR}; font-weight: 600;")
+        form.addRow(status)
+
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        form.addRow(btns)
+        btns.rejected.connect(dlg.reject)
+
+        def _validate_and_accept():
+            name = name_edit.text().strip()
+            expr = expr_edit.text().strip()
+            if not name:
+                status.setText("Name is required.")
+                return
+            if not expr:
+                status.setText("Expression is required.")
+                return
+            if name in {s.name for s in self._signals}:
+                status.setText(f"Signal {name!r} already exists.")
+                return
+            try:
+                _math_compile(expr)
+            except ValueError as exc:
+                status.setText(str(exc))
+                return
+            dlg.accept()
+
+        btns.accepted.connect(_validate_and_accept)
+
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+
+        name = name_edit.text().strip()
+        expr = expr_edit.text().strip()
+        unit = unit_edit.text().strip()
+        color = color_edit.text().strip() or "#9c27b0"
+        panel = panel_combo.currentText().strip() or self._panel_names[0]
+
+        # Register the signal via the public API (handles compile +
+        # deps + appending to ``self._signals``).
+        self.add_math_signal(
+            name, expr, color=color, unit=unit, panel=panel,
+        )
+
+        # Lazy panel / curve / ring creation — the live scope was
+        # already started, so we can't call ``_build_panels`` again.
+        # Allocate this signal's ring buffer.
+        self._ring_t[name] = np.zeros(self._max_points, dtype=np.float64)
+        self._ring_y[name] = np.zeros(self._max_points, dtype=np.float64)
+        self._ring_n[name] = 0
+        self._enabled[name] = True
+
+        # If the panel doesn't exist yet, fall back to the first one.
+        if panel not in self._panels:
+            panel = next(iter(self._panels.keys()))
+        ps = self._panels[panel]
+        sig = self._signals[-1]
+        pen = pg.mkPen(color=color, width=1.6)
+        curve = ps.plot.plot([], [], pen=pen, name=name)
+        ps.curves[name] = curve
+        ps.signals.append(sig)
+
+        # Status feedback.
+        if self._status_label is not None:
+            self._status_label.setText(
+                f"math channel {name} = {expr} added to {panel}"
+            )
 
 
 class _ClickFilter(QtCore.QObject):

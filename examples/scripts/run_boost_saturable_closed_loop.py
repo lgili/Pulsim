@@ -25,7 +25,6 @@ knee but not deep, so the loop has to negotiate the changing gain).
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -99,7 +98,6 @@ def make_setpoint(t_step: float, v1: float, v2: float,
 def main() -> None:
     builder = build_plant()
     vout_idx = builder.node_id_of("vout")
-    sw_idx   = builder.node_id_of("sw")
     print(f"  num_branches:   {builder.num_branches}")
     print(f"  num_switches:   {builder.graph.num_switches}")
     print(f"  has_nonlinear:  {builder.pool.has_nonlinear_devices()}")
@@ -109,29 +107,24 @@ def main() -> None:
         output_min=DUTY_MIN, output_max=DUTY_MAX,
         integrator_state=0.10,
     )
+    # LPF runs every `dt` (composed observer below); the PI reads
+    # its filtered state once per PWM period.
     lpf = p.FirstOrderLowPass(tau=TAU_LPF)
-    duty = [0.10]
-    last_pi_t = [-1.0]
 
     setpoint_fn = make_setpoint(T_STEP, V_REF, V_REF_2)
 
-    def observe(t: float, x) -> None:
-        v_out_filt = lpf.update(input_value=float(x[vout_idx]), dt=DT)
-        sp = setpoint_fn(t)
-        if t - last_pi_t[0] >= T_PWM:
-            dt_pi = (t - last_pi_t[0]) if last_pi_t[0] >= 0 else T_PWM
-            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
-                                  dt=dt_pi)
-            last_pi_t[0] = t
+    loop = p.bind_pi_to_switch(
+        builder,
+        pi=pi,
+        measured=lambda x: lpf.state,
+        setpoint=setpoint_fn,
+        switch="Q1",
+        freq=F_PWM,
+    )
 
-    num_switches = builder.graph.num_switches
-
-    def switch_fn(t: float):
-        phase = math.fmod(t, T_PWM) / T_PWM
-        m = p.SwitchStateMask(num_switches)
-        if phase < duty[0]:
-            m.set(0, True)
-        return m
+    def combined_observer(t: float, x) -> None:
+        lpf.update(input_value=float(x[vout_idx]), dt=DT)
+        loop.step_observer(t, x)
 
     print(f"\n  Closed-loop SATURABLE boost:")
     print(f"    PI(Kp={KP}, Ki={KI}), duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
@@ -140,46 +133,38 @@ def main() -> None:
     print(f"    setpoint {V_REF} V → {V_REF_2} V at t = {T_STEP*1e3:.1f} ms")
     res = p.simulate(
         builder, t_end=T_END, dt=DT,
-        switch_fn=switch_fn,
-        step_observer=observe,
+        switch_fn=loop.switch_fn,
+        step_observer=combined_observer,
         max_event_iterations=12,
         max_newton_iterations=100,
     )
     print(f"  samples: {res.num_steps()}")
 
-    # Replay PI for plot.
-    pi2 = p.PIController(
-        Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
-        integrator_state=0.10,
-    )
-    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
-    duty_hist = np.zeros(res.num_steps())
-    setpoint_hist = np.zeros(res.num_steps())
-    last_t = [-1.0]
-    d_curr = [0.10]
-    for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
-        sp = setpoint_fn(t)
-        if t - last_t[0] >= T_PWM:
-            dt_pi = (t - last_t[0]) if last_t[0] >= 0 else T_PWM
-            d_curr[0] = pi2.update(setpoint=sp, measured=v_out, dt=dt_pi)
-            last_t[0] = t
-        duty_hist[k] = d_curr[0]
-        setpoint_hist[k] = sp
+    # Duty captured live; resample to per-sample grid for the plot.
+    if loop.duty_history:
+        d_times = np.asarray([t for t, _ in loop.duty_history])
+        d_vals  = np.asarray([d for _, d in loop.duty_history])
+        duty_hist = np.interp(res.times, d_times, d_vals, left=d_vals[0])
+    else:
+        duty_hist = np.zeros(res.num_steps())
+    setpoint_hist = np.asarray([setpoint_fn(t) for t in res.times])
 
     times = np.asarray(res.times) * 1e3
-    v_out_arr = np.array([s[vout_idx] for s in res.states])
-    v_sw_arr  = np.array([s[sw_idx]   for s in res.states])
+    v_out_arr = res.v("vout")
+    v_sw_arr  = res.v("sw")
 
     # Recover the inductor current from the state vector.
     # SaturableInductor branch adds a branch-current unknown,
     # accessible via pool.branch_var_id_for_inductor (if exposed).
     # If not, fall back to estimating from V_sw / impedance.
     # The L_boost is branch index 1 (after Vin = 0).
+    i_L_arr: "np.ndarray | None" = None
     try:
-        i_L_idx = builder.pool.branch_var_id_for_inductor(
-            1, builder.graph)
-        i_L_arr = np.array([s[i_L_idx] for s in res.states])
+        # v1.5 named accessor — bypasses the manual
+        # pool.branch_var_id_for_inductor lookup the previous
+        # revision needed because the state-vector offset for an
+        # inductor isn't simply num_nodes + branch_id.
+        i_L_arr = np.asarray(res.i("L_boost"))
         have_iL = True
     except Exception:
         have_iL = False

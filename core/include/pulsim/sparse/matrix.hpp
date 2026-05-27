@@ -31,15 +31,26 @@
 namespace pulsim::sparse {
 
 // -----------------------------------------------------------------------------
-// Matrix — column-major, int32-index sparse matrix.
+// MatrixT<Scalar> — column-major, int32-index sparse matrix.
+//
+// Templatized on Scalar (v1.4.0+) so the same type expresses both
+// real-valued PWL state-space MNA matrices and complex-valued
+// AC-sweep operators `(jω·E − A)`.
+//
+// `Matrix` (no template arg) is == `MatrixT<Real>` for backward
+// compatibility with every Layer 1-9 consumer.
 //
 // This is THE matrix type for Layer 4's state-space cache and Layer 5's
 // MNA. Choosing it correctly here means future layers compose naturally.
 // -----------------------------------------------------------------------------
-using Matrix = Eigen::SparseMatrix<Real, Eigen::ColMajor, Index>;
+template <typename Scalar>
+using MatrixT = Eigen::SparseMatrix<Scalar, Eigen::ColMajor, Index>;
+
+using Matrix = MatrixT<Real>;
 
 // -----------------------------------------------------------------------------
-// Triplet — (row, col, value) entry for triplet-based assembly.
+// TripletT<Scalar> — (row, col, value) entry for triplet-based assembly.
+// `Triplet` == `TripletT<Real>` (backward compat).
 //
 // Standard pattern:
 //     std::vector<Triplet> triplets;
@@ -48,7 +59,10 @@ using Matrix = Eigen::SparseMatrix<Real, Eigen::ColMajor, Index>;
 //     Matrix M(rows, cols);
 //     M.setFromTriplets(triplets.begin(), triplets.end());
 // -----------------------------------------------------------------------------
-using Triplet = Eigen::Triplet<Real, Index>;
+template <typename Scalar>
+using TripletT = Eigen::Triplet<Scalar, Index>;
+
+using Triplet = TripletT<Real>;
 
 // -----------------------------------------------------------------------------
 // stamp_dense — add a small dense block at (row, col).

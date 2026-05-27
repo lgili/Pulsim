@@ -103,6 +103,7 @@ def compute_dc_op(builder,
                     pseudo_trans: Optional[PseudoTransientConfig] = None,
                     source_step: Optional[SourceStepConfig] = None,
                     verbose: bool = False,
+                    should_continue=None,
                     ) -> np.ndarray:
     """Compute the DC operating-point of a circuit.
 
@@ -137,6 +138,14 @@ def compute_dc_op(builder,
     if source_step is None:
         source_step = SourceStepConfig()
 
+    # add-python-builder-ergonomics: top-of-call cancellation check.
+    # The auto strategy path additionally invokes the kernel-level
+    # `compute_dc_op_with_strategy(should_continue=…)` so cancellations
+    # mid-fallback surface as `pulsim.Cancelled`.
+    if should_continue is not None and not should_continue():
+        from . import Cancelled as _Cancelled
+        raise _Cancelled("compute_dc_op", point_index=0)
+
     if strategy == "naive":
         return _dc_naive(builder, t_eval=t_eval, verbose=verbose)
     if strategy == "pseudo_trans":
@@ -155,6 +164,10 @@ def compute_dc_op(builder,
                 print(f"  compute_dc_op[auto]: naive failed "
                        f"({type(exc_naive).__name__}); "
                        f"falling back to pseudo_trans")
+        # Cancellation check between strategies.
+        if should_continue is not None and not should_continue():
+            from . import Cancelled as _Cancelled
+            raise _Cancelled("compute_dc_op", point_index=1)
         # 2) try pseudo_trans
         try:
             x = _dc_pseudo_trans(builder, pseudo_trans, verbose=verbose)
@@ -166,6 +179,9 @@ def compute_dc_op(builder,
                 print(f"  compute_dc_op[auto]: pseudo_trans failed "
                        f"({type(exc_pt).__name__}); "
                        f"falling back to source_step")
+        if should_continue is not None and not should_continue():
+            from . import Cancelled as _Cancelled
+            raise _Cancelled("compute_dc_op", point_index=2)
         # 3) try source_step
         try:
             x = _dc_source_step(builder, source_step, verbose=verbose)
