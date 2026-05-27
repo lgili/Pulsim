@@ -462,7 +462,6 @@ class RadauIIA3:
         if t_end <= t0:
             raise ValueError("t_span must have t_end > t_start")
         x = np.asarray(x0, dtype=np.float64).copy()
-        n = x.size
 
         if dt_init is None:
             # Conservative: pick a step sized to f(t0, x0) magnitude.
