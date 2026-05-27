@@ -230,6 +230,11 @@ from .hysteresis import (
     add_hysteretic_inductor,
     make_hysteretic_inductor_observer,
 )
+from .integrators import (
+    AdaptiveSolution,
+    DormandPrince5,
+    RadauIIA3,
+)
 from .spice_import import (
     SpiceElement,
     parse_spice_value,
@@ -470,6 +475,10 @@ __all__ = [
     "HystereticInductor",
     "add_hysteretic_inductor",
     "make_hysteretic_inductor_observer",
+    # Adaptive RK integrators (Phase 2.4).
+    "AdaptiveSolution",
+    "DormandPrince5",
+    "RadauIIA3",
     # SPICE netlist import (Phase E.10).
     "SpiceElement",
     "parse_spice_value",
