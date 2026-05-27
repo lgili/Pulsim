@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 import pulsim as p
 
 
@@ -418,3 +420,169 @@ def test_diode_switching_loss_zero_when_q_rr_is_zero() -> None:
     # n_turn_off_events still reported — useful for diagnostics
     # even with Q_rr=0.
     assert d["n_turn_off_events"] >= 0
+
+
+# -----------------------------------------------------------------------
+# PSIM-style datasheet entry points — E_rr_ref / V_R_ref for diode,
+# E_on_ref / E_off_ref / V_ref / I_ref for switch.
+# -----------------------------------------------------------------------
+
+def test_diode_e_rr_ref_matches_q_rr_form() -> None:
+    """`E_rr_ref + V_R_ref` is the PSIM-style datasheet form. When
+    `E_rr_ref = Q_rr · V_R_ref` the two specs must yield identical
+    `E_sw_total`."""
+    f0 = 1000.0
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd",
+                                v_dc=0.0, v_amplitude=10.0,
+                                frequency=f0, phase=0.0)
+    b.add_resistor("R1", "a", "b", 1.0)
+    b.add_diode("D1", "b", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+    res = p.simulate(b, t_end=5.0 / f0, dt=1.0 / (f0 * 200))
+
+    Q_rr = 50e-9
+    V_R_ref = 100.0
+    E_rr_ref = Q_rr * V_R_ref
+
+    s_qrr = p.device_loss_summary(
+        b, res, diode_specs={"D1": {"Q_rr": Q_rr}})
+    s_err = p.device_loss_summary(
+        b, res, diode_specs={"D1": {"E_rr_ref": E_rr_ref,
+                                       "V_R_ref": V_R_ref}})
+    E1 = next(e for e in s_qrr if e["kind"] == "diode")["E_sw_total"]
+    E2 = next(e for e in s_err if e["kind"] == "diode")["E_sw_total"]
+    assert math.isclose(E1, E2, rel_tol=1e-9)
+
+
+def test_diode_e_rr_ref_requires_v_r_ref() -> None:
+    """E_rr_ref without V_R_ref must error — the scaling reference
+    cannot be silently defaulted."""
+    f0 = 1000.0
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd",
+                                v_dc=0.0, v_amplitude=10.0,
+                                frequency=f0, phase=0.0)
+    b.add_resistor("R1", "a", "b", 1.0)
+    b.add_diode("D1", "b", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+    res = p.simulate(b, t_end=2.0 / f0, dt=1.0 / (f0 * 100))
+    with pytest.raises(ValueError, match="V_R_ref"):
+        p.device_loss_summary(
+            b, res, diode_specs={"D1": {"E_rr_ref": 1e-6}})
+
+
+def test_switch_psim_style_switching_loss_per_edge() -> None:
+    """Half-bridge-style PWM switch with PSIM E_on/E_off datasheet
+    entry. `E_sw_total` must equal `n_turn_on · E_on_ref +
+    n_turn_off · E_off_ref` when the actual V/I at edges match the
+    reference (forced by sizing V_dc and the load)."""
+    V_dc, R_load = 10.0, 1.0
+    g_on = 100.0
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", V_dc)
+    b.add_resistor("R1", "vin", "mid", R_load)
+    b.add_switch("SW1", "mid", "gnd", g_on=g_on, g_off=1e-9)
+
+    f_sw = 5_000.0
+    T_sw = 1.0 / f_sw
+    n_periods = 8
+
+    def pwm_50(t: float):
+        mask = p.SwitchStateMask(b.graph.num_switches)
+        on = (t % T_sw) < (0.5 * T_sw)
+        mask.set(0, bool(on))
+        return mask
+
+    res = p.simulate(b, t_end=n_periods * T_sw,
+                       dt=T_sw / 400, switch_fn=pwm_50)
+
+    # Pick V_ref = V_dc and I_ref such that the energy per edge
+    # is exactly E_on_ref / E_off_ref (under the steady-state
+    # blocking voltage and load current).
+    E_on_ref  = 100e-6  # 100 µJ
+    E_off_ref = 150e-6
+    V_ref = V_dc
+    # Closed-state load current ≈ V_dc · g_on / (1 + R · g_on) — for
+    # R=1, g_on=100 → I ≈ 9.9 A. Use the ideal-switch-closed value
+    # (V_dc / R) = 10 A as the datasheet reference; the actual
+    # current is within 1 %.
+    I_ref = V_dc / R_load
+
+    summary = p.device_loss_summary(
+        b, res, switch_fn=pwm_50,
+        switch_specs={"SW1": {"E_on_ref": E_on_ref,
+                                 "E_off_ref": E_off_ref,
+                                 "V_ref": V_ref,
+                                 "I_ref": I_ref}})
+    sw = next(e for e in summary if e["kind"] == "switch")
+
+    # n_periods PWM cycles ⇒ n_periods turn-on + n_periods turn-off
+    # (possibly ± 1 depending on alignment of the last cycle).
+    assert abs(sw["n_turn_on_events"] - n_periods) <= 1
+    assert abs(sw["n_turn_off_events"] - n_periods) <= 1
+    # E_sw_total ≈ (E_on_ref + E_off_ref) · n_periods to ~5 %
+    # (slight mismatch from g_on tail current).
+    expected = (E_on_ref + E_off_ref) * sw["n_turn_on_events"]
+    assert math.isclose(sw["E_sw_total"], expected, rel_tol=0.10), (
+        sw["E_sw_total"], expected)
+    # Bookkeeping consistency.
+    duration = float(res.times[-1] - res.times[0])
+    assert math.isclose(sw["P_sw_avg"],
+                          sw["E_sw_total"] / duration, rel_tol=1e-9)
+    assert math.isclose(sw["E_sw_on_total"] + sw["E_sw_off_total"],
+                          sw["E_sw_total"], rel_tol=1e-9)
+
+
+def test_switch_specs_requires_ref_pair() -> None:
+    """V_ref + I_ref must both be positive — otherwise the datasheet
+    scaling is undefined and we error rather than silently default."""
+    V_dc = 5.0
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", V_dc)
+    b.add_resistor("R1", "vin", "mid", 1.0)
+    b.add_switch("SW1", "mid", "gnd", g_on=100.0, g_off=1e-9)
+
+    def always_on(_t: float):
+        mask = p.SwitchStateMask(b.graph.num_switches)
+        # Toggle off then on to create an edge.
+        mask.set(0, _t > 1e-5)
+        return mask
+
+    res = p.simulate(b, t_end=1e-4, dt=1e-6, switch_fn=always_on)
+    with pytest.raises(ValueError, match="V_ref"):
+        p.device_loss_summary(
+            b, res, switch_fn=always_on,
+            switch_specs={"SW1": {"E_on_ref": 1e-6,
+                                     "E_off_ref": 1e-6,
+                                     "V_ref": 0.0,
+                                     "I_ref": 1.0}})
+
+
+def test_switch_specs_zero_when_no_e_refs() -> None:
+    """If neither E_on_ref nor E_off_ref is positive the switching
+    loss must be zero (no datasheet ⇒ no annotation), but the
+    bookkeeping (edge counts) is still reported so users can see
+    the switching frequency."""
+    V_dc = 5.0
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", V_dc)
+    b.add_resistor("R1", "vin", "mid", 1.0)
+    b.add_switch("SW1", "mid", "gnd", g_on=100.0, g_off=1e-9)
+
+    f_sw = 5_000.0
+    T_sw = 1.0 / f_sw
+
+    def pwm(t: float):
+        mask = p.SwitchStateMask(b.graph.num_switches)
+        mask.set(0, bool((t % T_sw) < (0.5 * T_sw)))
+        return mask
+
+    res = p.simulate(b, t_end=4 * T_sw, dt=T_sw / 200, switch_fn=pwm)
+    summary = p.device_loss_summary(
+        b, res, switch_fn=pwm,
+        switch_specs={"SW1": {"E_on_ref": 0.0, "E_off_ref": 0.0,
+                                 "V_ref": 1.0, "I_ref": 1.0}})
+    sw = next(e for e in summary if e["kind"] == "switch")
+    assert sw["E_sw_total"] == 0.0
+    assert sw["P_sw_avg"] == 0.0
+    assert sw["n_turn_on_events"] >= 1
+    assert sw["n_turn_off_events"] >= 1

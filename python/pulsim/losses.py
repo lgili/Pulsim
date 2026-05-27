@@ -314,39 +314,160 @@ def _evaluate_switch_mask_trace(switch_fn: Callable[[float], Any],
 def _diode_switching_loss(events_for_branch,
                           times: np.ndarray,
                           v_D: np.ndarray,
-                          Q_rr: float) -> Dict[str, float]:
+                          spec: Mapping[str, Any]) -> Dict[str, float]:
     """Post-hoc reverse-recovery switching loss from
     ``SimulationResult.commutation_events``.
 
-    For every ``new_state=False`` event on the diode branch, look up
-    the reverse voltage ``V_R = |v_D(t_event)|`` (linearly interpolated
-    from the result trace) and accumulate ``E_rr = Q_rr · V_R``. The
-    formula is the textbook simulator post-processing pattern — the
-    ideal ``SwitchedDiode`` kernel model has zero physical recovery
-    charge, so this number is purely a datasheet annotation.
+    Mirrors PSIM's diode-loss panel — two equivalent entry points:
+
+    * **Raw ``Q_rr``** — loss per event ``E_rr = Q_rr · |V_R|`` (the
+      simplest pattern; assumes ``Q_rr`` is roughly constant over
+      the operating range, valid for hard-recovery diodes).
+    * **Datasheet pair ``(E_rr_ref, V_R_ref)``** — loss per event
+      ``E_rr = E_rr_ref · (|V_R| / V_R_ref)``. Use this when the
+      datasheet quotes ``E_rr`` (energy per pulse) at a specific
+      reference voltage, which is more common for fast/soft recovery
+      diodes.
+
+    Either form yields the same number when
+    ``E_rr_ref = Q_rr · V_R_ref``. ``V_R`` itself is linearly
+    interpolated from the result trace at each event time, so the
+    formula tracks the actual reverse voltage the diode sees —
+    independent of the simulation dt.
+
+    The ideal ``SwitchedDiode`` kernel model has no physical
+    recovery charge; this is a datasheet annotation, matching
+    PSIM / LTspice "ideal-diode-with-Qrr" post-processing.
     """
     turn_offs = [ev for ev in events_for_branch
                   if bool(ev.new_state) is False]
     n_off = len(turn_offs)
-    if n_off == 0 or Q_rr <= 0:
-        T = (times[-1] - times[0]) if times.size > 1 else 0.0
-        return {
-            "E_sw_total": 0.0,
-            "P_sw_avg": 0.0,
-            "n_turn_off_events": int(n_off),
-            "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
-        }
+    T = (times[-1] - times[0]) if times.size > 1 else 0.0
+    Q_rr = float(spec.get("Q_rr", 0.0))
+    E_rr_ref = float(spec.get("E_rr_ref", 0.0))
+    V_R_ref = float(spec.get("V_R_ref", 0.0))
+
+    bookkeeping = {
+        "n_turn_off_events": int(n_off),
+        "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
+    }
+    if n_off == 0 or (Q_rr <= 0 and E_rr_ref <= 0):
+        return {"E_sw_total": 0.0, "P_sw_avg": 0.0, **bookkeeping}
+
     # Interpolate |v_D| at every turn-off instant.
     t_off = np.asarray([float(ev.t_estimated) for ev in turn_offs])
     V_R = np.interp(t_off, times, np.abs(v_D))
-    E_per_event = float(Q_rr) * V_R
+
+    if E_rr_ref > 0:
+        if V_R_ref <= 0:
+            raise ValueError(
+                "diode_specs: E_rr_ref requires a positive V_R_ref "
+                "(the reference reverse voltage from the datasheet).")
+        E_per_event = E_rr_ref * (V_R / V_R_ref)
+    else:
+        E_per_event = Q_rr * V_R
     E_total = float(np.sum(E_per_event))
-    T = (times[-1] - times[0]) if times.size > 1 else 0.0
     return {
         "E_sw_total": E_total,
         "P_sw_avg": (E_total / T) if T > 0 else 0.0,
-        "n_turn_off_events": int(n_off),
-        "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
+        **bookkeeping,
+    }
+
+
+def _switch_switching_loss(closed_trace: np.ndarray,
+                            times: np.ndarray,
+                            v_SW: np.ndarray,
+                            i_SW: np.ndarray,
+                            spec: Mapping[str, Any]) -> Dict[str, float]:
+    """Post-hoc turn-on / turn-off switching loss for an ideal-switch
+    branch (MOSFET / IGBT equivalent).
+
+    PSIM-style datasheet annotation: ``E_on`` and ``E_off`` are taken
+    from the device datasheet at a reference operating point
+    ``(V_ref, I_ref)`` and scaled linearly by both the blocking
+    voltage and the conducting current at the transition::
+
+        E_on_event  = E_on_ref  · (V_blocking / V_ref) · (I_load / I_ref)
+        E_off_event = E_off_ref · (V_blocking / V_ref) · (I_load / I_ref)
+
+    Transitions are detected from the user-supplied ``switch_fn``
+    mask trace — the kernel itself emits no commutation events for
+    ideal switches, but the deterministic switch_fn lets us
+    reconstruct turn-on (False→True) and turn-off (True→False)
+    edges exactly.
+
+    At each edge between samples k-1 and k, we take ``|v_SW[k-1]|``
+    as the blocking voltage (the value the switch was holding off
+    just before / just after the transition) and ``|i_SW[k]|`` as
+    the load current the device sees while conducting.
+    """
+    E_on_ref  = float(spec.get("E_on_ref",  0.0))
+    E_off_ref = float(spec.get("E_off_ref", 0.0))
+    V_ref = float(spec.get("V_ref", 0.0))
+    I_ref = float(spec.get("I_ref", 0.0))
+    T = (times[-1] - times[0]) if times.size > 1 else 0.0
+
+    # Detect edges. Diff of the boolean trace gives ±1 at transitions.
+    diff = np.diff(closed_trace.astype(np.int8))
+    turn_on_k  = np.flatnonzero(diff == +1) + 1   # index post-edge
+    turn_off_k = np.flatnonzero(diff == -1) + 1
+    n_on  = int(turn_on_k.size)
+    n_off = int(turn_off_k.size)
+    bookkeeping = {
+        "n_turn_on_events": n_on,
+        "n_turn_off_events": n_off,
+        "f_sw_estimate": (float(n_on + n_off) / (2.0 * T)) if T > 0
+                                else 0.0,
+    }
+    if (n_on == 0 and n_off == 0) or (E_on_ref <= 0 and E_off_ref <= 0):
+        return {
+            "E_sw_on_total": 0.0,
+            "E_sw_off_total": 0.0,
+            "E_sw_total": 0.0,
+            "P_sw_avg": 0.0,
+            **bookkeeping,
+        }
+    if V_ref <= 0 or I_ref <= 0:
+        raise ValueError(
+            "switch_specs: V_ref and I_ref must be positive — they "
+            "anchor the datasheet E_on/E_off reference operating "
+            "point.")
+
+    # Blocking voltage = the OFF-state v_SW (across the open switch).
+    # That's the sample BEFORE a turn-on edge and the sample AFTER a
+    # turn-off edge — in both cases the switch is "open / blocking".
+    # Load current = the ON-state |i_SW| in the conducting interval
+    # adjacent to the edge. For turn-on that's the sample at k (just
+    # after closing); for turn-off it's the sample at k-1 (just before
+    # opening).
+    def _edge_loss(idxs: np.ndarray, E_ref: float,
+                    *, blocking_at_post_edge: bool,
+                    load_at_post_edge: bool) -> float:
+        if idxs.size == 0 or E_ref <= 0:
+            return 0.0
+        blk_k  = idxs if blocking_at_post_edge \
+                       else np.clip(idxs - 1, 0, v_SW.size - 1)
+        load_k = idxs if load_at_post_edge \
+                       else np.clip(idxs - 1, 0, v_SW.size - 1)
+        V_blk = np.abs(v_SW[blk_k])
+        I_load = np.abs(i_SW[load_k])
+        return float(np.sum(E_ref * (V_blk / V_ref) * (I_load / I_ref)))
+
+    # Turn-on:  V_blk = pre-edge (open), I_load = post-edge (just closed).
+    # Turn-off: V_blk = post-edge (now open), I_load = pre-edge (was closed).
+    E_on_total = _edge_loss(turn_on_k,  E_on_ref,
+                              blocking_at_post_edge=False,
+                              load_at_post_edge=True)
+    E_off_total = _edge_loss(turn_off_k, E_off_ref,
+                              blocking_at_post_edge=True,
+                              load_at_post_edge=False)
+    E_total = E_on_total + E_off_total
+    return {
+        "E_sw_on_total": E_on_total,
+        "E_sw_off_total": E_off_total,
+        "E_sw_total": E_total,
+        "P_sw_avg": (E_total / T) if T > 0 else 0.0,
+        **bookkeeping,
     }
 
 
@@ -460,6 +581,7 @@ def device_loss_summary(
     switch_fn: Optional[Callable[[float], Any]] = None,
     core_loss_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
     diode_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+    switch_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Walk every resistor, inductor, ideal-switch and switched-diode
     branch in ``builder`` and report each one's conduction
@@ -507,19 +629,45 @@ def device_loss_summary(
         is also accepted in place of ``material``.
     diode_specs : mapping, optional
         Per-diode datasheet annotations for reverse-recovery
-        switching loss. Keys are diode branch names (preferred) or
-        numeric branch ids. Values are mappings with::
+        switching loss (PSIM-style). Keys are diode branch names or
+        numeric branch ids. Two equivalent entry points::
 
+            # Raw recovery charge — assumes Q_rr ~ constant.
             {"Q_rr": float (C)}
 
-        For every turn-off event in
-        ``result.commutation_events`` matching that branch,
-        ``E_rr = Q_rr · |V_R(t_event)|`` is accumulated and reported
-        as ``E_sw_total`` / ``P_sw_avg`` / ``n_turn_off_events`` /
-        ``f_sw_estimate`` on the diode entry. The ideal
-        ``SwitchedDiode`` kernel model has no physical recovery
-        charge — this is a datasheet annotation pass, matching the
-        standard PSIM / LTspice post-processing.
+            # Datasheet energy + reference voltage — preferred for
+            # fast / soft-recovery diodes that quote E_rr directly.
+            {"E_rr_ref": float (J), "V_R_ref": float (V)}
+
+        For each turn-off event in
+        ``result.commutation_events`` matching the branch the
+        helper interpolates ``|V_R(t_event)|`` and accumulates
+        ``E_rr_event = Q_rr · V_R`` or
+        ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``. Reports
+        ``E_sw_total``, ``P_sw_avg``, ``n_turn_off_events``,
+        ``f_sw_estimate``.
+    switch_specs : mapping, optional
+        Per-switch datasheet annotations for MOSFET / IGBT-style
+        turn-on / turn-off switching loss (PSIM-style). Keys are
+        switch branch names or branch ids. Values::
+
+            {"E_on_ref":  float (J),
+             "E_off_ref": float (J),
+             "V_ref":     float (V),
+             "I_ref":     float (A)}
+
+        Transitions are detected from the deterministic
+        ``switch_fn`` mask (so ``switch_fn=`` is required when
+        ``switch_specs=`` is). Per event::
+
+            E_on  = E_on_ref  · (|V_blk| / V_ref) · (|I_load| / I_ref)
+            E_off = E_off_ref · (|V_blk| / V_ref) · (|I_load| / I_ref)
+
+        ``V_blk`` is the sample just before the edge,
+        ``I_load`` is the sample just after. Reports
+        ``E_sw_on_total``, ``E_sw_off_total``, ``E_sw_total``,
+        ``P_sw_avg``, plus ``n_turn_on_events`` /
+        ``n_turn_off_events`` / ``f_sw_estimate``.
 
     Returns
     -------
@@ -556,6 +704,16 @@ def device_loss_summary(
                 diode_by_bid[key] = spec
             else:
                 diode_by_name[str(key)] = spec
+
+    # And for ideal-switch (MOSFET/IGBT-equivalent) datasheet annotations.
+    switch_by_bid: Dict[int, Mapping[str, Any]] = {}
+    switch_by_name: Dict[str, Mapping[str, Any]] = {}
+    if switch_specs is not None:
+        for key, spec in switch_specs.items():
+            if isinstance(key, int):
+                switch_by_bid[key] = spec
+            else:
+                switch_by_name[str(key)] = spec
 
     # Bucket commutation events by branch_id so the diode handler
     # can iterate only its own.
@@ -653,10 +811,9 @@ def device_loss_summary(
             d_spec = (diode_by_bid.get(bid)
                       or diode_by_name.get(name))
             if d_spec is not None:
-                Q_rr = float(d_spec.get("Q_rr", 0.0))
                 ev_branch = events_by_branch.get(int(bid), [])
                 entry.update(
-                    _diode_switching_loss(ev_branch, times, v_D, Q_rr))
+                    _diode_switching_loss(ev_branch, times, v_D, d_spec))
             summary.append(entry)
             switch_seq_idx += 1
             continue
@@ -682,15 +839,23 @@ def device_loss_summary(
             v_SW = (_node_voltage_trace(states, int(from_id))
                     - _node_voltage_trace(states, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
+            i_SW = v_SW * g_arr  # branch current at each sample
             stats = _conduction_stats(v_SW, g_arr, times)
-            summary.append({
+            entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "switch",
                 "name": name,
                 "duty_closed": float(closed.mean())
                                    if closed.size else 0.0,
                 **stats,
-            })
+            }
+            s_spec = (switch_by_bid.get(bid)
+                      or switch_by_name.get(name))
+            if s_spec is not None:
+                entry.update(
+                    _switch_switching_loss(closed, times, v_SW,
+                                            i_SW, s_spec))
+            summary.append(entry)
             switch_seq_idx += 1
             continue
 
