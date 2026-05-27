@@ -311,6 +311,45 @@ def _evaluate_switch_mask_trace(switch_fn: Callable[[float], Any],
     return out
 
 
+def _diode_switching_loss(events_for_branch,
+                          times: np.ndarray,
+                          v_D: np.ndarray,
+                          Q_rr: float) -> Dict[str, float]:
+    """Post-hoc reverse-recovery switching loss from
+    ``SimulationResult.commutation_events``.
+
+    For every ``new_state=False`` event on the diode branch, look up
+    the reverse voltage ``V_R = |v_D(t_event)|`` (linearly interpolated
+    from the result trace) and accumulate ``E_rr = Q_rr · V_R``. The
+    formula is the textbook simulator post-processing pattern — the
+    ideal ``SwitchedDiode`` kernel model has zero physical recovery
+    charge, so this number is purely a datasheet annotation.
+    """
+    turn_offs = [ev for ev in events_for_branch
+                  if bool(ev.new_state) is False]
+    n_off = len(turn_offs)
+    if n_off == 0 or Q_rr <= 0:
+        T = (times[-1] - times[0]) if times.size > 1 else 0.0
+        return {
+            "E_sw_total": 0.0,
+            "P_sw_avg": 0.0,
+            "n_turn_off_events": int(n_off),
+            "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
+        }
+    # Interpolate |v_D| at every turn-off instant.
+    t_off = np.asarray([float(ev.t_estimated) for ev in turn_offs])
+    V_R = np.interp(t_off, times, np.abs(v_D))
+    E_per_event = float(Q_rr) * V_R
+    E_total = float(np.sum(E_per_event))
+    T = (times[-1] - times[0]) if times.size > 1 else 0.0
+    return {
+        "E_sw_total": E_total,
+        "P_sw_avg": (E_total / T) if T > 0 else 0.0,
+        "n_turn_off_events": int(n_off),
+        "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
+    }
+
+
 def _resolve_core_material(spec: Mapping[str, Any]) -> Any:
     """Pull a ``CoreMaterial`` out of a core_loss_specs entry. Accepts
     either ``{"material": "<catalog-name>"}`` or
@@ -420,6 +459,7 @@ def device_loss_summary(
     *,
     switch_fn: Optional[Callable[[float], Any]] = None,
     core_loss_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+    diode_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Walk every resistor, inductor, ideal-switch and switched-diode
     branch in ``builder`` and report each one's conduction
@@ -465,6 +505,21 @@ def device_loss_summary(
 
         An inline triplet ``{"K": ..., "alpha": ..., "beta": ...}``
         is also accepted in place of ``material``.
+    diode_specs : mapping, optional
+        Per-diode datasheet annotations for reverse-recovery
+        switching loss. Keys are diode branch names (preferred) or
+        numeric branch ids. Values are mappings with::
+
+            {"Q_rr": float (C)}
+
+        For every turn-off event in
+        ``result.commutation_events`` matching that branch,
+        ``E_rr = Q_rr · |V_R(t_event)|`` is accumulated and reported
+        as ``E_sw_total`` / ``P_sw_avg`` / ``n_turn_off_events`` /
+        ``f_sw_estimate`` on the diode entry. The ideal
+        ``SwitchedDiode`` kernel model has no physical recovery
+        charge — this is a datasheet annotation pass, matching the
+        standard PSIM / LTspice post-processing.
 
     Returns
     -------
@@ -491,6 +546,23 @@ def device_loss_summary(
                 core_by_bid[key] = spec
             else:
                 core_by_name[str(key)] = spec
+
+    # Same dual lookup for diode datasheet annotations.
+    diode_by_bid: Dict[int, Mapping[str, Any]] = {}
+    diode_by_name: Dict[str, Mapping[str, Any]] = {}
+    if diode_specs is not None:
+        for key, spec in diode_specs.items():
+            if isinstance(key, int):
+                diode_by_bid[key] = spec
+            else:
+                diode_by_name[str(key)] = spec
+
+    # Bucket commutation events by branch_id so the diode handler
+    # can iterate only its own.
+    events = list(getattr(result, "commutation_events", []))
+    events_by_branch: Dict[int, list] = {}
+    for ev in events:
+        events_by_branch.setdefault(int(ev.branch_id), []).append(ev)
 
     summary: List[Dict[str, Any]] = []
     switch_seq_idx = 0  # increments once per Switch / Diode branch
@@ -568,7 +640,7 @@ def device_loss_summary(
             closed = v_D > V_th
             g_arr = np.where(closed, g_on, g_off)
             stats = _conduction_stats(v_D, g_arr, times)
-            summary.append({
+            entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "diode",
                 "name": name,
@@ -576,7 +648,16 @@ def device_loss_summary(
                 "duty_conducting": float(closed.mean())
                                        if closed.size else 0.0,
                 **stats,
-            })
+            }
+            # Optional datasheet reverse-recovery loss.
+            d_spec = (diode_by_bid.get(bid)
+                      or diode_by_name.get(name))
+            if d_spec is not None:
+                Q_rr = float(d_spec.get("Q_rr", 0.0))
+                ev_branch = events_by_branch.get(int(bid), [])
+                entry.update(
+                    _diode_switching_loss(ev_branch, times, v_D, Q_rr))
+            summary.append(entry)
             switch_seq_idx += 1
             continue
 

@@ -313,3 +313,108 @@ def test_device_loss_summary_core_loss_inline_triplet() -> None:
     P1 = next(e for e in s1 if e["kind"] == "inductor")["P_core_avg"]
     P2 = next(e for e in s2 if e["kind"] == "inductor")["P_core_avg"]
     assert math.isclose(P1, P2, rel_tol=1e-9)
+
+
+# -----------------------------------------------------------------------
+# Diode switching loss (Q_rr reverse recovery) — uses commutation_events
+# from the simulation result, no kernel-side changes needed.
+# -----------------------------------------------------------------------
+
+def test_diode_switching_loss_zero_without_specs() -> None:
+    """No `diode_specs=` ⇒ the diode entry has only the conduction
+    fields (no E_sw_total / P_sw_avg keys leak in)."""
+    f0 = 1000.0
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd",
+                                v_dc=0.0, v_amplitude=10.0,
+                                frequency=f0, phase=0.0)
+    b.add_resistor("R1", "a", "b", 1.0)
+    b.add_diode("D1", "b", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+
+    res = p.simulate(b, t_end=5.0 / f0, dt=1.0 / (f0 * 200))
+    summary = p.device_loss_summary(b, res)
+    d = next(e for e in summary if e["kind"] == "diode")
+    # No switching-loss keys present without the opt-in.
+    assert "E_sw_total" not in d
+    assert "P_sw_avg" not in d
+
+
+def test_diode_switching_loss_accumulates_per_event() -> None:
+    """With `Q_rr` supplied, every turn-off event contributes
+    `E_rr = Q_rr · |V_R|` to the diode entry. For an AC-driven
+    rectifier the event count should match the number of zero
+    crossings of `v_D > V_th` (≈ 2 per period)."""
+    f0 = 1000.0
+    V_pk = 10.0
+    Q_rr = 50e-9  # 50 nC — typical fast recovery diode
+    n_periods = 5
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd",
+                                v_dc=0.0, v_amplitude=V_pk,
+                                frequency=f0, phase=0.0)
+    b.add_resistor("R1", "a", "b", 1.0)
+    b.add_diode("D1", "b", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+
+    res = p.simulate(b, t_end=n_periods / f0, dt=1.0 / (f0 * 200))
+    summary = p.device_loss_summary(
+        b, res, diode_specs={"D1": {"Q_rr": Q_rr}})
+    d = next(e for e in summary if e["kind"] == "diode")
+
+    # AC half-wave rectifier: 1 turn-off per period.
+    assert d["n_turn_off_events"] >= n_periods - 1
+    assert d["n_turn_off_events"] <= n_periods + 1
+    # f_sw_estimate ≈ f0 to a fraction of a period.
+    assert abs(d["f_sw_estimate"] - f0) / f0 < 0.25
+    # Reverse voltage at turn-off ≤ V_pk ⇒ per-event energy is
+    # bounded by Q_rr · V_pk; E_sw_total ≤ n_events · Q_rr · V_pk.
+    assert 0.0 < d["E_sw_total"] <= (d["n_turn_off_events"]
+                                      * Q_rr * V_pk * 1.05)
+    # P_sw_avg = E_sw_total / duration.
+    duration = float(res.times[-1] - res.times[0])
+    assert math.isclose(d["P_sw_avg"],
+                          d["E_sw_total"] / duration,
+                          rel_tol=1e-9)
+
+
+def test_diode_switching_loss_scales_linearly_with_q_rr() -> None:
+    """Doubling Q_rr must double E_sw_total — confirms it's a clean
+    datasheet annotation pass, not coupled to the simulation
+    dynamics."""
+    f0 = 1000.0
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd",
+                                v_dc=0.0, v_amplitude=10.0,
+                                frequency=f0, phase=0.0)
+    b.add_resistor("R1", "a", "b", 1.0)
+    b.add_diode("D1", "b", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+    res = p.simulate(b, t_end=5.0 / f0, dt=1.0 / (f0 * 200))
+
+    s1 = p.device_loss_summary(
+        b, res, diode_specs={"D1": {"Q_rr": 25e-9}})
+    s2 = p.device_loss_summary(
+        b, res, diode_specs={"D1": {"Q_rr": 50e-9}})
+    E1 = next(e for e in s1 if e["kind"] == "diode")["E_sw_total"]
+    E2 = next(e for e in s2 if e["kind"] == "diode")["E_sw_total"]
+    assert math.isclose(E2, 2.0 * E1, rel_tol=1e-9)
+
+
+def test_diode_switching_loss_zero_when_q_rr_is_zero() -> None:
+    """Providing Q_rr=0 (or omitting it) must still produce the
+    bookkeeping fields, but E_sw_total stays at zero."""
+    f0 = 1000.0
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd",
+                                v_dc=0.0, v_amplitude=10.0,
+                                frequency=f0, phase=0.0)
+    b.add_resistor("R1", "a", "b", 1.0)
+    b.add_diode("D1", "b", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+    res = p.simulate(b, t_end=5.0 / f0, dt=1.0 / (f0 * 200))
+
+    summary = p.device_loss_summary(
+        b, res, diode_specs={"D1": {"Q_rr": 0.0}})
+    d = next(e for e in summary if e["kind"] == "diode")
+    assert d["E_sw_total"] == 0.0
+    assert d["P_sw_avg"] == 0.0
+    # n_turn_off_events still reported — useful for diagnostics
+    # even with Q_rr=0.
+    assert d["n_turn_off_events"] >= 0
