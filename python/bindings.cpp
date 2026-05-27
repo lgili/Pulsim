@@ -36,6 +36,7 @@
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/mmc/arm.hpp"
 #include "pulsim/motors/mechanical.hpp"
+#include "pulsim/magnetics/hysteretic_inductor.hpp"
 #include "pulsim/motors/motor_adapters.hpp"
 #include "pulsim/solver/bdf1.hpp"
 #include "pulsim/switchgear/switchgear_adapters.hpp"
@@ -1975,6 +1976,47 @@ void init_module(py::module_& m) {
             "the per-phase inductor branch-var indices and dummy "
             "source-row indices. Optional psi/torque/slip channels "
             "are written when the channel name is non-empty.")
+
+        // ---- Magnetics (Phase 2.2 / C++ port) ----
+        .def("add_hysteretic_inductor",
+            [](BlockChain& self,
+                Real Ms, Real a, Real alpha, Real c, Real k,
+                int N_turns, Real l_m, Real A_core,
+                Index inductor_branch_var_idx,
+                Index bemf_source_idx,
+                std::string M_channel,
+                std::string B_channel,
+                std::string H_channel,
+                std::string vm_channel) {
+                pulsim::magnetics::JilesAthertonParams params;
+                params.Ms = Ms;
+                params.a = a;
+                params.alpha = alpha;
+                params.c = c;
+                params.k = k;
+                pulsim::magnetics::add_hysteretic_inductor_to_chain(
+                    self, params, N_turns, l_m, A_core,
+                    inductor_branch_var_idx, bemf_source_idx,
+                    std::move(M_channel),
+                    std::move(B_channel),
+                    std::move(H_channel),
+                    std::move(vm_channel));
+            },
+            py::arg("Ms"), py::arg("a"), py::arg("alpha"),
+            py::arg("c"), py::arg("k"),
+            py::arg("N_turns"), py::arg("l_m"), py::arg("A_core"),
+            py::arg("inductor_branch_var_idx"),
+            py::arg("bemf_source_idx"),
+            py::arg("M_channel")  = std::string{},
+            py::arg("B_channel")  = std::string{},
+            py::arg("H_channel")  = std::string{},
+            py::arg("vm_channel") = std::string{},
+            "Jiles-Atherton hysteretic-inductor block (Phase 2.2). "
+            "The user must have added L_0 air-core + dummy V source "
+            "via `pulsim.add_hysteretic_inductor` and resolved the "
+            "branch-var indices. Writes v_M = +N·A·μ₀·dM/dt into the "
+            "dummy source's residual row. Sign matches the Python "
+            "observer's v1.5+ convention.")
 
         // ---- Thermal blocks (Phase C.1 / C++ port) ----
         .def("add_thermal_power_injection",
