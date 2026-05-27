@@ -202,12 +202,33 @@ from .motors import (
     DcMotor,
     PMSM,
     BLDC,
+    InductionMotor,
     add_dc_motor,
     make_dc_motor_observer,
     add_pmsm,
     make_pmsm_observer,
     add_bldc,
     make_bldc_observer,
+    add_induction_motor,
+    make_induction_motor_observer,
+    im_parameters_from_nameplate,
+)
+from .observers import (
+    SlidingModeObserver,
+    FluxMRASObserver,
+)
+from .hysteresis import (
+    JilesAthertonParams,
+    JilesAthertonModel,
+    reference_material,
+    list_reference_materials,
+    compute_bh_loop,
+    core_loss_jiles_atherton,
+    fit_ja_from_bh_curve,
+    BHLoopResult,
+    HystereticInductor,
+    add_hysteretic_inductor,
+    make_hysteretic_inductor_observer,
 )
 from .spice_import import (
     SpiceElement,
@@ -424,12 +445,31 @@ __all__ = [
     "DcMotor",
     "PMSM",
     "BLDC",
+    "InductionMotor",
     "add_dc_motor",
     "make_dc_motor_observer",
     "add_pmsm",
     "make_pmsm_observer",
     "add_bldc",
     "make_bldc_observer",
+    "add_induction_motor",
+    "make_induction_motor_observer",
+    "im_parameters_from_nameplate",
+    # Sensorless observers (Phase 2.3).
+    "SlidingModeObserver",
+    "FluxMRASObserver",
+    # Magnetic hysteresis — Jiles-Atherton (Phase 2.2).
+    "JilesAthertonParams",
+    "JilesAthertonModel",
+    "reference_material",
+    "list_reference_materials",
+    "compute_bh_loop",
+    "core_loss_jiles_atherton",
+    "fit_ja_from_bh_curve",
+    "BHLoopResult",
+    "HystereticInductor",
+    "add_hysteretic_inductor",
+    "make_hysteretic_inductor_observer",
     # SPICE netlist import (Phase E.10).
     "SpiceElement",
     "parse_spice_value",
@@ -1021,7 +1061,7 @@ def simulate(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.4.2"
+__version__ = "1.5.0"
 
 
 # ---------------------------------------------------------------------------
