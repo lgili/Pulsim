@@ -37,11 +37,23 @@
          <lastmod>2026-05-27</lastmod>
     </url>
     <url>
+         <loc>https://lgili.github.io/Pulsim/latest/motors-induction/</loc>
+         <lastmod>2026-05-27</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/motors-sensorless/</loc>
+         <lastmod>2026-05-27</lastmod>
+    </url>
+    <url>
          <loc>https://lgili.github.io/Pulsim/latest/performance-tuning/</loc>
          <lastmod>2026-05-27</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/schematic-rendering/</loc>
+         <lastmod>2026-05-27</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/solvers/</loc>
          <lastmod>2026-05-27</lastmod>
     </url>
     <url>
