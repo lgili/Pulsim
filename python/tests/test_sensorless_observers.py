@@ -151,3 +151,46 @@ def test_smo_locks_onto_synthetic_back_emf():
         f"RMS {math.degrees(err_rms):.2f}°.")
     assert err_rms < math.radians(10.0), (
         f"SMO RMS angle error {math.degrees(err_rms):.2f}° too high.")
+
+
+@pytest.mark.skipif(not hasattr(pulsim, "FluxMRASObserver"),
+                       reason="FluxMRASObserver not available")
+def test_mras_voltage_model_leaky_integrator_no_drift():
+    """With ``voltage_model_hpf_omega > 0`` the reference flux must
+    NOT drift indefinitely when fed a clean balanced sinusoidal
+    excitation — even though ω̂ starts at zero and the adaptive
+    loop hasn't yet locked, the reference-flux magnitude must
+    settle to a bounded value (≤ a few Wb)."""
+    Rs, Ls, Lr, Lm, Rr = 2.46, 0.0948, 0.0948, 0.0874, 1.23
+    sigma = 1.0 - (Lm ** 2) / (Ls * Lr)
+    L_sigma_s = sigma * Ls
+    omega_e = 314.0
+    psi_mag = 0.5
+    i_mag = 5.0
+    mras = pulsim.FluxMRASObserver(
+        Rs=Rs, Ls=Ls, Lr=Lr, Lm=Lm, Rr=Rr,
+        voltage_model_hpf_omega=5.0,
+    )
+    dt = 100e-6
+    theta = 0.0
+    for _ in range(int(0.5 / dt)):
+        theta += omega_e * dt
+        if theta >= 2 * math.pi:
+            theta -= 2 * math.pi
+        i_a = i_mag * math.cos(theta)
+        i_b = i_mag * math.sin(theta)
+        dpsi_a_dt = -psi_mag * omega_e * math.sin(theta)
+        dpsi_b_dt = +psi_mag * omega_e * math.cos(theta)
+        di_a_dt = -i_mag * omega_e * math.sin(theta)
+        di_b_dt = +i_mag * omega_e * math.cos(theta)
+        v_a = Rs * i_a + L_sigma_s * di_a_dt + (Lm / Lr) * dpsi_a_dt
+        v_b = Rs * i_b + L_sigma_s * di_b_dt + (Lm / Lr) * dpsi_b_dt
+        mras.update(v_alpha=v_a, v_beta=v_b,
+                       i_alpha=i_a, i_beta=i_b, dt=dt)
+    # Bounded — without the leaky integrator, ψ_r_ref would drift
+    # away unboundedly under any DC bias in the input.
+    psi_ref_mag = math.hypot(mras.psi_r_alpha_ref, mras.psi_r_beta_ref)
+    assert 0.1 < psi_ref_mag < 5.0, (
+        f"ψ_r_ref magnitude {psi_ref_mag:.3f} out of bounded range "
+        f"— leaky integrator may have failed.")
+    assert math.isfinite(mras.omega_hat)
