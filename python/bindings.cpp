@@ -40,6 +40,7 @@
 #include "pulsim/integrators/radau_iia3.hpp"
 #include "pulsim/magnetics/hysteretic_inductor.hpp"
 #include "pulsim/motors/motor_adapters.hpp"
+#include "pulsim/observers/sensorless.hpp"
 #include "pulsim/solver/bdf1.hpp"
 #include "pulsim/switchgear/switchgear_adapters.hpp"
 #include "pulsim/thermal/thermal_adapters.hpp"
@@ -2161,6 +2162,109 @@ void init_module(py::module_& m) {
             "branch-var indices. Writes v_M = +N·A·μ₀·dM/dt into the "
             "dummy source's residual row. Sign matches the Python "
             "observer's v1.5+ convention.")
+
+        // ---- Sensorless observers (Phase 2.3 / C++ port) ----
+        .def("add_sliding_mode_observer",
+            [](BlockChain& self,
+                Real Rs, Real Ls, Real K_sl, Real omega_lpf,
+                Real Kp_pll, Real Ki_pll, Real f_init_hz,
+                Real epsilon, Real low_speed_threshold,
+                std::string v_alpha_channel, std::string v_beta_channel,
+                std::string i_alpha_channel, std::string i_beta_channel,
+                std::string theta_hat_channel,
+                std::string omega_hat_channel,
+                std::string e_alpha_hat_channel,
+                std::string e_beta_hat_channel,
+                std::string low_speed_flag_channel) {
+                pulsim::observers::SlidingModeObserverParams p;
+                p.Rs = Rs; p.Ls = Ls; p.K_sl = K_sl;
+                p.omega_lpf = omega_lpf;
+                p.Kp_pll = Kp_pll; p.Ki_pll = Ki_pll;
+                p.f_init_hz = f_init_hz;
+                p.epsilon = epsilon;
+                p.low_speed_threshold = low_speed_threshold;
+                pulsim::observers::add_sliding_mode_observer_to_chain(
+                    self, p,
+                    std::move(v_alpha_channel),
+                    std::move(v_beta_channel),
+                    std::move(i_alpha_channel),
+                    std::move(i_beta_channel),
+                    std::move(theta_hat_channel),
+                    std::move(omega_hat_channel),
+                    std::move(e_alpha_hat_channel),
+                    std::move(e_beta_hat_channel),
+                    std::move(low_speed_flag_channel));
+            },
+            py::arg("Rs"), py::arg("Ls"),
+            py::arg("K_sl") = Real{50.0},
+            py::arg("omega_lpf") =
+                Real{2.0} * Real{3.14159265358979323846} * Real{500.0},
+            py::arg("Kp_pll") = Real{200.0},
+            py::arg("Ki_pll") = Real{1e4},
+            py::arg("f_init_hz") = Real{50.0},
+            py::arg("epsilon") = Real{0.5},
+            py::arg("low_speed_threshold") = Real{0.05},
+            py::arg("v_alpha_channel"), py::arg("v_beta_channel"),
+            py::arg("i_alpha_channel"), py::arg("i_beta_channel"),
+            py::arg("theta_hat_channel"),
+            py::arg("omega_hat_channel"),
+            py::arg("e_alpha_hat_channel") = std::string{},
+            py::arg("e_beta_hat_channel")  = std::string{},
+            py::arg("low_speed_flag_channel") = std::string{},
+            "PMSM Sliding-Mode Observer (Phase 2.3 C++ port). Reads "
+            "(v_alpha, v_beta, i_alpha, i_beta) channels and writes "
+            "(theta_hat, omega_hat, optional e_alpha/beta_hat + "
+            "low_speed_flag).")
+
+        .def("add_flux_mras_observer",
+            [](BlockChain& self,
+                Real Rs, Real Ls, Real Lr, Real Lm, Real Rr,
+                Real voltage_model_hpf_omega,
+                Real Kp_mras, Real Ki_mras,
+                bool normalise_eps, Real eps_norm_floor,
+                std::string v_alpha_channel, std::string v_beta_channel,
+                std::string i_alpha_channel, std::string i_beta_channel,
+                std::string omega_hat_channel,
+                std::string psi_adj_alpha_channel,
+                std::string psi_adj_beta_channel,
+                std::string psi_ref_alpha_channel,
+                std::string psi_ref_beta_channel) {
+                pulsim::observers::FluxMRASObserverParams p;
+                p.Rs = Rs; p.Ls = Ls; p.Lr = Lr; p.Lm = Lm; p.Rr = Rr;
+                p.voltage_model_hpf_omega = voltage_model_hpf_omega;
+                p.Kp_mras = Kp_mras; p.Ki_mras = Ki_mras;
+                p.normalise_eps = normalise_eps;
+                p.eps_norm_floor = eps_norm_floor;
+                pulsim::observers::add_flux_mras_observer_to_chain(
+                    self, p,
+                    std::move(v_alpha_channel),
+                    std::move(v_beta_channel),
+                    std::move(i_alpha_channel),
+                    std::move(i_beta_channel),
+                    std::move(omega_hat_channel),
+                    std::move(psi_adj_alpha_channel),
+                    std::move(psi_adj_beta_channel),
+                    std::move(psi_ref_alpha_channel),
+                    std::move(psi_ref_beta_channel));
+            },
+            py::arg("Rs"), py::arg("Ls"),
+            py::arg("Lr"), py::arg("Lm"), py::arg("Rr") = Real{0.0},
+            py::arg("voltage_model_hpf_omega") = Real{5.0},
+            py::arg("Kp_mras") = Real{50.0},
+            py::arg("Ki_mras") = Real{1e3},
+            py::arg("normalise_eps") = true,
+            py::arg("eps_norm_floor") = Real{1e-6},
+            py::arg("v_alpha_channel"), py::arg("v_beta_channel"),
+            py::arg("i_alpha_channel"), py::arg("i_beta_channel"),
+            py::arg("omega_hat_channel"),
+            py::arg("psi_adj_alpha_channel") = std::string{},
+            py::arg("psi_adj_beta_channel")  = std::string{},
+            py::arg("psi_ref_alpha_channel") = std::string{},
+            py::arg("psi_ref_beta_channel")  = std::string{},
+            "IM Flux-MRAS Observer (Phase 2.3 C++ port). Reads "
+            "(v_alpha, v_beta, i_alpha, i_beta) channels and writes "
+            "omega_hat. Default normalise_eps=True activates the "
+            "bootstrap-fixed cross-product.")
 
         // ---- Thermal blocks (Phase C.1 / C++ port) ----
         .def("add_thermal_power_injection",
