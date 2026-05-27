@@ -23,22 +23,25 @@ Two modes:
        summary = p.device_loss_summary(b, res)
        print(summary)
 
-   :func:`device_loss_summary` walks every resistor and inductor
-   branch, integrates ``i² · R`` over time, and reports a table.
+   :func:`device_loss_summary` walks every resistor, inductor,
+   ideal-switch and switched-diode branch and reports per-device
+   conduction statistics. Pass ``switch_fn=`` to reconstruct
+   switch conduction loss from the same deterministic mask the
+   simulation used; pass ``core_loss_specs=`` to add Steinmetz /
+   iGSE core loss on selected inductors.
 
-Switch and diode losses require per-step switch-state introspection
-that is not yet plumbed through the pybind11 bindings (the kernel
-emits :class:`CommutationEvent` records for diode events but does
-not expose the deterministic switch-fn state per timestep). See
-``KNOWN_LIMITATIONS.md`` § "Per-device loss reporting" — closing
-that gap is tracked for v1.4.
+The reconstruction is post-hoc only — the kernel itself stays
+fixed-dt and the result trace is processed in NumPy. No kernel
+binding changes are required for v1.6 closure.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Mapping, Optional, Union  # noqa: F401
 
 import numpy as np
+
+from . import magnetic as _magnetic
 
 
 __all__ = [
@@ -260,45 +263,469 @@ def _node_voltage_trace(states: np.ndarray, node_id: int) -> np.ndarray:
     return states[:, node_id]
 
 
-def device_loss_summary(builder,
-                            result) -> List[Dict[str, Any]]:
-    """Walk every inductor and resistor branch in ``builder`` and
-    report each one's conduction statistics.
+# ---------------------------------------------------------------
+# Helpers for the diode / switch / magnetic paths.
+# ---------------------------------------------------------------
 
-    The summary covers two device kinds:
+def _conduction_stats(v: np.ndarray,
+                      g: Union[float, np.ndarray],
+                      times: np.ndarray) -> Dict[str, float]:
+    """Compute (i_avg, i_rms, i_peak, P_avg, E_total) for a branch
+    whose current trace is ``i = v · g`` and whose instantaneous
+    power is ``P = v · i = v² · g``.
 
-    * **inductors** — current is in the state vector directly; the
-      entry includes ``i_avg``, ``i_rms``, ``i_peak``. Conduction
-      loss is left to the caller (an ideal inductor has none).
-    * **resistors** — current is reconstructed from the node-voltage
-      difference and the device's stored ``R_ohms``, so the entry
-      also reports ``P_avg`` (mean dissipated power, W) and
-      ``E_total`` (energy integrated over the run, J).
+    ``g`` may be a scalar (constant conductance, e.g. a resistor or
+    on-state switch) or an array matching ``v`` (state-dependent
+    conductance, e.g. a switch toggling between ``g_on`` / ``g_off``).
+    """
+    if isinstance(g, np.ndarray):
+        g_arr = g.astype(float, copy=False)
+    else:
+        g_arr = np.full_like(v, float(g))
+    i = v * g_arr
+    p = v * i
+    T = (times[-1] - times[0]) if times.size > 1 else 1.0
+    if T <= 0:
+        T = 1.0
+    return {
+        "i_avg": float(np.trapezoid(i, times) / T) if times.size > 1
+                   else float(i.mean()),
+        "i_rms": float(np.sqrt(np.mean(i ** 2))),
+        "i_peak": float(np.abs(i).max()) if i.size else 0.0,
+        "P_avg": float(np.trapezoid(p, times) / T) if times.size > 1
+                   else float(p.mean()),
+        "E_total": float(np.trapezoid(p, times)) if times.size > 1
+                     else 0.0,
+    }
 
-    Switches and diodes are deliberately omitted: their per-step
-    state isn't exposed by the bindings yet, so we cannot
-    reconstruct an exact i(t). Closing that gap is tracked in
-    ``KNOWN_LIMITATIONS.md`` for v1.4.
+
+def _evaluate_switch_mask_trace(switch_fn: Callable[[float], Any],
+                                 times: np.ndarray,
+                                 switch_idx: int) -> np.ndarray:
+    """Sample ``switch_fn(t).get(switch_idx)`` at every result time
+    and return a boolean ndarray of length len(times)."""
+    out = np.zeros(times.size, dtype=bool)
+    for k, t in enumerate(times):
+        mask = switch_fn(float(t))
+        out[k] = bool(mask.get(int(switch_idx)))
+    return out
+
+
+def _diode_switching_loss(events_for_branch,
+                          times: np.ndarray,
+                          v_D: np.ndarray,
+                          spec: Mapping[str, Any]) -> Dict[str, float]:
+    """Post-hoc reverse-recovery switching loss from
+    ``SimulationResult.commutation_events``.
+
+    Mirrors PSIM's diode-loss panel — two equivalent entry points:
+
+    * **Raw ``Q_rr``** — loss per event ``E_rr = Q_rr · |V_R|`` (the
+      simplest pattern; assumes ``Q_rr`` is roughly constant over
+      the operating range, valid for hard-recovery diodes).
+    * **Datasheet pair ``(E_rr_ref, V_R_ref)``** — loss per event
+      ``E_rr = E_rr_ref · (|V_R| / V_R_ref)``. Use this when the
+      datasheet quotes ``E_rr`` (energy per pulse) at a specific
+      reference voltage, which is more common for fast/soft recovery
+      diodes.
+
+    Either form yields the same number when
+    ``E_rr_ref = Q_rr · V_R_ref``. ``V_R`` itself is linearly
+    interpolated from the result trace at each event time, so the
+    formula tracks the actual reverse voltage the diode sees —
+    independent of the simulation dt.
+
+    The ideal ``SwitchedDiode`` kernel model has no physical
+    recovery charge; this is a datasheet annotation, matching
+    PSIM / LTspice "ideal-diode-with-Qrr" post-processing.
+    """
+    turn_offs = [ev for ev in events_for_branch
+                  if bool(ev.new_state) is False]
+    n_off = len(turn_offs)
+    T = (times[-1] - times[0]) if times.size > 1 else 0.0
+    Q_rr = float(spec.get("Q_rr", 0.0))
+    E_rr_ref = float(spec.get("E_rr_ref", 0.0))
+    V_R_ref = float(spec.get("V_R_ref", 0.0))
+
+    bookkeeping = {
+        "n_turn_off_events": int(n_off),
+        "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
+    }
+    if n_off == 0 or (Q_rr <= 0 and E_rr_ref <= 0):
+        return {"E_sw_total": 0.0, "P_sw_avg": 0.0, **bookkeeping}
+
+    # Interpolate |v_D| at every turn-off instant.
+    t_off = np.asarray([float(ev.t_estimated) for ev in turn_offs])
+    V_R = np.interp(t_off, times, np.abs(v_D))
+
+    if E_rr_ref > 0:
+        if V_R_ref <= 0:
+            raise ValueError(
+                "diode_specs: E_rr_ref requires a positive V_R_ref "
+                "(the reference reverse voltage from the datasheet).")
+        E_per_event = E_rr_ref * (V_R / V_R_ref)
+    else:
+        E_per_event = Q_rr * V_R
+    E_total = float(np.sum(E_per_event))
+    return {
+        "E_sw_total": E_total,
+        "P_sw_avg": (E_total / T) if T > 0 else 0.0,
+        **bookkeeping,
+    }
+
+
+def _switch_switching_loss(closed_trace: np.ndarray,
+                            times: np.ndarray,
+                            v_SW: np.ndarray,
+                            i_SW: np.ndarray,
+                            spec: Mapping[str, Any]) -> Dict[str, float]:
+    """Post-hoc turn-on / turn-off switching loss for an ideal-switch
+    branch (MOSFET / IGBT equivalent).
+
+    PSIM-style datasheet annotation: ``E_on`` and ``E_off`` are taken
+    from the device datasheet at a reference operating point
+    ``(V_ref, I_ref)`` and scaled linearly by both the blocking
+    voltage and the conducting current at the transition::
+
+        E_on_event  = E_on_ref  · (V_blocking / V_ref) · (I_load / I_ref)
+        E_off_event = E_off_ref · (V_blocking / V_ref) · (I_load / I_ref)
+
+    Transitions are detected from the user-supplied ``switch_fn``
+    mask trace — the kernel itself emits no commutation events for
+    ideal switches, but the deterministic switch_fn lets us
+    reconstruct turn-on (False→True) and turn-off (True→False)
+    edges exactly.
+
+    At each edge between samples k-1 and k, we take ``|v_SW[k-1]|``
+    as the blocking voltage (the value the switch was holding off
+    just before / just after the transition) and ``|i_SW[k]|`` as
+    the load current the device sees while conducting.
+    """
+    E_on_ref  = float(spec.get("E_on_ref",  0.0))
+    E_off_ref = float(spec.get("E_off_ref", 0.0))
+    V_ref = float(spec.get("V_ref", 0.0))
+    I_ref = float(spec.get("I_ref", 0.0))
+    T = (times[-1] - times[0]) if times.size > 1 else 0.0
+
+    # Detect edges. Diff of the boolean trace gives ±1 at transitions.
+    diff = np.diff(closed_trace.astype(np.int8))
+    turn_on_k  = np.flatnonzero(diff == +1) + 1   # index post-edge
+    turn_off_k = np.flatnonzero(diff == -1) + 1
+    n_on  = int(turn_on_k.size)
+    n_off = int(turn_off_k.size)
+    bookkeeping = {
+        "n_turn_on_events": n_on,
+        "n_turn_off_events": n_off,
+        "f_sw_estimate": (float(n_on + n_off) / (2.0 * T)) if T > 0
+                                else 0.0,
+    }
+    if (n_on == 0 and n_off == 0) or (E_on_ref <= 0 and E_off_ref <= 0):
+        return {
+            "E_sw_on_total": 0.0,
+            "E_sw_off_total": 0.0,
+            "E_sw_total": 0.0,
+            "P_sw_avg": 0.0,
+            **bookkeeping,
+        }
+    if V_ref <= 0 or I_ref <= 0:
+        raise ValueError(
+            "switch_specs: V_ref and I_ref must be positive — they "
+            "anchor the datasheet E_on/E_off reference operating "
+            "point.")
+
+    # Blocking voltage = the OFF-state v_SW (across the open switch).
+    # That's the sample BEFORE a turn-on edge and the sample AFTER a
+    # turn-off edge — in both cases the switch is "open / blocking".
+    # Load current = the ON-state |i_SW| in the conducting interval
+    # adjacent to the edge. For turn-on that's the sample at k (just
+    # after closing); for turn-off it's the sample at k-1 (just before
+    # opening).
+    def _edge_loss(idxs: np.ndarray, E_ref: float,
+                    *, blocking_at_post_edge: bool,
+                    load_at_post_edge: bool) -> float:
+        if idxs.size == 0 or E_ref <= 0:
+            return 0.0
+        blk_k  = idxs if blocking_at_post_edge \
+                       else np.clip(idxs - 1, 0, v_SW.size - 1)
+        load_k = idxs if load_at_post_edge \
+                       else np.clip(idxs - 1, 0, v_SW.size - 1)
+        V_blk = np.abs(v_SW[blk_k])
+        I_load = np.abs(i_SW[load_k])
+        return float(np.sum(E_ref * (V_blk / V_ref) * (I_load / I_ref)))
+
+    # Turn-on:  V_blk = pre-edge (open), I_load = post-edge (just closed).
+    # Turn-off: V_blk = post-edge (now open), I_load = pre-edge (was closed).
+    E_on_total = _edge_loss(turn_on_k,  E_on_ref,
+                              blocking_at_post_edge=False,
+                              load_at_post_edge=True)
+    E_off_total = _edge_loss(turn_off_k, E_off_ref,
+                              blocking_at_post_edge=True,
+                              load_at_post_edge=False)
+    E_total = E_on_total + E_off_total
+    return {
+        "E_sw_on_total": E_on_total,
+        "E_sw_off_total": E_off_total,
+        "E_sw_total": E_total,
+        "P_sw_avg": (E_total / T) if T > 0 else 0.0,
+        **bookkeeping,
+    }
+
+
+def _resolve_core_material(spec: Mapping[str, Any]) -> Any:
+    """Pull a ``CoreMaterial`` out of a core_loss_specs entry. Accepts
+    either ``{"material": "<catalog-name>"}`` or
+    ``{"material": <CoreMaterial>}`` or
+    ``{"K": ..., "alpha": ..., "beta": ...}`` (inline triplet)."""
+    mat = spec.get("material")
+    if mat is None:
+        if "K" in spec and "alpha" in spec and "beta" in spec:
+            return _magnetic.CoreMaterial(
+                name=str(spec.get("name", "inline")),
+                K=float(spec["K"]),
+                alpha=float(spec["alpha"]),
+                beta=float(spec["beta"]),
+            )
+        raise ValueError(
+            "core_loss_specs entry must include either 'material' "
+            "(name or CoreMaterial) or an inline {K, alpha, beta} "
+            "triplet.")
+    if isinstance(mat, str):
+        return _magnetic.core_material(mat)
+    return mat
+
+
+def _inductor_core_loss(i_arr: np.ndarray,
+                         times: np.ndarray,
+                         L: float,
+                         spec: Mapping[str, Any]) -> Dict[str, float]:
+    """Compute Steinmetz / iGSE core loss for one inductor given the
+    current trace + a per-device spec.
+
+    Spec required keys:
+      * ``N_turns``  — winding turn count.
+      * ``A_core``   — magnetic cross-section (m²).
+      * ``V_core``   — core volume (m³).
+      * either ``material`` (str or CoreMaterial) or
+        inline ``{K, alpha, beta}``.
+    Spec optional keys:
+      * ``use_igse`` (default True) — iGSE on the trace; falls back
+        to classic Steinmetz at the dominant frequency when False.
+      * ``f_op`` — frequency override for Steinmetz mode (Hz). If
+        omitted, estimated from the trace via the largest non-DC FFT
+        bin.
+    """
+    N = float(spec["N_turns"])
+    A = float(spec["A_core"])
+    V = float(spec["V_core"])
+    if N <= 0 or A <= 0 or V <= 0:
+        return {"P_core_avg": 0.0, "E_core_total": 0.0,
+                "B_peak": 0.0}
+    material = _resolve_core_material(spec)
+
+    # Reconstruct flux density B(t) = L · i(t) / (N · A).
+    B = (float(L) * i_arr) / (N * A)
+    B_peak = float(np.max(np.abs(B))) if B.size else 0.0
+
+    use_igse = bool(spec.get("use_igse", True)) and times.size >= 4
+    P_v: float = 0.0
+    if use_igse:
+        try:
+            P_v = float(_magnetic.igse_loss_density(B, times, material))
+        except Exception:
+            # iGSE needs ≥1 period; if the trace is shorter than a
+            # cycle the call can fail. Fall back to Steinmetz.
+            use_igse = False
+    if not use_igse:
+        # Steinmetz needs a frequency. Estimate from FFT if not given.
+        f_op = spec.get("f_op")
+        if f_op is None:
+            f_op = _estimate_dominant_frequency(B, times)
+        P_v = float(_magnetic.steinmetz_loss_density(
+            B_peak, float(f_op), material))
+    P_core = float(P_v * V)
+    T = (times[-1] - times[0]) if times.size > 1 else 0.0
+    return {
+        "P_core_avg": P_core,
+        "E_core_total": P_core * T,
+        "B_peak": B_peak,
+    }
+
+
+def _estimate_dominant_frequency(B: np.ndarray,
+                                  times: np.ndarray) -> float:
+    """Estimate the dominant frequency in B(t) via the FFT, ignoring
+    the DC bin. Returns 0 if the trace is too short or flat."""
+    if times.size < 4 or B.size < 4:
+        return 0.0
+    dt = float(np.mean(np.diff(times)))
+    if dt <= 0:
+        return 0.0
+    # Subtract mean to suppress DC.
+    spec = np.abs(np.fft.rfft(B - B.mean()))
+    freqs = np.fft.rfftfreq(B.size, d=dt)
+    if spec.size <= 1:
+        return 0.0
+    # Find the dominant non-DC bin. argmax over spec[1:] then offset.
+    idx = int(np.argmax(spec[1:])) + 1
+    return float(freqs[idx])
+
+
+# ---------------------------------------------------------------
+# Top-level summary.
+# ---------------------------------------------------------------
+
+def device_loss_summary(
+    builder,
+    result,
+    *,
+    switch_fn: Optional[Callable[[float], Any]] = None,
+    core_loss_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+    diode_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+    switch_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Walk every resistor, inductor, ideal-switch and switched-diode
+    branch in ``builder`` and report each one's conduction
+    statistics.
+
+    Supported device kinds:
+
+    * **resistor** — current is reconstructed from the node-voltage
+      difference and ``R_ohms``. Reports ``i_avg``, ``i_rms``,
+      ``i_peak`` plus ``P_avg`` and ``E_total``.
+    * **inductor** — current is in the state vector directly.
+      Reports the same current metrics. If a matching entry exists
+      in ``core_loss_specs``, the entry also gets ``P_core_avg``,
+      ``E_core_total`` and ``B_peak`` (Steinmetz / iGSE).
+    * **diode** (ideal switched diode with ``g_on`` / ``g_off``) —
+      conduction state is inferred from the node-voltage drop and
+      the device's ``V_th``. Reports the same current + power metrics
+      as the resistor path.
+    * **switch** (ideal switch with ``g_on`` / ``g_off``) — requires
+      ``switch_fn`` so the per-step closed/open mask can be sampled
+      deterministically. Without ``switch_fn`` the switch entry is
+      skipped (kept honest — no silent default).
+
+    Parameters
+    ----------
+    builder, result
+        A populated :class:`CircuitBuilder` and the
+        :class:`SimulationResult` produced by it.
+    switch_fn : callable, optional
+        ``t -> SwitchStateMask`` used during the simulation. Pass
+        the same callable here to enable switch-branch loss
+        reconstruction.
+    core_loss_specs : mapping, optional
+        Per-inductor core-loss configuration. Keys are inductor
+        branch *names* (preferred, case-sensitive) or numeric
+        branch ids. Values are mappings with::
+
+            {"material": "N87" | CoreMaterial,
+             "N_turns": int, "A_core": float (m²),
+             "V_core": float (m³),
+             "use_igse": bool = True,
+             "f_op": float (Hz)  # optional, Steinmetz fallback}
+
+        An inline triplet ``{"K": ..., "alpha": ..., "beta": ...}``
+        is also accepted in place of ``material``.
+    diode_specs : mapping, optional
+        Per-diode datasheet annotations for reverse-recovery
+        switching loss (PSIM-style). Keys are diode branch names or
+        numeric branch ids. Two equivalent entry points::
+
+            # Raw recovery charge — assumes Q_rr ~ constant.
+            {"Q_rr": float (C)}
+
+            # Datasheet energy + reference voltage — preferred for
+            # fast / soft-recovery diodes that quote E_rr directly.
+            {"E_rr_ref": float (J), "V_R_ref": float (V)}
+
+        For each turn-off event in
+        ``result.commutation_events`` matching the branch the
+        helper interpolates ``|V_R(t_event)|`` and accumulates
+        ``E_rr_event = Q_rr · V_R`` or
+        ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``. Reports
+        ``E_sw_total``, ``P_sw_avg``, ``n_turn_off_events``,
+        ``f_sw_estimate``.
+    switch_specs : mapping, optional
+        Per-switch datasheet annotations for MOSFET / IGBT-style
+        turn-on / turn-off switching loss (PSIM-style). Keys are
+        switch branch names or branch ids. Values::
+
+            {"E_on_ref":  float (J),
+             "E_off_ref": float (J),
+             "V_ref":     float (V),
+             "I_ref":     float (A)}
+
+        Transitions are detected from the deterministic
+        ``switch_fn`` mask (so ``switch_fn=`` is required when
+        ``switch_specs=`` is). Per event::
+
+            E_on  = E_on_ref  · (|V_blk| / V_ref) · (|I_load| / I_ref)
+            E_off = E_off_ref · (|V_blk| / V_ref) · (|I_load| / I_ref)
+
+        ``V_blk`` is the sample just before the edge,
+        ``I_load`` is the sample just after. Reports
+        ``E_sw_on_total``, ``E_sw_off_total``, ``E_sw_total``,
+        ``P_sw_avg``, plus ``n_turn_on_events`` /
+        ``n_turn_off_events`` / ``f_sw_estimate``.
 
     Returns
     -------
     list of dict
-        One entry per inductor / resistor in branch-id order. Each
-        dict carries the keys ``branch_id``, ``kind``, ``name`` plus
-        the kind-specific statistics above.
+        One entry per known device in branch-id order. Unknown
+        kinds (sources, capacitors, ...) are skipped silently.
     """
     states = _states_as_array(result)
     times = _times_as_array(result)
     T = (times[-1] - times[0]) if times.size > 1 else 1.0
 
-    # Build a {branch_id: descriptor} index from the builder so we
-    # can look up resistor params + node ids without re-enumerating.
     try:
         comps_by_bid = {c["branch_id"]: c for c in builder.components()}
     except Exception:
         comps_by_bid = {}
 
+    # Build per-inductor core-loss spec lookup that accepts BOTH
+    # the branch name and the branch_id.
+    core_by_bid: Dict[int, Mapping[str, Any]] = {}
+    core_by_name: Dict[str, Mapping[str, Any]] = {}
+    if core_loss_specs is not None:
+        for key, spec in core_loss_specs.items():
+            if isinstance(key, int):
+                core_by_bid[key] = spec
+            else:
+                core_by_name[str(key)] = spec
+
+    # Same dual lookup for diode datasheet annotations.
+    diode_by_bid: Dict[int, Mapping[str, Any]] = {}
+    diode_by_name: Dict[str, Mapping[str, Any]] = {}
+    if diode_specs is not None:
+        for key, spec in diode_specs.items():
+            if isinstance(key, int):
+                diode_by_bid[key] = spec
+            else:
+                diode_by_name[str(key)] = spec
+
+    # And for ideal-switch (MOSFET/IGBT-equivalent) datasheet annotations.
+    switch_by_bid: Dict[int, Mapping[str, Any]] = {}
+    switch_by_name: Dict[str, Mapping[str, Any]] = {}
+    if switch_specs is not None:
+        for key, spec in switch_specs.items():
+            if isinstance(key, int):
+                switch_by_bid[key] = spec
+            else:
+                switch_by_name[str(key)] = spec
+
+    # Bucket commutation events by branch_id so the diode handler
+    # can iterate only its own.
+    events = list(getattr(result, "commutation_events", []))
+    events_by_branch: Dict[int, list] = {}
+    for ev in events:
+        events_by_branch.setdefault(int(ev.branch_id), []).append(ev)
+
     summary: List[Dict[str, Any]] = []
+    switch_seq_idx = 0  # increments once per Switch / Diode branch
+                        # in branch-id order — matches the kernel
+                        # convention in pulsim/pwl/assemble.hpp.
 
     for bid in range(builder.graph.num_branches):
         desc = comps_by_bid.get(bid, {})
@@ -306,27 +733,33 @@ def device_loss_summary(builder,
         name = desc.get("name", "")
 
         if kind == "inductor":
-            # Inductor current is in the state vector directly.
             try:
                 i_idx = builder.pool.branch_var_id_for_inductor(
                     bid, builder.graph)
             except Exception:
                 continue
             i_arr = states[:, i_idx]
-            summary.append({
+            entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "inductor",
                 "name": name,
-                "i_avg": float(np.trapezoid(i_arr, times) / T) if T > 0
-                           else float(i_arr.mean()),
+                "i_avg": (float(np.trapezoid(i_arr, times) / T)
+                          if T > 0 else float(i_arr.mean())),
                 "i_rms": float(np.sqrt(np.mean(i_arr ** 2))),
                 "i_peak": float(np.abs(i_arr).max()),
-            })
+            }
+            # Optional Steinmetz / iGSE core loss.
+            spec = core_by_bid.get(bid) or core_by_name.get(name)
+            if spec is not None:
+                L = float(desc.get("params", {}).get(
+                    "L_henries", float("nan")))
+                if np.isfinite(L) and L > 0:
+                    entry.update(
+                        _inductor_core_loss(i_arr, times, L, spec))
+            summary.append(entry)
             continue
 
         if kind == "resistor":
-            # Reconstruct i_R = (v_from - v_to) / R from node
-            # voltages. Ground (node_id < 0) is the reference.
             R = float(desc.get("params", {}).get("R_ohms", float("nan")))
             if not np.isfinite(R) or R <= 0:
                 continue
@@ -336,25 +769,96 @@ def device_loss_summary(builder,
             v_from = _node_voltage_trace(states, int(from_id))
             v_to   = _node_voltage_trace(states, int(to_id))
             v_R = v_from - v_to
-            i_R = v_R / R
-            p_R = v_R * i_R  # = i² · R, but cheaper from v_R · i_R
+            stats = _conduction_stats(v_R, 1.0 / R, times)
             summary.append({
                 "branch_id": int(bid),
                 "kind": "resistor",
                 "name": name,
                 "R_ohms": R,
-                "i_avg": float(np.trapezoid(i_R, times) / T) if T > 0
-                           else float(i_R.mean()),
-                "i_rms": float(np.sqrt(np.mean(i_R ** 2))),
-                "i_peak": float(np.abs(i_R).max()),
-                "P_avg": (float(np.trapezoid(p_R, times) / T)
-                          if T > 0 else float(p_R.mean())),
-                "E_total": (float(np.trapezoid(p_R, times))
-                            if times.size > 1 else 0.0),
+                **stats,
             })
             continue
 
-        # Other kinds (switches, diodes, sources, ...) — skip for now.
-        # See KNOWN_LIMITATIONS.md for the v1.4 roadmap.
+        if kind == "diode":
+            # SwitchedDiode: closed when v_D > V_th. Use g_on while
+            # forward-biased, g_off while reverse-biased.
+            params = desc.get("params", {})
+            g_on  = float(params.get("g_on", float("nan")))
+            g_off = float(params.get("g_off", float("nan")))
+            V_th  = float(params.get("V_th", 0.0))
+            if not (np.isfinite(g_on) and np.isfinite(g_off)):
+                switch_seq_idx += 1
+                continue
+            from_id, to_id = desc.get("nodes", (None, None))
+            if from_id is None or to_id is None:
+                switch_seq_idx += 1
+                continue
+            v_D = (_node_voltage_trace(states, int(from_id))
+                   - _node_voltage_trace(states, int(to_id)))
+            closed = v_D > V_th
+            g_arr = np.where(closed, g_on, g_off)
+            stats = _conduction_stats(v_D, g_arr, times)
+            entry: Dict[str, Any] = {
+                "branch_id": int(bid),
+                "kind": "diode",
+                "name": name,
+                "V_th": V_th,
+                "duty_conducting": float(closed.mean())
+                                       if closed.size else 0.0,
+                **stats,
+            }
+            # Optional datasheet reverse-recovery loss.
+            d_spec = (diode_by_bid.get(bid)
+                      or diode_by_name.get(name))
+            if d_spec is not None:
+                ev_branch = events_by_branch.get(int(bid), [])
+                entry.update(
+                    _diode_switching_loss(ev_branch, times, v_D, d_spec))
+            summary.append(entry)
+            switch_seq_idx += 1
+            continue
+
+        if kind == "switch":
+            params = desc.get("params", {})
+            g_on  = float(params.get("g_on", float("nan")))
+            g_off = float(params.get("g_off", float("nan")))
+            if not (np.isfinite(g_on) and np.isfinite(g_off)):
+                switch_seq_idx += 1
+                continue
+            if switch_fn is None:
+                # Honest skip — without switch_fn we have no way to
+                # know the per-step mask state.
+                switch_seq_idx += 1
+                continue
+            from_id, to_id = desc.get("nodes", (None, None))
+            if from_id is None or to_id is None:
+                switch_seq_idx += 1
+                continue
+            closed = _evaluate_switch_mask_trace(
+                switch_fn, times, switch_seq_idx)
+            v_SW = (_node_voltage_trace(states, int(from_id))
+                    - _node_voltage_trace(states, int(to_id)))
+            g_arr = np.where(closed, g_on, g_off)
+            i_SW = v_SW * g_arr  # branch current at each sample
+            stats = _conduction_stats(v_SW, g_arr, times)
+            entry: Dict[str, Any] = {
+                "branch_id": int(bid),
+                "kind": "switch",
+                "name": name,
+                "duty_closed": float(closed.mean())
+                                   if closed.size else 0.0,
+                **stats,
+            }
+            s_spec = (switch_by_bid.get(bid)
+                      or switch_by_name.get(name))
+            if s_spec is not None:
+                entry.update(
+                    _switch_switching_loss(closed, times, v_SW,
+                                            i_SW, s_spec))
+            summary.append(entry)
+            switch_seq_idx += 1
+            continue
+
+        # Other kinds (sources, capacitors, ...) — skip silently.
 
     return summary

@@ -176,6 +176,7 @@ from .thermal import (
     compute_temperature,
     add_foster_network,
     make_thermal_observer,
+    device_thermal_summary,
 )
 from .grid import (
     add_three_phase_grid,
@@ -430,6 +431,7 @@ __all__ = [
     "compute_temperature",
     "add_foster_network",
     "make_thermal_observer",
+    "device_thermal_summary",
     # Three-phase grid helpers (Phase C.2).
     "add_three_phase_grid",
     "add_three_phase_line_impedance",
