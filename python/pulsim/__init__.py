@@ -230,6 +230,7 @@ from .hysteresis import (
     add_hysteretic_inductor,
     make_hysteretic_inductor_observer,
 )
+from .yaml_chain import wire_chain_from_yaml
 from .integrators import (
     AdaptiveSolution,
     DormandPrince5,
@@ -326,6 +327,7 @@ __all__ = [
     "LoadedCircuit",
     "load_yaml_string",
     "load_yaml_file",
+    "wire_chain_from_yaml",
     "make_pwm_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
