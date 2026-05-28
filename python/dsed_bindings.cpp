@@ -41,6 +41,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
@@ -414,26 +415,62 @@ void init_module(py::module_& m) {
     using SSM = pulsim::topology::SwitchStateMask;
     using NativeAdapter = NativeCircuitBuilderAdapter<SSM>;
 
-    // --- PySwitchFnSSM: Python switch_fn → C++ SwitchStateMask path ---
-    // Local to this TU; used as the SwitchFn template arg of the C++
-    // schedulers when paired with a NativeAdapter.
+    // --- PySwitchFnSSM: switch_fn adapter with Bridge.12 native fast path ---
+    //
+    // The C++ scheduler template (`operator()(t)` + `next_edge_after(t)`)
+    // is satisfied by THIS class. At construction we check whether the
+    // user's `py::object` is actually a pybind11-bound NativePwm2Switch
+    // or NativeMultiMaskPwm — if so, we store a C++ pointer to the
+    // underlying object and call its native methods directly. Otherwise
+    // (Python class with __call__ / next_edge_after) we fall back to
+    // the GIL-acquiring path.
+    //
+    // The py::object `fn_` keeps the underlying native instance alive
+    // as long as PySwitchFnSSM is alive (pybind11 ref-count).
     struct PySwitchFnSSM {
         explicit PySwitchFnSSM(py::object fn)
             : fn_{std::move(fn)} {
-            if (py::hasattr(fn_, "next_edge_after")) {
-                nea_attr_ = fn_.attr("next_edge_after");
-                has_nea_  = true;
+            // Try to detect the native PWM types first. py::cast<T*>
+            // returns the C++ pointer if the py::object holds an
+            // instance of the bound type; throws py::cast_error
+            // otherwise.
+            try {
+                native_pwm2_ =
+                    fn_.cast<pulsim::sources::NativePwm2Switch*>();
+            } catch (const py::cast_error&) {
+                native_pwm2_ = nullptr;
+            }
+            if (!native_pwm2_) {
+                try {
+                    native_multi_ =
+                        fn_.cast<pulsim::sources::NativeMultiMaskPwm*>();
+                } catch (const py::cast_error&) {
+                    native_multi_ = nullptr;
+                }
+            }
+            if (!native_pwm2_ && !native_multi_) {
+                // Fallback path — generic Python callable. Pre-resolve
+                // `next_edge_after` attribute (if any) to avoid the
+                // hasattr cost per call.
+                if (py::hasattr(fn_, "next_edge_after")) {
+                    nea_attr_ = fn_.attr("next_edge_after");
+                    has_nea_  = true;
+                }
             }
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            // The Bridge.11 schedulers release the GIL for the inner
-            // loop; re-acquire it before touching Python objects.
+            // Bridge.12 native fast path — pure C++, no GIL touch.
+            if (native_pwm2_) return (*native_pwm2_)(t);
+            if (native_multi_) return (*native_multi_)(t);
+            // Generic Python fallback (Bridge.11 path).
             py::gil_scoped_acquire gil;
             return fn_(t).cast<SSM>();
         }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
+            if (native_pwm2_)  return native_pwm2_->next_edge_after(t);
+            if (native_multi_) return native_multi_->next_edge_after(t);
             py::gil_scoped_acquire gil;
             if (has_nea_) {
                 return nea_attr_(t).cast<Real>();
@@ -442,6 +479,8 @@ void init_module(py::module_& m) {
         }
 
         py::object fn_;
+        pulsim::sources::NativePwm2Switch*   native_pwm2_  = nullptr;
+        pulsim::sources::NativeMultiMaskPwm* native_multi_ = nullptr;
         py::object nea_attr_;
         bool       has_nea_ = false;
     };

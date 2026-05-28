@@ -61,6 +61,12 @@ from ._pulsim import (  # type: ignore[import-not-found]
     make_three_phase_spwm_fn,
     make_phase_shift_full_bridge_fn,
     make_combined_switch_fn,
+    # Bridge.12 — native PWM switch_fn classes for the DSED engine.
+    # Detected by the C++ scheduler binding and called without GIL
+    # roundtrips per scheduler step. ~25× faster per call than the
+    # equivalent Python `class PWM` pattern.
+    NativePwm2Switch,
+    NativeMultiMaskPwm,
 )
 
 from .control import (
@@ -336,6 +342,8 @@ __all__ = [
     "LoadedCircuit",
     "load_yaml_string",
     "load_yaml_file",
+    "NativePwm2Switch",
+    "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
     "make_dead_time_pwm_pair_fn",

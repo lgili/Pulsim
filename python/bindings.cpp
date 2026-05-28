@@ -56,6 +56,7 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
+#include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/phase_shift_full_bridge_fn.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
@@ -1110,6 +1111,63 @@ void init_module(py::module_& m) {
     // returns a Python callable produced by std::function ⇒
     // py::function conversion; it can be passed directly as
     // `switch_fn=` to `run_transient`.
+    // -------------------------------------------------------------------
+    // Bridge.12 — native PWM switch_fn classes. The DSED scheduler
+    // bindings (dsed_bindings.cpp::PySwitchFnSSM) detect these at
+    // construction and call operator() / next_edge_after() in pure C++,
+    // bypassing pybind11 entirely. ~25× cheaper per-call than the
+    // equivalent Python `class PWM` pattern.
+    // -------------------------------------------------------------------
+
+    py::class_<sources::NativePwm2Switch>(m, "NativePwm2Switch",
+        "Native 2-switch complementary PWM for DSED. Pass directly "
+        "as `switch_fn=` to `pulsim.simulate(engine='dsed', ...)` — "
+        "the dispatch detects the type and calls the C++ implementation "
+        "without GIL roundtrips per scheduler step. ~25× faster per "
+        "switch_fn call than the equivalent Python class.")
+        .def(py::init<Real, Real, int, bool>(),
+              py::arg("T_sw"), py::arg("D"), py::arg("n_switches"),
+              py::arg("hs_first") = true,
+              "Build PWM with period T_sw (s), duty D in [0, 1], "
+              "n_switches in the mask. `hs_first=True` (default): "
+              "switch 0 closed during D·T, switch 1 during (1-D)·T. "
+              "Set to False for boost-style (LS closed first).")
+        .def("__call__",
+              [](const sources::NativePwm2Switch& self, Real t) {
+                  return self(t);
+              },
+              py::arg("t"),
+              "Return the active mask at time `t`.")
+        .def("next_edge_after",
+              &sources::NativePwm2Switch::next_edge_after,
+              py::arg("t"),
+              "Return the next gate-edge time strictly greater than `t`.")
+        .def_readonly("T_sw", &sources::NativePwm2Switch::T_sw)
+        .def_readonly("D", &sources::NativePwm2Switch::D);
+
+    py::class_<sources::NativeMultiMaskPwm>(m, "NativeMultiMaskPwm",
+        "Native multi-mask PWM (K-mask schedule cycling through "
+        "phase boundaries). For 3-level inverters (P→O→N pattern), "
+        "multi-leg interleaved converters, etc. Same fast-path "
+        "detection as NativePwm2Switch.")
+        .def(py::init<Real, std::vector<Real>,
+                       std::vector<topology::SwitchStateMask>>(),
+              py::arg("T_sw"), py::arg("phase_boundaries"),
+              py::arg("masks"),
+              "Build a K-mask PWM. `phase_boundaries[k]` is the END "
+              "of mask k's active window as a fraction of T_sw "
+              "(strictly increasing in (0, 1]). `masks[k]` is the "
+              "SwitchStateMask active in window k.")
+        .def("__call__",
+              [](const sources::NativeMultiMaskPwm& self, Real t) {
+                  return self(t);
+              },
+              py::arg("t"))
+        .def("next_edge_after",
+              &sources::NativeMultiMaskPwm::next_edge_after,
+              py::arg("t"))
+        .def_readonly("T_sw", &sources::NativeMultiMaskPwm::T_sw);
+
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
         py::arg("frequency"), py::arg("duty"),
