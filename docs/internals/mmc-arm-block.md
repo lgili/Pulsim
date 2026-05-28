@@ -1,14 +1,20 @@
 # MMC Arm Block — design doc
 
-**Status:** L0–L3 implemented (Phase 20 — Python layer complete).
-See ``python/pulsim/mmc.py`` and the integration tests under
+**Status:** L0–L3 implemented, both Half-Bridge and Full-Bridge
+submodules supported across every layer. Per-step math lives in
+``core/include/pulsim/mmc/arm.hpp`` (header-only C++23); the
+Python module ``python/pulsim/mmc.py`` is a thin orchestrator
+(dataclasses, builder helpers, observers, time-series drivers).
+Integration tests under
 ``python/tests/test_mmc_arm_{average,multilevel,equivalent,detailed}.py``.
-**Reference:** Sousa, Gean Jacques Maia de.
-*Sistemas de Controle para a Operação Eficiente de Conversores Modulares Multiníveis em Acionamentos Elétricos*. PhD thesis, UFSC, 2022. (`artigos/Gean Jacques Maia de Sousa.pdf`)
+
+**Reference:** Sousa (2022), *Sistemas de Controle para a Operação
+Eficiente de Conversores Modulares Multiníveis em Acionamentos
+Elétricos.* PhD thesis, UFSC.
 
 This doc captures the model equations, the layered block hierarchy, the
-parameter / API contract, and the staged validation plan for adding
-Modular Multilevel Converter (MMC) support to pulsim. The goal is a
+parameter / API contract, and the staged validation plan for the
+Modular Multilevel Converter (MMC) support in pulsim. The goal is a
 simulator that is
 
 * **fast enough** to run an MMC with 30+ submodules per arm at switching
@@ -18,6 +24,8 @@ simulator that is
 
 by giving the user a *small ladder of models* (L0 → L3) and letting them
 pick the right point on the speed-vs-fidelity curve.
+
+User-facing tutorial: see [Modular Multilevel Converters](../mmc.md).
 
 ---
 
@@ -153,20 +161,31 @@ states can flip per simulation step, plus additional monostables
 ## 3. Layered block hierarchy
 
 We ship four layers. Each is one self-contained block in
-`pulsim.power_electronics.mmc` (Python) backed by a thin C++ device
-where it helps performance.
+`pulsim.mmc` (Python wrapper) backed by a header-only C++23 kernel in
+`core/include/pulsim/mmc/arm.hpp`. The Python side owns dataclasses,
+builder integration, observers, and the time-series drivers; the kernel
+owns the per-step math.
 
-| Layer | Block | States/arm | Captures | Use case |
-|---|---|---|---|---|
-| **L0** | `MmcArmAverage`     | 1 | continuous mb, eq (2.13/14) | small-signal Bode, fast trade studies |
-| **L1** | `MmcArmMultilevel`  | 1 | discrete `s_b ∈ {0,…,N}` | modulation strategy (PS-PWM, APOD, …) |
-| **L2** | `MmcArmEquivalent`  | 1 | + dead-time + min pulse (thesis 3.4.2) | loss estimation, fast dynamics |
-| **L3** | `MmcArmDetailed`    | N | + intra-arm v_CSM differences | balancing algorithms, fault injection |
+| Layer | Python class | Builder helper | States/arm | Captures | Use case |
+|---|---|---|---|---|---|
+| **L0** | `MmcArmAverage`     | `add_mmc_arm_average`     | 1 | continuous `m_b`, eq (2.13/14) | small-signal Bode, fast trade studies |
+| **L1** | `MmcArmMultilevel`  | `add_mmc_arm_multilevel`  | 1 | discrete `s_b ∈ {0,…,N}` (HB) or `{-N,…,N}` (FB) | modulation strategy (PS-PWM, IPD) |
+| **L2** | `MmcArmEquivalent`  | `add_mmc_arm_equivalent`  | 1 | + dead-time + min pulse (thesis 3.4.2) | loss estimation, fast dynamics |
+| **L3** | `MmcArmDetailed`    | `add_mmc_arm_detailed`    | N | + intra-arm `v_C_SM` spread + sort-and-select | balancing algorithms, fault injection |
 
 The blocks share the same external port shape (two electrical
 terminals A/B, a control-input port for the modulating signal, an
 optional measurement port for `v_C`), so a user can swap layers
 without changing topology.
+
+Both submodule topologies (`sm_type="half_bridge"` and
+`sm_type="full_bridge"`) are supported across every layer. FB encoding
+at L2/L3 uses a signed insertion count `s_b ∈ {-N..N}`: positive states
+add `+v_C` per SM, negative states add `−v_C` per SM, and zero states
+free-wheel. The L2 dead-time monostable routes by `sign(i_b)` exactly as
+the thesis derives; L3 sort-and-select picks SMs by polarity of the
+desired contribution, then by capacitor voltage relative to the charging
+direction.
 
 ---
 
@@ -237,15 +256,25 @@ p.add_mmc_three_phase_dc_ac(
 )
 ```
 
-### 5.2 C++ (`pulsim::v1::Circuit`)
+### 5.2 C++ (`core/include/pulsim/mmc/arm.hpp`)
 
-L0 reuses `add_vcvs` (controlled voltage source) for `v_b = m_b · v_C`,
-a regular capacitor for `C`, and a `add_cccs` / current-controlled
-current source for `i_C = m_b · i_b`. No new device class needed at
-this layer — purely a builder helper composing existing primitives.
+All per-step math is `constexpr`-friendly C++23 living in
+`core/include/pulsim/mmc/arm.hpp` (header-only). The public entry
+points exposed via pybind11 (`python/bindings.cpp`):
 
-L1–L3 will eventually need a custom device. We hold off until the L0
-proof-of-concept is in place.
+* `mmc_arm_average_step`     — `(v_C, m_b, i_b, dt, params) → (v_C_next, v_b)`
+* `mmc_arm_multilevel_step`  — `(v_C, s_b, i_b, dt, params) → (v_C_next, v_b)`
+* `mmc_arm_equivalent_step`  — `(state, s_ref, i_b, dt, params, sm_type) → (state_next, v_b, s_w, s_u, s_n)`
+* `mmc_arm_detailed_step`    — `(state, s_ref, i_b, dt, params) → (state_next, v_b, insertion_mask)`
+* `ps_pwm_switching_function`, `ipd_switching_function` — quantizers
+  used by the Python multilevel driver.
+
+The Python side (``python/pulsim/mmc.py``) is a thin orchestrator:
+it owns dataclasses, builder integration (the `add_mmc_arm_*` family
+and the three-phase topology helper), per-step observers, and the
+time-series drivers (`simulate_mmc_arm_*`). There is no pure-Python
+fallback by design — a single implementation is the only contract
+worth maintaining.
 
 ---
 
@@ -289,46 +318,47 @@ algorithm) and confirm the spread stays bounded.
 
 ---
 
-## 7. Implementation order
+## 7. Implementation order — done
 
-Each step is a stand-alone PR. We don't move on until tests pass.
+The roadmap below was followed; every step has shipped and is covered
+by integration tests.
 
-1. **L0 builder helper** — `p.add_mmc_arm_average(...)` composing
-   existing pulsim primitives (controlled VS + cap + controlled CS).
-   Plus one test: sine-wave steady-state matches eq (2.43) ripple.
-2. **3-phase topology helper** — `p.add_mmc_three_phase_dc_ac(...)`
+1. ✅ **L0 builder helper** — `p.add_mmc_arm_average(...)` composing
+   pulsim primitives (controlled VS + cap + controlled CS).
+2. ✅ **3-phase topology helper** — `p.add_mmc_three_phase_dc_ac(...)`
    wraps 6 arms + 6 arm inductors + DC bus connections.
-3. **L0 showcase YAML** — examples/mmc_three_phase_dc_ac.yaml
-   exercising the full converter with open-loop sinusoidal
-   modulation.
-4. **L1 multilevel** — `MmcArmMultilevel` adds the quantizer that
-   converts continuous `m_b` ∈ [0, 1] into `s_b ∈ {0, …, N}` plus a
-   carrier-distribution scheme (start with phase-shifted).
-5. **L2 SM equivalent** — adds dead-time monostables + min-pulse-width
-   saturator. New C++ device `MmcArmEquivalentDevice` because the
-   monostables touch every sub-step.
-6. **L3 detailed** — per-SM state, balancing algorithms, fault
-   injection. Lowest priority; we expect L2 to cover ≥ 95 % of
-   real-world use cases.
+3. ✅ **L0 showcase YAML** — `examples/mmc_three_phase_dc_ac.yaml`
+   exercising the full converter with open-loop sinusoidal modulation.
+4. ✅ **L1 multilevel** — quantises continuous `m_b` into `s_b` with
+   PS-PWM or IPD carrier distribution. Both HB and FB.
+5. ✅ **L2 SM equivalent** — dead-time monostables + min-pulse-width
+   saturator. HB at first, FB added as a follow-up using a signed
+   insertion count.
+6. ✅ **L3 detailed** — per-SM state with sort-and-select balancing.
+   HB + FB; balancing tracks the polarity of the desired contribution
+   and the sign of `i_b`.
 
 ---
 
-## 8. Open questions
+## 8. Resolved design choices
 
-* Should `m_b` be an input-port (callable / signal) or a state we
-  update via the BlockChain executor? Probably the latter for L2/L3
-  (control loops live in BlockChain land), but L0 can stay as a
-  callable for simplicity.
-* For L2, do we discretise the dead-time monostables on the simulation
-  step `T_s` (cheap, slight phase error) or on a sub-step grid
-  (faithful, more bookkeeping)? Thesis sec 3.4.2 takes the former; we
-  follow.
-* L3 balancing: which canonical algorithm do we ship by default —
-  thesis sec 5.1.1 (Sousa's intra-arm scheme) or the classic
-  Tu/Hu/Xu sort-and-select? The thesis one explicitly addresses
-  `T_m` and seems the right default for medium-voltage IGBTs.
+The original "open questions" section is preserved here for historical
+context; each was settled during implementation.
+
+* **`m_b` as callable vs state.** L0 ships as a callable
+  (`m_b: float | Callable[[float], float]` on `add_mmc_arm_average`);
+  L1–L3 also take a per-step reference signal that the user updates
+  inside `step_observer` or via a BlockChain executor. Control loops
+  remain a user concern — the arm exposes the knobs and observers.
+* **L2 monostable discretisation.** We follow the thesis: monostables
+  are evaluated on the simulation step `T_s` (cheap, small phase
+  error). Sub-step grids were not needed to match the validation
+  baselines.
+* **L3 balancing.** Sort-and-select per Tu/Hu/Xu (2011) is the default,
+  extended to signed insertion counts for FB. Variants can be plugged
+  in by the user (the kernel exposes the per-SM voltages each step).
 
 ---
 
-*This document grows as we implement each layer. Section 9+ will be
+*This document grows as the implementation evolves. Section 9+ will be
 filled in with measured benchmarks and observed gotchas.*

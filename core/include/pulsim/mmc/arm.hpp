@@ -295,12 +295,24 @@ struct StepMultilevelResult {
 // L2 — SM-equivalent arm step (dead-time + min-pulse-width).
 // ----------------------------------------------------------------------------
 //
-// Each SM tracks (bit_s1, bit_s2) and a dead-time timer. Sub-module
-// transitions trigger a free-wheel window of width ``t_dead`` during
-// which both transistors are off — current then routes through the
-// body diodes (D2 conducts when ``i_b > 0`` ⇒ SM bypassed; D1 conducts
-// when ``i_b < 0`` ⇒ SM inserted). ``t_min`` suppresses any per-SM
-// toggle that would happen within ``t_min`` of the previous toggle.
+// Each SM tracks (bit_s1, bit_s2) and a dead-time timer.
+//
+// **Half-bridge** (``sm_type = HalfBridge``):
+//   bit_s1 == 1 → SM inserted (output = +v_C); bit_s2 == 1 → bypassed
+//   (output = 0). Both bits 0 → all 4 transistors off → free-wheel
+//   through body diodes. Current routing: ``i_b > 0`` ⇒ D2 conducts
+//   (bypass), ``i_b < 0`` ⇒ D1 conducts (inserted).
+//
+// **Full-bridge** (``sm_type = FullBridge``):
+//   bit_s1 == 1 → SM inserted POSITIVELY (output = +v_C, via S1a + S2b).
+//   bit_s2 == 1 → SM inserted NEGATIVELY (output = -v_C, via S1b + S2a).
+//   Both bits 0 → either bypass (S1a+S1b or S2a+S2b on, output 0) OR
+//   dead-time (all 4 off). During dead-time the body diodes route
+//   current OPPOSITE to its sign: ``i_b > 0`` ⇒ output = -v_C (D2a + D1b
+//   conduct); ``i_b < 0`` ⇒ output = +v_C (D1a + D2b conduct).
+//
+// ``t_min`` suppresses any per-SM toggle that would happen within
+// ``t_min`` of the previous toggle, on both topologies.
 //
 // The state arrays are mutated in-place. Caller is responsible for
 // sizing them to ``n_sm`` and seeding initial values via
@@ -308,8 +320,10 @@ struct StepMultilevelResult {
 
 struct StepEquivalentResult {
     Real v_b;
-    Index s_w;     // count of "defined inserted" SMs (S1 on)
-    Index s_u;     // count of free-wheel SMs (both off)
+    Index s_w;     // count of "+inserted" SMs (bit_s1 = 1)
+    Index s_u;     // count of free-wheel / bypass SMs (both bits 0)
+    Index s_n;     // count of "-inserted" SMs (bit_s2 = 1, FB only;
+                   // always 0 for HB)
 };
 
 [[nodiscard]] inline StepEquivalentResult mmc_arm_equivalent_step(
@@ -328,20 +342,29 @@ struct StepEquivalentResult {
     Real t_dead,
     Real t_min,
     Real r_p_inv = Real{0.0},
-    ModulationScheme scheme = ModulationScheme::PsPwm) {
+    ModulationScheme scheme = ModulationScheme::PsPwm,
+    SubmoduleType sm_type = SubmoduleType::HalfBridge) {
 
     if (dt <= Real{0.0}) {
         throw std::invalid_argument(
             "mmc_arm_equivalent_step: dt must be > 0");
     }
 
-    const Real m_clamped = (m_ref < Real{0.0})
-        ? Real{0.0}
-        : (m_ref > Real{1.0} ? Real{1.0} : m_ref);
+    // Clamp m_ref to the topology's valid range.
+    //   HB:  m_ref ∈ [0, 1]
+    //   FB:  m_ref ∈ [-1, 1]
+    const bool is_fb = (sm_type == SubmoduleType::FullBridge);
+    const Real m_lo = is_fb ? Real{-1.0} : Real{0.0};
+    Real m_clamped = m_ref;
+    if (m_clamped < m_lo)       m_clamped = m_lo;
+    else if (m_clamped > Real{1.0}) m_clamped = Real{1.0};
+    // FB comparators run on |m_clamped|; the sign is applied later
+    // (gives ±contribution per SM). For HB ``m_sign = +1`` so the
+    // existing logic is unaffected.
+    const Real m_abs  = is_fb ? std::fabs(m_clamped) : m_clamped;
+    const std::int8_t m_sign = is_fb && (m_clamped < Real{0.0}) ? -1 : +1;
 
     // ---- IPD: precompute the shared triangle + integer base s_b.
-    // All SMs below ``s_base`` always want to be on; the SM at index
-    // ``s_base`` follows the triangle comparator; the rest want off.
     Index ipd_s_base = 0;
     Real ipd_m_frac = Real{0.0};
     Real ipd_tri = Real{0.0};
@@ -351,58 +374,74 @@ struct StepEquivalentResult {
         ipd_tri = (phase_ipd < Real{0.5})
             ? Real{2.0} * phase_ipd
             : Real{2.0} * (Real{1.0} - phase_ipd);
-        const Real m_scaled = m_clamped * static_cast<Real>(n_sm);
+        const Real m_scaled = m_abs * static_cast<Real>(n_sm);
         ipd_s_base = static_cast<Index>(std::floor(m_scaled));
         if (ipd_s_base > n_sm) ipd_s_base = n_sm;
         ipd_m_frac = m_scaled - static_cast<Real>(ipd_s_base);
     }
 
     for (Index k = 0; k < n_sm; ++k) {
-        std::int8_t target;
+        // Target *magnitude* per SM (1 = active, 0 = bypass) — the
+        // FB sign is encoded later as (target_pos, target_neg).
+        std::int8_t target_mag;
         if (scheme == ModulationScheme::Ipd) {
-            // IPD assignment: SMs 0..s_base-1 ON, SM at s_base
-            // follows the triangle, rest OFF.
             if (k < ipd_s_base) {
-                target = 1;
+                target_mag = 1;
             } else if (k == ipd_s_base) {
-                target = (ipd_m_frac > ipd_tri) ? 1 : 0;
+                target_mag = (ipd_m_frac > ipd_tri) ? 1 : 0;
             } else {
-                target = 0;
+                target_mag = 0;
             }
         } else {
-            // PS-PWM target bit for SM k at time t.
+            // PS-PWM comparator for SM k.
             const Real raw = t * f_carrier +
                 static_cast<Real>(k) / static_cast<Real>(n_sm);
             const Real phase = raw - std::floor(raw);
             const Real tri = (phase < Real{0.5})
                 ? Real{2.0} * phase
                 : Real{2.0} * (Real{1.0} - phase);
-            target = (m_clamped > tri) ? 1 : 0;
+            target_mag = (m_abs > tri) ? 1 : 0;
+        }
+        // Encode target into the (bit_s1, bit_s2) pair:
+        //   HB: target_mag=1 ⇒ (1,0) inserted; =0 ⇒ (0,1) bypass.
+        //   FB: target_mag·m_sign = +1 ⇒ (1,0) +inserted;
+        //                          = 0 ⇒ (0,0) bypass;
+        //                          = -1 ⇒ (0,1) -inserted.
+        std::int8_t tgt_s1, tgt_s2;
+        if (!is_fb) {
+            tgt_s1 = target_mag;
+            tgt_s2 = static_cast<std::int8_t>(1 - target_mag);
+        } else {
+            tgt_s1 = (target_mag != 0 && m_sign > 0) ? 1 : 0;
+            tgt_s2 = (target_mag != 0 && m_sign < 0) ? 1 : 0;
         }
 
         if (in_dead_time_until[k] > Real{0.0} &&
             t >= in_dead_time_until[k]) {
-            // Dead-time elapsed → commit the toggle.
-            bit_s1[k] = target;
-            bit_s2[k] = static_cast<std::int8_t>(1 - target);
+            // Dead-time elapsed → commit the new state.
+            bit_s1[k] = tgt_s1;
+            bit_s2[k] = tgt_s2;
             in_dead_time_until[k] = -std::numeric_limits<Real>::infinity();
         } else if (in_dead_time_until[k] <= Real{0.0}) {
             // Not in dead-time — check whether a toggle is needed.
-            if (target != bit_s1[k]) {
-                // Min-pulse-width guard.
+            // For HB, only ``bit_s1`` matters; for FB the full
+            // (bit_s1, bit_s2) pair encodes the ternary state.
+            const bool toggle = (tgt_s1 != bit_s1[k]) ||
+                                 (tgt_s2 != bit_s2[k]);
+            if (toggle) {
                 if (t_min > Real{0.0} &&
                     (t - last_toggle_time[k]) < t_min) {
-                    continue;  // suppress this toggle
+                    continue;  // suppress
                 }
-                // Begin dead-time: both switches open.
+                // Enter dead-time: all driven switches open.
                 bit_s1[k] = 0;
                 bit_s2[k] = 0;
                 in_dead_time_until[k] = t + t_dead;
                 last_toggle_time[k] = t;
-                // If t_dead == 0, the transition is instantaneous.
                 if (t_dead == Real{0.0}) {
-                    bit_s1[k] = target;
-                    bit_s2[k] = static_cast<std::int8_t>(1 - target);
+                    // Instantaneous transition (no dead-time modelled).
+                    bit_s1[k] = tgt_s1;
+                    bit_s2[k] = tgt_s2;
                     in_dead_time_until[k] =
                         -std::numeric_limits<Real>::infinity();
                 }
@@ -410,23 +449,38 @@ struct StepEquivalentResult {
         }
     }
 
-    Index s_w = 0;
-    Index s_u = 0;
+    Index s_w = 0;   // +inserted
+    Index s_n = 0;   // -inserted (FB only)
+    Index s_u = 0;   // dead-time / bypass (both bits 0)
     for (Index k = 0; k < n_sm; ++k) {
-        if (bit_s1[k] != 0) ++s_w;
-        else if (bit_s2[k] == 0) ++s_u;
+        if      (bit_s1[k] != 0) ++s_w;
+        else if (bit_s2[k] != 0) ++s_n;
+        else                       ++s_u;
     }
 
-    // Current-direction routing: i_b > 0 bypasses free-wheel SMs;
-    // i_b < 0 inserts them.
-    const Index s_eff = (i_b < Real{0.0}) ? (s_w + s_u) : s_w;
+    // Effective signed insertion count (per SM contribution in {-1, 0, +1}).
+    // Free-wheel / dead-time SMs get a current-direction-dependent override:
+    //   HB:  i_b > 0 ⇒ bypassed (contribute 0); i_b < 0 ⇒ inserted (+1).
+    //   FB:  i_b > 0 ⇒ -1 contribution (D2a + D1b conduct);
+    //        i_b < 0 ⇒ +1 contribution (D1a + D2b conduct).
+    Index s_eff;
+    if (!is_fb) {
+        // Original HB behaviour preserved: s_u SMs add to "inserted"
+        // count when i_b < 0.
+        s_eff = (i_b < Real{0.0}) ? (s_w + s_u) : s_w;
+    } else {
+        const Index dt_contrib = (i_b > Real{0.0}) ? -s_u
+                              : (i_b < Real{0.0}) ? +s_u
+                                                  : Index{0};
+        s_eff = s_w - s_n + dt_contrib;
+    }
     const Real m_b_eff = static_cast<Real>(s_eff) /
                           static_cast<Real>(n_sm);
     const Real v_b = m_b_eff * v_C;
     const Real leak = v_C * r_p_inv;
     const Real dv_dt = (m_b_eff * i_b - leak) / c_arm;
     v_C = v_C + dt * dv_dt;
-    return StepEquivalentResult{v_b, s_w, s_u};
+    return StepEquivalentResult{v_b, s_w, s_u, s_n};
 }
 
 // ----------------------------------------------------------------------------
@@ -443,8 +497,19 @@ struct StepDetailedResult {
     Index s_b;
 };
 
-// Fills ``insertion_mask`` (length n_sm) with the boolean pattern of
-// which SMs to insert this step. Returns the number of inserted SMs.
+// Fills ``insertion_mask`` (length n_sm) with the per-SM signed
+// insertion pattern: ``+1`` = inserted positively, ``-1`` = inserted
+// negatively (full-bridge only), ``0`` = bypassed. Returns the
+// SIGNED number of inserted SMs (= ``s_b`` after clamping).
+//
+// For half-bridge the mask values are always in {0, +1} and the
+// behaviour matches the previous implementation exactly. For
+// full-bridge the mask values are in {-1, 0, +1}; the *direction*
+// of insertion is taken from ``sign(s_b)`` (since FB SMs can
+// contribute ±v_C). Charging vs discharging is determined by the
+// sign of ``i_b · sign(s_b)``: positive ⇒ insert the SMs with the
+// *lowest* v_C (they need charging); negative ⇒ insert the *highest*
+// (they need discharging).
 inline Index balance_select(
     const Real* v_C_per_sm,
     Index n_sm,
@@ -453,9 +518,9 @@ inline Index balance_select(
     BalancingScheme scheme,
     std::int8_t* insertion_mask) {
 
-    // Clamp s_b to [0, n_sm].
-    Index s = s_b;
-    if (s < 0) s = 0;
+    // Decompose into sign and magnitude.
+    const std::int8_t sgn = (s_b > 0) ? +1 : (s_b < 0 ? -1 : 0);
+    Index s = (s_b < 0) ? -s_b : s_b;     // |s_b|
     if (s > n_sm) s = n_sm;
 
     if (s == 0) {
@@ -463,19 +528,18 @@ inline Index balance_select(
         return 0;
     }
     if (s >= n_sm) {
-        std::fill(insertion_mask, insertion_mask + n_sm, 1);
-        return n_sm;
+        std::fill(insertion_mask, insertion_mask + n_sm, sgn);
+        return sgn * n_sm;
     }
     if (scheme == BalancingScheme::None) {
         std::fill(insertion_mask, insertion_mask + n_sm, 0);
         for (Index k = 0; k < s; ++k) {
-            insertion_mask[k] = 1;
+            insertion_mask[k] = sgn;
         }
-        return s;
+        return sgn * s;
     }
 
-    // Sort-and-select. We build an index array, sort by v_C, then
-    // pick either the lowest s (charging) or highest s (discharging).
+    // Sort-and-select. Build index array sorted by v_C ascending.
     std::vector<Index> idx(static_cast<std::size_t>(n_sm));
     std::iota(idx.begin(), idx.end(), Index{0});
     std::stable_sort(idx.begin(), idx.end(),
@@ -483,20 +547,23 @@ inline Index balance_select(
             return v_C_per_sm[a] < v_C_per_sm[b];
         });
 
+    // Charging vs discharging is determined by sign(i_b · sgn):
+    //   sign(i_b)·sgn > 0 → the inserted SMs CHARGE  → pick LOWEST v_C
+    //   sign(i_b)·sgn < 0 → the inserted SMs DISCHARGE → pick HIGHEST v_C
+    const bool insert_low = (i_b * static_cast<Real>(sgn) >= Real{0.0});
+
     std::fill(insertion_mask, insertion_mask + n_sm, 0);
-    if (i_b >= Real{0.0}) {
-        // Charging — insert lowest s.
+    if (insert_low) {
         for (Index k = 0; k < s; ++k) {
-            insertion_mask[idx[static_cast<std::size_t>(k)]] = 1;
+            insertion_mask[idx[static_cast<std::size_t>(k)]] = sgn;
         }
     } else {
-        // Discharging — insert highest s.
         for (Index k = 0; k < s; ++k) {
             insertion_mask[
-                idx[static_cast<std::size_t>(n_sm - 1 - k)]] = 1;
+                idx[static_cast<std::size_t>(n_sm - 1 - k)]] = sgn;
         }
     }
-    return s;
+    return sgn * s;
 }
 
 [[nodiscard]] inline StepDetailedResult mmc_arm_detailed_step(
@@ -524,17 +591,21 @@ inline Index balance_select(
     balance_select(
         v_C_per_sm, n_sm, s_b, i_b, scheme, insertion_mask);
 
+    // ``insertion_mask`` is signed: {-1, 0, +1}. For HB only +1/0
+    // are ever produced; for FB the −1 entries represent SMs
+    // inserted in the reverse direction (output −v_C).
     Real v_b = Real{0.0};
     for (Index k = 0; k < n_sm; ++k) {
-        if (insertion_mask[k] != 0) {
-            v_b += v_C_per_sm[k];
-        }
+        v_b += static_cast<Real>(insertion_mask[k]) * v_C_per_sm[k];
     }
 
     // Per-SM forward Euler:
-    //   dv_C_n/dt = (insertion_n · i_b − v_C_n · r_p_inv_per_sm) / c_sm
+    //   dv_C_n/dt = (sign_n · i_b − v_C_n · r_p_inv_per_sm) / c_sm
+    // where sign_n ∈ {-1, 0, +1} from the signed insertion_mask.
+    // A negatively-inserted SM (FB) sees current −i_b across its cap,
+    // which is exactly what the sign in the multiplication encodes.
     for (Index k = 0; k < n_sm; ++k) {
-        const Real ins = (insertion_mask[k] != 0) ? Real{1.0} : Real{0.0};
+        const Real ins  = static_cast<Real>(insertion_mask[k]);
         const Real leak = v_C_per_sm[k] * r_p_inv_per_sm;
         const Real dv_dt = (ins * i_b - leak) / c_sm;
         v_C_per_sm[k] = v_C_per_sm[k] + dt * dv_dt;

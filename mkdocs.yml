@@ -128,6 +128,7 @@ nav:
       - 'Tutorial 06 — IGBT Boost': tutorials/06-igbt-boost.md
       - 'Motors — Induction (Phase 2)': motors-induction.md
       - 'Motors — Sensorless Observers (Phase 2)': motors-sensorless.md
+      - 'Modular Multilevel Converters (MMC)': mmc.md
       - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
@@ -155,6 +156,7 @@ nav:
       - 'Layer 4 — PWL State-Space Cache': internals/layer4-pwl-state-space-cache.md
       - 'Layer 4 V1 — Trapezoidal Companion': internals/layer4-v1-trapezoidal-companion.md
       - 'Layer 10 — Benchmarks': internals/layer10-benchmarks.md
+      - 'MMC Arm Block — design doc': internals/mmc-arm-block.md
   - Operations:
       - Build System: build-system.md
       - Performance Tuning: performance-tuning.md

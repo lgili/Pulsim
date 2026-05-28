@@ -1,18 +1,26 @@
 """Modular Multilevel Converter (MMC) models.
 
-Phase 20 — L0 of the layered MMC block hierarchy. This module ships the
-**average-value arm model**: one state per arm (``v_C``, the sum of the
-submodule capacitor voltages), continuous modulation index
-``m_b ∈ [0, 1]`` (half-bridge) or ``m_b ∈ [-1, 1]`` (full-bridge), and
-forward-Euler integration of the capacitor dynamics.
+Layered MMC arm block hierarchy. Four fidelity levels are exposed,
+each sharing the same external port shape so the user can swap layers
+without changing topology:
+
+* **L0** — average-value arm (one state, continuous ``m_b``).
+* **L1** — multilevel quantised switching (PS-PWM / IPD).
+* **L2** — SM-equivalent with dead-time + min-pulse-width.
+* **L3** — per-SM detailed with sort-and-select balancing.
+
+Both submodule topologies are supported across every layer:
+``"half_bridge"`` (``m_b ∈ [0, 1]``) and ``"full_bridge"``
+(``m_b ∈ [-1, 1]``). Per-step math lives in
+``core/include/pulsim/mmc/arm.hpp``; this module owns the Python
+dataclasses, builder integration, observers, and time-series drivers.
 
 Reference
 =========
 
-Sousa, Gean Jacques Maia de.
-*Sistemas de Controle para a Operação Eficiente de Conversores
-Modulares Multiníveis em Acionamentos Elétricos.*
-PhD thesis, UFSC, 2022. — ``artigos/Gean Jacques Maia de Sousa.pdf``
+Sousa (2022), *Sistemas de Controle para a Operação Eficiente de
+Conversores Modulares Multiníveis em Acionamentos Elétricos.*
+PhD thesis, UFSC.
 
 Average-arm equations (thesis eqs 2.13, 2.14)
 =============================================
@@ -46,9 +54,12 @@ API
 * :func:`mmc_arm_average_step` — pure one-step advance (for users who
   want to embed the arm in their own outer loop).
 
-The L1 (discrete multilevel), L2 (SM-equivalent with dead-time +
-min-pulse-width), and L3 (per-SM detailed) blocks live in follow-up
-phases. See ``docs/internals/mmc-arm-block.md`` for the full roadmap.
+L1/L2/L3 share the same shape: ``MmcArm*Params`` + ``simulate_mmc_arm_*``
+drivers + ``add_mmc_arm_*`` builder helpers + ``make_mmc_arm_*_observer``
+factories. The three-phase topology helper
+:func:`add_mmc_three_phase_dc_ac` wires six L0 arms + arm inductors in
+one call. See ``docs/mmc.md`` (user guide) and
+``docs/internals/mmc-arm-block.md`` (design doc).
 """
 
 from __future__ import annotations
@@ -1198,8 +1209,10 @@ class MmcArmEquivalentParams:
     Attributes:
         n_sm: Number of submodules per arm (≥ 1).
         c_sm: Per-SM capacitance [F]. ``C_arm = c_sm / n_sm``.
-        sm_type: ``"half_bridge"``. Full-bridge L2 is a follow-up
-            (the dead-time bookkeeping doubles per FB SM).
+        sm_type: ``"half_bridge"`` or ``"full_bridge"``. FB SMs
+            output ±v_C with a per-SM ternary state encoded in the
+            ``(bit_s1, bit_s2)`` pair (``(1,0)`` = +inserted,
+            ``(0,1)`` = -inserted, ``(0,0)`` = bypass / dead-time).
         v_c0: Initial capacitor-sum voltage [V].
         r_p: Optional parallel loss resistance [Ω].
         f_carrier: PS-PWM carrier frequency per SM [Hz].
@@ -1225,10 +1238,10 @@ class MmcArmEquivalentParams:
             raise ValueError(f"n_sm must be ≥ 1 (got {self.n_sm})")
         if self.c_sm <= 0:
             raise ValueError(f"c_sm must be > 0 (got {self.c_sm})")
-        if self.sm_type != "half_bridge":
+        if self.sm_type not in ("half_bridge", "full_bridge"):
             raise ValueError(
-                f"L2 ships half-bridge only for now "
-                f"(got {self.sm_type!r}); full-bridge is a follow-up",
+                f"sm_type must be 'half_bridge' or 'full_bridge' "
+                f"(got {self.sm_type!r})",
             )
         if self.r_p is not None and self.r_p <= 0:
             raise ValueError(f"r_p must be > 0 when set (got {self.r_p})")
@@ -1256,7 +1269,7 @@ class MmcArmEquivalentParams:
 
     @property
     def m_min(self) -> float:
-        return 0.0
+        return -1.0 if self.sm_type == "full_bridge" else 0.0
 
     @property
     def m_max(self) -> float:
@@ -1311,7 +1324,7 @@ def mmc_arm_equivalent_step(
     dt: float,
     t: float,
     params: MmcArmEquivalentParams,
-) -> "tuple[float, int, int]":
+) -> "tuple[float, int, int, int]":
     """Advance the L2 SM-equivalent arm by one forward-Euler step.
 
     Mutates ``state`` in place (advances ``state.v_C`` and the
@@ -1321,17 +1334,20 @@ def mmc_arm_equivalent_step(
 
     Args:
         state: Live L2 state (see :func:`make_l2_state`).
-        m_ref: Reference modulation index ``∈ [0, 1]``.
+        m_ref: Reference modulation index. Range: ``[0, 1]`` for
+            half-bridge SMs, ``[-1, +1]`` for full-bridge.
         i_b: Arm current [A] — sign determines free-wheel routing.
         dt: Time step [s] (> 0).
         t: Current time [s].
-        params: Arm configuration (dead-time, min-pulse-width, …).
+        params: Arm configuration (sm_type, dead-time, min-pulse, …).
 
     Returns:
-        ``(v_b, s_w, s_u)``:
+        ``(v_b, s_w, s_u, s_n)``:
             * ``v_b`` — arm-generated voltage at this step [V].
-            * ``s_w`` — number of "defined inserted" SMs (S1 closed).
-            * ``s_u`` — number of free-wheeling SMs (both off).
+            * ``s_w`` — number of positively-inserted SMs (bit_s1 = 1).
+            * ``s_u`` — number of free-wheel / bypass SMs (both bits 0).
+            * ``s_n`` — number of negatively-inserted SMs (FB only;
+              always 0 for HB).
 
     Notes:
         ``dt`` must satisfy
@@ -1342,7 +1358,7 @@ def mmc_arm_equivalent_step(
         raise ValueError(f"dt must be > 0 (got {dt})")
 
     r_p_inv = (1.0 / params.r_p) if params.r_p is not None else 0.0
-    v_C_next, v_b, s_w, s_u = _cpp_eq_step(
+    v_C_next, v_b, s_w, s_u, s_n = _cpp_eq_step(
         float(state.v_C),
         state.bit_s1, state.bit_s2,
         state.in_dead_time_until, state.last_toggle_time,
@@ -1352,14 +1368,19 @@ def mmc_arm_equivalent_step(
         float(params.t_dead), float(params.t_min),
         float(r_p_inv),
         params.modulation_scheme,
+        params.sm_type,
     )
     state.v_C = v_C_next
-    return v_b, int(s_w), int(s_u)
+    return v_b, int(s_w), int(s_u), int(s_n)
 
 
 @dataclass(frozen=True)
 class MmcArmEquivalentResult:
-    """Output of :func:`simulate_mmc_arm_equivalent`."""
+    """Output of :func:`simulate_mmc_arm_equivalent`.
+
+    ``s_n`` is only populated for full-bridge runs (counts negatively-
+    inserted SMs); it is identically zero for half-bridge.
+    """
 
     t: np.ndarray
     v_C: np.ndarray
@@ -1369,6 +1390,7 @@ class MmcArmEquivalentResult:
     s_u: np.ndarray
     i_b: np.ndarray
     params: MmcArmEquivalentParams = field(repr=False)
+    s_n: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
 
 
 def simulate_mmc_arm_equivalent(
@@ -1425,8 +1447,10 @@ def simulate_mmc_arm_equivalent(
     m_ref_arr = np.zeros(n_points)
     s_w_arr = np.zeros(n_points, dtype=np.int64)
     s_u_arr = np.zeros(n_points, dtype=np.int64)
+    s_n_arr = np.zeros(n_points, dtype=np.int64)
     i_b_arr = np.zeros(n_points)
 
+    is_fb = (params.sm_type == "full_bridge")
     for k, tk in enumerate(t_arr):
         m_k = float(m_ref_fn(tk))
         i_k = float(i_b_fn(tk))
@@ -1434,23 +1458,30 @@ def simulate_mmc_arm_equivalent(
         i_b_arr[k] = i_k
         v_C_arr[k] = state.v_C
         if k < n_points - 1:
-            v_b, s_w, s_u = mmc_arm_equivalent_step(
+            v_b, s_w, s_u, s_n = mmc_arm_equivalent_step(
                 state, m_k, i_k, dt, float(tk), params,
             )
             v_b_arr[k] = v_b
             s_w_arr[k] = s_w
             s_u_arr[k] = s_u
+            s_n_arr[k] = s_n
         else:
             # Compute v_b at the final sample without advancing v_C.
             n = params.n_sm
             s_w = int(state.bit_s1.sum())
+            s_n = int(state.bit_s2.sum()) if is_fb else 0
             s_u = int(
                 ((state.bit_s1 == 0) & (state.bit_s2 == 0)).sum()
             )
-            s_eff = s_w + (s_u if i_k < 0 else 0)
+            if is_fb:
+                dt_contrib = -s_u if i_k > 0 else (+s_u if i_k < 0 else 0)
+                s_eff = s_w - s_n + dt_contrib
+            else:
+                s_eff = s_w + (s_u if i_k < 0 else 0)
             v_b_arr[k] = (s_eff / n) * state.v_C
             s_w_arr[k] = s_w
             s_u_arr[k] = s_u
+            s_n_arr[k] = s_n
 
     return MmcArmEquivalentResult(
         t=t_arr,
@@ -1461,6 +1492,7 @@ def simulate_mmc_arm_equivalent(
         s_u=s_u_arr,
         i_b=i_b_arr,
         params=params,
+        s_n=s_n_arr,
     )
 
 
@@ -1507,7 +1539,11 @@ class MmcArmDetailedParams:
     Attributes:
         n_sm: Number of submodules per arm.
         c_sm: Per-SM capacitance [F].
-        sm_type: ``"half_bridge"`` only at this layer.
+        sm_type: ``"half_bridge"`` (s_b ∈ {0..N}, mask ∈ {0, +1})
+            or ``"full_bridge"`` (s_b ∈ {-N..N}, mask ∈ {-1, 0, +1}).
+            FB SMs contribute ±v_C per insertion direction; the
+            sort-and-select policy picks the lowest- or highest-
+            voltage SMs based on the sign of ``i_b · sign(s_b)``.
         v_c0: Initial **arm-sum** voltage [V]; each SM starts at
             ``v_c0 / n_sm``. Pass a heterogeneous initial-state
             array directly via :func:`make_l3_state` if you want
@@ -1534,9 +1570,9 @@ class MmcArmDetailedParams:
             raise ValueError(f"n_sm must be ≥ 1 (got {self.n_sm})")
         if self.c_sm <= 0:
             raise ValueError(f"c_sm must be > 0 (got {self.c_sm})")
-        if self.sm_type != "half_bridge":
+        if self.sm_type not in ("half_bridge", "full_bridge"):
             raise ValueError(
-                f"L3 ships half-bridge only for now "
+                f"sm_type must be 'half_bridge' or 'full_bridge' "
                 f"(got {self.sm_type!r})",
             )
         if self.r_p is not None and self.r_p <= 0:
@@ -1567,7 +1603,7 @@ class MmcArmDetailedParams:
 
     @property
     def m_min(self) -> float:
-        return 0.0
+        return -1.0 if self.sm_type == "full_bridge" else 0.0
 
     @property
     def m_max(self) -> float:
@@ -2093,7 +2129,7 @@ def make_mmc_arm_equivalent_observers(
         for k, arm in enumerate(arms):
             i_b = float(x[src_indices[k]])
             m_k = float(arm.m_ref_fn(t))
-            v_b, _s_w, _s_u = mmc_arm_equivalent_step(
+            v_b, _s_w, _s_u, _s_n = mmc_arm_equivalent_step(
                 arm.state, m_k, i_b, dt, t, arm.params,
             )
             # Stash the v_b just computed for the next b_extra call.

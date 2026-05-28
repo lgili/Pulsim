@@ -2567,7 +2567,8 @@ void init_module(py::module_& m) {
              Real m_ref, Real i_b, Real dt, Real t,
              Index n_sm, Real c_arm, Real f_carrier,
              Real t_dead, Real t_min, Real r_p_inv,
-             const std::string& modulation_scheme) {
+             const std::string& modulation_scheme,
+             const std::string& sm_type) {
               if (bit_s1.size() != n_sm || bit_s2.size() != n_sm ||
                   in_dead_time_until.size() != n_sm ||
                   last_toggle_time.size() != n_sm) {
@@ -2578,6 +2579,10 @@ void init_module(py::module_& m) {
                   (modulation_scheme == "ipd")
                       ? mmc::ModulationScheme::Ipd
                       : mmc::ModulationScheme::PsPwm;
+              const mmc::SubmoduleType type =
+                  (sm_type == "full_bridge")
+                      ? mmc::SubmoduleType::FullBridge
+                      : mmc::SubmoduleType::HalfBridge;
               const auto res = mmc::mmc_arm_equivalent_step(
                   v_C,
                   bit_s1.mutable_data(),
@@ -2585,11 +2590,12 @@ void init_module(py::module_& m) {
                   in_dead_time_until.mutable_data(),
                   last_toggle_time.mutable_data(),
                   m_ref, i_b, dt, t, n_sm, c_arm, f_carrier,
-                  t_dead, t_min, r_p_inv, sch);
+                  t_dead, t_min, r_p_inv, sch, type);
               return py::make_tuple(
                   v_C, res.v_b,
                   static_cast<py::int_>(res.s_w),
-                  static_cast<py::int_>(res.s_u));
+                  static_cast<py::int_>(res.s_u),
+                  static_cast<py::int_>(res.s_n));
           },
           py::arg("v_C"), py::arg("bit_s1"), py::arg("bit_s2"),
           py::arg("in_dead_time_until"), py::arg("last_toggle_time"),
@@ -2598,9 +2604,11 @@ void init_module(py::module_& m) {
           py::arg("f_carrier"), py::arg("t_dead"), py::arg("t_min"),
           py::arg("r_p_inv") = Real{0.0},
           py::arg("modulation_scheme") = "ps_pwm",
+          py::arg("sm_type") = "half_bridge",
           "C++ hotpath: L2 SM-equivalent forward-Euler step "
           "(dead-time + min-pulse-width). State arrays are mutated "
-          "in place. Returns `(v_C_next, v_b, s_w, s_u)`.");
+          "in place. Returns `(v_C_next, v_b, s_w, s_u, s_n)` where "
+          "``s_n`` counts negatively-inserted SMs (full-bridge only).");
 
     m.def("_cpp_mmc_arm_detailed_step",
           [](py::array_t<Real, py::array::c_style |
