@@ -192,6 +192,17 @@ from .fast_block import (
 # Module access: `import pulsim.fast_block` or
 # `sys.modules['pulsim.fast_block']`; `pulsim.fast_block` itself
 # resolves to the decorator (re-exported above).
+from .topology import (
+    BuckResult,
+    BoostResult,
+    FlybackResult,
+    add_buck,
+    add_boost,
+    add_flyback,
+    add_bridge_rectifier,
+    add_three_phase_vsi,
+    add_three_phase_rl_load,
+)
 from .grid import (
     add_three_phase_grid,
     add_three_phase_line_impedance,
@@ -451,6 +462,16 @@ __all__ = [
     # PSIM/PLECS-style JIT control block (Numba — optional dep).
     "FastBlock",
     "fast_block",
+    # SMPS topology factories (v1.5 ergonomics).
+    "BuckResult",
+    "BoostResult",
+    "FlybackResult",
+    "add_buck",
+    "add_boost",
+    "add_flyback",
+    "add_bridge_rectifier",
+    "add_three_phase_vsi",
+    "add_three_phase_rl_load",
     # Three-phase grid helpers (Phase C.2).
     "add_three_phase_grid",
     "add_three_phase_line_impedance",
@@ -785,6 +806,68 @@ def _result_power(self, device_name: str) -> float:
 SimulationResult.v = _result_v          # type: ignore[attr-defined]
 SimulationResult.i = _result_i          # type: ignore[attr-defined]
 SimulationResult.power = _result_power  # type: ignore[attr-defined]
+
+
+def _result_plot(self, *signals, save=None, show=None, **kwargs):
+    """Plot one or more signals from this simulation result.
+
+    Each ``signal`` can be:
+
+    * ``"vout"``, ``"node_name"`` — a node voltage. Resolved via
+      :meth:`~SimulationResult.v`.
+    * ``"L1"``, ``"R_load"``, ``"M1"``, ... — a branch current.
+      Resolved via :meth:`~SimulationResult.i`.
+
+    The result must carry a back-reference to its builder (which
+    :func:`simulate` sets automatically). Standalone
+    ``run_transient`` consumers without the builder attached must
+    use :func:`pulsim.scope` directly.
+
+    Parameters
+    ----------
+    signals
+        Variable-length list of signal names. Each must resolve as
+        either a node voltage or a branch current — unknown names
+        raise :class:`NameNotFoundError` with the same fuzzy
+        "Did you mean ...?" suggestion path used by
+        :meth:`SimulationResult.v` / :meth:`.i`.
+    save
+        Optional path; passed through to :func:`pulsim.scope`.
+    show
+        If ``True`` (default when called interactively), display
+        the figure. If ``False``, just return it.
+    **kwargs
+        Forwarded into :func:`pulsim.scope` (titles, axes options,
+        etc.).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure produced by :func:`pulsim.scope`.
+
+    Raises
+    ------
+    AttributeError
+        If the result has no `_builder` back-reference. Use
+        :func:`pulsim.scope(builder, result, signals=[...])` for
+        that case.
+    NameNotFoundError
+        If any signal can't be resolved as a node OR a branch.
+    """
+    builder = getattr(self, "_builder", None)
+    if builder is None:
+        raise AttributeError(
+            "SimulationResult.plot() requires the result to carry a "
+            "back-reference to its builder. Use "
+            "`pulsim.scope(builder, result, signals=[...])` directly "
+            "when the result came from `run_transient` without going "
+            "through `simulate()`.")
+    from .plot import scope as _scope
+    return _scope(builder, self, signals=list(signals),
+                    save=save, show=show, **kwargs)
+
+
+SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
 
 
 def simulate(

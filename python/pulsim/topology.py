@@ -35,9 +35,15 @@ __all__ = [
     "BridgeRectifierResult",
     "ThreePhaseVsiResult",
     "ThreePhaseRLLoadResult",
+    "BuckResult",
+    "BoostResult",
+    "FlybackResult",
     "add_bridge_rectifier",
     "add_three_phase_vsi",
     "add_three_phase_rl_load",
+    "add_buck",
+    "add_boost",
+    "add_flyback",
 ]
 
 
@@ -371,4 +377,331 @@ def add_three_phase_rl_load(builder,
         emit_leg("AB", node_a, node_b, 1.0,     1.0)
         emit_leg("BC", node_b, node_c, scale_b, scale_b)
         emit_leg("CA", node_c, node_a, scale_c, scale_c)
+    return out
+
+
+# =============================================================================
+# SMPS topology factories
+# =============================================================================
+#
+# These collapse the 5–8 ``add_*`` calls that a typical DC/DC plant
+# needs into one call. They DON'T compose a switch_fn — the caller
+# still drives the switch with their own PWM/PI/controller. That's a
+# deliberate split: plant and control stay decoupled, the way every
+# textbook keeps them.
+
+@dataclass
+class BuckResult:
+    """Output of :func:`add_buck`. Carries the deterministic device
+    names + branch ids the caller needs to wire control / probe
+    waveforms."""
+    switch_name: str = ""
+    switch_branch_id: int = -1
+    diode_name: str = ""
+    inductor_name: str = ""
+    inductor_branch_id: int = -1
+    capacitor_name: str = ""
+    load_name: str = ""
+    suggested_dt: float = 1e-7  # 1/10 of a 1 MHz switching period
+
+
+@dataclass
+class BoostResult:
+    """Output of :func:`add_boost`."""
+    switch_name: str = ""
+    switch_branch_id: int = -1
+    diode_name: str = ""
+    inductor_name: str = ""
+    inductor_branch_id: int = -1
+    capacitor_name: str = ""
+    load_name: str = ""
+    suggested_dt: float = 1e-7
+
+
+@dataclass
+class FlybackResult:
+    """Output of :func:`add_flyback`. Holds the primary + secondary
+    branch ids so the caller can probe both windings."""
+    switch_name: str = ""
+    switch_branch_id: int = -1
+    primary_name: str = ""
+    primary_branch_id: int = -1
+    secondary_name: str = ""
+    secondary_branch_id: int = -1
+    diode_name: str = ""
+    capacitor_name: str = ""
+    load_name: str = ""
+    suggested_dt: float = 1e-7
+
+
+def _suggested_dt_for(f_sw: float) -> float:
+    """Heuristic: aim for ≥ 100 samples per switching period so PWM
+    edges and ringing on L/C aren't aliased."""
+    if f_sw <= 0:
+        return 1e-7
+    return 1.0 / (100.0 * f_sw)
+
+
+def add_buck(builder,
+              name: str = "buck",
+              *,
+              vin_node: str = "vin",
+              vout_node: str = "vout",
+              gnd_node: str = "gnd",
+              V_in: float = 48.0,
+              L: float = 100e-6,
+              C: float = 100e-6,
+              R_load: float = 4.0,
+              f_sw: float = 100e3,
+              g_on: float = 1e3,
+              g_off: float = 1e-9,
+              diode_g_on: float = 1e3,
+              diode_g_off: float = 1e-6,
+              V_th: float = 0.0,
+              ) -> BuckResult:
+    """Add a synchronous-rectifier-style buck power stage.
+
+    Topology::
+
+        V_in ──HS────┬──── L ──── V_out ──┬── R_load ── gnd
+                     │                     │
+                     ⊽ D                  ═══ C
+                     │                     │
+                    gnd                   gnd
+
+    Devices added (with deterministic names):
+
+      * `{name}__Vin`   — DC source `vin_node` ↔ `gnd_node`, voltage `V_in`
+      * `{name}__HS`    — ideal switch `vin_node` ↔ `sw_mid`
+      * `{name}__D`     — freewheeling diode `gnd_node` ↔ `sw_mid`
+      * `{name}__L`     — inductor `sw_mid` ↔ `vout_node`
+      * `{name}__C`     — output capacitor `vout_node` ↔ `gnd_node`
+      * `{name}__R`     — load resistor `vout_node` ↔ `gnd_node`
+
+    The intermediate `sw_mid` node is auto-named `{name}__sw`.
+
+    The function **does not** wire a PWM driver. The caller drives the
+    switch via `simulate(switch_fn=...)` with their own PWM helper
+    (see :func:`pulsim.make_pwm_switch_fn`) and may close the loop via
+    :class:`pulsim.ClosedLoop` (`bind_pi_to_switch`).
+
+    Parameters
+    ----------
+    builder
+        A :class:`CircuitBuilder`. The function appends to it.
+    name
+        Prefix for the auto-created device + intermediate node names.
+        Default ``"buck"``.
+    vin_node, vout_node, gnd_node
+        External node names for the source, output, and ground rails.
+        Defaults wire the buck to a topology with `vin`/`vout`/`gnd`
+        rails ready to connect to upstream / downstream devices.
+    V_in, L, C, R_load
+        Component values (V / H / F / Ω).
+    f_sw
+        Nominal switching frequency (Hz). Used only to compute
+        `suggested_dt`; the caller picks the actual PWM frequency.
+    g_on, g_off
+        High-side switch on/off conductances. Default 1 kS / 1 nS
+        (R_on = 1 mΩ, R_off = 1 GΩ).
+    diode_g_on, diode_g_off, V_th
+        Diode parameters. Default 1 kS / 1 µS / 0 V.
+
+    Returns
+    -------
+    BuckResult
+        Device names + branch ids for wiring loss summaries,
+        thermal models, control. `suggested_dt` = 1 / (100·f_sw).
+    """
+    if V_in <= 0:
+        raise ValueError("add_buck: V_in must be > 0")
+    if L <= 0:
+        raise ValueError("add_buck: L must be > 0")
+    if C <= 0:
+        raise ValueError("add_buck: C must be > 0")
+    if R_load <= 0:
+        raise ValueError("add_buck: R_load must be > 0")
+    if f_sw <= 0:
+        raise ValueError("add_buck: f_sw must be > 0")
+
+    sw_mid = f"{name}__sw"
+    out = BuckResult(
+        switch_name=f"{name}__HS",
+        diode_name=f"{name}__D",
+        inductor_name=f"{name}__L",
+        capacitor_name=f"{name}__C",
+        load_name=f"{name}__R",
+        suggested_dt=_suggested_dt_for(f_sw),
+    )
+
+    builder.add_voltage_source(f"{name}__Vin", vin_node, gnd_node, V_in)
+
+    out.switch_branch_id = int(builder.graph.num_branches)
+    builder.add_switch(out.switch_name, vin_node, sw_mid,
+                          g_on=g_on, g_off=g_off)
+
+    builder.add_diode(out.diode_name, gnd_node, sw_mid,
+                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)
+
+    out.inductor_branch_id = int(builder.graph.num_branches)
+    builder.add_inductor(out.inductor_name, sw_mid, vout_node, L)
+
+    builder.add_capacitor(out.capacitor_name, vout_node, gnd_node, C)
+    builder.add_resistor(out.load_name, vout_node, gnd_node, R_load)
+    return out
+
+
+def add_boost(builder,
+               name: str = "boost",
+               *,
+               vin_node: str = "vin",
+               vout_node: str = "vout",
+               gnd_node: str = "gnd",
+               V_in: float = 12.0,
+               L: float = 100e-6,
+               C: float = 100e-6,
+               R_load: float = 50.0,
+               f_sw: float = 100e3,
+               g_on: float = 1e3,
+               g_off: float = 1e-9,
+               diode_g_on: float = 1e3,
+               diode_g_off: float = 1e-6,
+               V_th: float = 0.0,
+               ) -> BoostResult:
+    """Add a boost power stage.
+
+    Topology::
+
+                ┌── L ──┬── D ── V_out ──┬── R_load ── gnd
+                │        │                │
+        V_in ───┤        LS              ═══ C
+                │        │                │
+               gnd      gnd              gnd
+
+    Devices added: `{name}__Vin`, `{name}__L`, `{name}__LS`,
+    `{name}__D`, `{name}__C`, `{name}__R`. Intermediate switch /
+    inductor node: `{name}__sw`.
+
+    Same docstring + same caller contract as :func:`add_buck`.
+    """
+    if V_in <= 0:
+        raise ValueError("add_boost: V_in must be > 0")
+    if L <= 0 or C <= 0 or R_load <= 0:
+        raise ValueError("add_boost: L, C, R_load must be > 0")
+    if f_sw <= 0:
+        raise ValueError("add_boost: f_sw must be > 0")
+
+    sw_mid = f"{name}__sw"
+    out = BoostResult(
+        switch_name=f"{name}__LS",
+        diode_name=f"{name}__D",
+        inductor_name=f"{name}__L",
+        capacitor_name=f"{name}__C",
+        load_name=f"{name}__R",
+        suggested_dt=_suggested_dt_for(f_sw),
+    )
+
+    builder.add_voltage_source(f"{name}__Vin", vin_node, gnd_node, V_in)
+
+    out.inductor_branch_id = int(builder.graph.num_branches)
+    builder.add_inductor(out.inductor_name, vin_node, sw_mid, L)
+
+    out.switch_branch_id = int(builder.graph.num_branches)
+    builder.add_switch(out.switch_name, sw_mid, gnd_node,
+                          g_on=g_on, g_off=g_off)
+
+    builder.add_diode(out.diode_name, sw_mid, vout_node,
+                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)
+
+    builder.add_capacitor(out.capacitor_name, vout_node, gnd_node, C)
+    builder.add_resistor(out.load_name, vout_node, gnd_node, R_load)
+    return out
+
+
+def add_flyback(builder,
+                 name: str = "flyback",
+                 *,
+                 vin_node: str = "vin",
+                 vout_node: str = "vout",
+                 gnd_node: str = "gnd",
+                 V_in: float = 48.0,
+                 L_pri: float = 200e-6,
+                 L_sec: float = 200e-6,
+                 k: float = 0.99,
+                 C: float = 100e-6,
+                 R_load: float = 10.0,
+                 f_sw: float = 100e3,
+                 g_on: float = 1e3,
+                 g_off: float = 1e-9,
+                 diode_g_on: float = 1e3,
+                 diode_g_off: float = 1e-6,
+                 V_th: float = 0.0,
+                 ) -> FlybackResult:
+    """Add a flyback power stage.
+
+    Topology::
+
+        V_in ──┬── Lp(prim) ── LS ── gnd
+               │
+              gnd
+               ┌── Ls(sec) ── D ── V_out ──┬── R_load ── gnd
+               │                            │
+              sec_ret                      ═══ C
+               │                            │
+              gnd                          gnd
+
+    Coupled inductors `Lp` (primary) and `Ls` (secondary) with
+    coupling coefficient `k`.
+
+    Devices added: `{name}__Vin`, `{name}__Lp`, `{name}__Ls`,
+    `{name}__LS`, `{name}__D`, `{name}__C`, `{name}__R`.
+    Intermediate nodes: `{name}__sw` (primary-switch midpoint),
+    `{name}__sec` (secondary-winding midpoint).
+    """
+    if V_in <= 0:
+        raise ValueError("add_flyback: V_in must be > 0")
+    if not (0 < k <= 1):
+        raise ValueError(
+            f"add_flyback: k must be in (0, 1], got {k}")
+    if L_pri <= 0 or L_sec <= 0 or C <= 0 or R_load <= 0:
+        raise ValueError(
+            "add_flyback: L_pri, L_sec, C, R_load must be > 0")
+    if f_sw <= 0:
+        raise ValueError("add_flyback: f_sw must be > 0")
+
+    sw_mid = f"{name}__sw"
+    sec_mid = f"{name}__sec"
+    out = FlybackResult(
+        switch_name=f"{name}__LS",
+        primary_name=f"{name}__Lp",
+        secondary_name=f"{name}__Ls",
+        diode_name=f"{name}__D",
+        capacitor_name=f"{name}__C",
+        load_name=f"{name}__R",
+        suggested_dt=_suggested_dt_for(f_sw),
+    )
+
+    builder.add_voltage_source(f"{name}__Vin", vin_node, gnd_node, V_in)
+
+    out.primary_branch_id = int(builder.graph.num_branches)
+    builder.add_inductor(out.primary_name, vin_node, sw_mid, L_pri)
+
+    out.switch_branch_id = int(builder.graph.num_branches)
+    builder.add_switch(out.switch_name, sw_mid, gnd_node,
+                          g_on=g_on, g_off=g_off)
+
+    out.secondary_branch_id = int(builder.graph.num_branches)
+    builder.add_inductor(out.secondary_name, sec_mid, gnd_node, L_sec)
+
+    # Couple the two inductors. Builder API exposes
+    # add_inductor_coupling(name_a, name_b, k).
+    if hasattr(builder, "add_inductor_coupling"):
+        builder.add_inductor_coupling(
+            out.primary_name, out.secondary_name, k)
+
+    builder.add_diode(out.diode_name, sec_mid, vout_node,
+                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)
+
+    builder.add_capacitor(out.capacitor_name, vout_node, gnd_node, C)
+    builder.add_resistor(out.load_name, vout_node, gnd_node, R_load)
     return out
