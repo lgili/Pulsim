@@ -224,3 +224,62 @@ def test_device_thermal_summary_empty_specs_yields_empty_list() -> None:
     b, *_ = _dc_resistor_with_thermal_spec()
     res = p.simulate(b, t_end=1e-3, dt=1e-5)
     assert p.device_thermal_summary(b, res, thermal_specs={}) == []
+
+
+def test_device_thermal_summary_inductor_core_loss_folds_in() -> None:
+    """Inductor with Steinmetz core-loss spec: P_core_avg must
+    appear on the thermal entry AND drive T_j above ambient.
+    Confirms the pipeline `core_loss_specs → P_core_avg → T_j`
+    is wired end-to-end (regression for the bug where the field
+    was computed but omitted from the output dict)."""
+    f0 = 1000.0
+    V_pk = 50.0
+    R, L = 5.0, 1e-3
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "vin", "gnd",
+                                v_dc=0.0, v_amplitude=V_pk,
+                                frequency=f0, phase=0.0)
+    b.add_inductor("L1", "vin", "mid", L)
+    b.add_resistor("R1", "mid", "gnd", R)
+    res = p.simulate(b, t_end=20.0 / f0, dt=1.0 / (f0 * 200))
+
+    stages = [p.FosterStage(R_th_K_per_W=10.0, tau_s=1e-3)]
+    out = p.device_thermal_summary(
+        b, res,
+        thermal_specs={"L1": {"stages": stages,
+                                 "T_ambient_C": 25.0}},
+        core_loss_specs={"L1": {"material": "N87",
+                                     "N_turns": 50,
+                                     "A_core": 1e-4,
+                                     "V_core": 5e-6}},
+    )
+    e = next(x for x in out if x["kind"] == "inductor")
+    assert "P_core_avg" in e
+    assert e["P_core_avg"] > 0.0
+    # Ideal inductor → P_cond ≈ 0; total drive comes from P_core.
+    assert math.isclose(e["P_cond_avg"], 0.0, abs_tol=1e-9)
+    assert math.isclose(e["P_total_avg"], e["P_core_avg"],
+                          rel_tol=1e-9)
+    # T_j must rise above ambient.
+    assert e["T_j_peak"] > e["T_ambient_C"]
+
+
+def test_inductor_core_loss_bad_geometry_raises() -> None:
+    """`_inductor_core_loss` previously silently returned 0 for
+    non-positive geometry; now it must raise so the user notices
+    the bad spec."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "vin", "gnd",
+                                v_dc=0.0, v_amplitude=10.0,
+                                frequency=1000.0, phase=0.0)
+    b.add_inductor("L1", "vin", "mid", 1e-3)
+    b.add_resistor("R1", "mid", "gnd", 5.0)
+    res = p.simulate(b, t_end=2e-3, dt=5e-6)
+    with pytest.raises(ValueError, match="strictly positive"):
+        p.device_loss_summary(
+            b, res,
+            core_loss_specs={"L1": {"material": "N87",
+                                         "N_turns": 0,  # invalid
+                                         "A_core": 1e-4,
+                                         "V_core": 5e-6}},
+        )

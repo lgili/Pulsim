@@ -557,6 +557,41 @@ def test_switch_specs_requires_ref_pair() -> None:
                                      "I_ref": 1.0}})
 
 
+def test_unknown_spec_name_raises_loudly() -> None:
+    """`device_loss_summary` must refuse unknown names in any of the
+    `*_specs` mappings — consistent with `device_thermal_summary`
+    and in line with the "no silent defaults" rule. A typo is a
+    user bug, not a free no-op."""
+    V_dc = 5.0
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", V_dc)
+    b.add_resistor("R1", "vin", "mid", 1.0)
+    b.add_diode("D1", "mid", "gnd", g_on=100.0, g_off=1e-6, V_th=0.0)
+    b.add_switch("SW1", "mid", "gnd", g_on=100.0, g_off=1e-9)
+
+    def closed(_t: float):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        return m
+
+    res = p.simulate(b, t_end=1e-3, dt=1e-5, switch_fn=closed)
+
+    bad_payloads = [
+        ("diode_specs", {"D_TYPO": {"Q_rr": 1e-9}}),
+        ("switch_specs", {"SW_NOPE": {"E_on_ref": 1e-6,
+                                            "E_off_ref": 1e-6,
+                                            "V_ref": V_dc,
+                                            "I_ref": 1.0}}),
+        ("core_loss_specs", {"L_NOT_THERE": {"material": "N87",
+                                                   "N_turns": 10,
+                                                   "A_core": 1e-4,
+                                                   "V_core": 1e-6}}),
+    ]
+    for kw, payload in bad_payloads:
+        with pytest.raises(KeyError, match="no device|not found"):
+            p.device_loss_summary(b, res, switch_fn=closed,
+                                       **{kw: payload})
+
+
 def test_switch_specs_zero_when_no_e_refs() -> None:
     """If neither E_on_ref nor E_off_ref is positive the switching
     loss must be zero (no datasheet ⇒ no annotation), but the
