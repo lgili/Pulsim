@@ -594,7 +594,7 @@ def device_thermal_summary(
 
             {"branch_id": int, "kind": str, "name": str,
              "P_cond_avg": float, "P_sw_avg": float,
-             "P_total_avg": float,
+             "P_core_avg": float, "P_total_avg": float,
              "T_j_trace": np.ndarray,  # °C
              "T_j_avg": float, "T_j_peak": float,
              "T_ambient_C": float,
@@ -746,6 +746,7 @@ def device_thermal_summary(
             "name": name,
             "P_cond_avg": P_cond_avg,
             "P_sw_avg": P_sw_avg,
+            "P_core_avg": P_core_avg,
             "P_total_avg": P_cond_avg + P_constant,
             "T_j_trace": T_j_trace,
             "T_j_avg": float(np.mean(T_j_trace)),

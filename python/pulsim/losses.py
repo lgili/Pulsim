@@ -518,8 +518,9 @@ def _inductor_core_loss(i_arr: np.ndarray,
     A = float(spec["A_core"])
     V = float(spec["V_core"])
     if N <= 0 or A <= 0 or V <= 0:
-        return {"P_core_avg": 0.0, "E_core_total": 0.0,
-                "B_peak": 0.0}
+        raise ValueError(
+            f"core_loss_specs requires N_turns, A_core and V_core "
+            f"all strictly positive; got N={N}, A={A}, V={V}.")
     material = _resolve_core_material(spec)
 
     # Reconstruct flux density B(t) = L · i(t) / (N · A).
@@ -531,9 +532,11 @@ def _inductor_core_loss(i_arr: np.ndarray,
     if use_igse:
         try:
             P_v = float(_magnetic.igse_loss_density(B, times, material))
-        except Exception:
-            # iGSE needs ≥1 period; if the trace is shorter than a
-            # cycle the call can fail. Fall back to Steinmetz.
+        except ValueError:
+            # iGSE rejects traces shorter than one period or with
+            # non-positive ΔB (DC-only signal). Fall through to the
+            # Steinmetz path, which handles those degenerate cases
+            # gracefully.
             use_igse = False
     if not use_igse:
         # Steinmetz needs a frequency. Estimate from FFT if not given.

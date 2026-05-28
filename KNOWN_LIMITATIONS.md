@@ -14,34 +14,47 @@ can pick it up without re-discovering the context.
 
 ## Post-hoc analysis
 
-### Per-device loss reporting — switching transients
+### Per-device loss reporting — sub-step transient resolution
 
-`pulsim.device_loss_summary(builder, result)` walks every **resistor**,
-**inductor**, **ideal-switch** and **switched-diode** branch and
-reports `i_avg`, `i_rms`, `i_peak`, plus `P_avg`/`E_total`. The
-switch path requires the caller to forward the same
-`switch_fn=` that drove the simulation (so the per-step mask can
-be sampled deterministically). The diode path infers the
-conducting interval from the node-voltage drop and `V_th`. Optional
-`core_loss_specs=` adds Steinmetz / iGSE core loss on selected
-inductors using the `pulsim.magnetic` material catalogue.
+`pulsim.device_loss_summary(builder, result)` walks every
+**resistor**, **inductor**, **ideal-switch** and
+**switched-diode** branch and reports `i_avg`, `i_rms`, `i_peak`,
+plus `P_avg`/`E_total`. The switch path requires the caller to
+forward the same `switch_fn=` that drove the simulation. The
+diode path infers the conducting interval from the node-voltage
+drop and `V_th`. PSIM-style datasheet annotations are accepted:
 
-What is **not** covered post-hoc:
+* `diode_specs={"D1": {"Q_rr": ...}}` or
+  `{"E_rr_ref": ..., "V_R_ref": ...}` — reverse-recovery energy
+  per turn-off event, accumulated from
+  `SimulationResult.commutation_events`.
+* `switch_specs={"M1": {"E_on_ref": ..., "E_off_ref": ...,
+  "V_ref": ..., "I_ref": ...}}` — MOSFET/IGBT turn-on / turn-off
+  energy scaled linearly by the (V_blocking, I_load) at each
+  switch_fn edge.
+* `core_loss_specs={"L1": {"material": "N87", ...}}` —
+  Steinmetz / iGSE inductor core loss from `pulsim.magnetic`.
 
-* **Switching-transient energy** (turn-on / turn-off `E_sw`) for
-  MOSFET/IGBT devices — the kernel's discrete trap step doesn't
-  resolve the nanosecond-scale current overlap. Use
-  `LossAccumulator.add_switching_event(E_sw)` from a step observer
-  with datasheet `E_on` / `E_off` numbers when this matters.
-* **Diode reverse-recovery charge** `Q_rr · V_R · f_sw` — same
-  reason; the ideal `SwitchedDiode` model is hard-commuted with no
-  reverse recovery.
+`pulsim.device_thermal_summary(builder, result, thermal_specs=...)`
+pipes the same loss data through a per-device Foster network to
+produce `T_j(t)`.
 
-**Workaround for sub-step accuracy.** Build a state-aware
-`step_observer` and feed `LossAccumulator.add_sample(P_cond, dt)`
-plus `add_switching_event(E_sw)` from inside it — that path is
-exact at the dt grid and lets you plug datasheet switching-energy
-curves.
+What is **still not** covered post-hoc:
+
+* **In-sim switching-transient waveforms** (nanosecond V/I overlap
+  at the switching edge) — the kernel's discrete trap step doesn't
+  resolve sub-dt transitions, so the on-state `i_SW` and the
+  off-state `v_SW` are interpreted as block-averaged samples.
+  The PSIM-style annotation captures the right *energy*, not the
+  *instantaneous* trajectory. For waveform-level accuracy on a
+  given event, drop the dt to ≪ T_sw or use a sub-step model.
+
+**When LossAccumulator still helps.** A state-aware
+`step_observer` calling `LossAccumulator.add_sample(P_cond, dt)`
++ `add_switching_event(E_sw)` remains the right tool when you
+need per-event energy bookkeeping driven by a custom datasheet
+curve (e.g. `E_on(I, T_j)`) that doesn't fit the
+linear-scaling `*_specs` shape.
 
 ---
 

@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <numbers>
 #include <string>
 #include <utility>
 
@@ -27,6 +28,10 @@ namespace pulsim::observers {
 
 using blockchain::BlockChain;
 using blockchain::ChainContext;
+
+namespace {
+constexpr Real kTwoPi = Real{2} * std::numbers::pi_v<Real>;
+}  // namespace
 
 // =============================================================================
 // SlidingModeObserver — PMSM sensorless angle/speed
@@ -36,7 +41,7 @@ struct SlidingModeObserverParams {
     Real Rs = Real{0.5};                  // stator resistance per phase [Ω]
     Real Ls = Real{200e-6};               // stator inductance per phase [H]
     Real K_sl = Real{50.0};               // sliding-mode gain [V]
-    Real omega_lpf = Real{2.0} * Real{3.14159265358979323846}
+    Real omega_lpf = kTwoPi
                       * Real{500.0};      // LPF cutoff [rad/s]
     Real Kp_pll = Real{200.0};
     Real Ki_pll = Real{1e4};
@@ -81,7 +86,7 @@ inline void add_sliding_mode_observer_to_chain(
 
     auto state = std::make_shared<detail::SmoState>();
     state->omega_hat =
-        Real{2} * Real{3.14159265358979323846} * params.f_init_hz;
+        kTwoPi * params.f_init_hz;
 
     auto step = [state, params,
                     v_alpha_channel = std::move(v_alpha_channel),
@@ -129,14 +134,13 @@ inline void add_sliding_mode_observer_to_chain(
         state->pll_integ += params.Ki_pll * ctx.dt * e_phase;
         const Real delta_omega = params.Kp_pll * e_phase
                                     + state->pll_integ;
-        state->omega_hat = Real{2} * Real{3.14159265358979323846}
+        state->omega_hat = kTwoPi
                               * params.f_init_hz + delta_omega;
         state->theta_hat += state->omega_hat * ctx.dt;
         // Wrap to [0, 2π).
-        const Real two_pi = Real{2} * Real{3.14159265358979323846};
-        state->theta_hat = std::fmod(state->theta_hat, two_pi);
+        state->theta_hat = std::fmod(state->theta_hat, kTwoPi);
         if (state->theta_hat < Real{0}) {
-            state->theta_hat += two_pi;
+            state->theta_hat += kTwoPi;
         }
 
         // 4. Outputs.
@@ -162,7 +166,7 @@ inline void add_sliding_mode_observer_to_chain(
         state->e_hat_beta  = Real{0};
         state->theta_hat   = Real{0};
         state->omega_hat   =
-            Real{2} * Real{3.14159265358979323846} * params.f_init_hz;
+            kTwoPi * params.f_init_hz;
         state->pll_integ   = Real{0};
     };
     chain.add(std::move(step), std::move(reset));
