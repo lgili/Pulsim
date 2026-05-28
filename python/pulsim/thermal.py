@@ -50,6 +50,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from . import _result_views as _views
+from . import losses as _losses
+
 
 __all__ = [
     "FosterStage",
@@ -520,25 +523,10 @@ def make_thermal_observer(builder,
 # =============================================================================
 # Post-hoc convenience: per-device P(t) → T_j(t) pipeline
 # =============================================================================
-
-def _states_as_array(result) -> np.ndarray:
-    s = result.states
-    if hasattr(s, "shape"):
-        return np.asarray(s, dtype=float)
-    return np.asarray([list(v) for v in s], dtype=float)
-
-
-def _node_voltage(states: np.ndarray, node_id: int) -> np.ndarray:
-    if node_id < 0:
-        return np.zeros(states.shape[0], dtype=float)
-    return states[:, node_id]
-
-
-def _eval_mask_trace(switch_fn, times, switch_idx) -> np.ndarray:
-    out = np.zeros(times.size, dtype=bool)
-    for k, t in enumerate(times):
-        out[k] = bool(switch_fn(float(t)).get(int(switch_idx)))
-    return out
+#
+# The result-walk primitives (states_as_array, node_voltage_trace,
+# evaluate_switch_mask_trace) are shared with :mod:`pulsim.losses` via
+# :mod:`pulsim._result_views`.
 
 
 def device_thermal_summary(
@@ -611,15 +599,10 @@ def device_thermal_summary(
       via :func:`pulsim.device_loss_summary` and added to the
       constant offset.
     """
-    # Lazy import to avoid an import cycle (losses → thermal? no —
-    # losses doesn't depend on thermal, but we keep the import
-    # here for symmetry with the rest of the module's local helpers).
-    from . import losses as _losses
-
     if not thermal_specs:
         return []
 
-    states = _states_as_array(result)
+    states = _views.states_as_array(result)
     times = np.asarray(result.times, dtype=float)
 
     # Resolve thermal_specs into branch_id-keyed mapping.
@@ -689,8 +672,8 @@ def device_thermal_summary(
             if not (np.isfinite(R) and R > 0) or from_id is None \
                     or to_id is None:
                 continue
-            v_R = (_node_voltage(states, int(from_id))
-                   - _node_voltage(states, int(to_id)))
+            v_R = (_views.node_voltage_trace(states, int(from_id))
+                   - _views.node_voltage_trace(states, int(to_id)))
             P_cond_t = v_R * v_R / R
         elif kind == "inductor":
             # Ideal inductor — conduction loss is zero. Any thermal
@@ -705,8 +688,8 @@ def device_thermal_summary(
             if not (np.isfinite(g_on) and np.isfinite(g_off)) \
                     or from_id is None or to_id is None:
                 continue
-            v_D = (_node_voltage(states, int(from_id))
-                   - _node_voltage(states, int(to_id)))
+            v_D = (_views.node_voltage_trace(states, int(from_id))
+                   - _views.node_voltage_trace(states, int(to_id)))
             g_arr = np.where(v_D > V_th, g_on, g_off)
             P_cond_t = v_D * v_D * g_arr
         elif kind == "switch":
@@ -725,9 +708,10 @@ def device_thermal_summary(
             sidx = switch_seq_idx_by_bid.get(bid)
             if sidx is None:
                 continue
-            closed = _eval_mask_trace(switch_fn, times, sidx)
-            v_SW = (_node_voltage(states, int(from_id))
-                    - _node_voltage(states, int(to_id)))
+            closed = _views.evaluate_switch_mask_trace(
+                switch_fn, times, sidx)
+            v_SW = (_views.node_voltage_trace(states, int(from_id))
+                    - _views.node_voltage_trace(states, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
             P_cond_t = v_SW * v_SW * g_arr
         else:

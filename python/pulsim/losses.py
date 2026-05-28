@@ -37,10 +37,11 @@ binding changes are required for v1.6 closure.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Union  # noqa: F401
+from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
 import numpy as np
 
+from . import _result_views as _views
 from . import magnetic as _magnetic
 
 
@@ -199,19 +200,16 @@ class EfficiencyCalculator:
 # =============================================================================
 # Post-hoc helpers — work on a SimulationResult
 # =============================================================================
+#
+# The result-walk primitives (``states_as_array``,
+# ``node_voltage_trace``, ``evaluate_switch_mask_trace``) live in
+# :mod:`pulsim._result_views` and are shared with :mod:`pulsim.thermal`.
+# Module-local aliases keep the call sites short.
 
-def _states_as_array(result) -> np.ndarray:
-    """Convert SimulationResult.states (list of vectors or numpy array)
-    to a 2D numpy array shape (N, state_size)."""
-    s = result.states
-    if hasattr(s, "shape"):
-        return np.asarray(s, dtype=float)
-    return np.asarray([list(v) for v in s], dtype=float)
-
-
-def _times_as_array(result) -> np.ndarray:
-    t = result.times
-    return np.asarray(t, dtype=float)
+_states_as_array = _views.states_as_array
+_times_as_array = _views.times_as_array
+_node_voltage_trace = _views.node_voltage_trace
+_evaluate_switch_mask_trace = _views.evaluate_switch_mask_trace
 
 
 def average_power_at_node(builder,
@@ -255,14 +253,6 @@ def average_power_at_node(builder,
     return float(np.trapezoid(P, times) / (times[-1] - times[0]))
 
 
-def _node_voltage_trace(states: np.ndarray, node_id: int) -> np.ndarray:
-    """Return the voltage trace for ``node_id``. Ground (id < 0) is
-    treated as the reference and reported as a zero trace."""
-    if node_id < 0:
-        return np.zeros(states.shape[0], dtype=float)
-    return states[:, node_id]
-
-
 # ---------------------------------------------------------------
 # Helpers for the diode / switch / magnetic paths.
 # ---------------------------------------------------------------
@@ -297,18 +287,6 @@ def _conduction_stats(v: np.ndarray,
         "E_total": float(np.trapezoid(p, times)) if times.size > 1
                      else 0.0,
     }
-
-
-def _evaluate_switch_mask_trace(switch_fn: Callable[[float], Any],
-                                 times: np.ndarray,
-                                 switch_idx: int) -> np.ndarray:
-    """Sample ``switch_fn(t).get(switch_idx)`` at every result time
-    and return a boolean ndarray of length len(times)."""
-    out = np.zeros(times.size, dtype=bool)
-    for k, t in enumerate(times):
-        mask = switch_fn(float(t))
-        out[k] = bool(mask.get(int(switch_idx)))
-    return out
 
 
 def _diode_switching_loss(events_for_branch,
@@ -620,7 +598,9 @@ def device_loss_summary(
     core_loss_specs : mapping, optional
         Per-inductor core-loss configuration. Keys are inductor
         branch *names* (preferred, case-sensitive) or numeric
-        branch ids. Values are mappings with::
+        branch ids. **Unknown names / ids raise ``KeyError``** —
+        the helper refuses to silently ignore a typo. Values are
+        mappings with::
 
             {"material": "N87" | CoreMaterial,
              "N_turns": int, "A_core": float (m²),
@@ -686,37 +666,45 @@ def device_loss_summary(
         comps_by_bid = {c["branch_id"]: c for c in builder.components()}
     except Exception:
         comps_by_bid = {}
+    known_names = {c.get("name") for c in comps_by_bid.values()
+                     if c.get("name")}
+    known_bids = set(comps_by_bid)
 
-    # Build per-inductor core-loss spec lookup that accepts BOTH
-    # the branch name and the branch_id.
-    core_by_bid: Dict[int, Mapping[str, Any]] = {}
-    core_by_name: Dict[str, Mapping[str, Any]] = {}
-    if core_loss_specs is not None:
-        for key, spec in core_loss_specs.items():
+    def _build_spec_lookup(
+        specs: Optional[Mapping[Any, Mapping[str, Any]]],
+        kw: str,
+    ) -> tuple[Dict[int, Mapping[str, Any]],
+                  Dict[str, Mapping[str, Any]]]:
+        """Split a ``{name|bid: spec}`` mapping into name- and
+        bid-keyed lookups, raising loudly on unknown references."""
+        by_bid: Dict[int, Mapping[str, Any]] = {}
+        by_name: Dict[str, Mapping[str, Any]] = {}
+        if specs is None:
+            return by_bid, by_name
+        for key, spec in specs.items():
             if isinstance(key, int):
-                core_by_bid[key] = spec
+                if key not in known_bids:
+                    raise KeyError(
+                        f"{kw}: branch_id={key!r} not found in the "
+                        f"builder (known ids: {sorted(known_bids)}).")
+                by_bid[key] = spec
             else:
-                core_by_name[str(key)] = spec
+                k_str = str(key)
+                if k_str not in known_names:
+                    raise KeyError(
+                        f"{kw}: no device named {k_str!r} in the "
+                        f"builder (known names: {sorted(known_names)}).")
+                by_name[k_str] = spec
+        return by_bid, by_name
 
-    # Same dual lookup for diode datasheet annotations.
-    diode_by_bid: Dict[int, Mapping[str, Any]] = {}
-    diode_by_name: Dict[str, Mapping[str, Any]] = {}
-    if diode_specs is not None:
-        for key, spec in diode_specs.items():
-            if isinstance(key, int):
-                diode_by_bid[key] = spec
-            else:
-                diode_by_name[str(key)] = spec
-
-    # And for ideal-switch (MOSFET/IGBT-equivalent) datasheet annotations.
-    switch_by_bid: Dict[int, Mapping[str, Any]] = {}
-    switch_by_name: Dict[str, Mapping[str, Any]] = {}
-    if switch_specs is not None:
-        for key, spec in switch_specs.items():
-            if isinstance(key, int):
-                switch_by_bid[key] = spec
-            else:
-                switch_by_name[str(key)] = spec
+    # Build per-spec lookups (name + bid keyed) with strict validation
+    # — unknown references are user errors, not silent skips.
+    core_by_bid, core_by_name = _build_spec_lookup(
+        core_loss_specs, "core_loss_specs")
+    diode_by_bid, diode_by_name = _build_spec_lookup(
+        diode_specs, "diode_specs")
+    switch_by_bid, switch_by_name = _build_spec_lookup(
+        switch_specs, "switch_specs")
 
     # Bucket commutation events by branch_id so the diode handler
     # can iterate only its own.

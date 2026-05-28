@@ -76,10 +76,11 @@ def _add_induction_motor_block(chain, builder, spec: Mapping[str, Any]):
 
     # Pull motor parameters back from the original YAML device? We
     # require the user to re-state R_s / L_s / R_r / L_r / L_m /
-    # pole_pairs in the chain spec — the loader doesn't keep them in
-    # an indexed structure that we can re-query. This duplication
-    # would go away once the chain section becomes a true compiler
-    # pass that reads both topology and chain in one shot (v1.6).
+    # pole_pairs in the chain spec — the loader doesn't keep them
+    # in an indexed structure that we can re-query. The duplication
+    # would go away once the chain section becomes a true loader
+    # pass that walks topology and chain in one go; until then,
+    # the YAML schema explicitly mirrors the C++ adapter signature.
     chain.add_induction_motor(
         J=float(spec.get("J", 1e-6)),
         B=float(spec.get("B", 0.0)),
