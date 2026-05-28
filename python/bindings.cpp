@@ -191,24 +191,25 @@ void init_module(py::module_& m) {
               "\"gnd\" / \"GND\" / \"0\" alias to ground.")
         .def("add_voltage_source",
               &builder::CircuitBuilder::add_voltage_source,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"), py::arg("V"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("V"),
               py::return_value_policy::reference,
               "Add a DC voltage source. V in volts.")
         .def("add_current_source",
               &builder::CircuitBuilder::add_current_source,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"), py::arg("I"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("I"),
               py::return_value_policy::reference,
               "Add a DC current source. I in amperes. "
-              "EE convention: I flows OUT of `from` (the "
+              "EE convention: I flows OUT of `n_pos` (the "
               "+ terminal) into the external circuit, "
-              "back to `to`. Does NOT add a branch-current "
-              "unknown — the current is fixed at I.")
+              "back to `n_neg`. Does NOT add a "
+              "branch-current unknown — the current is "
+              "fixed at I.")
         .def("add_pwm_voltage_source",
               &builder::CircuitBuilder::add_pwm_voltage_source,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"),
               py::arg("v_high"), py::arg("v_low"),
               py::arg("frequency"), py::arg("duty"),
               py::arg("phase") = 0.0,
@@ -220,8 +221,8 @@ void init_module(py::module_& m) {
               "run_transient — no b_extra_fn lambda needed.")
         .def("add_sine_voltage_source",
               &builder::CircuitBuilder::add_sine_voltage_source,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"),
               py::arg("v_dc"), py::arg("v_amplitude"),
               py::arg("frequency"), py::arg("phase") = 0.0,
               py::return_value_policy::reference,
@@ -234,8 +235,8 @@ void init_module(py::module_& m) {
               "studies, audio-amp testing.")
         .def("add_pulse_voltage_source",
               &builder::CircuitBuilder::add_pulse_voltage_source,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"),
               py::arg("v_initial"), py::arg("v_pulsed"),
               py::arg("t_start"), py::arg("pulse_width"),
               py::arg("period") = 0.0,
@@ -316,14 +317,14 @@ void init_module(py::module_& m) {
               "loop stamps the MOSFET each iteration.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"), py::arg("R_ohms"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("R_ohms"),
               py::return_value_policy::reference,
               "Add a linear resistor. R in ohms.")
         .def("add_capacitor",
               &builder::CircuitBuilder::add_capacitor,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"), py::arg("C_farads"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("C_farads"),
               py::arg("c0") = std::nullopt,
               py::return_value_policy::reference,
               "Add a linear capacitor. C in farads.\n"
@@ -332,13 +333,13 @@ void init_module(py::module_& m) {
               "to seed the cap's positive-terminal node.")
         .def("add_inductor",
               &builder::CircuitBuilder::add_inductor,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"), py::arg("L_henries"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("L_henries"),
               py::arg("i0") = std::nullopt,
               py::return_value_policy::reference,
               "Add a linear inductor. L in henries.\n"
               "Optional `i0` records an initial current (A) flowing\n"
-              "from the `from` terminal toward `to` — consumed by\n"
+              "from the `n_pos` terminal toward `n_neg` — consumed by\n"
               "`simulate(initial_state=None)`.")
         .def("set_initial",
               &builder::CircuitBuilder::set_initial,
@@ -399,8 +400,8 @@ void init_module(py::module_& m) {
               "auto-fills the names into the stream when attaching.")
         .def("add_saturable_inductor",
               &builder::CircuitBuilder::add_saturable_inductor,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"),
               py::arg("L_0"), py::arg("I_sat"),
               py::arg("L_residual") = 0.0,
               py::return_value_policy::reference,
@@ -427,8 +428,8 @@ void init_module(py::module_& m) {
               "(V3's IdealDiode, AD-driven).")
         .def("add_switch",
               &builder::CircuitBuilder::add_switch,
-              py::arg("name"), py::arg("from"),
-              py::arg("to"), py::arg("g_on"),
+              py::arg("name"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("g_on"),
               py::arg("g_off"),
               py::return_value_policy::reference,
               "Add a controlled switch (driven by switch_fn "
