@@ -57,7 +57,10 @@
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/sources/phase_shift_full_bridge_fn.hpp"
+#include "pulsim/sources/pulse_b_extra.hpp"
+#include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/pwm_switch_fn.hpp"
+#include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/streaming/live_ring.hpp"
@@ -495,6 +498,28 @@ void init_module(py::module_& m) {
         .def_property_readonly("num_branches",
               &builder::CircuitBuilder::num_branches,
               "Number of branches added so far.")
+        .def("compute_time_varying_b_extra",
+              [](const builder::CircuitBuilder& self, Real t) {
+                  // Sum the contributions of all time-varying voltage
+                  // sources (sine + PWM + pulse) into a single
+                  // full-MNA-sized b_extra vector. Bridge.6 — the
+                  // DSED adapter calls this each step and projects
+                  // through b_projection · b_extra(t) to overlay
+                  // time-varying sources without re-stamping.
+                  const auto& g = self.graph();
+                  const auto& p = self.pool();
+                  Vector b = sources::compute_pwm_b_extra(p, g, t);
+                  b += sources::compute_sine_b_extra(p, g, t);
+                  b += sources::compute_pulse_b_extra(p, g, t);
+                  return b;
+              },
+              py::arg("t"),
+              "Sum the b_extra contributions from all time-varying "
+              "voltage sources (sine + PWM + pulse) at time `t`. "
+              "Returns a full-MNA-sized vector. The pulsim.simulate "
+              "engine='pwl' applies this automatically; engine='dsed' "
+              "calls it via the CircuitBuilderAdapter to overlay "
+              "AC / PWM source values per PED step.")
         .def("node_id_of",
               &builder::CircuitBuilder::node_id_of,
               py::arg("name"),
@@ -934,7 +959,46 @@ void init_module(py::module_& m) {
               py::arg("updates"),
               py::arg("mode") = pwl::ParametricRefactorMode::AllActive,
               "Batch parametric refactor — takes a list of "
-              "(branch_id, new_value) tuples for simultaneous updates.");
+              "(branch_id, new_value) tuples for simultaneous updates.")
+        // -------------------------------------------------------------
+        // DSED bridge — continuous-time LTI state-space extraction
+        // (currently a stub; see notes/DSED_BRIDGE_DESIGN.md §5.1).
+        // -------------------------------------------------------------
+        .def("compute_lti_state_space",
+              [](pwl::PwlStateSpaceCache& self,
+                  const topology::SwitchStateMask& mask,
+                  Real h_a, Real h_b) {
+                  auto r = self.compute_lti_state_space(mask, h_a, h_b);
+                  // Convert to a Python tuple
+                  // (A, b_constant, state_row_indices, state_is_cap,
+                  //  b_projection)
+                  // for downstream consumption by the Python
+                  // CircuitBuilderAdapter. The projection matrix
+                  // ``b_projection`` is the linear map from full-MNA
+                  // b → state-reduced b, used to overlay time-varying
+                  // source contributions (sine/PWM/pulse) without
+                  // re-stamping per step (Bridge.6).
+                  return py::make_tuple(
+                      r.A,
+                      r.b_constant,
+                      r.state_row_indices,
+                      r.state_is_cap,
+                      r.b_projection);
+              },
+              py::arg("mask"),
+              py::arg("h_a") = Real{1e-6},
+              py::arg("h_b") = Real{5e-7},
+              "Extract continuous-time LTI state-space (A, b) for "
+              "the given switch mask via MNA finite-difference "
+              "recovery. Returns a tuple "
+              "(A_ndarray, b_ndarray, state_row_indices, "
+              "state_is_cap, b_projection). "
+              "Used by pulsim.dsed.PEDSimulatorAuto through the "
+              "Python CircuitBuilderAdapter. "
+              "Supports grounded + floating capacitors via T^T·M·T "
+              "congruence (Phase 5.1b). Time-varying source overlay "
+              "via b_projection · b_extra_mna(t) at each PED step "
+              "(Bridge.6).");
 
     // ---- SimulationOptions / SimulationResult ----------------------------
     using namespace pulsim::solver;
@@ -2667,9 +2731,15 @@ void init_module(py::module_& m) {
 // ``pybind11_add_module(_pulsim …)`` in ``python/CMakeLists.txt``); all
 // kernel symbols are bound directly on the module (no submodule), which
 // is what ``python/pulsim/__init__.py`` imports via ``from ._pulsim import …``.
+// Forward decl: DSED scheduler bindings (Bridge.10) — separate TU.
+namespace pulsim_dsed_bindings {
+    void init_module(pybind11::module_& m);
+}
+
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
               "kernel: PWL state-space cache, trapezoidal companion, "
               "Newton refinement, and the high-level CircuitBuilder API.";
     pulsim_kernel_bindings::init_module(m);
+    pulsim_dsed_bindings::init_module(m);
 }

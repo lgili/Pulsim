@@ -63,6 +63,7 @@ endif()
 pybind11_add_module(_pulsim
     NO_EXTRAS
     bindings.cpp
+    dsed_bindings.cpp
 )
 
 target_link_libraries(_pulsim
@@ -171,4 +172,17 @@ foreach(_rel_path IN LISTS _pulsim_schematic_install_files)
     get_filename_component(_rel_dir ${_rel_path} DIRECTORY)
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_rel_path}
             DESTINATION pulsim/${_rel_dir})
+endforeach()
+
+# Install the dsed (Path-Based Event-Driven) Python subpackage
+# alongside the top-level files. Mirrors the schematic pattern.
+# Source: add-path-based-dsed-engine OpenSpec, Gate 2 Phase 2.B-3.
+file(GLOB _pulsim_dsed_install_files
+    LIST_DIRECTORIES false
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/pulsim
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/dsed/*.py
+)
+foreach(_rel_path IN LISTS _pulsim_dsed_install_files)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_rel_path}
+            DESTINATION pulsim/dsed)
 endforeach()

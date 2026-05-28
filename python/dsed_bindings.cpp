@@ -1,0 +1,381 @@
+// =============================================================================
+// Pulsim — pybind11 bindings for the DSED schedulers (Bridge.10)
+// =============================================================================
+//
+// Wraps the three C++ scheduler templates (PEDSimulator [DOPRI5],
+// PEDSimulatorBDF2, PEDSimulatorAuto) so Python callers go through the
+// native inner loop instead of the pure-Python port. The Python-side
+// `system` and `switch_fn` are still invoked via callbacks (the C++
+// scheduler holds a `py::object` and calls `.attr("A_matrix")()` etc.),
+// so RHS / b_vector queries still pay the GIL acquire on every step —
+// but the scheduler control flow, step controllers, Hermite interpolation,
+// LU solves, and event predicates all run natively.
+//
+// Captured speedup on buck CCM (5 ms, 100 kHz, see
+// notes/DSED_BRIDGE_DESIGN.md §11):
+//
+//   * Python scheduler   : ~60 µs / step (1007 steps, 61 ms wall)
+//   * C++ scheduler here : ~10–15 µs / step (4–6× speedup)
+//   * Fully-native (no callbacks) : ~5 µs / step — see follow-up
+//
+// MaskT handling: we wrap Python masks in a thin `PyMask` struct
+// (struct so ADL finds our `mode_id_of(PyMask)` overload inside
+// `scheduler_auto.hpp`).
+//
+// Result types: PEDResult / PEDResultAuto are returned as Python
+// dataclass-like dicts so callers don't need a custom .py shim.
+
+#include <pybind11/eigen.h>
+#include <pybind11/functional.h>
+#include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#include "pulsim/dsed/scheduler.hpp"
+#include "pulsim/dsed/scheduler_bdf2.hpp"
+#include "pulsim/dsed/scheduler_auto.hpp"
+#include "pulsim/dsed/step_controller.hpp"
+#include "pulsim/dsed/stiffness_detector.hpp"
+#include "pulsim/numeric/dense.hpp"
+#include "pulsim/numeric/types.hpp"
+
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+namespace py = pybind11;
+
+namespace pulsim_dsed_bindings {
+
+using pulsim::Real;
+using pulsim::Vector;
+using pulsim::DenseMatrix;
+
+// ---------------------------------------------------------------------------
+// PyMask: thin wrapper around py::object so ADL finds our `mode_id_of`
+// overload when the C++ scheduler templates expand.
+// ---------------------------------------------------------------------------
+struct PyMask {
+    py::object obj;
+
+    bool operator==(const PyMask& other) const {
+        if (obj.is(other.obj)) return true;
+        try {
+            return obj.equal(other.obj);
+        } catch (...) {
+            return false;
+        }
+    }
+    bool operator!=(const PyMask& other) const {
+        return !(*this == other);
+    }
+};
+
+// Hashable mask → mode_id for PEDSimulatorAuto's per-mode integrator cache.
+inline int mode_id_of(const PyMask& m) noexcept {
+    try {
+        // Python's hash() works for any hashable object (SwitchStateMask
+        // is hashable in the pulsim bindings).
+        return static_cast<int>(py::hash(m.obj));
+    } catch (...) {
+        // Fallback: use the object's identity (works for unhashable
+        // objects, though they shouldn't typically appear).
+        return static_cast<int>(
+            reinterpret_cast<std::uintptr_t>(m.obj.ptr()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PySystem: adapter that holds a Python `system` object and forwards
+// `A_matrix()`, `b_vector(t)`, `rhs(t, x)`, `current_mask()`, `set_mask(m)`
+// through pybind11. Matches the `HasLTIPerMode` concept.
+// ---------------------------------------------------------------------------
+class PySystem {
+public:
+    explicit PySystem(py::object obj)
+        : obj_(std::move(obj)),
+          A_attr_(obj_.attr("A_matrix")),
+          b_attr_(obj_.attr("b_vector")),
+          rhs_attr_(obj_.attr("rhs")),
+          mask_attr_(obj_.attr("current_mask")),
+          set_mask_attr_(obj_.attr("set_mask")) {}
+
+    // Returns DenseMatrix by value (Eigen copy is cheap for small n_state).
+    DenseMatrix A_matrix() const {
+        return A_attr_().cast<DenseMatrix>();
+    }
+
+    Vector b_vector(Real t) const {
+        return b_attr_(t).cast<Vector>();
+    }
+
+    Vector rhs(Real t, const Vector& x) const {
+        return rhs_attr_(t, x).cast<Vector>();
+    }
+
+    PyMask current_mask() const {
+        return PyMask{mask_attr_()};
+    }
+
+    void set_mask(const PyMask& m) {
+        set_mask_attr_(m.obj);
+    }
+
+private:
+    py::object obj_;
+    // Pre-resolved attributes to skip the attr-lookup cost per call.
+    py::object A_attr_;
+    py::object b_attr_;
+    py::object rhs_attr_;
+    py::object mask_attr_;
+    py::object set_mask_attr_;
+};
+
+// ---------------------------------------------------------------------------
+// PySwitchFn: adapter that holds a Python `switch_fn` callable and an
+// optional `next_edge_after(t)` method. Returns PyMask from operator().
+// ---------------------------------------------------------------------------
+class PySwitchFn {
+public:
+    explicit PySwitchFn(py::object fn)
+        : fn_(std::move(fn)) {
+        if (py::hasattr(fn_, "next_edge_after")) {
+            nea_attr_ = fn_.attr("next_edge_after");
+            has_nea_ = true;
+        }
+    }
+
+    PyMask operator()(Real t) const {
+        return PyMask{fn_(t)};
+    }
+
+    Real next_edge_after(Real t) const {
+        if (has_nea_) {
+            return nea_attr_(t).cast<Real>();
+        }
+        return std::numeric_limits<Real>::infinity();
+    }
+
+private:
+    py::object fn_;
+    py::object nea_attr_;
+    bool has_nea_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// PEDResult / PEDResultAuto → Python dict converters.
+//
+// We return a dict so callers can index by name; the existing
+// _PEDSimulationResult wrapper in `python/pulsim/_dsed_dispatch.py`
+// already handles arbitrary attribute access.
+// ---------------------------------------------------------------------------
+
+template <class MaskT>
+py::dict ped_result_to_dict(
+    const pulsim::dsed::PEDResult<MaskT>& res) {
+    // Convert times + states to numpy arrays
+    const auto n_steps = static_cast<py::ssize_t>(res.times.size());
+    const auto n_state = res.states.empty()
+        ? py::ssize_t{0}
+        : static_cast<py::ssize_t>(res.states[0].size());
+
+    py::array_t<double> times_arr(n_steps);
+    py::array_t<double> states_arr({n_steps, n_state});
+    auto* times_ptr = times_arr.mutable_data();
+    auto* states_ptr = states_arr.mutable_data();
+    for (py::ssize_t i = 0; i < n_steps; ++i) {
+        times_ptr[i] = res.times[i];
+        for (py::ssize_t j = 0; j < n_state; ++j) {
+            states_ptr[i * n_state + j] = res.states[i][j];
+        }
+    }
+
+    py::dict d;
+    d["times"] = std::move(times_arr);
+    d["states"] = std::move(states_arr);
+    d["n_accept"] = res.n_accept;
+    d["n_reject"] = res.n_reject;
+    d["n_events"] = res.n_events;
+    d["cpu_time_seconds"] = res.cpu_time_seconds;
+    // Event log: skip the MaskT objects (they're py::object wrappers
+    // around Python objects that we just hand back).
+    py::list events;
+    for (const auto& e : res.event_log) {
+        py::dict ed;
+        ed["t"] = e.t;
+        ed["name"] = e.name;
+        ed["predicate_type"] = static_cast<int>(e.type);
+        // Cast MaskT (which is PyMask) back to its py::object
+        if constexpr (std::is_same_v<MaskT, PyMask>) {
+            ed["old_mask"] = e.old_mask.obj;
+            ed["new_mask"] = e.new_mask.obj;
+        }
+        events.append(ed);
+    }
+    d["event_log"] = events;
+    return d;
+}
+
+template <class MaskT>
+py::dict ped_result_auto_to_dict(
+    const pulsim::dsed::PEDResultAuto<MaskT>& res) {
+    const auto n_steps = static_cast<py::ssize_t>(res.times.size());
+    const auto n_state = res.states.empty()
+        ? py::ssize_t{0}
+        : static_cast<py::ssize_t>(res.states[0].size());
+
+    py::array_t<double> times_arr(n_steps);
+    py::array_t<double> states_arr({n_steps, n_state});
+    auto* times_ptr = times_arr.mutable_data();
+    auto* states_ptr = states_arr.mutable_data();
+    for (py::ssize_t i = 0; i < n_steps; ++i) {
+        times_ptr[i] = res.times[i];
+        for (py::ssize_t j = 0; j < n_state; ++j) {
+            states_ptr[i * n_state + j] = res.states[i][j];
+        }
+    }
+
+    py::dict d;
+    d["times"] = std::move(times_arr);
+    d["states"] = std::move(states_arr);
+    d["n_accept"] = res.n_accept;
+    d["n_reject"] = res.n_reject;
+    d["n_events"] = res.n_events;
+    d["n_rk45_steps"] = res.n_rk45_steps;
+    d["n_bdf2_steps"] = res.n_bdf2_steps;
+    d["cpu_time_seconds"] = res.cpu_time_seconds;
+    py::list events;
+    for (const auto& e : res.event_log) {
+        py::dict ed;
+        ed["t"] = e.t;
+        ed["name"] = e.name;
+        ed["predicate_type"] = static_cast<int>(e.type);
+        ed["integrator_used"] = static_cast<int>(e.integrator_used);
+        if constexpr (std::is_same_v<MaskT, PyMask>) {
+            ed["old_mask"] = e.old_mask.obj;
+            ed["new_mask"] = e.new_mask.obj;
+        }
+        events.append(ed);
+    }
+    d["event_log"] = events;
+    return d;
+}
+
+// ---------------------------------------------------------------------------
+// Module init — registers three free functions:
+//   run_ped_native(system, switch_fn, x0, t_end, rtol, atol, dt_init, dt_max)
+//   run_bdf2_native(system, switch_fn, x0, t_end, h_fixed)
+//   run_auto_native(system, switch_fn, x0, t_end, rtol, atol, dt_init,
+//                    dt_max, h_bdf2, stiffness_threshold)
+// ---------------------------------------------------------------------------
+void init_module(py::module_& m) {
+    using pulsim::dsed::PEDSimulator;
+    using pulsim::dsed::PEDSimulatorBDF2;
+    using pulsim::dsed::PEDSimulatorAuto;
+    using pulsim::dsed::PIController;
+    using pulsim::dsed::EventPredictor;
+    using pulsim::dsed::StiffnessDetector;
+
+    m.def("run_ped_native",
+        [](py::object system_obj,
+           py::object switch_fn_obj,
+           Vector x0,
+           Real t_end,
+           Real rtol,
+           Real atol,
+           Real dt_init,
+           Real dt_max,
+           std::size_t store_every) {
+            PySystem sys(std::move(system_obj));
+            PySwitchFn sf(std::move(switch_fn_obj));
+            PIController ctrl(rtol, atol);
+            EventPredictor pred;
+            PEDSimulator<PySystem, PySwitchFn> sim(
+                sys, std::move(sf), std::move(ctrl),
+                std::move(pred), dt_init, dt_max,
+                store_every);
+            auto res = sim.simulate(x0, t_end);
+            return ped_result_to_dict(res);
+        },
+        py::arg("system"),
+        py::arg("switch_fn"),
+        py::arg("x0"),
+        py::arg("t_end"),
+        py::arg("rtol")       = Real{1e-6},
+        py::arg("atol")       = Real{1e-9},
+        py::arg("dt_init")    = Real{1e-9},
+        py::arg("dt_max")     = Real{1e-5},
+        py::arg("store_every") = std::size_t{1},
+        "Native PEDSimulator (DOPRI5 + adaptive PI + event scan) "
+        "running the C++ scheduler inner loop. `system` and "
+        "`switch_fn` are still invoked via Python callbacks per step "
+        "(GIL overhead), but the scheduler control flow runs natively. "
+        "Returns a dict with times, states, n_accept, n_reject, "
+        "n_events, cpu_time_seconds, event_log.");
+
+    m.def("run_bdf2_native",
+        [](py::object system_obj,
+           py::object switch_fn_obj,
+           Vector x0,
+           Real t_end,
+           Real h_fixed,
+           std::size_t store_every) {
+            PySystem sys(std::move(system_obj));
+            PySwitchFn sf(std::move(switch_fn_obj));
+            PEDSimulatorBDF2<PySystem, PySwitchFn> sim(
+                sys, std::move(sf), h_fixed, store_every);
+            auto res = sim.simulate(x0, t_end);
+            return ped_result_to_dict(res);
+        },
+        py::arg("system"),
+        py::arg("switch_fn"),
+        py::arg("x0"),
+        py::arg("t_end"),
+        py::arg("h_fixed")    = Real{1e-6},
+        py::arg("store_every") = std::size_t{1},
+        "Native PEDSimulatorBDF2 (implicit BDF2 + Crank-Nicolson "
+        "bootstrap) running the C++ scheduler inner loop.");
+
+    m.def("run_auto_native",
+        [](py::object system_obj,
+           py::object switch_fn_obj,
+           Vector x0,
+           Real t_end,
+           Real rtol,
+           Real atol,
+           Real dt_init,
+           Real dt_max,
+           Real h_bdf2,
+           Real stiffness_threshold,
+           std::size_t store_every) {
+            PySystem sys(std::move(system_obj));
+            PySwitchFn sf(std::move(switch_fn_obj));
+            PIController ctrl(rtol, atol);
+            StiffnessDetector det(stiffness_threshold);
+            PEDSimulatorAuto<PySystem, PySwitchFn> sim(
+                sys, std::move(sf), std::move(ctrl),
+                std::move(det), dt_init, dt_max, h_bdf2,
+                store_every);
+            auto res = sim.simulate(x0, t_end);
+            return ped_result_auto_to_dict(res);
+        },
+        py::arg("system"),
+        py::arg("switch_fn"),
+        py::arg("x0"),
+        py::arg("t_end"),
+        py::arg("rtol")                = Real{1e-6},
+        py::arg("atol")                = Real{1e-9},
+        py::arg("dt_init")             = Real{1e-9},
+        py::arg("dt_max")              = Real{1e-5},
+        py::arg("h_bdf2")              = Real{1e-6},
+        py::arg("stiffness_threshold") = Real{10.0},
+        py::arg("store_every")          = std::size_t{1},
+        "Native PEDSimulatorAuto (per-mode RK45↔BDF2 dispatch via "
+        "stiffness detector) running the C++ scheduler inner loop. "
+        "Returns a dict that additionally includes n_rk45_steps + "
+        "n_bdf2_steps for each mode-segment.");
+}
+
+}  // namespace pulsim_dsed_bindings
