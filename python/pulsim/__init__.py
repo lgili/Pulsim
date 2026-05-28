@@ -178,6 +178,14 @@ from .thermal import (
     make_thermal_observer,
     device_thermal_summary,
 )
+from . import fast_block as _fast_block_module  # noqa: F401  (registers submodule)
+from .fast_block import (
+    FastBlock,
+    fast_block,
+)
+# Module access: `import pulsim.fast_block` or
+# `sys.modules['pulsim.fast_block']`; `pulsim.fast_block` itself
+# resolves to the decorator (re-exported above).
 from .grid import (
     add_three_phase_grid,
     add_three_phase_line_impedance,
@@ -432,6 +440,9 @@ __all__ = [
     "add_foster_network",
     "make_thermal_observer",
     "device_thermal_summary",
+    # PSIM/PLECS-style JIT control block (Numba — optional dep).
+    "FastBlock",
+    "fast_block",
     # Three-phase grid helpers (Phase C.2).
     "add_three_phase_grid",
     "add_three_phase_line_impedance",
