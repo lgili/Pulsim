@@ -145,6 +145,12 @@ nav:
       - '8 — Benchmarks': how-pulsim-works/08-benchmarks.md
       - '9 — Architecture Walkthrough': how-pulsim-works/09-architecture-walkthrough.md
       - '10 — Paper Figures Index': how-pulsim-works/10-paper-figures-index.md
+      - '11 — DSED Engine Overview (Part II)': how-pulsim-works/11-dsed-engine-overview.md
+      - '12 — MNA → State-Space Extraction': how-pulsim-works/12-dsed-state-space-extraction.md
+      - '13 — DOPRI5 + Adaptive PI + Event Scan': how-pulsim-works/13-dsed-dopri5-adaptive.md
+      - '14 — BDF2 + Stiffness Dispatch': how-pulsim-works/14-dsed-bdf2-and-dispatch.md
+      - '15 — Native Bindings (24× story)': how-pulsim-works/15-dsed-native-bindings.md
+      - '16 — DSED Benchmarks': how-pulsim-works/16-dsed-benchmarks.md
   - Internals:
       - Architecture (Layer-by-Layer): internals/README.md
       - 'Layer 0 — Numeric + Sparse': internals/layer0-numeric-and-sparse.md
