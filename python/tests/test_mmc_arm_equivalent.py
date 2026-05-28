@@ -63,10 +63,20 @@ class TestParams:
         with pytest.raises(ValueError, match="t_min"):
             MmcArmEquivalentParams(n_sm=4, c_sm=1e-3, t_min=-1e-6)
 
-    def test_reject_full_bridge_for_now(self):
-        with pytest.raises(ValueError, match="half-bridge only"):
+    def test_accept_full_bridge(self):
+        """FB SMs are now supported (m_ref ∈ [-1, +1], signed
+        per-SM contributions)."""
+        p = MmcArmEquivalentParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+        )
+        assert p.sm_type == "full_bridge"
+        assert p.m_min == -1.0
+        assert p.m_max == 1.0
+
+    def test_reject_unknown_sm_type(self):
+        with pytest.raises(ValueError, match="sm_type"):
             MmcArmEquivalentParams(  # type: ignore[arg-type]
-                n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+                n_sm=4, c_sm=1e-3, sm_type="quarter_bridge",
             )
 
     def test_inherits_l1_guards(self):
@@ -372,3 +382,55 @@ def test_result_shape():
     assert res.s_w.dtype.kind == "i"
     assert res.s_u.dtype.kind == "i"
     assert res.params is params
+
+
+# ---------------------------------------------------------------------------
+# Full-bridge end-to-end smoke tests
+# ---------------------------------------------------------------------------
+
+class TestFullBridgeEndToEnd:
+    """L2 full-bridge: positive + negative modulation, signed s_eff."""
+
+    def test_fb_positive_m_only_pos_insertions(self):
+        """With m_ref > 0 the SMs should only get +inserted (s_n = 0)."""
+        params = MmcArmEquivalentParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+            v_c0=400.0, f_carrier=2_000.0,
+            t_dead=0.0, t_min=0.0,
+        )
+        res = simulate_mmc_arm_equivalent(
+            duration=2e-3, dt=2e-6, m_ref=0.5, i_b=10.0, params=params,
+        )
+        # All inserted SMs are POSITIVE (s_n stays 0 throughout).
+        assert int(res.s_n.max()) == 0
+        # And we DO see positive insertions.
+        assert int(res.s_w.max()) >= 1
+
+    def test_fb_negative_m_only_neg_insertions(self):
+        """With m_ref < 0 the SMs should only get -inserted (s_w = 0)."""
+        params = MmcArmEquivalentParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+            v_c0=400.0, f_carrier=2_000.0,
+            t_dead=0.0, t_min=0.0,
+        )
+        res = simulate_mmc_arm_equivalent(
+            duration=2e-3, dt=2e-6, m_ref=-0.5, i_b=10.0, params=params,
+        )
+        assert int(res.s_w.max()) == 0
+        assert int(res.s_n.max()) >= 1
+
+    def test_fb_negative_m_negative_v_b(self):
+        """FB output should follow the sign of m_ref."""
+        params = MmcArmEquivalentParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+            v_c0=400.0, f_carrier=2_000.0,
+            t_dead=0.0, t_min=0.0,
+        )
+        res = simulate_mmc_arm_equivalent(
+            duration=2e-3, dt=2e-6, m_ref=-0.5, i_b=10.0, params=params,
+        )
+        # Average v_b over the run should be negative (≈ -0.5 · v_C).
+        mean_vb = float(res.v_b.mean())
+        assert mean_vb < 0
+        # Magnitude in the expected ballpark (|m| · v_C ≈ 0.5 · 400 = 200V).
+        assert abs(mean_vb) > 100.0

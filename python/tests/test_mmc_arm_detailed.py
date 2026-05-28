@@ -57,10 +57,18 @@ class TestParams:
                 n_sm=4, c_sm=1e-3, balancing="genetic_algorithm",
             )
 
-    def test_reject_full_bridge(self):
-        with pytest.raises(ValueError, match="half-bridge only"):
+    def test_accept_full_bridge(self):
+        """FB SMs are now supported (s_b ∈ {-N..N}, mask ∈ {-1, 0, +1})."""
+        p = MmcArmDetailedParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+        )
+        assert p.sm_type == "full_bridge"
+        assert p.m_min == -1.0
+
+    def test_reject_unknown_sm_type(self):
+        with pytest.raises(ValueError, match="sm_type"):
             MmcArmDetailedParams(  # type: ignore[arg-type]
-                n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+                n_sm=4, c_sm=1e-3, sm_type="quarter_bridge",
             )
 
     def test_inherits_l1_l2_guards(self):
@@ -311,4 +319,68 @@ def test_simulate_rejects_const_m_ref_out_of_range():
     with pytest.raises(ValueError, match="outside valid range"):
         simulate_mmc_arm_detailed(
             duration=1e-3, dt=1e-5, m_ref=-0.5, i_b=0.0, params=params,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Full-bridge end-to-end smoke tests
+# ---------------------------------------------------------------------------
+
+class TestFullBridgeEndToEnd:
+    """L3 full-bridge: signed s_b, mask ∈ {-1, 0, +1}, balanced ±insertion."""
+
+    def test_fb_positive_m_only_positive_mask(self):
+        """With m_ref > 0 every inserted SM gets mask = +1 (charging)."""
+        params = MmcArmDetailedParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+            v_c0=400.0, f_carrier=2_000.0,
+        )
+        res = simulate_mmc_arm_detailed(
+            duration=2e-3, dt=2e-6, m_ref=0.6, i_b=10.0, params=params,
+        )
+        # s_b never negative for positive m_ref.
+        assert int(res.s_b.min()) >= 0
+        assert int(res.s_b.max()) >= 1
+
+    def test_fb_negative_m_only_negative_mask(self):
+        """With m_ref < 0 we get s_b < 0 (negative insertion)."""
+        params = MmcArmDetailedParams(
+            n_sm=4, c_sm=1e-3, sm_type="full_bridge",
+            v_c0=400.0, f_carrier=2_000.0,
+        )
+        res = simulate_mmc_arm_detailed(
+            duration=2e-3, dt=2e-6, m_ref=-0.6, i_b=10.0, params=params,
+        )
+        assert int(res.s_b.max()) <= 0
+        assert int(res.s_b.min()) <= -1
+        # v_b should track sign(s_b) — predominantly negative.
+        assert float(res.v_b.mean()) < 0
+
+    def test_fb_sort_and_select_balances(self):
+        """Per-SM voltages stay tightly bunched with sort-and-select."""
+        n_sm = 6
+        v_c0_per_sm = np.array(
+            [380.0, 390.0, 400.0, 410.0, 420.0, 400.0],
+        )
+        params = MmcArmDetailedParams(
+            n_sm=n_sm, c_sm=1e-3, sm_type="full_bridge",
+            v_c0=v_c0_per_sm.mean() * n_sm,
+            f_carrier=2_000.0,
+            balancing="sort_and_select",
+        )
+        state = make_l3_state(params, initial_v_C_per_sm=v_c0_per_sm)
+
+        # Drive ±0.5 modulation alternating each carrier period with
+        # constant i_b > 0; sort-and-select should pull the highest-
+        # voltage SMs toward the lowest.
+        dt = 2e-6
+        for k in range(50_000):
+            tk = k * dt
+            m = 0.5 if (int(tk * 200) % 2) == 0 else -0.5
+            mmc_arm_detailed_step(state, m, 8.0, dt, tk, params)
+
+        # Per-SM voltage spread should have shrunk from 40 V to < 25 V.
+        spread_final = float(state.v_C_per_sm.max() - state.v_C_per_sm.min())
+        assert spread_final < 25.0, (
+            f"SM voltages did not balance: spread = {spread_final:.1f} V"
         )
