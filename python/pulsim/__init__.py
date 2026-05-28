@@ -1242,7 +1242,7 @@ def simulate(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 
 # ---------------------------------------------------------------------------
