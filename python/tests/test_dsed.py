@@ -192,32 +192,29 @@ def test_simulate_pwl_default_engine_still_works():
     assert res.num_steps() > 0
 
 
-def test_simulate_dsed_raises_clear_not_implemented_with_path_forward():
-    """engine='dsed' from a CircuitBuilder raises NotImplementedError
-    with an honest path-forward message.
+def test_simulate_dsed_runs_end_to_end_on_minimal_rc():
+    """engine='dsed' from a CircuitBuilder runs to completion on a
+    minimal RC circuit (Bridge.3 + Bridge.11 wired the full
+    PwlStateSpaceCache → NativeCircuitBuilderAdapter → C++ scheduler
+    pipeline; pre-Bridge.3 this test asserted NotImplementedError).
 
-    Post-Gate-5 API consolidation: the dispatch now lives in
-    ``pulsim._dsed_dispatch`` and the error message includes the
-    RESOLVED DSED options (rtol, atol, dt_max, integrator,
-    stiffness_threshold) plus a pointer to the working user-supplied-
-    LTI path (:class:`pulsim.dsed.PEDSimulatorAuto`). When the
-    pybind11 bridge that exposes ``state_space_for_mask(mask)`` on
-    ``PwlStateSpaceCache`` lands, this test gets updated to assert
-    successful execution.
+    For the algorithm + bridge architecture, see
+    ``notes/DSED_BRIDGE_DESIGN.md``.
     """
     import pulsim as p
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "n0", "gnd", 5.0)
     b.add_resistor("R1", "n0", "n1", 100.0)
     b.add_capacitor("C1", "n1", "gnd", 1e-6)
-    with pytest.raises(NotImplementedError) as exc_info:
-        p.simulate(b, t_end=1e-4, dt=1e-6, engine="dsed")
-    msg = str(exc_info.value)
-    # The path-forward message points to the right escape hatch
-    assert "PEDSimulatorAuto" in msg
-    # Includes the resolved options for diagnostics
-    assert "rtol = " in msg
-    assert "integrator = " in msg
+
+    # 10× RC = 10 · (100 · 1e-6) = 1 ms → cap fully charged
+    res = p.simulate(b, t_end=1e-3, engine="dsed", integrator="rk45",
+                      rtol=1e-7, atol=1e-10)
+    assert not res.empty()
+    assert res.num_steps() > 0
+    # Grounded cap → state[0] is v_C; should approach V_in = 5.0V.
+    final_vc = float(res.states[-1][0])
+    assert abs(final_vc - 5.0) < 0.01
 
 
 # -------------------------------------------------------------------------
