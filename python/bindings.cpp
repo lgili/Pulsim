@@ -1355,7 +1355,7 @@ void init_module(py::module_& m) {
            const topology::Graph& graph,
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
-           SwitchScheduleFn switch_fn,
+           py::object switch_fn_obj,         // Bridge.13: was SwitchScheduleFn
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
@@ -1363,6 +1363,43 @@ void init_module(py::module_& m) {
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring) {
+            // Bridge.13 — detect native PWM switch_fn (NativePwm2Switch
+            // / NativeMultiMaskPwm) and build a std::function lambda
+            // that calls the C++ method directly, no Python __call__.
+            // For generic Python callables, fall back to pybind11's
+            // auto-conversion path.
+            SwitchScheduleFn switch_fn;
+            {
+                sources::NativePwm2Switch* native_pwm2 = nullptr;
+                sources::NativeMultiMaskPwm* native_multi = nullptr;
+                try {
+                    native_pwm2 = switch_fn_obj.cast<
+                        sources::NativePwm2Switch*>();
+                } catch (const py::cast_error&) {}
+                if (!native_pwm2) {
+                    try {
+                        native_multi = switch_fn_obj.cast<
+                            sources::NativeMultiMaskPwm*>();
+                    } catch (const py::cast_error&) {}
+                }
+                if (native_pwm2) {
+                    // Capture py::object to keep the C++ instance alive
+                    // for the lambda's lifetime (pybind11 ref-count).
+                    auto keepalive = switch_fn_obj;
+                    switch_fn = [native_pwm2, keepalive](Real t) {
+                        return (*native_pwm2)(t);
+                    };
+                } else if (native_multi) {
+                    auto keepalive = switch_fn_obj;
+                    switch_fn = [native_multi, keepalive](Real t) {
+                        return (*native_multi)(t);
+                    };
+                } else {
+                    // Generic Python callable — pybind11 wraps as
+                    // std::function via its automatic converter.
+                    switch_fn = switch_fn_obj.cast<SwitchScheduleFn>();
+                }
+            }
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
