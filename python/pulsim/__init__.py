@@ -31,6 +31,7 @@ For full control, fall back to the explicit pipeline:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from ._pulsim import (  # type: ignore[import-not-found]
@@ -275,53 +276,60 @@ from .losses import (
     device_loss_summary,
     average_power_at_node,
 )
+# MMC re-exports — kept as top-level attributes for backward
+# compatibility but EXCLUDED from `__all__` so `dir(p)` and
+# `from pulsim import *` stay focused on the everyday surface.
+# MMC users either name them explicitly (`from pulsim import
+# MmcArmAverage`) or qualify via the submodule
+# (`from pulsim.mmc import ...`). The `# noqa: F401` quiets the
+# linter on these intentional unused imports.
 from .mmc import (
-    MmcArmAverageParams,
-    MmcArmAverageResult,
-    mmc_arm_average_step,
-    simulate_mmc_arm_average,
+    MmcArmAverageParams,  # noqa: F401
+    MmcArmAverageResult,  # noqa: F401
+    mmc_arm_average_step,  # noqa: F401
+    simulate_mmc_arm_average,  # noqa: F401
     # Builder-side wiring (Phase 20.4).
-    MmcArmAverage,
-    add_mmc_arm_average,
-    make_mmc_arm_observer,
-    make_mmc_arms_observer,
+    MmcArmAverage,  # noqa: F401
+    add_mmc_arm_average,  # noqa: F401
+    make_mmc_arm_observer,  # noqa: F401
+    make_mmc_arms_observer,  # noqa: F401
     # Three-phase DC/AC topology helper (Phase 20.4 step 2).
-    MmcThreePhaseDcAc,
-    add_mmc_three_phase_dc_ac,
+    MmcThreePhaseDcAc,  # noqa: F401
+    add_mmc_three_phase_dc_ac,  # noqa: F401
     # L1 multilevel arm — Phase 20.5.
-    MmcArmMultilevelParams,
-    MmcArmMultilevelResult,
-    ps_pwm_switching_function,
-    ipd_switching_function,
-    mmc_arm_multilevel_step,
-    simulate_mmc_arm_multilevel,
+    MmcArmMultilevelParams,  # noqa: F401
+    MmcArmMultilevelResult,  # noqa: F401
+    ps_pwm_switching_function,  # noqa: F401
+    ipd_switching_function,  # noqa: F401
+    mmc_arm_multilevel_step,  # noqa: F401
+    simulate_mmc_arm_multilevel,  # noqa: F401
     # L2 SM-equivalent arm (dead-time aware) — Phase 20.6.
-    MmcArmEquivalentParams,
-    MmcArmEquivalentState,
-    MmcArmEquivalentResult,
-    make_l2_state,
-    mmc_arm_equivalent_step,
-    simulate_mmc_arm_equivalent,
+    MmcArmEquivalentParams,  # noqa: F401
+    MmcArmEquivalentState,  # noqa: F401
+    MmcArmEquivalentResult,  # noqa: F401
+    make_l2_state,  # noqa: F401
+    mmc_arm_equivalent_step,  # noqa: F401
+    simulate_mmc_arm_equivalent,  # noqa: F401
     # L3 detailed (per-SM balancing) — Phase 20.7.
-    MmcArmDetailedParams,
-    MmcArmDetailedState,
-    MmcArmDetailedResult,
-    make_l3_state,
-    mmc_arm_detailed_step,
-    simulate_mmc_arm_detailed,
+    MmcArmDetailedParams,  # noqa: F401
+    MmcArmDetailedState,  # noqa: F401
+    MmcArmDetailedResult,  # noqa: F401
+    make_l3_state,  # noqa: F401
+    mmc_arm_detailed_step,  # noqa: F401
+    simulate_mmc_arm_detailed,  # noqa: F401
     # Builder integration for L1/L2/L3 — Phase 20.8.
-    MmcArmMultilevel,
-    add_mmc_arm_multilevel,
-    make_mmc_arm_multilevel_observer,
-    make_mmc_arm_multilevel_observers,
-    MmcArmEquivalent,
-    add_mmc_arm_equivalent,
-    make_mmc_arm_equivalent_observer,
-    make_mmc_arm_equivalent_observers,
-    MmcArmDetailed,
-    add_mmc_arm_detailed,
-    make_mmc_arm_detailed_observer,
-    make_mmc_arm_detailed_observers,
+    MmcArmMultilevel,  # noqa: F401
+    add_mmc_arm_multilevel,  # noqa: F401
+    make_mmc_arm_multilevel_observer,  # noqa: F401
+    make_mmc_arm_multilevel_observers,  # noqa: F401
+    MmcArmEquivalent,  # noqa: F401
+    add_mmc_arm_equivalent,  # noqa: F401
+    make_mmc_arm_equivalent_observer,  # noqa: F401
+    make_mmc_arm_equivalent_observers,  # noqa: F401
+    MmcArmDetailed,  # noqa: F401
+    add_mmc_arm_detailed,  # noqa: F401
+    make_mmc_arm_detailed_observer,  # noqa: F401
+    make_mmc_arm_detailed_observers,  # noqa: F401
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -462,6 +470,10 @@ __all__ = [
     # PSIM/PLECS-style JIT control block (Numba — optional dep).
     "FastBlock",
     "fast_block",
+    # Solver options bundle (v1.5 ergonomics — bundles 11 advanced
+    # kernel knobs into one dataclass so `simulate()`'s top-level
+    # signature stays focused on the everyday kwargs).
+    "SolverOptions",
     # SMPS topology factories (v1.5 ergonomics).
     "BuckResult",
     "BoostResult",
@@ -536,54 +548,19 @@ __all__ = [
     "EfficiencyCalculator",
     "device_loss_summary",
     "average_power_at_node",
-    # Modular Multilevel Converter — L0 average-value arm model
-    # (Phase 20, Sousa 2022 eqs 2.13/2.14).
-    "MmcArmAverageParams",
-    "MmcArmAverageResult",
-    "mmc_arm_average_step",
-    "simulate_mmc_arm_average",
-    # MMC L0 CircuitBuilder integration (Phase 20.4).
-    "MmcArmAverage",
-    "add_mmc_arm_average",
-    "make_mmc_arm_observer",
-    "make_mmc_arms_observer",
-    # MMC three-phase DC/AC topology helper.
-    "MmcThreePhaseDcAc",
-    "add_mmc_three_phase_dc_ac",
-    # MMC L1 — discrete multilevel arm (PS-PWM).
-    "MmcArmMultilevelParams",
-    "MmcArmMultilevelResult",
-    "ps_pwm_switching_function",
-    "ipd_switching_function",
-    "mmc_arm_multilevel_step",
-    "simulate_mmc_arm_multilevel",
-    # MMC L2 — SM-equivalent (dead-time + min-pulse-width).
-    "MmcArmEquivalentParams",
-    "MmcArmEquivalentState",
-    "MmcArmEquivalentResult",
-    "make_l2_state",
-    "mmc_arm_equivalent_step",
-    "simulate_mmc_arm_equivalent",
-    # MMC L3 — detailed per-SM with balancing.
-    "MmcArmDetailedParams",
-    "MmcArmDetailedState",
-    "MmcArmDetailedResult",
-    "make_l3_state",
-    "mmc_arm_detailed_step",
-    "simulate_mmc_arm_detailed",
-    # MMC L1/L2/L3 builder integration.
-    "MmcArmMultilevel",
-    "add_mmc_arm_multilevel",
-    "make_mmc_arm_multilevel_observer",
-    "make_mmc_arm_multilevel_observers",
-    "MmcArmEquivalent",
-    "add_mmc_arm_equivalent",
-    "make_mmc_arm_equivalent_observer",
-    "make_mmc_arm_equivalent_observers",
-    "MmcArmDetailed",
-    "add_mmc_arm_detailed",
-    "make_mmc_arm_detailed_observer",
-    "make_mmc_arm_detailed_observers",
+    # Modular Multilevel Converter (Phase 20) helpers live as
+    # top-level attributes for backward compatibility, but are
+    # excluded from `__all__` so `from pulsim import *` and
+    # `dir(pulsim)`-driven completion stay focused on the
+    # everyday surface. MMC users still import them directly:
+    #
+    #     from pulsim import MmcArmAverage, add_mmc_arm_average
+    #
+    # or namespace-qualify via the dedicated submodule:
+    #
+    #     from pulsim.mmc import MmcArmDetailed, simulate_mmc_arm_average
+    #
+    # 40+ MMC symbols intentionally NOT listed here.
 ]
 
 if _HAS_SCOPE:
@@ -870,6 +847,67 @@ def _result_plot(self, *signals, save=None, show=None, **kwargs):
 SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
 
 
+# =============================================================================
+# SolverOptions — bundle advanced kernel knobs (v1.5 ergonomics)
+# =============================================================================
+
+@dataclass
+class SolverOptions:
+    """Advanced kernel options for :func:`simulate`.
+
+    Most users never need to touch any of these — the defaults are
+    tuned for typical SMPS workloads. They cover three families:
+
+    * **Newton / nonlinear refresh** — when the circuit has smooth
+      diodes, MOSFET / IGBT level-1 models, or saturable inductors.
+    * **Event detection** — sub-step commutation timing accuracy.
+    * **Adaptive RK schema** (Phase 2.4) — `integrator`, `rtol`,
+      `atol`, `dt_init`. Today only `integrator="kernel"` is wired
+      to actually run; `"dopri5"` / `"radau"` raise
+      ``NotImplementedError`` pointing at the v1.6 cache refactor.
+
+    Two equivalent ways to use:
+
+    1. **Bundle**:
+       ::
+
+           opts = p.SolverOptions(max_newton_iterations=200,
+                                     tol_newton_res=1e-11)
+           res = p.simulate(b, t_end=..., dt=..., solver=opts)
+
+    2. **Flat kwargs** (backward compatible):
+       ::
+
+           res = p.simulate(b, t_end=..., dt=...,
+                              max_newton_iterations=200,
+                              tol_newton_res=1e-11)
+
+    When both are given, the flat kwargs override the corresponding
+    fields on `solver`.
+    """
+    # Newton / nonlinear refresh ------------------------------------
+    enable_nonlinear_refresh: Optional[bool] = None
+    max_newton_iterations: int = 0
+    tol_newton_dx: Optional[float] = None
+    tol_newton_res: Optional[float] = None
+    enable_newton_line_search: Optional[bool] = None
+    enable_newton_lm: Optional[bool] = None
+
+    # Event detection -----------------------------------------------
+    max_event_iterations: int = 0
+    enable_substep_state_correction: Optional[bool] = None
+
+    # Inductor regularisation (rare — kept for completeness) --------
+    inductor_freeze_di_max: float = 0.0
+    inductor_abs_clamp: float = 0.0
+
+    # Adaptive RK schema (Phase 2.4 — execution deferred to v1.6) ---
+    integrator: str = "kernel"
+    rtol: float = 1.0e-5
+    atol: float = 1.0e-8
+    dt_init: float = 0.0
+
+
 def simulate(
     builder: CircuitBuilder,
     t_end: float,
@@ -905,6 +943,8 @@ def simulate(
     should_continue=None,
     closed_loops=None,
     live_stream=None,
+    # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
+    solver: Optional["SolverOptions"] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -1020,6 +1060,45 @@ def simulate(
         For PED today with a user-supplied LTI system, use
         :class:`pulsim.dsed.PEDSimulatorAuto` directly.
     """
+    # ---- Merge `solver` bundle (v1.5 Round 2 ergonomics). ----
+    # For every advanced kernel knob, the flat kwarg wins when the
+    # user explicitly passed something non-default; otherwise we pull
+    # from `solver` if supplied. Purely additive — every existing
+    # call site that uses the flat kwargs continues to behave
+    # identically. This runs BEFORE the engine dispatch so the merged
+    # rtol/atol/dt_init/integrator values also flow into the DSED
+    # path when the user authors via `solver=`.
+    if solver is not None:
+        if enable_nonlinear_refresh is None:
+            enable_nonlinear_refresh = solver.enable_nonlinear_refresh
+        if max_newton_iterations == 0:
+            max_newton_iterations = solver.max_newton_iterations
+        if max_event_iterations == 0:
+            max_event_iterations = solver.max_event_iterations
+        if tol_newton_dx is None:
+            tol_newton_dx = solver.tol_newton_dx
+        if tol_newton_res is None:
+            tol_newton_res = solver.tol_newton_res
+        if enable_newton_line_search is None:
+            enable_newton_line_search = solver.enable_newton_line_search
+        if enable_newton_lm is None:
+            enable_newton_lm = solver.enable_newton_lm
+        if enable_substep_state_correction is None:
+            enable_substep_state_correction = (
+                solver.enable_substep_state_correction)
+        if inductor_freeze_di_max == 0.0:
+            inductor_freeze_di_max = solver.inductor_freeze_di_max
+        if inductor_abs_clamp == 0.0:
+            inductor_abs_clamp = solver.inductor_abs_clamp
+        if integrator is None:
+            integrator = solver.integrator
+        if rtol is None:
+            rtol = solver.rtol
+        if atol is None:
+            atol = solver.atol
+        if dt_init is None:
+            dt_init = solver.dt_init
+
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
@@ -1062,6 +1141,19 @@ def simulate(
     # ---- engine='pwl' from here on ----
     # mypy/pyright: narrow Optional[float] → float.
     assert dt is not None and dt > 0
+
+    # Fall back to documented PWL defaults for any remaining None values
+    # introduced by the `solver=` plumbing (these used to be flat
+    # defaults at the signature; the DSED engine has its own defaults
+    # owned by the dispatcher above).
+    if integrator is None:
+        integrator = "kernel"
+    if rtol is None:
+        rtol = 1.0e-5
+    if atol is None:
+        atol = 1.0e-8
+    if dt_init is None:
+        dt_init = 0.0
 
     # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
     # Today only the kernel trap path is wired into run_transient.
