@@ -4,6 +4,146 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-05-28
+
+### Highlights — Path-Based Event-Driven (DSED) engine + native PWM switch_fn
+
+Lands the **Path-Based Event-Driven (PED)** simulation engine
+([PR #62](https://github.com/lgili/Pulsim/pull/62)) — Pulsim's
+alternative to the default fixed-step trapezoidal + PWL cache loop.
+DSED predicts the next event time analytically (gate edges, body
+diode commutation, voltage thresholds), integrates with adaptive
+step control between events (DOPRI5 or BDF2 per-mode dispatch), and
+handles mask transitions instantaneously without aliasing.
+
+End-result for canonical buck CCM (24V→12V, 100 kHz, 5 ms window,
+1007 vs 50001 steps): **DSED is 24× faster than PWL in wall-clock**.
+Geo-mean speedup across 6 converter topologies (buck/boost/buck-boost/
+half-bridge/floating-cap RLC/NPC split-bus): **14.5× vs PWL**.
+
+#### What you can do now
+
+```python
+import pulsim as p
+
+b = p.CircuitBuilder()
+b.add_voltage_source("Vin", "in", "gnd", 24.0)
+# ... build a buck ...
+
+# DSED engine — variable-step, event-driven, ~24× faster than 'pwl'
+sf = p.NativePwm2Switch(T_sw=1e-5, D=0.5, n_switches=2)
+res = p.simulate(b, t_end=5e-3, engine='dsed', switch_fn=sf)
+```
+
+The `engine='dsed'` API is fully wired through Python with all the
+familiar kwargs (rtol, atol, integrator='rk45'/'bdf2'/'auto',
+b_extra_fn, switch_fn, initial_state). No user code change needed
+beyond the `engine='dsed'` opt-in.
+
+#### Topologies supported
+
+LTI-per-mask circuits: buck, boost, buck-boost, flyback, forward,
+half-bridge, full-bridge, NPC split-bus (floating caps), MMC SM-stacks
+(floating caps), PFC with AC input, grid-tied inverters with sine
+V_grid. Plus rejection of pathological cases (floating caps with
+both terminals on ground, parallel caps, inductor loops) with
+actionable error messages.
+
+#### Architecture (Bridges 1–13)
+
+* **Bridges 1–5** — algorithm gates: DOPRI5 + PI controller +
+  Illinois root finder, BDF2 + Crank-Nicolson bootstrap, stiffness
+  detector, per-mode RK45↔BDF2 auto-dispatch. Initial Python
+  prototype + C++23 port.
+* **Bridge 5.1b** — T^T·M·T congruence transform for **floating
+  capacitors** (NPC split bus, MMC SM stacks, half/full-bridge
+  differential output caps).
+* **Bridges 6/7** — Time-varying source overlay (sine / PWM / pulse)
+  + user `b_extra_fn` callback via per-mask projection matrix B.
+* **Bridge 8** — Real-converter end-to-end validation (buck, boost,
+  NPC split-bus, half-bridge + sine V_in).
+* **Bridge 9** — Inductor-loop rejection (parallel L, all-L cycles)
+  with clear "merge into L_eq" pointer.
+* **Bridge 10** — Pybind11 scheduler wrappers (C++ inner loop,
+  Python callbacks). 2.7× per-step over pure Python.
+* **Bridge 11** — Native C++ `CircuitBuilderAdapter` — eliminates
+  GIL roundtrips on the hot loop. Brought DSED to 13.3× faster
+  than PWL.
+* **Bridge 12** — Native PWM switch_fn classes (`NativePwm2Switch`,
+  `NativeMultiMaskPwm`) detected at construction; scheduler calls
+  them in pure C++ without GIL. Brought DSED to 24.3× faster than
+  PWL.
+* **Bridge 13** — PWL engine also detects native PWM and dispatches
+  through a C++ lambda. PWL itself becomes 2× faster on PWM-driven
+  circuits.
+
+#### Speedup breakdown (buck CCM, 5 ms, 100 kHz)
+
+| Layer | Wall-clock | per-step | vs PWL (old) |
+|---|---:|---:|---:|
+| PWL (C++ trap, 50001 steps)               | 52.7 ms | 1.05 µs | 1.0× (baseline) |
+| **PWL + native PWM** (Bridge.13)           | **26.2 ms** | **0.52 µs** | **2.0×** |
+| DSED Python scheduler (Bridge.5)           | 61.3 ms | 60.8 µs | 0.85× |
+| DSED Bridge.10 (Python adapter)            | 22.4 ms | 22.2 µs | 2.3× |
+| DSED Bridge.11 (native adapter)            |  3.8 ms |  3.80 µs | 13.3× |
+| **DSED Bridge.12 (+ native PWM)**          |  **2.2 ms** |  **2.19 µs** | **24.3×** |
+
+Final v_C = 12.0000 V exact (bit-for-bit match with analytical
+D·V_in steady state) across all layers.
+
+#### Tests
+
+* **549/549 C++ tests pass** (Catch2; added 6 LTI extractor tests
+  for the congruence transform + inductor-cycle rejection)
+* **14 new Python end-to-end tests** (`python/tests/test_dsed_end_to_end.py`)
+  covering buck/boost/NPC/floating-cap/sine-input/Bridge.12-vs-Python
+  bit-for-bit agreement
+* **Total Python test suite: 950 pass**
+
+#### API surface added
+
+```python
+# DSED engine
+pulsim.simulate(b, engine='dsed', integrator='auto'|'rk45'|'bdf2',
+                 rtol=..., atol=..., dt_init=..., h_bdf2=...,
+                 stiffness_threshold=..., switch_fn=..., b_extra_fn=...)
+
+# Native PWM (DSED + PWL both detect these)
+pulsim.NativePwm2Switch(T_sw, D, n_switches, hs_first=True)
+pulsim.NativeMultiMaskPwm(T_sw, phase_boundaries, masks)
+
+# Advanced — direct PED scheduler access (user-defined LTI system)
+pulsim.dsed.PEDSimulator(...)
+pulsim.dsed.PEDSimulatorBDF2(...)
+pulsim.dsed.PEDSimulatorAuto(...)
+pulsim.dsed.PIController(...)
+pulsim.dsed.StiffnessDetector(...)
+pulsim.dsed.BDF2State / bdf2_step(...)
+pulsim.dsed.RK45State / rk45_step(...) / interpolate(...)
+pulsim.dsed.EventPredictor / EventPredicate / illinois / brent_fallback
+
+# C++ control blocks (advanced, embedded export):
+# pulsim._pulsim._NativePIController, _NativePIDController,
+# _NativeFirstOrderLowPass — bit-for-bit identical to the Python
+# pulsim.control classes but for native step_observer use cases.
+```
+
+#### Known limitations / out of scope
+
+* Nonlinear devices (diode Shockley, MOSFET Vth, saturable L) still
+  use `pulsim.dsed.PEDSimulator` directly with a user-defined LTI
+  system. The PED engine does not model per-operating-point
+  linearization.
+* Inductor cycles (parallel L) and parallel capacitors are rejected
+  with clear errors pointing to the merge-equivalent workaround.
+
+See `notes/DSED_BRIDGE_DESIGN.md` for the full design (~700 lines:
+math, MNA→state-space reduction, T^T·M·T congruence for floating
+caps, projection matrix B for time-varying sources, native C++
+adapter, dispatch hierarchy) and
+`openspec/changes/add-path-based-dsed-engine/` for the proposal +
+specs.
+
 ## [1.5.0] — Unreleased
 
 ### Highlights — Phase 2 physics-parity push + PSIM-equivalent loss/thermal/control panels
