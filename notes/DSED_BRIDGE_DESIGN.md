@@ -624,6 +624,94 @@ These are also auto-detected and preferred by
 
 ---
 
+## 13. Bridge.11 landed (native C++ CircuitBuilderAdapter — 13.3× wall-clock vs PWL)
+
+Eliminates the per-step Python callback for `A_matrix() / b_vector(t)
+/ rhs(t, x)` that bottlenecked Bridge.10. The new
+`pulsim::dsed::NativeCircuitBuilderAdapter` (header
+`core/include/pulsim/dsed/builder_adapter.hpp`) mirrors the Python
+adapter in pure C++23:
+
+* Holds non-owning refs to `topology::Graph`, `pwl::DevicePool`,
+  `pwl::PwlStateSpaceCache`.
+* Lazy `std::unordered_map<MaskT, LTIEntry>` cache keyed by
+  `topology::SwitchStateMask` (already has `std::hash`); per-entry
+  stores the extractor's `(A, b_constant, B, state_row_indices,
+  state_is_cap)` tuple.
+* `b_vector(t) / rhs(t, x)` call `compute_sine_b_extra +
+  compute_pwm_b_extra + compute_pulse_b_extra` natively (same
+  helpers `run_transient` uses) and apply the cached `B` projection.
+* Optional `std::function<Vector(Real)>` for user `b_extra_fn`
+  (wrapped from Python with `py::gil_scoped_acquire` so it's safe
+  to call from inside the GIL-released inner loop).
+* Probes for time-varying sources once at construction — DC-only
+  circuits skip the overlay entirely on the hot path.
+
+### ADL hook for `PEDSimulatorAuto`
+
+The auto-dispatch scheduler calls `mode_id_of(mask)` to key its
+per-mode integrator cache. The default `pulsim::dsed::mode_id_of<MaskT>`
+template only matches integral/enum types, so for `SwitchStateMask`
+we provide an overload in `pulsim::topology::` namespace (where
+two-phase lookup finds it via ADL):
+
+```cpp
+namespace pulsim::topology {
+inline int mode_id_of(const SwitchStateMask& m) noexcept {
+    return static_cast<int>(std::hash<SwitchStateMask>{}(m));
+}
+}
+```
+
+### Speedup measured (buck CCM, 24V→12V, 100 kHz, 5 ms window)
+
+| Layer | Wall-clock | per-step | vs PWL |
+|---|---:|---:|---:|
+| PWL (C++ trap, dt=100ns, 50001 steps) | 51.01 ms | 1.02 µs | 1.0× (baseline) |
+| DSED Python scheduler (Bridge.5, 1007 steps) | 61.26 ms | 60.8 µs | 0.85× |
+| DSED Bridge.10 (Python adapter + C++ sched) | 22.40 ms | 22.2 µs | 2.3× |
+| **DSED Bridge.11 (native adapter + C++ sched)** | **3.83 ms** | **3.80 µs** | **13.3× FASTER than PWL** |
+
+Per-step ratio against the C++ trap inner loop (~1.02 µs) is only
+~3.7× now — almost all of that is `compute_sine/pwm/pulse_b_extra`
+loops walking `pool` device-by-device. Further optimization could
+cache the source-stamp vectors once per mask and apply a per-step
+linear combination instead of re-walking the pool.
+
+### Dispatch wiring
+
+`python/pulsim/_dsed_dispatch.run_dsed_from_builder` tries Bridge.11
+first, falls back to Bridge.10 (Python adapter + native scheduler)
+if the native adapter rejects the circuit (e.g. nonlinear device),
+and finally falls back to Bridge.5 (pure Python) if the native
+bindings aren't built at all.
+
+### What's exposed
+
+```python
+from pulsim._pulsim import (
+    _NativeCircuitBuilderAdapter,    # the native adapter class
+    run_ped_native_builder,           # DOPRI5 over native adapter
+    run_bdf2_native_builder,          # BDF2 over native adapter
+    run_auto_native_builder,          # auto-dispatch over native adapter
+)
+```
+
+These are auto-detected by `pulsim.simulate(engine='dsed', ...)` —
+no user code changes needed. End-user API is unchanged.
+
+### Validation
+
+* **549/549 C++ tests pass** (no new tests; Bridge.11 reuses the
+  existing extractor + scheduler tests through the new adapter).
+* **12/12 Python end-to-end tests pass**, suite runs in 1.18 s
+  (vs 1.85 s with Bridge.10 — ~40% faster across the suite).
+* Buck CCM final state = 12.0000 V exact (bit-for-bit match with
+  earlier Bridges; the algorithm is unchanged, only the inner-loop
+  language).
+
+---
+
 ## 8. References
 
 * Pulsim assembler: `core/include/pulsim/pwl/assemble.hpp`

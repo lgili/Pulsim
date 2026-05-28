@@ -31,6 +31,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/dsed/builder_adapter.hpp"
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
@@ -38,6 +40,8 @@
 #include "pulsim/dsed/stiffness_detector.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/pwl/cache.hpp"
+#include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -207,12 +211,22 @@ py::dict ped_result_to_dict(
         ed["t"] = e.t;
         ed["name"] = e.name;
         ed["predicate_type"] = static_cast<int>(e.type);
-        // Cast MaskT (which is PyMask) back to its py::object
+        // Cast MaskT — PyMask carries a raw py::object; the
+        // SwitchStateMask path goes through pybind11 auto-cast since
+        // the type is bound in `bindings.cpp`.
         if constexpr (std::is_same_v<MaskT, PyMask>) {
             ed["old_mask"] = e.old_mask.obj;
             ed["new_mask"] = e.new_mask.obj;
+        } else {
+            ed["old_mask"] = py::cast(e.old_mask);
+            ed["new_mask"] = py::cast(e.new_mask);
         }
         events.append(ed);
+    }
+    // Patch the (non-PyMask) overload's mask serialisation
+    if constexpr (!std::is_same_v<MaskT, PyMask>) {
+        // Empty `event_log` already populated above without mask
+        // entries; nothing extra to do here.
     }
     d["event_log"] = events;
     return d;
@@ -256,6 +270,9 @@ py::dict ped_result_auto_to_dict(
         if constexpr (std::is_same_v<MaskT, PyMask>) {
             ed["old_mask"] = e.old_mask.obj;
             ed["new_mask"] = e.new_mask.obj;
+        } else {
+            ed["old_mask"] = py::cast(e.old_mask);
+            ed["new_mask"] = py::cast(e.new_mask);
         }
         events.append(ed);
     }
@@ -376,6 +393,223 @@ void init_module(py::module_& m) {
         "stiffness detector) running the C++ scheduler inner loop. "
         "Returns a dict that additionally includes n_rk45_steps + "
         "n_bdf2_steps for each mode-segment.");
+
+    // -------------------------------------------------------------------
+    // Bridge.11 — NativeCircuitBuilderAdapter + native-typed schedulers.
+    //
+    // The schedulers above (`run_ped_native` / `run_bdf2_native` /
+    // `run_auto_native`) take a generic `system` Python object and
+    // pay GIL roundtrips on every A_matrix / b_vector / rhs call (~22
+    // µs/step on buck CCM). The variants below take a native C++
+    // `NativeCircuitBuilderAdapter` and a SwitchStateMask-returning
+    // switch_fn; the scheduler inner loop calls C++ → C++ for RHS
+    // (no GIL, no marshalling), only paying the GIL cost at gate
+    // edges when the Python switch_fn is invoked.
+    //
+    // Expected speedup vs Bridge.10: ~5-10× per-step → buck CCM 5 ms
+    // down from ~22 ms wall-clock to ~2-5 ms.
+    // -------------------------------------------------------------------
+
+    using pulsim::dsed::NativeCircuitBuilderAdapter;
+    using SSM = pulsim::topology::SwitchStateMask;
+    using NativeAdapter = NativeCircuitBuilderAdapter<SSM>;
+
+    // --- PySwitchFnSSM: Python switch_fn → C++ SwitchStateMask path ---
+    // Local to this TU; used as the SwitchFn template arg of the C++
+    // schedulers when paired with a NativeAdapter.
+    struct PySwitchFnSSM {
+        explicit PySwitchFnSSM(py::object fn)
+            : fn_{std::move(fn)} {
+            if (py::hasattr(fn_, "next_edge_after")) {
+                nea_attr_ = fn_.attr("next_edge_after");
+                has_nea_  = true;
+            }
+        }
+
+        [[nodiscard]] SSM operator()(Real t) const {
+            // The Bridge.11 schedulers release the GIL for the inner
+            // loop; re-acquire it before touching Python objects.
+            py::gil_scoped_acquire gil;
+            return fn_(t).cast<SSM>();
+        }
+
+        [[nodiscard]] Real next_edge_after(Real t) const {
+            py::gil_scoped_acquire gil;
+            if (has_nea_) {
+                return nea_attr_(t).cast<Real>();
+            }
+            return std::numeric_limits<Real>::infinity();
+        }
+
+        py::object fn_;
+        py::object nea_attr_;
+        bool       has_nea_ = false;
+    };
+
+    py::class_<NativeAdapter>(m, "_NativeCircuitBuilderAdapter",
+        "Bridge.11 — native C++ CircuitBuilderAdapter. Wraps a "
+        "(CircuitBuilder, PwlStateSpaceCache) pair so the C++ "
+        "schedulers can call A_matrix / b_vector / rhs without GIL "
+        "roundtrips. Time-varying source overlay (sine/PWM/pulse) "
+        "is computed natively via the same compute_*_b_extra "
+        "helpers run_transient uses; an optional Python b_extra_fn "
+        "callback adds onto that result.")
+        .def(py::init([](
+                const pulsim::builder::CircuitBuilder& builder,
+                pulsim::pwl::PwlStateSpaceCache& cache,
+                py::object b_extra_fn) {
+                std::function<Vector(Real)> cpp_b_extra;
+                if (!b_extra_fn.is_none()) {
+                    // Wrap the Python callable into std::function. The
+                    // GIL cost only matters if the user actually
+                    // provides a callback — most circuits use the
+                    // auto-detected sine/PWM/pulse path.
+                    cpp_b_extra = [cb = std::move(b_extra_fn)](Real t) {
+                        py::gil_scoped_acquire gil;
+                        return cb(t).cast<Vector>();
+                    };
+                }
+                return std::make_unique<NativeAdapter>(
+                    builder.graph(), builder.pool(), cache,
+                    std::move(cpp_b_extra));
+            }),
+            py::arg("builder"),
+            py::arg("cache"),
+            py::arg("b_extra_fn") = py::none())
+        .def("set_mask", &NativeAdapter::set_mask,
+            "Set the active mask. Subsequent A_matrix / b_vector / "
+            "rhs queries resolve against this mask (cached lazily).")
+        .def("current_mask",
+            [](const NativeAdapter& self) { return self.current_mask(); },
+            "Return the currently-active mask.")
+        .def("A_matrix",
+            [](const NativeAdapter& self) {
+                // Return DenseMatrix by value (Eigen copy is cheap for
+                // small n_state). Used by Python tests / diagnostics.
+                return self.A_matrix();
+            },
+            "Continuous-time A matrix for the active mask.")
+        .def("b_vector",
+            &NativeAdapter::b_vector,
+            py::arg("t"),
+            "Continuous-time b vector at time `t` (DC + sine + PWM + "
+            "pulse + user-supplied overlay).")
+        .def("rhs",
+            &NativeAdapter::rhs,
+            py::arg("t"), py::arg("x"),
+            "Continuous-time RHS: dx/dt = A·x + b(t).")
+        .def_property_readonly("n_state",
+            &NativeAdapter::n_state,
+            "Number of continuous-time state variables for the "
+            "currently-active mask. Triggers a mask resolution if "
+            "not already cached.")
+        .def_property_readonly("has_dynamic_sources",
+            &NativeAdapter::has_dynamic_sources,
+            "Whether any time-varying source is present. Determined "
+            "once at construction by probing compute_*_b_extra.")
+        .def_property_readonly("num_cached_masks",
+            &NativeAdapter::num_cached_masks,
+            "Number of distinct masks resolved (and thus cached) "
+            "so far. Useful for tests + diagnostics.");
+
+    m.def("run_ped_native_builder",
+        [](NativeAdapter& adapter,
+           py::object switch_fn_obj,
+           Vector x0,
+           Real t_end,
+           Real rtol,
+           Real atol,
+           Real dt_init,
+           Real dt_max,
+           std::size_t store_every) {
+            PySwitchFnSSM sf(std::move(switch_fn_obj));
+            PIController ctrl(rtol, atol);
+            EventPredictor pred;
+            PEDSimulator<NativeAdapter, PySwitchFnSSM> sim(
+                adapter, std::move(sf), std::move(ctrl),
+                std::move(pred), dt_init, dt_max, store_every);
+            // Release the GIL during simulate(); the C++ scheduler
+            // only re-acquires it at gate edges to call switch_fn.
+            py::gil_scoped_release release;
+            auto res = sim.simulate(x0, t_end);
+            py::gil_scoped_acquire acquire;
+            return ped_result_to_dict(res);
+        },
+        py::arg("adapter"),
+        py::arg("switch_fn"),
+        py::arg("x0"),
+        py::arg("t_end"),
+        py::arg("rtol")        = Real{1e-6},
+        py::arg("atol")        = Real{1e-9},
+        py::arg("dt_init")     = Real{1e-9},
+        py::arg("dt_max")      = Real{1e-5},
+        py::arg("store_every") = std::size_t{1},
+        "Bridge.11 — native PEDSimulator (DOPRI5) over a "
+        "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
+        "execute in C++ without GIL roundtrips; the only Python "
+        "callback is `switch_fn` at gate edges (rare).");
+
+    m.def("run_bdf2_native_builder",
+        [](NativeAdapter& adapter,
+           py::object switch_fn_obj,
+           Vector x0,
+           Real t_end,
+           Real h_fixed,
+           std::size_t store_every) {
+            PySwitchFnSSM sf(std::move(switch_fn_obj));
+            PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
+                adapter, std::move(sf), h_fixed, store_every);
+            py::gil_scoped_release release;
+            auto res = sim.simulate(x0, t_end);
+            py::gil_scoped_acquire acquire;
+            return ped_result_to_dict(res);
+        },
+        py::arg("adapter"),
+        py::arg("switch_fn"),
+        py::arg("x0"),
+        py::arg("t_end"),
+        py::arg("h_fixed")     = Real{1e-6},
+        py::arg("store_every") = std::size_t{1},
+        "Bridge.11 — native PEDSimulatorBDF2 over a "
+        "NativeCircuitBuilderAdapter (implicit BDF2 + CN bootstrap).");
+
+    m.def("run_auto_native_builder",
+        [](NativeAdapter& adapter,
+           py::object switch_fn_obj,
+           Vector x0,
+           Real t_end,
+           Real rtol,
+           Real atol,
+           Real dt_init,
+           Real dt_max,
+           Real h_bdf2,
+           Real stiffness_threshold,
+           std::size_t store_every) {
+            PySwitchFnSSM sf(std::move(switch_fn_obj));
+            PIController ctrl(rtol, atol);
+            StiffnessDetector det(stiffness_threshold);
+            PEDSimulatorAuto<NativeAdapter, PySwitchFnSSM> sim(
+                adapter, std::move(sf), std::move(ctrl),
+                std::move(det), dt_init, dt_max, h_bdf2,
+                store_every);
+            py::gil_scoped_release release;
+            auto res = sim.simulate(x0, t_end);
+            py::gil_scoped_acquire acquire;
+            return ped_result_auto_to_dict(res);
+        },
+        py::arg("adapter"),
+        py::arg("switch_fn"),
+        py::arg("x0"),
+        py::arg("t_end"),
+        py::arg("rtol")                = Real{1e-6},
+        py::arg("atol")                = Real{1e-9},
+        py::arg("dt_init")             = Real{1e-9},
+        py::arg("dt_max")              = Real{1e-5},
+        py::arg("h_bdf2")              = Real{1e-6},
+        py::arg("stiffness_threshold") = Real{10.0},
+        py::arg("store_every")          = std::size_t{1},
+        "Bridge.11 — native PEDSimulatorAuto over a "
+        "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 }
 
 }  // namespace pulsim_dsed_bindings

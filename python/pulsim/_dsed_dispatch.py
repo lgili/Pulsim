@@ -457,21 +457,87 @@ def run_dsed_from_builder(
             f"t_start ({opts.t_start})."
         )
 
-    # ---- Stage 4: try native C++ scheduler first (Bridge.10), fall
-    # back to Python port if the native module isn't built.
-    native_ok = False
+    # ---- Stage 4: prefer Bridge.11 (full-native adapter + scheduler),
+    # fall back to Bridge.10 (Python adapter + native scheduler),
+    # fall back to Bridge.5 (Python adapter + Python scheduler).
+    _native = None
     try:
-        from . import _pulsim as _native       # type: ignore[attr-defined]
-        run_ped_native = getattr(_native, "run_ped_native", None)
-        run_bdf2_native = getattr(_native, "run_bdf2_native", None)
-        run_auto_native = getattr(_native, "run_auto_native", None)
-        native_ok = (run_ped_native is not None
-                     and run_bdf2_native is not None
-                     and run_auto_native is not None)
-    except (ImportError, AttributeError):
-        native_ok = False
+        from . import _pulsim as _native_mod   # type: ignore[attr-defined]
+        _native = _native_mod
+    except ImportError:
+        _native = None
 
-    if native_ok:
+    NativeAdapterCls = (getattr(_native, "_NativeCircuitBuilderAdapter", None)
+                        if _native is not None else None)
+    run_ped_b11 = (getattr(_native, "run_ped_native_builder", None)
+                   if _native is not None else None)
+    run_bdf2_b11 = (getattr(_native, "run_bdf2_native_builder", None)
+                    if _native is not None else None)
+    run_auto_b11 = (getattr(_native, "run_auto_native_builder", None)
+                    if _native is not None else None)
+    bridge11_ok = (NativeAdapterCls is not None
+                   and run_ped_b11 is not None
+                   and run_bdf2_b11 is not None
+                   and run_auto_b11 is not None)
+
+    if bridge11_ok:
+        try:
+            native_adapter = NativeAdapterCls(
+                builder, cache,
+                b_extra_fn if b_extra_fn is not None else None)
+            if opts.integrator == "rk45":
+                native_res = run_ped_b11(
+                    native_adapter, sf, x0, t_window,
+                    rtol=opts.rtol, atol=opts.atol,
+                    dt_init=opts.dt_init, dt_max=opts.dt_max,
+                    store_every=opts.store_every)
+            elif opts.integrator == "bdf2":
+                native_res = run_bdf2_b11(
+                    native_adapter, sf, x0, t_window,
+                    h_fixed=opts.h_bdf2,
+                    store_every=opts.store_every)
+            else:  # 'auto'
+                native_res = run_auto_b11(
+                    native_adapter, sf, x0, t_window,
+                    rtol=opts.rtol, atol=opts.atol,
+                    dt_init=opts.dt_init, dt_max=opts.dt_max,
+                    h_bdf2=opts.h_bdf2,
+                    stiffness_threshold=opts.stiffness_threshold,
+                    store_every=opts.store_every)
+            times_arr = native_res["times"]
+            states_arr = native_res["states"]
+            times = [float(t) + float(opts.t_start) for t in times_arr]
+            states = [np.asarray(states_arr[i], dtype=float)
+                      for i in range(len(times))]
+            return _PEDSimulationResult(
+                times=times,
+                states=states,
+                n_accept=native_res.get("n_accept", 0),
+                n_reject=native_res.get("n_reject", 0),
+                n_events=native_res.get("n_events", 0),
+                n_rk45_steps=native_res.get("n_rk45_steps", 0),
+                n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+                cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
+            )
+        except (RuntimeError, ValueError):
+            # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
+            # device that the C++ extractor can't handle). Silently fall
+            # through to Bridge.10 — the Python adapter has identical
+            # semantics + the same error path on the same circuits.
+            pass
+
+    # Bridge.10 path — Python adapter + native scheduler.
+    run_ped_native = (getattr(_native, "run_ped_native", None)
+                      if _native is not None else None)
+    run_bdf2_native = (getattr(_native, "run_bdf2_native", None)
+                       if _native is not None else None)
+    run_auto_native = (getattr(_native, "run_auto_native", None)
+                       if _native is not None else None)
+    bridge10_ok = (run_ped_native is not None
+                   and run_bdf2_native is not None
+                   and run_auto_native is not None)
+
+    if bridge10_ok:
         if opts.integrator == "rk45":
             native_res = run_ped_native(
                 adapter, sf, x0, t_window,
@@ -491,7 +557,6 @@ def run_dsed_from_builder(
                 h_bdf2=opts.h_bdf2,
                 stiffness_threshold=opts.stiffness_threshold,
                 store_every=opts.store_every)
-        # Native returns a dict; convert to _PEDSimulationResult
         times_arr = native_res["times"]
         states_arr = native_res["states"]
         times = [float(t) + float(opts.t_start) for t in times_arr]
