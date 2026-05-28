@@ -29,6 +29,33 @@ add_library(pulsim::core ALIAS pulsim_core)
 # =============================================================================
 if(PULSIM_BUILD_TESTS)
     # =============================================================================
+    # pulsim_core_dsed_tests — add-path-based-dsed-engine (Gate 2)
+    # =============================================================================
+    # Path-Based Event-Driven engine unit tests. Header-only modules
+    # in core/include/pulsim/dsed/. Depends only on Layer 0 (numeric
+    # types) — no Pulsim-cache integration yet (that lands at Gate 4).
+    add_executable(pulsim_core_dsed_tests
+        tests/dsed/test_main.cpp
+        tests/dsed/test_step_controller.cpp
+        tests/dsed/test_event_predictor.cpp
+        tests/dsed/test_rk45.cpp
+        tests/dsed/test_buck_ccm.cpp        # Phase 2.B-1 — C++ end-to-end on buck CCM
+        tests/dsed/test_diode_events.cpp    # Gate 3 — buck DCM + body-diode commutation
+        tests/dsed/test_bdf2.cpp            # Gate 4 — BDF2 + stiffness detector
+        tests/dsed/test_bdf2_scheduler.cpp  # Gate 4.C — end-to-end BDF2 PED scheduler
+        tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
+    )
+    target_link_libraries(pulsim_core_dsed_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_dsed_tests)
+    endif()
+    catch_discover_tests(pulsim_core_dsed_tests)
+
+    # =============================================================================
     # pulsim_core_layer0_tests — bootstrap-pulsim-v2-kernel
     # =============================================================================
     # Layer 0 tests live in a separate binary so v2 can be developed
@@ -439,6 +466,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v3/test_main.cpp
         tests/layer4_v3/test_nonlinear_solve.cpp
         tests/layer4_v3/test_diode_load_line.cpp
+        tests/layer4_v3/test_lti_state_space.cpp   # Bridge.3 — DSED bridge
     )
     target_link_libraries(pulsim_core_layer4_v3_tests
         PRIVATE
@@ -506,6 +534,7 @@ if(PULSIM_BUILD_TESTS)
         tests/benchmarks/test_bench_ac_sweep.cpp         # v1.4.0 — complex solver per-freq cost
         tests/benchmarks/test_bench_multi_bit_rank1.cpp  # v1.4.0 — multi-bit path-union routing
         tests/benchmarks/test_bench_parametric_sweep.cpp # v1.4.0 — refactor_parametric for sweeps
+        tests/benchmarks/test_bench_dsed.cpp             # PED Gate 2 Phase 2.B-2 — variable-step buck CCM
     )
     target_include_directories(pulsim_benchmarks
         PRIVATE

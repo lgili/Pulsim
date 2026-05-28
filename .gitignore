@@ -82,3 +82,8 @@ benchmarks/parity_out/
 # Node.js (elkjs for pulsim.schematic ELK backend)
 node_modules/
 package-lock.json
+
+# DSED dev build dirs (not the canonical build/)
+build-dsed/
+build-s6/
+build_tests/

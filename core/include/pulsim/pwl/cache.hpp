@@ -38,6 +38,8 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <numeric>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -291,6 +293,523 @@ public:
         const PwlSegment& seg = lookup(mask);
         Vector rhs = -(seg.b_constant + b_extra);
         seg.solver->solve(rhs, x);
+    }
+
+    // -------------------------------------------------------------
+    // DSED bridge — continuous-time LTI state-space extraction
+    // (notes/DSED_BRIDGE_DESIGN.md — currently a stub; implementation
+    // is Phase 5.1 of the bridge work).
+    // -------------------------------------------------------------
+
+    /// Result of `compute_lti_state_space(mask)` — the per-mask
+    /// continuous-time state-space `dx_state/dt = A · x_state + b`.
+    ///
+    /// For use by ``pulsim.dsed.PEDSimulatorAuto`` (and the Python
+    /// adapter in ``python/pulsim/dsed/_builder_bridge.py``).
+    ///
+    /// The state vector convention is
+    /// `x_state = [v_C_1, ..., v_C_nc, i_L_1, ..., i_L_nl]` —
+    /// `state_row_indices[i]` gives the FULL-MNA row where state `i`
+    /// lives, and `state_is_cap[i]` discriminates caps from inductors.
+    ///
+    /// **Time-varying source overlay (Phase 5.2 / Bridge.6):**
+    /// ``b_projection`` is the linear map from full-MNA `b` to the
+    /// reduced state-space `b` (i.e. `b_state(t) = b_constant +
+    /// b_projection · b_extra_mna(t)`). The Python adapter uses this
+    /// to overlay sine / PWM / pulse source values per PED step,
+    /// matching ``run_transient``'s b_extra pipeline.
+    struct ContinuousLTI {
+        DenseMatrix A;                         // n_state × n_state
+        Vector b_constant;                      // n_state — DC sources
+        std::vector<Index> state_row_indices;   // MNA row of each state
+        std::vector<bool> state_is_cap;          // True=cap, False=inductor
+        DenseMatrix b_projection;               // n_state × n_mna
+                                                // Linear projection from
+                                                // full-MNA b to state b
+    };
+
+    /// Extract continuous-time `(A, b)` for the given switch mask.
+    ///
+    /// Uses the MNA finite-difference recovery method documented in
+    /// ``notes/DSED_BRIDGE_DESIGN.md`` §2:
+    ///   1. Assemble `J(h_a)` and `J(h_b)` via the existing assembler
+    ///   2. Recover `M_dyn = (J(h_a) - J(h_b)) / (2/h_a - 2/h_b)`
+    ///   3. Recover `G_static = J(h_a) - (2/h_a) · M_dyn`
+    ///   4. Identify state rows via `pool.kind_of` + `branch_var_id_for_inductor`
+    ///   5. Schur-complement the algebraic vars out → dense `A, b`
+    ///
+    /// **STATUS:** stub — throws `std::logic_error` until Phase 5.1
+    /// of the bridge work lands. The pybind11 binding is wired so
+    /// callers (Python `CircuitBuilderAdapter`) can catch the error
+    /// and emit a clear `NotImplementedError` upstream.
+    ///
+    /// **Restrictions when implemented:**
+    /// * LTI circuits only — nonlinear devices (diodes, MOSFETs,
+    ///   IGBTs, saturable inductors) require per-operating-point
+    ///   linearization not modeled by the PED engine; calling this
+    ///   on a nonlinear topology will throw.
+    /// * `h_a`, `h_b` are recovery-only step sizes (NOT the PED's
+    ///   actual step). Defaults are chosen for numerical
+    ///   well-conditioning across typical PE scales.
+    [[nodiscard]] ContinuousLTI
+    compute_lti_state_space(
+        const topology::SwitchStateMask& mask,
+        Real h_a = Real{1e-6},
+        Real h_b = Real{5e-7}) const {
+        // ---------------------------------------------------------
+        // Step 1: assemble J at two dt values via the existing
+        // stamper — no new stamping code path.
+        // ---------------------------------------------------------
+        sparse::Matrix J_a, J_b;
+        Vector b_a, b_b;
+        assemble_segment(graph_, pool_, mask, h_a, J_a, b_a);
+        assemble_segment(graph_, pool_, mask, h_b, J_b, b_b);
+
+        const int n_mna = static_cast<int>(J_a.rows());
+
+        // ---------------------------------------------------------
+        // Step 2: densify the small per-segment matrices and
+        // recover M_dyn / G_static by linear combination
+        //   J(h) = G_static + (2/h) · M_dyn
+        //   → M_dyn  = (J_a - J_b) · (h_a · h_b) / (2 · (h_b - h_a))
+        //   → G_st   = J_a - (2/h_a) · M_dyn
+        // ---------------------------------------------------------
+        DenseMatrix Jd_a = DenseMatrix(J_a);   // Eigen sparse → dense
+        DenseMatrix Jd_b = DenseMatrix(J_b);
+        const Real recovery =
+            (h_a * h_b) / (Real{2} * (h_b - h_a));
+        DenseMatrix M_dyn = (Jd_a - Jd_b) * recovery;
+        DenseMatrix G_st  = Jd_a - (Real{2} / h_a) * M_dyn;
+
+        // ---------------------------------------------------------
+        // Step 3: walk pool to identify caps + inductors. Caps may
+        //         be GROUNDED (one terminal == kGround) or FLOATING
+        //         (both terminals non-ground). Floating caps are
+        //         re-oriented in Step 3b and handled via a
+        //         congruence transform in Step 3c (Phase 5.1b —
+        //         see notes/DSED_BRIDGE_DESIGN.md §5.1b).
+        // ---------------------------------------------------------
+        struct CapInfo {
+            Index from;       // raw branch.from (may be kGround)
+            Index to;         // raw branch.to   (may be kGround)
+            Real C;
+            // Re-oriented in Step 3b: pos = state-bearing terminal,
+            // neg = closer to anchor (may be the synthetic ground).
+            // After Step 3b, pos is always a real MNA index.
+            Index pos = kInvalidIndex;
+            Index neg = kInvalidIndex;
+        };
+        struct IndInfo {
+            Index branch_var;
+            Real L;
+            Index from;       // raw branch.from (for cycle detection)
+            Index to;         // raw branch.to
+        };
+        std::vector<CapInfo> caps;
+        std::vector<IndInfo> inds;
+        for (Index bid = 0; bid < graph_.num_branches(); ++bid) {
+            const auto& branch = graph_.branch(bid);
+            if (branch.kind != topology::BranchKind::PassiveLinear) {
+                continue;
+            }
+            const auto k = pool_.kind_of(branch.id);
+            if (k == DevicePool::StoredKind::Capacitor) {
+                if (branch.from == kGround && branch.to == kGround) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: capacitor has "
+                        "both terminals on ground (short circuit).");
+                }
+                caps.push_back({
+                    branch.from, branch.to,
+                    pool_.capacitor_params(branch.id).C,
+                });
+            } else if (k == DevicePool::StoredKind::Inductor) {
+                const Index bv = pool_.branch_var_id_for_inductor(
+                    branch.id, graph_);
+                inds.push_back({
+                    bv,
+                    pool_.inductor_params(branch.id).L,
+                    branch.from,
+                    branch.to,
+                });
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Inductor cycle detection (Bridge.9). Inductors form a graph
+        // over MNA nodes; a CYCLE in this graph creates a KVL constraint
+        // on di_L/dt that makes the per-mode A matrix singular (the
+        // Schur complement on G_aa fails because the inductor branch-
+        // var rows of G_ss are linearly dependent). The dual problem
+        // for caps (floating + parallel) has a coordinate-change fix
+        // (Phase 5.1b); for inductors the same fix exists in theory
+        // but is much rarer in real PE circuits — we reject the
+        // pathological case with a clear error and a workaround
+        // pointer (merge into a single equivalent inductor).
+        //
+        // Detection: union-find over MNA nodes + ground sentinel,
+        // union by inductor edges, detect cycle when both endpoints
+        // are already in the same component.
+        // -----------------------------------------------------------------
+        if (!inds.empty()) {
+            const Index kGroundIdx_ind = static_cast<Index>(n_mna);
+            const Index kNodeCount_ind = kGroundIdx_ind + 1;
+            auto map_idx_ind = [&](Index n) {
+                return n == kGround ? kGroundIdx_ind : n;
+            };
+            std::vector<Index> uf_ind(kNodeCount_ind);
+            std::iota(uf_ind.begin(), uf_ind.end(), Index{0});
+            auto find_root_ind = [&](Index x) {
+                while (uf_ind[x] != x) {
+                    uf_ind[x] = uf_ind[uf_ind[x]];
+                    x = uf_ind[x];
+                }
+                return x;
+            };
+            for (const auto& l : inds) {
+                Index a = find_root_ind(map_idx_ind(l.from));
+                Index b = find_root_ind(map_idx_ind(l.to));
+                if (a == b) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: inductors form a "
+                        "cycle (parallel inductors or longer all-"
+                        "inductor loops). The KVL around the loop "
+                        "creates a linear dependency on di_L/dt that "
+                        "makes the LTI state-space singular. Merge "
+                        "the looping inductors into a single equivalent "
+                        "inductor upstream (parallel inductors: "
+                        "L_eq = (L1·L2)/(L1+L2); series in the same "
+                        "loop with mutual coupling: use Pulsim's "
+                        "transformer/coupled-inductor API).");
+                }
+                uf_ind[a] = b;
+            }
+        }
+
+        const int n_cap = static_cast<int>(caps.size());
+        const int n_ind = static_cast<int>(inds.size());
+        const int n_state = n_cap + n_ind;
+        if (n_state == 0) {
+            throw std::runtime_error(
+                "compute_lti_state_space: circuit has no "
+                "dynamic elements (caps or inductors); the "
+                "PED engine integrates state equations, so a "
+                "purely static circuit has no state to evolve.");
+        }
+
+        // Declared OUTSIDE the n_cap > 0 block so it stays in scope
+        // for the B-projection construction in Step 7. Defaults to
+        // identity (no congruence) for grounded-only or no-cap cases.
+        DenseMatrix T = DenseMatrix::Identity(n_mna, n_mna);
+        bool t_is_identity = true;
+
+        // ---------------------------------------------------------
+        // Step 3b: orient each cap via BFS over the cap-edge graph.
+        //
+        // We model caps as undirected edges between MNA nodes (with
+        // a synthetic node `n_mna` representing the ground rail).
+        // For each connected component of cap edges we pick an
+        // *anchor*:
+        //   - If the component touches ground, anchor = synthetic
+        //     ground (every node in the component carries a cap
+        //     state).
+        //   - Otherwise, anchor = lowest-index MNA node in the
+        //     component (the anchor stays algebraic; all other
+        //     nodes carry a cap state).
+        //
+        // BFS from the anchor orients each tree edge as
+        //   pos = farther-from-anchor, neg = closer-to-anchor.
+        // A cap that doesn't end up as a tree edge means parallel
+        // caps formed a cycle — that's deferred (merge upstream).
+        // ---------------------------------------------------------
+        if (n_cap > 0) {
+            const Index kGroundIdx = static_cast<Index>(n_mna);
+            const Index kNodeCount = kGroundIdx + 1;
+
+            auto map_idx = [&](Index n) {
+                return n == kGround ? kGroundIdx : n;
+            };
+
+            // Union-find over [0, n_mna] to identify components
+            std::vector<Index> uf(kNodeCount);
+            std::iota(uf.begin(), uf.end(), Index{0});
+            auto find_root = [&](Index x) {
+                while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; }
+                return x;
+            };
+            auto unite = [&](Index a, Index b) {
+                a = find_root(a);
+                b = find_root(b);
+                if (a != b) uf[a] = b;
+            };
+            for (const auto& c : caps) {
+                unite(map_idx(c.from), map_idx(c.to));
+            }
+
+            // Anchor per component: prefer ground; otherwise lowest
+            // MNA index that's present in the component.
+            std::vector<Index> root_to_anchor(kNodeCount, kInvalidIndex);
+            // First pass: stamp ground anchors.
+            {
+                Index r = find_root(kGroundIdx);
+                root_to_anchor[r] = kGroundIdx;
+            }
+            // Second pass: stamp lowest-MNA-index for non-grounded
+            // components (skip if already ground-anchored).
+            for (Index i = 0; i < static_cast<Index>(n_mna); ++i) {
+                Index r = find_root(i);
+                if (root_to_anchor[r] == kGroundIdx) continue;
+                if (root_to_anchor[r] == kInvalidIndex
+                    || i < root_to_anchor[r]) {
+                    root_to_anchor[r] = i;
+                }
+            }
+
+            // Cap-edge adjacency over MNA + ground sentinel
+            std::vector<std::vector<std::pair<Index, int>>> adj(kNodeCount);
+            for (int k = 0; k < n_cap; ++k) {
+                const Index a = map_idx(caps[k].from);
+                const Index b = map_idx(caps[k].to);
+                adj[a].push_back({b, k});
+                adj[b].push_back({a, k});
+            }
+
+            // BFS from each anchor, recording tree edges (cap indices)
+            // in BFS-discovery order.
+            std::vector<int> bfs_cap_order;
+            bfs_cap_order.reserve(n_cap);
+            std::vector<char> visited(kNodeCount, char{0});
+            for (Index r = 0; r < kNodeCount; ++r) {
+                if (find_root(r) != r) continue;          // not a root
+                Index anchor = root_to_anchor[r];
+                if (anchor == kInvalidIndex) continue;    // empty comp
+                if (visited[anchor]) continue;            // already done
+                std::queue<Index> q;
+                q.push(anchor);
+                visited[anchor] = char{1};
+                while (!q.empty()) {
+                    Index u = q.front(); q.pop();
+                    for (auto [v, cap_k] : adj[u]) {
+                        if (visited[v]) continue;
+                        visited[v] = char{1};
+                        // Orient: pos = farther-from-anchor (v),
+                        //         neg = closer-to-anchor   (u)
+                        caps[cap_k].pos = v;
+                        caps[cap_k].neg = u;
+                        bfs_cap_order.push_back(cap_k);
+                        q.push(v);
+                    }
+                }
+            }
+
+            // Any cap left unoriented = parallel-cap cycle. Defer.
+            for (int k = 0; k < n_cap; ++k) {
+                if (caps[k].pos == kInvalidIndex) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: capacitors form a "
+                        "cycle (parallel caps share both terminals) — "
+                        "merge them into a single equivalent cap "
+                        "upstream. Phase 5.1b TODO.");
+                }
+                // The anchor (kGroundIdx OR a real MNA node) can be
+                // a `neg` value. The `pos` is always a real MNA row.
+                if (caps[k].pos == kGroundIdx) {
+                    // Shouldn't happen: BFS from anchor visits non-
+                    // anchor nodes as `v`; `v == kGroundIdx` is only
+                    // possible if a non-ground anchor had a cap to
+                    // ground, but then ground would have been in the
+                    // component and already anchored. Defensive guard.
+                    throw std::logic_error(
+                        "compute_lti_state_space: internal BFS "
+                        "produced kGroundIdx as a cap `pos`.");
+                }
+            }
+
+            // -----------------------------------------------------
+            // Step 3c: build T (sparse), apply congruence transform.
+            //
+            //   M_new = T^T · M_dyn · T
+            //   G_new = T^T · G_st  · T
+            //   b_new = T^T · b_a
+            //
+            // T is constructed by processing tree edges in *reverse*
+            // BFS order and doing T.col(neg) += T.col(pos). After
+            // this, T col `anchor` carries 1's at every node in the
+            // grounded component (subtree under anchor), so the
+            // anchor's row of M_new is zero — algebraic.
+            // -----------------------------------------------------
+            // Build T in place (start identity, was declared above
+            // for outer-scope access).
+            for (auto it = bfs_cap_order.rbegin();
+                 it != bfs_cap_order.rend(); ++it) {
+                const auto& c = caps[*it];
+                // If `neg` is the synthetic ground (grounded cap on
+                // a leaf of the tree), there's no column to update.
+                if (c.neg == kGroundIdx) continue;
+                T.col(c.neg) += T.col(c.pos);
+            }
+
+            // Skip the congruence apply if T is exactly identity
+            // (no floating caps → grounded-only circuit → T = I).
+            // This is the buck-CCM regression fast path.
+            t_is_identity = T.isIdentity();
+            if (!t_is_identity) {
+                DenseMatrix Tt = T.transpose();
+                DenseMatrix M_tmp = Tt * M_dyn * T;
+                DenseMatrix G_tmp = Tt * G_st  * T;
+                Vector      b_tmp = Tt * b_a;
+                M_dyn = std::move(M_tmp);
+                G_st  = std::move(G_tmp);
+                b_a   = std::move(b_tmp);
+            }
+        }
+
+        // ---------------------------------------------------------
+        // Step 4: build the state-row index list (caps first, then
+        // inductors) and the algebraic-row index list.
+        //
+        // For each cap, the state row is the `pos` MNA index (where
+        // T put the +C diagonal of M_new). For each inductor, the
+        // state row is its branch_var (T leaves inductor rows alone).
+        // ---------------------------------------------------------
+        std::vector<Index> state_rows;
+        std::vector<bool> state_is_cap;
+        state_rows.reserve(n_state);
+        state_is_cap.reserve(n_state);
+        for (const auto& c : caps) {
+            state_rows.push_back(c.pos);
+            state_is_cap.push_back(true);
+        }
+        for (const auto& i : inds) {
+            state_rows.push_back(i.branch_var);
+            state_is_cap.push_back(false);
+        }
+
+        std::vector<bool> is_state(n_mna, false);
+        for (Index r : state_rows) is_state[r] = true;
+        std::vector<Index> alg_rows;
+        for (int r = 0; r < n_mna; ++r) {
+            if (!is_state[r]) alg_rows.push_back(r);
+        }
+        const int n_alg = static_cast<int>(alg_rows.size());
+
+        // ---------------------------------------------------------
+        // Step 5: partition G_st and b_a into [SS, SA, AS, AA]
+        // ---------------------------------------------------------
+        DenseMatrix G_ss(n_state, n_state);
+        DenseMatrix G_sa(n_state, n_alg);
+        DenseMatrix G_as(n_alg,   n_state);
+        DenseMatrix G_aa(n_alg,   n_alg);
+        Vector b_s(n_state);
+        Vector b_a_v(n_alg);
+        for (int i = 0; i < n_state; ++i) {
+            for (int j = 0; j < n_state; ++j) {
+                G_ss(i, j) = G_st(state_rows[i], state_rows[j]);
+            }
+            for (int j = 0; j < n_alg; ++j) {
+                G_sa(i, j) = G_st(state_rows[i], alg_rows[j]);
+            }
+            b_s(i) = b_a(state_rows[i]);
+        }
+        for (int i = 0; i < n_alg; ++i) {
+            for (int j = 0; j < n_state; ++j) {
+                G_as(i, j) = G_st(alg_rows[i], state_rows[j]);
+            }
+            for (int j = 0; j < n_alg; ++j) {
+                G_aa(i, j) = G_st(alg_rows[i], alg_rows[j]);
+            }
+            b_a_v(i) = b_a(alg_rows[i]);
+        }
+
+        // ---------------------------------------------------------
+        // Step 6: Schur-complement out the algebraic vars.
+        //   M_ss · dx_s/dt = -G_ss · x_s - G_sa · x_a - b_s
+        //   G_aa · x_a = -G_as · x_s - b_a_v
+        //   → x_a = -G_aa^{-1} · (G_as · x_s + b_a_v)
+        //   → M_ss · dx_s/dt = (G_sa · G_aa^{-1} · G_as - G_ss) · x_s
+        //                     + (G_sa · G_aa^{-1} · b_a_v - b_s)
+        //
+        // We also build the projection matrix B (n_state × n_mna)
+        // such that for any time-varying b_extra in original MNA
+        // coords, b_reduced(t) = B · b_extra(t). This lets the
+        // Python adapter overlay sine/PWM/pulse contributions per
+        // PED step without re-stamping (Phase 5.2 / Bridge.6).
+        //
+        //   B = M_ss^{-1} · (G_sa · G_aa^{-1} · S_alg - S_state) · T^T
+        //
+        // where S_state (n_state × n_mna) and S_alg (n_alg × n_mna)
+        // are selector matrices picking the state and algebraic rows.
+        // ---------------------------------------------------------
+        DenseMatrix Schur_G(n_state, n_state);
+        Vector Schur_b(n_state);
+
+        // Build selector matrices (sparse-ish: one 1 per row)
+        DenseMatrix S_state = DenseMatrix::Zero(n_state, n_mna);
+        for (int i = 0; i < n_state; ++i) {
+            S_state(i, state_rows[i]) = Real{1};
+        }
+        DenseMatrix S_alg = DenseMatrix::Zero(n_alg, n_mna);
+        for (int i = 0; i < n_alg; ++i) {
+            S_alg(i, alg_rows[i]) = Real{1};
+        }
+        DenseMatrix B(n_state, n_mna);
+
+        if (n_alg > 0) {
+            Eigen::FullPivLU<DenseMatrix> lu_aa(G_aa);
+            if (!lu_aa.isInvertible()) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: algebraic block "
+                    "G_aa is singular; circuit topology does "
+                    "not have a unique algebraic solution for "
+                    "this switch mask.");
+            }
+            DenseMatrix Ginv_Gas = lu_aa.solve(G_as);
+            Vector      Ginv_ba  = lu_aa.solve(b_a_v);
+            Schur_G = G_sa * Ginv_Gas - G_ss;
+            Schur_b = G_sa * Ginv_ba  - b_s;
+
+            // B uses the SAME factorisation: G_aa^{-1} · S_alg.
+            DenseMatrix Ginv_Salg = lu_aa.solve(S_alg);
+            B = G_sa * Ginv_Salg - S_state;
+        } else {
+            Schur_G = -G_ss;
+            Schur_b = -b_s;
+            B = -S_state;
+        }
+
+        // Apply T^T on the right (the input b is in ORIGINAL coords;
+        // the extractor internally transformed b_a via T^T already).
+        if (!t_is_identity) {
+            B = B * T.transpose();
+        }
+
+        // ---------------------------------------------------------
+        // Step 7: apply M_ss^{-1}. M_ss is diagonal: +C for caps,
+        // -L for inductors. Apply per-row scaling to A, b_reduced,
+        // AND B (since b_reduced and B both go through M_ss^{-1}).
+        // ---------------------------------------------------------
+        DenseMatrix A = Schur_G;
+        Vector b_reduced = Schur_b;
+        for (int i = 0; i < n_cap; ++i) {
+            const Real inv = Real{1} / caps[i].C;
+            A.row(i) *= inv;
+            b_reduced(i) *= inv;
+            B.row(i) *= inv;
+        }
+        for (int i = 0; i < n_ind; ++i) {
+            const Real inv = Real{-1} / inds[i].L;
+            A.row(n_cap + i) *= inv;
+            b_reduced(n_cap + i) *= inv;
+            B.row(n_cap + i) *= inv;
+        }
+
+        return ContinuousLTI{
+            std::move(A),
+            std::move(b_reduced),
+            std::move(state_rows),
+            std::move(state_is_cap),
+            std::move(B),
+        };
     }
 
     /// Number of segments currently cached. In eager mode this

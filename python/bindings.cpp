@@ -56,8 +56,12 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
+#include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/phase_shift_full_bridge_fn.hpp"
+#include "pulsim/sources/pulse_b_extra.hpp"
+#include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/pwm_switch_fn.hpp"
+#include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/streaming/live_ring.hpp"
@@ -495,6 +499,28 @@ void init_module(py::module_& m) {
         .def_property_readonly("num_branches",
               &builder::CircuitBuilder::num_branches,
               "Number of branches added so far.")
+        .def("compute_time_varying_b_extra",
+              [](const builder::CircuitBuilder& self, Real t) {
+                  // Sum the contributions of all time-varying voltage
+                  // sources (sine + PWM + pulse) into a single
+                  // full-MNA-sized b_extra vector. Bridge.6 — the
+                  // DSED adapter calls this each step and projects
+                  // through b_projection · b_extra(t) to overlay
+                  // time-varying sources without re-stamping.
+                  const auto& g = self.graph();
+                  const auto& p = self.pool();
+                  Vector b = sources::compute_pwm_b_extra(p, g, t);
+                  b += sources::compute_sine_b_extra(p, g, t);
+                  b += sources::compute_pulse_b_extra(p, g, t);
+                  return b;
+              },
+              py::arg("t"),
+              "Sum the b_extra contributions from all time-varying "
+              "voltage sources (sine + PWM + pulse) at time `t`. "
+              "Returns a full-MNA-sized vector. The pulsim.simulate "
+              "engine='pwl' applies this automatically; engine='dsed' "
+              "calls it via the CircuitBuilderAdapter to overlay "
+              "AC / PWM source values per PED step.")
         .def("node_id_of",
               &builder::CircuitBuilder::node_id_of,
               py::arg("name"),
@@ -934,7 +960,46 @@ void init_module(py::module_& m) {
               py::arg("updates"),
               py::arg("mode") = pwl::ParametricRefactorMode::AllActive,
               "Batch parametric refactor — takes a list of "
-              "(branch_id, new_value) tuples for simultaneous updates.");
+              "(branch_id, new_value) tuples for simultaneous updates.")
+        // -------------------------------------------------------------
+        // DSED bridge — continuous-time LTI state-space extraction
+        // (currently a stub; see notes/DSED_BRIDGE_DESIGN.md §5.1).
+        // -------------------------------------------------------------
+        .def("compute_lti_state_space",
+              [](pwl::PwlStateSpaceCache& self,
+                  const topology::SwitchStateMask& mask,
+                  Real h_a, Real h_b) {
+                  auto r = self.compute_lti_state_space(mask, h_a, h_b);
+                  // Convert to a Python tuple
+                  // (A, b_constant, state_row_indices, state_is_cap,
+                  //  b_projection)
+                  // for downstream consumption by the Python
+                  // CircuitBuilderAdapter. The projection matrix
+                  // ``b_projection`` is the linear map from full-MNA
+                  // b → state-reduced b, used to overlay time-varying
+                  // source contributions (sine/PWM/pulse) without
+                  // re-stamping per step (Bridge.6).
+                  return py::make_tuple(
+                      r.A,
+                      r.b_constant,
+                      r.state_row_indices,
+                      r.state_is_cap,
+                      r.b_projection);
+              },
+              py::arg("mask"),
+              py::arg("h_a") = Real{1e-6},
+              py::arg("h_b") = Real{5e-7},
+              "Extract continuous-time LTI state-space (A, b) for "
+              "the given switch mask via MNA finite-difference "
+              "recovery. Returns a tuple "
+              "(A_ndarray, b_ndarray, state_row_indices, "
+              "state_is_cap, b_projection). "
+              "Used by pulsim.dsed.PEDSimulatorAuto through the "
+              "Python CircuitBuilderAdapter. "
+              "Supports grounded + floating capacitors via T^T·M·T "
+              "congruence (Phase 5.1b). Time-varying source overlay "
+              "via b_projection · b_extra_mna(t) at each PED step "
+              "(Bridge.6).");
 
     // ---- SimulationOptions / SimulationResult ----------------------------
     using namespace pulsim::solver;
@@ -1046,6 +1111,63 @@ void init_module(py::module_& m) {
     // returns a Python callable produced by std::function ⇒
     // py::function conversion; it can be passed directly as
     // `switch_fn=` to `run_transient`.
+    // -------------------------------------------------------------------
+    // Bridge.12 — native PWM switch_fn classes. The DSED scheduler
+    // bindings (dsed_bindings.cpp::PySwitchFnSSM) detect these at
+    // construction and call operator() / next_edge_after() in pure C++,
+    // bypassing pybind11 entirely. ~25× cheaper per-call than the
+    // equivalent Python `class PWM` pattern.
+    // -------------------------------------------------------------------
+
+    py::class_<sources::NativePwm2Switch>(m, "NativePwm2Switch",
+        "Native 2-switch complementary PWM for DSED. Pass directly "
+        "as `switch_fn=` to `pulsim.simulate(engine='dsed', ...)` — "
+        "the dispatch detects the type and calls the C++ implementation "
+        "without GIL roundtrips per scheduler step. ~25× faster per "
+        "switch_fn call than the equivalent Python class.")
+        .def(py::init<Real, Real, int, bool>(),
+              py::arg("T_sw"), py::arg("D"), py::arg("n_switches"),
+              py::arg("hs_first") = true,
+              "Build PWM with period T_sw (s), duty D in [0, 1], "
+              "n_switches in the mask. `hs_first=True` (default): "
+              "switch 0 closed during D·T, switch 1 during (1-D)·T. "
+              "Set to False for boost-style (LS closed first).")
+        .def("__call__",
+              [](const sources::NativePwm2Switch& self, Real t) {
+                  return self(t);
+              },
+              py::arg("t"),
+              "Return the active mask at time `t`.")
+        .def("next_edge_after",
+              &sources::NativePwm2Switch::next_edge_after,
+              py::arg("t"),
+              "Return the next gate-edge time strictly greater than `t`.")
+        .def_readonly("T_sw", &sources::NativePwm2Switch::T_sw)
+        .def_readonly("D", &sources::NativePwm2Switch::D);
+
+    py::class_<sources::NativeMultiMaskPwm>(m, "NativeMultiMaskPwm",
+        "Native multi-mask PWM (K-mask schedule cycling through "
+        "phase boundaries). For 3-level inverters (P→O→N pattern), "
+        "multi-leg interleaved converters, etc. Same fast-path "
+        "detection as NativePwm2Switch.")
+        .def(py::init<Real, std::vector<Real>,
+                       std::vector<topology::SwitchStateMask>>(),
+              py::arg("T_sw"), py::arg("phase_boundaries"),
+              py::arg("masks"),
+              "Build a K-mask PWM. `phase_boundaries[k]` is the END "
+              "of mask k's active window as a fraction of T_sw "
+              "(strictly increasing in (0, 1]). `masks[k]` is the "
+              "SwitchStateMask active in window k.")
+        .def("__call__",
+              [](const sources::NativeMultiMaskPwm& self, Real t) {
+                  return self(t);
+              },
+              py::arg("t"))
+        .def("next_edge_after",
+              &sources::NativeMultiMaskPwm::next_edge_after,
+              py::arg("t"))
+        .def_readonly("T_sw", &sources::NativeMultiMaskPwm::T_sw);
+
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
         py::arg("frequency"), py::arg("duty"),
@@ -1233,7 +1355,7 @@ void init_module(py::module_& m) {
            const topology::Graph& graph,
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
-           SwitchScheduleFn switch_fn,
+           py::object switch_fn_obj,         // Bridge.13: was SwitchScheduleFn
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
@@ -1241,6 +1363,43 @@ void init_module(py::module_& m) {
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring) {
+            // Bridge.13 — detect native PWM switch_fn (NativePwm2Switch
+            // / NativeMultiMaskPwm) and build a std::function lambda
+            // that calls the C++ method directly, no Python __call__.
+            // For generic Python callables, fall back to pybind11's
+            // auto-conversion path.
+            SwitchScheduleFn switch_fn;
+            {
+                sources::NativePwm2Switch* native_pwm2 = nullptr;
+                sources::NativeMultiMaskPwm* native_multi = nullptr;
+                try {
+                    native_pwm2 = switch_fn_obj.cast<
+                        sources::NativePwm2Switch*>();
+                } catch (const py::cast_error&) {}
+                if (!native_pwm2) {
+                    try {
+                        native_multi = switch_fn_obj.cast<
+                            sources::NativeMultiMaskPwm*>();
+                    } catch (const py::cast_error&) {}
+                }
+                if (native_pwm2) {
+                    // Capture py::object to keep the C++ instance alive
+                    // for the lambda's lifetime (pybind11 ref-count).
+                    auto keepalive = switch_fn_obj;
+                    switch_fn = [native_pwm2, keepalive](Real t) {
+                        return (*native_pwm2)(t);
+                    };
+                } else if (native_multi) {
+                    auto keepalive = switch_fn_obj;
+                    switch_fn = [native_multi, keepalive](Real t) {
+                        return (*native_multi)(t);
+                    };
+                } else {
+                    // Generic Python callable — pybind11 wraps as
+                    // std::function via its automatic converter.
+                    switch_fn = switch_fn_obj.cast<SwitchScheduleFn>();
+                }
+            }
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -2667,9 +2826,15 @@ void init_module(py::module_& m) {
 // ``pybind11_add_module(_pulsim …)`` in ``python/CMakeLists.txt``); all
 // kernel symbols are bound directly on the module (no submodule), which
 // is what ``python/pulsim/__init__.py`` imports via ``from ._pulsim import …``.
+// Forward decl: DSED scheduler bindings (Bridge.10) — separate TU.
+namespace pulsim_dsed_bindings {
+    void init_module(pybind11::module_& m);
+}
+
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
               "kernel: PWL state-space cache, trapezoidal companion, "
               "Newton refinement, and the high-level CircuitBuilder API.";
     pulsim_kernel_bindings::init_module(m);
+    pulsim_dsed_bindings::init_module(m);
 }

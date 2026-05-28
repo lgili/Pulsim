@@ -61,6 +61,12 @@ from ._pulsim import (  # type: ignore[import-not-found]
     make_three_phase_spwm_fn,
     make_phase_shift_full_bridge_fn,
     make_combined_switch_fn,
+    # Bridge.12 — native PWM switch_fn classes for the DSED engine.
+    # Detected by the C++ scheduler binding and called without GIL
+    # roundtrips per scheduler step. ~25× faster per call than the
+    # equivalent Python `class PWM` pattern.
+    NativePwm2Switch,
+    NativeMultiMaskPwm,
 )
 
 from .control import (
@@ -336,6 +342,8 @@ __all__ = [
     "LoadedCircuit",
     "load_yaml_string",
     "load_yaml_file",
+    "NativePwm2Switch",
+    "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
     "make_dead_time_pwm_pair_fn",
@@ -782,8 +790,18 @@ SimulationResult.power = _result_power  # type: ignore[attr-defined]
 def simulate(
     builder: CircuitBuilder,
     t_end: float,
-    dt: float,
+    dt: Optional[float] = None,
     *,
+    # --- engine selector ---
+    engine: str = "pwl",
+    # --- DSED variable-step kwargs (only used when engine='dsed') ---
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
+    dt_init: Optional[float] = None,
+    integrator: Optional[str] = None,
+    stiffness_threshold: Optional[float] = None,
+    h_bdf2: Optional[float] = None,
+    # --- common kwargs ---
     t_start: float = 0.0,
     switch_fn: Optional[Callable[[float], SwitchStateMask]] = None,
     b_extra_fn: Optional[Callable[[float], "list[float]"]] = None,
@@ -804,29 +822,55 @@ def simulate(
     should_continue=None,
     closed_loops=None,
     live_stream=None,
-    integrator: str = "kernel",
-    rtol: float = 1.0e-5,
-    atol: float = 1.0e-8,
-    dt_init: float = 0.0,
 ) -> SimulationResult:
-    """Build the PWL cache and run a fixed-dt transient simulation.
+    """Build the cache and run a transient simulation.
 
-    This is the ergonomic one-call API (proposal #3.3). It collapses
-    the cache-build / SimulationOptions / switch_fn dance into a
-    single function: pass a populated :class:`CircuitBuilder`, the
-    time window, and `dt`, and get a :class:`SimulationResult` back.
+    Two simulation paradigms, selected by the ``engine`` keyword:
 
-    Auto-behaviours (override via keyword args):
+    * ``engine='pwl'`` (default, v1.0–v1.4 compatibility) — fixed-step
+      trapezoidal companion + PWL state-space cache. **Requires a
+      positive `dt`.** Bit-exact reproducibility; matches v1.4.0
+      output to machine precision.
 
-    * **`switch_fn`** — defaults to "all switches closed" (i.e. a
-      mask with every bit set). For circuits with no switches the
-      default is fine. For PWM circuits, pass an explicit
-      :func:`make_pwm_switch_fn` or hand-rolled callable.
-    * **`enable_nonlinear_refresh`** — auto-detected from the
-      builder's pool (proposal #3.4). Set to ``True`` if any of
-      smooth-blend `IdealDiode`, SH1 `MosfetLevel1`, Level 1
-      `IgbtLevel1`, or `SaturableInductor` is present; ``False``
-      otherwise. Pass an explicit bool to override.
+    * ``engine='dsed'`` (variable-step, opt-in) — Path-Based
+      Event-Driven scheduler with automatic RK45 / BDF2 dispatch.
+      Tolerance ``rtol`` controls accuracy; the kernel handles
+      integrator selection, step sizing, event prediction, and
+      LU caching transparently. ``dt`` (if supplied) acts as
+      the maximum-step cap ``dt_max``.
+
+    Two simple decision trees for users:
+
+    * **"Não sei qual escolher"** → ``engine='pwl'`` with the
+      smallest ``dt`` you can afford. Always works; matches every
+      legacy script.
+    * **"Quero performance e meu circuito tem PWM/DCM/eventos"** →
+      ``engine='dsed', rtol=1e-6``. Kernel does the rest.
+
+    Examples
+    --------
+
+    Fixed-step (v1.4.0 behaviour)::
+
+        result = pulsim.simulate(b, t_end=5e-3, dt=1e-7)
+
+    Variable-step with default tolerances::
+
+        result = pulsim.simulate(b, t_end=5e-3, engine='dsed')
+
+    Variable-step with tighter accuracy::
+
+        result = pulsim.simulate(
+            b, t_end=5e-3, engine='dsed',
+            rtol=1e-8, atol=1e-11,
+        )
+
+    Variable-step forcing RK45-only (e.g. debug / repeatability)::
+
+        result = pulsim.simulate(
+            b, t_end=5e-3, engine='dsed',
+            integrator='rk45',
+        )
 
     Parameters
     ----------
@@ -835,41 +879,119 @@ def simulate(
     t_end
         End time, in seconds.
     dt
-        Fixed time step, in seconds.
+        Fixed time step (engine='pwl', required) OR upper-bound
+        ``dt_max`` (engine='dsed', optional — defaults to 10 µs).
+    engine
+        ``'pwl'`` (default, fixed-step) or ``'dsed'`` (variable-step).
+    rtol, atol
+        Relative / absolute tolerance for the DSED PI controller.
+        Ignored if ``engine='pwl'`` (warning emitted). Defaults:
+        ``rtol=1e-6, atol=1e-9``.
+    dt_init
+        Initial step for the DSED PI controller (default 1e-9).
+    integrator
+        DSED override: ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``.
+        ``'auto'`` picks per mode via stiffness detector. Force one
+        for debug / repeatability.
+    stiffness_threshold
+        DSED override: ``|λ_max|·h`` ratio above which auto-dispatch
+        picks BDF2 (default 10.0).
+    h_bdf2
+        Fixed step for BDF2 segments under ``integrator='bdf2'`` or
+        ``'auto'`` (default 1e-6).
     t_start, default 0.0
         Start time, in seconds.
     switch_fn
         Callable ``t -> SwitchStateMask`` controlling the
         switch state at each sample.  Defaults to all-closed.
     b_extra_fn
-        Callable ``t -> list[float]`` adding to the constant
-        residual at each step.  Defaults to None (no extras).
+        PWL-only: Callable ``t -> list[float]`` adding to the constant
+        residual at each step.  Defaults to None.
     start_from_dc_op
-        If ``True``, seed the initial state from
+        PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
     enable_nonlinear_refresh
-        Force-enable/-disable the Newton refresh pass.  ``None``
-        (default) means auto-detect via
-        :meth:`DevicePool.has_nonlinear_devices`.
+        PWL-only: Force-enable/-disable the Newton refresh pass.
+        ``None`` (default) means auto-detect.
     max_newton_iterations, max_event_iterations
-        Forwarded to :class:`SimulationOptions`.
+        PWL-only: forwarded to :class:`SimulationOptions`.
 
     Returns
     -------
     SimulationResult
         The full per-sample state-vector history.
+
+    Raises
+    ------
+    ValueError
+        On unknown ``engine``; on ``engine='pwl'`` without ``dt``;
+        on invalid DSED options (negative tolerance, unknown
+        ``integrator``).
+    UserWarning
+        When DSED-only kwargs are passed with ``engine='pwl'`` (they
+        are silently ignored — the warning is informational so
+        scripts that copy-paste kwargs don't break suddenly).
+    NotImplementedError
+        On ``engine='dsed'`` from a :class:`CircuitBuilder` —
+        the per-mask (A, b) extraction bridge is still pending.
+        For PED today with a user-supplied LTI system, use
+        :class:`pulsim.dsed.PEDSimulatorAuto` directly.
     """
+    # ---- Validate first — fail fast on user mistakes (DSED side). ----
+    # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
+    # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
+    # engine='pwl' it just warns on DSED-only kwarg leakage.
+    from . import _dsed_dispatch as _dsed
+    _dsed._validate_engine_kwargs(
+        engine=engine,
+        dt=dt,
+        rtol=rtol,
+        atol=atol,
+        dt_init=dt_init,
+        integrator=integrator,
+        stiffness_threshold=stiffness_threshold,
+        h_bdf2=h_bdf2,
+    )
+
+    # ---- Engine dispatch: DSED takes the early-return path. ----
+    # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
+    # The DSED dispatcher owns its own validation; main's Phase 2.4
+    # adaptive-RK selector below is PWL-specific and must NOT apply
+    # to DSED integrator names.
+    if engine == "dsed":
+        return _dsed.run_dsed_from_builder(
+            builder=builder,
+            t_end=t_end,
+            dt=dt,
+            rtol=rtol,
+            atol=atol,
+            dt_init=dt_init,
+            integrator=integrator,
+            stiffness_threshold=stiffness_threshold,
+            h_bdf2=h_bdf2,
+            t_start=t_start,
+            switch_fn=switch_fn,
+            b_extra_fn=b_extra_fn,
+            initial_state=initial_state,
+            progress=progress,
+        )
+
+    # ---- engine='pwl' from here on ----
+    # mypy/pyright: narrow Optional[float] → float.
+    assert dt is not None and dt > 0
+
     # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
     # Today only the kernel trap path is wired into run_transient.
     # Reject other choices with a clear pointer at the deferred
     # cache refactor so users get actionable feedback instead of a
     # silent default-back to "kernel".
-    if integrator not in ("kernel", "default"):
+    if integrator not in ("kernel", "default", None):
         if integrator not in ("dopri5", "radau"):
             raise ValueError(
                 f"simulate(integrator={integrator!r}): unknown "
-                "integrator. Supported names: 'kernel' (default), "
-                "'dopri5', 'radau'."
+                "integrator for engine='pwl'. Supported names: "
+                "'kernel' (default), 'dopri5', 'radau'. For DSED's "
+                "RK45/BDF2/auto integrators, use engine='dsed'."
             )
         raise NotImplementedError(
             f"simulate(integrator={integrator!r}) is reserved for "
@@ -882,7 +1004,9 @@ def simulate(
             "For Phase 2.4, the integrator name and its tolerances "
             "round-trip through `SimulationOptions` and YAML so "
             "your config stays forward-compatible — drop "
-            "`integrator='kernel'` (or omit) to run today."
+            "`integrator='kernel'` (or omit) to run today. "
+            "Note: engine='dsed' offers RK45/BDF2/auto today via the "
+            "Path-Based Event-Driven scheduler."
         )
     _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
@@ -1158,6 +1282,14 @@ _V1_SYMBOL_HINTS = {
     # through to this hint dict.
     "parse_netlist":      "p.parse_spice_netlist (SPICE subset)",
 }
+
+
+# Note: the original `_simulate_dsed()` stub (Gate 2 Phase 2.B-3) was
+# replaced by `pulsim._dsed_dispatch.run_dsed_from_builder()` in the
+# Gate 5+ API consolidation. The new dispatch lives in its own module
+# (`_dsed_dispatch.py`) and provides validation + option resolution +
+# the honest NotImplementedError-with-resolved-options message. See
+# the `simulate(...)` body above for how it is wired in.
 
 
 def __getattr__(name: str):
