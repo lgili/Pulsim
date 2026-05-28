@@ -1,18 +1,26 @@
 """Modular Multilevel Converter (MMC) models.
 
-Phase 20 — L0 of the layered MMC block hierarchy. This module ships the
-**average-value arm model**: one state per arm (``v_C``, the sum of the
-submodule capacitor voltages), continuous modulation index
-``m_b ∈ [0, 1]`` (half-bridge) or ``m_b ∈ [-1, 1]`` (full-bridge), and
-forward-Euler integration of the capacitor dynamics.
+Layered MMC arm block hierarchy. Four fidelity levels are exposed,
+each sharing the same external port shape so the user can swap layers
+without changing topology:
+
+* **L0** — average-value arm (one state, continuous ``m_b``).
+* **L1** — multilevel quantised switching (PS-PWM / IPD).
+* **L2** — SM-equivalent with dead-time + min-pulse-width.
+* **L3** — per-SM detailed with sort-and-select balancing.
+
+Both submodule topologies are supported across every layer:
+``"half_bridge"`` (``m_b ∈ [0, 1]``) and ``"full_bridge"``
+(``m_b ∈ [-1, 1]``). Per-step math lives in
+``core/include/pulsim/mmc/arm.hpp``; this module owns the Python
+dataclasses, builder integration, observers, and time-series drivers.
 
 Reference
 =========
 
-Sousa, Gean Jacques Maia de.
-*Sistemas de Controle para a Operação Eficiente de Conversores
-Modulares Multiníveis em Acionamentos Elétricos.*
-PhD thesis, UFSC, 2022. — ``artigos/Gean Jacques Maia de Sousa.pdf``
+Sousa (2022), *Sistemas de Controle para a Operação Eficiente de
+Conversores Modulares Multiníveis em Acionamentos Elétricos.*
+PhD thesis, UFSC.
 
 Average-arm equations (thesis eqs 2.13, 2.14)
 =============================================
@@ -46,9 +54,12 @@ API
 * :func:`mmc_arm_average_step` — pure one-step advance (for users who
   want to embed the arm in their own outer loop).
 
-The L1 (discrete multilevel), L2 (SM-equivalent with dead-time +
-min-pulse-width), and L3 (per-SM detailed) blocks live in follow-up
-phases. See ``docs/internals/mmc-arm-block.md`` for the full roadmap.
+L1/L2/L3 share the same shape: ``MmcArm*Params`` + ``simulate_mmc_arm_*``
+drivers + ``add_mmc_arm_*`` builder helpers + ``make_mmc_arm_*_observer``
+factories. The three-phase topology helper
+:func:`add_mmc_three_phase_dc_ac` wires six L0 arms + arm inductors in
+one call. See ``docs/mmc.md`` (user guide) and
+``docs/internals/mmc-arm-block.md`` (design doc).
 """
 
 from __future__ import annotations
