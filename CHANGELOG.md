@@ -4,6 +4,162 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — Unreleased
+
+### Highlights — Phase 2 physics-parity push + PSIM-equivalent loss/thermal/control panels
+
+This release closes **Phase 2 (Physics Parity)** of the v1.x roadmap
+and lands a four-way upgrade to the post-hoc analysis surface so
+users get the loss / thermal / control workflows they expect from
+PSIM and PLECS without leaving Python.
+
+**A. Phase 2 — Physics parity in the C++ kernel**
+([PR #51](https://github.com/lgili/Pulsim/pull/51) →
+[#52](https://github.com/lgili/Pulsim/pull/52) →
+[#53](https://github.com/lgili/Pulsim/pull/53) →
+[#54](https://github.com/lgili/Pulsim/pull/54) →
+[#55](https://github.com/lgili/Pulsim/pull/55) →
+[#56](https://github.com/lgili/Pulsim/pull/56))
+
+* **2.1 — Squirrel-cage induction motor**: header-only C++ port at
+  `core/include/pulsim/motors/induction_motor.hpp` + pybind
+  `CxxBlockChain.add_induction_motor(...)`. 5-state Krause αβ
+  model running at kernel speed.
+* **2.2 — Jiles-Atherton hysteretic inductor**: C++ port at
+  `core/include/pulsim/magnetics/jiles_atherton.hpp` +
+  `CxxBlockChain.add_hysteretic_inductor(...)`. Sign convention
+  fix on `v_M` in the b_extra row matches the Python observer.
+* **2.3 — Sensorless rotor observers**: C++ port of
+  `SlidingModeObserver` (PMSM Utkin + LPF + PLL) and
+  `FluxMRASObserver` (IM Schauder voltage + current with
+  bootstrap-fixed normalised cross-product) at
+  `core/include/pulsim/observers/sensorless.hpp`. New
+  `CxxBlockChain.add_sliding_mode_observer(...)` /
+  `.add_flux_mras_observer(...)`.
+* **2.4 — Adaptive Runge-Kutta**: `DormandPrince5` and `RadauIIA3`
+  shipped (Python in v1.4.x, C++ port for standalone use in v1.5).
+  `simulate(integrator=)` schema landed; kernel wiring deferred to
+  v1.6 — see "v1.6 deferred" note below.
+
+**B. YAML composite devices + `chain:` wiring**
+([PR #54](https://github.com/lgili/Pulsim/pull/54),
+[#56](https://github.com/lgili/Pulsim/pull/56))
+
+* New device kinds in `circuit:` — `induction_motor` and
+  `hysteretic_inductor`. The loader expands them into
+  deterministic branch-id schemes (`IM_Lsig_{a,b,c}`,
+  `IM_E_{a,b,c}`, `L_core_L0`, `L_core_V_M`).
+* New `pulsim.wire_chain_from_yaml(loaded, chain_spec)` resolves
+  the deterministic branch names and stamps a `CxxBlockChain`.
+  Four block types: `induction_motor`, `hysteretic_inductor`,
+  `sliding_mode_observer`, `flux_mras_observer`.
+* See [docs/yaml-chain.md](yaml-chain.md).
+
+**C. PSIM-style loss + thermal pipeline**
+([PR #58](https://github.com/lgili/Pulsim/pull/58))
+
+* `device_loss_summary` extended to cover **resistor + inductor +
+  ideal-switch + switched-diode** in one pass, with optional
+  per-device datasheet annotations:
+  - `diode_specs={"D1": {"Q_rr": ...}}` or
+    `{"E_rr_ref": ..., "V_R_ref": ...}` → reverse-recovery energy
+    per turn-off event, accumulated from `commutation_events`.
+  - `switch_specs={"M1": {"E_on_ref": ..., "E_off_ref": ...,
+    "V_ref": ..., "I_ref": ...}}` → PSIM-style turn-on / turn-off
+    energy scaled by `(V_blocking, I_load)` at each `switch_fn`
+    edge.
+  - `core_loss_specs={"L1": {"material": "N87", ...}}` →
+    Steinmetz / iGSE core loss from `pulsim.magnetic`.
+* New **`device_thermal_summary(builder, result,
+  thermal_specs=...)`** pipes the loss output through a per-device
+  Foster network and returns per-device `T_j(t)` traces, plus
+  `T_j_avg`, `T_j_peak`, `P_total_avg`, `R_th_total`.
+* Strict spec validation — unknown device names in any `*_specs`
+  raise `KeyError`; non-positive geometry on core loss raises
+  `ValueError`. No silent zeros.
+* Shared `_result_views` helpers between `losses.py` and
+  `thermal.py` eliminate duplicated result-walk code.
+* See [docs/losses-and-thermal.md](losses-and-thermal.md).
+
+**D. PSIM/PLECS-style "C block" via Numba JIT**
+([PR #59](https://github.com/lgili/Pulsim/pull/59))
+
+* New `@pulsim.fast_block` decorator turns a Python control
+  function into a Numba-LLVM-compiled native callable. Same
+  authoring contract as PSIM's Custom C Block (read inputs,
+  mutate `state` in-place, return scalar) without runtime `cc`
+  invocation, cross-OS compiler dance, or `.so` plumbing.
+* `pip install pulsim[fast]` enables the JIT path; the optional
+  dep keeps the base install lean. Without numba, `@fast_block`
+  raises a clear `ImportError` with the install hint.
+* See [docs/fast-block.md](fast-block.md) and the runnable
+  showcase
+  [`examples/scripts/run_fast_block_pi_buck.py`](../examples/scripts/run_fast_block_pi_buck.py).
+
+### Added
+
+* `pulsim.SlidingModeObserver` / `FluxMRASObserver` — C++ kernel
+  adapters via `CxxBlockChain.add_*` (Phase 2.3).
+* `pulsim.wire_chain_from_yaml(loaded, chain_spec)` — Python
+  glue between the YAML loader and `CxxBlockChain`.
+* `SimulationOptions.integrator` / `rtol` / `atol` / `dt_init`
+  fields + matching YAML `simulation:` block keys (Phase 2.4
+  schema, kernel wiring deferred to v1.6).
+* `simulate(integrator=, rtol=, atol=, dt_init=)` kwargs —
+  `"kernel"` default unchanged; `"dopri5"` / `"radau"` raise
+  `NotImplementedError` with a v1.6 pointer.
+* `pulsim.device_loss_summary` extended (see Highlights C).
+* `pulsim.device_thermal_summary` — new (see Highlights C).
+* `pulsim.FastBlock`, `pulsim.fast_block` — new (Highlights D).
+* `pulsim.magnetic` Steinmetz / iGSE helpers + N87 / 3F4 / 3C90
+  built-in material catalogue used by `device_loss_summary`'s
+  core-loss path.
+* Optional dep: `pulsim[fast]` → `numba>=0.58`.
+
+### Changed
+
+* `device_loss_summary` previously skipped switches / diodes /
+  magnetic devices silently; now they're reported with the
+  datasheet annotations described above. The signature gains
+  `switch_specs`, `diode_specs`, `core_loss_specs` kwargs.
+* **(Breaking)** `device_loss_summary` now **raises `KeyError`**
+  when any `*_specs` mapping references a device name / branch_id
+  that isn't in the builder. Was a silent skip in v1.4. Update
+  YAMLs and test fixtures to use the actual device names.
+* `KNOWN_LIMITATIONS.md` § "Per-device loss reporting" rewritten
+  to reflect the v1.5 coverage — what's actually covered today
+  vs the sub-`dt` switching-transient waveform shapes that the
+  fixed-`dt` kernel still doesn't resolve.
+
+### Fixed
+
+* MRAS bootstrap fix: the normalised cross-product
+  `ε / (|ψ_ref|·|ψ_adj|)` is now the default
+  (`normalise_eps=True`) in `FluxMRASObserver` — resolves
+  cold-start convergence for IM sensorless on `ω̂_init=0`.
+* JA observer `v_M` sign in `b_extra` was inverted on the
+  v1.4.x release branch — now matches the Python observer's
+  `+N·A·µ₀·dM/dt` convention.
+* `device_thermal_summary` previously computed `P_core_avg`
+  internally but omitted the field from the output dict —
+  fixed, users now see the core contribution that drove `T_j`.
+* `_inductor_core_loss` previously returned silent zeros for
+  invalid geometry (`N_turns ≤ 0` etc.); now raises `ValueError`.
+* Narrowed `except Exception` around iGSE fall-back to
+  `except ValueError` so unrelated bugs surface instead of
+  hiding.
+
+### v1.6 deferred
+
+The Phase 2.4 schema for `simulate(integrator="dopri5"|"radau")`
+landed, but actual execution waits on a `PwlStateSpaceCache`
+refactor (the cache stores `J = G + (2/dt)·M` in trap-companion
+form; adaptive RK needs `(G, M, b)` separately and DAE-aware
+Radau — augmented MNA's mass matrix is structurally singular).
+Same blocker postpones in-kernel `R_DS_on(T_j)` live feedback
+and the stiff-thermal Radau example. See the v1.6 milestone for
+the cache refactor work-item.
+
 ## [1.4.0] — 2026-05-24
 
 ### Highlights — In-house complex sparse LU + generalised path-based update framework

@@ -31,6 +31,12 @@ If you've used SPICE before, the mental model is similar but the implementation 
 4. [**API reference**](api-reference.md) — Python surface, one page.
 5. [**Gotchas**](gotchas.md) — Newton convergence corner cases and the workarounds that ship in 1.0.
 
+### Post-hoc analysis (v1.5)
+
+- [**Losses & junction temperature**](losses-and-thermal.md) — `device_loss_summary` + `device_thermal_summary`. Reads resistors, inductors (with optional Steinmetz / iGSE core loss), ideal switches (PSIM `E_on` / `E_off`), and switched diodes (`Q_rr` / `E_rr_ref`); pipes the per-device loss through a Foster network for `T_j(t)`.
+- [**`@fast_block`**](fast-block.md) — Pulsim's PSIM-`Custom C Block` / PLECS-`C-Script` workalike via Numba LLVM JIT. Write the control law in Python, get native-speed code without a C compiler in the user's PATH.
+- [**YAML composite devices + chain wiring**](yaml-chain.md) — `induction_motor` / `hysteretic_inductor` in `circuit:` plus `wire_chain_from_yaml(loaded, chain_spec)` for the control layer (IM mechanical, JA observer, SMO/MRAS sensorless).
+
 ## Where the source lives
 
 | Tree | What's inside |
