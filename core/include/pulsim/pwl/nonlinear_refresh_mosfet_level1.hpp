@@ -1,49 +1,64 @@
 #pragma once
 
 // =============================================================================
-// Pulsim — Layer 4 V13: SH1 MOSFET Newton refresh
+// Pulsim — Layer 4 V13/V14: SH1 MOSFET + Level-1 IGBT Newton refresh
 // =============================================================================
 //
-// Per-Newton-iteration refresh for `models::MosfetLevel1`.
-// Iterates `BranchKind::Nonlinear` branches registered with
-// `StoredKind::MosfetLevel1`, reads V(drain), V(source),
-// V(gate) from the current state vector, evaluates the SH1
-// current + Jacobian via AD, and stamps:
+// Per-Newton-iteration refresh for the 3-terminal AD devices
+// `models::MosfetLevel1` and `models::IgbtLevel1`. Each iterates
+// `BranchKind::Nonlinear` branches of its `StoredKind`, reads V(drain/
+// collector), V(source/emitter), V(gate) from the state vector, evaluates the
+// current + Jacobian via AD, and stamps the (drain/source) x (drain/source/
+// gate) conductance block:
 //
-//   f[drain]  += I_D
-//   f[source] -= I_D
-//   J[drain,  drain]  += ∂I/∂V(drain)
-//   J[drain,  source] += ∂I/∂V(source)
-//   J[drain,  gate]   += ∂I/∂V(gate)
-//   J[source, drain]  -= ∂I/∂V(drain)
-//   J[source, source] -= ∂I/∂V(source)
-//   J[source, gate]   -= ∂I/∂V(gate)
+//   f[from]  += i;                f[to] -= i
+//   J[from, k] += ∂i/∂v[k];       J[to, k] -= ∂i/∂v[k]   for k in {from,to,gate}
 //
-// (Gate KCL is unaffected — Level 1 ideal-gate has zero gate
-// current. Parasitic gate capacitance is OUT OF SCOPE for V0
-// of this device.)
+// (Gate KCL is unaffected — Level-1 ideal gate draws zero current. Parasitic
+// gate capacitance is out of scope.)
+//
+// The loop/stamp body is identical to the diode's apart from terminal count
+// and param/gate lookup, so all stampers delegate to the generic
+// `stamp_nonlinear_branches<Device>` (nonlinear_refresh_device.hpp) and supply
+// only the per-device `get_params`/`get_terminals` functors. (Audit 2026-05
+// #14b: collapsed ~700 LOC of cross-device copy-paste.)
 
 #include "pulsim/models/device_model.hpp"
+#include "pulsim/models/ideal_diode.hpp"
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/nonlinear_refresh_device.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/sparse/matrix.hpp"
-#include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
-#include <cmath>
+#include <array>
 
 namespace pulsim::pwl {
 
-/// Refresh function that stamps SH1 MOSFET contributions on
-/// every Nonlinear branch registered as one. Clears J_nl
-/// and f_nl first (consistent with `refresh_smooth_diodes`'s
-/// standalone convention). Returns max(|i_drain|) for
-/// residual-norm reporting.
+namespace detail {
+/// Terminal list for a 3-terminal SH1 MOSFET: {drain, source, gate}.
+inline constexpr auto mosfet_level1_terminals =
+    [](const DevicePool& pool, const auto& branch) {
+        return std::array<Index, 3>{
+            branch.from, branch.to,
+            pool.mosfet_level1_gate_node(branch.id)};
+    };
+/// Terminal list for a 3-terminal Level-1 IGBT: {collector, emitter, gate}.
+inline constexpr auto igbt_level1_terminals =
+    [](const DevicePool& pool, const auto& branch) {
+        return std::array<Index, 3>{
+            branch.from, branch.to,
+            pool.igbt_level1_gate_node(branch.id)};
+    };
+}  // namespace detail
+
+/// Stamp SH1 MOSFET contributions on every Nonlinear branch registered as
+/// one. Clears J_nl/f_nl first. Returns max(|i_drain|) for residual reporting.
 inline Real refresh_mosfets_level1(
     const Vector& x,
     sparse::Matrix& J_nl,
@@ -52,79 +67,17 @@ inline Real refresh_mosfets_level1(
     const DevicePool& pool) {
     if (J_nl.rows() > 0) J_nl.setZero();
     if (f_nl.size() > 0) f_nl.setZero();
-    Real max_abs_i = Real{0};
-
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        const auto& branch = graph.branch(b_id);
-        if (branch.kind != topology::BranchKind::Nonlinear) {
-            continue;
-        }
-        if (pool.kind_of(branch.id) !=
-                DevicePool::StoredKind::MosfetLevel1) {
-            continue;
-        }
-        const auto& p = pool.mosfet_level1_params(branch.id);
-        const Index gate_node =
-            pool.mosfet_level1_gate_node(branch.id);
-
-        const Index drain  = branch.from;
-        const Index source = branch.to;
-        const Index gate   = gate_node;
-
-        const Real v_d = stamping::read_node_voltage(x, drain);
-        const Real v_s = stamping::read_node_voltage(x, source);
-        const Real v_g = stamping::read_node_voltage(x, gate);
-
-        // Terminal order: drain, source, gate.
-        const models::ModelInputs<models::MosfetLevel1> v_term{
-            v_d, v_s, v_g};
-
-        const auto [i, partials] =
-            models::evaluate_current_and_jacobian<
-                models::MosfetLevel1>(v_term, p);
-
-        const bool d_active = stamping::node_is_active(drain);
-        const bool s_active = stamping::node_is_active(source);
-        const bool g_active = stamping::node_is_active(gate);
-
-        // KCL residuals.
-        if (d_active) f_nl[drain]  += i;
-        if (s_active) f_nl[source] -= i;
-
-        // Jacobian: drain row.
-        if (d_active) {
-            if (d_active) {
-                J_nl.coeffRef(drain, drain) += partials[0];
-            }
-            if (s_active) {
-                J_nl.coeffRef(drain, source) += partials[1];
-            }
-            if (g_active) {
-                J_nl.coeffRef(drain, gate) += partials[2];
-            }
-        }
-        // Jacobian: source row.
-        if (s_active) {
-            if (d_active) {
-                J_nl.coeffRef(source, drain) -= partials[0];
-            }
-            if (s_active) {
-                J_nl.coeffRef(source, source) -= partials[1];
-            }
-            if (g_active) {
-                J_nl.coeffRef(source, gate) -= partials[2];
-            }
-        }
-
-        max_abs_i = std::max(max_abs_i, std::abs(i));
-    }
-
-    return max_abs_i;
+    return stamp_nonlinear_branches<models::MosfetLevel1>(
+        x, J_nl, f_nl, graph, pool,
+        DevicePool::StoredKind::MosfetLevel1,
+        [](const DevicePool& p, Index b) {
+            return p.mosfet_level1_params(b);
+        },
+        detail::mosfet_level1_terminals);
 }
 
-/// Stamp the SH1 Igbt Level 1 contribution analogous to
-/// the MOSFET refresh. Linear-conduction model — Newton
-/// handles it cleanly (no spurious roots).
+/// Stamp Level-1 IGBT contributions (linear-conduction model — Newton handles
+/// it cleanly, no spurious roots). Clears J_nl/f_nl first.
 inline Real refresh_igbts_level1(
     const Vector& x,
     sparse::Matrix& J_nl,
@@ -133,243 +86,55 @@ inline Real refresh_igbts_level1(
     const DevicePool& pool) {
     if (J_nl.rows() > 0) J_nl.setZero();
     if (f_nl.size() > 0) f_nl.setZero();
-    Real max_abs_i = Real{0};
-    for (Index b_id = 0;
-         b_id < graph.num_branches(); ++b_id) {
-        const auto& branch = graph.branch(b_id);
-        if (branch.kind != topology::BranchKind::Nonlinear) {
-            continue;
-        }
-        if (pool.kind_of(branch.id) !=
-                DevicePool::StoredKind::IgbtLevel1) {
-            continue;
-        }
-        const auto& p = pool.igbt_level1_params(branch.id);
-        const Index gate_node =
-            pool.igbt_level1_gate_node(branch.id);
-        const Index collector = branch.from;
-        const Index emitter   = branch.to;
-        const Index gate      = gate_node;
-
-        const Real v_c = stamping::read_node_voltage(x, collector);
-        const Real v_e = stamping::read_node_voltage(x, emitter);
-        const Real v_g = stamping::read_node_voltage(x, gate);
-
-        const models::ModelInputs<models::IgbtLevel1> v_term{
-            v_c, v_e, v_g};
-        const auto [i, partials] =
-            models::evaluate_current_and_jacobian<
-                models::IgbtLevel1>(v_term, p);
-
-        const bool c_active = stamping::node_is_active(collector);
-        const bool e_active = stamping::node_is_active(emitter);
-        const bool g_active = stamping::node_is_active(gate);
-
-        if (c_active) f_nl[collector] += i;
-        if (e_active) f_nl[emitter]   -= i;
-
-        if (c_active) {
-            J_nl.coeffRef(collector, collector) += partials[0];
-            if (e_active) {
-                J_nl.coeffRef(collector, emitter) += partials[1];
-            }
-            if (g_active) {
-                J_nl.coeffRef(collector, gate) += partials[2];
-            }
-        }
-        if (e_active) {
-            if (c_active) {
-                J_nl.coeffRef(emitter, collector) -= partials[0];
-            }
-            J_nl.coeffRef(emitter, emitter) -= partials[1];
-            if (g_active) {
-                J_nl.coeffRef(emitter, gate) -= partials[2];
-            }
-        }
-        max_abs_i = std::max(max_abs_i, std::abs(i));
-    }
-    return max_abs_i;
+    return stamp_nonlinear_branches<models::IgbtLevel1>(
+        x, J_nl, f_nl, graph, pool,
+        DevicePool::StoredKind::IgbtLevel1,
+        [](const DevicePool& p, Index b) {
+            return p.igbt_level1_params(b);
+        },
+        detail::igbt_level1_terminals);
 }
 
-/// Combined refresh that runs both the smooth-blend
-/// IdealDiode and SH1 MOSFET stampers in a single pass.
-/// Useful as a drop-in `NonlinearRefreshFn` when a circuit
-/// contains both kinds of nonlinear devices.
+/// Combined refresh that stamps smooth-blend IdealDiode, Level-1 IGBT, and
+/// SH1 MOSFET contributions in a single `NonlinearRefreshFn`. Drop-in for
+/// circuits mixing those nonlinear devices. Zeroes J_nl/f_nl once, then runs
+/// three ADDITIVE device passes (pass order is irrelevant — stamps accumulate
+/// into the same once-zeroed matrices); the residual indicator is the max
+/// stamped current across all three.
 [[nodiscard]] inline NonlinearRefreshFn
 make_combined_diode_mosfet_refresh() {
-    return [](const Vector& x,
-                sparse::Matrix& J_nl,
-                Vector& f_nl,
-                const topology::Graph& graph,
-                const DevicePool& pool) -> Real {
+    return [](const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+              const topology::Graph& graph, const DevicePool& pool) -> Real {
         if (J_nl.rows() > 0) J_nl.setZero();
         if (f_nl.size() > 0) f_nl.setZero();
-        // Diode pass first (writes diode contributions).
-        // We reuse refresh_smooth_diodes' logic but inlined
-        // to avoid double zero-out.
-        Real max_abs_i = Real{0};
 
-        for (Index b_id = 0;
-             b_id < graph.num_branches(); ++b_id) {
-            const auto& branch = graph.branch(b_id);
-            if (branch.kind !=
-                    topology::BranchKind::Nonlinear) {
-                continue;
-            }
-            const auto kind = pool.kind_of(branch.id);
-            if (kind ==
-                    DevicePool::StoredKind::NonlinearDiode) {
-                const auto& p =
-                    pool.nonlinear_diode_params(branch.id);
-                const stamping::BranchCoord coord{
-                    branch.from, branch.to, branch.id};
-                const Real v_from =
-                    stamping::read_node_voltage(x, coord.from);
-                const Real v_to =
-                    stamping::read_node_voltage(x, coord.to);
-                const models::ModelInputs<models::IdealDiode>
-                    v_term{v_from, v_to};
-                const auto [i, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::IdealDiode>(v_term, p);
-                const bool from_active =
-                    stamping::node_is_active(coord.from);
-                const bool to_active =
-                    stamping::node_is_active(coord.to);
-                if (from_active) f_nl[coord.from] += i;
-                if (to_active)   f_nl[coord.to]   -= i;
-                if (from_active) {
-                    J_nl.coeffRef(coord.from, coord.from) +=
-                        partials[0];
-                    if (to_active) {
-                        J_nl.coeffRef(coord.from, coord.to) +=
-                            partials[1];
-                    }
-                }
-                if (to_active) {
-                    if (from_active) {
-                        J_nl.coeffRef(coord.to, coord.from) -=
-                            partials[0];
-                    }
-                    J_nl.coeffRef(coord.to, coord.to) -=
-                        partials[1];
-                }
-                max_abs_i =
-                    std::max(max_abs_i, std::abs(i));
-            } else if (kind ==
-                    DevicePool::StoredKind::IgbtLevel1) {
-                // Inline the IGBT pass — linear-conduction
-                // physics, simple Jacobian stamping.
-                const auto& p =
-                    pool.igbt_level1_params(branch.id);
-                const Index collector = branch.from;
-                const Index emitter   = branch.to;
-                const Index gate      =
-                    pool.igbt_level1_gate_node(branch.id);
-                const Real v_c =
-                    stamping::read_node_voltage(x, collector);
-                const Real v_e =
-                    stamping::read_node_voltage(x, emitter);
-                const Real v_g =
-                    stamping::read_node_voltage(x, gate);
-                const models::ModelInputs<models::IgbtLevel1>
-                    v_term{v_c, v_e, v_g};
-                const auto [i, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::IgbtLevel1>(v_term, p);
-                const bool c_active =
-                    stamping::node_is_active(collector);
-                const bool e_active =
-                    stamping::node_is_active(emitter);
-                const bool g_active =
-                    stamping::node_is_active(gate);
-                if (c_active) f_nl[collector] += i;
-                if (e_active) f_nl[emitter]   -= i;
-                if (c_active) {
-                    J_nl.coeffRef(collector, collector) +=
-                        partials[0];
-                    if (e_active) {
-                        J_nl.coeffRef(collector, emitter) +=
-                            partials[1];
-                    }
-                    if (g_active) {
-                        J_nl.coeffRef(collector, gate) +=
-                            partials[2];
-                    }
-                }
-                if (e_active) {
-                    if (c_active) {
-                        J_nl.coeffRef(emitter, collector) -=
-                            partials[0];
-                    }
-                    J_nl.coeffRef(emitter, emitter) -=
-                        partials[1];
-                    if (g_active) {
-                        J_nl.coeffRef(emitter, gate) -=
-                            partials[2];
-                    }
-                }
-                max_abs_i =
-                    std::max(max_abs_i, std::abs(i));
-            } else if (kind ==
-                    DevicePool::StoredKind::MosfetLevel1) {
-                // Inline the MOSFET pass so we don't
-                // double-zero.
-                const auto& p =
-                    pool.mosfet_level1_params(branch.id);
-                const Index drain  = branch.from;
-                const Index source = branch.to;
-                const Index gate   =
-                    pool.mosfet_level1_gate_node(branch.id);
-                const Real v_d =
-                    stamping::read_node_voltage(x, drain);
-                const Real v_s =
-                    stamping::read_node_voltage(x, source);
-                const Real v_g =
-                    stamping::read_node_voltage(x, gate);
-                const models::ModelInputs<
-                        models::MosfetLevel1>
-                    v_term{v_d, v_s, v_g};
-                const auto [i, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::MosfetLevel1>(v_term, p);
-                const bool d_active =
-                    stamping::node_is_active(drain);
-                const bool s_active =
-                    stamping::node_is_active(source);
-                const bool g_active =
-                    stamping::node_is_active(gate);
-                if (d_active) f_nl[drain]  += i;
-                if (s_active) f_nl[source] -= i;
-                if (d_active) {
-                    J_nl.coeffRef(drain, drain) +=
-                        partials[0];
-                    if (s_active) {
-                        J_nl.coeffRef(drain, source) +=
-                            partials[1];
-                    }
-                    if (g_active) {
-                        J_nl.coeffRef(drain, gate) +=
-                            partials[2];
-                    }
-                }
-                if (s_active) {
-                    if (d_active) {
-                        J_nl.coeffRef(source, drain) -=
-                            partials[0];
-                    }
-                    J_nl.coeffRef(source, source) -=
-                        partials[1];
-                    if (g_active) {
-                        J_nl.coeffRef(source, gate) -=
-                            partials[2];
-                    }
-                }
-                max_abs_i =
-                    std::max(max_abs_i, std::abs(i));
-            }
-        }
-        return max_abs_i;
+        const Real i_diode = stamp_nonlinear_branches<models::IdealDiode>(
+            x, J_nl, f_nl, graph, pool,
+            DevicePool::StoredKind::NonlinearDiode,
+            [](const DevicePool& p, Index b) {
+                return p.nonlinear_diode_params(b);
+            },
+            [](const DevicePool&, const auto& branch) {
+                return std::array<Index, 2>{branch.from, branch.to};
+            });
+
+        const Real i_igbt = stamp_nonlinear_branches<models::IgbtLevel1>(
+            x, J_nl, f_nl, graph, pool,
+            DevicePool::StoredKind::IgbtLevel1,
+            [](const DevicePool& p, Index b) {
+                return p.igbt_level1_params(b);
+            },
+            detail::igbt_level1_terminals);
+
+        const Real i_mosfet = stamp_nonlinear_branches<models::MosfetLevel1>(
+            x, J_nl, f_nl, graph, pool,
+            DevicePool::StoredKind::MosfetLevel1,
+            [](const DevicePool& p, Index b) {
+                return p.mosfet_level1_params(b);
+            },
+            detail::mosfet_level1_terminals);
+
+        return std::max({i_diode, i_igbt, i_mosfet});
     };
 }
 
