@@ -4,6 +4,77 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] — 2026-05-29
+
+### Fixed
+
+* **`simulate(engine='dsed', switch_fn=<plain Python callable>)`**
+  was silently producing the trajectory of a circuit with the
+  switch **frozen at the t=0 mask** — no PWM edges ever detected
+  — while still returning a successful result. Reproducer: buck
+  CCM with 50 % duty PWM at 100 kHz over 5 ms. Pre-fix DSED
+  returned V_C ≈ V_in (the SW-always-on attractor); PWL returned
+  V_out ≈ V_in/2 as expected. Users hit "DSED stabilises at the
+  wrong setpoint" / "DSED hangs at a weird value" and reasonably
+  suspected the topology was being rejected silently.
+
+  Root cause: the C++ scheduler computes the next gate-edge time
+  via ``switch_fn.next_edge_after(t)`` (see
+  ``core/include/pulsim/dsed/scheduler*.hpp``). The native PWM
+  classes (:class:`NativePwm2Switch`,
+  :class:`NativeMultiMaskPwm`) implement that method analytically;
+  plain Python callables don't, and the pybind11 fallback in
+  ``PySwitchFn::next_edge_after`` returned
+  ``std::numeric_limits<Real>::infinity()``. The scheduler then
+  computed ``t_gate = min(∞, t_end) = t_end`` and integrated the
+  whole window with the mask sampled at ``t = t_start``.
+
+  Fix: each DSED scheduler (``scheduler.hpp``,
+  ``scheduler_auto.hpp``, ``scheduler_bdf2.hpp``) now treats
+  ``∞`` returns from ``next_edge_after`` as "no edge info — poll
+  defensively" and caps ``t_gate`` at ``t + dt_max/10`` so the
+  scheduler is forced to land at that boundary and re-sample the
+  switch_fn via ``fire_gate_event_`` (which catches any
+  discovered mask change). Native PWM classes and any user
+  object whose ``next_edge_after`` returns a finite value take
+  the analytical fast path unchanged (``std::isfinite()`` check).
+
+  The dispatcher emits a one-shot ``UserWarning`` when it sees a
+  plain Python switch_fn so users know they're in the polled path
+  and can opt into :class:`NativePwm2Switch` for best performance.
+
+### Performance
+
+Canonical buck CCM (V_in=24V, L=100µH, C=100µF, R_load=2Ω,
+f_sw=100 kHz, 50 % duty). Plain Python switch_fn (the path that
+exercises the new defensive polling):
+
+  | t_end  | DSED auto | PWL @ 100ns | PWL/DSED speedup |
+  |--------|----------:|------------:|-----------------:|
+  |   1 ms |    3.5 ms |     33.0 ms |        **9.5×**  |
+  |   5 ms |   15.8 ms |    163.1 ms |       **10.3×**  |
+  |  20 ms |   63.7 ms |    666.8 ms |       **10.5×**  |
+
+The ~10× speedup matches the DSED win when the trajectory
+between events is smooth — the scheduler skips through each
+5 µs PWM half-period in one RK45 step instead of 50 fixed-dt
+steps. Switching to :class:`NativePwm2Switch` would push this
+higher still on ≥2-switch topologies (analytical
+``next_edge_after`` skips the polling overhead entirely).
+
+### Tests
+
+* `python/tests/test_dsed_python_switch_fn_polling.py` (3 tests):
+  - **Correctness**: canonical bug reproducer — buck with
+    resistive freewheel + plain Python PWM. DSED ``V_out_mean``
+    and ``i_L_mean`` must match PWL within 5 %. Pre-fix: 3× off.
+    Post-fix: 0.06 %.
+  - **Warning**: the dispatcher emits a ``UserWarning`` mentioning
+    ``NativePwm2Switch`` when the polling wrapper is engaged.
+  - **Fast-path preservation**: a switch_fn that already exposes
+    ``next_edge_after`` is NOT auto-wrapped (no warning, no
+    polling cap engaged).
+
 ## [1.6.3] — 2026-05-29
 
 ### Internal — Python DSED scheduler reorganised to test tree
