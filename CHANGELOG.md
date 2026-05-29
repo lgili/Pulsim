@@ -4,6 +4,28 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] — 2026-05-28
+
+### Fixed
+
+* **`pip install pulsim` was broken on v1.6.0** because
+  `pulsim/__init__.py` re-exports `wire_chain_from_yaml`, which forced
+  a top-level `import yaml as _yaml` in `pulsim.yaml_chain`. PyYAML is
+  only listed under the `dev` optional extra (it's not a runtime
+  dependency), so the cibuildwheel smoke test (`python -c "import
+  pulsim"`) failed on all platforms (Linux/macOS/Windows) and the
+  PyPI publish workflow rejected the v1.6.0 wheels.
+
+  Moved the `import yaml` to a lazy import inside
+  `wire_chain_from_yaml` — only triggered when the caller passes a
+  YAML *string*. Python list/dict chain specs continue to work
+  without PyYAML installed. If the YAML-string path is taken without
+  PyYAML, the user gets an actionable `ModuleNotFoundError` pointing
+  at `pip install 'pulsim[dev]'`.
+
+  No behavioural change for anyone who already had PyYAML
+  installed via `pulsim[dev]` or as a transitive dep.
+
 ## [1.6.0] — 2026-05-28
 
 ### Highlights — Path-Based Event-Driven (DSED) engine + native PWM switch_fn
