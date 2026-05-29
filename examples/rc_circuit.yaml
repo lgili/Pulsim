@@ -1,20 +1,20 @@
-schema: pulsim-v1
-version: 1
-simulation:
-  tstop: 5e-3
-  dt: 1e-6
-components:
+circuit:
+  devices:
   - type: voltage_source
     name: V1
-    nodes: [in, 0]
-    waveform:
-      type: dc
-      value: 5.0
+    from: in
+    to: gnd
+    V: 5.0
   - type: resistor
     name: R1
-    nodes: [in, out]
-    value: 1k
+    from: in
+    to: out
+    R: 1000.0
   - type: capacitor
     name: C1
-    nodes: [out, 0]
-    value: 1u
+    from: out
+    to: gnd
+    C: 1.0e-06
+  simulation:
+    t_end: 0.005
+    dt: 1.0e-06

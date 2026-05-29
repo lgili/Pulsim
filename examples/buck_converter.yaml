@@ -1,46 +1,60 @@
-schema: pulsim-v1
-version: 1
-simulation:
-  tstop: 2e-3
-  dt: 0.5e-6
-  dt_max: 2e-6
-components:
-  - type: voltage_source
-    name: Vdc
-    nodes: [vcc, 0]
-    waveform:
-      type: dc
-      value: 48.0
-  - type: voltage_source
-    name: Vpwm
-    nodes: [ctrl, 0]
-    waveform:
-      type: pulse
-      v_initial: 0.0
-      v_pulse: 5.0
-      t_delay: 0.0
-      t_rise: 1e-9
-      t_fall: 1e-9
-      t_width: 25e-6
-      period: 50e-6
-  - type: vcswitch
-    name: S1
-    nodes: [ctrl, vcc, sw_node]
-    v_threshold: 2.5
-    ron: 0.01
-    roff: 1e9
-  - type: diode
-    name: D1
-    nodes: [0, sw_node]
-  - type: inductor
-    name: L1
-    nodes: [sw_node, out]
-    value: 100u
-  - type: capacitor
-    name: C1
-    nodes: [out, 0]
-    value: 100u
-  - type: resistor
-    name: Rload
-    nodes: [out, 0]
-    value: 10.0
+# Pulsim v2 example: 48 V → buck → ~24 V (open-loop, 50% duty).
+#
+# Migrated from the legacy `schema: pulsim-v1` format. The old file
+# drove an ideal `vcswitch` from a `pulse` voltage source on a `ctrl`
+# node. v2 has no voltage-controlled switch — the `switch` device is
+# gate-mask driven — so the high-side switch S1 is toggled by a
+# `switch_fn(t)` supplied at runtime (e.g. a 20 kHz / 50% PWM via
+# `p.make_pwm_switch_fn`). Run with:
+#
+#   import pulsim as p
+#   lc = p.load_yaml_file("examples/buck_converter.yaml")
+#   sw = p.make_pwm_switch_fn(frequency=20e3, duty=0.5,
+#                             num_switches=lc.graph.num_switches,
+#                             switch_idx=0)
+#   res = p.simulate(lc, t_end=2e-3, dt=0.5e-6, switch_fn=sw)
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vdc
+      from: vcc
+      to: gnd
+      V: 48.0
+
+    - type: switch          # was vcswitch S1 (ron=0.01, roff=1e9)
+      name: S1
+      from: vcc
+      to: sw_node
+      g_on: 100.0
+      g_off: 1.0e-9
+
+    - type: diode           # freewheel
+      name: D1
+      anode: gnd
+      cathode: sw_node
+      g_on: 1.0e3
+      g_off: 1.0e-9
+      V_th: 0.7
+
+    - type: inductor
+      name: L1
+      from: sw_node
+      to: out
+      L: 100.0e-6
+
+    - type: capacitor
+      name: C1
+      from: out
+      to: gnd
+      C: 100.0e-6
+
+    - type: resistor
+      name: Rload
+      from: out
+      to: gnd
+      R: 10.0
+
+  simulation:
+    t_end: 2.0e-3
+    dt: 0.5e-6

@@ -1,64 +1,68 @@
-schema: pulsim-v1
-version: 1
-simulation:
-  tstart: 0.0
-  tstop: 500e-6
-  dt: 0.25e-6
-  dt_max: 1e-6
-components:
-  - type: voltage_source
-    name: Vdc
-    nodes: [vcc, 0]
-    waveform:
-      type: dc
-      value: 100.0
-  - type: voltage_source
-    name: Vpwm_hi
-    nodes: [ctrl_hi, 0]
-    waveform:
-      type: pwm
-      v_high: 15.0
-      v_low: 0.0
-      frequency: 20000
-      duty: 0.5
-      dead_time: 1e-6
-      phase: 0.0
-  - type: voltage_source
-    name: Vpwm_lo
-    nodes: [ctrl_lo, 0]
-    waveform:
-      type: pwm
-      v_high: 15.0
-      v_low: 0.0
-      frequency: 20000
-      duty: 0.5
-      dead_time: 1e-6
-      phase: 0.5
-  - type: resistor
-    name: Rmid1
-    nodes: [vcc, mid]
-    value: 100k
-  - type: resistor
-    name: Rmid2
-    nodes: [mid, 0]
-    value: 100k
-  - type: vcswitch
-    name: S_hi
-    nodes: [ctrl_hi, vcc, out]
-    v_threshold: 7.5
-    ron: 0.05
-    roff: 1e9
-  - type: vcswitch
-    name: S_lo
-    nodes: [ctrl_lo, out, 0]
-    v_threshold: 7.5
-    ron: 0.05
-    roff: 1e9
-  - type: resistor
-    name: Rload
-    nodes: [out, load_mid]
-    value: 10.0
-  - type: inductor
-    name: Lload
-    nodes: [load_mid, mid]
-    value: 1m
+# Pulsim v2 example: half-bridge driving an RL load.
+#
+# Migrated from the legacy `schema: pulsim-v1` format. The old file
+# drove two ideal `vcswitch`es from complementary `pwm` voltage
+# sources on `ctrl_hi` / `ctrl_lo` nodes (with dead-time). v2 has no
+# voltage-controlled switch — the `switch` device is gate-mask driven
+# — so S_hi / S_lo are toggled by a `switch_fn(t)` at runtime.
+# Use `p.make_dead_time_pwm_pair_fn(...)` to reproduce the 20 kHz,
+# 50% duty, complementary pair with 1 µs dead-time:
+#
+#   import pulsim as p
+#   lc = p.load_yaml_file("examples/half_bridge_pwm.yaml")
+#   sw = p.make_dead_time_pwm_pair_fn(frequency=20e3, duty=0.5,
+#                                     dead_time=1e-6,
+#                                     num_switches=lc.graph.num_switches,
+#                                     high_idx=0, low_idx=1)
+#   res = p.simulate(lc, t_end=500e-6, dt=0.25e-6, switch_fn=sw)
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vdc
+      from: vcc
+      to: gnd
+      V: 100.0
+
+    # Mid-rail divider (sets the RL-load return reference at Vdc/2).
+    - type: resistor
+      name: Rmid1
+      from: vcc
+      to: mid
+      R: 100.0e3
+
+    - type: resistor
+      name: Rmid2
+      from: mid
+      to: gnd
+      R: 100.0e3
+
+    - type: switch          # was vcswitch S_hi (ron=0.05, roff=1e9)
+      name: S_hi
+      from: vcc
+      to: out
+      g_on: 20.0
+      g_off: 1.0e-9
+
+    - type: switch          # was vcswitch S_lo (ron=0.05, roff=1e9)
+      name: S_lo
+      from: out
+      to: gnd
+      g_on: 20.0
+      g_off: 1.0e-9
+
+    - type: resistor
+      name: Rload
+      from: out
+      to: load_mid
+      R: 10.0
+
+    - type: inductor
+      name: Lload
+      from: load_mid
+      to: mid
+      L: 1.0e-3
+
+  simulation:
+    t_end: 500.0e-6
+    dt: 0.25e-6
