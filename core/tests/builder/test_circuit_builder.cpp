@@ -14,6 +14,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -459,4 +460,34 @@ TEST_CASE("add_multi_winding_transformer rejects non-positive inductance",
     REQUIRE_THROWS_AS(
         b.add_multi_winding_transformer("MW1", windings),
         std::invalid_argument);
+}
+
+// Defense-in-depth (audit critic): a NaN/Inf reaching the Newton residual —
+// from a future device, a param that slipped past the builder gate, or an
+// ill-conditioned step — must throw a clear error instead of silently burning
+// to max_iters (NaN compares false against every tolerance) and reporting a
+// misleading "failed to converge".
+TEST_CASE("solve_with_newton throws on a non-finite residual (NaN guard)",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    b.add_voltage_source("V1", "n0", "gnd", 2.0);
+    b.add_resistor("R1", "n0", "gnd", 100.0);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    const Vector x_init = Vector::Zero(seg.state_size);
+
+    // Refresh that injects a NaN into the residual vector.
+    auto nan_refresh = [](const Vector&, sparse::Matrix& J_nl, Vector& f_nl,
+                          const topology::Graph&, const DevicePool&) -> Real {
+        if (J_nl.rows() > 0) J_nl.setZero();
+        if (f_nl.size() > 0) {
+            f_nl.setZero();
+            f_nl[0] = std::numeric_limits<Real>::quiet_NaN();
+        }
+        return Real{0};
+    };
+    REQUIRE_THROWS_AS(
+        solve_with_newton(seg, nan_refresh, b.graph(), b.pool(), x_init),
+        std::runtime_error);
 }
