@@ -65,7 +65,7 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/buck_switching.yaml
+  - path: circuits/switching/buck/buck_switching.yaml
     ngspice_netlist: spice/ngspice/buck_switching.cir
     ngspice_observables:
       - column: V(out)
@@ -75,13 +75,13 @@ benchmarks:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
-  - path: circuits/switching/buck_igbt.yaml
+  - path: circuits/switching/buck/buck_igbt.yaml
     ngspice_netlist: spice/ngspice/buck_igbt.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap, trbdf2]
-  - path: circuits/switching/boost_switching_complex.yaml
+  - path: circuits/switching/boost/boost_switching_complex.yaml
     ngspice_netlist: spice/ngspice/boost_switching_complex.cir
     ngspice_observables:
       - column: V(out)
@@ -101,7 +101,7 @@ benchmarks:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
-  - path: circuits/switching/buck_mosfet_nonlinear.yaml
+  - path: circuits/switching/buck/buck_mosfet_nonlinear.yaml
     ngspice_netlist: spice/ngspice/buck_mosfet_nonlinear.cir
     ngspice_observables:
       - column: V(out)
@@ -185,7 +185,7 @@ benchmarks:
     # diode's piecewise-linear knee (oscillation grows unbounded).
     # gmres_trbdf2 is L-stable and tracks the clamp cleanly.
     scenarios: [gmres_trbdf2]
-  - path: circuits/switching/pwm_voltage_rl_filter.yaml
+  - path: circuits/switching/basic/pwm_voltage_rl_filter.yaml
     ngspice_netlist: spice/ngspice/pwm_voltage_rl_filter.cir
     ngspice_observables:
       - column: V(out)
@@ -308,25 +308,25 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/pwm_voltage_rc.yaml
+  - path: circuits/switching/basic/pwm_voltage_rc.yaml
     ngspice_netlist: spice/ngspice/pwm_voltage_rc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/snubber_rc.yaml
+  - path: circuits/switching/basic/snubber_rc.yaml
     ngspice_netlist: spice/ngspice/snubber_rc.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/vcswitch_resistor.yaml
+  - path: circuits/switching/basic/vcswitch_resistor.yaml
     ngspice_netlist: spice/ngspice/vcswitch_resistor.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/mosfet_nmos_dc.yaml
+  - path: circuits/switching/basic/mosfet_nmos_dc.yaml
     ngspice_netlist: spice/ngspice/mosfet_nmos_dc.cir
     ngspice_observables:
       - column: V(drain)
@@ -348,13 +348,13 @@ benchmarks:
   # ----- Phase 17: inverter / topology stress tests -----
   # Progressively heavier topologies designed to find solver +
   # component-coverage gaps. Each pushes a different stress axis.
-  - path: circuits/switching/synchronous_buck.yaml
+  - path: circuits/switching/buck/synchronous_buck.yaml
     ngspice_netlist: spice/ngspice/synchronous_buck.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/half_bridge_inverter.yaml
+  - path: circuits/switching/inverter/half_bridge_inverter.yaml
     ngspice_netlist: spice/ngspice/half_bridge_inverter.cir
     ngspice_observables:
       - column: V(load)
@@ -367,7 +367,7 @@ benchmarks:
   # at ±V_dc, and IL stays bounded. No ngspice mirror; baselined
   # against Pulsim itself like the other Phase 19+ regression
   # benches.
-  - path: circuits/switching/full_bridge_dc.yaml
+  - path: circuits/switching/isolated/full_bridge_dc.yaml
     scenarios: [default]
   # flyback_converter: coupled_inductor + vcswitch + diode cascade
   # on a transformer-isolated SMPS. With the original
@@ -380,7 +380,7 @@ benchmarks:
   # 0.38 V on V(out). No C++ change was needed — the mutual
   # stamp + diode commutation simply needs the same
   # rejection-tolerant config the other switching benches use.
-  - path: circuits/switching/flyback_converter.yaml
+  - path: circuits/switching/isolated/flyback_converter.yaml
     ngspice_netlist: spice/ngspice/flyback_converter.cir
     ngspice_observables:
       - column: V(out)
@@ -390,13 +390,13 @@ benchmarks:
     # transition. The trbdf2 scenario keeps the YAML's bdf1 (or
     # falls back to TRBDF2) and the manifest run passes.
     scenarios: [trbdf2]
-  - path: circuits/switching/boost_classic.yaml
+  - path: circuits/switching/boost/boost_classic.yaml
     ngspice_netlist: spice/ngspice/boost_classic.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/buck_boost.yaml
+  - path: circuits/switching/buck_boost/buck_boost.yaml
     ngspice_netlist: spice/ngspice/buck_boost.cir
     ngspice_observables:
       - column: V(out)
@@ -410,27 +410,27 @@ benchmarks:
   # the open-loop fixed-duty boost is intrinsically slow to settle,
   # but the simulation is stable and deterministic — a regression
   # tracker on what Pulsim does today.
-  - path: circuits/switching/cascaded_boost_buck.yaml
+  - path: circuits/switching/boost/cascaded_boost_buck.yaml
     scenarios: [default]
-  - path: circuits/switching/cascaded_buck_buck.yaml
+  - path: circuits/switching/buck/cascaded_buck_buck.yaml
     ngspice_netlist: spice/ngspice/cascaded_buck_buck.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/sync_buck_500khz.yaml
+  - path: circuits/switching/buck/sync_buck_500khz.yaml
     ngspice_netlist: spice/ngspice/sync_buck_500khz.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/triple_sync_buck.yaml
+  - path: circuits/switching/buck/triple_sync_buck.yaml
     ngspice_netlist: spice/ngspice/triple_sync_buck.cir
     ngspice_observables:
       - column: V(out_b)
         spice_vector: v(out_b)
     scenarios: [direct_trap]
-  - path: circuits/switching/buck_dcm.yaml
+  - path: circuits/switching/buck/buck_dcm.yaml
     ngspice_netlist: spice/ngspice/buck_dcm.cir
     ngspice_observables:
       - column: V(out)
@@ -448,13 +448,13 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/sepic.yaml
+  - path: circuits/switching/buck_boost/sepic.yaml
     ngspice_netlist: spice/ngspice/sepic.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/cuk_converter.yaml
+  - path: circuits/switching/buck_boost/cuk_converter.yaml
     ngspice_netlist: spice/ngspice/cuk_converter.cir
     ngspice_observables:
       - column: V(out)
@@ -466,19 +466,19 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/two_phase_interleaved_boost.yaml
+  - path: circuits/switching/boost/two_phase_interleaved_boost.yaml
     ngspice_netlist: spice/ngspice/two_phase_interleaved_boost.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [direct_trap]
-  - path: circuits/switching/synchronous_flyback.yaml
+  - path: circuits/switching/isolated/synchronous_flyback.yaml
     ngspice_netlist: spice/ngspice/synchronous_flyback.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [trbdf2]
-  - path: circuits/switching/bidirectional_buck_boost.yaml
+  - path: circuits/switching/buck_boost/bidirectional_buck_boost.yaml
     ngspice_netlist: spice/ngspice/bidirectional_buck_boost.cir
     ngspice_observables:
       - column: V(out)
@@ -493,13 +493,13 @@ benchmarks:
     # scenario so the manifest doesn't override to trapezoidal/
     # trbdf2 (both of which lose accuracy on this circuit).
     scenarios: [direct_bdf1]
-  - path: circuits/switching/forward_converter.yaml
+  - path: circuits/switching/isolated/forward_converter.yaml
     ngspice_netlist: spice/ngspice/forward_converter.cir
     ngspice_observables:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [trbdf2]
-  - path: circuits/switching/buck_with_current_sense.yaml
+  - path: circuits/switching/buck/buck_with_current_sense.yaml
     ngspice_netlist: spice/ngspice/buck_with_current_sense.cir
     ngspice_observables:
       - column: V(out)
@@ -548,11 +548,11 @@ benchmarks:
   # true` and a couple of YAML refresh-ups got them all running
   # deterministically. They validate against captured Pulsim baselines
   # like the other regression-only benches.
-  - path: circuits/switching/synchronous_boost.yaml
+  - path: circuits/switching/boost/synchronous_boost.yaml
     scenarios: [default]
   - path: circuits/magnetics/half_bridge_transformer_dc.yaml
     scenarios: [default]
-  - path: circuits/switching/npc_three_level_halfbridge.yaml
+  - path: circuits/switching/multilevel/npc_three_level_halfbridge.yaml
     scenarios: [default]
 
   # ----- Phase 23 Sprint B: Bode / frequency-domain validation -----
@@ -577,23 +577,23 @@ benchmarks:
     scenarios: [default]
 
   # ----- Phase 23 Bonus: textbook reference cases -----
-  - path: circuits/switching/textbook_erickson_buck_ccm.yaml
+  - path: circuits/switching/buck/textbook_erickson_buck_ccm.yaml
     scenarios: [default]
-  - path: circuits/switching/textbook_erickson_boost_ccm.yaml
+  - path: circuits/switching/boost/textbook_erickson_boost_ccm.yaml
     scenarios: [default]
 
   # ----- Phase 24: soft-switching detection (ZVS / ZCS) -----
-  - path: circuits/switching/buck_hard_switching_reference.yaml
+  - path: circuits/switching/buck/buck_hard_switching_reference.yaml
     scenarios: [default]
 
   # ----- Phase 25: long-simulation / numerical-stress benches -----
   - path: circuits/thermal/long_run_drift_buck.yaml
     scenarios: [default]
-  - path: circuits/switching/high_freq_gan_buck.yaml
+  - path: circuits/switching/buck/high_freq_gan_buck.yaml
     scenarios: [default]
   - path: circuits/stress/stiff_rc_high_freq_switching.yaml
     scenarios: [default]
-  - path: circuits/switching/mmc_4cell_chain.yaml
+  - path: circuits/switching/multilevel/mmc_4cell_chain.yaml
     scenarios: [default]
 
   # ----- Phase 26: magnetic saturation + core loss (Steinmetz) -----
@@ -618,23 +618,23 @@ benchmarks:
     scenarios: [default]
   - path: circuits/diodes/half_wave_rectifier_sine.yaml
     scenarios: [default]
-  - path: circuits/switching/half_bridge_lc_filter.yaml
+  - path: circuits/switching/inverter/half_bridge_lc_filter.yaml
     scenarios: [default]
-  - path: circuits/switching/flying_capacitor_3level.yaml
+  - path: circuits/switching/multilevel/flying_capacitor_3level.yaml
     scenarios: [default]
-  - path: circuits/switching/cascaded_h_bridge_5level.yaml
+  - path: circuits/switching/multilevel/cascaded_h_bridge_5level.yaml
     scenarios: [default]
-  - path: circuits/switching/t_type_3level_halfbridge.yaml
+  - path: circuits/switching/multilevel/t_type_3level_halfbridge.yaml
     scenarios: [default]
-  - path: circuits/switching/lcc_resonant_inverter.yaml
+  - path: circuits/switching/inverter/lcc_resonant_inverter.yaml
     scenarios: [default]
-  - path: circuits/switching/active_clamp_forward.yaml
+  - path: circuits/switching/isolated/active_clamp_forward.yaml
     scenarios: [default]
-  - path: circuits/switching/boost_pfc_open_loop.yaml
+  - path: circuits/switching/boost/boost_pfc_open_loop.yaml
     scenarios: [default]
-  - path: circuits/switching/dual_active_bridge.yaml
+  - path: circuits/switching/isolated/dual_active_bridge.yaml
     scenarios: [default]
-  - path: circuits/switching/half_bridge_inverter_lc.yaml
+  - path: circuits/switching/inverter/half_bridge_inverter_lc.yaml
     scenarios: [default]
 
   # Phase 22: all three formerly-deferred topologies above are now
@@ -657,7 +657,7 @@ benchmarks:
   #   against. This is a SPICE-side numerical issue with the Level-1
   #   PMOS model + 64 % duty cycle, not a Pulsim correctness gap.
   #   Kept here as a future "needs ngspice .cir tuning" item.
-  - path: circuits/switching/buck_pmos.yaml
+  - path: circuits/switching/buck/buck_pmos.yaml
     scenarios: [direct_trap, trbdf2]
 
   # Phase 28: three-phase control primitives — Clarke / Park / PLL / SVM.

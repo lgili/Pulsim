@@ -362,7 +362,7 @@ def main() -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path(__file__).parent / "local_limit" / "benchmarks_local_limit.yaml",
+        default=Path(__file__).parent.parent / "manifests" / "local_limit.yaml",
     )
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/out_local_limit"))
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run")

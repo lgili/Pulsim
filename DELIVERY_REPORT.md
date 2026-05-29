@@ -383,7 +383,7 @@ integral.
 **Delivered**: 3 closed-loop YAML circuits (`ll14_buck_closed_loop.yaml`,
 `ll15_boost_closed_loop.yaml`, `ll16_flyback_closed_loop.yaml`) with
 PI controllers + PWM generators registered in
-`benchmarks/local_limit/benchmarks_local_limit.yaml`.
+`benchmarks/manifests/local_limit.yaml`.
 
 **Key files**: `benchmarks/circuits/{ll14, ll15, ll16}_*.yaml`.
 
