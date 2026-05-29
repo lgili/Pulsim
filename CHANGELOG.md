@@ -4,6 +4,60 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+* **`pulsim.add_voltage_doubler_bridge(builder, name, *, ac_l, ac_n,
+  dc_pos, dc_neg, ...)`** — universal-input (110/220 VAC) AC-DC
+  front-end. Builds a 4-diode bridge with a series cap stack
+  (``C_top`` between ``dc_pos`` and the auto-created ``mid_node``,
+  ``C_bot`` between ``mid_node`` and ``dc_neg``) and a controlled
+  switch between ``ac_n`` and the cap midpoint. Same hardware
+  switches between **bridge mode** (switch open → ``V_DC ≈ √2·V_AC``,
+  use on 220 VAC) and **voltage doubler mode** (switch closed →
+  ``V_DC ≈ 2·√2·V_AC``, use on 110 VAC), so the downstream PFC /
+  SMPS sees the same DC bus voltage across the universal-input
+  range. Returns :class:`VoltageDoublerBridgeResult` carrying the
+  deterministic device names, branch IDs, midpoint node name, and
+  the ``switch_index`` the caller passes to
+  ``mask.set(switch_index, doubler_enabled)``.
+
+  Example:
+
+  ```python
+  import pulsim as p
+
+  b = p.CircuitBuilder()
+  b.add_sine_voltage_source(name="Vac", n_pos="ac_l", n_neg="ac_n",
+                              v_dc=0.0, v_amplitude=311.0,
+                              frequency=60.0)  # 220 VAC nominal
+  rect = p.add_voltage_doubler_bridge(
+      b, name="Rect",
+      ac_l="ac_l", ac_n="ac_n",
+      dc_pos="vdc", dc_neg="gnd",
+      C_top=470e-6, C_bot=470e-6,
+  )
+  b.add_resistor("R_load", "vdc", "gnd", 100.0)
+
+  def sw(t):
+      m = p.SwitchStateMask(b.graph.num_switches)
+      m.set(rect.switch_index, low_line_input)  # True → doubler
+      return m
+
+  res = p.simulate(b, t_end=0.2, dt=20e-6, switch_fn=sw)
+  ```
+
+### Tests
+
+* `python/tests/test_voltage_doubler_bridge.py` (12 tests) — pins
+  construction (branch/switch counts, deterministic names,
+  ``switch_index`` location), validation (rejects non-positive
+  ``C_top``/``C_bot``/conductances loudly), bridge-mode and
+  doubler-mode steady-state DC bus voltages on their respective
+  canonical inputs, and the universal-input promise that
+  ``220VAC + bridge`` matches ``110VAC + doubler`` within ±15 %.
+
 ## [1.6.2] — 2026-05-29
 
 ### Fixed
