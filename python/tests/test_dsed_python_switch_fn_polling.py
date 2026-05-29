@@ -149,8 +149,6 @@ def test_switch_fn_with_next_edge_after_skips_polling_wrapper() -> None:
     "if the switch_fn already exposes ``next_edge_after``, leave
     it alone". We pin that decision tree directly.
     """
-    from pulsim._dsed_dispatch import _PolledPySwitchFn
-
     class _AnalyticalPWM:
         T = 1e-5
         D = 0.5
@@ -184,11 +182,9 @@ def test_switch_fn_with_next_edge_after_skips_polling_wrapper() -> None:
             return float("inf")
 
     sf2 = _ConstantNeaSwitchFn(b2.graph.num_switches)
-    # If the dispatcher were to wrap sf2, the wrapping path emits a
-    # UserWarning. We assert no such warning fires.
+    # Run the simulation — UserWarning must NOT fire because sf2
+    # advertises next_edge_after (analytical fast path engaged).
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         res = p.simulate(b2, t_end=1e-5, engine="dsed", switch_fn=sf2)
     assert res.num_steps() > 0
-    # Sanity: sf2 is not a _PolledPySwitchFn instance either way.
-    assert not isinstance(sf2, _PolledPySwitchFn)
