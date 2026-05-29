@@ -429,6 +429,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reading order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-hoc-analysis-v15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Post-hoc analysis (v1.5)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -569,6 +584,21 @@
       Reading order
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Reading order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-hoc-analysis-v15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Post-hoc analysis (v1.5)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -791,6 +821,27 @@
   
   <span class="md-ellipsis">
     Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
   </span>
   
 
@@ -1164,6 +1215,132 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="how-pulsim-works/11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="how-pulsim-works/12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="how-pulsim-works/13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="how-pulsim-works/14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="how-pulsim-works/15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="how-pulsim-works/16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1423,6 +1600,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1635,6 +1833,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reading order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-hoc-analysis-v15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Post-hoc analysis (v1.5)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1707,6 +1920,12 @@
 <li><a href="api-reference/"><strong>API reference</strong></a> — Python surface, one page.</li>
 <li><a href="gotchas/"><strong>Gotchas</strong></a> — Newton convergence corner cases and the workarounds that ship in 1.0.</li>
 </ol>
+<h3 id="post-hoc-analysis-v15">Post-hoc analysis (v1.5)<a class="headerlink" href="#post-hoc-analysis-v15" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="losses-and-thermal/"><strong>Losses &amp; junction temperature</strong></a> — <code>device_loss_summary</code> + <code>device_thermal_summary</code>. Reads resistors, inductors (with optional Steinmetz / iGSE core loss), ideal switches (PSIM <code>E_on</code> / <code>E_off</code>), and switched diodes (<code>Q_rr</code> / <code>E_rr_ref</code>); pipes the per-device loss through a Foster network for <code>T_j(t)</code>.</li>
+<li><a href="fast-block/"><strong><code>@fast_block</code></strong></a> — Pulsim's PSIM-<code>Custom C Block</code> / PLECS-<code>C-Script</code> workalike via Numba LLVM JIT. Write the control law in Python, get native-speed code without a C compiler in the user's PATH.</li>
+<li><a href="yaml-chain/"><strong>YAML composite devices + chain wiring</strong></a> — <code>induction_motor</code> / <code>hysteretic_inductor</code> in <code>circuit:</code> plus <code>wire_chain_from_yaml(loaded, chain_spec)</code> for the control layer (IM mechanical, JA observer, SMO/MRAS sensorless).</li>
+</ul>
 <h2 id="where-the-source-lives">Where the source lives<a class="headerlink" href="#where-the-source-lives" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

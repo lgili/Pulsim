@@ -13,6 +13,10 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/internals/mmc-arm-block/">
       
       
+        <link rel="prev" href="../layer10-benchmarks/">
+      
+      
+        <link rel="next" href="../../build-system/">
       
       
       <link rel="icon" href="../../assets/images/pulsim-logo.svg">
@@ -261,10 +265,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../" class="md-tabs__link">
           
   
@@ -644,6 +650,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../solvers/" class="md-nav__link">
         
   
@@ -1001,6 +1028,132 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1012,27 +1165,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -1043,7 +1199,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             Internals
@@ -1255,6 +1411,256 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-mmc-anatomy-refresher" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. MMC anatomy refresher
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-arm-equations" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Arm equations
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Arm equations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-switched-model-eqs-27-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Switched model — eqs (2.7), (2.9)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-averaged-model-eqs-213-214" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Averaged model — eqs (2.13), (2.14)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-arm-current-dynamics-eq-230" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.3 Arm-current dynamics — eq (2.30)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-current-decomposition-eq-222" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.4 Current decomposition — eq (2.22)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-sm-equivalent-simulation-model-thesis-342-eqs-395399" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.5 SM-equivalent simulation model (thesis 3.4.2) — eqs (3.95)–(3.99)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-layered-block-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Layered block hierarchy
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Parameters
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-api-surface-proposed" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. API surface (proposed)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. API surface (proposed)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-python-pulsim-flat-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1 Python (pulsim flat namespace)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-c-coreincludepulsimmmcarmhpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.2 C++ (core/include/pulsim/mmc/arm.hpp)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-validation-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Validation plan
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Validation plan">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l0-sinusoidal-steady-state-vs-analytical" class="md-nav__link">
+    <span class="md-ellipsis">
+      L0 — sinusoidal steady-state vs. analytical
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l1-multilevel-waveform-vs-ps-pwm-expectation" class="md-nav__link">
+    <span class="md-ellipsis">
+      L1 — multilevel waveform vs. PS-PWM expectation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l2-vs-l0-with-dead-time-stress" class="md-nav__link">
+    <span class="md-ellipsis">
+      L2 — vs. L0 with dead-time stress
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l3-intra-arm-balancing" class="md-nav__link">
+    <span class="md-ellipsis">
+      L3 — intra-arm balancing
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-implementation-order-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Implementation order — done
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-resolved-design-choices" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. Resolved design choices
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1554,9 +1960,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#52-c-pulsimv1circuit" class="md-nav__link">
+  <a href="#52-c-coreincludepulsimmmcarmhpp" class="md-nav__link">
     <span class="md-ellipsis">
-      5.2 C++ (pulsim::v1::Circuit)
+      5.2 C++ (core/include/pulsim/mmc/arm.hpp)
     </span>
   </a>
   
@@ -1619,18 +2025,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-implementation-order" class="md-nav__link">
+  <a href="#7-implementation-order-done" class="md-nav__link">
     <span class="md-ellipsis">
-      7. Implementation order
+      7. Implementation order — done
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-open-questions" class="md-nav__link">
+  <a href="#8-resolved-design-choices" class="md-nav__link">
     <span class="md-ellipsis">
-      8. Open questions
+      8. Resolved design choices
     </span>
   </a>
   
@@ -1668,14 +2074,19 @@
 
 
 <h1 id="mmc-arm-block-design-doc">MMC Arm Block — design doc<a class="headerlink" href="#mmc-arm-block-design-doc" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> L0–L3 implemented (Phase 20 — Python layer complete).
-See <code>python/pulsim/mmc.py</code> and the integration tests under
-<code>python/tests/test_mmc_arm_{average,multilevel,equivalent,detailed}.py</code>.
-<strong>Reference:</strong> Sousa, Gean Jacques Maia de.
-<em>Sistemas de Controle para a Operação Eficiente de Conversores Modulares Multiníveis em Acionamentos Elétricos</em>. PhD thesis, UFSC, 2022. (<code>artigos/Gean Jacques Maia de Sousa.pdf</code>)</p>
+<p><strong>Status:</strong> L0–L3 implemented, both Half-Bridge and Full-Bridge
+submodules supported across every layer. Per-step math lives in
+<code>core/include/pulsim/mmc/arm.hpp</code> (header-only C++23); the
+Python module <code>python/pulsim/mmc.py</code> is a thin orchestrator
+(dataclasses, builder helpers, observers, time-series drivers).
+Integration tests under
+<code>python/tests/test_mmc_arm_{average,multilevel,equivalent,detailed}.py</code>.</p>
+<p><strong>Reference:</strong> Sousa (2022), <em>Sistemas de Controle para a Operação
+Eficiente de Conversores Modulares Multiníveis em Acionamentos
+Elétricos.</em> PhD thesis, UFSC.</p>
 <p>This doc captures the model equations, the layered block hierarchy, the
-parameter / API contract, and the staged validation plan for adding
-Modular Multilevel Converter (MMC) support to pulsim. The goal is a
+parameter / API contract, and the staged validation plan for the
+Modular Multilevel Converter (MMC) support in pulsim. The goal is a
 simulator that is</p>
 <ul>
 <li><strong>fast enough</strong> to run an MMC with 30+ submodules per arm at switching
@@ -1685,6 +2096,7 @@ simulator that is</p>
 </ul>
 <p>by giving the user a <em>small ladder of models</em> (L0 → L3) and letting them
 pick the right point on the speed-vs-fidelity curve.</p>
+<p>User-facing tutorial: see <a href="../../mmc/">Modular Multilevel Converters</a>.</p>
 <hr />
 <h2 id="1-mmc-anatomy-refresher">1. MMC anatomy refresher<a class="headerlink" href="#1-mmc-anatomy-refresher" title="Permanent link">&para;</a></h2>
 <p>An MMC arm <code>Bⱼ,ₖ</code> is a series chain of N submodules (SMs) plus an arm
@@ -1794,13 +2206,16 @@ states can flip per simulation step, plus additional monostables
 <hr />
 <h2 id="3-layered-block-hierarchy">3. Layered block hierarchy<a class="headerlink" href="#3-layered-block-hierarchy" title="Permanent link">&para;</a></h2>
 <p>We ship four layers. Each is one self-contained block in
-<code>pulsim.power_electronics.mmc</code> (Python) backed by a thin C++ device
-where it helps performance.</p>
+<code>pulsim.mmc</code> (Python wrapper) backed by a header-only C++23 kernel in
+<code>core/include/pulsim/mmc/arm.hpp</code>. The Python side owns dataclasses,
+builder integration, observers, and the time-series drivers; the kernel
+owns the per-step math.</p>
 <table>
 <thead>
 <tr>
 <th>Layer</th>
-<th>Block</th>
+<th>Python class</th>
+<th>Builder helper</th>
 <th>States/arm</th>
 <th>Captures</th>
 <th>Use case</th>
@@ -1810,20 +2225,23 @@ where it helps performance.</p>
 <tr>
 <td><strong>L0</strong></td>
 <td><code>MmcArmAverage</code></td>
+<td><code>add_mmc_arm_average</code></td>
 <td>1</td>
-<td>continuous mb, eq (2.13/14)</td>
+<td>continuous <code>m_b</code>, eq (2.13/14)</td>
 <td>small-signal Bode, fast trade studies</td>
 </tr>
 <tr>
 <td><strong>L1</strong></td>
 <td><code>MmcArmMultilevel</code></td>
+<td><code>add_mmc_arm_multilevel</code></td>
 <td>1</td>
-<td>discrete <code>s_b ∈ {0,…,N}</code></td>
-<td>modulation strategy (PS-PWM, APOD, …)</td>
+<td>discrete <code>s_b ∈ {0,…,N}</code> (HB) or <code>{-N,…,N}</code> (FB)</td>
+<td>modulation strategy (PS-PWM, IPD)</td>
 </tr>
 <tr>
 <td><strong>L2</strong></td>
 <td><code>MmcArmEquivalent</code></td>
+<td><code>add_mmc_arm_equivalent</code></td>
 <td>1</td>
 <td>+ dead-time + min pulse (thesis 3.4.2)</td>
 <td>loss estimation, fast dynamics</td>
@@ -1831,8 +2249,9 @@ where it helps performance.</p>
 <tr>
 <td><strong>L3</strong></td>
 <td><code>MmcArmDetailed</code></td>
+<td><code>add_mmc_arm_detailed</code></td>
 <td>N</td>
-<td>+ intra-arm v_CSM differences</td>
+<td>+ intra-arm <code>v_C_SM</code> spread + sort-and-select</td>
 <td>balancing algorithms, fault injection</td>
 </tr>
 </tbody>
@@ -1841,6 +2260,14 @@ where it helps performance.</p>
 terminals A/B, a control-input port for the modulating signal, an
 optional measurement port for <code>v_C</code>), so a user can swap layers
 without changing topology.</p>
+<p>Both submodule topologies (<code>sm_type="half_bridge"</code> and
+<code>sm_type="full_bridge"</code>) are supported across every layer. FB encoding
+at L2/L3 uses a signed insertion count <code>s_b ∈ {-N..N}</code>: positive states
+add <code>+v_C</code> per SM, negative states add <code>−v_C</code> per SM, and zero states
+free-wheel. The L2 dead-time monostable routes by <code>sign(i_b)</code> exactly as
+the thesis derives; L3 sort-and-select picks SMs by polarity of the
+desired contribution, then by capacitor voltage relative to the charging
+direction.</p>
 <hr />
 <h2 id="4-parameters">4. Parameters<a class="headerlink" href="#4-parameters" title="Permanent link">&para;</a></h2>
 <p>Every layer takes the same minimum set:</p>
@@ -1955,13 +2382,24 @@ parameters; that's a later concern.</p>
     <span class="n">modulator</span><span class="o">=...</span><span class="p">,</span>          <span class="c1"># callable t -&gt; (m_a, m_b, m_c) for each phase × pos/neg</span>
 <span class="p">)</span>
 </code></pre></div>
-<h3 id="52-c-pulsimv1circuit">5.2 C++ (<code>pulsim::v1::Circuit</code>)<a class="headerlink" href="#52-c-pulsimv1circuit" title="Permanent link">&para;</a></h3>
-<p>L0 reuses <code>add_vcvs</code> (controlled voltage source) for <code>v_b = m_b · v_C</code>,
-a regular capacitor for <code>C</code>, and a <code>add_cccs</code> / current-controlled
-current source for <code>i_C = m_b · i_b</code>. No new device class needed at
-this layer — purely a builder helper composing existing primitives.</p>
-<p>L1–L3 will eventually need a custom device. We hold off until the L0
-proof-of-concept is in place.</p>
+<h3 id="52-c-coreincludepulsimmmcarmhpp">5.2 C++ (<code>core/include/pulsim/mmc/arm.hpp</code>)<a class="headerlink" href="#52-c-coreincludepulsimmmcarmhpp" title="Permanent link">&para;</a></h3>
+<p>All per-step math is <code>constexpr</code>-friendly C++23 living in
+<code>core/include/pulsim/mmc/arm.hpp</code> (header-only). The public entry
+points exposed via pybind11 (<code>python/bindings.cpp</code>):</p>
+<ul>
+<li><code>mmc_arm_average_step</code>     — <code>(v_C, m_b, i_b, dt, params) → (v_C_next, v_b)</code></li>
+<li><code>mmc_arm_multilevel_step</code>  — <code>(v_C, s_b, i_b, dt, params) → (v_C_next, v_b)</code></li>
+<li><code>mmc_arm_equivalent_step</code>  — <code>(state, s_ref, i_b, dt, params, sm_type) → (state_next, v_b, s_w, s_u, s_n)</code></li>
+<li><code>mmc_arm_detailed_step</code>    — <code>(state, s_ref, i_b, dt, params) → (state_next, v_b, insertion_mask)</code></li>
+<li><code>ps_pwm_switching_function</code>, <code>ipd_switching_function</code> — quantizers
+  used by the Python multilevel driver.</li>
+</ul>
+<p>The Python side (<code>python/pulsim/mmc.py</code>) is a thin orchestrator:
+it owns dataclasses, builder integration (the <code>add_mmc_arm_*</code> family
+and the three-phase topology helper), per-step observers, and the
+time-series drivers (<code>simulate_mmc_arm_*</code>). There is no pure-Python
+fallback by design — a single implementation is the only contract
+worth maintaining.</p>
 <hr />
 <h2 id="6-validation-plan">6. Validation plan<a class="headerlink" href="#6-validation-plan" title="Permanent link">&para;</a></h2>
 <h3 id="l0-sinusoidal-steady-state-vs-analytical">L0 — sinusoidal steady-state vs. analytical<a class="headerlink" href="#l0-sinusoidal-steady-state-vs-analytical" title="Permanent link">&para;</a></h3>
@@ -1994,45 +2432,45 @@ the idealised response; L2 should show:</p>
 Then turn it on (sort-and-select per Tu, Hu, Xu 2011 — the standard
 algorithm) and confirm the spread stays bounded.</p>
 <hr />
-<h2 id="7-implementation-order">7. Implementation order<a class="headerlink" href="#7-implementation-order" title="Permanent link">&para;</a></h2>
-<p>Each step is a stand-alone PR. We don't move on until tests pass.</p>
+<h2 id="7-implementation-order-done">7. Implementation order — done<a class="headerlink" href="#7-implementation-order-done" title="Permanent link">&para;</a></h2>
+<p>The roadmap below was followed; every step has shipped and is covered
+by integration tests.</p>
 <ol>
-<li><strong>L0 builder helper</strong> — <code>p.add_mmc_arm_average(...)</code> composing
-   existing pulsim primitives (controlled VS + cap + controlled CS).
-   Plus one test: sine-wave steady-state matches eq (2.43) ripple.</li>
-<li><strong>3-phase topology helper</strong> — <code>p.add_mmc_three_phase_dc_ac(...)</code>
+<li>✅ <strong>L0 builder helper</strong> — <code>p.add_mmc_arm_average(...)</code> composing
+   pulsim primitives (controlled VS + cap + controlled CS).</li>
+<li>✅ <strong>3-phase topology helper</strong> — <code>p.add_mmc_three_phase_dc_ac(...)</code>
    wraps 6 arms + 6 arm inductors + DC bus connections.</li>
-<li><strong>L0 showcase YAML</strong> — examples/mmc_three_phase_dc_ac.yaml
-   exercising the full converter with open-loop sinusoidal
-   modulation.</li>
-<li><strong>L1 multilevel</strong> — <code>MmcArmMultilevel</code> adds the quantizer that
-   converts continuous <code>m_b</code> ∈ [0, 1] into <code>s_b ∈ {0, …, N}</code> plus a
-   carrier-distribution scheme (start with phase-shifted).</li>
-<li><strong>L2 SM equivalent</strong> — adds dead-time monostables + min-pulse-width
-   saturator. New C++ device <code>MmcArmEquivalentDevice</code> because the
-   monostables touch every sub-step.</li>
-<li><strong>L3 detailed</strong> — per-SM state, balancing algorithms, fault
-   injection. Lowest priority; we expect L2 to cover ≥ 95 % of
-   real-world use cases.</li>
+<li>✅ <strong>L0 showcase YAML</strong> — <code>examples/mmc_three_phase_dc_ac.yaml</code>
+   exercising the full converter with open-loop sinusoidal modulation.</li>
+<li>✅ <strong>L1 multilevel</strong> — quantises continuous <code>m_b</code> into <code>s_b</code> with
+   PS-PWM or IPD carrier distribution. Both HB and FB.</li>
+<li>✅ <strong>L2 SM equivalent</strong> — dead-time monostables + min-pulse-width
+   saturator. HB at first, FB added as a follow-up using a signed
+   insertion count.</li>
+<li>✅ <strong>L3 detailed</strong> — per-SM state with sort-and-select balancing.
+   HB + FB; balancing tracks the polarity of the desired contribution
+   and the sign of <code>i_b</code>.</li>
 </ol>
 <hr />
-<h2 id="8-open-questions">8. Open questions<a class="headerlink" href="#8-open-questions" title="Permanent link">&para;</a></h2>
+<h2 id="8-resolved-design-choices">8. Resolved design choices<a class="headerlink" href="#8-resolved-design-choices" title="Permanent link">&para;</a></h2>
+<p>The original "open questions" section is preserved here for historical
+context; each was settled during implementation.</p>
 <ul>
-<li>Should <code>m_b</code> be an input-port (callable / signal) or a state we
-  update via the BlockChain executor? Probably the latter for L2/L3
-  (control loops live in BlockChain land), but L0 can stay as a
-  callable for simplicity.</li>
-<li>For L2, do we discretise the dead-time monostables on the simulation
-  step <code>T_s</code> (cheap, slight phase error) or on a sub-step grid
-  (faithful, more bookkeeping)? Thesis sec 3.4.2 takes the former; we
-  follow.</li>
-<li>L3 balancing: which canonical algorithm do we ship by default —
-  thesis sec 5.1.1 (Sousa's intra-arm scheme) or the classic
-  Tu/Hu/Xu sort-and-select? The thesis one explicitly addresses
-  <code>T_m</code> and seems the right default for medium-voltage IGBTs.</li>
+<li><strong><code>m_b</code> as callable vs state.</strong> L0 ships as a callable
+  (<code>m_b: float | Callable[[float], float]</code> on <code>add_mmc_arm_average</code>);
+  L1–L3 also take a per-step reference signal that the user updates
+  inside <code>step_observer</code> or via a BlockChain executor. Control loops
+  remain a user concern — the arm exposes the knobs and observers.</li>
+<li><strong>L2 monostable discretisation.</strong> We follow the thesis: monostables
+  are evaluated on the simulation step <code>T_s</code> (cheap, small phase
+  error). Sub-step grids were not needed to match the validation
+  baselines.</li>
+<li><strong>L3 balancing.</strong> Sort-and-select per Tu/Hu/Xu (2011) is the default,
+  extended to signed insertion counts for FB. Variants can be plugged
+  in by the user (the kernel exposes the per-SM voltages each step).</li>
 </ul>
 <hr />
-<p><em>This document grows as we implement each layer. Section 9+ will be
+<p><em>This document grows as the implementation evolves. Section 9+ will be
 filled in with measured benchmarks and observed gotchas.</em></p>
 
 
@@ -2064,6 +2502,44 @@ filled in with measured benchmarks and observed gotchas.</em></p>
       
         <footer class="md-footer">
   
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../layer10-benchmarks/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Layer 10 — Benchmarks">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Layer 10 — Benchmarks
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../build-system/" class="md-footer__link md-footer__link--next" aria-label="Next: Build System">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Build System
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
     
   
   <div class="md-footer-meta md-typeset">

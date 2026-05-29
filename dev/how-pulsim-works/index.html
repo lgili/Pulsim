@@ -650,6 +650,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../solvers/" class="md-nav__link">
         
   
@@ -837,6 +858,30 @@
       Reading order
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Reading order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#part-i-pwl-engine-chapters-110" class="md-nav__link">
+    <span class="md-ellipsis">
+      Part I — PWL engine (chapters 1–10)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#part-ii-path-based-event-driven-dsed-engine-chapters-1116-v160" class="md-nav__link">
+    <span class="md-ellipsis">
+      Part II — Path-Based Event-Driven (DSED) engine (chapters 11–16, v1.6.0)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1086,6 +1131,132 @@
   
   <span class="md-ellipsis">
     10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
   </span>
   
 
@@ -1354,6 +1525,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1548,6 +1740,30 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reading order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#part-i-pwl-engine-chapters-110" class="md-nav__link">
+    <span class="md-ellipsis">
+      Part I — PWL engine (chapters 1–10)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#part-ii-path-based-event-driven-dsed-engine-chapters-1116-v160" class="md-nav__link">
+    <span class="md-ellipsis">
+      Part II — Path-Based Event-Driven (DSED) engine (chapters 11–16, v1.6.0)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1637,6 +1853,9 @@ that go even deeper).</p>
 chapters <span class="arithmatex">\(1..N-1\)</span>. Skip ahead at your own risk; the headline
 results in <strong>Chapter 8 (Benchmarks)</strong> only make sense once you've
 seen what's being measured.</p>
+<h3 id="part-i-pwl-engine-chapters-110">Part I — PWL engine (chapters 1–10)<a class="headerlink" href="#part-i-pwl-engine-chapters-110" title="Permanent link">&para;</a></h3>
+<p>The fixed-step trapezoidal companion + PWL state-space cache —
+the default <code>pulsim.simulate(engine='pwl', ...)</code> path.</p>
 <table>
 <thead>
 <tr>
@@ -1686,7 +1905,7 @@ seen what's being measured.</p>
 <tr>
 <td>7</td>
 <td><a href="07-rank1-partial-refactor/">Path-Based Partial Refactorisation</a></td>
-<td><strong>The algorithmic contribution of the forthcoming methods paper.</strong> Etree-walk path computation, threshold pivot fault, lazy-union varying-set caching</td>
+<td><strong>The algorithmic contribution of the v1.4 methods paper.</strong> Etree-walk path computation, threshold pivot fault, lazy-union varying-set caching</td>
 <td>Path walk diagram, single-bit-flip update example, fault-and-recover flow</td>
 </tr>
 <tr>
@@ -1704,8 +1923,62 @@ seen what's being measured.</p>
 <tr>
 <td>10</td>
 <td><a href="10-paper-figures-index/">Paper Figures Index</a></td>
-<td>Every figure regenerated for the forthcoming methods paper, with provenance + the script that built it</td>
+<td>Every figure regenerated for the methods paper, with provenance + the script that built it</td>
 <td>Reference grid of all paper-bound figures</td>
+</tr>
+</tbody>
+</table>
+<h3 id="part-ii-path-based-event-driven-dsed-engine-chapters-1116-v160">Part II — Path-Based Event-Driven (DSED) engine (chapters 11–16, v1.6.0)<a class="headerlink" href="#part-ii-path-based-event-driven-dsed-engine-chapters-1116-v160" title="Permanent link">&para;</a></h3>
+<p>The opt-in <code>pulsim.simulate(engine='dsed', ...)</code> path. Predicts
+events analytically, integrates between them with adaptive RK
+(DOPRI5) or implicit BDF2 dispatched per mode. <strong>24× wall-clock
+faster than PWL on buck CCM</strong>; geo-mean 14.5× across 6
+converter topologies.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Chapter</th>
+<th>What you'll learn</th>
+<th>Key concepts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>11</td>
+<td><a href="11-dsed-engine-overview/">DSED Engine Overview</a></td>
+<td>Why fixed-step trap struggles with PE switching, the PED scheduler loop in one figure, where DSED wins vs where it doesn't</td>
+<td>Event-driven vs fixed-step, "path-based" insight, mode-segment graph</td>
+</tr>
+<tr>
+<td>12</td>
+<td><a href="12-dsed-state-space-extraction/">MNA → Continuous-Time State-Space</a></td>
+<td>The full derivation of <code>compute_lti_state_space</code>: finite-difference recovery of <span class="arithmatex">\(M_{\text{dyn}}/G_{\text{static}}\)</span>, Schur complement, <span class="arithmatex">\(T^\top M T\)</span> congruence for floating capacitors, projection matrix <span class="arithmatex">\(B\)</span> for time-varying sources</td>
+<td>Two-<span class="arithmatex">\(h\)</span> recovery, Schur reduction, NPC/MMC floating-cap fix, sine source overlay</td>
+</tr>
+<tr>
+<td>13</td>
+<td><a href="13-dsed-dopri5-adaptive/">DOPRI5 + Adaptive PI + Event Scan</a></td>
+<td>DOPRI5 Butcher tableau + FSAL, Söderlind PI step controller, cubic Hermite interpolation for sub-step events, Illinois + Brent root finder</td>
+<td>RK5(4), PI control, dense output, predicate event localisation</td>
+</tr>
+<tr>
+<td>14</td>
+<td><a href="14-dsed-bdf2-and-dispatch/">BDF2 + Stiffness Dispatch</a></td>
+<td>BDF2 + Crank-Nicolson bootstrap, eigenvalue-based stiffness detector, <code>PEDSimulatorAuto</code>'s per-mode-segment dispatch, when BDF2 actually fires</td>
+<td>A-stability, <span class="arithmatex">\(\|\lambda_{\max}\|\cdot h\)</span> threshold, mode-id integrator cache</td>
+</tr>
+<tr>
+<td>15</td>
+<td><a href="15-dsed-native-bindings/">Native Bindings — The 24× Story</a></td>
+<td>How the per-step hot loop moved from Python to C++ across 4 bridges. Bridge.10 (C++ scheduler) → Bridge.11 (native adapter) → Bridge.12 (<code>NativePwm2Switch</code> fast-path) → Bridge.13 (PWL also benefits)</td>
+<td>pybind11 patterns, GIL release, <code>py::cast&lt;T*&gt;</code> detection, fallback hierarchy</td>
+</tr>
+<tr>
+<td>16</td>
+<td><a href="16-dsed-benchmarks/">DSED Benchmarks</a></td>
+<td>The headline 24× on buck CCM, 14.5× geo-mean across 6 topologies, bridge-by-bridge per-step decomposition, honest scope limits</td>
+<td>Per-step decomposition, topology sweep, when DSED doesn't win</td>
 </tr>
 </tbody>
 </table>
