@@ -2020,9 +2020,10 @@ kwarg switches the consumer of the cached factors.</p>
 <li><strong>LTI per mask</strong> — every switch-state combination must give a
    constant-coefficient ODE. This excludes Shockley diodes, MOSFET
    <span class="arithmatex">\(V_{th}\)</span> models, saturable inductors. For those, users go through
-   the explicit <code>pulsim.dsed.PEDSimulator</code> API with a user-defined
-   LTI system (validated on buck DCM with body-diode commutation
-   in <a href="https://github.com/lgili/Pulsim/blob/main/notes/GATE3_PROGRESS.md">Gate 3</a>).</li>
+   the explicit <code>pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)</code>
+   API with a hand-rolled LTI system (validated on buck DCM with
+   body-diode commutation in
+   <a href="https://github.com/lgili/Pulsim/blob/main/notes/GATE3_PROGRESS.md">Gate 3</a>).</li>
 <li><strong>No parallel capacitors</strong> — two caps sharing both terminals
    create a singular <span class="arithmatex">\(M_{\text{dyn}}\)</span> block. Rejected with an
    error pointing to the merge-equivalent workaround.</li>

@@ -2303,10 +2303,12 @@ mask</strong>. Nonlinear devices need per-operating-point linearization
 that the PED engine doesn't model. Users with those circuits
 have two options:</p>
 <ol>
-<li>Use <code>pulsim.dsed.PEDSimulator</code> directly with a user-defined
-   LTI system (validated on buck DCM with body-diode commutation
-   in Gate 3). This gives DSED-class speedup on the LTI portion
-   plus user-controlled handling of the nonlinear bits.</li>
+<li>Use <code>pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)</code>
+   with a hand-rolled LTI system (validated on buck DCM with
+   body-diode commutation in Gate 3). This gives DSED-class
+   speedup on the LTI portion plus user-controlled handling of
+   the nonlinear bits — see the function's docstring for the
+   5-method system protocol.</li>
 <li>Stay on <code>engine='pwl'</code>, which uses Newton refinement to handle
    nonlinearities (chapters 5-6).</li>
 </ol>
