@@ -330,7 +330,11 @@ inline void load_device(
         }
         const Real R_s = require_real(dev, idx, type, "R_s");
         const Real L_s = require_real(dev, idx, type, "L_s");
-        const Real R_r = require_real(dev, idx, type, "R_r");
+        // R_r is required (presence-validated by require_real) but its value is
+        // consumed by the Python BlockChain helper, not by the topology built
+        // here — mark maybe_unused so we keep the validation without warning.
+        [[maybe_unused]] const Real R_r =
+            require_real(dev, idx, type, "R_r");
         const Real L_r = require_real(dev, idx, type, "L_r");
         const Real L_m = require_real(dev, idx, type, "L_m");
         if (L_m * L_m >= L_s * L_r) {
@@ -345,6 +349,16 @@ inline void load_device(
             require_string(dev, idx, type, "neutral_node");
         const char phase_tag[3] = {'a', 'b', 'c'};
         for (int k = 0; k < 3; ++k) {
+            // Validate each element is a scalar before `.as<std::string>()`
+            // (audit #9): without this, a malformed entry (e.g. a nested
+            // sequence/map) throws an uncaught yaml-cpp exception instead of a
+            // controlled error, matching the require_string validation style.
+            if (!dev["phase_nodes"][k] ||
+                !dev["phase_nodes"][k].IsScalar()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: induction_motor '{}' phase_nodes[{}] must be "
+                    "a scalar node name", name, k));
+            }
             const std::string p_node =
                 dev["phase_nodes"][k].as<std::string>();
             const std::string mid_r =
