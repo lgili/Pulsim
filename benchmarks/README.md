@@ -10,7 +10,14 @@ benchmarks/
 ├── README.md                    # this file
 ├── circuits/                    # YAML netlists, grouped by topology family
 │   ├── linear/                  #   pure R/L/C, dividers, bridges, IC discharge
-│   ├── switching/               #   buck/boost/flyback/forward/vcswitch/mosfet
+│   ├── switching/               #   DC-DC + inverters, sub-grouped:
+│   │   ├── buck/                #     step-down (sync, interleaved, DCM, igbt/gan/…)
+│   │   ├── boost/               #     step-up (pfc, sync, interleaved, …)
+│   │   ├── buck_boost/          #     buck-boost, Ćuk, SEPIC
+│   │   ├── isolated/            #     flyback, forward, active-clamp, DAB, full-bridge
+│   │   ├── multilevel/          #     flying-cap, NPC, T-type, cascaded-H, MMC
+│   │   ├── inverter/            #     half-bridge inverters, LCC resonant
+│   │   └── basic/               #     vcswitch/mosfet/snubber/pwm primitives
 │   ├── diodes/                  #   rectifiers, clamps, clippers, voltage doubler
 │   ├── magnetics/               #   transformer, coupled/saturating inductor
 │   ├── motors/                  #   dc, bldc, pmsm, induction
@@ -30,7 +37,8 @@ benchmarks/
 │   ├── stress_catalog.yaml      #   tier definitions (A / B / C)
 │   ├── electrothermal_stress_catalog.yaml
 │   ├── kpi_thresholds.yaml      #   regression thresholds
-│   └── kpi_thresholds_electrothermal.yaml
+│   ├── kpi_thresholds_electrothermal.yaml
+│   └── local_limit.yaml         #   PC-local fixed+variable limit sub-suite
 ├── tools/                       # bench-suite Python runners
 │   ├── benchmark_runner.py      #   primary YAML runner
 │   ├── benchmark_ngspice.py     #   Pulsim vs SPICE parity runner
@@ -40,8 +48,7 @@ benchmarks/
 │   ├── freeze_kpi_baseline.py   #   snapshot a KPI baseline
 │   └── _console.py              #   shared rich UI helpers
 ├── kpi/                         # KPI-metrics library (compute_thd/efficiency/…) + self-test
-├── kpi_baselines/               # frozen KPI snapshots + artifact manifests
-└── local_limit/                 # local-limit sub-suite (own internal manifest)
+└── kpi_baselines/               # frozen KPI snapshots + artifact manifests
 ```
 
 ## Path conventions
@@ -74,7 +81,7 @@ python3 benchmarks/tools/stress_suite.py --output-dir benchmarks/stress_out
 
 # Local fixed+variable limit suite (10 progressive circuits)
 python3 benchmarks/tools/local_limit_suite.py \
-    --manifest benchmarks/local_limit/benchmarks_local_limit.yaml \
+    --manifest benchmarks/manifests/local_limit.yaml \
     --output-dir benchmarks/out_local_limit --mode both
 
 # KPI regression gate (after a run + a frozen baseline)
