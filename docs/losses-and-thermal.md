@@ -189,6 +189,6 @@ documented in `KNOWN_LIMITATIONS.md`.
 
 ## End-to-end example
 
-[`examples/scripts/run_device_loss_to_thermal.py`](../examples/scripts/run_device_loss_to_thermal.py)
+[`examples/scripts/run_device_loss_to_thermal.py`](https://github.com/lgili/Pulsim/blob/main/examples/scripts/run_device_loss_to_thermal.py)
 ships a 130-line buck → losses → `T_j(t)` pipeline with an optional
 `--plot` flag that overlays the steady-state Foster asymptote.

@@ -32,8 +32,12 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-import yaml as _yaml  # PyYAML — already a runtime dep of pulsim
-
+# PyYAML is only needed when the caller passes a YAML *string* to
+# `wire_chain_from_yaml` (Python list/dict chain specs work without
+# it). Import is deferred to the call site so the module — and the
+# whole `pulsim` package — stays importable on machines that didn't
+# install the `dev` extra (PyYAML lives in `pyproject.toml` under
+# `[project.optional-dependencies] dev`).
 from . import _pulsim as _k
 
 
@@ -219,6 +223,16 @@ def wire_chain_from_yaml(loaded, chain_spec):
         If the chain spec is malformed.
     """
     if isinstance(chain_spec, str):
+        try:
+            import yaml as _yaml  # PyYAML, dev extra.
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "pulsim.wire_chain_from_yaml: parsing a YAML string "
+                "requires PyYAML. Install with "
+                "`pip install 'pulsim[dev]'` or `pip install PyYAML`. "
+                "Alternatively, pass a Python list-of-dicts instead "
+                "of a YAML string."
+            ) from exc
         chain_blocks = _yaml.safe_load(chain_spec)
     else:
         chain_blocks = chain_spec

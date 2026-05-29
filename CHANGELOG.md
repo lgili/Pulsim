@@ -4,6 +4,276 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] — 2026-05-29
+
+### Fixed
+
+* **`simulate(engine='dsed', switch_fn=<plain Python callable>)`**
+  was silently producing the trajectory of a circuit with the
+  switch **frozen at the t=0 mask** — no PWM edges ever detected
+  — while still returning a successful result. Reproducer: buck
+  CCM with 50 % duty PWM at 100 kHz over 5 ms. Pre-fix DSED
+  returned V_C ≈ V_in (the SW-always-on attractor); PWL returned
+  V_out ≈ V_in/2 as expected. Users hit "DSED stabilises at the
+  wrong setpoint" / "DSED hangs at a weird value" and reasonably
+  suspected the topology was being rejected silently.
+
+  Root cause: the C++ scheduler computes the next gate-edge time
+  via ``switch_fn.next_edge_after(t)`` (see
+  ``core/include/pulsim/dsed/scheduler*.hpp``). The native PWM
+  classes (:class:`NativePwm2Switch`,
+  :class:`NativeMultiMaskPwm`) implement that method analytically;
+  plain Python callables don't, and the pybind11 fallback in
+  ``PySwitchFn::next_edge_after`` returned
+  ``std::numeric_limits<Real>::infinity()``. The scheduler then
+  computed ``t_gate = min(∞, t_end) = t_end`` and integrated the
+  whole window with the mask sampled at ``t = t_start``.
+
+  Fix: each DSED scheduler (``scheduler.hpp``,
+  ``scheduler_auto.hpp``, ``scheduler_bdf2.hpp``) now treats
+  ``∞`` returns from ``next_edge_after`` as "no edge info — poll
+  defensively" and caps ``t_gate`` at ``t + dt_max/10`` so the
+  scheduler is forced to land at that boundary and re-sample the
+  switch_fn via ``fire_gate_event_`` (which catches any
+  discovered mask change). Native PWM classes and any user
+  object whose ``next_edge_after`` returns a finite value take
+  the analytical fast path unchanged (``std::isfinite()`` check).
+
+  The dispatcher emits a one-shot ``UserWarning`` when it sees a
+  plain Python switch_fn so users know they're in the polled path
+  and can opt into :class:`NativePwm2Switch` for best performance.
+
+### Performance
+
+Canonical buck CCM (V_in=24V, L=100µH, C=100µF, R_load=2Ω,
+f_sw=100 kHz, 50 % duty). Plain Python switch_fn (the path that
+exercises the new defensive polling):
+
+  | t_end  | DSED auto | PWL @ 100ns | PWL/DSED speedup |
+  |--------|----------:|------------:|-----------------:|
+  |   1 ms |    3.5 ms |     33.0 ms |        **9.5×**  |
+  |   5 ms |   15.8 ms |    163.1 ms |       **10.3×**  |
+  |  20 ms |   63.7 ms |    666.8 ms |       **10.5×**  |
+
+The ~10× speedup matches the DSED win when the trajectory
+between events is smooth — the scheduler skips through each
+5 µs PWM half-period in one RK45 step instead of 50 fixed-dt
+steps. Switching to :class:`NativePwm2Switch` would push this
+higher still on ≥2-switch topologies (analytical
+``next_edge_after`` skips the polling overhead entirely).
+
+### Tests
+
+* `python/tests/test_dsed_python_switch_fn_polling.py` (3 tests):
+  - **Correctness**: canonical bug reproducer — buck with
+    resistive freewheel + plain Python PWM. DSED ``V_out_mean``
+    and ``i_L_mean`` must match PWL within 5 %. Pre-fix: 3× off.
+    Post-fix: 0.06 %.
+  - **Warning**: the dispatcher emits a ``UserWarning`` mentioning
+    ``NativePwm2Switch`` when the polling wrapper is engaged.
+  - **Fast-path preservation**: a switch_fn that already exposes
+    ``next_edge_after`` is NOT auto-wrapped (no warning, no
+    polling cap engaged).
+
+## [1.6.3] — 2026-05-29
+
+### Internal — Python DSED scheduler reorganised to test tree
+
+No user-facing behaviour change. v1.6.2 confirmed the C++ DSED
+scheduler reaches the documented speedup on `pip install pulsim`;
+the pure-Python implementation that shipped alongside it had
+become **dead code on the user-facing path** — the dispatcher was
+already taking the C++ Bridges 10/11 for every supported circuit,
+and the Stage-4 Python fallback was only reachable if those C++
+paths both rejected the input, which doesn't happen for any
+circuit the documented surface ports today. Despite that, the
+Python files still:
+
+* Forced `pulsim` to keep optional deps (scipy) reachable through
+  the wheel's import graph — exactly the regression v1.6.2 fixed
+  with the lazy-import dance.
+* Doubled the maintenance cost of every DSED algorithm tweak.
+* Hid drift between the C++ port and the Python reference, since
+  nothing ever cross-checked them.
+
+v1.6.3 moves the Python scheduler from `pulsim/dsed/` to
+`python/tests/_dsed_reference/` where it serves its actual
+ongoing purpose — a readable reference for the
+`docs/how-pulsim-works/` Part II chapters and a cross-validation
+baseline against the C++ port. The hot path
+(`pulsim.simulate(b, engine='dsed', ...)`) is unchanged.
+
+### Public surface delta
+
+Net surface change is **additive** for the documented escape
+hatch and **internal-only** for everything else.
+
+**Added**
+
+* `pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, *,
+  integrator='auto', rtol=1e-6, atol=1e-9, dt_init=1e-9,
+  dt_max=1e-5, h_bdf2=None, stiffness_threshold=100.0,
+  store_every=1)` — the canonical user-LTI escape hatch for
+  custom-LTI workflows (system-ID benchmarks, FMU integrations,
+  hand-rolled physics models). Thin wrapper around the native C++
+  `run_ped_native` / `run_bdf2_native` / `run_auto_native` symbols
+  that documents the required `system` protocol (5 methods:
+  `A_matrix`, `b_vector`, `rhs`, `current_mask`, `set_mask`) and
+  validates it at the call site so a missing method raises a
+  clear `TypeError` with the list of what's needed instead of a
+  cryptic pybind11 dispatch error from deep inside the C++
+  scheduler.
+
+  The docs and previous `_dsed_dispatch.py` error messages used
+  to point at `pulsim.dsed.PEDSimulatorAuto` for this workflow.
+  `run_user_lti` is the new pointer; equivalent semantics, better
+  ergonomics.
+
+* `pulsim.dsed.CircuitBuilderAdapter` is still exported for
+  advanced users who want the same `(A, b)` extraction logic the
+  dispatcher uses internally (Bridge.10 path).
+
+**Removed** *(internal symbols only — none of these had
+documented end-user call sites; the public docs and our
+error-message pointers used them as an escape-hatch hint, now
+replaced by `run_user_lti`)*
+
+* `PEDSimulator`, `PEDResult`, `EventRecord`
+* `PEDSimulatorBDF2`
+* `PEDSimulatorAuto`, `PEDResultAuto`, `AutoDispatchEventRecord`
+* `PIController`, `EventPredictor`, `EventPredicate`
+* `BDF2State`, `BDF2PIController`, `bdf2_step`
+* `RK45State`, `rk45_step`, `interpolate`
+* `StiffnessDetector`, `IntegratorChoice`
+* `illinois`, `brent_fallback`
+
+These remain available **inside the test tree only**, importable
+from tests as `from _dsed_reference import ...`. They are no
+longer reachable from `pulsim.dsed.*`.
+
+### Changed
+
+* The DSED dispatcher (`pulsim._dsed_dispatch`) no longer ships
+  a Stage-4 pure-Python scheduler fallback. When both Bridge.11
+  (native C++ adapter) and Bridge.10 (Python adapter + native C++
+  scheduler) reject a circuit — typically a nonlinear device the
+  extractor doesn't yet support — the dispatcher now raises
+  `NotImplementedError` with two clear options: switch to
+  `engine='pwl'`, or use `pulsim.dsed.run_user_lti` with a
+  hand-rolled LTI system. Previously the fallback would silently
+  take the user out of the documented speedup regime even though
+  the dead-code path itself wasn't reachable on the wheel after
+  v1.6.2.
+
+### Tests
+
+* `python/tests/test_dsed_cpp_matches_python_reference.py` (3
+  parametrised tests + 2 protocol-validation tests):
+  - **Cross-validation**: a 2-state damped oscillator run through
+    both the C++ scheduler (via `run_user_lti`) and the Python
+    reference (via `_dsed_reference.PEDSimulator`). Both forced to
+    `integrator='rk45'` to pin the *kernel* (DOPRI5 + adaptive PI
+    + Hermite interpolation) rather than the auto-dispatch
+    heuristic. End-state must agree within numpy-allclose-style
+    tolerance (`atol_tol + rtol_tol·|x_py|`). The two
+    implementations converge to the same trajectory at common
+    accepted-step time stamps to 14 digits.
+  - `run_user_lti(system_missing_method, ...)` raises `TypeError`
+    naming the missing method.
+  - `run_user_lti(..., integrator='bogus')` raises `ValueError`.
+
+### Docs
+
+* `docs/how-pulsim-works/11-dsed-engine-overview.md` and
+  `16-dsed-benchmarks.md` updated: every mention of
+  `pulsim.dsed.PEDSimulator*` as the user-LTI escape hatch
+  replaced with `pulsim.dsed.run_user_lti`.
+* `_dsed_dispatch.py` error messages updated to point at
+  `run_user_lti` instead of the removed scheduler classes.
+
+### Migration notes (best-effort, no expected callers)
+
+We did a repo-wide and downstream-project sweep for callers of
+the removed symbols outside the test tree and found none. If you
+were importing one of them anyway (defensive note, since they
+were technically exported):
+
+1. **You were driving the scheduler from a CircuitBuilder** —
+   switch to `pulsim.simulate(b, engine='dsed', ...)`. This is
+   the production path and exclusively uses the C++ kernel.
+2. **You were driving it from a custom LTI** — switch to
+   `pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)`.
+   The system protocol is documented inline; a complete usage
+   example is in
+   `python/tests/test_dsed_cpp_matches_python_reference.py`.
+
+If neither replacement covers your workflow, please open an issue
+describing the use case so we can document or expose the right
+extension hook from the C++ side.
+
+## [1.6.2] — 2026-05-29
+
+### Fixed
+
+* **`simulate(engine='dsed', ...)` silently lost the 24× speedup
+  on `pip install pulsim`** because `pulsim/dsed/bdf2_integrator.py`
+  had a top-level `from scipy.linalg import lu_factor, lu_solve`.
+  scipy is not a runtime dependency (it lives under
+  `[project.optional-dependencies] dev`), so the import crashed —
+  cascading through `pulsim.dsed.__init__` and masking even the
+  C++ native Bridge.11 path that doesn't need scipy at all. End
+  users got a `RuntimeError: required Pulsim bindings not
+  available (No module named 'scipy')` and the native C++ path
+  was unreachable from the wheel.
+
+  Moved the scipy import to a lazy on-demand helper inside
+  `bdf2_integrator.py`. The C++ native DSED path (the headline
+  ~24× speedup on the buck CCM benchmark) now works on a clean
+  `pip install pulsim`. scipy is still required for the
+  pure-Python BDF2 fallback — the lazy import raises a clear
+  `ModuleNotFoundError` pointing at `pip install 'pulsim[dev]'`
+  if a user explicitly hits that path.
+
+  Empirical confirmation (clean venv, no scipy, v1.6.2 wheel,
+  canonical buck CCM 24 V→12 V at 100 kHz, 5 ms window):
+  PWL @ dt=100ns = 143 ms (50001 steps); DSED auto = 0.6 ms
+  (507 steps); **speedup 232×**.
+
+### Tests
+
+* `python/tests/test_dsed_without_scipy.py` (3 tests) pins the
+  invariant:
+  - Subprocess test: spawn fresh Python with an `__import__`
+    hook blocking `scipy`, assert `import pulsim.dsed` succeeds.
+  - Buck CCM test: run a 5 ms buck simulation with `engine='dsed'`
+    under the same hook; wall-clock < 5 s (the C++ native path
+    completes in ~1 ms; the Python fallback would take 30+ s).
+  - Speedup test: PWL @ dt=100ns vs DSED auto on buck CCM — gate
+    at >5× speedup. Skipped if scipy is missing (the gate would
+    be biased by the same regression we're testing).
+
+## [1.6.1] — 2026-05-28
+
+### Fixed
+
+* **`pip install pulsim` was broken on v1.6.0** because
+  `pulsim/__init__.py` re-exports `wire_chain_from_yaml`, which forced
+  a top-level `import yaml as _yaml` in `pulsim.yaml_chain`. PyYAML is
+  only listed under the `dev` optional extra (it's not a runtime
+  dependency), so the cibuildwheel smoke test (`python -c "import
+  pulsim"`) failed on all platforms (Linux/macOS/Windows) and the
+  PyPI publish workflow rejected the v1.6.0 wheels.
+
+  Moved the `import yaml` to a lazy import inside
+  `wire_chain_from_yaml` — only triggered when the caller passes a
+  YAML *string*. Python list/dict chain specs continue to work
+  without PyYAML installed. If the YAML-string path is taken without
+  PyYAML, the user gets an actionable `ModuleNotFoundError` pointing
+  at `pip install 'pulsim[dev]'`.
+
+  No behavioural change for anyone who already had PyYAML
+  installed via `pulsim[dev]` or as a transitive dep.
+
 ## [1.6.0] — 2026-05-28
 
 ### Highlights — Path-Based Event-Driven (DSED) engine + native PWM switch_fn

@@ -37,6 +37,11 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
+from ._pulsim import (  # type: ignore[import-not-found]
+    NativeMultiMaskPwm,
+    NativePwm2Switch,
+)
+
 
 # =============================================================================
 # Type aliases (public for downstream type-hints)
@@ -259,8 +264,10 @@ _BRIDGE_FALLBACK_MESSAGE = (
     "inductors), which the PED engine doesn't model.\n"
     "\n"
     "For PED today on circuits the bridge can't handle, use "
-    "`pulsim.dsed.PEDSimulatorAuto` directly with a user-supplied "
-    "LTI system (see the module docstring for an example). Captured "
+    "`pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)` "
+    "with a hand-rolled LTI system (see "
+    "`pulsim.dsed.run_user_lti.__doc__` for the 5-method system "
+    "protocol). Captured "
     "benchmarks across 13 scenarios: ~1× on non-stiff PWM converters "
     "(no penalty), 4-90× on stiff multi-state systems.\n"
     "\n"
@@ -354,11 +361,11 @@ def run_dsed_from_builder(
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
 
-    **Current status**: raises :class:`NotImplementedError` because the
-    pybind11 bridge that exposes ``(A, b)`` per mask from
-    ``PwlStateSpaceCache`` hasn't landed yet. The error message
-    includes the resolved DSED options + a pointer to the working
-    user-supplied-LTI path (:class:`pulsim.dsed.PEDSimulatorAuto`).
+    Production path. Tries the native C++ adapter (Bridge.11) and
+    falls back to the Python adapter + native scheduler (Bridge.10)
+    when the C++ extractor rejects the circuit. If both reject,
+    raises :class:`NotImplementedError` with a pointer at the
+    user-supplied-LTI escape hatch (:func:`pulsim.dsed.run_user_lti`).
 
     The implementation path forward (~3-5 days of focused work):
 
@@ -416,6 +423,32 @@ def run_dsed_from_builder(
         for i in range(n_sw):
             default_mask.set(i, True)
         sf = lambda _t: default_mask  # noqa: E731
+
+    adapter = CircuitBuilderAdapter(
+        builder=builder, cache=cache, switch_fn=sf,
+        b_extra_fn=b_extra_fn)
+
+    # Performance hint for plain Python switch_fns. The C++ scheduler
+    # detects the `next_edge_after` ∞ return at runtime and falls back
+    # to polling at `dt_max/10` — correct but slower than the
+    # analytical fast path. Surface that to the user once per call so
+    # PWM-heavy workloads can opt in to NativePwm2Switch /
+    # NativeMultiMaskPwm explicitly.
+    if (not isinstance(sf, (
+            NativePwm2Switch, NativeMultiMaskPwm))
+            and not hasattr(sf, "next_edge_after")):
+        warnings.warn(
+            "simulate(engine='dsed'): the C++ scheduler will poll "
+            f"this plain Python switch_fn every {opts.dt_max / 10:.3g} "
+            "s (= dt_max/10) for mask changes — correct but slower "
+            "than the analytical fast path. For best performance on "
+            "PWM-driven simulations, wrap your switch logic in "
+            "`pulsim.NativePwm2Switch` or `pulsim.NativeMultiMaskPwm`, "
+            "which expose `next_edge_after` analytically so the "
+            "scheduler skips directly to the next gate edge.",
+            UserWarning,
+            stacklevel=3,
+        )
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,
@@ -573,52 +606,29 @@ def run_dsed_from_builder(
             cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
         )
 
-    # ---- Stage 4 fallback: pure-Python scheduler (Bridge.5) --------
-    # Used when the C++ native bindings aren't built (e.g. dev install
-    # without recompile). Identical semantics, ~3× slower wall-clock.
-    from .dsed import (
-        PEDSimulator,
-        PEDSimulatorBDF2,
-        PEDSimulatorAuto,
-        PIController,
-        EventPredictor,
-        StiffnessDetector,
-    )
-    if opts.integrator == "rk45":
-        sim = PEDSimulator(
-            system=adapter, switch_fn=sf,
-            controller=PIController(rtol=opts.rtol, atol=opts.atol),
-            predictor=EventPredictor(),
-            dt_init=opts.dt_init, dt_max=opts.dt_max,
-            store_every=opts.store_every,
-        )
-    elif opts.integrator == "bdf2":
-        sim = PEDSimulatorBDF2(
-            system=adapter, switch_fn=sf,
-            h_fixed=opts.h_bdf2,
-            store_every=opts.store_every,
-        )
-    else:  # 'auto'
-        sim = PEDSimulatorAuto(
-            system=adapter, switch_fn=sf,
-            controller=PIController(rtol=opts.rtol, atol=opts.atol),
-            detector=StiffnessDetector(opts.stiffness_threshold),
-            dt_init=opts.dt_init, dt_max=opts.dt_max,
-            h_bdf2=opts.h_bdf2,
-            store_every=opts.store_every,
-        )
-    ped_result = sim.simulate(x0, t_window)
-    times = [float(t) + float(opts.t_start) for t in ped_result.times]
-    states = [np.asarray(x, dtype=float) for x in ped_result.states]
-    return _PEDSimulationResult(
-        times=times,
-        states=states,
-        n_accept=getattr(ped_result, "n_accept", 0),
-        n_reject=getattr(ped_result, "n_reject", 0),
-        n_events=getattr(ped_result, "n_events", 0),
-        n_rk45_steps=getattr(ped_result, "n_rk45_steps", 0),
-        n_bdf2_steps=getattr(ped_result, "n_bdf2_steps", 0),
-        cpu_time_seconds=getattr(ped_result, "cpu_time", 0.0),
+    # ---- No fallback. ----
+    # The Bridge.11 native-builder path and the Bridge.10
+    # Python-adapter-+-native-scheduler path together cover every
+    # CircuitBuilder we currently know how to extract an (A, b)
+    # state-space from. If we reach this line, both rejected the
+    # circuit — typically due to a nonlinear device the C++
+    # extractor doesn't yet support. The pure-Python scheduler
+    # fallback that used to live here was demoted to the test
+    # tree in v1.6.3 (see `python/tests/_dsed_reference/`); the
+    # production path is C++-only.
+    raise NotImplementedError(
+        "pulsim.simulate(engine='dsed'): both the native C++ "
+        "builder adapter (Bridge.11) and the Python builder "
+        "adapter (Bridge.10) rejected this circuit. This usually "
+        "means the circuit contains a nonlinear device or an "
+        "unsupported topology that the per-mask (A, b) extractor "
+        "can't handle. Two options: (a) switch to "
+        "engine='pwl' which handles the same circuits via the "
+        "trap-companion path; or (b) build a hand-rolled LTI "
+        "system that satisfies `pulsim.dsed.run_user_lti`'s "
+        "system protocol and drive the native scheduler "
+        "directly. Please open an issue describing the failing "
+        "circuit so we can extend the extractor."
     )
 
 

@@ -146,13 +146,13 @@ res = p.simulate(b, t_end=2e-3, dt=1e-7,
 
 Runs in ~90 ms wall-clock for 2 ms of simulated time; v_out
 converges to the 12 V setpoint. The full runnable script is
-[`examples/scripts/run_fast_block_pi_buck.py`](../examples/scripts/run_fast_block_pi_buck.py).
+[`examples/scripts/run_fast_block_pi_buck.py`](https://github.com/lgili/Pulsim/blob/main/examples/scripts/run_fast_block_pi_buck.py).
 
 ## When to use what
 
 | Use case | What ships |
 |---|---|
-| Standard PI/PID/PLL/Clarke/Park controllers | [`pulsim.control`](../python/pulsim/control.py) blocks — 20+ pre-built, already JIT-compiled to C++ at chain build time. Use these first. |
+| Standard PI/PID/PLL/Clarke/Park controllers | [`pulsim.control`](https://github.com/lgili/Pulsim/blob/main/python/pulsim/control.py) blocks — 20+ pre-built, already JIT-compiled to C++ at chain build time. Use these first. |
 | Custom control law, prototype-fast | `step_observer=` callable in plain Python. No new deps; perfectly fast for kHz-class loops. |
 | Custom control law, **lots** of math per step (vector ops, lookup tables, state machines with hundreds of branches) | **`@fast_block`** — native LLVM-compiled speed without leaving Python. |
 | MHz-class hot path inside the kernel | Add a new block type in `python/pulsim/blockchain.py::_compile_to_cxx` and `core/include/pulsim/blockchain/blocks.hpp`. |
