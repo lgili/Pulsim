@@ -195,7 +195,13 @@ struct BDF2PIController {
                 "BDF2 PI controller: max consecutive rejections exceeded");
         }
         const Real exp_p = kP / Real{3};
-        Real ratio = std::pow(Real{1.0} / e, exp_p) / safety;
+        // Pure-I shrink on rejection. Bug fix vs the earlier ``/ safety``:
+        // for `e` only slightly > 1 the divide-by-safety inflated the ratio
+        // above 1, clamped to 1.0, and h NEVER shrank → infinite reject loop
+        // until max_rejects fired. `safety` (< 1) must MULTIPLY, matching the
+        // accept path above and the identical fix in step_controller.hpp's
+        // PIController (Söderlind 2002 / Hairer & Wanner, Solving ODE I §II.4).
+        Real ratio = safety * std::pow(Real{1.0} / e, exp_p);
         ratio = std::clamp(ratio, rho_min, Real{1.0});
         return {false, ratio * h};
     }

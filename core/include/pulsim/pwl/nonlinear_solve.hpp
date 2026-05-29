@@ -102,6 +102,20 @@ using NonlinearRefreshFn = std::function<
     Real last_res_norm = std::numeric_limits<Real>::infinity();
 
     for (Size iter = 0; iter < max_iters; ++iter) {
+        // Defense-in-depth (audit 2026-05 critic): a non-finite iterate means
+        // a NaN/Inf entered the system — e.g. a bad device parameter that
+        // slipped past the builder gate, or an ill-conditioned step. A NaN
+        // compares false against every tolerance below, so without this guard
+        // the loop would silently burn to max_iters (or grow LM's λ to the
+        // limit) and report a misleading error. Fail loudly and diagnosably.
+        if (!x.allFinite()) {
+            throw std::runtime_error(std::format(
+                "solve_with_newton: non-finite state vector at iter {} — a "
+                "NaN/Inf propagated into the solution (check device "
+                "parameters and matrix conditioning)",
+                iter));
+        }
+
         // 1. Refresh nonlinear contributions at current x.
         const Real nl_residual_norm =
             refresh(x, J_nl, f_nl, graph, pool);
@@ -123,6 +137,17 @@ using NonlinearRefreshFn = std::function<
         //    b_extra) + f_nl.
         Vector f_combined =
             seg.J * x + seg.b_constant + b_extra + f_nl;
+
+        // Companion guard: catch a NaN/Inf that entered via the nonlinear
+        // refresh (f_nl) or b_extra even when x itself is still finite —
+        // otherwise it silently corrupts the convergence/LM/line-search tests.
+        if (!f_combined.allFinite()) {
+            throw std::runtime_error(std::format(
+                "solve_with_newton: non-finite residual at iter {} — the "
+                "nonlinear refresh or b_extra produced a NaN/Inf (check "
+                "device parameters and matrix conditioning)",
+                iter));
+        }
 
         (void)nl_residual_norm;   // diagnostic only
         const Real baseline_norm =

@@ -226,6 +226,19 @@ if(PULSIM_ENABLE_NATIVE AND NOT MSVC)
     message(STATUS "Native optimizations: Enabled (-march=native)")
 endif()
 
+# Pin floating-point evaluation across the Clang/GCC/AppleClang CI matrix:
+# disable FMA contraction so the event sign-gate (s_prev*s_curr in
+# run_transient.hpp) and the in-house LU pivot-ratio comparison evaluate
+# identically on every compiler. A fused multiply-add can flip a near-zero
+# crossing's sign and select the WRONG switch-state segment for the step — a
+# silent wrong answer, not just a perf wobble — making results non-reproducible
+# across platforms. (MSVC defaults to /fp:precise, which does not contract
+# across statements, so it is exempt.) Cost is negligible: the sparse solve is
+# memory-bound, not FMA-bound.
+if(NOT MSVC)
+    list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -ffp-contract=off)
+endif()
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     list(APPEND PULSIM_TARGET_COMPILE_OPTIONS
         -Wall -Wextra -Wpedantic -Werror=return-type

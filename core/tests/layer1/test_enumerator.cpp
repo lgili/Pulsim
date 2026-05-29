@@ -10,6 +10,7 @@
 #include <bit>
 #include <cstdint>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 using namespace pulsim;
@@ -74,4 +75,16 @@ TEST_CASE("Iterator equality compares both counter and N",
     SwitchStateEnumerator e2(3);
     REQUIRE(e1.begin() == e2.begin());
     REQUIRE(e1.end() == e2.end());
+}
+
+TEST_CASE("N >= 64 throws instead of silently capping the state space",
+          "[v2][layer1][enumerator]") {
+    // The in-process Gray-code counter is 64-bit, so 2^64 masks cannot
+    // be represented. Previously N >= 64 silently capped at 2^63 → an
+    // incomplete cache. It must now fail loudly.
+    REQUIRE_THROWS_AS(SwitchStateEnumerator(64), std::invalid_argument);
+    REQUIRE_THROWS_AS(SwitchStateEnumerator(100), std::invalid_argument);
+    REQUIRE_THROWS_AS(enumerate_switch_states(64), std::invalid_argument);
+    // N = 63 remains the largest supported width.
+    REQUIRE_NOTHROW(SwitchStateEnumerator(63));
 }

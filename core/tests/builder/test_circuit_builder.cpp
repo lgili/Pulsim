@@ -14,9 +14,11 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
+#include <vector>
 
 using namespace pulsim;
 using namespace pulsim::builder;
@@ -395,4 +397,97 @@ TEST_CASE("Nonlinear diode builder: DC load-line",
     // Load-line: v_n1 ≈ V_dc - V_F0 = 1.3 V.
     REQUIRE(x[1] > 1.0);
     REQUIRE(x[1] < 1.5);
+}
+
+// -----------------------------------------------------------------------------
+// Parameter validation (C++ audit 2026-05 — div-by-zero device-model class).
+// Non-positive device parameters that would divide by zero or take sqrt of a
+// negative in the AD device math must be rejected at the builder gate with
+// std::invalid_argument, NOT silently produce NaN deep in the Newton refresh.
+// -----------------------------------------------------------------------------
+
+TEST_CASE("add_nonlinear_diode rejects non-positive R_d",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    REQUIRE_THROWS_AS(
+        b.add_nonlinear_diode("D1", "n0", "n1",
+            models::IdealDiode::Params{.R_d = Real{0}}),
+        std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        b.add_nonlinear_diode("D2", "n0", "n1",
+            models::IdealDiode::Params{.R_d = Real{-1}}),
+        std::invalid_argument);
+}
+
+TEST_CASE("add_igbt_level1 rejects non-positive R_CE_sat",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    REQUIRE_THROWS_AS(
+        b.add_igbt_level1("Q1", "c", "e", "g",
+            /*V_CE_sat=*/Real{1.5}, /*R_CE_sat=*/Real{0}),
+        std::invalid_argument);
+}
+
+TEST_CASE("add_saturable_inductor rejects non-positive I_sat",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    REQUIRE_THROWS_AS(
+        b.add_saturable_inductor("L1", "n0", "n1",
+            /*L_0=*/Real{1e-3}, /*I_sat=*/Real{0}),
+        std::invalid_argument);
+}
+
+TEST_CASE("add_transformer rejects non-positive winding inductance",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    REQUIRE_THROWS_AS(
+        b.add_transformer("T1", "p0", "p1", "s0", "s1",
+            /*L_p=*/Real{0}, /*L_s=*/Real{1e-3}),
+        std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        b.add_transformer("T2", "p0", "p1", "s0", "s1",
+            /*L_p=*/Real{1e-3}, /*L_s=*/Real{-2e-3}),
+        std::invalid_argument);
+}
+
+TEST_CASE("add_multi_winding_transformer rejects non-positive inductance",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    std::vector<CircuitBuilder::WindingSpec> windings{
+        {.from = "a0", .to = "a1", .L = Real{1e-3}},
+        {.from = "b0", .to = "b1", .L = Real{0}},
+    };
+    REQUIRE_THROWS_AS(
+        b.add_multi_winding_transformer("MW1", windings),
+        std::invalid_argument);
+}
+
+// Defense-in-depth (audit critic): a NaN/Inf reaching the Newton residual —
+// from a future device, a param that slipped past the builder gate, or an
+// ill-conditioned step — must throw a clear error instead of silently burning
+// to max_iters (NaN compares false against every tolerance) and reporting a
+// misleading "failed to converge".
+TEST_CASE("solve_with_newton throws on a non-finite residual (NaN guard)",
+          "[v2][layer6][builder][validation]") {
+    CircuitBuilder b;
+    b.add_voltage_source("V1", "n0", "gnd", 2.0);
+    b.add_resistor("R1", "n0", "gnd", 100.0);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    const Vector x_init = Vector::Zero(seg.state_size);
+
+    // Refresh that injects a NaN into the residual vector.
+    auto nan_refresh = [](const Vector&, sparse::Matrix& J_nl, Vector& f_nl,
+                          const topology::Graph&, const DevicePool&) -> Real {
+        if (J_nl.rows() > 0) J_nl.setZero();
+        if (f_nl.size() > 0) {
+            f_nl.setZero();
+            f_nl[0] = std::numeric_limits<Real>::quiet_NaN();
+        }
+        return Real{0};
+    };
+    REQUIRE_THROWS_AS(
+        solve_with_newton(seg, nan_refresh, b.graph(), b.pool(), x_init),
+        std::runtime_error);
 }

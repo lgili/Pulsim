@@ -317,6 +317,14 @@ inline SimulationResult run_transient(
     // just as a pre-computed b_extra). Initialise to zero.
     pwl::SaturableInductorHistory sat_history;
     sat_history.init(graph, pool);
+    // Warm-start: seed the saturable-inductor (i_L_old, V_L_old) from
+    // `initial_state` too. Otherwise the first Newton refresh sees zeros
+    // and stamps a wrong Jacobian → convergence failure or wrong solution
+    // on step 1. No-op when there are no saturable inductors. Must run
+    // AFTER init() and after `x = *initial_state` above.
+    if (initial_state != nullptr) {
+        sat_history.seed_from_dc_op(x);
+    }
     const bool has_saturable = !sat_history.empty();
 
     // V17: shared dt that the saturable-inductor refresh
@@ -456,6 +464,29 @@ inline SimulationResult run_transient(
     // (matching Layer 5 V2 behaviour for regression testing).
     const Size max_iters = opts.max_event_iterations;
 
+    // Built-in time-varying source detection + reusable b_extra buffers
+    // (audit #6/#16), shared by BOTH the dynamic and static paths below. The
+    // PWM/sine/pulse helpers otherwise allocate + zero a state-size vector AND
+    // scan every branch on every step; detect ONCE which kinds the circuit
+    // contains, then reuse buffers and skip absent kinds in the hot loops.
+    bool has_pwm = false, has_sine = false, has_pulse = false;
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        if (graph.branch(b_id).kind != topology::BranchKind::Source) {
+            continue;
+        }
+        switch (pool.kind_of(b_id)) {
+        case pwl::DevicePool::StoredKind::PWMVoltageSource:
+            has_pwm = true; break;
+        case pwl::DevicePool::StoredKind::SineVoltageSource:
+            has_sine = true; break;
+        case pwl::DevicePool::StoredKind::PulseVoltageSource:
+            has_pulse = true; break;
+        default:
+            break;
+        }
+    }
+    Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
+
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
         //
@@ -521,27 +552,31 @@ inline SimulationResult run_transient(
                     diode_owned);
             }
 
-            // 1. History from previous step.
-            const Vector b_extra_history =
-                history.compute_b_extra(opts.dt);
-
+            // Accumulate b_extra into the reused buffer (audit #6), in the
+            // same left-to-right order as before so the result is
+            // bit-identical: history, then the optional user fn, then only the
+            // built-in source kinds the circuit contains. A null user fn and
+            // absent source kinds contribute (and cost) nothing instead of
+            // allocating + adding a zero vector every step.
+            // 1. History from the previous step.
+            b_extra = history.compute_b_extra(opts.dt);
             // 2. Optional user-supplied b_extra(t).
-            const Vector b_extra_user = b_extra_fn
-                ? b_extra_fn(t)
-                : Vector::Zero(state_size);
-
-            // 3. Built-in PWM (V4) + sine (V11) + pulse
-            //    (V12) sources.
-            const Vector b_extra_pwm =
-                sources::compute_pwm_b_extra(pool, graph, t);
-            const Vector b_extra_sine =
-                sources::compute_sine_b_extra(pool, graph, t);
-            const Vector b_extra_pulse =
-                sources::compute_pulse_b_extra(pool, graph, t);
-
-            b_extra = b_extra_history + b_extra_user +
-                      b_extra_pwm + b_extra_sine +
-                      b_extra_pulse;
+            if (b_extra_fn) {
+                b_extra += b_extra_fn(t);
+            }
+            // 3. Built-in PWM (V4) + sine (V11) + pulse (V12) sources.
+            if (has_pwm) {
+                sources::compute_pwm_b_extra(pool, graph, t, be_pwm);
+                b_extra += be_pwm;
+            }
+            if (has_sine) {
+                sources::compute_sine_b_extra(pool, graph, t, be_sine);
+                b_extra += be_sine;
+            }
+            if (has_pulse) {
+                sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
+                b_extra += be_pulse;
+            }
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
@@ -636,7 +671,13 @@ inline SimulationResult run_transient(
             // means events within the first/last 2 µs are
             // skipped.
             const Real substep_min_dt = opts.dt * Real{0.01};
-            bool corrected = false;
+            // dt of the FINAL solve in this outer step, fed to the deferred
+            // trap-history commit below. Stays opts.dt on the normal path;
+            // becomes dt2 when sub-step correction splits the step (sub-step 1
+            // commits the dt1 half inline; the dt2 commit is deferred past the
+            // freeze guard). This also distinguishes the corrected path — no
+            // separate `corrected` flag is needed.
+            Real committed_dt = opts.dt;
             if (opts.enable_substep_state_correction &&
                 !step_events.empty()) {
                 // Find earliest event in the step.
@@ -659,26 +700,33 @@ inline SimulationResult run_transient(
 
                     // Sub-step 1: pre-event mask, dt1.
                     {
-                        const Vector be_user_1 = b_extra_fn
-                            ? b_extra_fn(t_est)
-                            : Vector::Zero(state_size);
-                        const Vector be_hist_1 =
-                            history.compute_b_extra(dt1);
-                        const Vector be_pwm_1 =
+                        // Accumulate the sub-step b_extra into the reused
+                        // outer buffer (audit #16), in the same order as
+                        // before — history, user fn, then present source kinds
+                        // — so the result is bit-identical. The outer
+                        // `b_extra` is free here: the main event-iteration
+                        // solve already consumed it this step.
+                        b_extra = history.compute_b_extra(dt1);
+                        if (b_extra_fn) {
+                            b_extra += b_extra_fn(t_est);
+                        }
+                        if (has_pwm) {
                             sources::compute_pwm_b_extra(
-                                pool, graph, t_est);
-                        const Vector be_sine_1 =
+                                pool, graph, t_est, be_pwm);
+                            b_extra += be_pwm;
+                        }
+                        if (has_sine) {
                             sources::compute_sine_b_extra(
-                                pool, graph, t_est);
-                        const Vector be_pulse_1 =
+                                pool, graph, t_est, be_sine);
+                            b_extra += be_sine;
+                        }
+                        if (has_pulse) {
                             sources::compute_pulse_b_extra(
-                                pool, graph, t_est);
-                        const Vector be_total_1 =
-                            be_hist_1 + be_user_1 +
-                            be_pwm_1 + be_sine_1 +
-                            be_pulse_1;
+                                pool, graph, t_est, be_pulse);
+                            b_extra += be_pulse;
+                        }
                         cache.solve_at(
-                            mask_pre, dt1, be_total_1, x);
+                            mask_pre, dt1, b_extra, x);
                         history.update_from_state(x, dt1);
                         if (has_saturable) {
                             sat_history.update_from_state(x);
@@ -721,32 +769,36 @@ inline SimulationResult run_transient(
                                 diodes.current_diode_mask(),
                                 diode_owned);
                         }
-                        const Vector be_user_2 = b_extra_fn
-                            ? b_extra_fn(t)
-                            : Vector::Zero(state_size);
-                        const Vector be_hist_2 =
-                            history.compute_b_extra(dt2);
-                        const Vector be_pwm_2 =
-                            sources::compute_pwm_b_extra(
-                                pool, graph, t);
-                        const Vector be_sine_2 =
-                            sources::compute_sine_b_extra(
-                                pool, graph, t);
-                        const Vector be_pulse_2 =
-                            sources::compute_pulse_b_extra(
-                                pool, graph, t);
-                        const Vector be_total_2 =
-                            be_hist_2 + be_user_2 +
-                            be_pwm_2 + be_sine_2 +
-                            be_pulse_2;
-                        cache.solve_at(
-                            mask_post, dt2, be_total_2, x);
-                        history.update_from_state(x, dt2);
-                        if (has_saturable) {
-                            sat_history.update_from_state(x);
+                        // Same reused-buffer accumulation as sub-step 1
+                        // (audit #16), at time t with dt2.
+                        b_extra = history.compute_b_extra(dt2);
+                        if (b_extra_fn) {
+                            b_extra += b_extra_fn(t);
                         }
+                        if (has_pwm) {
+                            sources::compute_pwm_b_extra(
+                                pool, graph, t, be_pwm);
+                            b_extra += be_pwm;
+                        }
+                        if (has_sine) {
+                            sources::compute_sine_b_extra(
+                                pool, graph, t, be_sine);
+                            b_extra += be_sine;
+                        }
+                        if (has_pulse) {
+                            sources::compute_pulse_b_extra(
+                                pool, graph, t, be_pulse);
+                            b_extra += be_pulse;
+                        }
+                        cache.solve_at(
+                            mask_post, dt2, b_extra, x);
+                        // History commit DEFERRED to after the freeze guard
+                        // (below): the guard must be able to snap an
+                        // unphysical i_L back BEFORE it is baked into the
+                        // trap history. Sub-step 1 already committed the dt1
+                        // half above; this records dt2 as the final commit dt.
+                        committed_dt = dt2;
                     }
-                    corrected = true;
                 }
             }
 
@@ -766,22 +818,29 @@ inline SimulationResult run_transient(
             // DCM, series-blocking diode briefly open, etc.) and
             // the LU solve emits a kiloamp-scale unphysical jump.
             // See ``inductor_freeze_di_max`` in options.hpp.
-            if (!corrected &&
-                (opts.inductor_freeze_di_max > Real{0} ||
-                 opts.inductor_abs_clamp > Real{0})) {
+            if (opts.inductor_freeze_di_max > Real{0} ||
+                opts.inductor_abs_clamp > Real{0}) {
                 for (const auto& e : history.entries()) {
                     if (e.kind != pwl::DevicePool::StoredKind::Inductor) {
                         continue;
                     }
+                    // Baseline = this step's PRE-step current, read from
+                    // x_prev rather than history.i_prev. Under sub-step
+                    // correction, sub-step 1 already advanced history.i_prev
+                    // to the mid-step value, so comparing against it would
+                    // miss the jump (di ≈ 0). x_prev is the immutable
+                    // start-of-step state across both sub-steps.
+                    const Real i_prev_step =
+                        x_prev[e.inductor_branch_var_id];
                     Real i_new = x[e.inductor_branch_var_id];
-                    // Step-to-step jump guard: snap back to i_prev
-                    // when the solver emits an unphysical kilo-amp
+                    // Step-to-step jump guard: snap back to the pre-step
+                    // current when the solver emits an unphysical kilo-amp
                     // delta (rectifier in DCM, etc.).
                     if (opts.inductor_freeze_di_max > Real{0}) {
-                        const Real di  = i_new - e.i_prev;
+                        const Real di  = i_new - i_prev_step;
                         const Real adi = di < Real{0} ? -di : di;
                         if (adi > opts.inductor_freeze_di_max) {
-                            i_new = e.i_prev;
+                            i_new = i_prev_step;
                         }
                     }
                     // Absolute clamp: catches the *slow drift* form
@@ -798,13 +857,14 @@ inline SimulationResult run_transient(
                 }
             }
 
-            // 5. Commit history for the next step (skipped if
-            //    the substep correction already advanced it).
-            if (!corrected) {
-                history.update_from_state(x, opts.dt);
-                if (has_saturable) {
-                    sat_history.update_from_state(x);
-                }
+            // 5. Commit history for the next step. Deferred until AFTER the
+            //    freeze guard so a snapped-back i_L is the value baked into
+            //    the trap history. `committed_dt` is opts.dt on the normal
+            //    path and dt2 when sub-step correction split the step (whose
+            //    sub-step 1 already committed the dt1 half above).
+            history.update_from_state(x, committed_dt);
+            if (has_saturable) {
+                sat_history.update_from_state(x);
             }
 
             // 6. Record. event_iteration_count = iters - 1 (the
@@ -820,7 +880,6 @@ inline SimulationResult run_transient(
         // No dynamic devices → cache.solve gives the DC operating
         // point for the requested switch state. Diode iteration
         // still applies.
-        const Vector zero_b_extra = Vector::Zero(state_size);
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
@@ -840,22 +899,28 @@ inline SimulationResult run_transient(
                 step_observer(t, x_prev);
             }
 
-            const Vector b_extra_user_only = b_extra_fn
-                ? b_extra_fn(t)
-                : zero_b_extra;
-            // Built-in PWM (V4) + sine (V11) + pulse (V12)
-            // sources — apply on the static path too, since
-            // all are time-varying even without caps/Ls.
-            const Vector b_extra_pwm =
-                sources::compute_pwm_b_extra(pool, graph, t);
-            const Vector b_extra_sine =
-                sources::compute_sine_b_extra(pool, graph, t);
-            const Vector b_extra_pulse =
-                sources::compute_pulse_b_extra(pool, graph, t);
-            const Vector b_extra_user = b_extra_user_only +
-                                          b_extra_pwm +
-                                          b_extra_sine +
-                                          b_extra_pulse;
+            // Accumulate into the reused buffer (audit #6/#16): optional user
+            // fn, then present built-in source kinds. No trap history on the
+            // static path. Same summation order → bit-identical; absent kinds
+            // and a null user fn cost nothing. `b_extra_user` aliases the
+            // buffer so the solves below are unchanged.
+            b_extra.setZero();
+            if (b_extra_fn) {
+                b_extra += b_extra_fn(t);
+            }
+            if (has_pwm) {
+                sources::compute_pwm_b_extra(pool, graph, t, be_pwm);
+                b_extra += be_pwm;
+            }
+            if (has_sine) {
+                sources::compute_sine_b_extra(pool, graph, t, be_sine);
+                b_extra += be_sine;
+            }
+            if (has_pulse) {
+                sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
+                b_extra += be_pulse;
+            }
+            const Vector& b_extra_user = b_extra;
 
             Size iters = 0;
             bool flipped = false;

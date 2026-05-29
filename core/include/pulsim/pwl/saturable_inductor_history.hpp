@@ -70,6 +70,14 @@ public:
         }
     }
 
+    /// Seed `(i_L_old, V_L_old)` from a warm-start state vector (the
+    /// `initial_state` passed to `run_transient`), so the first Newton
+    /// refresh sees consistent previous-step values instead of zeros.
+    /// Mirrors `HistoryState::seed_from_dc_op`; reads the same fields as
+    /// `update_from_state`. No-op when the circuit has no saturable
+    /// inductors. Call AFTER `init()`.
+    void seed_from_dc_op(const Vector& x) { update_from_state(x); }
+
     [[nodiscard]] const std::vector<Entry>&
     entries() const noexcept { return entries_; }
 

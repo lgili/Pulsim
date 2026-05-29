@@ -39,6 +39,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -740,6 +741,35 @@ private:
                                 models::IgbtLevel1::Params,
                                 models::VCVS::Params,
                                 models::SaturableInductor::Params>;
+
+    // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
+    // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
+    // to `StoredKind`, so the enum and the `Entry` alternative list MUST stay
+    // in lock-step. These asserts turn a silent desync — which would mislabel
+    // every device and corrupt dispatch — into a build error: adding or
+    // reordering a device fails to compile until BOTH lists agree.
+    template <StoredKind K, typename P>
+    static constexpr bool kind_maps_to_ = std::is_same_v<
+        std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
+
+    static_assert(std::variant_size_v<Entry> == 15,
+        "StoredKind has 15 values; Entry must list 15 alternatives in the "
+        "same order — update both together.");
+    static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
+    static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::Switch,             SwitchParams>);
+    static_assert(kind_maps_to_<StoredKind::Capacitor,          models::Capacitor::Params>);
+    static_assert(kind_maps_to_<StoredKind::Inductor,           models::Inductor::Params>);
+    static_assert(kind_maps_to_<StoredKind::Diode,              models::SwitchedDiode::Params>);
+    static_assert(kind_maps_to_<StoredKind::NonlinearDiode,     models::IdealDiode::Params>);
+    static_assert(kind_maps_to_<StoredKind::CurrentSource,      models::CurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::PWMVoltageSource,   models::PWMVoltageSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::SineVoltageSource,  models::SineVoltageSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::PulseVoltageSource, models::PulseVoltageSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::MosfetLevel1,       models::MosfetLevel1::Params>);
+    static_assert(kind_maps_to_<StoredKind::IgbtLevel1,         models::IgbtLevel1::Params>);
+    static_assert(kind_maps_to_<StoredKind::VCVS,               models::VCVS::Params>);
+    static_assert(kind_maps_to_<StoredKind::SaturableInductor,  models::SaturableInductor::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
