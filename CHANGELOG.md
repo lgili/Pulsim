@@ -4,6 +4,142 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] — 2026-05-29
+
+### Internal — Python DSED scheduler reorganised to test tree
+
+No user-facing behaviour change. v1.6.2 confirmed the C++ DSED
+scheduler reaches the documented speedup on `pip install pulsim`;
+the pure-Python implementation that shipped alongside it had
+become **dead code on the user-facing path** — the dispatcher was
+already taking the C++ Bridges 10/11 for every supported circuit,
+and the Stage-4 Python fallback was only reachable if those C++
+paths both rejected the input, which doesn't happen for any
+circuit the documented surface ports today. Despite that, the
+Python files still:
+
+* Forced `pulsim` to keep optional deps (scipy) reachable through
+  the wheel's import graph — exactly the regression v1.6.2 fixed
+  with the lazy-import dance.
+* Doubled the maintenance cost of every DSED algorithm tweak.
+* Hid drift between the C++ port and the Python reference, since
+  nothing ever cross-checked them.
+
+v1.6.3 moves the Python scheduler from `pulsim/dsed/` to
+`python/tests/_dsed_reference/` where it serves its actual
+ongoing purpose — a readable reference for the
+`docs/how-pulsim-works/` Part II chapters and a cross-validation
+baseline against the C++ port. The hot path
+(`pulsim.simulate(b, engine='dsed', ...)`) is unchanged.
+
+### Public surface delta
+
+Net surface change is **additive** for the documented escape
+hatch and **internal-only** for everything else.
+
+**Added**
+
+* `pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, *,
+  integrator='auto', rtol=1e-6, atol=1e-9, dt_init=1e-9,
+  dt_max=1e-5, h_bdf2=None, stiffness_threshold=100.0,
+  store_every=1)` — the canonical user-LTI escape hatch for
+  custom-LTI workflows (system-ID benchmarks, FMU integrations,
+  hand-rolled physics models). Thin wrapper around the native C++
+  `run_ped_native` / `run_bdf2_native` / `run_auto_native` symbols
+  that documents the required `system` protocol (5 methods:
+  `A_matrix`, `b_vector`, `rhs`, `current_mask`, `set_mask`) and
+  validates it at the call site so a missing method raises a
+  clear `TypeError` with the list of what's needed instead of a
+  cryptic pybind11 dispatch error from deep inside the C++
+  scheduler.
+
+  The docs and previous `_dsed_dispatch.py` error messages used
+  to point at `pulsim.dsed.PEDSimulatorAuto` for this workflow.
+  `run_user_lti` is the new pointer; equivalent semantics, better
+  ergonomics.
+
+* `pulsim.dsed.CircuitBuilderAdapter` is still exported for
+  advanced users who want the same `(A, b)` extraction logic the
+  dispatcher uses internally (Bridge.10 path).
+
+**Removed** *(internal symbols only — none of these had
+documented end-user call sites; the public docs and our
+error-message pointers used them as an escape-hatch hint, now
+replaced by `run_user_lti`)*
+
+* `PEDSimulator`, `PEDResult`, `EventRecord`
+* `PEDSimulatorBDF2`
+* `PEDSimulatorAuto`, `PEDResultAuto`, `AutoDispatchEventRecord`
+* `PIController`, `EventPredictor`, `EventPredicate`
+* `BDF2State`, `BDF2PIController`, `bdf2_step`
+* `RK45State`, `rk45_step`, `interpolate`
+* `StiffnessDetector`, `IntegratorChoice`
+* `illinois`, `brent_fallback`
+
+These remain available **inside the test tree only**, importable
+from tests as `from _dsed_reference import ...`. They are no
+longer reachable from `pulsim.dsed.*`.
+
+### Changed
+
+* The DSED dispatcher (`pulsim._dsed_dispatch`) no longer ships
+  a Stage-4 pure-Python scheduler fallback. When both Bridge.11
+  (native C++ adapter) and Bridge.10 (Python adapter + native C++
+  scheduler) reject a circuit — typically a nonlinear device the
+  extractor doesn't yet support — the dispatcher now raises
+  `NotImplementedError` with two clear options: switch to
+  `engine='pwl'`, or use `pulsim.dsed.run_user_lti` with a
+  hand-rolled LTI system. Previously the fallback would silently
+  take the user out of the documented speedup regime even though
+  the dead-code path itself wasn't reachable on the wheel after
+  v1.6.2.
+
+### Tests
+
+* `python/tests/test_dsed_cpp_matches_python_reference.py` (3
+  parametrised tests + 2 protocol-validation tests):
+  - **Cross-validation**: a 2-state damped oscillator run through
+    both the C++ scheduler (via `run_user_lti`) and the Python
+    reference (via `_dsed_reference.PEDSimulator`). Both forced to
+    `integrator='rk45'` to pin the *kernel* (DOPRI5 + adaptive PI
+    + Hermite interpolation) rather than the auto-dispatch
+    heuristic. End-state must agree within numpy-allclose-style
+    tolerance (`atol_tol + rtol_tol·|x_py|`). The two
+    implementations converge to the same trajectory at common
+    accepted-step time stamps to 14 digits.
+  - `run_user_lti(system_missing_method, ...)` raises `TypeError`
+    naming the missing method.
+  - `run_user_lti(..., integrator='bogus')` raises `ValueError`.
+
+### Docs
+
+* `docs/how-pulsim-works/11-dsed-engine-overview.md` and
+  `16-dsed-benchmarks.md` updated: every mention of
+  `pulsim.dsed.PEDSimulator*` as the user-LTI escape hatch
+  replaced with `pulsim.dsed.run_user_lti`.
+* `_dsed_dispatch.py` error messages updated to point at
+  `run_user_lti` instead of the removed scheduler classes.
+
+### Migration notes (best-effort, no expected callers)
+
+We did a repo-wide and downstream-project sweep for callers of
+the removed symbols outside the test tree and found none. If you
+were importing one of them anyway (defensive note, since they
+were technically exported):
+
+1. **You were driving the scheduler from a CircuitBuilder** —
+   switch to `pulsim.simulate(b, engine='dsed', ...)`. This is
+   the production path and exclusively uses the C++ kernel.
+2. **You were driving it from a custom LTI** — switch to
+   `pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)`.
+   The system protocol is documented inline; a complete usage
+   example is in
+   `python/tests/test_dsed_cpp_matches_python_reference.py`.
+
+If neither replacement covers your workflow, please open an issue
+describing the use case so we can document or expose the right
+extension hook from the C++ side.
+
 ## [1.6.2] — 2026-05-29
 
 ### Fixed

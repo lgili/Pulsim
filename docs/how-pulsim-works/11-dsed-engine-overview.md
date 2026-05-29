@@ -166,9 +166,10 @@ DSED handles any circuit Pulsim can express that satisfies:
 1. **LTI per mask** — every switch-state combination must give a
    constant-coefficient ODE. This excludes Shockley diodes, MOSFET
    $V_{th}$ models, saturable inductors. For those, users go through
-   the explicit `pulsim.dsed.PEDSimulator` API with a user-defined
-   LTI system (validated on buck DCM with body-diode commutation
-   in [Gate 3](https://github.com/lgili/Pulsim/blob/main/notes/GATE3_PROGRESS.md)).
+   the explicit `pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)`
+   API with a hand-rolled LTI system (validated on buck DCM with
+   body-diode commutation in
+   [Gate 3](https://github.com/lgili/Pulsim/blob/main/notes/GATE3_PROGRESS.md)).
 2. **No parallel capacitors** — two caps sharing both terminals
    create a singular $M_{\text{dyn}}$ block. Rejected with an
    error pointing to the merge-equivalent workaround.

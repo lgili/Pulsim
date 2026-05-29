@@ -39,7 +39,18 @@ import pulsim as p
 def test_pulsim_dsed_imports_without_scipy_in_subprocess() -> None:
     """Spawn a fresh Python and block `import scipy`. Importing
     `pulsim.dsed` (and going down the dispatcher path) must still
-    succeed — this is the exact wheel-install scenario."""
+    succeed — this is the exact wheel-install scenario.
+
+    Pre-v1.7.0 the public ``pulsim.dsed`` re-exported the pure-Python
+    scheduler classes whose ``bdf2_integrator`` did a top-level
+    ``import scipy.linalg``. The fix lazified that import, but
+    the bigger structural cleanup in v1.7.0 moved the whole
+    Python scheduler to ``tests/_dsed_reference/`` — so today the
+    public ``pulsim.dsed`` doesn't touch scipy at all. This test
+    keeps the scipy-blocked subprocess assertion as a guard
+    against any future regression that pulls an optional dep
+    back into the public package.
+    """
     script = textwrap.dedent("""
         import builtins, sys
         _real = builtins.__import__
@@ -51,9 +62,10 @@ def test_pulsim_dsed_imports_without_scipy_in_subprocess() -> None:
 
         import pulsim  # must not crash
         import pulsim.dsed as _dsed  # the cascade that used to crash
-        # Touch a member that lives in bdf2_integrator — that module
-        # must have loaded even though scipy is blocked.
-        _ = _dsed.BDF2State
+        # Touch the public surface to confirm it loaded — these are
+        # the only symbols the slim v1.7.0 dsed package exports.
+        _ = _dsed.run_user_lti
+        _ = _dsed.CircuitBuilderAdapter
         sys.stdout.write(f'OK {pulsim.__version__}')
     """)
     result = subprocess.run(

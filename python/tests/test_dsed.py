@@ -1,11 +1,14 @@
-"""Smoke tests for the PED (Path-Based Event-Driven) Python facade.
+"""Smoke tests for the PED (Path-Based Event-Driven) Python reference.
 
-Phase 2.B-4 of the `add-path-based-dsed-engine` OpenSpec.
+Phase 2.B-4 of the `add-path-based-dsed-engine` OpenSpec. As of
+v1.7.0 the Python scheduler reference lives at
+``python/tests/_dsed_reference/`` (formerly ``pulsim.dsed.*``) — see
+``python/tests/_dsed_reference/__init__.py`` for the rationale.
 
 These tests exercise:
-* The standalone :mod:`pulsim.dsed` package (DOPRI5, PI controller,
-  Illinois root-finder, scheduler) on a synthetic RC circuit —
-  zero Pulsim-cache dependency.
+* The reference :mod:`_dsed_reference` package (DOPRI5, PI
+  controller, Illinois root-finder, scheduler) on a synthetic RC
+  circuit — zero Pulsim-cache dependency.
 * The :func:`pulsim.simulate` dispatcher with ``engine='dsed'`` to
   confirm the bridge from :class:`pulsim.CircuitBuilder` exists.
 
@@ -28,7 +31,7 @@ import pytest
 
 def test_dsed_module_importable():
     """The pulsim.dsed package must be importable + expose key classes."""
-    from pulsim.dsed import (
+    from _dsed_reference import (
         PEDSimulator,
         PEDResult,
         PIController,
@@ -44,7 +47,7 @@ def test_dsed_module_importable():
 
 def test_illinois_finds_root_of_linear():
     """Sanity check: Illinois root-finder on a linear function."""
-    from pulsim.dsed import illinois
+    from _dsed_reference import illinois
     g = lambda t: t - 0.5  # noqa: E731
     root = illinois(g, 0.0, 1.0)
     assert abs(root - 0.5) < 1e-9
@@ -52,7 +55,7 @@ def test_illinois_finds_root_of_linear():
 
 def test_pi_controller_accepts_small_error():
     """PIController.accept returns True for err << tol."""
-    from pulsim.dsed import PIController
+    from _dsed_reference import PIController
     c = PIController()
     x_old = np.array([1.0, 2.0])
     x_new = x_old.copy()
@@ -64,7 +67,7 @@ def test_pi_controller_accepts_small_error():
 
 def test_rk45_on_exponential_decay():
     """DOPRI5 on dx/dt = -x with x(0)=1; check x(1) ≈ 1/e."""
-    from pulsim.dsed import rk45_step, RK45State
+    from _dsed_reference import rk45_step, RK45State
 
     def f(t, x):
         return -x
@@ -87,7 +90,7 @@ def test_ped_simulator_on_rc_discharge():
     Analytical: x(t) = x(0) · exp(-t).
     Validate over t in [0, 5] with mask fixed (no events).
     """
-    from pulsim.dsed import PEDSimulator, PIController
+    from _dsed_reference import PEDSimulator, PIController
 
     class RC:
         R = 1.0
@@ -128,7 +131,7 @@ def test_ped_simulator_handles_periodic_mask_events():
     Switches between two RC time constants every 0.1 s for 1 s.
     The number of events should be 10 (gate edges).
     """
-    from pulsim.dsed import PEDSimulator, PIController
+    from _dsed_reference import PEDSimulator, PIController
 
     class TwoMode:
         _mask = True

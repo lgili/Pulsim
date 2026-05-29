@@ -257,6 +257,14 @@ from .hysteresis import (
     add_hysteretic_inductor,
     make_hysteretic_inductor_observer,
 )
+# DSED public subpackage — bound as a namespace attribute so users
+# can write `pulsim.dsed.run_user_lti(...)`. The PEP 562
+# `__getattr__` at the bottom of this module would otherwise reject
+# the access with the v1-migration error. v1.6.3 demoted the
+# pure-Python schedulers to `python/tests/_dsed_reference/`; the
+# public `pulsim.dsed` surface is now just `run_user_lti` + the
+# `CircuitBuilderAdapter` for Bridge.10 advanced users.
+from . import dsed as dsed  # noqa: F401  (re-export submodule)
 from .yaml_chain import wire_chain_from_yaml
 from .integrators import (
     AdaptiveSolution,
@@ -1055,10 +1063,11 @@ def simulate(
         are silently ignored — the warning is informational so
         scripts that copy-paste kwargs don't break suddenly).
     NotImplementedError
-        On ``engine='dsed'`` from a :class:`CircuitBuilder` —
-        the per-mask (A, b) extraction bridge is still pending.
-        For PED today with a user-supplied LTI system, use
-        :class:`pulsim.dsed.PEDSimulatorAuto` directly.
+        On ``engine='dsed'`` from a :class:`CircuitBuilder` when
+        the per-mask (A, b) extractor rejects the circuit (e.g.
+        nonlinear device the extractor doesn't yet support). For
+        PED today with a user-supplied LTI system, use
+        :func:`pulsim.dsed.run_user_lti` directly.
     """
     # ---- Merge `solver` bundle (v1.5 Round 2 ergonomics). ----
     # For every advanced kernel knob, the flat kwarg wins when the
@@ -1417,7 +1426,7 @@ def simulate(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.6.2"
+__version__ = "1.6.3"
 
 
 # ---------------------------------------------------------------------------
