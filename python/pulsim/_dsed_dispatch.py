@@ -37,6 +37,75 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
+from ._pulsim import (  # type: ignore[import-not-found]
+    NativeMultiMaskPwm,
+    NativePwm2Switch,
+)
+
+
+# ---------------------------------------------------------------------------
+# _PolledPySwitchFn — fixes a silent-wrong-answer bug on plain Python
+# switch_fns in the DSED engine.
+# ---------------------------------------------------------------------------
+class _PolledPySwitchFn:
+    """Wraps a Python ``switch_fn`` so the C++ DSED scheduler polls it.
+
+    **The bug this exists to fix.** The C++ DSED scheduler computes the
+    next gate-edge time via ``switch_fn.next_edge_after(t)`` (see
+    ``core/include/pulsim/dsed/scheduler*.hpp``). The native PWM
+    classes (:class:`NativePwm2Switch`, :class:`NativeMultiMaskPwm`)
+    implement that method exactly; plain Python callables don't.
+    The pybind11 adapter ``PySwitchFn::next_edge_after`` falls back to
+    ``std::numeric_limits<Real>::infinity()`` in that case, which the
+    scheduler caps at ``t_end``. The integrator's step size is then
+    bounded only by the PI controller + ``dt_max`` — and the scheduler
+    **never re-queries the user's switch_fn between accepted steps**.
+
+    For a PWM circuit, this means the scheduler integrates the *whole
+    window* with the mask sampled at ``t = t_start`` — silently
+    producing the trajectory of a circuit with the switch frozen
+    instead of modulated. The user sees a DC-like steady state at the
+    wrong setpoint and (reasonably) suspects DSED is "stuck".
+
+    **What this wrapper does.** Reports ``next_edge_after(t) = t +
+    dt_max/2``, forcing the scheduler to call ``switch_fn`` at most
+    every ``dt_max/2``. The scheduler then resolves the mask change as
+    a gate event, refactors ``(A, b)``, and advances correctly. The
+    cost is one extra Python callback per ``dt_max/2`` interval —
+    significant overhead but the only way to get a *correct* result
+    when the caller can't tell us when the next edge will be.
+
+    **Performance escape hatch.** For PWM-driven simulations, wrap your
+    switch_fn in :class:`pulsim.NativePwm2Switch` or
+    :class:`pulsim.NativeMultiMaskPwm` instead. Those expose
+    ``next_edge_after`` analytically and avoid the polling overhead —
+    the scheduler then only re-queries on real gate edges (~25× faster
+    per scheduler step for dense PWM).
+    """
+
+    __slots__ = ("_fn", "_step")
+
+    def __init__(self, fn: Callable[[float], Any], dt_max: float):
+        self._fn = fn
+        # The poll step has to be small enough that two consecutive
+        # mask transitions can't fall between polls without being
+        # noticed. PWM at frequency `f_sw` has edges every
+        # `T_sw/2 = 1/(2·f_sw)` seconds. Empirically, polling at
+        # `dt_max/10` captures every edge for the common case where
+        # the user picks `dt_max ≈ T_sw` (the same heuristic the
+        # buck/boost helpers' `suggested_dt` follows). Stricter
+        # PWMs need either a tighter `dt`/`dt_max` from the user or
+        # — much better — wrapping in `pulsim.NativePwm2Switch` /
+        # `NativeMultiMaskPwm`, both of which expose an analytical
+        # `next_edge_after` so the scheduler never has to poll.
+        self._step = float(dt_max) / 10.0
+
+    def __call__(self, t: float):
+        return self._fn(t)
+
+    def next_edge_after(self, t: float) -> float:
+        return float(t) + self._step
+
 
 # =============================================================================
 # Type aliases (public for downstream type-hints)
@@ -418,6 +487,39 @@ def run_dsed_from_builder(
         for i in range(n_sw):
             default_mask.set(i, True)
         sf = lambda _t: default_mask  # noqa: E731
+
+    adapter = CircuitBuilderAdapter(
+        builder=builder, cache=cache, switch_fn=sf,
+        b_extra_fn=b_extra_fn)
+
+    # Auto-wrap a plain Python switch_fn so the C++ event predictor
+    # polls it at every `dt_max/10` and detects mask changes via
+    # comparison. Without this, switch_fns that don't expose
+    # `next_edge_after(t)` get scheduled at `t_end` (== ∞), so the
+    # scheduler integrates the whole window with the *initial* mask —
+    # silently producing the wrong trajectory for PWM / state-machine
+    # modulation. See `_PolledPySwitchFn` for the exact contract.
+    #
+    # Emit a one-time warning recommending the native PWM classes for
+    # PWM-heavy workloads (they expose `next_edge_after` analytically
+    # and avoid the polling overhead entirely).
+    if (not isinstance(sf, (
+            NativePwm2Switch, NativeMultiMaskPwm))
+            and not hasattr(sf, "next_edge_after")):
+        warnings.warn(
+            "simulate(engine='dsed'): wrapping a plain Python "
+            "switch_fn for polled event detection (dt_max/10 = "
+            f"{opts.dt_max / 10:.3g} s). This is correct but slow "
+            "— each scheduler step calls back into Python. For "
+            "best performance on PWM-driven simulations, wrap "
+            "your switch logic in `pulsim.NativePwm2Switch` or "
+            "`pulsim.NativeMultiMaskPwm`, which expose "
+            "`next_edge_after` analytically and let the scheduler "
+            "skip directly to the next gate edge.",
+            UserWarning,
+            stacklevel=3,
+        )
+        sf = _PolledPySwitchFn(sf, opts.dt_max)
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,
