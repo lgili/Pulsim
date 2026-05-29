@@ -18,14 +18,15 @@ Symptoms users reported:
 * "DSED hangs" — actually just diverging to a wrong attractor and
   reaching a non-physical steady state.
 
-**Fix.** ``pulsim._dsed_dispatch`` auto-wraps any switch_fn that
-doesn't expose ``next_edge_after`` with :class:`_PolledPySwitchFn`,
-which reports ``next_edge_after(t) = t + dt_max/10`` and forces the
-scheduler to re-query the user's callback at least 10× per
-``dt_max`` window. The native PWM classes
-(:class:`pulsim.NativePwm2Switch`, :class:`pulsim.NativeMultiMaskPwm`)
-are still preferred for performance — the dispatcher detects them
-and skips the polling wrapper.
+**Fix.** The C++ DSED scheduler now treats ``∞`` returns from
+``next_edge_after`` as "no edge info — poll defensively" and caps
+``t_gate`` at ``t + dt_max/10`` so the scheduler is forced to land
+at that boundary and re-sample the switch_fn via
+``fire_gate_event_`` (catches any discovered mask change). The
+native PWM classes (:class:`pulsim.NativePwm2Switch`,
+:class:`pulsim.NativeMultiMaskPwm`) and any user object whose
+``next_edge_after`` returns a finite value take the analytical
+fast path unchanged.
 
 These tests pin two contracts:
 
@@ -158,14 +159,16 @@ def test_switch_fn_with_next_edge_after_skips_polling_wrapper() -> None:
             return t + 0.5 * self.T
 
     sf = _AnalyticalPWM()
-    # The dispatcher's wrapping criterion (mirrors the inline check
+    # The dispatcher's UserWarning criterion (mirrors the inline check
     # in `run_dsed_from_builder`): "not a native PWM AND has no
     # next_edge_after method".
     assert not isinstance(sf, (p.NativePwm2Switch, p.NativeMultiMaskPwm))
     assert hasattr(sf, "next_edge_after")
-    # Therefore the dispatcher must leave sf alone — it does NOT
-    # become a `_PolledPySwitchFn`. We confirm via a small simulation
-    # that DOES finish quickly (constant-mask RC, no events).
+    # Therefore the dispatcher must NOT emit the polling warning.
+    # We confirm via a small simulation that finishes quickly
+    # (constant-mask RC, no events) — if the dispatcher (or C++
+    # scheduler) tried to engage the defensive poll cap, the call
+    # would still succeed but the warning would fire.
     b2 = p.CircuitBuilder()
     b2.add_voltage_source("V", "a", "gnd", 0.0)
     b2.add_resistor("R", "a", "b", 1.0)
