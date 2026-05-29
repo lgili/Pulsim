@@ -197,10 +197,12 @@ from .topology import (
     BuckResult,
     BoostResult,
     FlybackResult,
+    VoltageDoublerBridgeResult,
     add_buck,
     add_boost,
     add_flyback,
     add_bridge_rectifier,
+    add_voltage_doubler_bridge,
     add_three_phase_vsi,
     add_three_phase_rl_load,
 )
@@ -482,6 +484,9 @@ __all__ = [
     "add_boost",
     "add_flyback",
     "add_bridge_rectifier",
+    # Universal-input AC-DC front-end (bridge ↔ voltage doubler).
+    "VoltageDoublerBridgeResult",
+    "add_voltage_doubler_bridge",
     "add_three_phase_vsi",
     "add_three_phase_rl_load",
     # Three-phase grid helpers (Phase C.2).
