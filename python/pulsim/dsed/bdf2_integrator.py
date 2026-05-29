@@ -62,10 +62,44 @@ work.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
-from scipy.linalg import lu_factor, lu_solve
+
+# scipy is required for the BDF2 LU factor/solve, but it is NOT a
+# runtime dep of pulsim — it lives under `[project.optional-dependencies]
+# dev` in pyproject.toml. The C++ native DSED path (`run_*_native_builder`
+# in `_pulsim`) does NOT need scipy at all, so a top-level scipy import
+# here would crash the entire `pulsim.dsed` subpackage on machines that
+# only have the runtime deps, blocking even the native C++ path.
+#
+# Resolve scipy on demand via the two helpers below. They cache the
+# imported functions in a module-level singleton so the import only
+# happens once across all calls.
+_scipy_funcs: Optional[tuple[Any, Any]] = None
+
+
+def _scipy_lu() -> tuple[Any, Any]:
+    """Return ``(lu_factor, lu_solve)`` from ``scipy.linalg``.
+
+    Raises ``ModuleNotFoundError`` with an actionable pointer to the
+    ``pulsim[dev]`` extra if scipy isn't installed."""
+    global _scipy_funcs
+    if _scipy_funcs is None:
+        try:
+            from scipy.linalg import lu_factor, lu_solve
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "pulsim.dsed: the pure-Python BDF2 integrator "
+                "requires scipy. The C++ native DSED path runs "
+                "without scipy — usually this means the native "
+                "path rejected the circuit and fell through to "
+                "the Python fallback. Install scipy with "
+                "`pip install scipy` (or `pip install 'pulsim[dev]'`) "
+                "to enable the Python fallback."
+            ) from exc
+        _scipy_funcs = (lu_factor, lu_solve)
+    return _scipy_funcs
 
 
 @dataclass
@@ -97,6 +131,7 @@ class BDF2State:
 
 def _factor_J(A: np.ndarray, h: float) -> tuple:
     """LU-factor the BDF2 system matrix ``J = I - (2h/3) A``."""
+    lu_factor, _ = _scipy_lu()
     n = A.shape[0]
     J = np.eye(n) - (2.0 * h / 3.0) * A
     return lu_factor(J)
@@ -157,6 +192,7 @@ def bdf2_step(
         # Bootstrap: Crank-Nicolson (trapezoidal rule, order-2 A-stable)
         # (I - (h/2) A) y_1 = (I + (h/2) A) y_0 + h · b(t + h/2)
         # We approximate b(t + h/2) ≈ (b(t) + b(t + h)) / 2.
+        lu_factor, lu_solve = _scipy_lu()
         b_old = b_fn(t)
         b_mid = 0.5 * (b_old + b_new)
         n = A.shape[0]
@@ -173,6 +209,7 @@ def bdf2_step(
 
     # Full BDF2 step:
     # (I - (2h/3) A) y_new = (4/3) y - (1/3) y_prev + (2h/3) b(t+h)
+    _, lu_solve = _scipy_lu()
     assert state.y_prev is not None
     rhs_bdf2 = (4.0 / 3.0) * y - (1.0 / 3.0) * state.y_prev \
                + (2.0 * h / 3.0) * b_new

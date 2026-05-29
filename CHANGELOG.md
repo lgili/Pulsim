@@ -4,6 +4,47 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] — 2026-05-29
+
+### Fixed
+
+* **`simulate(engine='dsed', ...)` silently lost the 24× speedup
+  on `pip install pulsim`** because `pulsim/dsed/bdf2_integrator.py`
+  had a top-level `from scipy.linalg import lu_factor, lu_solve`.
+  scipy is not a runtime dependency (it lives under
+  `[project.optional-dependencies] dev`), so the import crashed —
+  cascading through `pulsim.dsed.__init__` and masking even the
+  C++ native Bridge.11 path that doesn't need scipy at all. End
+  users got a `RuntimeError: required Pulsim bindings not
+  available (No module named 'scipy')` and the native C++ path
+  was unreachable from the wheel.
+
+  Moved the scipy import to a lazy on-demand helper inside
+  `bdf2_integrator.py`. The C++ native DSED path (the headline
+  ~24× speedup on the buck CCM benchmark) now works on a clean
+  `pip install pulsim`. scipy is still required for the
+  pure-Python BDF2 fallback — the lazy import raises a clear
+  `ModuleNotFoundError` pointing at `pip install 'pulsim[dev]'`
+  if a user explicitly hits that path.
+
+  Empirical confirmation (clean venv, no scipy, v1.6.2 wheel,
+  canonical buck CCM 24 V→12 V at 100 kHz, 5 ms window):
+  PWL @ dt=100ns = 143 ms (50001 steps); DSED auto = 0.6 ms
+  (507 steps); **speedup 232×**.
+
+### Tests
+
+* `python/tests/test_dsed_without_scipy.py` (3 tests) pins the
+  invariant:
+  - Subprocess test: spawn fresh Python with an `__import__`
+    hook blocking `scipy`, assert `import pulsim.dsed` succeeds.
+  - Buck CCM test: run a 5 ms buck simulation with `engine='dsed'`
+    under the same hook; wall-clock < 5 s (the C++ native path
+    completes in ~1 ms; the Python fallback would take 30+ s).
+  - Speedup test: PWL @ dt=100ns vs DSED auto on buck CCM — gate
+    at >5× speedup. Skipped if scipy is missing (the gate would
+    be biased by the same regression we're testing).
+
 ## [1.6.1] — 2026-05-28
 
 ### Fixed
