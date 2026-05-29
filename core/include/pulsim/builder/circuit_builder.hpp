@@ -245,6 +245,12 @@ public:
         Real R_CE_sat = Real{0.05},
         Real V_T      = Real{5.0},
         Real kappa    = Real{10.0}) {
+        if (!(R_CE_sat > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_igbt_level1(\"{}\"): R_CE_sat must be > 0 (got {}); a "
+                "zero/negative on-state resistance divides by zero in the "
+                "IGBT current law and yields NaN.", name, R_CE_sat));
+        }
         const Index c_idx = resolve_node_(collector);
         const Index e_idx = resolve_node_(emitter);
         const Index g_idx = resolve_node_(gate);
@@ -524,6 +530,12 @@ public:
         std::string_view name, std::string_view anode,
         std::string_view cathode,
         models::IdealDiode::Params params) {
+        if (!(params.R_d > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_nonlinear_diode(\"{}\"): R_d must be > 0 (got {}); a "
+                "zero/negative slope resistance divides by zero in the diode "
+                "current law and yields NaN.", name, params.R_d));
+        }
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(
@@ -644,6 +656,12 @@ public:
         std::string_view p_from, std::string_view p_to,
         std::string_view s_from, std::string_view s_to,
         Real L_p, Real L_s, Real k = Real{1}) {
+        if (!(L_p > Real{0}) || !(L_s > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_transformer(\"{}\"): L_p and L_s must be > 0 (got "
+                "L_p={}, L_s={}); the mutual term M = k·sqrt(L_p·L_s) is NaN "
+                "for non-positive inductances.", name, L_p, L_s));
+        }
         const Index p_from_idx = resolve_node_(p_from);
         const Index p_to_idx   = resolve_node_(p_to);
         const Index s_from_idx = resolve_node_(s_from);
@@ -690,6 +708,12 @@ public:
         std::string_view from, std::string_view to,
         Real L_0, Real I_sat,
         Real L_residual = Real{0}) {
+        if (!(I_sat > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_saturable_inductor(\"{}\"): I_sat must be > 0 (got {}); "
+                "the saturation ratio i_L/I_sat divides by zero otherwise and "
+                "yields NaN.", name, I_sat));
+        }
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = add_branch_(
@@ -738,6 +762,13 @@ public:
         branch_ids.reserve(N);
         Size winding_idx = 0;
         for (const auto& w : windings) {
+            if (!(w.L > Real{0})) {
+                throw std::invalid_argument(std::format(
+                    "add_multi_winding_transformer(\"{}\"): every winding "
+                    "inductance must be > 0 (got {}); pair-wise couplings use "
+                    "sqrt(L_i·L_j), which is NaN for non-positive L.",
+                    name, w.L));
+            }
             const Index from_idx = resolve_node_(w.from);
             const Index to_idx   = resolve_node_(w.to);
             const std::string winding_name =

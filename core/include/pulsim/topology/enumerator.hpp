@@ -25,6 +25,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
+#include <stdexcept>
 
 namespace pulsim::topology {
 
@@ -82,8 +83,22 @@ public:
     // Construction
     // -------------------------------------------------------------------------
 
-    explicit SwitchStateEnumerator(Size num_switches) noexcept
-        : num_switches_{num_switches}, num_states_{num_states_for(num_switches)} {}
+    explicit SwitchStateEnumerator(Size num_switches)
+        : num_switches_{num_switches}, num_states_{num_states_for(num_switches)} {
+        // N >= 64 would need a 128-bit counter; the in-process Gray-code
+        // path can only represent 2^63 masks, so it would SILENTLY
+        // enumerate half the switch-state space and build an incomplete
+        // cache. Fail loudly instead — large-N circuits must use Layer 4's
+        // lazy `PwlStateSpaceCache` enumeration (which never materialises
+        // the full 2^N set).
+        if (num_switches >= 64) {
+            throw std::invalid_argument(
+                "SwitchStateEnumerator: num_switches >= 64 is unsupported by "
+                "in-process Gray-code enumeration (2^64 needs a 128-bit "
+                "counter). Use lazy PwlStateSpaceCache enumeration for "
+                "large-N circuits.");
+        }
+    }
 
     [[nodiscard]] Iterator begin() const noexcept {
         return Iterator{0, num_switches_};
@@ -92,11 +107,10 @@ public:
         return Iterator{num_states_, num_switches_};
     }
 
-    /// Total number of states the enumeration will yield (= 2^N for
-    /// N ≤ 63; capped at 1 << 63 for N = 63 to avoid overflow into
-    /// the sign bit — N = 64 would need a 128-bit counter and isn't
-    /// supported here. Layer 4's lazy enumeration is the right
-    /// answer past N ~ 20 anyway).
+    /// Total number of states the enumeration will yield (= 2^N).
+    /// Valid for N ≤ 63 only; the constructor throws for N ≥ 64 (a
+    /// 128-bit counter would be required). Layer 4's lazy enumeration
+    /// is the right answer past N ~ 20 anyway.
     [[nodiscard]] std::uint64_t num_states() const noexcept {
         return num_states_;
     }
@@ -107,10 +121,12 @@ public:
 
 private:
     static constexpr std::uint64_t num_states_for(Size n) noexcept {
-        // N = 0 → 1 state (the empty mask). N >= 64 caps at 1 << 63
-        // (Layer 4's lazy path takes over for true large-N
-        // enumeration; the in-process path here is for ≤ 20-ish
-        // switches in practice).
+        // N = 0 → 1 state (the empty mask). The N >= 64 branch is
+        // defensive only: the constructor rejects N >= 64 before any
+        // object is usable (it runs in the member-init list, so this
+        // must stay noexcept and total). Layer 4's lazy path is the
+        // supported route for large N; the in-process path here is for
+        // ≤ 20-ish switches in practice.
         if (n == 0) return 1ULL;
         if (n >= 64) return 1ULL << 63;
         return 1ULL << n;
@@ -123,7 +139,7 @@ private:
 /// Free function for natural call-site syntax:
 ///   for (auto mask : enumerate_switch_states(N)) { ... }
 [[nodiscard]] inline SwitchStateEnumerator enumerate_switch_states(
-    Size num_switches) noexcept {
+    Size num_switches) {
     return SwitchStateEnumerator{num_switches};
 }
 

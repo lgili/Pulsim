@@ -317,6 +317,14 @@ inline SimulationResult run_transient(
     // just as a pre-computed b_extra). Initialise to zero.
     pwl::SaturableInductorHistory sat_history;
     sat_history.init(graph, pool);
+    // Warm-start: seed the saturable-inductor (i_L_old, V_L_old) from
+    // `initial_state` too. Otherwise the first Newton refresh sees zeros
+    // and stamps a wrong Jacobian → convergence failure or wrong solution
+    // on step 1. No-op when there are no saturable inductors. Must run
+    // AFTER init() and after `x = *initial_state` above.
+    if (initial_state != nullptr) {
+        sat_history.seed_from_dc_op(x);
+    }
     const bool has_saturable = !sat_history.empty();
 
     // V17: shared dt that the saturable-inductor refresh
@@ -636,7 +644,13 @@ inline SimulationResult run_transient(
             // means events within the first/last 2 µs are
             // skipped.
             const Real substep_min_dt = opts.dt * Real{0.01};
-            bool corrected = false;
+            // dt of the FINAL solve in this outer step, fed to the deferred
+            // trap-history commit below. Stays opts.dt on the normal path;
+            // becomes dt2 when sub-step correction splits the step (sub-step 1
+            // commits the dt1 half inline; the dt2 commit is deferred past the
+            // freeze guard). This also distinguishes the corrected path — no
+            // separate `corrected` flag is needed.
+            Real committed_dt = opts.dt;
             if (opts.enable_substep_state_correction &&
                 !step_events.empty()) {
                 // Find earliest event in the step.
@@ -741,12 +755,13 @@ inline SimulationResult run_transient(
                             be_pulse_2;
                         cache.solve_at(
                             mask_post, dt2, be_total_2, x);
-                        history.update_from_state(x, dt2);
-                        if (has_saturable) {
-                            sat_history.update_from_state(x);
-                        }
+                        // History commit DEFERRED to after the freeze guard
+                        // (below): the guard must be able to snap an
+                        // unphysical i_L back BEFORE it is baked into the
+                        // trap history. Sub-step 1 already committed the dt1
+                        // half above; this records dt2 as the final commit dt.
+                        committed_dt = dt2;
                     }
-                    corrected = true;
                 }
             }
 
@@ -766,22 +781,29 @@ inline SimulationResult run_transient(
             // DCM, series-blocking diode briefly open, etc.) and
             // the LU solve emits a kiloamp-scale unphysical jump.
             // See ``inductor_freeze_di_max`` in options.hpp.
-            if (!corrected &&
-                (opts.inductor_freeze_di_max > Real{0} ||
-                 opts.inductor_abs_clamp > Real{0})) {
+            if (opts.inductor_freeze_di_max > Real{0} ||
+                opts.inductor_abs_clamp > Real{0}) {
                 for (const auto& e : history.entries()) {
                     if (e.kind != pwl::DevicePool::StoredKind::Inductor) {
                         continue;
                     }
+                    // Baseline = this step's PRE-step current, read from
+                    // x_prev rather than history.i_prev. Under sub-step
+                    // correction, sub-step 1 already advanced history.i_prev
+                    // to the mid-step value, so comparing against it would
+                    // miss the jump (di ≈ 0). x_prev is the immutable
+                    // start-of-step state across both sub-steps.
+                    const Real i_prev_step =
+                        x_prev[e.inductor_branch_var_id];
                     Real i_new = x[e.inductor_branch_var_id];
-                    // Step-to-step jump guard: snap back to i_prev
-                    // when the solver emits an unphysical kilo-amp
+                    // Step-to-step jump guard: snap back to the pre-step
+                    // current when the solver emits an unphysical kilo-amp
                     // delta (rectifier in DCM, etc.).
                     if (opts.inductor_freeze_di_max > Real{0}) {
-                        const Real di  = i_new - e.i_prev;
+                        const Real di  = i_new - i_prev_step;
                         const Real adi = di < Real{0} ? -di : di;
                         if (adi > opts.inductor_freeze_di_max) {
-                            i_new = e.i_prev;
+                            i_new = i_prev_step;
                         }
                     }
                     // Absolute clamp: catches the *slow drift* form
@@ -798,13 +820,14 @@ inline SimulationResult run_transient(
                 }
             }
 
-            // 5. Commit history for the next step (skipped if
-            //    the substep correction already advanced it).
-            if (!corrected) {
-                history.update_from_state(x, opts.dt);
-                if (has_saturable) {
-                    sat_history.update_from_state(x);
-                }
+            // 5. Commit history for the next step. Deferred until AFTER the
+            //    freeze guard so a snapped-back i_L is the value baked into
+            //    the trap history. `committed_dt` is opts.dt on the normal
+            //    path and dt2 when sub-step correction split the step (whose
+            //    sub-step 1 already committed the dt1 half above).
+            history.update_from_state(x, committed_dt);
+            if (has_saturable) {
+                sat_history.update_from_state(x);
             }
 
             // 6. Record. event_iteration_count = iters - 1 (the
