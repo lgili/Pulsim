@@ -168,7 +168,7 @@ DSED handles any circuit Pulsim can express that satisfies:
    $V_{th}$ models, saturable inductors. For those, users go through
    the explicit `pulsim.dsed.PEDSimulator` API with a user-defined
    LTI system (validated on buck DCM with body-diode commutation
-   in [Gate 3](../../notes/GATE3_PROGRESS.md)).
+   in [Gate 3](https://github.com/lgili/Pulsim/blob/main/notes/GATE3_PROGRESS.md)).
 2. **No parallel capacitors** — two caps sharing both terminals
    create a singular $M_{\text{dyn}}$ block. Rejected with an
    error pointing to the merge-equivalent workaround.
