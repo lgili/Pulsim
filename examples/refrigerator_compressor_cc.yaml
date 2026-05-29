@@ -1,3 +1,10 @@
+# ⚠ NOT MIGRATED TO v2 — requires the legacy v1 kernel.
+# This example uses `single_phase_induction_motor` + `compressor_load`,
+# neither of which exists in the v2 device library (single-phase IM is a
+# documented gap — see docs/migration-from-v1.md § 7). It therefore still
+# uses the old `schema: pulsim-v1` format and will NOT load on the current
+# kernel. Kept as a reference until the single-phase IM device lands in v2.
+#
 # Refrigerator compressor — fixed-frequency "CC convencional" topology.
 #
 # Models a typical domestic refrigerator:
