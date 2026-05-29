@@ -486,6 +486,30 @@ inline SimulationResult run_transient(
             step_observer(opts.t_start, x);
         }
 
+        // Hot-loop b_extra setup (audit #6). The built-in time-varying source
+        // helpers (PWM/sine/pulse) each allocate + zero a state-size vector
+        // AND scan every branch on every step. Detect ONCE which of the three
+        // kinds the circuit actually contains, then in the loop reuse
+        // pre-allocated buffers and skip absent kinds entirely — removing up
+        // to 3 heap allocations per step over the (up to 1e8-step) transient.
+        bool has_pwm = false, has_sine = false, has_pulse = false;
+        for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+            if (graph.branch(b_id).kind != topology::BranchKind::Source) {
+                continue;
+            }
+            switch (pool.kind_of(b_id)) {
+            case pwl::DevicePool::StoredKind::PWMVoltageSource:
+                has_pwm = true; break;
+            case pwl::DevicePool::StoredKind::SineVoltageSource:
+                has_sine = true; break;
+            case pwl::DevicePool::StoredKind::PulseVoltageSource:
+                has_pulse = true; break;
+            default:
+                break;
+            }
+        }
+        Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
+
         for (Size k = 1; k < n_steps; ++k) {
             // User-cancellation check (Phase: live scope). Lets a
             // GUI / external watchdog stop the simulation early
@@ -529,27 +553,31 @@ inline SimulationResult run_transient(
                     diode_owned);
             }
 
-            // 1. History from previous step.
-            const Vector b_extra_history =
-                history.compute_b_extra(opts.dt);
-
+            // Accumulate b_extra into the reused buffer (audit #6), in the
+            // same left-to-right order as before so the result is
+            // bit-identical: history, then the optional user fn, then only the
+            // built-in source kinds the circuit contains. A null user fn and
+            // absent source kinds contribute (and cost) nothing instead of
+            // allocating + adding a zero vector every step.
+            // 1. History from the previous step.
+            b_extra = history.compute_b_extra(opts.dt);
             // 2. Optional user-supplied b_extra(t).
-            const Vector b_extra_user = b_extra_fn
-                ? b_extra_fn(t)
-                : Vector::Zero(state_size);
-
-            // 3. Built-in PWM (V4) + sine (V11) + pulse
-            //    (V12) sources.
-            const Vector b_extra_pwm =
-                sources::compute_pwm_b_extra(pool, graph, t);
-            const Vector b_extra_sine =
-                sources::compute_sine_b_extra(pool, graph, t);
-            const Vector b_extra_pulse =
-                sources::compute_pulse_b_extra(pool, graph, t);
-
-            b_extra = b_extra_history + b_extra_user +
-                      b_extra_pwm + b_extra_sine +
-                      b_extra_pulse;
+            if (b_extra_fn) {
+                b_extra += b_extra_fn(t);
+            }
+            // 3. Built-in PWM (V4) + sine (V11) + pulse (V12) sources.
+            if (has_pwm) {
+                sources::compute_pwm_b_extra(pool, graph, t, be_pwm);
+                b_extra += be_pwm;
+            }
+            if (has_sine) {
+                sources::compute_sine_b_extra(pool, graph, t, be_sine);
+                b_extra += be_sine;
+            }
+            if (has_pulse) {
+                sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
+                b_extra += be_pulse;
+            }
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable

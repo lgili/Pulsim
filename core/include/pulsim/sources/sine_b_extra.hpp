@@ -30,13 +30,20 @@ namespace pulsim::sources {
 /// into b_extra at simulation time `t`. Returns a vector
 /// of size `pool.state_size(graph)` with all zeros except
 /// at the sine-source branch-var rows.
-[[nodiscard]] inline Vector compute_sine_b_extra(
+/// Output-parameter overload (hot-path friendly): fill `out` — resized to
+/// `state_size` and zeroed — reusing the caller's buffer instead of
+/// allocating one per call.
+inline void compute_sine_b_extra(
     const pwl::DevicePool& pool,
     const topology::Graph& graph,
-    Real t) {
+    Real t,
+    Vector& out) {
     const Size state_size = pool.state_size(graph);
-    Vector b_extra =
-        Vector::Zero(static_cast<Index>(state_size));
+    if (out.size() != static_cast<Index>(state_size)) {
+        out = Vector::Zero(static_cast<Index>(state_size));
+    } else {
+        out.setZero();
+    }
 
     for (Index b_id = 0;
          b_id < graph.num_branches(); ++b_id) {
@@ -54,9 +61,19 @@ namespace pulsim::sources {
             pool.branch_var_id_for_source(branch.id, graph);
         const Real v_sine =
             models::SineVoltageSource::value_at(p, t);
-        b_extra[src_var] += -v_sine;
+        out[src_var] += -v_sine;
     }
-    return b_extra;
+}
+
+/// Allocating convenience overload — returns a fresh vector. Delegates to the
+/// output-parameter overload above.
+[[nodiscard]] inline Vector compute_sine_b_extra(
+    const pwl::DevicePool& pool,
+    const topology::Graph& graph,
+    Real t) {
+    Vector out;
+    compute_sine_b_extra(pool, graph, t, out);
+    return out;
 }
 
 }  // namespace pulsim::sources
