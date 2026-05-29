@@ -8,7 +8,6 @@ validation, regression, and SPICE-parity comparison.
 ```text
 benchmarks/
 ├── README.md                    # this file
-├── REORG_PLAN.md                # historical: phases of the May-2026 cleanup
 ├── circuits/                    # YAML netlists, grouped by topology family
 │   ├── linear/                  #   pure R/L/C, dividers, bridges, IC discharge
 │   ├── switching/               #   buck/boost/flyback/forward/vcswitch/mosfet
@@ -24,7 +23,7 @@ benchmarks/
 ├── spice/                       # SPICE backend netlists (paired with circuits/)
 │   ├── ngspice/                 #   .cir files for ngspice
 │   └── ltspice/                 #   .cir files for LTspice (subset)
-├── baselines/                   # reference CSV waveforms (flat)
+├── baselines/                   # reference waveforms, gzip-compressed (<name>.csv.gz, flat)
 ├── manifests/                   # bench-suite configuration
 │   ├── benchmarks.yaml          #   primary benchmark + scenario list
 │   ├── electrothermal.yaml      #   focused electrothermal subset
@@ -40,6 +39,7 @@ benchmarks/
 │   ├── kpi_gate.py              #   regression gate vs frozen baseline
 │   ├── freeze_kpi_baseline.py   #   snapshot a KPI baseline
 │   └── _console.py              #   shared rich UI helpers
+├── kpi/                         # KPI-metrics library (compute_thd/efficiency/…) + self-test
 ├── kpi_baselines/               # frozen KPI snapshots + artifact manifests
 └── local_limit/                 # local-limit sub-suite (own internal manifest)
 ```
@@ -142,9 +142,12 @@ See [`tools/bench/README.md`](../tools/bench/README.md) for details.
          spice_vector: v(out)
      scenarios: [direct_trap]   # or gmres_trbdf2, trbdf2, …
    ```
-5. If validating against a reference waveform: drop the CSV in
-   `baselines/<name>.csv` and set `validation.type: reference` in
-   the YAML.
+5. If validating against a reference waveform: set `validation.type:
+   reference` + `baseline: baselines/<name>.csv` in the YAML, then run
+   once with `--generate-baselines` to capture it. Baselines are stored
+   **gzip-compressed** (`baselines/<name>.csv.gz`) to keep the repo
+   small; the loader resolves the plain `.csv` reference to the `.gz`
+   file automatically, so YAML refs stay as `.csv`.
 6. Run the suite locally; if PASS, commit. Otherwise tune thresholds
    in the YAML with a comment explaining why.
 

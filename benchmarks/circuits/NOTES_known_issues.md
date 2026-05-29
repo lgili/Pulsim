@@ -21,8 +21,8 @@ Each entry below lists:
 ## 1. vcswitch + L + freewheel diode commutation — numerical divergence
 
 - **Canonical fixture (snubber-equipped, stronger evidence)**:
-  - `benchmarks/circuits/chopper_with_rc_snubber.yaml`
-  - `benchmarks/ngspice/chopper_with_rc_snubber.cir`
+  - `benchmarks/circuits/switching/chopper_with_rc_snubber.yaml`
+  - `benchmarks/spice/ngspice/chopper_with_rc_snubber.cir`
 - **Topology**: Vcc (20 V DC) → vcswitch S1 → L (1 mH) → R_load (10 Ω) → 0,
   with a freewheel diode from 0 → sw AND an RC snubber (R_sn = 10 Ω,
   C_sn = 100 nF) from sw → vcc. vcswitch driven by PWM at 5 kHz / 50 %.

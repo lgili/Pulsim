@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 import math
 import tempfile
@@ -225,8 +226,25 @@ def run_pulsim(
     )
 
 
+def resolve_baseline_path(path: Path) -> Path:
+    """Resolve a declared baseline path to the file actually on disk.
+
+    Baselines are stored gzip-compressed (``<name>.csv.gz``) to keep the
+    repository small, but YAML ``baseline:`` entries reference the plain
+    ``<name>.csv`` name. Prefer the ``.gz`` sibling when the plain file
+    is absent, so neither the YAML refs nor callers need to know about
+    compression.
+    """
+    if path.exists():
+        return path
+    gz = Path(str(path) + ".gz")
+    return gz if gz.exists() else path
+
+
 def load_csv_series(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
-    with open(path, "r", encoding="utf-8") as handle:
+    path = resolve_baseline_path(path)
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         times: List[float] = []
         series: Dict[str, List[float]] = {}
@@ -300,6 +318,7 @@ def validate_analytical(times: List[float], values: List[float], model: str, par
 
 
 def validate_reference(times: List[float], values: List[float], baseline_path: Path, column: str) -> Tuple[Optional[float], Optional[float], str]:
+    baseline_path = resolve_baseline_path(baseline_path)
     if not baseline_path.exists():
         return None, None, f"Baseline missing: {baseline_path}"
     ref_times, ref_series = load_csv_series(baseline_path)
@@ -641,14 +660,19 @@ def run_benchmarks(
                                     message = "Missing baseline path"
                                 else:
                                     baseline_path = (suite_root(benchmarks_path) / baseline_rel).resolve()
-                                    if not baseline_path.exists() and generate_baselines:
-                                        baseline_path.parent.mkdir(parents=True, exist_ok=True)
-                                        with open(output_path, "r", encoding="utf-8") as src, open(
-                                            baseline_path, "w", encoding="utf-8"
+                                    actual_baseline = resolve_baseline_path(baseline_path)
+                                    if not actual_baseline.exists() and generate_baselines:
+                                        # Write baselines gzip-compressed (<name>.csv.gz)
+                                        # to keep the repo small; the loader resolves
+                                        # the plain .csv reference back to the .gz file.
+                                        gz_path = Path(str(baseline_path) + ".gz")
+                                        gz_path.parent.mkdir(parents=True, exist_ok=True)
+                                        with open(output_path, "r", encoding="utf-8") as src, gzip.open(
+                                            gz_path, "wt", encoding="utf-8"
                                         ) as dst:
                                             dst.write(src.read())
                                         status = "baseline"
-                                        message = "Baseline generated"
+                                        message = "Baseline generated (gzip)"
                                     else:
                                         max_error, rms_error, message = validate_reference(
                                             times_eval, values_eval, baseline_path, observable
