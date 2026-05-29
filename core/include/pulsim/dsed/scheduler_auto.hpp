@@ -167,9 +167,25 @@ public:
                     "PEDSimulatorAuto: exceeded max-step cap");
             }
 
-            // 1. Next gate-edge time (fast path)
-            const Real t_gate = std::min(
-                switch_fn_.next_edge_after(t), t_end);
+            // 1. Next gate-edge time. The fast path is
+            //    `switch_fn.next_edge_after(t)` which returns the
+            //    analytically-predicted next mask transition (used by
+            //    `NativePwm2Switch` etc.). When the switch_fn doesn't
+            //    expose `next_edge_after` — typical of plain Python
+            //    callables — the pybind11 adapter returns ∞, so we'd
+            //    cap at t_end and never re-query the user's callback
+            //    between accepted steps. That silently produced the
+            //    wrong trajectory for PWM circuits (every mask edge
+            //    missed). Defensive fallback: when the predictor
+            //    returned ∞, cap `t_gate` at `t + dt_max/10` so the
+            //    scheduler is forced to land at that boundary and
+            //    re-sample the switch_fn via `fire_gate_event_`
+            //    (which catches any discovered mask change).
+            const Real t_gate_raw = switch_fn_.next_edge_after(t);
+            constexpr Real kPollFractionOfDtMax = Real{0.1};
+            const Real t_gate = std::isfinite(t_gate_raw)
+                ? std::min(t_gate_raw, t_end)
+                : std::min(t + dt_max_ * kPollFractionOfDtMax, t_end);
 
             // 2. Take one step using the current mode's integrator
             Real h_use;

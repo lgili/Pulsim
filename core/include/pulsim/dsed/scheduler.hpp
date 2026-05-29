@@ -296,7 +296,25 @@ private:
 
     [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end) const {
         if constexpr (HasNextEdge<SwitchFn>) {
-            return std::min(switch_fn_.next_edge_after(t_now), t_end);
+            // Fast path: switch_fn knows when its next edge is
+            // (e.g. NativePwm2Switch with an analytical formula).
+            const Real raw = switch_fn_.next_edge_after(t_now);
+            if (std::isfinite(raw)) {
+                return std::min(raw, t_end);
+            }
+            // Fallback: the predictor returned ∞, which on the
+            // pybind11 `PySwitchFn` adapter means "the user's
+            // Python switch_fn doesn't expose next_edge_after".
+            // Cap at `t_now + dt_max/10` so the scheduler is
+            // forced to land at that boundary and re-sample the
+            // switch_fn via fire_gate_event_ (catches any
+            // mask change the user didn't pre-announce). Without
+            // this cap, PWM-driven simulations with plain Python
+            // switch_fns silently produced trajectories with the
+            // mask frozen at t=0.
+            constexpr Real kPollFractionOfDtMax = Real{0.1};
+            return std::min(t_now + dt_max_ * kPollFractionOfDtMax,
+                              t_end);
         } else {
             return t_end;
         }

@@ -170,7 +170,21 @@ public:
 private:
     [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end) const {
         if constexpr (HasNextEdge<SwitchFn>) {
-            return std::min(switch_fn_.next_edge_after(t_now), t_end);
+            // See `scheduler.hpp::next_gate_edge_` for the rationale
+            // behind the `isfinite` defensive fallback. Same logic
+            // applies here: ∞ from `next_edge_after` triggers a
+            // `dt_max/10` poll boundary so PWM events from plain
+            // Python switch_fns aren't silently missed.
+            const Real raw = switch_fn_.next_edge_after(t_now);
+            if (std::isfinite(raw)) {
+                return std::min(raw, t_end);
+            }
+            constexpr Real kPollFractionOfDtMax = Real{0.1};
+            // BDF2 uses a fixed step (`h_fixed_`); same logic as
+            // RK45 — derive the poll cap from the only step-size
+            // knob the BDF2 scheduler has.
+            return std::min(t_now + h_fixed_ * kPollFractionOfDtMax,
+                              t_end);
         } else {
             return t_end;
         }
