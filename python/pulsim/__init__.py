@@ -1607,6 +1607,29 @@ _V1_SYMBOL_HINTS = {
     # effort), so attribute access resolves normally and never falls
     # through to this hint dict.
     "parse_netlist":      "p.parse_spice_netlist (SPICE subset)",
+    # ----- T3.1: 1.5 → 1.6 churn hints ---------------------------------
+    # The retired pulsim.sweep helper *classes* (1.5 → 1.6).
+    # `pulsim.sweep` ITSELF is now a function and resolves normally —
+    # only these former subpackage attributes hit the hint path.
+    "Distribution":       "lambda rng: rng.normal(mu, sigma) — pass the "
+                          "distribution callable directly to p.monte_carlo("
+                          "distributions={...}). See docs/migration-guide.md "
+                          "§ '1.5 → 1.6 — API stability notes'.",
+    "Cartesian":          "params={...} kwarg on p.sweep(builder_factory, "
+                          "params={'R': [10, 20, 50]}, kpi_fn=..., ...). "
+                          "See docs/migration-guide.md.",
+    "metrics":            "build your own KPI lambda — `kpi_fn(res, "
+                          "params) -> dict[str, float]` is the 1.6 contract. "
+                          "See docs/migration-guide.md for examples "
+                          "(rms_voltage, peak_current, settling_time).",
+    "PmsmParams":         "no params struct — p.add_pmsm takes the parameters "
+                          "as direct kwargs (R_s=, Ld=, Lq=, psi_pm=, "
+                          "pole_pairs=, J=, ...). See docs/migration-guide.md "
+                          "§ '1.5 → 1.6 — API stability notes'.",
+    "ThreePhaseVsiParams": "no params struct — p.add_three_phase_vsi takes the "
+                          "parameters as direct kwargs.",
+    "BldcParams":         "no params struct — p.add_bldc takes the parameters "
+                          "as direct kwargs.",
 }
 
 
