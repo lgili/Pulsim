@@ -4,6 +4,87 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] — 2026-05-30
+
+GUI integration hardening release. Six findings from a multi-stage
+drive integration audit (boost MOSFET 65 kHz + 3φ VSI 20 kHz + PMSM)
+landed as PRs #76-#81 and ship together.
+
+### Added
+
+* **`MotorObserverBundle`** — `make_pmsm_observer` /
+  `make_bldc_observer` / `make_dc_motor_observer` now return a
+  callable bundle with per-step trace buffers (`times`, `omega_rad_s`,
+  `theta_rad`, `T_em`, `i_d`, `i_q`, `i_a`/`i_b`/`i_c` on 3-φ;
+  `i_a` on DC). Backward-compatible: still iterates as
+  `(step_observer, b_extra_fn)` for legacy `obs, b_extra = ...`
+  unpacking. `pulsim.simulate` auto-attaches bundles to the result so
+  `res.signal("M1.omega")` resolves without manual wiring. Auto-attach
+  walks composed observers (closed-loop path) too. PR #78.
+* **`SimulationResult.signal(name)` and `.signals()`** — name-based
+  lookup for user-recorded traces (today: motor bundles), with
+  fuzzy-matched suggestions on `NameNotFoundError`. PR #78.
+* **PMSM saliency** — `add_pmsm` gains `Ld=, Lq=, i_d_init=,
+  i_q_init=, theta_init=` kwargs (mutually exclusive with `L_s=`).
+  The abc topology uses `L_avg = (Ld + Lq) / 2`; the observer
+  publishes the reluctance torque `T_rel = (3/2)·pp·(Ld − Lq)·i_d·i_q`
+  on top of the magnet torque. `i_d_init` / `i_q_init` are
+  inverse-Park'd to abc at `θ_e(0) = pp · theta_init` and seeded into
+  the three phase inductors via `i0=`. Legacy `L_s=` form stays
+  bit-for-bit identical (verified). PR #80.
+
+### Fixed
+
+* **PWL Newton auto-promotes to LM** on rank-deficient Jacobians
+  and near-miss stalls (T1.2). Multi-stage switched topologies (e.g.
+  realistic boost + SH1 MOSFET on inductive load) previously required
+  the user to hand-set `enable_newton_lm=True` (often with a physical
+  RC snubber on top). `solve_with_newton_b_extra` now sets
+  `enable_lm=true` automatically on (a) a numerically singular
+  factorize or (b) 3 consecutive iterations where `residual < tol_res`
+  but `||dx|| ≥ tol_dx`. Transparent — explicit
+  `enable_newton_lm=True` callers see no behaviour change. PR #77.
+* **`simulate(closed_loops=, switch_fn=, step_observer=)` composes**
+  instead of raising (T1.1). Pre-fix the kernel rejected the combo as
+  conflicting; now closed_loops' switch_fn is OR-merged with the
+  user's, and observers run in registration order (closed-loop first,
+  then user). Unlocks closed-loop PFC + open-loop VSI + PMSM observer
+  in the same run. PR #76.
+* **DSED schedulers fail loudly on NaN/Inf step output** (T1.3).
+  `PEDSimulator` / `PEDSimulatorBDF2` / `PEDSimulatorAuto` previously
+  could silently commit NaN to the result (BDF2) or burn 5 generic
+  rejections (RK45) when a switch-mask combo extracted an
+  ill-conditioned A or a Python `b_extra_fn` returned NaN. All three
+  schedulers now detect NaN/Inf per step and throw an actionable
+  error pointing at the common root causes + workarounds
+  (`engine='pwl'` benefits from the new auto-LM, shrink `dt_max`,
+  audit callbacks). RK45 shrinks h × 0.1 and retries up to
+  `kNanMaxStreak=3` consecutive iterations before throwing; BDF2
+  throws immediately on first NaN. PR #79.
+
+### Documentation
+
+* **1.5 → 1.6 API stability notes** added to
+  `docs/migration-guide.md` (T3.1) — covers the `pulsim.sweep`
+  package→function collapse (with a lookup table mapping each retired
+  `Distribution`/`Cartesian`/`metrics` helper to its
+  lambda-based 1.6 replacement), `add_rc_snubber` becoming
+  keyword-only, and PMSM/VSI/BLDC no longer having `*Params` structs.
+  In-source `_V1_SYMBOL_HINTS` extended with 6 new entries
+  (`Distribution`, `Cartesian`, `metrics`, `PmsmParams`,
+  `ThreePhaseVsiParams`, `BldcParams`) so probing for the retired
+  names raises `AttributeError` with an actionable migration hint
+  instead of a bare error. PR #81.
+
+### Notes
+
+The T2.1 caveat: the salient-pole model uses `L = (Ld + Lq) / 2` in
+the abc topology, so the di/dt anisotropy along dq is approximated
+(reluctance torque is captured exactly; the high-frequency electrical
+response uses the average inductance). For most IPM control studies
+(FOC, flux-weakening, MTPA) this is the dominant saliency effect.
+Full dq-frame reformulation is a v2 follow-up.
+
 ## [1.6.4] — 2026-05-29
 
 ### Fixed
