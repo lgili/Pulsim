@@ -1,0 +1,2280 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/how-pulsim-works/10-paper-figures-index/">
+      
+      
+        <link rel="prev" href="../09-architecture-walkthrough/">
+      
+      
+        <link rel="next" href="../11-dsed-engine-overview/">
+      
+      
+      <link rel="icon" href="../../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>10 — Paper Figures Index - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#10-paper-figures-index" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              10 — Paper Figures Index
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Index
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-the-figures" class="md-nav__link">
+    <span class="md-ellipsis">
+      Regenerating the figures
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#style-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      Style contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Data provenance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-paper-reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cross-paper reuse
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-not-here-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      What's NOT here (yet)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cross-references
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Index
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-the-figures" class="md-nav__link">
+    <span class="md-ellipsis">
+      Regenerating the figures
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#style-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      Style contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Data provenance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-paper-reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cross-paper reuse
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-not-here-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      What's NOT here (yet)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cross-references
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/how-pulsim-works/10-paper-figures-index.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/how-pulsim-works/10-paper-figures-index.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="10-paper-figures-index">10. Paper Figures Index<a class="headerlink" href="#10-paper-figures-index" title="Permanent link">&para;</a></h1>
+<p>The single page that maps every figure in the "How Pulsim
+Works" doc set to the paper section it feeds. Reviewers and
+co-authors land here; everything below is a stable link target.</p>
+<p><strong>Status (as of v1.4.0):</strong> 15 of 15 matplotlib figures
+rendered + 4 mermaid diagrams embedded in-line in chapters.
+Both PNG (web) and PDF (paper-grade, 300 dpi) outputs land
+in <code>_figures/output/</code>. New in v1.4.0: figs 8.4, 8.5, 8.6
+covering the multi-bit / parametric / AC-sweep contributions.</p>
+<hr />
+<h2 id="index">Index<a class="headerlink" href="#index" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Fig #</th>
+<th>Chapter</th>
+<th>Title</th>
+<th>Paper section</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.1</td>
+<td><a href="../01-introduction/#12-what-breaks-in-spice">§1.2</a></td>
+<td>SPICE per-step CPU cost share</td>
+<td>Intro § (motivation)</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>1.2</td>
+<td><a href="../01-introduction/#13-the-structural-insight-smps-has-finite-topology">§1.3</a></td>
+<td>Topology census across 10 reference converters</td>
+<td>Intro § (sparsity in topology space)</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>2.1</td>
+<td><a href="../02-mna-foundations/#24-a-worked-example-assembling-a-buck">§2.4</a></td>
+<td>Buck schematic</td>
+<td>§II MNA review</td>
+<td>mermaid (no PDF)</td>
+</tr>
+<tr>
+<td>2.2</td>
+<td><a href="../02-mna-foundations/#25-what-sparse-looks-like-for-real-smps">§2.5</a></td>
+<td>Sparsity patterns: buck / NPC / MMC</td>
+<td>§II.B sparsity + bandedness</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>3.1</td>
+<td><a href="../03-trapezoidal-companion/#33-the-companion-model-view">§3.3</a></td>
+<td>Capacitor companion model</td>
+<td>§III companion model</td>
+<td>mermaid (no PDF)</td>
+</tr>
+<tr>
+<td>3.2</td>
+<td><a href="../03-trapezoidal-companion/">§3.5</a></td>
+<td>Buck <span class="arithmatex">\(i_L\)</span> at <span class="arithmatex">\(\Delta t = 1\text{µs} / 100\text{ns} / 10\text{ns} / 1\text{ns}\)</span></td>
+<td>§III.A discretisation convergence</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>4.1</td>
+<td><a href="../04-pwl-state-space-cache/#42-the-lifecycle">§4.2</a></td>
+<td>Cache lifecycle flowchart</td>
+<td>§IV cache mechanics</td>
+<td>mermaid (no PDF)</td>
+</tr>
+<tr>
+<td>4.2</td>
+<td><a href="../04-pwl-state-space-cache/#43-cost-analysis-amortisation-in-the-limit">§4.3</a></td>
+<td>Build-cost amortisation curve (cache vs SPICE-style)</td>
+<td>§IV.C cost analysis</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>5.1</td>
+<td><a href="../05-sparse-lu-foundations/#53-what-fill-is-and-why-it-ruins-naive-sparse-lu">§5.3</a></td>
+<td>Fill comparison: original / natural-LU / RCM-LU</td>
+<td>§V.A ordering</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>5.2</td>
+<td><a href="../05-sparse-lu-foundations/#55-the-elimination-tree">§5.5</a></td>
+<td>Elimination tree of 8×8 RCM-ordered</td>
+<td>§V.B etree</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>5.3</td>
+<td><a href="../05-sparse-lu-foundations/#58-putting-it-together-cost-vs-n">§5.8</a></td>
+<td>Asymptotic cost vs <span class="arithmatex">\(n\)</span> (4 algorithms)</td>
+<td>§V.C complexity</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>6.1</td>
+<td><a href="../06-pulsim-sparse-lu/">§6.2</a></td>
+<td><code>PulsimSparseLuSolver</code> lifecycle state diagram</td>
+<td>§VI.A in-house impl</td>
+<td>mermaid (no PDF)</td>
+</tr>
+<tr>
+<td>6.2</td>
+<td><a href="../06-pulsim-sparse-lu/">§6.3</a></td>
+<td>Dynamic pattern discovery vs symbolic prediction</td>
+<td>§VI.B implementation detail</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>6.3</td>
+<td><a href="../06-pulsim-sparse-lu/">§6.4</a></td>
+<td>Pivot-row swap visualisation</td>
+<td>§VI.C partial pivoting</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>7.1</td>
+<td><a href="../07-rank1-partial-refactor/#73-the-path-walk-visualised">§7.3</a></td>
+<td>Etree path walk for a changed column</td>
+<td><strong>§VII (methods-paper contribution)</strong></td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>7.2</td>
+<td><a href="../07-rank1-partial-refactor/#74-the-pivot-fault-fallback">§7.4</a></td>
+<td>Pivot fault recovery flow</td>
+<td><strong>§VII.B fault recovery</strong></td>
+<td>mermaid (no PDF)</td>
+</tr>
+<tr>
+<td>8.1</td>
+<td><a href="../08-benchmarks/#83-speedup-vs-n_mathrmstate">§8.3</a></td>
+<td>Captured speedups B/A, C/B, C/A vs <span class="arithmatex">\(n_{\mathrm{state}}\)</span></td>
+<td><strong>§VIII.A captured speedup</strong></td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>8.2</td>
+<td><a href="../08-benchmarks/#84-the-decomposition-in-bar-form">§8.4</a></td>
+<td>Multiplicative decomposition stacked bars</td>
+<td><strong>§VIII.A decomposition</strong></td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>8.3</td>
+<td><a href="../08-benchmarks/#85-per-call-cost-flat-vs-linear">§8.5</a></td>
+<td>Per-call cost vs <span class="arithmatex">\(n_{\mathrm{state}}\)</span> (flat vs linear)</td>
+<td><strong>§VIII.B asymptotic scaling</strong></td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>8.4</td>
+<td><a href="../08-benchmarks/#8111-multi-bit-path-union-speedup">§8.11.1</a></td>
+<td>Multi-bit speedup vs Hamming distance + hit-rate decay (v1.4.0)</td>
+<td><strong>§VI.A multi-bit row</strong></td>
+<td>✅ rendered (NEW)</td>
+</tr>
+<tr>
+<td>8.5</td>
+<td><a href="../08-benchmarks/#8112-parametric-sweep-monte-carlo-speedup">§8.11.2</a></td>
+<td>Parametric sweep speedup + per-point cost (v1.4.0)</td>
+<td><strong>§VI.C parametric row</strong></td>
+<td>✅ rendered (NEW)</td>
+</tr>
+<tr>
+<td>8.6</td>
+<td><a href="../08-benchmarks/#8113-ac-sweep-complex-sparse-lu-v140">§8.11.3</a></td>
+<td>AC sweep complex LU: Pulsim vs Eigen (v1.4.0)</td>
+<td><strong>§VI.B AC complex</strong></td>
+<td>✅ rendered (NEW)</td>
+</tr>
+<tr>
+<td>9.1</td>
+<td><a href="../09-architecture-walkthrough/#91-the-layer-model">§9.1</a></td>
+<td>Pulsim 10-layer stack</td>
+<td>§I.B kernel architecture</td>
+<td>✅ rendered</td>
+</tr>
+<tr>
+<td>9.2</td>
+<td><a href="../09-architecture-walkthrough/#93-cross-layer-dependency-graph">§9.3</a></td>
+<td>Cross-layer dependency DAG</td>
+<td>§I.B (appendix)</td>
+<td>mermaid (no PDF)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Inventory at v1.4.0:</strong></p>
+<ul>
+<li><strong>15 PDF/PNG matplotlib figures</strong> in <code>_figures/output/</code>
+  (figs 1.1, 1.2, 2.2, 3.2, 4.2, 5.1, 5.2, 5.3, 6.2, 6.3, 7.1,
+  8.1, 8.2, 8.3, <strong>8.4 (NEW)</strong>, <strong>8.5 (NEW)</strong>, <strong>8.6 (NEW)</strong>,
+  9.1 — 18 entries total because some figs are 2-panel)</li>
+<li><strong>6 mermaid diagrams</strong> embedded in markdown (rendered live
+  in the docs site; export to PDF via <code>npx @mermaid-js/mermaid-cli</code>
+  for paper inclusion)</li>
+<li><strong>Captured CSVs feeding figs 8.4-8.6</strong>:</li>
+<li><code>multi_bit_microbench.csv</code> → fig 8.4</li>
+<li><code>parametric_microbench.csv</code> → fig 8.5</li>
+<li><code>ac_sweep_microbench.csv</code> → fig 8.6</li>
+</ul>
+<hr />
+<h2 id="regenerating-the-figures">Regenerating the figures<a class="headerlink" href="#regenerating-the-figures" title="Permanent link">&para;</a></h2>
+<p>Single command:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>docs/how-pulsim-works/_figures/generate_all.py
+</code></pre></div>
+<p>Outputs land in <code>docs/how-pulsim-works/_figures/output/</code> as
+<strong>both PNG and PDF</strong>.</p>
+<ul>
+<li><strong>PNG</strong> is for the docs site (mkdocs serves them; KaTeX
+  renders inline)</li>
+<li><strong>PDF</strong> is for paper inclusion via <code>\includegraphics{...}</code> in
+  the methods paper LaTeX</li>
+</ul>
+<p>Mermaid diagrams render natively in the docs site. For paper
+inclusion, export to PDF via the Mermaid CLI:</p>
+<div class="highlight"><pre><span></span><code>npx<span class="w"> </span>@mermaid-js/mermaid-cli<span class="w"> </span>-i<span class="w"> </span>diagram.mmd<span class="w"> </span>-o<span class="w"> </span>diagram.pdf<span class="w"> </span>-t<span class="w"> </span>neutral
+</code></pre></div>
+<p>(Pulsim's paper figures workflow doesn't bundle this yet — the
+two paper-bound mermaid diagrams in this set, figs 4.1 and 7.2
+flowcharts, would need a one-time CLI export when the paper
+draft consumes them.)</p>
+<hr />
+<h2 id="style-contract">Style contract<a class="headerlink" href="#style-contract" title="Permanent link">&para;</a></h2>
+<p>Every PDF figure conforms to a uniform style enforced by
+<code>generate_all.py:apply_paper_style()</code>:</p>
+<ul>
+<li><strong>Width</strong>: 7.0 in (IEEE double-column) for most plots,
+  5-6 in for single-column / standalone diagrams</li>
+<li><strong>DPI</strong>: 300</li>
+<li><strong>Font</strong>: Computer Modern Roman serif (matches IEEE paper
+  body text)</li>
+<li><strong>Body size</strong>: 10 pt; titles 11 pt; legends 9 pt; tick
+  labels 9 pt</li>
+<li><strong>Axis line width</strong>: 0.6 pt</li>
+<li><strong>Grid alpha</strong>: 0.3 (visible but unobtrusive)</li>
+<li><strong>Legend</strong>: borderless (<code>frameon=False</code>)</li>
+<li><strong>Spines</strong>: top + right removed for plot-style figures
+  (matplotlib's default frame is too cluttered for IEEE
+  typography)</li>
+</ul>
+<p>If you add a figure that violates this style, the visual
+coherence breaks. Use the same <code>apply_paper_style()</code> call as
+the first line of every <code>render(output_dir)</code> function — it's
+applied automatically by <code>generate_all.py</code> if you go through
+the standard entry point.</p>
+<hr />
+<h2 id="data-provenance">Data provenance<a class="headerlink" href="#data-provenance" title="Permanent link">&para;</a></h2>
+<p>Two figures pull from real captured data:</p>
+<table>
+<thead>
+<tr>
+<th>Figure</th>
+<th>Data source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8.1, 8.2, 8.3</td>
+<td><code>rank1_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[rank1][microbench]"</code></td>
+</tr>
+<tr>
+<td>8.4</td>
+<td><code>multi_bit_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[multi_bit][microbench]"</code></td>
+</tr>
+<tr>
+<td>8.5</td>
+<td><code>parametric_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[parametric][microbench]"</code></td>
+</tr>
+<tr>
+<td>8.6</td>
+<td><code>ac_sweep_microbench.csv</code> produced by <code>./build/core/pulsim_benchmarks "[ac_sweep][microbench]"</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every other figure is computed from closed-form math, synthetic
+fixtures (the buck-like 8×8 from <code>core/tests/layer0/</code>), or
+representative-data tables embedded in the script. The split
+is intentional: chapters 1-7 illustrate concepts that don't
+need a kernel build to demonstrate; chapter 8 measures the
+captured numbers that the forthcoming methods paper's headline claim rests on.</p>
+<p>When the microbench is recaptured (e.g. on different hardware,
+a new compiler, or under future-Pulsim improvements), the CSV
+updates and figures 8.1-8.3 regenerate automatically. Hardware-
+identifier metadata in the CSV header captures the provenance.</p>
+<hr />
+<h2 id="cross-paper-reuse">Cross-paper reuse<a class="headerlink" href="#cross-paper-reuse" title="Permanent link">&para;</a></h2>
+<p>The forthcoming methods paper draft (kept outside this
+repository until publication) pulls figures directly from this
+directory:</p>
+<div class="highlight"><pre><span></span><code><span class="c">% In the paper&#39;s source.tex:</span>
+<span class="k">\includegraphics</span><span class="na">[width=\columnwidth]</span><span class="nb">{</span>
+    ../../docs/how-pulsim-works/<span class="nb">_</span>figures/output/fig81<span class="nb">_</span>speedup<span class="nb">_</span>vs<span class="nb">_</span>n.pdf
+<span class="nb">}</span>
+<span class="k">\caption</span><span class="nb">{</span>Captured speedup ratios on the 3-backend microbench.
+         Source: <span class="k">\texttt</span><span class="nb">{</span>docs/how-pulsim-works/<span class="k">\_figures</span>/fig81<span class="k">\_speedup\_vs\_n</span>.py<span class="nb">}}</span>
+</code></pre></div>
+<p>This way the doc set + the paper share one source of truth.
+Changing a figure caption or restyling a plot updates both the
+docs and the paper in a single edit. The figure-script comments
+include the <code>Source: ...</code> provenance line so reviewers can
+trace each figure back to its generator.</p>
+<hr />
+<h2 id="whats-not-here-yet">What's NOT here (yet)<a class="headerlink" href="#whats-not-here-yet" title="Permanent link">&para;</a></h2>
+<p>Some paper-bound figures are not yet in this index — they'll
+land as the methods paper draft progresses:</p>
+<ul>
+<li><strong>Per-converter benchmark</strong> on the 10 reference projects
+  (deferred to <code>add-pwl-rank1-runtime-integration</code> proposal).
+  Currently only the synthetic N-switch-chain is captured.</li>
+<li><strong>Pivot-fallback rate heatmap</strong> sweeping <code>PIVOT_THRESH ∈
+  {1e-5, 1e-4, 1e-3, 1e-2, 1e-1}</code> × the 8 <span class="arithmatex">\(N\)</span> values. Would
+  back chapter 8's "1e-3 is the sweet spot" claim with a
+  full sensitivity sweep instead of just the captured "zero
+  fallbacks at 1e-3" data point.</li>
+<li><strong>AC sweep complex-solver benchmark</strong> — pending
+  implementation of <code>add-pulsim-complex-sparse-lu</code> (the next
+  major architectural change after v1.3.0).</li>
+</ul>
+<p>These show up as "TBD" in a forthcoming methods paper draft outline and
+will be added to this index once captured.</p>
+<hr />
+<h2 id="cross-references">Cross-references<a class="headerlink" href="#cross-references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The <strong>forthcoming methods paper</strong> kept outside this
+  repository until publication (final venue + submission
+  date TBD)</li>
+<li>The <strong>OpenSpec proposals</strong> under <code>openspec/changes/archive/</code>
+  for <code>add-pwl-rank1-update</code>, <code>add-pwl-rank1-partial-refactor</code>,
+  <code>replace-klu-with-pulsim-sparse-lu</code>,
+  <code>add-pulsim-complex-sparse-lu</code>, <code>add-generalised-path-refactor</code></li>
+<li>The <strong>captured CSVs</strong> above, regenerable via
+  <code>./build/core/pulsim_benchmarks</code> with the appropriate Catch2 tag</li>
+<li><strong><a href="../09-architecture-walkthrough/">Chapter 9 — Architecture Walkthrough</a></strong>
+  for where each algorithm lives in the layer stack</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../09-architecture-walkthrough/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 9 — Architecture Walkthrough">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                9 — Architecture Walkthrough
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../11-dsed-engine-overview/" class="md-footer__link md-footer__link--next" aria-label="Next: 11 — DSED Engine Overview (Part II)">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                11 — DSED Engine Overview (Part II)
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>
