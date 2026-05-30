@@ -257,16 +257,69 @@ class PMSM:
     Each phase has R_s + L_s + a phase-dependent back-EMF source.
     The observer tracks electrical angle θ_e = pp · θ_m and drives
     the three back-EMF sources with sinusoids 120° apart.
+
+    Saliency support (T2.1). For surface-mounted PM motors
+    ``Ld_H == Lq_H == L_s_H``; for IPM / salient-pole rotors
+    ``Ld_H ≠ Lq_H`` and the model captures the dq-frame reluctance
+    torque ``T_rel = (3/2)·pp·(Ld−Lq)·i_d·i_q``. The abc topology
+    is built around the AVERAGE inductance ``L_s_H = (Ld+Lq)/2`` so
+    the high-frequency electrical impedance is correct on average;
+    full anisotropic di/dt coupling lives only in the dq frame and
+    is not modelled here. For most IPM control studies (FOC,
+    flux-weakening, MTPA) the average-L + reluctance-torque model
+    captures the dominant behaviour.
     """
     R_s_ohm: float
-    L_s_H: float
+    L_s_H: float                          # average inductance (Ld+Lq)/2
     psi_pm_Wb: float                     # PM flux linkage [Wb]
     pole_pairs: int                       # pp
     mech: Mechanical
+    # T2.1 — saliency parameters. Default to L_s for surface-PM.
+    Ld_H: float = 0.0
+    Lq_H: float = 0.0
+    # T2.1 — initial dq-axis currents (seed via inverse Park into the
+    # phase inductors' i0= before the kernel runs).
+    i_d_init_A: float = 0.0
+    i_q_init_A: float = 0.0
+    theta_init_rad: float = 0.0
     # Filled in by add_pmsm:
     phase_branch_ids: tuple = field(default_factory=tuple)   # 3 inductor ids
     bemf_source_ids:  tuple = field(default_factory=tuple)   # 3 source ids
     neutral_node: str = ""
+
+    @property
+    def is_salient(self) -> bool:
+        """True when ``Ld_H ≠ Lq_H`` (within float-precision tolerance)."""
+        return abs(self.Ld_H - self.Lq_H) > 1e-12 * max(
+            abs(self.Ld_H), abs(self.Lq_H), 1e-30)
+
+
+def _inverse_park_to_abc(i_d: float, i_q: float, theta_e: float
+                            ) -> "tuple[float, float, float]":
+    """Inverse Park + amplitude-invariant inverse Clarke from
+    ``(i_d, i_q)`` at electrical angle ``theta_e`` to phase
+    currents ``(i_a, i_b, i_c)``. Used to seed initial conditions on
+    the phase inductors when ``i_d_init`` / ``i_q_init`` are
+    non-zero.
+
+    Convention matches the FOC chain and the
+    :class:`MotorObserverBundle` dq computation:
+
+    * Park: ``[d; q] = [cos θ, sin θ; −sin θ, cos θ] · [α; β]``
+    * Inverse Park: ``[α; β] = [cos θ, −sin θ; sin θ, cos θ] · [d; q]``
+    * Inverse Clarke (amplitude-invariant): ``i_a = α``,
+      ``i_b = −½α + (√3/2)β``, ``i_c = −½α − (√3/2)β``.
+    """
+    cos_t = math.cos(theta_e)
+    sin_t = math.sin(theta_e)
+    i_alpha = i_d * cos_t - i_q * sin_t
+    i_beta = i_d * sin_t + i_q * cos_t
+    half = 0.5
+    sqrt3_half = math.sqrt(3.0) / 2.0
+    i_a = i_alpha
+    i_b = -half * i_alpha + sqrt3_half * i_beta
+    i_c = -half * i_alpha - sqrt3_half * i_beta
+    return (i_a, i_b, i_c)
 
 
 def add_pmsm(builder,
@@ -275,16 +328,21 @@ def add_pmsm(builder,
                 phase_nodes,
                 neutral_node: str,
                 R_s: float,
-                L_s: float,
+                L_s: Optional[float] = None,
+                Ld: Optional[float] = None,
+                Lq: Optional[float] = None,
                 psi_pm: float,
                 pole_pairs: int,
                 J: float,
                 B: float = 0.0,
                 T_load: float = 0.0,
                 T_load_fn=None,
+                i_d_init: float = 0.0,
+                i_q_init: float = 0.0,
+                theta_init: float = 0.0,
                 ) -> PMSM:
     """Add a 3-phase PMSM. Each phase: R_s + L_s + back-EMF source
-    in series between `phase_nodes[k]` and `neutral_node`.
+    in series between ``phase_nodes[k]`` and ``neutral_node``.
 
     Parameters
     ----------
@@ -292,19 +350,76 @@ def add_pmsm(builder,
         3-element sequence of phase terminal node names.
     neutral_node
         Star-point neutral.
-    R_s, L_s
-        Per-phase stator resistance + inductance.
+    R_s
+        Per-phase stator resistance (Ω).
+    L_s, Ld, Lq
+        Stator inductance specification. Use either ``L_s=`` (surface
+        PM / non-salient, single value) OR ``Ld=, Lq=`` (salient /
+        IPM, distinct dq-axis values). Combining both raises
+        ``ValueError``. When ``Ld != Lq`` the abc topology uses the
+        average ``L_s = (Ld + Lq) / 2``; the observer publishes the
+        reluctance torque ``T_rel = (3/2)·pp·(Ld−Lq)·i_d·i_q`` on
+        top of the magnet torque ``(3/2)·pp·ψ_pm·i_q``.
+
+        Caveat: the di/dt anisotropy along dq is NOT modelled in
+        abc — the high-frequency response uses the average L only.
+        For most IPM control work (FOC, flux-weakening, MTPA) the
+        reluctance-torque term is the dominant saliency effect and
+        this approximation is adequate. Full dq-frame reformulation
+        is a v2 follow-up.
     psi_pm
         PM flux linkage in Wb. Back-EMF peak = pp · ψ_pm · ω_m.
     pole_pairs
         Number of pole pairs (pp). ω_e = pp · ω_m.
     J, B, T_load, T_load_fn
         Mechanical parameters (see :func:`add_dc_motor`).
+    i_d_init, i_q_init
+        Initial dq-axis stator currents (A). Inverse-Park'd to abc
+        at electrical angle ``pp · theta_init`` and seeded into the
+        three phase inductors via ``i0=``. Useful for starting a
+        simulation from a non-zero FOC operating point (e.g. an MTPA
+        steady-state) without waiting for a 5-τ electrical startup
+        transient.
+    theta_init
+        Initial mechanical rotor angle (rad). Default 0.0. The
+        observer's ``mech.theta_rad`` is initialised to this value
+        so ``θ_e(t=0) = pp · theta_init``.
     """
     if len(phase_nodes) != 3:
         raise ValueError("phase_nodes must have 3 entries")
+
+    # ----- T2.1: resolve inductance specification ----------------------
+    if L_s is not None and (Ld is not None or Lq is not None):
+        raise ValueError(
+            "add_pmsm: pass either `L_s=` (single stator inductance for "
+            "surface-PM) OR `Ld=, Lq=` (salient/IPM), not both.")
+    if (Ld is None) != (Lq is None):
+        raise ValueError(
+            "add_pmsm: `Ld` and `Lq` must be set together (both or "
+            "neither).")
+    if Ld is not None and Lq is not None:
+        Ld_H = float(Ld)
+        Lq_H = float(Lq)
+        L_s_avg = 0.5 * (Ld_H + Lq_H)
+    elif L_s is not None:
+        L_s_avg = float(L_s)
+        Ld_H = L_s_avg
+        Lq_H = L_s_avg
+    else:
+        raise ValueError(
+            "add_pmsm: provide either `L_s=` or `Ld=, Lq=` — no "
+            "stator inductance specified.")
+
     mech = Mechanical(J_kgm2=J, B_Nms_per_rad=B,
                           T_load_Nm=T_load, T_load_fn=T_load_fn)
+    # Seed the mechanical angle so θ_e(t=0) = pp · theta_init.
+    mech.theta_rad = float(theta_init)
+
+    # Inverse-Park the dq ICs to abc once for the t=0 seed.
+    theta_e0 = float(pole_pairs) * float(theta_init)
+    i_a0, i_b0, i_c0 = _inverse_park_to_abc(
+        float(i_d_init), float(i_q_init), theta_e0)
+    i_abc_init = (i_a0, i_b0, i_c0)
 
     phase_branch_ids = []
     bemf_source_ids = []
@@ -315,8 +430,16 @@ def add_pmsm(builder,
         builder.add_resistor(f"{name}_Rs_{('a','b','c')[k]}",
                                 p_node, mid_r, float(R_s))
         ind_id = builder.graph.num_branches
+        # T2.1: seed i0= only when the IC is non-trivial. Passing
+        # i0=0.0 explicitly is equivalent but pollutes the kernel's
+        # initial_state vector with zeros that the auto-default already
+        # produces.
+        ind_kwargs = {}
+        if abs(i_abc_init[k]) > 1e-15:
+            ind_kwargs["i0"] = i_abc_init[k]
         builder.add_inductor(f"{name}_Ls_{('a','b','c')[k]}",
-                                mid_r, mid_l, float(L_s))
+                                mid_r, mid_l, L_s_avg,
+                                **ind_kwargs)
         phase_branch_ids.append(ind_id)
         # Back-EMF source (0V initially; observer modulates).
         bemf_id = builder.graph.num_branches
@@ -326,8 +449,11 @@ def add_pmsm(builder,
         bemf_source_ids.append(bemf_id)
 
     motor = PMSM(
-        R_s_ohm=R_s, L_s_H=L_s, psi_pm_Wb=psi_pm,
+        R_s_ohm=R_s, L_s_H=L_s_avg, psi_pm_Wb=psi_pm,
         pole_pairs=pole_pairs, mech=mech,
+        Ld_H=Ld_H, Lq_H=Lq_H,
+        i_d_init_A=float(i_d_init), i_q_init_A=float(i_q_init),
+        theta_init_rad=float(theta_init),
         phase_branch_ids=tuple(phase_branch_ids),
         bemf_source_ids=tuple(bemf_source_ids),
         neutral_node=neutral_node,
@@ -401,6 +527,27 @@ def _make_3phase_motor_observer(builder, motor, *, dt: float,
                 bemf_shape(theta_e, 0) * i_a +
                 bemf_shape(theta_e, 1) * i_b +
                 bemf_shape(theta_e, 2) * i_c)
+
+        # T2.1 — saliency reluctance torque
+        # ``T_rel = (3/2) · pp · (L_d − L_q) · i_d · i_q``. Only fires
+        # on salient rotors (Ld_H != Lq_H). The PMSM dataclass sets
+        # both to the same value for surface-PM, so this branch is
+        # cheap (a single subtract + abs compare) and zero-effect.
+        if (waveform == "sinusoidal"
+                and hasattr(motor, "is_salient")
+                and motor.is_salient):
+            # Clarke (amplitude-invariant) + Park to compute i_d, i_q.
+            i_alpha = (2.0 / 3.0) * (i_a - 0.5 * i_b - 0.5 * i_c)
+            i_beta = (i_b - i_c) / math.sqrt(3.0)
+            cos_t = math.cos(theta_e)
+            sin_t = math.sin(theta_e)
+            i_d_now = i_alpha * cos_t + i_beta * sin_t
+            i_q_now = -i_alpha * sin_t + i_beta * cos_t
+            T_rel = (1.5 * motor.pole_pairs
+                     * (motor.Ld_H - motor.Lq_H)
+                     * i_d_now * i_q_now)
+            T_em += T_rel
+
         motor.mech.integrate(t, T_em, dt)
 
     def b_extra_fn(t):
