@@ -178,6 +178,180 @@ headers moved from `pulsim/v2/<sub>/<file>.hpp` to
 `pulsim/<sub>/<file>.hpp`, and the CMake alias renamed from
 `pulsim::v2` to `pulsim::core`.
 
+## 1.5 → 1.6 — API stability notes
+
+Three call-site shapes changed between 1.5 and 1.6.x. Each one
+broke working GUI integrations on the bump; flagged here so future
+binders don't trip on the same shape.
+
+### `pulsim.sweep` — package → single function
+
+In 1.5, `pulsim.sweep` was a *subpackage* with helpers:
+
+```python
+# Pre-1.6 — no longer works
+from pulsim.sweep import Distribution, Cartesian, metrics
+
+dist = Distribution.normal(mean=10.0, std=1.0)
+grid = Cartesian({"R": [10, 20, 50]})
+kpi = metrics.rms_voltage("vout")
+```
+
+In 1.6, `pulsim.sweep` is a single *function* (Cartesian grid by
+default) and `pulsim.monte_carlo` is its random-draw sibling. The
+distribution / metric helper classes were retired — callers supply
+their own lambdas:
+
+```python
+# 1.6 — grid sweep (drop-in for the old Cartesian pattern)
+import pulsim as p
+
+def build_buck(R: float):
+    b = p.CircuitBuilder()
+    ...   # use R inside
+    return b
+
+def kpi(res, params):
+    import numpy as np
+    return {"V_out": float(np.asarray(res.v("vout"))[-1])}
+
+res = p.sweep(
+    build_buck,
+    params={"R": [10.0, 20.0, 50.0]},   # Cartesian grid
+    kpi_fn=kpi,
+    t_end=10e-3, dt=1e-6,
+)
+print(res.to_dataframe())
+```
+
+```python
+# 1.6 — Monte Carlo (drop-in for the old Distribution pattern)
+res = p.monte_carlo(
+    build_buck,
+    distributions={
+        "R": lambda rng: rng.normal(10.0, 1.0),    # ← was Distribution.normal
+    },
+    kpi_fn=kpi,
+    n_samples=500,
+    seed=42,                                         # reproducible
+    t_end=10e-3, dt=1e-6,
+)
+```
+
+Each `distributions[name]` is a callable that receives a
+`numpy.random.Generator` (the default RNG seeded by `seed=`) and
+returns a single float. Use `rng.normal`, `rng.uniform`,
+`rng.lognormal`, etc. directly — no helper class needed.
+
+| 1.5 helper | 1.6 replacement |
+|---|---|
+| `pulsim.sweep.Distribution.normal(μ, σ)` | `lambda rng: rng.normal(μ, σ)` |
+| `pulsim.sweep.Distribution.uniform(a, b)` | `lambda rng: rng.uniform(a, b)` |
+| `pulsim.sweep.Distribution.lognormal(μ, σ)` | `lambda rng: rng.lognormal(μ, σ)` |
+| `pulsim.sweep.Cartesian({...})` | `params={...}` kwarg on `p.sweep` |
+| `pulsim.sweep.metrics.rms_voltage(name)` | KPI lambda — extract the trace, compute RMS yourself |
+| `pulsim.sweep.metrics.peak_current(name)` | KPI lambda — `np.max(np.abs(res.i(name)))` |
+| `pulsim.sweep.metrics.settling_time(...)` | KPI lambda — your own first-time-below-2 %-band logic |
+
+The 1.6 `kpi_fn` returns a `dict[str, float]`. Combine multiple
+KPIs in one pass:
+
+```python
+def kpi(res, params):
+    import numpy as np
+    vout = np.asarray(res.v("vout"))
+    iL = np.asarray(res.i("L1"))
+    return {
+        "V_out_ss": float(vout[-1]),
+        "V_out_rms": float(np.sqrt(np.mean(vout ** 2))),
+        "I_L_peak": float(np.max(np.abs(iL))),
+    }
+```
+
+This is a deliberate API simplification — the 1.5 helper classes
+duplicated what callers can express in three lines of numpy.
+
+### `add_rc_snubber` — positional → keyword-only
+
+```python
+# Pre-1.6 — used to accept positional args
+p.add_rc_snubber(builder, R, C, from_node, to_node)   # TypeError in 1.6
+
+# 1.6 — keyword-only
+p.add_rc_snubber(
+    builder,
+    R=1.0, C=470e-9,
+    from_node="vdc", to_node="sw",
+    name_prefix="Snub",     # optional, defaults to "Snub"
+)
+```
+
+The full 1.6 signature:
+
+```python
+def add_rc_snubber(
+    builder, *,
+    R: float, C: float,
+    from_node: str, to_node: str,
+    name_prefix: str = "Snub",
+) -> None
+```
+
+Positional calls now raise `TypeError: add_rc_snubber() takes 1
+positional argument but 5 were given` — the `*,` after `builder`
+forces every parameter to be named.
+
+### PMSM / VSI / motors — module-level functions, no `*Params` struct
+
+In 1.5 some helpers had a Pre-1.0-style POD params struct (e.g.
+`PmsmParams(R_s=..., L_s=...)` → `circuit.add_pmsm(params)`).
+1.6 standardised on module-level functions that take the parameters
+as **direct kwargs**. There's no `PmsmParams` / `ThreePhaseVsiParams`
+struct — pass the parameters directly:
+
+```python
+# 1.6
+motor = p.add_pmsm(
+    builder,
+    name="M1",
+    phase_nodes=("ua", "ub", "uc"),
+    neutral_node="nn",
+    R_s=0.5, Ld=1.8e-3, Lq=2.2e-3,   # T2.1: per-axis Ld/Lq for IPM
+    psi_pm=0.05, pole_pairs=4,
+    J=1e-3, B=1e-4,
+    i_d_init=0.0, i_q_init=0.0,       # T2.1: per-axis ICs
+    theta_init=0.0,
+)
+```
+
+Same shape for `add_three_phase_vsi`, `add_bldc`,
+`add_induction_motor`, etc. — pass the parameters as keyword args
+on the module-level function; the helper returns a small dataclass
+(e.g. `PMSM`, `BLDC`) carrying the live state. There is no separate
+params struct.
+
+If a GUI converter built against the old `Params` shape needs to
+construct kwargs from a settings dict, just splat it:
+
+```python
+pmsm_kwargs = {
+    "name": "M1",
+    "phase_nodes": ("ua", "ub", "uc"),
+    "neutral_node": "nn",
+    "R_s": settings["Rs"],
+    "Ld": settings["Ld"],
+    "Lq": settings["Lq"],
+    "psi_pm": settings["psi_pm"],
+    "pole_pairs": settings["pp"],
+    "J": settings["J"],
+    "B": settings.get("B", 0.0),
+}
+motor = p.add_pmsm(builder, **pmsm_kwargs)
+```
+
+This is intentional — no parallel `*Params` data structure to keep
+in sync with the kwarg list.
+
 ## See also
 
 - `examples/scripts/` — 20 runnable reference scripts.
