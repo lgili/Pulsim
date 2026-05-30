@@ -138,6 +138,43 @@ public:
             // 4. Take BDF2 step
             auto [x_new, _err] = bdf2_step(A_cur, b_fn, t, x, h_use, bdf2_state);
 
+            // 4b. Finite-value guard (GUI integration findings T1.3).
+            // BDF2 is fixed-step — we can't shrink h to retry.
+            // If the step produced NaN/Inf, the only thing we can
+            // do is fail loudly with an actionable error so the
+            // user notices and switches engine / audits their
+            // b_extra_fn / etc. Pre-fix the NaN propagated silently
+            // into the result, where downstream plots and metrics
+            // surfaced "all NaN" without context.
+            {
+                bool finite = true;
+                for (Eigen::Index i = 0; i < x_new.size(); ++i) {
+                    if (!std::isfinite(x_new(i))) { finite = false; break; }
+                }
+                if (!finite) {
+                    throw std::runtime_error(
+                        std::string{"PEDSimulator (BDF2): step "}
+                        + "produced NaN/Inf at t="
+                        + std::to_string(t)
+                        + ", h_fixed="
+                        + std::to_string(h_use)
+                        + ". Common root causes:\n"
+                        + "  (1) the LTI A matrix for the current "
+                          "switch mask is singular or ill-conditioned;\n"
+                        + "  (2) a Python b_extra_fn (e.g. motor / "
+                          "control observer) returned NaN;\n"
+                        + "  (3) a switch_fn returned a mask whose "
+                          "dynamics blow up.\n"
+                        + "Workarounds: try engine='pwl' (T1.2 auto-LM "
+                          "handles rank-deficient Jacobians); "
+                          "switch to integrator='rk45' or 'auto' "
+                          "(variable-step adaptive shrinks dt around "
+                          "stiff regions); shrink h_bdf2; or audit "
+                          "b_extra_fn / switch_fn for NaN-producing "
+                          "branches.");
+                }
+            }
+
             // 5. Commit
             t += h_use;
             x = std::move(x_new);

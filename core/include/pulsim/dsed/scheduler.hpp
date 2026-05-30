@@ -214,6 +214,39 @@ public:
             // 4. DOPRI5 step (FSAL)
             auto [x_new, err] = step(f, t, x, h_use, rk_state);
 
+            // 4b. Finite-value guard (GUI integration findings T1.3).
+            // If `f(t, x)` or any RK stage produced NaN/Inf — possibly
+            // because the LTI A matrix for the current mask is so
+            // ill-conditioned that A·x overflows, or because a Python
+            // b_extra_fn divided by zero — `x_new`/`err` propagates
+            // it. Pre-fix the controller would treat e=NaN as "reject"
+            // (NaN comparisons always false), shrink h, retry, and
+            // after `max_rejects` fire an unhelpful generic
+            // `5 consecutive rejections (err=nan, h=...)` error.
+            //
+            // We now detect the NaN/Inf at the RK45 level, log a
+            // dedicated nan_streak_ counter, and after `kNanMaxStreak`
+            // throw an actionable error pointing the caller at the
+            // common root causes. On non-streak NaN we still shrink
+            // dt and retry — same as a regular step rejection.
+            if (!is_all_finite_(x_new) || !is_all_finite_(err)) {
+                rk_state.invalidate();
+                ++nan_streak_;
+                ++result.n_reject;
+                if (nan_streak_ >= kNanMaxStreak) {
+                    throw std::runtime_error(
+                        nan_error_message_(t, h_use, "RK45"));
+                }
+                // Aggressive shrink — a NaN step usually means
+                // the current dt is way too coarse for the dynamics
+                // at this mask, or the dynamics are uncomputable
+                // (singular A). Halve h_use and retry; if the
+                // shrink hits dt_min, kNanMaxStreak will bail us out.
+                h = std::max(h_use * Real{0.1}, Real{1e-18});
+                continue;
+            }
+            nan_streak_ = 0;
+
             // 5. PI accept/reject
             auto [accepted, h_next] = controller_.accept(err, x, x_new, h_use);
             if (!accepted) {
@@ -429,6 +462,46 @@ private:
         ++result.n_events;
     }
 
+    /// Whether every entry of `v` is finite (not NaN, not Inf).
+    [[nodiscard]] static bool is_all_finite_(const Vector& v) noexcept {
+        for (Eigen::Index i = 0; i < v.size(); ++i) {
+            if (!std::isfinite(v(i))) return false;
+        }
+        return true;
+    }
+
+    /// Compose the actionable error message thrown when the RK45 step
+    /// path produces NaN/Inf for `kNanMaxStreak` consecutive iterations.
+    [[nodiscard]] std::string nan_error_message_(Real t, Real h,
+                                                    const char* sched) const {
+        std::string msg{"PEDSimulator ("};
+        msg += sched;
+        msg += "): step produced NaN/Inf for ";
+        msg += std::to_string(kNanMaxStreak);
+        msg += " consecutive iterations at t=";
+        msg += std::to_string(t);
+        msg += ", h=";
+        msg += std::to_string(h);
+        msg += ". Common root causes:\n";
+        msg += "  (1) the LTI A matrix for the current switch mask "
+                "is numerically singular or so ill-conditioned that "
+                "A·x overflows IEEE-754 double precision;\n";
+        msg += "  (2) a Python b_extra_fn (e.g. a motor / control "
+                "observer) returned NaN because it divided by zero "
+                "or read uninitialized state;\n";
+        msg += "  (3) a switch_fn returned a mask whose extracted "
+                "state-space dynamics blow up.\n";
+        msg += "Workarounds while you investigate: pass "
+                "`engine='pwl'` (more robust on multi-stage switched "
+                "topologies — T1.2 auto-LM handles rank-deficient "
+                "Jacobians transparently), or tighten `dt_max` to "
+                "force more event samples, or audit your "
+                "b_extra_fn / switch_fn for NaN-producing branches.";
+        return msg;
+    }
+
+    static constexpr std::size_t kNanMaxStreak = 3;
+
     System& system_;
     SwitchFn switch_fn_;
     PIController controller_;
@@ -437,6 +510,7 @@ private:
     Real dt_max_;
     std::size_t store_every_;
     StateProjectionFn state_projection_;
+    std::size_t nan_streak_ = 0;
 };
 
 }  // namespace pulsim::dsed

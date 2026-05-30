@@ -240,6 +240,37 @@ public:
                     continue;
                 }
                 auto [x_new_rk, err] = step(f, t, x, h_use, rk_state);
+                // Finite-value guard (T1.3). See scheduler.hpp for
+                // the full root-cause / workaround documentation.
+                bool finite_rk = true;
+                for (Eigen::Index i = 0; i < x_new_rk.size(); ++i) {
+                    if (!std::isfinite(x_new_rk(i))) { finite_rk = false; break; }
+                }
+                for (Eigen::Index i = 0; finite_rk && i < err.size(); ++i) {
+                    if (!std::isfinite(err(i))) { finite_rk = false; break; }
+                }
+                if (!finite_rk) {
+                    rk_state.invalidate();
+                    ++nan_streak_;
+                    ++result.n_reject;
+                    if (nan_streak_ >= kNanMaxStreakAuto) {
+                        throw std::runtime_error(
+                            std::string{"PEDSimulator (auto/RK45): step "}
+                            + "produced NaN/Inf for "
+                            + std::to_string(kNanMaxStreakAuto)
+                            + " consecutive iterations at t="
+                            + std::to_string(t)
+                            + ", h=" + std::to_string(h_use)
+                            + ". Try engine='pwl' (T1.2 auto-LM "
+                              "handles multi-stage switched topologies), "
+                              "shrink dt_max, or audit your "
+                              "switch_fn / b_extra_fn for NaN-producing "
+                              "branches.");
+                    }
+                    h_rk45 = std::max(h_use * Real{0.1}, Real{1e-18});
+                    continue;
+                }
+                nan_streak_ = 0;
                 auto [accepted_rk, h_next] =
                     rk45_controller_.accept(err, x, x_new_rk, h_use);
                 accepted = accepted_rk;
@@ -252,6 +283,26 @@ public:
                 }
                 x_new = std::move(x_new_rk);
                 ++result.n_rk45_steps;
+            }
+
+            // Finite-value guard for the BDF2 branch (T1.3). BDF2 is
+            // fixed-step → no retry, throw with same message as
+            // scheduler_bdf2.hpp.
+            if (choice == IntegratorChoice::BDF2) {
+                bool finite_b = true;
+                for (Eigen::Index i = 0; i < x_new.size(); ++i) {
+                    if (!std::isfinite(x_new(i))) { finite_b = false; break; }
+                }
+                if (!finite_b) {
+                    throw std::runtime_error(
+                        std::string{"PEDSimulator (auto/BDF2): step "}
+                        + "produced NaN/Inf at t="
+                        + std::to_string(t)
+                        + ", h_fixed=" + std::to_string(h_use)
+                        + ". Try engine='pwl', integrator='rk45', "
+                        + "shrink h_bdf2, or audit b_extra_fn / "
+                        + "switch_fn for NaN-producing branches.");
+                }
             }
 
             // 3. Commit accepted step
@@ -347,6 +398,11 @@ private:
     Real dt_max_;
     Real h_bdf2_;
     std::size_t store_every_;
+    // T1.3 — consecutive RK45 NaN/Inf streak counter (BDF2 throws on
+    // first NaN, so it has no streak; reset on every clean accepted
+    // step).
+    std::size_t nan_streak_ = 0;
+    static constexpr std::size_t kNanMaxStreakAuto = 3;
 };
 
 }  // namespace pulsim::dsed
