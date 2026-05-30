@@ -130,8 +130,15 @@ class TestBindPiToSwitch:
 # Requirement: closed_loops= composition + conflict detection
 # ---------------------------------------------------------------------------
 class TestComposition:
-    def test_rejecting_conflicting_callback_wiring(self):
-        # Spec scenario: "Rejecting conflicting callback wiring".
+    def test_composes_closed_loops_with_extra_switch_fn(self):
+        # v1.6.5 (T1.1 fix): closed_loops + an extra user switch_fn
+        # must compose via mask-OR so a closed-loop stage can run
+        # alongside another openly-switched stage in the same call.
+        # Pre-fix this raised ``ValueError("pass closed_loops OR
+        # switch_fn/step_observer, not both")``. See
+        # `test_closed_loops_compose_switch_fn.py` for the full
+        # composition contract; this case is the spec scenario
+        # "Composing closed_loops with an extra callback".
         b = _build_buck()
         pi = ps.PIController(Kp=0.08, Ki=40.0)
         loop = ps.bind_pi_to_switch(
@@ -141,14 +148,17 @@ class TestComposition:
         )
 
         def custom_fn(_t):
+            # Empty mask contribution — the loop still owns Q1; the
+            # user contributes nothing extra. The point is that the
+            # call itself must SUCCEED rather than rejecting.
             return ps.SwitchStateMask(b.graph.num_switches)
 
-        with pytest.raises(ValueError, match="closed_loops"):
-            ps.simulate(
-                b, t_end=1e-3, dt=1e-6,
-                closed_loops=[loop],
-                switch_fn=custom_fn,
-            )
+        res = ps.simulate(
+            b, t_end=1e-3, dt=1e-6,
+            closed_loops=[loop],
+            switch_fn=custom_fn,
+        )
+        assert res.num_steps() > 0
 
     def test_closed_loops_single(self):
         # Single-loop composition path should give the same result as

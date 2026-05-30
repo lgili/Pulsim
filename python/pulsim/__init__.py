@@ -1195,17 +1195,32 @@ def simulate(
     _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
     if closed_loops:
-        if switch_fn is not None or step_observer is not None:
-            raise ValueError(
-                "pass closed_loops OR switch_fn/step_observer, not "
-                "both — the helper composes both callbacks "
-                "internally."
-            )
+        # Compose closed_loops with any user-supplied switch_fn /
+        # step_observer. Pre-v1.6.5 this raised ValueError because
+        # the loop owns its own switch indices and observer state;
+        # but real drives need this composition: e.g. a closed-loop
+        # PFC boost stage (owns the boost MOSFET via ClosedLoop) +
+        # an openly-switched 3φ VSI (owns its own switches via a
+        # separate switch_fn) + a PMSM observer (b_extra_fn /
+        # step_observer). Each owner addresses a disjoint set of
+        # switch indices, so the merged switch_fn is the bitwise OR
+        # of every contributor's mask — exactly what
+        # `make_combined_switch_fn` already does. Step observers
+        # compose by running each callback in registration order:
+        # closed-loop observers first (they update PI state /
+        # closed-loop bookkeeping), then the user's step_observer
+        # (e.g. PMSM mechanical state, custom probes).
         loops = list(closed_loops)
         n_sw_compose = builder.graph.num_switches
         per_switch_fns = [loop.switch_fn for loop in loops]
+        if switch_fn is not None:
+            per_switch_fns.append(switch_fn)
         switch_fn = make_combined_switch_fn(n_sw_compose, per_switch_fns)
-        per_observers = [loop.step_observer for loop in loops]
+
+        per_observers: list[Callable[[float, object], None]] = [
+            loop.step_observer for loop in loops]
+        if step_observer is not None:
+            per_observers.append(step_observer)
 
         def _composed_observer(t: float, x) -> None:
             for obs in per_observers:
