@@ -101,6 +101,28 @@ using NonlinearRefreshFn = std::function<
     Real last_dx_norm  = std::numeric_limits<Real>::infinity();
     Real last_res_norm = std::numeric_limits<Real>::infinity();
 
+    // ----- Auto-LM detection state (GUI integration findings T1.2) -----
+    // Two failure modes promote `enable_lm` to true mid-solve:
+    //
+    // 1. **Singular factorize.** The combined Jacobian is numerically
+    //    rank-deficient. The user described this as the
+    //    `PwlStateSpaceCache: numerically singular` symptom on a
+    //    multi-stage switched topology (e.g. boost MOSFET at 65 kHz +
+    //    a VSI at 20 kHz). LM with λ·I diagonal bump cures it.
+    //
+    // 2. **Near-miss stall.** Newton hits residual ≈ 0 (well below
+    //    `tol_res`) but `||dx||` plateaus above `tol_dx`. Indicates
+    //    a flat valley in the solution manifold — Newton's full step
+    //    overshoots and walks the valley without progressing. LM's
+    //    diagonal damping curls the step back toward the descent
+    //    direction.
+    //
+    // Pre-fix the user had to set `enable_newton_lm=True` manually on
+    // these topologies (plus often a physical RC snubber). After this
+    // change, default settings recover automatically.
+    constexpr Size kNearMissStreak = Size{3};
+    Size near_miss_streak = Size{0};
+
     for (Size iter = 0; iter < max_iters; ++iter) {
         // Defense-in-depth (audit 2026-05 critic): a non-finite iterate means
         // a NaN/Inf entered the system — e.g. a bad device parameter that
@@ -249,10 +271,16 @@ using NonlinearRefreshFn = std::function<
                     iter));
             }
             if (!solver->factorize(J_combined)) {
-                throw std::runtime_error(std::format(
-                    "solve_with_newton: combined matrix is "
-                    "numerically singular at iter {}",
-                    iter));
+                // Auto-LM promotion (GUI integration findings T1.2):
+                // numerically singular Jacobian usually means a
+                // multi-stage switched topology hit a mask combo
+                // where multiple switches commutate together and
+                // a regularized solve is needed. Instead of
+                // throwing, flip into LM mode and retry this
+                // iteration via `continue` — the LM branch above
+                // builds J_lm = J + λ·I, which restores full rank.
+                enable_lm = true;
+                continue;
             }
             Vector neg_f = -f_combined;
             solver->solve(neg_f, dx);
@@ -293,6 +321,25 @@ using NonlinearRefreshFn = std::function<
         last_res_norm = f_combined.lpNorm<Eigen::Infinity>();
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;
+        }
+        // Auto-LM promotion #2: near-miss stall (GUI T1.2).
+        // Residual is essentially zero (we're at a fixed point of f)
+        // but `dx` plateaus above `tol_dx` — Newton's full step
+        // overshoots a flat valley in the solution manifold and
+        // ping-pongs without progressing. Diagnostic the user
+        // reported: `||residual||_inf ≈ 1e-13`,
+        // `||dx||_inf ≈ 4e-6`. LM's diagonal damping curls the
+        // step back toward the descent direction. Promote after a
+        // consecutive streak so a single off-iter doesn't trigger.
+        if (!enable_lm
+                && last_res_norm < tol_res
+                && last_dx_norm >= tol_dx) {
+            ++near_miss_streak;
+            if (near_miss_streak >= kNearMissStreak) {
+                enable_lm = true;
+            }
+        } else {
+            near_miss_streak = Size{0};
         }
     }
 
