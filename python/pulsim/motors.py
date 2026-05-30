@@ -52,6 +52,7 @@ __all__ = [
     "PMSM",
     "BLDC",
     "InductionMotor",
+    "MotorObserverBundle",
     "add_dc_motor",
     "make_dc_motor_observer",
     "add_pmsm",
@@ -62,6 +63,154 @@ __all__ = [
     "make_induction_motor_observer",
     "im_parameters_from_nameplate",
 ]
+
+
+# =============================================================================
+# Motor observer bundle — exposes per-step traces (T2.2)
+# =============================================================================
+
+class MotorObserverBundle:
+    """Bundles a motor's ``(step_observer, b_extra_fn)`` pair together
+    with per-step trace buffers for ω, θ, i_d/i_q, T_em.
+
+    Why this exists (GUI integration findings T2.2). The C++ PMSM /
+    BLDC / DC handles only expose topology metadata
+    (``neutral_node``, branch ids). The rotor state ω/θ lives inside
+    the observer's closure and was unreachable from a
+    :class:`SimulationResult`. Every motor study needs a speed/angle
+    plot — wrapping the observer in a throwaway probe was the
+    documented workaround. This bundle fixes that.
+
+    Backward compatibility. The bundle is *callable* (it IS the
+    step_observer) and *iterable* — existing call sites can keep
+    using::
+
+        obs, b_extra = p.make_pmsm_observer(b, motor, dt=DT)
+
+    and `obs` is a normal step_observer Callable[[float, Sequence],
+    None]. New callers can keep the bundle reference and read::
+
+        bundle = p.make_pmsm_observer(b, motor, dt=DT)
+        res = p.simulate(..., step_observer=bundle,
+                          b_extra_fn=bundle.b_extra_fn)
+        plt.plot(bundle.times, bundle.omega_rad_s)
+        plt.plot(bundle.times, bundle.theta_rad)
+
+    Or via :class:`SimulationResult`::
+
+        res.signal(f"{bundle.name}.omega")   # rotor speed [rad/s]
+        res.signal(f"{bundle.name}.theta")   # rotor angle [rad]
+        res.signal(f"{bundle.name}.T_em")    # electromagnetic torque [Nm]
+        res.signal(f"{bundle.name}.i_d")     # d-axis current [A] (3φ only)
+        res.signal(f"{bundle.name}.i_q")     # q-axis current [A] (3φ only)
+
+    The auto-attach happens inside :func:`pulsim.simulate` — the user
+    doesn't need to wire it manually.
+
+    Parameters
+    ----------
+    name
+        Trace prefix for :meth:`attach_to_result`. Defaults to
+        ``"M1"`` — match the motor's ``name=`` kwarg.
+    has_dq
+        Whether to populate the ``i_d``/``i_q`` lists. True for 3-phase
+        motors (PMSM / BLDC / IM); False for the DC motor (which has
+        ``i_a`` instead).
+    """
+
+    __slots__ = (
+        "_inner_step",
+        "b_extra_fn",
+        "name",
+        "has_dq",
+        "times",
+        "omega_rad_s",
+        "theta_rad",
+        "T_em",
+        "i_d",
+        "i_q",
+        "i_a",
+        "i_b",
+        "i_c",
+    )
+
+    def __init__(
+        self,
+        inner_step,
+        b_extra_fn,
+        *,
+        name: str = "M1",
+        has_dq: bool = True,
+    ) -> None:
+        self._inner_step = inner_step
+        self.b_extra_fn = b_extra_fn
+        self.name = name
+        self.has_dq = has_dq
+        self.times: list = []
+        self.omega_rad_s: list = []
+        self.theta_rad: list = []
+        self.T_em: list = []
+        # 3φ-only buffers (always present so the slots layout is
+        # uniform; left empty for DC motor).
+        self.i_d: list = []
+        self.i_q: list = []
+        self.i_a: list = []
+        self.i_b: list = []
+        self.i_c: list = []
+
+    def __call__(self, t, x):
+        # `_inner_step` is the per-motor closure that updates the
+        # `mech` state AND pushes into our buffers. We forward the
+        # call verbatim; the closure has captured our `self`.
+        return self._inner_step(t, x)
+
+    def __iter__(self):
+        # Legacy unpacking:  obs, b_extra = make_pmsm_observer(...)
+        yield self
+        yield self.b_extra_fn
+
+    def __getitem__(self, idx):
+        return (self, self.b_extra_fn)[idx]
+
+    # -------- Trace publishing ---------------------------------------
+    def to_dict(self):
+        """Return a ``{trace_name: numpy.ndarray}`` snapshot of the
+        accumulated buffers. Pulls in numpy lazily so import-time cost
+        stays low."""
+        import numpy as np
+        out = {
+            f"{self.name}.t":       np.asarray(self.times, dtype=float),
+            f"{self.name}.omega":   np.asarray(self.omega_rad_s, dtype=float),
+            f"{self.name}.theta":   np.asarray(self.theta_rad, dtype=float),
+            f"{self.name}.T_em":    np.asarray(self.T_em, dtype=float),
+        }
+        if self.has_dq:
+            out[f"{self.name}.i_d"] = np.asarray(self.i_d, dtype=float)
+            out[f"{self.name}.i_q"] = np.asarray(self.i_q, dtype=float)
+            out[f"{self.name}.i_a"] = np.asarray(self.i_a, dtype=float)
+            out[f"{self.name}.i_b"] = np.asarray(self.i_b, dtype=float)
+            out[f"{self.name}.i_c"] = np.asarray(self.i_c, dtype=float)
+        else:
+            # DC motor — armature current under the "i_a" key.
+            out[f"{self.name}.i_a"] = np.asarray(self.i_a, dtype=float)
+        return out
+
+    def attach_to_result(self, result) -> None:
+        """Stash this bundle's traces on `result` so
+        ``result.signal('M1.omega')`` resolves.
+
+        Idempotent: callable multiple times. The traces are taken from
+        the bundle's current buffers (so call this AFTER the simulation
+        finishes).
+        """
+        traces = getattr(result, "_motor_traces", None)
+        if traces is None:
+            traces = {}
+            try:
+                result._motor_traces = traces
+            except AttributeError:  # pragma: no cover — defensive
+                return
+        traces.update(self.to_dict())
 
 
 # =============================================================================
@@ -197,8 +346,9 @@ def add_dc_motor(builder,
     return motor
 
 
-def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float):
-    """Build a (step_observer, b_extra_fn) pair for a DC motor.
+def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float,
+                              name: str = "M1") -> "MotorObserverBundle":
+    """Build a :class:`MotorObserverBundle` for a DC motor.
 
     The observer:
       1. Reads i_armature from the state vector.
@@ -209,6 +359,19 @@ def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float):
     The b_extra_fn injects the stashed back-EMF into the source's
     constraint row at every step.
 
+    The bundle exposes ``times``, ``omega_rad_s``, ``theta_rad``,
+    ``T_em`` and ``i_a`` (armature current) — populated by every
+    step_observer call. After :func:`pulsim.simulate`, the same
+    traces are reachable via :meth:`SimulationResult.signal`
+    (e.g. ``res.signal("M1.omega")``). See
+    :func:`make_pmsm_observer` for the full bundle contract;
+    note: DC motors don't define dq currents, so the ``i_d``/``i_q``
+    buffers stay empty (``has_dq=False``).
+
+    Backward compatibility. Existing call sites that do
+    ``obs, b_extra = make_dc_motor_observer(...)`` keep working —
+    the bundle iterates as a 2-tuple.
+
     Parameters
     ----------
     builder
@@ -218,6 +381,8 @@ def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float):
     dt
         Mechanical integration step. Typically equal to the
         simulation dt.
+    name
+        Trace prefix for :meth:`MotorObserverBundle.attach_to_result`.
     """
     state_size = builder.pool.state_size(builder.graph)
     i_idx = builder.pool.branch_var_id_for_inductor(
@@ -226,12 +391,22 @@ def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float):
         motor.bemf_source_branch_id, builder.graph)
 
     bemf = {"V": 0.0}
+    bundle = MotorObserverBundle(
+        inner_step=None, b_extra_fn=None,
+        name=name, has_dq=False,
+    )
 
     def step_observer(t, x):
         i_a = float(x[i_idx])
         T_em = motor.Kt_Nm_per_A * i_a
         motor.mech.integrate(t, T_em, dt)
         bemf["V"] = motor.Ke_V_s_per_rad * motor.mech.omega_rad_s
+
+        bundle.times.append(float(t))
+        bundle.omega_rad_s.append(float(motor.mech.omega_rad_s))
+        bundle.theta_rad.append(float(motor.mech.theta_rad))
+        bundle.T_em.append(float(T_em))
+        bundle.i_a.append(i_a)
 
     def b_extra_fn(t):
         out = [0.0] * state_size
@@ -242,7 +417,9 @@ def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float):
         out[src_idx] = -bemf["V"]
         return out
 
-    return step_observer, b_extra_fn
+    bundle._inner_step = step_observer
+    bundle.b_extra_fn = b_extra_fn
+    return bundle
 
 
 # =============================================================================
@@ -336,9 +513,14 @@ def add_pmsm(builder,
 
 
 def _make_3phase_motor_observer(builder, motor, *, dt: float,
-                                    waveform: str):
+                                    waveform: str,
+                                    name: str = "M1"):
     """Shared implementation for PMSM (sinusoidal) and BLDC
-    (trapezoidal) back-EMF observers."""
+    (trapezoidal) back-EMF observers.
+
+    Returns a :class:`MotorObserverBundle` carrying per-step traces
+    (ω, θ, T_em, i_a/i_b/i_c, i_d/i_q).
+    """
     state_size = builder.pool.state_size(builder.graph)
     phase_idx = tuple(
         builder.pool.branch_var_id_for_inductor(bid, builder.graph)
@@ -348,6 +530,16 @@ def _make_3phase_motor_observer(builder, motor, *, dt: float,
         for sid in motor.bemf_source_ids)
 
     bemf = {"v": (0.0, 0.0, 0.0)}
+    # T2.2: trace publishing. ``bundle`` is the callable we return.
+    # We build it first as a forward declaration, then point its
+    # _inner_step at the closure below. The closure captures
+    # ``bundle`` so it can push samples.
+    bundle = MotorObserverBundle(
+        inner_step=None,   # set after closure is defined
+        b_extra_fn=None,   # set after closure is defined
+        name=name,
+        has_dq=True,
+    )
 
     def bemf_shape(theta_e: float, k: int) -> float:
         """Back-EMF shape for phase k (k=0,1,2 → a,b,c).
@@ -374,6 +566,8 @@ def _make_3phase_motor_observer(builder, motor, *, dt: float,
         # 120°-flat-top: f(θ) = clip(2 sin(θ), -1, +1) gives a
         # roughly trapezoidal shape with flat 60° regions.
         return max(-1.0, min(1.0, 2.0 * s))
+
+    sqrt3 = math.sqrt(3.0)
 
     def step_observer(t, x):
         i_a = float(x[phase_idx[0]])
@@ -403,20 +597,72 @@ def _make_3phase_motor_observer(builder, motor, *, dt: float,
                 bemf_shape(theta_e, 2) * i_c)
         motor.mech.integrate(t, T_em, dt)
 
+        # T2.2: publish traces. Clarke (amplitude-invariant) → Park.
+        # Matches the convention used in `pulsim.motor_helpers.FOC`:
+        #   α = (2/3)·(i_a − ½ i_b − ½ i_c)
+        #   β = (1/√3)·(i_b − i_c)
+        #   [d; q] = [cos θ, sin θ; −sin θ, cos θ] · [α; β]
+        i_alpha = (2.0 / 3.0) * (i_a - 0.5 * i_b - 0.5 * i_c)
+        i_beta = (i_b - i_c) / sqrt3
+        cos_t = math.cos(theta_e)
+        sin_t = math.sin(theta_e)
+        i_d_now = i_alpha * cos_t + i_beta * sin_t
+        i_q_now = -i_alpha * sin_t + i_beta * cos_t
+
+        bundle.times.append(float(t))
+        bundle.omega_rad_s.append(float(motor.mech.omega_rad_s))
+        bundle.theta_rad.append(float(motor.mech.theta_rad))
+        bundle.T_em.append(float(T_em))
+        bundle.i_a.append(i_a)
+        bundle.i_b.append(i_b)
+        bundle.i_c.append(i_c)
+        bundle.i_d.append(float(i_d_now))
+        bundle.i_q.append(float(i_q_now))
+
     def b_extra_fn(t):
         out = [0.0] * state_size
         for k in range(3):
             out[src_idx[k]] = -bemf["v"][k]
         return out
 
-    return step_observer, b_extra_fn
+    bundle._inner_step = step_observer
+    bundle.b_extra_fn = b_extra_fn
+    return bundle
 
 
-def make_pmsm_observer(builder, motor: PMSM, *, dt: float):
-    """Build a (step_observer, b_extra_fn) pair for a PMSM with
-    sinusoidal back-EMF."""
+def make_pmsm_observer(builder, motor: PMSM, *, dt: float,
+                          name: str = "M1") -> "MotorObserverBundle":
+    """Build a :class:`MotorObserverBundle` for a PMSM with sinusoidal
+    back-EMF.
+
+    The bundle is a callable step_observer that also exposes
+    per-step trace buffers (``times``, ``omega_rad_s``, ``theta_rad``,
+    ``T_em``, ``i_d``, ``i_q``, ``i_a``/``i_b``/``i_c``). It still
+    unpacks as ``(step_observer, b_extra_fn)`` for backward
+    compatibility::
+
+        # Legacy (works unchanged):
+        obs, b_extra = p.make_pmsm_observer(b, motor, dt=DT)
+        res = p.simulate(b, ..., step_observer=obs, b_extra_fn=b_extra)
+
+        # New: keep the bundle for trace access.
+        bundle = p.make_pmsm_observer(b, motor, dt=DT, name="M1")
+        res = p.simulate(b, ..., step_observer=bundle,
+                          b_extra_fn=bundle.b_extra_fn)
+        # After simulate, traces are auto-attached to res:
+        plt.plot(res.signal("M1.omega"))
+        plt.plot(bundle.omega_rad_s)   # same data, raw list
+
+    Parameters
+    ----------
+    name
+        Trace prefix. Default ``"M1"`` matches :func:`add_pmsm`'s
+        default device name; override when running multiple motors
+        in the same circuit.
+    """
     return _make_3phase_motor_observer(builder, motor, dt=dt,
-                                            waveform="sinusoidal")
+                                            waveform="sinusoidal",
+                                            name=name)
 
 
 # =============================================================================
@@ -463,11 +709,13 @@ def add_bldc(builder,
     )
 
 
-def make_bldc_observer(builder, motor: BLDC, *, dt: float):
-    """Build a (step_observer, b_extra_fn) pair for a BLDC with
-    trapezoidal back-EMF."""
+def make_bldc_observer(builder, motor: BLDC, *, dt: float,
+                          name: str = "M1") -> "MotorObserverBundle":
+    """Build a :class:`MotorObserverBundle` for a BLDC with trapezoidal
+    back-EMF. See :func:`make_pmsm_observer` for the bundle API."""
     return _make_3phase_motor_observer(builder, motor, dt=dt,
-                                            waveform="trapezoidal")
+                                            waveform="trapezoidal",
+                                            name=name)
 
 
 # =============================================================================

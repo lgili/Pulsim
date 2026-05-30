@@ -230,6 +230,7 @@ from .motors import (
     PMSM,
     BLDC,
     InductionMotor,
+    MotorObserverBundle,
     add_dc_motor,
     make_dc_motor_observer,
     add_pmsm,
@@ -517,6 +518,7 @@ __all__ = [
     "InductionMotor",
     "add_dc_motor",
     "make_dc_motor_observer",
+    "MotorObserverBundle",
     "add_pmsm",
     "make_pmsm_observer",
     "add_bldc",
@@ -784,6 +786,53 @@ def _result_power(self, device_name: str) -> float:
     )
 
 
+def _result_signal(self, name: str):
+    """Return a user-recorded trace by name (e.g.
+    ``result.signal("M1.omega")``).
+
+    Sources, in resolution order:
+
+    1. ``self._motor_traces`` — populated by motor observer bundles
+       (PMSM / BLDC / DC motor / IM) when their ``attach_to_result``
+       was called. :func:`pulsim.simulate` does this automatically
+       when it detects a :class:`MotorObserverBundle` in
+       ``step_observer`` or inside ``closed_loops``.
+    2. Future-extensible: any other observer that registers traces
+       under the same dict can be reached the same way.
+
+    Returns
+    -------
+    numpy.ndarray
+        The recorded samples. Use ``self.signal(f"{name}.t")`` if you
+        also need the timestamp array (motor bundles publish their
+        own ``<motor>.t`` alongside each motor for convenience —
+        these typically equal ``self.times`` but the motor observer
+        captures the value at observer-call time, which can differ
+        from kernel sample time in an adaptive integrator).
+
+    Raises
+    ------
+    NameNotFoundError
+        When `name` isn't registered. The error carries fuzzy
+        suggestions over the registered trace names.
+    """
+    traces = getattr(self, "_motor_traces", None) or {}
+    if name in traces:
+        return traces[name]
+    candidates = list(traces.keys())
+    import difflib as _difflib
+    sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.5)
+    raise NameNotFoundError(name, "signal", sugg)
+
+
+def _result_signals(self) -> "list[str]":
+    """Return the sorted list of registered signal names (e.g.
+    ``['M1.T_em', 'M1.i_a', 'M1.i_b', 'M1.i_c', 'M1.i_d',
+       'M1.i_q', 'M1.omega', 'M1.t', 'M1.theta']``).
+    """
+    return sorted((getattr(self, "_motor_traces", None) or {}).keys())
+
+
 # Monkey-patch the methods onto the C++-bound SimulationResult class.
 # We can't subclass it cleanly because run_transient returns the
 # concrete C++ type, but the type itself accepts attribute injection
@@ -791,6 +840,8 @@ def _result_power(self, device_name: str) -> float:
 SimulationResult.v = _result_v          # type: ignore[attr-defined]
 SimulationResult.i = _result_i          # type: ignore[attr-defined]
 SimulationResult.power = _result_power  # type: ignore[attr-defined]
+SimulationResult.signal = _result_signal      # type: ignore[attr-defined]
+SimulationResult.signals = _result_signals    # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):
@@ -1151,6 +1202,14 @@ def simulate(
     # mypy/pyright: narrow Optional[float] → float.
     assert dt is not None and dt > 0
 
+    # T2.2: snapshot the user's original observer/closed_loops args
+    # so the post-run motor-trace auto-attach can walk them. The
+    # local names get rebound below by the progress / closed_loops
+    # / compose-observer wrappers.
+    _step_observer_user = step_observer
+    _b_extra_fn_user = b_extra_fn
+    _closed_loops_user = closed_loops
+
     # Fall back to documented PWL defaults for any remaining None values
     # introduced by the `solver=` plumbing (these used to be flat
     # defaults at the signature; the DSED engine has its own defaults
@@ -1225,6 +1284,11 @@ def simulate(
         def _composed_observer(t: float, x) -> None:
             for obs in per_observers:
                 obs(t, x)
+
+        # T2.2: stash the inner observers so the post-run
+        # _auto_attach_motor_traces can walk into any MotorObserverBundle
+        # that the user passed via step_observer= (now wrapped here).
+        _composed_observer._inner_observers = per_observers  # type: ignore[attr-defined]
 
         step_observer = _composed_observer
 
@@ -1433,7 +1497,70 @@ def simulate(
         res._builder = builder
     except AttributeError:  # pragma: no cover — pre-dynamic_attr builds
         pass
+
+    # T2.2: auto-attach motor observer traces so
+    # `res.signal('M1.omega')` works without manual wiring. We walk
+    # the step_observer / b_extra_fn / closed_loops the user passed
+    # in and any MotorObserverBundle gets `.attach_to_result(res)`.
+    _auto_attach_motor_traces(
+        res,
+        step_observer=_step_observer_user,
+        b_extra_fn=_b_extra_fn_user,
+        closed_loops=_closed_loops_user,
+    )
     return res
+
+
+def _auto_attach_motor_traces(
+    result,
+    *,
+    step_observer=None,
+    b_extra_fn=None,
+    closed_loops=None,
+) -> None:
+    """Find every :class:`MotorObserverBundle` reachable from the
+    caller's `simulate(...)` arguments and stash its traces on
+    ``result._motor_traces``. Idempotent and exception-safe — a
+    misbehaving custom step_observer must not break the post-sim
+    result.
+    """
+    from .motors import MotorObserverBundle as _Bundle
+    seen: set = set()
+
+    def _visit(obj) -> None:
+        if obj is None or id(obj) in seen:
+            return
+        seen.add(id(obj))
+        if isinstance(obj, _Bundle):
+            try:
+                obj.attach_to_result(result)
+            except Exception:  # noqa: BLE001 — defensive
+                pass
+            return
+        # Composed observer (closed_loops path) — walks the inner
+        # list we stash on the wrapper at compose time.
+        for attr in ("_inner_observers", "_inner_bundles"):
+            inner = getattr(obj, attr, None)
+            if inner is None:
+                continue
+            try:
+                for child in inner:
+                    _visit(child)
+            except TypeError:  # not iterable — skip
+                pass
+
+    _visit(step_observer)
+    _visit(b_extra_fn)
+    if closed_loops:
+        try:
+            for loop in closed_loops:
+                _visit(loop)
+                # The closed-loop wrapper itself bundles a
+                # step_observer / switch_fn; visit those too.
+                _visit(getattr(loop, "step_observer", None))
+                _visit(getattr(loop, "switch_fn", None))
+        except TypeError:  # not iterable
+            pass
 
 
 # Note: SineVoltageSource (Layer 2 V11) is exposed as a
