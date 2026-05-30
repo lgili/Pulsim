@@ -2,302 +2,302 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/api-reference/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/build-system/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/fast-block/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/getting-started/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/gotchas/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/helpers/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/losses-and-thermal/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/mental-model/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/migration-from-v1/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/migration-guide/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/mmc/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/motors-induction/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/motors-sensorless/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/performance-tuning/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/schematic-rendering/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/solvers/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/troubleshooting/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/versioning-and-release/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/yaml-chain/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/archive/numerical-modes-audit-2026-05/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/01-introduction/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/02-mna-foundations/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/03-trapezoidal-companion/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/04-pwl-state-space-cache/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/05-sparse-lu-foundations/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/06-pulsim-sparse-lu/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/07-rank1-partial-refactor/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/08-benchmarks/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/09-architecture-walkthrough/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/10-paper-figures-index/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/11-dsed-engine-overview/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/12-dsed-state-space-extraction/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/13-dsed-dopri5-adaptive/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/14-dsed-bdf2-and-dispatch/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/15-dsed-native-bindings/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/how-pulsim-works/16-dsed-benchmarks/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer0-numeric-and-sparse/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer1-topology-and-enumeration/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer10-benchmarks/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer2-ad-and-device-models/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer2-v1-mosfet-igbt/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer2-v2-transformer/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer3-stamping-pipeline/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-pwl-state-space-cache/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v1-trapezoidal-companion/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v10-warm-start/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v2-dc-operating-point/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v3-nonlinear-newton/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v4-newton-globalization/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v5-lm-newton/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v6-lazy-cache/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v7-multi-dt-cache/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v8-continuation/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer4-v9-vf0-continuation/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-solver-and-events/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-v1.5-buck-validation/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-v2-ideal-diode/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-v2.1-event-detection/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-v2.2-substep-diagnostics/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-v3-substep-correction/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer5-v4-newton-in-run-transient/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer6-builder-api/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer7-python-bindings/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer8-yaml-parser/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/layer9-smps-showcase/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/internals/mmc-arm-block/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/tutorials/01-rc-charging/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/tutorials/02-buck-converter/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/tutorials/03-flyback-isolated/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/tutorials/04-3phase-vsi/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/tutorials/05-ldo-feedback/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/tutorials/06-igbt-boost/</loc>
-         <lastmod>2026-05-29</lastmod>
+         <lastmod>2026-05-30</lastmod>
     </url>
 </urlset>
