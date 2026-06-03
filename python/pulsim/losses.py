@@ -289,6 +289,45 @@ def _conduction_stats(v: np.ndarray,
     }
 
 
+def _conduction_model_coeffs(spec: Mapping[str, Any]) -> "tuple[float, float]":
+    """Pull ``(V_f0, r_on)`` from a conduction-model spec.
+
+    Accepts datasheet-friendly aliases so the same helper covers diodes
+    (``V_f0`` / ``r_d``), MOSFETs (``r_on`` only — V_f0 = 0) and IGBTs
+    (``V_ce0`` / ``r_ce``)::
+
+        V_f0 ← V_f0 | V_F0 | V_ce0 | V_CE0 | V_F   (default 0)
+        r_on ← r_on | R_on | r_d | r_ce | R_CE     (default 0)
+    """
+    def _first(d, keys, default=0.0):
+        for k in keys:
+            if k in d:
+                return float(d[k])
+        return float(default)
+    V_f0 = _first(spec, ("V_f0", "V_F0", "V_ce0", "V_CE0", "V_F"))
+    r_on = _first(spec, ("r_on", "R_on", "r_d", "R_d", "r_ce", "R_CE"))
+    return V_f0, r_on
+
+
+def _conduction_power_offset_slope(i_arr: np.ndarray,
+                                   spec: Mapping[str, Any]) -> np.ndarray:
+    """Per-step conduction power for a PWL device characteristic.
+
+    ``P_cond(t) = V_f0 · |i(t)| + r_on · i(t)²``
+
+    This is the standard offset-plus-slope conduction model
+    (Erickson & Maksimović Ch. 3): a fixed forward-voltage drop ``V_f0``
+    plus an ohmic ``r_on``. It is applied to the device's *actual*
+    current trace from the simulation, so the loss tracks the real
+    waveform — strictly more accurate than the pure-resistive ``v²·g``
+    reconstruction for IGBTs and diodes, whose V_f0 offset dominates at
+    low current.
+    """
+    V_f0, r_on = _conduction_model_coeffs(spec)
+    i = np.asarray(i_arr, dtype=float)
+    return V_f0 * np.abs(i) + r_on * i * i
+
+
 def _diode_switching_loss(events_for_branch,
                           times: np.ndarray,
                           v_D: np.ndarray,
@@ -563,6 +602,7 @@ def device_loss_summary(
     core_loss_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
     diode_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
     switch_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+    conduction_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Walk every resistor, inductor, ideal-switch and switched-diode
     branch in ``builder`` and report each one's conduction
@@ -651,6 +691,20 @@ def device_loss_summary(
         ``E_sw_on_total``, ``E_sw_off_total``, ``E_sw_total``,
         ``P_sw_avg``, plus ``n_turn_on_events`` /
         ``n_turn_off_events`` / ``f_sw_estimate``.
+    conduction_specs : mapping, optional
+        Per-diode / per-switch offset+slope conduction model. Keys are
+        device names or branch ids. Values give the PWL device
+        characteristic (datasheet aliases accepted)::
+
+            {"V_f0": float (V),   # forward-voltage offset (or V_ce0)
+             "r_on": float (Ω)}   # ohmic slope        (or r_ce / r_d)
+
+        When present, the entry gains ``P_cond_model_avg`` /
+        ``E_cond_model`` computed as ``V_f0·|i| + r_on·i²`` over the
+        device's actual current trace — strictly more accurate than the
+        pure-resistive ``v²·g`` ``P_avg`` for IGBTs and diodes (the
+        ``V_f0`` offset dominates conduction loss at low current). MOSFETs
+        set ``V_f0 = 0`` and use ``r_on`` alone.
 
     Returns
     -------
@@ -705,6 +759,8 @@ def device_loss_summary(
         diode_specs, "diode_specs")
     switch_by_bid, switch_by_name = _build_spec_lookup(
         switch_specs, "switch_specs")
+    cond_by_bid, cond_by_name = _build_spec_lookup(
+        conduction_specs, "conduction_specs")
 
     # Bucket commutation events by branch_id so the diode handler
     # can iterate only its own.
@@ -798,6 +854,20 @@ def device_loss_summary(
                                        if closed.size else 0.0,
                 **stats,
             }
+            # Optional datasheet offset+slope conduction model
+            # (V_f0 + r_d·I) applied to the actual current trace.
+            c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
+            if c_spec is not None:
+                i_D = v_D * g_arr
+                p_model = _conduction_power_offset_slope(i_D, c_spec)
+                V_f0, r_on = _conduction_model_coeffs(c_spec)
+                entry["P_cond_model_avg"] = (
+                    float(np.trapezoid(p_model, times) / T)
+                    if T > 0 else float(p_model.mean()))
+                entry["E_cond_model"] = (float(np.trapezoid(p_model, times))
+                                         if times.size > 1 else 0.0)
+                entry["V_f0"] = V_f0
+                entry["r_on"] = r_on
             # Optional datasheet reverse-recovery loss.
             d_spec = (diode_by_bid.get(bid)
                       or diode_by_name.get(name))
@@ -840,6 +910,19 @@ def device_loss_summary(
                                    if closed.size else 0.0,
                 **stats,
             }
+            # Optional offset+slope conduction model (V_ce0 + r_ce·I for
+            # an IGBT, or r_on·I for a MOSFET) on the actual current.
+            c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
+            if c_spec is not None:
+                p_model = _conduction_power_offset_slope(i_SW, c_spec)
+                V_f0, r_on = _conduction_model_coeffs(c_spec)
+                entry["P_cond_model_avg"] = (
+                    float(np.trapezoid(p_model, times) / T)
+                    if T > 0 else float(p_model.mean()))
+                entry["E_cond_model"] = (float(np.trapezoid(p_model, times))
+                                         if times.size > 1 else 0.0)
+                entry["V_f0"] = V_f0
+                entry["r_on"] = r_on
             s_spec = (switch_by_bid.get(bid)
                       or switch_by_name.get(name))
             if s_spec is not None:

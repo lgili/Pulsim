@@ -551,8 +551,16 @@ def device_thermal_summary(
     switch_specs=None,
     diode_specs=None,
     core_loss_specs=None,
+    conduction_specs=None,
 ):
     """End-to-end ``per-device P(t) → T_j(t)`` glue.
+
+    When a device appears in ``conduction_specs`` (``{name|bid:
+    {"V_f0"/"V_ce0": …, "r_on"/"r_ce": …}}``) its conduction power trace
+    uses the datasheet offset+slope model ``V_f0·|i| + r_on·i²`` instead
+    of the pure-resistive ``v²·g`` reconstruction — more accurate for
+    IGBTs and diodes whose forward-voltage offset dominates at low
+    current, so the resulting ``T_j`` is correspondingly more faithful.
 
     Walks every R / inductor / switch / diode branch the user
     supplied a thermal model for, reconstructs the per-step
@@ -647,8 +655,24 @@ def device_thermal_summary(
         core_loss_specs=core_loss_specs,
         diode_specs=diode_specs,
         switch_specs=switch_specs,
+        conduction_specs=conduction_specs,
     )
     loss_by_bid = {int(e["branch_id"]): e for e in loss_entries}
+
+    # Resolve conduction_specs (name|bid → spec) for the per-device
+    # P_cond(t) reconstruction below.
+    cond_by_bid = {}
+    if conduction_specs:
+        for key, spec in conduction_specs.items():
+            if isinstance(key, int):
+                cond_by_bid[int(key)] = spec
+            else:
+                d = comps_by_name.get(str(key))
+                if d is None:
+                    raise KeyError(
+                        f"device_thermal_summary: conduction_specs names "
+                        f"unknown device {key!r}.")
+                cond_by_bid[int(d["branch_id"])] = spec
 
     # Need switch_seq_idx (same logic as device_loss_summary).
     switch_seq_idx_by_bid = {}
@@ -703,7 +727,12 @@ def device_thermal_summary(
             v_D = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
             g_arr = np.where(v_D > V_th, g_on, g_off)
-            P_cond_t = v_D * v_D * g_arr
+            c_spec = cond_by_bid.get(bid)
+            if c_spec is not None:
+                P_cond_t = _losses._conduction_power_offset_slope(
+                    v_D * g_arr, c_spec)
+            else:
+                P_cond_t = v_D * v_D * g_arr
         elif kind == "switch":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -725,7 +754,12 @@ def device_thermal_summary(
             v_SW = (_views.node_voltage_trace(states, int(from_id))
                     - _views.node_voltage_trace(states, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
-            P_cond_t = v_SW * v_SW * g_arr
+            c_spec = cond_by_bid.get(bid)
+            if c_spec is not None:
+                P_cond_t = _losses._conduction_power_offset_slope(
+                    v_SW * g_arr, c_spec)
+            else:
+                P_cond_t = v_SW * v_SW * g_arr
         else:
             # Unsupported kind for the thermal pipeline.
             continue
