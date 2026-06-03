@@ -123,13 +123,25 @@ class TestResultAccessors:
                 b.branch_index_of("L1"), b.graph)]
         assert np.array_equal(res.i("L1"), expected)
 
-    def test_i_resistor_raises_not_implemented(self, buck):
-        # Resistor / capacitor / diode branches have no MNA current
-        # state variable — `result.i` raises NotImplementedError
-        # pointing the caller at the `losses` helpers.
+    def test_i_resistor_reconstructs_from_node_voltages(self, buck):
+        # As of v1.6.6, `result.i` also works on resistor branches —
+        # it reconstructs the current from the two terminal node
+        # voltages and the resistor's stored R_ohms
+        # (i = (V_from − V_to) / R). Capacitor / diode / MOSFET
+        # branches still raise NotImplementedError because their
+        # reconstruction requires the kind-specific stamp (lives in
+        # `pulsim.losses`). See `test_result_i_resistor.py` for the
+        # focused regression coverage; here we just confirm the path
+        # fires on the buck's load resistor.
         _, res = buck
-        with pytest.raises(NotImplementedError, match="MNA current"):
-            res.i("R_L")
+        i_R = res.i("R_L")
+        import numpy as np
+        assert isinstance(i_R, np.ndarray)
+        assert i_R.shape[0] == res.num_steps()
+        # The buck's load current is non-trivial — exact value depends
+        # on duty / startup, just sanity-check we get a plausible
+        # non-zero trace (>100 mA at some point).
+        assert np.any(np.abs(i_R) > 0.1)
 
     def test_power_resistor(self, buck):
         # Spec scenario: "Device power lookup". `device_loss_summary`

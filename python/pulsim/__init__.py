@@ -680,22 +680,76 @@ def _result_v(self, name: str, t=None):
 def _result_i(self, name: str, t=None):
     """Return the branch-current trace for ``name``.
 
-    The state vector only carries currents for branches that
-    contribute MNA state variables — inductors and independent
-    voltage sources. For resistors / capacitors / diodes /
-    MOSFETs, the current must be reconstructed from node
-    voltages and the device's parameters; that path lives in
-    :mod:`pulsim.losses` (today via
-    :func:`average_power_at_node` and
-    :func:`device_loss_summary`). When called on a non-state
-    branch this method raises :class:`NotImplementedError`
-    pointing the caller at those helpers.
+    ``result.i()`` aims at the PLECS-style output-equation convention:
+    the simulator's state vector ``x`` is the small set of MNA
+    natives (node voltages + augmented inductor / voltage-source
+    currents), and any branch current is a deterministic function of
+    that state plus the device's stored params + (for switched
+    devices) the active switch mask. Reading any current is therefore
+    a per-step evaluation of that function — no need for sentinel
+    probes or sense resistors in the topology.
 
-    Sign convention follows the ``add_*`` call: current is
-    positive flowing from the ``from`` terminal to the ``to``
-    terminal.
+    Supported branch kinds and their reconstruction:
+
+    +----------------------------+-----------------------------------------+
+    | kind                        | ``i(t)``                                |
+    +============================+=========================================+
+    | ``inductor``               | ``states[:, branch_var_id_for_inductor]`` |
+    | ``voltage_source``         | ``states[:, branch_var_id_for_source]`` |
+    | ``pwm_voltage_source``     | ditto                                   |
+    | ``sine_voltage_source``    | ditto                                   |
+    | ``pulse_voltage_source``   | ditto                                   |
+    | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
+    | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
+    | ``current_source``         | constant ``I`` from params              |
+    | ``diode`` (PWL switched)   | ``(V_from − V_to − V_th)·G`` where      |
+    |                            | ``G = g_on`` when forward-biased,       |
+    |                            | ``g_off`` otherwise                     |
+    | ``switch``                 | ``(V_from − V_to)·G`` where             |
+    |                            | ``G = g_on`` when ``switch_fn`` mask    |
+    |                            | bit is set, ``g_off`` otherwise         |
+    +----------------------------+-----------------------------------------+
+
+    Sentinel handling. Pulsim uses ``node_id = −1`` for the
+    ground / reference node (no column in the state vector;
+    implicit zero in the MNA solve). The reconstruction treats
+    ``node_id < 0`` as ``V = 0`` instead of Python's
+    negative-indexing into ``states``.
+
+    Switch-fn requirement. Switch-branch reconstruction needs the
+    per-step mask schedule. ``pulsim.simulate(...)`` auto-stashes the
+    composed ``switch_fn`` on ``result._switch_fn``; if you're
+    operating on a result built another way, set ``result._switch_fn
+    = your_switch_fn`` before calling ``.i()``.
+
+    Not yet supported (deferred to future PRs because their device
+    params aren't exposed by ``builder.components()`` today):
+    ``mosfet_level1``, ``igbt_level1``, ``nonlinear_diode``,
+    ``vcvs``, ``saturable_inductor``. Calls on those kinds raise
+    :class:`NotImplementedError` pointing at
+    :func:`pulsim.losses.device_loss_summary`, which already
+    implements per-step nonlinear stamp evaluation for the loss
+    summary.
+
+    Sign convention. Current is positive flowing from the ``from``
+    terminal to the ``to`` terminal of the ``add_*`` call (matches
+    the inductor / voltage-source convention).
+
+    Parameters
+    ----------
+    name
+        Branch name (any supported kind from the table above).
+    t
+        Optional step selection (``int`` / ``slice`` / array-like).
+        ``None`` returns the full per-sample trace.
     """
     import numpy as _np
+    from ._result_views import (
+        node_voltage_trace as _node_v,
+        evaluate_switch_mask_trace as _mask_trace,
+        states_as_array as _sa,
+        times_as_array as _ta,
+    )
     builder = getattr(self, "_builder", None)
     if builder is None:
         raise RuntimeError(
@@ -715,11 +769,11 @@ def _result_i(self, name: str, t=None):
         import difflib as _difflib
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "branch", sugg) from None
-    # Map branch_id to its state-vector column. Only inductors and
-    # voltage sources have a dedicated current state variable; the
-    # pool exposes the lookup but each device family has its own
-    # accessor in v1.4. Try inductor first (most common case), fall
-    # back to source.
+
+    # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
+    # Try inductor first (most common case), then the source family
+    # (which also covers PWM / sine / pulse voltage sources — they
+    # all share ``branch_var_id_for_source``).
     state_idx: "int | None" = None
     for accessor in (
         "branch_var_id_for_inductor",
@@ -733,19 +787,160 @@ def _result_i(self, name: str, t=None):
             break
         except Exception:  # noqa: BLE001 — wrong device kind
             continue
-    if state_idx is None:
-        raise NotImplementedError(
-            f"branch {name!r} has no MNA current state variable "
-            f"(it's likely a resistor, capacitor, diode, or MOSFET — "
-            f"reconstruct its current via pulsim.losses helpers, e.g. "
-            f"device_loss_summary(result, builder)). result.i() is "
-            f"defined for inductors and voltage sources only."
-        )
-    states = _np.asarray(self.states)
-    col = states[:, state_idx]
-    if t is None:
-        return col
-    return col[t]
+    states = _sa(self)
+    if state_idx is not None:
+        col = states[:, state_idx]
+        if t is None:
+            return col
+        return col[t]
+
+    # ---- Slow path: dispatch on `kind` from components() ----
+    desc = None
+    try:
+        for d in builder.components():
+            if int(d.get("branch_id", -1)) == int(b_id):
+                desc = d
+                break
+    except Exception:  # noqa: BLE001 — defensive
+        desc = None
+    if desc is None:
+        raise RuntimeError(
+            f"result.i({name!r}): branch_id {b_id} not found in "
+            f"`builder.components()`. This usually means the binding "
+            f"signature drifted — check `python/bindings.cpp::components`.")
+
+    kind = desc.get("kind", "unknown")
+    params = desc.get("params", {}) or {}
+    from_id, to_id = desc.get("nodes", (None, None))
+
+    def _need_nodes() -> "tuple[int, int]":
+        if from_id is None or to_id is None:
+            raise RuntimeError(
+                f"result.i({name!r}): descriptor missing terminal "
+                f"node IDs.")
+        return int(from_id), int(to_id)
+
+    def _v_branch() -> "_np.ndarray":
+        f, to = _need_nodes()
+        return _node_v(states, f) - _node_v(states, to)
+
+    def _finalize(col):
+        return col if t is None else col[t]
+
+    # ----------------------- resistor --------------------------------
+    if kind == "resistor":
+        try:
+            R_ohms = float(params["R_ohms"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"result.i({name!r}): resistor params missing "
+                f"`R_ohms` ({exc!r})") from None
+        if R_ohms <= 0.0:
+            raise ValueError(
+                f"result.i({name!r}): non-positive R_ohms={R_ohms}")
+        return _finalize(_v_branch() / R_ohms)
+
+    # ----------------------- capacitor -------------------------------
+    if kind == "capacitor":
+        try:
+            C_F = float(params["C_farads"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"result.i({name!r}): capacitor params missing "
+                f"`C_farads` ({exc!r})") from None
+        if C_F <= 0.0:
+            raise ValueError(
+                f"result.i({name!r}): non-positive C_farads={C_F}")
+        v_C = _v_branch()
+        times_arr = _ta(self)
+        # Numerical derivative — uses second-order central differences
+        # at interior samples, one-sided at the endpoints. The kernel's
+        # trapezoidal scheme already produces a smooth v_C, so np.gradient
+        # gives results consistent with i_C = C·dv/dt to within solver
+        # tolerance (typically ≲ 1 % of peak |i_C|). For exact
+        # representations, the future kernel-side C matrix expansion
+        # would emit i_C directly during the solve.
+        if times_arr.size < 2 or v_C.size < 2:
+            return _finalize(_np.zeros_like(v_C))
+        col = C_F * _np.gradient(v_C, times_arr)
+        return _finalize(col)
+
+    # ----------------------- current source --------------------------
+    if kind == "current_source":
+        try:
+            I_A = float(params["I"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"result.i({name!r}): current_source params missing "
+                f"`I` ({exc!r})") from None
+        return _finalize(_np.full(states.shape[0], I_A))
+
+    # ----------------------- diode -----------------------------------
+    if kind == "diode":
+        # PWL switched diode: closed when v_D > V_th. Use g_on while
+        # forward-biased, g_off while reverse-biased. Mirrors the
+        # convention from `pulsim.losses._conduction_stats(diode)`.
+        try:
+            g_on = float(params["g_on"])
+            g_off = float(params["g_off"])
+            V_th = float(params.get("V_th", 0.0))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"result.i({name!r}): diode params missing "
+                f"`g_on`/`g_off`/`V_th` ({exc!r})") from None
+        v_D = _v_branch()
+        closed = v_D > V_th
+        G_arr = _np.where(closed, g_on, g_off)
+        # The diode stamp models the on-state as a conductance to a
+        # virtual V_th supply: i_D = G·(v_D − V_th) when closed,
+        # i_D = G·v_D when open (g_off is leakage with no threshold).
+        col = _np.where(closed,
+                          G_arr * (v_D - V_th),
+                          G_arr * v_D)
+        return _finalize(col)
+
+    # ----------------------- switch ----------------------------------
+    if kind == "switch":
+        try:
+            g_on = float(params["g_on"])
+            g_off = float(params["g_off"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"result.i({name!r}): switch params missing "
+                f"`g_on`/`g_off` ({exc!r})") from None
+        sf = getattr(self, "_switch_fn", None)
+        if sf is None:
+            raise NotImplementedError(
+                f"result.i({name!r}): switch current reconstruction "
+                f"requires the original `switch_fn` to be available on "
+                f"the result. `pulsim.simulate(...)` auto-stashes it "
+                f"on `result._switch_fn`; if you built this result "
+                f"another way, set "
+                f"`result._switch_fn = your_switch_fn` before calling "
+                f"`.i()`.")
+        try:
+            seq_idx = int(builder.switch_index_of(name))
+        except Exception as exc:  # noqa: BLE001 — usage error
+            raise RuntimeError(
+                f"result.i({name!r}): switch_index_of failed "
+                f"({exc!r}); make sure {name!r} is a switch added "
+                f"via `builder.add_switch`.") from None
+        times_arr = _ta(self)
+        closed = _mask_trace(sf, times_arr, seq_idx)
+        G_arr = _np.where(closed, g_on, g_off)
+        return _finalize(_v_branch() * G_arr)
+
+    # ----------------------- not yet supported -----------------------
+    raise NotImplementedError(
+        f"branch {name!r} has kind={kind!r}; result.i() does not yet "
+        f"reconstruct currents for this device family. Currently "
+        f"supported: inductor, voltage_source (incl. pwm / sine / "
+        f"pulse variants), resistor, capacitor, current_source, "
+        f"diode, switch. For mosfet_level1 / igbt_level1 / "
+        f"nonlinear_diode / vcvs / saturable_inductor, the per-step "
+        f"nonlinear stamp evaluation lives in "
+        f"`pulsim.losses.device_loss_summary` — use that for now. "
+        f"Lifting these into `result.i()` is tracked as a follow-up.")
 
 
 def _result_power(self, device_name: str) -> float:
@@ -833,6 +1028,49 @@ def _result_signals(self) -> "list[str]":
     return sorted((getattr(self, "_motor_traces", None) or {}).keys())
 
 
+def _result_currents(self, *, skip_unsupported: bool = True
+                        ) -> "dict[str, object]":
+    """Return ``{branch_name: ndarray}`` with every supported branch's
+    current trace — pulsim's nearest equivalent to PLECS' "all currents
+    from the output equation" UX.
+
+    Walks ``builder.components()`` and calls :meth:`i` on every branch
+    whose kind has a reconstruction implementation (inductor,
+    voltage_source family, resistor, capacitor, current_source, diode,
+    switch). When ``skip_unsupported`` is True (default), kinds without
+    a Python-side reconstruction
+    (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
+    ``saturable_inductor``) are silently omitted from the result —
+    pass ``False`` to surface their ``NotImplementedError`` instead.
+
+    Returns
+    -------
+    dict[str, numpy.ndarray]
+        Branch name → per-sample current trace. Empty dict if the
+        result wasn't produced via ``pulsim.simulate(...)`` (no builder
+        reference attached).
+    """
+    builder = getattr(self, "_builder", None)
+    out: "dict[str, object]" = {}
+    if builder is None:
+        return out
+    try:
+        comps = list(builder.components())
+    except Exception:  # noqa: BLE001 — defensive
+        return out
+    for d in comps:
+        n = d.get("name", "")
+        if not n:
+            continue
+        try:
+            out[n] = self.i(n)
+        except (NotImplementedError, RuntimeError, ValueError):
+            if not skip_unsupported:
+                raise
+            continue
+    return out
+
+
 # Monkey-patch the methods onto the C++-bound SimulationResult class.
 # We can't subclass it cleanly because run_transient returns the
 # concrete C++ type, but the type itself accepts attribute injection
@@ -842,6 +1080,7 @@ SimulationResult.i = _result_i          # type: ignore[attr-defined]
 SimulationResult.power = _result_power  # type: ignore[attr-defined]
 SimulationResult.signal = _result_signal      # type: ignore[attr-defined]
 SimulationResult.signals = _result_signals    # type: ignore[attr-defined]
+SimulationResult.currents = _result_currents  # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):
@@ -1209,6 +1448,7 @@ def simulate(
     _step_observer_user = step_observer
     _b_extra_fn_user = b_extra_fn
     _closed_loops_user = closed_loops
+    _switch_fn_user = switch_fn
 
     # Fall back to documented PWL defaults for any remaining None values
     # introduced by the `solver=` plumbing (these used to be flat
@@ -1496,6 +1736,16 @@ def simulate(
     try:
         res._builder = builder
     except AttributeError:  # pragma: no cover — pre-dynamic_attr builds
+        pass
+
+    # Stash the (composed) switch_fn so `result.i(switch_name)` can
+    # reconstruct switch-branch currents post-hoc by replaying the
+    # mask schedule at each result time. ``switch_fn`` here is the
+    # post-compose version (closed_loops + user) so it sees every
+    # switch the result actually exercised.
+    try:
+        res._switch_fn = switch_fn
+    except AttributeError:  # pragma: no cover
         pass
 
     # T2.2: auto-attach motor observer traces so
