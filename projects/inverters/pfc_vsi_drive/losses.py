@@ -146,7 +146,45 @@ THERMAL = {
 
 
 def junction_temperature(R_th_ja: float, P_loss: float, T_amb: float) -> float:
+    """Legacy fixed-coefficient steady state: T_j = T_amb + R_th_ja·P."""
     return float(T_amb + R_th_ja * P_loss)
+
+
+# Conduction-loss temperature coefficients [1/°C] (datasheet R_ds(T) /
+# V_ce(T) / V_f(T) trends). Positive → loss climbs with temperature.
+A_COND_MOSFET = +0.006   # R_ds,on roughly doubles by 150 °C
+A_COND_IGBT   = +0.004   # net V_ce,sat tempco
+A_COND_DIODE  = -0.002   # V_f falls ~2 mV/°C
+A_SW          = +0.005   # switching energy rises with temperature
+
+
+def electrothermal_Tj(R_th_ja: float, P_cond: float, P_sw: float,
+                      a_cond: float, T_amb: float) -> float:
+    """Self-consistent junction temperature with the Pulsim electro-thermal
+    API: conduction loss climbs with T_j (R_ds/V_ce(T)), so this solves the
+    fixed point ``T_j = T_amb + R_th_ja·P(T_j)`` and flags runaway.
+
+    Same single-device, junction-to-ambient topology as the legacy
+    :func:`junction_temperature` (so it's apples-to-apples), but with the
+    temperature feedback the fixed-coefficient model misses. For the
+    inverter IPM, where six dies share one baseplate, the more faithful
+    shared-heatsink model is demonstrated in ``thermal_comparison.py``.
+
+    Returns ``inf`` if the loss↔temperature feedback has no stable
+    equilibrium (thermal runaway).
+    """
+    import pulsim as _p
+    dev = _p.HeatsinkDevice(
+        "dev", [_p.FosterStage(R_th_K_per_W=R_th_ja, tau_s=0.1)],
+        R_th_case_to_sink_K_per_W=0.0)
+    model = _p.TempCoLoss(P_cond_ref_W=float(P_cond), P_sw_ref_W=float(P_sw),
+                          a_cond_per_C=a_cond, a_sw_per_C=A_SW)
+    r = _p.electrothermal_steady_state(
+        [dev], {"dev": model},
+        R_th_sink_to_amb_K_per_W=0.0, T_amb_C=float(T_amb))
+    if r.get("runaway"):
+        return float("inf")
+    return float(r["devices"]["dev"]["T_j_C"])
 
 
 # ---------------------------------------------------------------------------
@@ -422,14 +460,26 @@ def compute_losses(sim_result, *, settle_fraction: float = 0.7,
     eta_inverter = float((op.P_in_target - P_total) / max(op.P_in_target, 1.0))
 
     # ---- Thermal (junction temperature) -----------------------------
-    T_J_D001 = junction_temperature(THERMAL["D001"].R_th_ja,
-                                      float(P_cond_D001), op.T_amb)
-    T_J_T001 = junction_temperature(THERMAL["T001"].R_th_ja,
-                                      float(P_cond_T1 + P_sw_T1), op.T_amb)
-    T_J_D002 = junction_temperature(THERMAL["D002"].R_th_ja,
-                                      float(P_cond_D002 + P_sw_D002), op.T_amb)
-    T_J_IC500 = junction_temperature(THERMAL["IC500"].R_th_ja,
-                                       float(P_IC500_total / 6.0), op.T_amb)
+    # Pulsim electro-thermal steady state: conduction loss climbs with T_j
+    # (R_ds(T)/V_ce(T)/V_f(T)), so each junction is the self-consistent
+    # fixed point T_j = T_amb + R_th_ja·P(T_j) — with thermal-runaway
+    # detection the legacy fixed-coefficient model can't provide. Same
+    # per-device junction-to-ambient topology as before (each device on
+    # its own heatsink path), so it stays comparable to the PSIM KPIs.
+    # The IPM's six dies sharing one baseplate are explored more faithfully
+    # with the shared-heatsink API in thermal_comparison.py.
+    T_J_D001 = electrothermal_Tj(THERMAL["D001"].R_th_ja,
+                                 float(P_cond_D001), 0.0,
+                                 A_COND_DIODE, op.T_amb)
+    T_J_T001 = electrothermal_Tj(THERMAL["T001"].R_th_ja,
+                                 float(P_cond_T1), float(P_sw_T1),
+                                 A_COND_MOSFET, op.T_amb)
+    T_J_D002 = electrothermal_Tj(THERMAL["D002"].R_th_ja,
+                                 float(P_cond_D002), float(P_sw_D002),
+                                 A_COND_DIODE, op.T_amb)
+    T_J_IC500 = electrothermal_Tj(THERMAL["IC500"].R_th_ja,
+                                  float(P_IC500_total / 6.0), 0.0,
+                                  A_COND_IGBT, op.T_amb)
 
     return LossBreakdown(
         P_cond_D001=P_cond_D001,

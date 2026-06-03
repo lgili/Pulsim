@@ -178,12 +178,30 @@ from .snubber import (
 )
 from .thermal import (
     FosterStage,
+    CauerStage,
     fit_foster_from_zth,
     predict_zth_curve,
     compute_temperature,
     add_foster_network,
+    add_cauer_thermal_network,
     make_thermal_observer,
     device_thermal_summary,
+    ThermalLimitMonitor,
+    # Shared heatsink — N devices coupled through one sink (P1).
+    HeatsinkDevice,
+    SharedHeatsink,
+    shared_heatsink_steady_state,
+    add_shared_heatsink,
+    make_heatsink_observer,
+    # Temperature-dependent loss + electro-thermal feedback (P2).
+    TempCoLoss,
+    electrothermal_steady_state,
+    make_electrothermal_heatsink_observer,
+    # Heatsink + TIM sizing helpers (P5).
+    TIM_CATALOG,
+    tim_resistance,
+    convection_coefficient,
+    convection_resistance,
 )
 from . import fast_block as _fast_block_module  # noqa: F401  (registers submodule)
 from .fast_block import (
@@ -470,12 +488,30 @@ __all__ = [
     "recommend_snubber",
     # Thermal Foster networks + electro-thermal co-sim (Phase C.1).
     "FosterStage",
+    "CauerStage",
     "fit_foster_from_zth",
     "predict_zth_curve",
     "compute_temperature",
     "add_foster_network",
+    "add_cauer_thermal_network",
     "make_thermal_observer",
     "device_thermal_summary",
+    "ThermalLimitMonitor",
+    # Shared heatsink — N devices coupled through one sink (P1).
+    "HeatsinkDevice",
+    "SharedHeatsink",
+    "shared_heatsink_steady_state",
+    "add_shared_heatsink",
+    "make_heatsink_observer",
+    # Temperature-dependent loss + electro-thermal feedback (P2).
+    "TempCoLoss",
+    "electrothermal_steady_state",
+    "make_electrothermal_heatsink_observer",
+    # Heatsink + TIM sizing helpers (P5).
+    "TIM_CATALOG",
+    "tim_resistance",
+    "convection_coefficient",
+    "convection_resistance",
     # PSIM/PLECS-style JIT control block (Numba — optional dep).
     "FastBlock",
     "fast_block",

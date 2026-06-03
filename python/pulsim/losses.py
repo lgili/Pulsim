@@ -289,10 +289,83 @@ def _conduction_stats(v: np.ndarray,
     }
 
 
+def _conduction_model_coeffs(spec: Mapping[str, Any]) -> "tuple[float, float]":
+    """Pull ``(V_f0, r_on)`` from a conduction-model spec.
+
+    Accepts datasheet-friendly aliases so the same helper covers diodes
+    (``V_f0`` / ``r_d``), MOSFETs (``r_on`` only — V_f0 = 0) and IGBTs
+    (``V_ce0`` / ``r_ce``)::
+
+        V_f0 ← V_f0 | V_F0 | V_ce0 | V_CE0 | V_F   (default 0)
+        r_on ← r_on | R_on | r_d | r_ce | R_CE     (default 0)
+    """
+    def _first(d, keys, default=0.0):
+        for k in keys:
+            if k in d:
+                return float(d[k])
+        return float(default)
+    V_f0 = _first(spec, ("V_f0", "V_F0", "V_ce0", "V_CE0", "V_F"))
+    r_on = _first(spec, ("r_on", "R_on", "r_d", "R_d", "r_ce", "R_CE"))
+    return V_f0, r_on
+
+
+def _conduction_power_offset_slope(i_arr: np.ndarray,
+                                   spec: Mapping[str, Any]) -> np.ndarray:
+    """Per-step conduction power for a PWL device characteristic.
+
+    ``P_cond(t) = V_f0 · |i(t)| + r_on · i(t)²``
+
+    This is the standard offset-plus-slope conduction model
+    (Erickson & Maksimović Ch. 3): a fixed forward-voltage drop ``V_f0``
+    plus an ohmic ``r_on``. It is applied to the device's *actual*
+    current trace from the simulation, so the loss tracks the real
+    waveform — strictly more accurate than the pure-resistive ``v²·g``
+    reconstruction for IGBTs and diodes, whose V_f0 offset dominates at
+    low current.
+    """
+    V_f0, r_on = _conduction_model_coeffs(spec)
+    i = np.asarray(i_arr, dtype=float)
+    return V_f0 * np.abs(i) + r_on * i * i
+
+
+def _interp_energy_curve(x_query, curve) -> np.ndarray:
+    """Interpolate a datasheet switching-energy curve ``E(I)``.
+
+    ``curve`` is a sequence of ``(I, E)`` points (current [A], energy
+    [J], measured at a fixed reference bus voltage). Returns the
+    piecewise-linearly interpolated energy at each ``x_query`` current,
+    with **linear extrapolation** beyond the tabulated range — more
+    honest than clamping when a higher-power operating point pushes the
+    current past the datasheet curve. Output is clamped to ``>= 0``
+    (switching energy is non-negative).
+    """
+    pts = sorted((float(i), float(e)) for i, e in curve)
+    if not pts:
+        raise ValueError("switching-energy curve needs >= 1 (I, E) point")
+    xs = np.asarray([q[0] for q in pts], dtype=float)
+    ys = np.asarray([q[1] for q in pts], dtype=float)
+    xq = np.atleast_1d(np.asarray(x_query, dtype=float))
+    if xs.size == 1:
+        out = np.full_like(xq, ys[0])
+    else:
+        out = np.interp(xq, xs, ys)
+        below = xq < xs[0]
+        if below.any():
+            s = (ys[1] - ys[0]) / (xs[1] - xs[0])
+            out = np.where(below, ys[0] + s * (xq - xs[0]), out)
+        above = xq > xs[-1]
+        if above.any():
+            s = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+            out = np.where(above, ys[-1] + s * (xq - xs[-1]), out)
+    return np.maximum(out, 0.0)
+
+
 def _diode_switching_loss(events_for_branch,
                           times: np.ndarray,
                           v_D: np.ndarray,
-                          spec: Mapping[str, Any]) -> Dict[str, float]:
+                          spec: Mapping[str, Any],
+                          i_D: "Optional[np.ndarray]" = None,
+                          ) -> Dict[str, float]:
     """Post-hoc reverse-recovery switching loss from
     ``SimulationResult.commutation_events``.
 
@@ -324,19 +397,35 @@ def _diode_switching_loss(events_for_branch,
     Q_rr = float(spec.get("Q_rr", 0.0))
     E_rr_ref = float(spec.get("E_rr_ref", 0.0))
     V_R_ref = float(spec.get("V_R_ref", 0.0))
+    E_rr_curve = spec.get("E_rr_curve")
 
     bookkeeping = {
         "n_turn_off_events": int(n_off),
         "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
     }
-    if n_off == 0 or (Q_rr <= 0 and E_rr_ref <= 0):
+    if n_off == 0 or (Q_rr <= 0 and E_rr_ref <= 0 and E_rr_curve is None):
         return {"E_sw_total": 0.0, "P_sw_avg": 0.0, **bookkeeping}
 
     # Interpolate |v_D| at every turn-off instant.
     t_off = np.asarray([float(ev.t_estimated) for ev in turn_offs])
     V_R = np.interp(t_off, times, np.abs(v_D))
 
-    if E_rr_ref > 0:
+    if E_rr_curve is not None:
+        # Nonlinear E_rr(I_F): interpolate the datasheet curve at the
+        # forward current the diode was carrying just before recovery.
+        if V_R_ref <= 0:
+            raise ValueError(
+                "diode_specs: E_rr_curve requires a positive V_R_ref.")
+        if i_D is None:
+            raise ValueError(
+                "diode_specs: E_rr_curve needs the diode current trace "
+                "(i_D=) — pass it from device_loss_summary.")
+        idx_before = np.clip(
+            np.searchsorted(times, t_off, side="left") - 1,
+            0, times.size - 1)
+        I_F = np.abs(np.asarray(i_D, dtype=float)[idx_before])
+        E_per_event = _interp_energy_curve(I_F, E_rr_curve) * (V_R / V_R_ref)
+    elif E_rr_ref > 0:
         if V_R_ref <= 0:
             raise ValueError(
                 "diode_specs: E_rr_ref requires a positive V_R_ref "
@@ -381,6 +470,8 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     """
     E_on_ref  = float(spec.get("E_on_ref",  0.0))
     E_off_ref = float(spec.get("E_off_ref", 0.0))
+    E_on_curve = spec.get("E_on_curve")
+    E_off_curve = spec.get("E_off_curve")
     V_ref = float(spec.get("V_ref", 0.0))
     I_ref = float(spec.get("I_ref", 0.0))
     T = (times[-1] - times[0]) if times.size > 1 else 0.0
@@ -397,7 +488,9 @@ def _switch_switching_loss(closed_trace: np.ndarray,
         "f_sw_estimate": (float(n_on + n_off) / (2.0 * T)) if T > 0
                                 else 0.0,
     }
-    if (n_on == 0 and n_off == 0) or (E_on_ref <= 0 and E_off_ref <= 0):
+    has_on = (E_on_ref > 0) or (E_on_curve is not None)
+    has_off = (E_off_ref > 0) or (E_off_curve is not None)
+    if (n_on == 0 and n_off == 0) or (not has_on and not has_off):
         return {
             "E_sw_on_total": 0.0,
             "E_sw_off_total": 0.0,
@@ -405,11 +498,10 @@ def _switch_switching_loss(closed_trace: np.ndarray,
             "P_sw_avg": 0.0,
             **bookkeeping,
         }
-    if V_ref <= 0 or I_ref <= 0:
+    if V_ref <= 0:
         raise ValueError(
-            "switch_specs: V_ref and I_ref must be positive — they "
-            "anchor the datasheet E_on/E_off reference operating "
-            "point.")
+            "switch_specs: V_ref must be positive — it anchors the "
+            "datasheet E_on/E_off reference bus voltage.")
 
     # Blocking voltage = the OFF-state v_SW (across the open switch).
     # That's the sample BEFORE a turn-on edge and the sample AFTER a
@@ -418,10 +510,10 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     # adjacent to the edge. For turn-on that's the sample at k (just
     # after closing); for turn-off it's the sample at k-1 (just before
     # opening).
-    def _edge_loss(idxs: np.ndarray, E_ref: float,
+    def _edge_loss(idxs: np.ndarray, E_ref: float, curve,
                     *, blocking_at_post_edge: bool,
                     load_at_post_edge: bool) -> float:
-        if idxs.size == 0 or E_ref <= 0:
+        if idxs.size == 0 or (E_ref <= 0 and curve is None):
             return 0.0
         blk_k  = idxs if blocking_at_post_edge \
                        else np.clip(idxs - 1, 0, v_SW.size - 1)
@@ -429,14 +521,24 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                        else np.clip(idxs - 1, 0, v_SW.size - 1)
         V_blk = np.abs(v_SW[blk_k])
         I_load = np.abs(i_SW[load_k])
+        if curve is not None:
+            # Nonlinear E(I) from the datasheet curve (at V_ref), scaled
+            # linearly by the actual blocking voltage.
+            E_base = _interp_energy_curve(I_load, curve)
+            return float(np.sum(E_base * (V_blk / V_ref)))
+        # Linear (single-point) datasheet scaling.
+        if I_ref <= 0:
+            raise ValueError(
+                "switch_specs: I_ref must be positive when using the "
+                "single-point E_on_ref/E_off_ref scaling.")
         return float(np.sum(E_ref * (V_blk / V_ref) * (I_load / I_ref)))
 
     # Turn-on:  V_blk = pre-edge (open), I_load = post-edge (just closed).
     # Turn-off: V_blk = post-edge (now open), I_load = pre-edge (was closed).
-    E_on_total = _edge_loss(turn_on_k,  E_on_ref,
+    E_on_total = _edge_loss(turn_on_k,  E_on_ref, E_on_curve,
                               blocking_at_post_edge=False,
                               load_at_post_edge=True)
-    E_off_total = _edge_loss(turn_off_k, E_off_ref,
+    E_off_total = _edge_loss(turn_off_k, E_off_ref, E_off_curve,
                               blocking_at_post_edge=True,
                               load_at_post_edge=False)
     E_total = E_on_total + E_off_total
@@ -563,6 +665,7 @@ def device_loss_summary(
     core_loss_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
     diode_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
     switch_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
+    conduction_specs: Optional[Mapping[Any, Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Walk every resistor, inductor, ideal-switch and switched-diode
     branch in ``builder`` and report each one's conduction
@@ -622,6 +725,11 @@ def device_loss_summary(
             # fast / soft-recovery diodes that quote E_rr directly.
             {"E_rr_ref": float (J), "V_R_ref": float (V)}
 
+            # Nonlinear datasheet E_rr(I_F) curve at V_R_ref — the most
+            # faithful: E_rr is interpolated at the forward current the
+            # diode carried just before each recovery.
+            {"E_rr_curve": [(I_F, E_rr), …], "V_R_ref": float (V)}
+
         For each turn-off event in
         ``result.commutation_events`` matching the branch the
         helper interpolates ``|V_R(t_event)|`` and accumulates
@@ -639,6 +747,16 @@ def device_loss_summary(
              "V_ref":     float (V),
              "I_ref":     float (A)}
 
+        Or, for the nonlinear datasheet energy-vs-current curves
+        (interpolated at the actual switched current per event, linearly
+        extrapolated beyond the tabulated range), supply ``E_on_curve``
+        / ``E_off_curve`` instead of the single-point ``E_on_ref`` /
+        ``E_off_ref`` (``I_ref`` is then unnecessary)::
+
+            {"E_on_curve":  [(I, E_on), …],
+             "E_off_curve": [(I, E_off), …],
+             "V_ref":       float (V)}
+
         Transitions are detected from the deterministic
         ``switch_fn`` mask (so ``switch_fn=`` is required when
         ``switch_specs=`` is). Per event::
@@ -651,6 +769,20 @@ def device_loss_summary(
         ``E_sw_on_total``, ``E_sw_off_total``, ``E_sw_total``,
         ``P_sw_avg``, plus ``n_turn_on_events`` /
         ``n_turn_off_events`` / ``f_sw_estimate``.
+    conduction_specs : mapping, optional
+        Per-diode / per-switch offset+slope conduction model. Keys are
+        device names or branch ids. Values give the PWL device
+        characteristic (datasheet aliases accepted)::
+
+            {"V_f0": float (V),   # forward-voltage offset (or V_ce0)
+             "r_on": float (Ω)}   # ohmic slope        (or r_ce / r_d)
+
+        When present, the entry gains ``P_cond_model_avg`` /
+        ``E_cond_model`` computed as ``V_f0·|i| + r_on·i²`` over the
+        device's actual current trace — strictly more accurate than the
+        pure-resistive ``v²·g`` ``P_avg`` for IGBTs and diodes (the
+        ``V_f0`` offset dominates conduction loss at low current). MOSFETs
+        set ``V_f0 = 0`` and use ``r_on`` alone.
 
     Returns
     -------
@@ -705,6 +837,8 @@ def device_loss_summary(
         diode_specs, "diode_specs")
     switch_by_bid, switch_by_name = _build_spec_lookup(
         switch_specs, "switch_specs")
+    cond_by_bid, cond_by_name = _build_spec_lookup(
+        conduction_specs, "conduction_specs")
 
     # Bucket commutation events by branch_id so the diode handler
     # can iterate only its own.
@@ -798,13 +932,28 @@ def device_loss_summary(
                                        if closed.size else 0.0,
                 **stats,
             }
+            # Optional datasheet offset+slope conduction model
+            # (V_f0 + r_d·I) applied to the actual current trace.
+            c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
+            if c_spec is not None:
+                i_D = v_D * g_arr
+                p_model = _conduction_power_offset_slope(i_D, c_spec)
+                V_f0, r_on = _conduction_model_coeffs(c_spec)
+                entry["P_cond_model_avg"] = (
+                    float(np.trapezoid(p_model, times) / T)
+                    if T > 0 else float(p_model.mean()))
+                entry["E_cond_model"] = (float(np.trapezoid(p_model, times))
+                                         if times.size > 1 else 0.0)
+                entry["V_f0"] = V_f0
+                entry["r_on"] = r_on
             # Optional datasheet reverse-recovery loss.
             d_spec = (diode_by_bid.get(bid)
                       or diode_by_name.get(name))
             if d_spec is not None:
                 ev_branch = events_by_branch.get(int(bid), [])
                 entry.update(
-                    _diode_switching_loss(ev_branch, times, v_D, d_spec))
+                    _diode_switching_loss(ev_branch, times, v_D, d_spec,
+                                          i_D=v_D * g_arr))
             summary.append(entry)
             switch_seq_idx += 1
             continue
@@ -840,6 +989,19 @@ def device_loss_summary(
                                    if closed.size else 0.0,
                 **stats,
             }
+            # Optional offset+slope conduction model (V_ce0 + r_ce·I for
+            # an IGBT, or r_on·I for a MOSFET) on the actual current.
+            c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
+            if c_spec is not None:
+                p_model = _conduction_power_offset_slope(i_SW, c_spec)
+                V_f0, r_on = _conduction_model_coeffs(c_spec)
+                entry["P_cond_model_avg"] = (
+                    float(np.trapezoid(p_model, times) / T)
+                    if T > 0 else float(p_model.mean()))
+                entry["E_cond_model"] = (float(np.trapezoid(p_model, times))
+                                         if times.size > 1 else 0.0)
+                entry["V_f0"] = V_f0
+                entry["r_on"] = r_on
             s_spec = (switch_by_bid.get(bid)
                       or switch_by_name.get(name))
             if s_spec is not None:
