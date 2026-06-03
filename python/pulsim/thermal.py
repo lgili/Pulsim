@@ -46,7 +46,9 @@ no special handling.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Callable, Union
 
 import numpy as np
 
@@ -65,6 +67,12 @@ __all__ = [
     "make_thermal_observer",
     "ThermalLimitMonitor",
     "device_thermal_summary",
+    # Shared heatsink — N devices coupled through one sink (P1).
+    "HeatsinkDevice",
+    "SharedHeatsink",
+    "shared_heatsink_steady_state",
+    "add_shared_heatsink",
+    "make_heatsink_observer",
 ]
 
 
@@ -739,3 +747,350 @@ def device_thermal_summary(
             "R_th_total": float(sum(s.R_th_K_per_W for s in stages)),
         })
     return out
+
+
+# =============================================================================
+# Shared heatsink — N devices coupled through ONE sink (P1)
+# =============================================================================
+#
+# Real high-power designs mount several devices (IGBTs, diodes, a bridge
+# module, …) on a *single* heatsink. Their dissipations SUM at the sink,
+# so the sink temperature is driven by the TOTAL power, and that rise
+# lifts every device's junction temperature together. A per-device model
+# (each device with its own junction→ambient impedance) misses this
+# coupling and underestimates T_j — exactly where it matters when pushing
+# an inverter to higher power.
+#
+# Thermal path per device, with the standard analogy (T↔V, P↔I,
+# R_th↔Ω, C_th↔F):
+#
+#   junction ─(junction_to_case ladder)─ case ─[R_th_case_to_sink]─┐
+#                                                                  │
+#   ambient(=T_amb) ─[R_th_sink_to_amb]─ T_sink ──────────────────┤  (shared)
+#                                          │                       │
+#                                     C_th_sink                  (every device)
+#
+# All devices share ``T_sink`` → coupled.
+
+
+@dataclass
+class HeatsinkDevice:
+    """One device mounted on a shared heatsink.
+
+    Attributes
+    ----------
+    name
+        Label used for thermal-node naming and for keying powers /
+        results.
+    junction_to_case
+        The device's junction-to-case transient thermal impedance, as a
+        list of :class:`FosterStage` (R_th + τ) **or** :class:`CauerStage`
+        (R_th + C_th). Both expose ``R_th_K_per_W`` and ``C_th_J_per_K``,
+        so either parametrisation works. May be empty (junction ≡ case).
+    R_th_case_to_sink_K_per_W
+        Case-to-sink thermal resistance [K/W] — the thermal-interface
+        material / insulator pad (datasheet ``R_th_ch``). ``0`` means the
+        case is bonded straight to the sink.
+
+    Notes
+    -----
+    Multiple :class:`HeatsinkDevice` passed to
+    :func:`shared_heatsink_steady_state` or :func:`add_shared_heatsink`
+    are **coupled** through the shared sink node.
+    """
+
+    name: str
+    junction_to_case: Sequence = field(default_factory=list)
+    R_th_case_to_sink_K_per_W: float = 0.0
+
+    @property
+    def R_th_jc_total_K_per_W(self) -> float:
+        """Total junction-to-case thermal resistance [K/W] (Σ stages)."""
+        return float(sum(s.R_th_K_per_W for s in self.junction_to_case))
+
+
+@dataclass
+class SharedHeatsink:
+    """Handle returned by :func:`add_shared_heatsink`.
+
+    Carries the thermal-node names so the caller can inject per-device
+    power (:func:`make_heatsink_observer`) and read junction / sink
+    temperatures from a state vector.
+    """
+
+    sink_node: str
+    ambient_node: str
+    junction_nodes: dict          # {device_name: junction node name}
+    case_nodes: dict              # {device_name: case node name}
+    T_amb_C: float
+
+
+def shared_heatsink_steady_state(
+    devices: "Sequence[HeatsinkDevice]",
+    powers: "Union[Mapping, Sequence[float]]",
+    *,
+    R_th_sink_to_amb_K_per_W: float,
+    T_amb_C: float = 25.0,
+) -> dict:
+    """Steady-state junction temperatures for N devices on ONE heatsink.
+
+    This is the sizing answer to *"does this heatsink keep every device
+    under its T_j limit at power level X?"* — solved analytically from
+    the coupled steady-state network::
+
+        T_sink   = T_amb + R_th_sa · Σ_i P_i          # ← the coupling
+        T_case_i = T_sink + R_th_cs_i · P_i
+        T_j_i    = T_case_i + R_th_jc_i · P_i
+
+    The ``Σ_i P_i`` term is what a per-device (independent) model misses:
+    every junction temperature depends on the **total** dissipation
+    through the shared sink, so adding a hotter device next to a cooler
+    one raises *both*.
+
+    Parameters
+    ----------
+    devices
+        List of :class:`HeatsinkDevice`.
+    powers
+        Average dissipation per device [W], either a mapping
+        ``{device_name: P_W}`` or a sequence aligned to ``devices``.
+    R_th_sink_to_amb_K_per_W
+        Heatsink-to-ambient thermal resistance [K/W] for the *shared*
+        sink (one value for the whole assembly — natural or forced
+        convection).
+    T_amb_C
+        Ambient temperature [°C].
+
+    Returns
+    -------
+    dict
+        ::
+
+            {"T_sink_C": float,
+             "P_total_W": float,
+             "devices": {name: {"P_W", "T_case_C", "T_j_C",
+                                 "delta_T_jc", "delta_T_cs",
+                                 "delta_T_sink",
+                                 "R_th_jc", "R_th_cs"}}}
+
+        ``delta_T_sink`` (= ``R_th_sa · P_total``) is identical for every
+        device — it is the shared-coupling contribution.
+
+    Examples
+    --------
+    Three IGBTs + three diodes on one 0.5 K/W sink::
+
+        igbt = lambda n: p.HeatsinkDevice(n,
+            [p.FosterStage(R_th_K_per_W=0.30, tau_s=0.05)],
+            R_th_case_to_sink_K_per_W=0.20)
+        dio  = lambda n: p.HeatsinkDevice(n,
+            [p.FosterStage(R_th_K_per_W=0.50, tau_s=0.03)],
+            R_th_case_to_sink_K_per_W=0.20)
+        devs = [igbt(f"Q{i}") for i in range(3)] + \
+               [dio(f"D{i}") for i in range(3)]
+        res = p.shared_heatsink_steady_state(
+            devs, {**{f"Q{i}": 18.0 for i in range(3)},
+                   **{f"D{i}": 6.0 for i in range(3)}},
+            R_th_sink_to_amb_K_per_W=0.5, T_amb_C=40.0)
+        print(res["T_sink_C"], res["devices"]["Q0"]["T_j_C"])
+    """
+    if R_th_sink_to_amb_K_per_W < 0:
+        raise ValueError("R_th_sink_to_amb_K_per_W must be >= 0")
+    if isinstance(powers, Mapping):
+        missing = [d.name for d in devices if d.name not in powers]
+        if missing:
+            raise KeyError(
+                f"powers mapping is missing device(s): {missing}")
+        P = {d.name: float(powers[d.name]) for d in devices}
+    else:
+        powers = list(powers)
+        if len(powers) != len(devices):
+            raise ValueError(
+                f"powers sequence has {len(powers)} entries but there "
+                f"are {len(devices)} devices")
+        P = {d.name: float(p_i) for d, p_i in zip(devices, powers)}
+
+    P_total = float(sum(P.values()))
+    delta_T_sink = R_th_sink_to_amb_K_per_W * P_total
+    T_sink = T_amb_C + delta_T_sink
+
+    out_devices = {}
+    for d in devices:
+        Pi = P[d.name]
+        R_cs = float(d.R_th_case_to_sink_K_per_W)
+        R_jc = d.R_th_jc_total_K_per_W
+        delta_cs = R_cs * Pi
+        delta_jc = R_jc * Pi
+        T_case = T_sink + delta_cs
+        T_j = T_case + delta_jc
+        out_devices[d.name] = {
+            "P_W": Pi,
+            "T_case_C": T_case,
+            "T_j_C": T_j,
+            "delta_T_sink": delta_T_sink,
+            "delta_T_cs": delta_cs,
+            "delta_T_jc": delta_jc,
+            "R_th_jc": R_jc,
+            "R_th_cs": R_cs,
+        }
+    return {
+        "T_sink_C": T_sink,
+        "P_total_W": P_total,
+        "devices": out_devices,
+    }
+
+
+def add_shared_heatsink(
+    builder,
+    devices: "Sequence[HeatsinkDevice]",
+    *,
+    R_th_sink_to_amb_K_per_W: float,
+    C_th_sink_J_per_K: float = 0.0,
+    ambient_node: str = "T_amb",
+    sink_node: str = "T_sink",
+    T_amb_C: float = 25.0,
+    name_prefix: str = "HS",
+) -> SharedHeatsink:
+    """Embed a COUPLED shared-heatsink thermal network into ``builder``.
+
+    Builds, from ordinary R/C/source primitives (T↔V, P↔I, R_th↔Ω,
+    C_th↔F):
+
+    * a DC source ``ambient_node`` = ``T_amb_C``;
+    * a shared ``R_th_sink_to_amb`` between ambient and ``sink_node``,
+      plus an optional ``C_th_sink`` (sink thermal mass) from
+      ``sink_node`` to ambient;
+    * per device: an optional ``R_th_case_to_sink`` (sink → case), then
+      its junction-to-case ladder (case → … → junction), with each
+      stage capacitance referenced to ambient.
+
+    Because every device hangs off the single ``sink_node``, their power
+    injections sum there and the junction temperatures are coupled — run
+    it with :func:`make_heatsink_observer` + ``simulate`` to get the
+    coupled transient ``T_j(t)`` for all devices, or solve the
+    steady-state directly with :func:`shared_heatsink_steady_state`.
+
+    Returns
+    -------
+    SharedHeatsink
+        Node-name handle for power injection and temperature read-out.
+    """
+    if not devices:
+        raise ValueError("add_shared_heatsink: at least one device required")
+    if R_th_sink_to_amb_K_per_W < 0:
+        raise ValueError("R_th_sink_to_amb_K_per_W must be >= 0")
+
+    names = [d.name for d in devices]
+    if len(set(names)) != len(names):
+        raise ValueError(
+            f"add_shared_heatsink: device names must be unique (got {names})")
+
+    builder.add_voltage_source(f"{name_prefix}_amb",
+                                  ambient_node, "gnd", float(T_amb_C))
+    builder.add_resistor(f"{name_prefix}_Rsa",
+                            ambient_node, sink_node,
+                            float(R_th_sink_to_amb_K_per_W))
+    if C_th_sink_J_per_K and C_th_sink_J_per_K > 0:
+        builder.add_capacitor(f"{name_prefix}_Csink",
+                                  sink_node, ambient_node,
+                                  float(C_th_sink_J_per_K))
+
+    junction_nodes: dict = {}
+    case_nodes: dict = {}
+    for d in devices:
+        pfx = f"{name_prefix}_{d.name}"
+        R_cs = float(d.R_th_case_to_sink_K_per_W)
+        if R_cs > 0:
+            case_node = f"{pfx}_case"
+            builder.add_resistor(f"{pfx}_Rcs", sink_node, case_node, R_cs)
+            prev = case_node
+        else:
+            # Case bonded straight to the sink.
+            case_node = sink_node
+            prev = sink_node
+        case_nodes[d.name] = case_node
+
+        stages = list(d.junction_to_case)
+        n = len(stages)
+        for k, s in enumerate(stages):
+            curr = f"{pfx}_Tj" if k == n - 1 else f"{pfx}_stage{k}"
+            builder.add_resistor(f"{pfx}_R{k}", prev, curr,
+                                    float(s.R_th_K_per_W))
+            builder.add_capacitor(f"{pfx}_C{k}", curr, ambient_node,
+                                      float(s.C_th_J_per_K))
+            prev = curr
+        # When there are no junction-to-case stages, junction ≡ case.
+        junction_nodes[d.name] = prev
+
+    return SharedHeatsink(
+        sink_node=sink_node,
+        ambient_node=ambient_node,
+        junction_nodes=junction_nodes,
+        case_nodes=case_nodes,
+        T_amb_C=float(T_amb_C),
+    )
+
+
+def make_heatsink_observer(
+    builder,
+    heatsink: SharedHeatsink,
+    power_fns: "Mapping[str, Callable]",
+):
+    """``(step_observer, b_extra_fn)`` injecting each device's power into
+    its junction node of a :func:`add_shared_heatsink` network.
+
+    Parameters
+    ----------
+    builder
+        The CircuitBuilder that already has the shared-heatsink network
+        (same one passed to :func:`add_shared_heatsink`).
+    heatsink
+        The :class:`SharedHeatsink` returned by
+        :func:`add_shared_heatsink`.
+    power_fns
+        Mapping ``{device_name: power_fn}`` where ``power_fn(t, x) -> P_W``
+        returns the device's instantaneous dissipation. Devices omitted
+        from the mapping dissipate zero.
+
+    Returns
+    -------
+    (step_observer, b_extra_fn)
+        Pass both to ``simulate(...)``. ``step_observer.read_T_j(x)``
+        returns ``{device_name: T_j_°C}`` and
+        ``step_observer.read_T_sink(x)`` returns the shared-sink
+        temperature.
+    """
+    state_size = builder.pool.state_size(builder.graph)
+    j_idx = {name: builder.node_id_of(node)
+             for name, node in heatsink.junction_nodes.items()}
+    sink_idx = builder.node_id_of(heatsink.sink_node)
+
+    fns = dict(power_fns)
+    unknown = [n for n in fns if n not in j_idx]
+    if unknown:
+        raise KeyError(
+            f"make_heatsink_observer: power_fns names not on this "
+            f"heatsink: {unknown}")
+    latest = {name: 0.0 for name in fns}
+
+    def step_observer(t, x):
+        for name, fn in fns.items():
+            latest[name] = float(fn(t, x))
+
+    def b_extra_fn(t):
+        out = [0.0] * state_size
+        # Power P (W) injected INTO the junction node = current source.
+        # Same sign convention as make_thermal_observer: b[i] = -P.
+        for name, P in latest.items():
+            out[j_idx[name]] = -P
+        return out
+
+    def read_T_j(x) -> dict:
+        return {name: float(x[idx]) for name, idx in j_idx.items()}
+
+    def read_T_sink(x) -> float:
+        return float(x[sink_idx])
+
+    step_observer.read_T_j = read_T_j        # type: ignore[attr-defined]
+    step_observer.read_T_sink = read_T_sink  # type: ignore[attr-defined]
+    return step_observer, b_extra_fn
