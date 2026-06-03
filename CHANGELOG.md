@@ -4,6 +4,62 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] — 2026-06-03
+
+Branch-current readout overhaul. ``SimulationResult.i(name)`` now
+reconstructs the current of **any** PWL-supported branch — the PLECS
+"current is just a row of the output equation" model — instead of
+only inductors and voltage sources. This eliminates the
+sense-resistor / bypass-shunt pattern downstream tools (PulsimGUI)
+were using to probe currents.
+
+### Added
+
+* **``result.i(name)`` for every supported device family** — in
+  addition to the existing inductor / voltage-source fast path
+  (state-vector native), the method now reconstructs:
+
+  | kind | reconstruction |
+  |---|---|
+  | resistor | ``(V_from − V_to) / R_ohms`` |
+  | capacitor | ``C · d(V_from − V_to)/dt`` |
+  | current_source | constant ``I`` from params |
+  | diode (PWL switched) | ``(v − V_th)·g_on`` forward, ``v·g_off`` reverse |
+  | switch | ``v·G`` with ``G = g_on`` when the mask bit is set, ``g_off`` otherwise |
+
+  Deferred (raise ``NotImplementedError`` with a hint at
+  ``pulsim.losses.device_loss_summary``): ``mosfet_level1`` /
+  ``igbt_level1`` / ``nonlinear_diode`` / ``vcvs`` /
+  ``saturable_inductor`` — their per-step nonlinear stamps aren't
+  exposed by ``builder.components()`` yet.
+
+* **``result.currents()``** — PLECS-style "all currents in one shot",
+  returns ``{branch_name: ndarray}`` for every reconstructible
+  branch. ``skip_unsupported=True`` (default) quietly omits kinds
+  without a reconstruction; ``False`` surfaces the error.
+
+* **``pulsim.simulate(...)`` stashes the composed ``switch_fn`` on
+  ``result._switch_fn``** (the same way ``_builder`` is attached) so
+  switch-branch current reconstruction works without manual wiring.
+
+### Changed
+
+* ``result.i()`` on a **resistor** branch no longer raises
+  ``NotImplementedError`` — it returns the reconstructed current.
+  ``result.i()`` on a **capacitor** likewise now returns
+  ``C·dv/dt`` instead of raising. (Callers relying on the old
+  exception should switch to checking the device kind explicitly.)
+
+### Notes
+
+The recommended probe pattern for arbitrary topology points is a
+**0 V voltage source** (``add_voltage_source(probe, n_in, n_out,
+0.0)``) — its branch current is a state variable read with the
+fast path, matching the SPICE / PSIM / PLECS "ammeter" convention
+with zero perturbation. The sense-resistor / ``__IP_BYPASS_<probe>``
+shunt approach is obsolete: it injects a small ``V_drop = I·R`` and
+ill-conditions the G matrix for tiny R.
+
 ## [1.6.5] — 2026-05-30
 
 GUI integration hardening release. Six findings from a multi-stage
