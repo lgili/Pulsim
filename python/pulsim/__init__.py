@@ -680,20 +680,47 @@ def _result_v(self, name: str, t=None):
 def _result_i(self, name: str, t=None):
     """Return the branch-current trace for ``name``.
 
-    The state vector only carries currents for branches that
-    contribute MNA state variables — inductors and independent
-    voltage sources. For resistors / capacitors / diodes /
-    MOSFETs, the current must be reconstructed from node
-    voltages and the device's parameters; that path lives in
-    :mod:`pulsim.losses` (today via
-    :func:`average_power_at_node` and
-    :func:`device_loss_summary`). When called on a non-state
-    branch this method raises :class:`NotImplementedError`
-    pointing the caller at those helpers.
+    The state vector carries MNA-native currents for branches that
+    contribute a state variable directly — **inductors** and
+    independent **voltage sources** — and ``result.i(name)`` reads
+    those off the state vector in ``O(1)``.
 
-    Sign convention follows the ``add_*`` call: current is
-    positive flowing from the ``from`` terminal to the ``to``
-    terminal.
+    For **resistors** the kernel does not store a current state
+    variable (the resistor's stamp is a conductance contribution to
+    the G matrix), but the branch current is a trivial
+    reconstruction from the resistor's two terminal node voltages
+    and its stored conductance::
+
+        i_R(t) = (V_from(t) − V_to(t)) / R_ohms
+
+    Since the GUI / PulsimGUI ``current_probe`` integration is
+    backed by a low-value bypass resistor in series with the
+    measured branch (typical pattern: a ``1e-4 Ω`` resistor named
+    ``__IP_BYPASS_<probe>``), supporting resistors here lets the
+    caller fetch the probe current with ``result.i("R_name")``
+    instead of reaching into ``pulsim.losses`` helpers. The cost is
+    one vector subtract + one scalar divide; the trace shape is
+    identical to ``result.times``.
+
+    For capacitors / diodes / MOSFETs / switches the current is
+    still not reconstructed here — those need either node-voltage
+    differentiation (cap) or the kind-specific stamp evaluation
+    (diodes / MOSFETs), which lives in :mod:`pulsim.losses` via
+    :func:`device_loss_summary`. Calling ``result.i()`` on those
+    kinds raises :class:`NotImplementedError` pointing the caller at
+    the right helper.
+
+    Sign convention. Current is positive flowing from the ``from``
+    terminal to the ``to`` terminal of the ``add_*`` call. Matches
+    the inductor / voltage-source convention.
+
+    Parameters
+    ----------
+    name
+        Branch name — inductor, voltage source, or resistor.
+    t
+        Optional step selection (``int`` / ``slice`` / array-like).
+        ``None`` returns the full per-sample trace.
     """
     import numpy as _np
     builder = getattr(self, "_builder", None)
@@ -733,19 +760,76 @@ def _result_i(self, name: str, t=None):
             break
         except Exception:  # noqa: BLE001 — wrong device kind
             continue
-    if state_idx is None:
-        raise NotImplementedError(
-            f"branch {name!r} has no MNA current state variable "
-            f"(it's likely a resistor, capacitor, diode, or MOSFET — "
-            f"reconstruct its current via pulsim.losses helpers, e.g. "
-            f"device_loss_summary(result, builder)). result.i() is "
-            f"defined for inductors and voltage sources only."
-        )
     states = _np.asarray(self.states)
-    col = states[:, state_idx]
-    if t is None:
-        return col
-    return col[t]
+    if state_idx is not None:
+        col = states[:, state_idx]
+        if t is None:
+            return col
+        return col[t]
+
+    # ----- Resistor branch — reconstruct from node voltages -----
+    # ``components()`` walks the builder once and returns each branch's
+    # kind / name / nodes / params dict (see bindings.cpp). For a
+    # resistor the params carry ``R_ohms`` directly. We do a linear
+    # scan; in practice this fires at most once per `.i()` call and
+    # the branch count is small enough that the cost is negligible
+    # vs the N×n_states data load that follows.
+    desc = None
+    try:
+        for d in builder.components():
+            if int(d.get("branch_id", -1)) == int(b_id):
+                desc = d
+                break
+    except Exception:  # noqa: BLE001 — defensive
+        desc = None
+
+    if desc is not None and desc.get("kind") == "resistor":
+        params = desc.get("params", {}) or {}
+        try:
+            R_ohms = float(params["R_ohms"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"result.i({name!r}): resistor params missing "
+                f"`R_ohms` ({exc!r}). This usually means the binding "
+                f"signature has drifted from `components()` — check "
+                f"`python/bindings.cpp::components`.") from None
+        if R_ohms <= 0.0:
+            raise ValueError(
+                f"result.i({name!r}): resistor has non-positive "
+                f"R_ohms={R_ohms}; cannot reconstruct current.")
+        from_id, to_id = desc.get("nodes", (None, None))
+        if from_id is None or to_id is None:
+            raise RuntimeError(
+                f"result.i({name!r}): resistor descriptor missing "
+                f"terminal node IDs.")
+        # Sentinel-aware node-voltage lookup. Pulsim represents the
+        # ground / reference node with ``node_id = −1`` (it has no
+        # column in the state vector — its voltage is the implicit
+        # zero of the MNA solve). Treating it as a regular index
+        # would silently read ``states[:, -1]`` (Python's negative
+        # indexing → last column, typically a branch current),
+        # producing a wildly wrong reconstruction. Real-node IDs
+        # are ≥ 0 and correspond 1-to-1 with state-vector columns.
+        v_from = (_np.zeros(states.shape[0])
+                  if int(from_id) < 0
+                  else states[:, int(from_id)])
+        v_to = (_np.zeros(states.shape[0])
+                if int(to_id) < 0
+                else states[:, int(to_id)])
+        col = (v_from - v_to) / R_ohms
+        if t is None:
+            return col
+        return col[t]
+
+    kind = desc.get("kind", "unknown") if desc is not None else "unknown"
+    raise NotImplementedError(
+        f"branch {name!r} (kind={kind!r}) has no MNA current state "
+        f"variable and isn't a resistor either. For capacitors / "
+        f"diodes / MOSFETs / switches, reconstruct the branch "
+        f"current via `pulsim.losses` helpers (e.g. "
+        f"`device_loss_summary(builder, result)`) which evaluate "
+        f"the kind-specific stamp per step. `result.i()` is defined "
+        f"for inductors, voltage sources, and resistors.")
 
 
 def _result_power(self, device_name: str) -> float:
