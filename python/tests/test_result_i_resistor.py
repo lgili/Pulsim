@@ -153,23 +153,27 @@ def test_bypass_resistor_pattern_recovers_probed_current():
 # ---------------------------------------------------------------------------
 # 5. Backward compat — non-resistor non-inductor still raises
 # ---------------------------------------------------------------------------
-def test_capacitor_branch_still_raises_not_implemented():
-    """Capacitor current reconstruction needs node-voltage
-    differentiation (``i_C = C · dv/dt``), which the .i() fast path
-    doesn't implement. Calls on capacitor names still raise with the
-    documented hint pointing at `pulsim.losses`."""
+def test_capacitor_branch_reconstructs_via_dvdt():
+    """``i_C = C · dv/dt``. As of v1.6.6 the capacitor reconstruction
+    fires automatically — the test verifies it matches Ohm's law on
+    the series R (KCL: i_R == i_C in an RC loop).
+
+    Pre-fix, capacitor branches raised ``NotImplementedError`` and
+    callers had to compute the gradient manually; that's now folded
+    into ``.i()``.
+    """
     b = p.CircuitBuilder()
     b.add_voltage_source("V1", "vin", "gnd", 5.0)
     b.add_resistor("R1", "vin", "n1", 1e3)
     b.add_capacitor("C1", "n1", "gnd", 1e-6)
 
-    res = p.simulate(b, t_end=1e-4, dt=1e-5)
-    with pytest.raises(NotImplementedError) as exc:
-        res.i("C1")
-    msg = str(exc.value)
-    assert "C1" in msg
-    assert "capacitor" in msg.lower()
-    assert "pulsim.losses" in msg or "device_loss_summary" in msg
+    res = p.simulate(b, t_end=5e-3, dt=1e-5)
+    i_R = res.i("R1")
+    i_C = res.i("C1")
+    # KCL in series loop: i_R == i_C at every step. The interior
+    # samples agree tightly; the very first/last samples have
+    # one-sided gradient error so we skip a small warmup window.
+    np.testing.assert_allclose(i_C[5:-5], i_R[5:-5], atol=1e-6, rtol=1e-3)
 
 
 # ---------------------------------------------------------------------------
