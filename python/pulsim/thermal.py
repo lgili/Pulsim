@@ -48,7 +48,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -77,6 +77,11 @@ __all__ = [
     "TempCoLoss",
     "electrothermal_steady_state",
     "make_electrothermal_heatsink_observer",
+    # Heatsink + TIM sizing helpers (P5).
+    "TIM_CATALOG",
+    "tim_resistance",
+    "convection_coefficient",
+    "convection_resistance",
 ]
 
 
@@ -1340,3 +1345,91 @@ def make_electrothermal_heatsink_observer(
         power_fns[name] = (
             lambda t, x, _idx=idx, _m=model: _m.power_at(float(x[_idx])))
     return make_heatsink_observer(builder, heatsink, power_fns)
+
+
+# =============================================================================
+# Heatsink + thermal-interface-material sizing helpers (P5)
+# =============================================================================
+#
+# Convenience for turning physical geometry into the R_th values the
+# shared-heatsink API consumes:
+#   * ``tim_resistance``  → R_th_case_to_sink (the TIM / insulator pad)
+#   * ``convection_resistance`` → R_th_sink_to_amb (sink → air)
+# The TIM resistance is exact physics (R = thickness / (k·area)); the
+# convection coefficient is a first-cut engineering estimate — prefer the
+# heatsink datasheet's R_th-vs-airflow curve when you have it.
+
+
+# Bulk thermal conductivity k [W/(m·K)] of common interface materials.
+TIM_CATALOG = {
+    "thermal_grease":  3.0,    # silicone heat-sink compound (typical)
+    "ceramic_grease":  5.0,    # ceramic/metal-oxide filled grease
+    "graphite_pad":    5.0,    # graphite thermal pad
+    "silicone_pad":    2.0,    # filled silicone gap pad
+    "phase_change":    4.0,    # phase-change material
+    "thermal_epoxy":   1.5,
+    "mica":            0.7,    # classic TO-220 mica insulator
+    "kapton":          0.2,    # polyimide insulating film
+    "bare_aluminium":  220.0,  # direct metal contact (no insulator)
+}
+
+
+def tim_resistance(area_m2: float,
+                   thickness_m: float,
+                   *,
+                   material: "Optional[str]" = None,
+                   k_W_per_mK: "Optional[float]" = None) -> float:
+    """Conductive resistance of a thermal-interface layer [K/W].
+
+    ``R_th = thickness / (k · area)`` — the case-to-sink resistance you
+    pass as ``R_th_case_to_sink_K_per_W`` to :class:`HeatsinkDevice`.
+
+    Provide either a catalog ``material`` (see :data:`TIM_CATALOG`) or an
+    explicit ``k_W_per_mK``. ``area_m2`` is the contact area, ``thickness_m``
+    the bond-line thickness.
+    """
+    if k_W_per_mK is None:
+        if material is None:
+            raise ValueError(
+                "tim_resistance: provide material= or k_W_per_mK=")
+        if material not in TIM_CATALOG:
+            raise KeyError(
+                f"tim_resistance: unknown material {material!r}; "
+                f"known: {sorted(TIM_CATALOG)}")
+        k = float(TIM_CATALOG[material])
+    else:
+        k = float(k_W_per_mK)
+    if area_m2 <= 0 or thickness_m < 0 or k <= 0:
+        raise ValueError("tim_resistance: area>0, thickness>=0, k>0 required")
+    return float(thickness_m) / (k * float(area_m2))
+
+
+def convection_coefficient(airflow_m_per_s: float = 0.0) -> float:
+    """Approximate convective heat-transfer coefficient h [W/(m²·K)].
+
+    First-cut engineering estimate: ~10 W/m²K in still air (natural
+    convection), rising with forced airflow (~25 at 2 m/s, ~35 at 5 m/s).
+    Valid for roughly 0–15 m/s. **Prefer the heatsink datasheet's
+    R_th-vs-airflow curve** for a real design — this is a sizing aid.
+    """
+    v = max(float(airflow_m_per_s), 0.0)
+    return 10.45 - v + 10.0 * math.sqrt(v)
+
+
+def convection_resistance(area_m2: float,
+                          *,
+                          airflow_m_per_s: float = 0.0,
+                          h_W_per_m2K: "Optional[float]" = None) -> float:
+    """Sink-to-ambient convective resistance ``R_th = 1 / (h · area)`` [K/W].
+
+    The value you pass as ``R_th_sink_to_amb_K_per_W`` to
+    :func:`shared_heatsink_steady_state` / :func:`add_shared_heatsink` /
+    :func:`electrothermal_steady_state`. ``h`` is taken from
+    ``h_W_per_m2K`` if given, else estimated from ``airflow_m_per_s`` via
+    :func:`convection_coefficient` (approximate — see its note).
+    """
+    h = (float(h_W_per_m2K) if h_W_per_m2K is not None
+         else convection_coefficient(airflow_m_per_s))
+    if area_m2 <= 0 or h <= 0:
+        raise ValueError("convection_resistance: area>0 and h>0 required")
+    return 1.0 / (h * float(area_m2))
