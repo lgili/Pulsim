@@ -194,6 +194,15 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          # Idempotent upload: don't 400 on files already present on
+          # PyPI. Without this, ANY re-trigger of the publish job for
+          # the same version — a tag retag (e.g. fixing a forgotten
+          # version-file bump), a manual workflow re-run, or a partial
+          # prior upload that got interrupted — fails the whole job
+          # with `400 File already exists`. With skip-existing the
+          # already-present wheels are skipped and only the missing
+          # ones upload, so re-running a release is safe.
+          skip-existing: true
 
   # =============================================================================
   # Create GitHub Release
