@@ -193,6 +193,10 @@ from .thermal import (
     shared_heatsink_steady_state,
     add_shared_heatsink,
     make_heatsink_observer,
+    # Temperature-dependent loss + electro-thermal feedback (P2).
+    TempCoLoss,
+    electrothermal_steady_state,
+    make_electrothermal_heatsink_observer,
 )
 from . import fast_block as _fast_block_module  # noqa: F401  (registers submodule)
 from .fast_block import (
@@ -494,6 +498,10 @@ __all__ = [
     "shared_heatsink_steady_state",
     "add_shared_heatsink",
     "make_heatsink_observer",
+    # Temperature-dependent loss + electro-thermal feedback (P2).
+    "TempCoLoss",
+    "electrothermal_steady_state",
+    "make_electrothermal_heatsink_observer",
     # PSIM/PLECS-style JIT control block (Numba — optional dep).
     "FastBlock",
     "fast_block",

@@ -73,6 +73,10 @@ __all__ = [
     "shared_heatsink_steady_state",
     "add_shared_heatsink",
     "make_heatsink_observer",
+    # Temperature-dependent loss + electro-thermal feedback (P2).
+    "TempCoLoss",
+    "electrothermal_steady_state",
+    "make_electrothermal_heatsink_observer",
 ]
 
 
@@ -1094,3 +1098,211 @@ def make_heatsink_observer(
     step_observer.read_T_j = read_T_j        # type: ignore[attr-defined]
     step_observer.read_T_sink = read_T_sink  # type: ignore[attr-defined]
     return step_observer, b_extra_fn
+
+
+# =============================================================================
+# Temperature-dependent loss + closed-loop electro-thermal coupling (P2)
+# =============================================================================
+#
+# At fixed device currents (set by the converter's control loop), the
+# *coefficients* of the loss model drift with junction temperature:
+#   * conduction: Rds_on(T) rises (~+0.4…+0.8 %/°C for Si MOSFETs);
+#     diode/IGBT V_f has the opposite (negative) tempco;
+#   * switching:  E_on/E_off rise with T.
+# Because loss ↑ raises T_j, and T_j ↑ raises loss, the steady state is a
+# self-consistent fixed point — and if the positive feedback is strong
+# enough relative to the heatsink's ability to remove heat, there is NO
+# stable equilibrium: thermal runaway. A model with Rds_on fixed at 25 °C
+# (the P1 helpers) reports an optimistic T_j and cannot see runaway at all.
+
+
+@dataclass
+class TempCoLoss:
+    """A device's dissipation as a function of junction temperature.
+
+    Anchored at a reference temperature (datasheet conditions)::
+
+        P(T_j) = P_cond_ref · (1 + a_cond · (T_j − T_ref))
+               + P_sw_ref   · (1 + a_sw   · (T_j − T_ref))
+
+    The reference powers ``P_cond_ref`` / ``P_sw_ref`` come from a loss
+    run at ``T_ref`` (e.g. :func:`pulsim.device_loss_summary` or your own
+    breakdown). The linear tempcos ``a_cond`` / ``a_sw`` [1/°C] come from
+    the datasheet's Rds_on(T) / V_ce(T) / E_sw(T) curves:
+
+    * MOSFET conduction (Rds_on-dominated): ``a_cond`` **positive**
+      (≈ +0.006 for a Si MOSFET that roughly doubles Rds_on by 150 °C).
+    * Diode conduction (V_f-dominated): ``a_cond`` **negative**
+      (V_f falls ≈ −2 mV/°C).
+    * Switching energy: ``a_sw`` typically small-positive.
+    """
+
+    P_cond_ref_W: float
+    P_sw_ref_W: float = 0.0
+    a_cond_per_C: float = 0.0
+    a_sw_per_C: float = 0.0
+    T_ref_C: float = 25.0
+
+    @property
+    def P_ref_total_W(self) -> float:
+        """Total dissipation at the reference temperature [W]."""
+        return float(self.P_cond_ref_W + self.P_sw_ref_W)
+
+    @property
+    def dP_dT_W_per_C(self) -> float:
+        """Loss–temperature slope dP/dT_j [W/°C] — the feedback gain.
+
+        ``P_cond_ref · a_cond + P_sw_ref · a_sw``. Positive means loss
+        grows with temperature (the destabilising direction).
+        """
+        return float(self.P_cond_ref_W * self.a_cond_per_C
+                     + self.P_sw_ref_W * self.a_sw_per_C)
+
+    def power_at(self, T_j_C: float) -> float:
+        """Dissipation [W] at junction temperature ``T_j_C`` [°C]."""
+        dT = float(T_j_C) - self.T_ref_C
+        return float(self.P_cond_ref_W * (1.0 + self.a_cond_per_C * dT)
+                     + self.P_sw_ref_W * (1.0 + self.a_sw_per_C * dT))
+
+
+def electrothermal_steady_state(
+    devices: "Sequence[HeatsinkDevice]",
+    loss_models: "Mapping[str, TempCoLoss]",
+    *,
+    R_th_sink_to_amb_K_per_W: float,
+    T_amb_C: float = 25.0,
+) -> dict:
+    """Self-consistent steady-state T_j with temperature-dependent loss.
+
+    Solves the coupled fixed point for N devices on a shared heatsink::
+
+        P_i   = loss_models[i].power_at(T_j_i)          # loss rises with T
+        T_j_i = T_amb + R_sa·Σ_j P_j + (R_cs_i+R_jc_i)·P_i
+
+    Because :class:`TempCoLoss` is **linear** in T_j, the fixed point is
+    solved in closed form (no iteration). Writing ``T_j = T_amb·1 + M·P``
+    with ``M_ij = R_sa + δ_ij·(R_cs_i+R_jc_i)`` and
+    ``P = P0 + K·(T_j − T_ref)``, ``K = diag(dP/dT_i)``::
+
+        (I − M·K) · T_j = T_amb·1 + M·(P0 − K·T_ref)
+
+    The feedback gain matrix is ``G = M·K``. The loop is stable iff the
+    spectral radius ``ρ(G) < 1``; ``ρ(G) ≥ 1`` is **thermal runaway**
+    (no stable equilibrium — every iteration drives T_j higher).
+
+    Reduces exactly to :func:`shared_heatsink_steady_state` when all
+    tempcos are zero (``K = 0`` → ``ρ = 0``).
+
+    Parameters
+    ----------
+    devices
+        List of :class:`HeatsinkDevice` (provides R_th_case_to_sink +
+        the junction-to-case ladder → R_jc).
+    loss_models
+        ``{device_name: TempCoLoss}`` — one per device (all required).
+    R_th_sink_to_amb_K_per_W, T_amb_C
+        Shared heatsink-to-ambient resistance and ambient temperature.
+
+    Returns
+    -------
+    dict
+        On a stable solve, the :func:`shared_heatsink_steady_state`
+        breakdown at the converged powers, plus::
+
+            {"converged": True, "runaway": False,
+             "feedback_gain": float,        # ρ(G); margin = 1 − ρ
+             "final_powers_W": {name: P_W}}
+
+        On runaway (``ρ ≥ 1``)::
+
+            {"converged": False, "runaway": True,
+             "feedback_gain": float, "message": str,
+             "T_ambient_C": float}
+    """
+    devices = list(devices)
+    if not devices:
+        raise ValueError("electrothermal_steady_state: no devices")
+    names = [d.name for d in devices]
+    missing = [n for n in names if n not in loss_models]
+    if missing:
+        raise KeyError(
+            f"electrothermal_steady_state: loss_models missing "
+            f"device(s): {missing}")
+    if R_th_sink_to_amb_K_per_W < 0:
+        raise ValueError("R_th_sink_to_amb_K_per_W must be >= 0")
+
+    N = len(devices)
+    R = np.array([d.R_th_case_to_sink_K_per_W + d.R_th_jc_total_K_per_W
+                  for d in devices], dtype=float)
+    P0 = np.array([loss_models[n].P_ref_total_W for n in names], dtype=float)
+    k = np.array([loss_models[n].dP_dT_W_per_C for n in names], dtype=float)
+    Tref = np.array([loss_models[n].T_ref_C for n in names], dtype=float)
+    Rsa = float(R_th_sink_to_amb_K_per_W)
+
+    # Thermal map T_j = T_amb·1 + M·P  with  M_ij = Rsa + δ_ij·R_i.
+    M = np.full((N, N), Rsa) + np.diag(R)
+    K = np.diag(k)
+    G = M @ K
+    eig = np.linalg.eigvals(G)
+    rho = float(np.max(eig.real)) if N else 0.0
+
+    if rho >= 1.0:
+        return {
+            "converged": False,
+            "runaway": True,
+            "feedback_gain": rho,
+            "T_ambient_C": float(T_amb_C),
+            "R_th_sink_to_amb_K_per_W": Rsa,
+            "message": (
+                f"thermal runaway: loss-temperature feedback gain "
+                f"ρ(M·K) = {rho:.3f} ≥ 1 — no stable equilibrium. "
+                f"Lower R_th, the tempcos, or the dissipation."),
+        }
+
+    rhs = float(T_amb_C) + M @ (P0 - k * Tref)
+    T_j = np.linalg.solve(np.eye(N) - G, rhs)
+    P = P0 + k * (T_j - Tref)
+    powers = {n: float(P[i]) for i, n in enumerate(names)}
+
+    base = shared_heatsink_steady_state(
+        devices, powers,
+        R_th_sink_to_amb_K_per_W=Rsa, T_amb_C=T_amb_C)
+    base["converged"] = True
+    base["runaway"] = False
+    base["feedback_gain"] = rho
+    base["final_powers_W"] = powers
+    return base
+
+
+def make_electrothermal_heatsink_observer(
+    builder,
+    heatsink: SharedHeatsink,
+    loss_models: "Mapping[str, TempCoLoss]",
+):
+    """Closed-loop electro-thermal observer for the transient path.
+
+    Like :func:`make_heatsink_observer`, but each device's injected power
+    is recomputed every step from its **current** junction temperature
+    via ``loss_models[name].power_at(T_j)`` — closing the loss↔temperature
+    loop. The feedback is explicit (one step lagged), which is exact in
+    the limit and harmless because the thermal time constants are orders
+    of magnitude longer than the step.
+
+    Pair with :func:`add_shared_heatsink` + ``simulate`` to get the
+    coupled transient ``T_j(t)`` *with* temperature-dependent losses; the
+    settled values match :func:`electrothermal_steady_state`.
+    """
+    j_idx = {name: builder.node_id_of(node)
+             for name, node in heatsink.junction_nodes.items()}
+    unknown = [n for n in loss_models if n not in j_idx]
+    if unknown:
+        raise KeyError(
+            f"make_electrothermal_heatsink_observer: loss_models names "
+            f"not on this heatsink: {unknown}")
+
+    power_fns = {}
+    for name, model in loss_models.items():
+        idx = j_idx[name]
+        power_fns[name] = (
+            lambda t, x, _idx=idx, _m=model: _m.power_at(float(x[_idx])))
+    return make_heatsink_observer(builder, heatsink, power_fns)
