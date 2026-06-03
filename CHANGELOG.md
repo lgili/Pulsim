@@ -4,6 +4,69 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-06-03
+
+Precision loss & thermal modelling for inverter thermal optimisation.
+The loss/thermal stack moves from a fixed-coefficient, per-device
+estimate to a coupled, temperature-aware model — devices sharing a
+heatsink, loss↔temperature feedback (with thermal-runaway detection),
+datasheet-curve switching loss, offset+slope conduction, and
+heatsink/TIM sizing helpers. All new symbols are re-exported at the
+flat ``pulsim`` namespace.
+
+### Added
+
+* **Shared heatsink** — ``HeatsinkDevice``, ``SharedHeatsink``,
+  ``shared_heatsink_steady_state``, ``add_shared_heatsink``,
+  ``make_heatsink_observer``. N devices on one sink are thermally
+  coupled: the sink rise is driven by the *total* dissipation
+  (``T_sink = T_amb + R_th,sa · Σ Pᵢ``), lifting every junction
+  together — the effect a per-device-independent model misses when
+  power is pushed up.
+
+* **Electro-thermal feedback + runaway detection** — ``TempCoLoss``,
+  ``electrothermal_steady_state``,
+  ``make_electrothermal_heatsink_observer``. Conduction loss climbs
+  with junction temperature (``R_ds(T)`` / ``V_ce(T)``), so the steady
+  state is the self-consistent fixed point
+  ``(I − M·K)·T_j = T_amb + M·(P₀ − K·T_ref)``, solved in closed form.
+  Feedback gain ``ρ(G) ≥ 1`` is flagged as **thermal runaway** instead
+  of returning a plausible-but-wrong temperature.
+
+* **Offset+slope conduction loss** — ``device_loss_summary`` /
+  ``device_thermal_summary`` gain ``conduction_specs``:
+  ``P = V_f0·|i| + r·i²`` (datasheet ``V_ce0 + r·I`` / ``V_f0 + r·I``),
+  whose forward-voltage offset dominates at low current, vs the default
+  pure-resistive ``v²·g``.
+
+* **Nonlinear datasheet switching curves** — ``E_on_curve`` /
+  ``E_off_curve`` / ``E_rr_curve`` interpolated at the actual switched
+  current per detected edge (linearly extrapolated beyond the table),
+  for fidelity away from the single reference operating point.
+
+* **Heatsink / TIM sizing helpers** — ``tim_resistance``,
+  ``convection_coefficient``, ``convection_resistance`` and
+  ``TIM_CATALOG`` turn geometry / airflow into the ``R_th`` values the
+  thermal API consumes (TIM resistance ``thickness/(k·area)`` is exact;
+  convection is a first-cut estimate).
+
+* **Newly exported** thermal primitives that existed internally but
+  weren't on the public surface: ``CauerStage``,
+  ``add_cauer_thermal_network``, ``ThermalLimitMonitor``.
+
+* **Docs** — new User-Guide page *Loss & Thermal Modelling*
+  (``docs/loss-thermal.md``) covering how the model works and how to use
+  it, with the coupling / runaway maths and runnable snippets.
+
+### Changed
+
+* ``projects/inverters/pfc_vsi_drive`` now computes junction
+  temperatures through ``electrothermal_steady_state`` (same
+  junction-to-ambient topology, so it stays comparable to the PSIM
+  KPIs) and ships a ``thermal_comparison.py`` IPM case study (old model
+  vs new). The legacy ``junction_temperature`` helper is retained and
+  reproduced bit-for-bit when the temperature coefficient is zero.
+
 ## [1.6.6] — 2026-06-03
 
 Branch-current readout overhaul. ``SimulationResult.i(name)`` now
