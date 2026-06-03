@@ -1,0 +1,2449 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/how-pulsim-works/13-dsed-dopri5-adaptive/">
+      
+      
+        <link rel="prev" href="../12-dsed-state-space-extraction/">
+      
+      
+        <link rel="next" href="../14-dsed-bdf2-and-dispatch/">
+      
+      
+      <link rel="icon" href="../../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>13 — DOPRI5 + Adaptive PI + Event Scan - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#13-dopri5-adaptive-pi-event-scan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              13 — DOPRI5 + Adaptive PI + Event Scan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../loss-thermal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#131-dopri5-dormand-prince-54-with-fsal" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.1 DOPRI5 — Dormand-Prince 5(4) with FSAL
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13.1 DOPRI5 — Dormand-Prince 5(4) with FSAL">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fsal-first-same-as-last" class="md-nav__link">
+    <span class="md-ellipsis">
+      FSAL — First-Same-As-Last
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#132-soderlind-pi-step-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.2 Söderlind PI step controller
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13.2 Söderlind PI step controller">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-pi-law" class="md-nav__link">
+    <span class="md-ellipsis">
+      The PI law
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accept-path-vs-reject-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      Accept-path vs reject-path
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-subtle-bug-we-fixed-gate-4d3" class="md-nav__link">
+    <span class="md-ellipsis">
+      A subtle bug we fixed (Gate 4.D.3)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#133-sub-step-predicate-events-hermite-illinois" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.3 Sub-step predicate events: Hermite + Illinois
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13.3 Sub-step predicate events: Hermite + Illinois">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-detection-via-hermite-interpolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1: detection via Hermite interpolation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-localisation-via-illinois" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2: localisation via Illinois
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-state-projection-at-tast" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3: state projection at \(t^\ast\)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#134-worked-example-1-rk-step-in-the-buck-ccm-hot-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.4 Worked example: 1 RK step in the buck CCM hot loop
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#135-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.5 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#131-dopri5-dormand-prince-54-with-fsal" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.1 DOPRI5 — Dormand-Prince 5(4) with FSAL
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13.1 DOPRI5 — Dormand-Prince 5(4) with FSAL">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fsal-first-same-as-last" class="md-nav__link">
+    <span class="md-ellipsis">
+      FSAL — First-Same-As-Last
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#132-soderlind-pi-step-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.2 Söderlind PI step controller
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13.2 Söderlind PI step controller">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-pi-law" class="md-nav__link">
+    <span class="md-ellipsis">
+      The PI law
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accept-path-vs-reject-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      Accept-path vs reject-path
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-subtle-bug-we-fixed-gate-4d3" class="md-nav__link">
+    <span class="md-ellipsis">
+      A subtle bug we fixed (Gate 4.D.3)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#133-sub-step-predicate-events-hermite-illinois" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.3 Sub-step predicate events: Hermite + Illinois
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13.3 Sub-step predicate events: Hermite + Illinois">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-detection-via-hermite-interpolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1: detection via Hermite interpolation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-localisation-via-illinois" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2: localisation via Illinois
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-state-projection-at-tast" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3: state projection at \(t^\ast\)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#134-worked-example-1-rk-step-in-the-buck-ccm-hot-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.4 Worked example: 1 RK step in the buck CCM hot loop
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#135-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      13.5 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/how-pulsim-works/13-dsed-dopri5-adaptive.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/how-pulsim-works/13-dsed-dopri5-adaptive.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="13-dopri5-adaptive-pi-event-scan">13. DOPRI5 + adaptive PI + event scan<a class="headerlink" href="#13-dopri5-adaptive-pi-event-scan" title="Permanent link">&para;</a></h1>
+<p>Chapter 12 reduced the per-mask MNA system to an LTI ODE
+<span class="arithmatex">\(\dot{\mathbf{x}}_s = A_m \mathbf{x}_s + \mathbf{b}_m(t)\)</span>. This
+chapter explains <strong>how the PED scheduler integrates that ODE
+between events</strong>:</p>
+<ol>
+<li><strong>DOPRI5</strong> (Dormand-Prince 5(4)) — a 7-stage explicit RK with
+   FSAL (First-Same-As-Last) optimisation. §13.1.</li>
+<li><strong>Söderlind PI step controller</strong> — picks <span class="arithmatex">\(h_{\text{new}}\)</span>
+   from the local error estimate using both proportional and
+   integral feedback. §13.2.</li>
+<li><strong>Cubic Hermite interpolation</strong> + <strong>Illinois root finder</strong> —
+   for sub-step predicate events (body diodes, voltage thresholds)
+   that don't align with gate edges. §13.3.</li>
+</ol>
+<p>The DOPRI5 + PI combination is the textbook choice for non-stiff
+adaptive RK (Hairer-Wanner Vol. I); we don't claim novelty there.
+What's worth documenting is <strong>how it's wired to the event-driven
+outer loop</strong> — that's where the PED architecture pays off.</p>
+<hr />
+<h2 id="131-dopri5-dormand-prince-54-with-fsal">13.1 DOPRI5 — Dormand-Prince 5(4) with FSAL<a class="headerlink" href="#131-dopri5-dormand-prince-54-with-fsal" title="Permanent link">&para;</a></h2>
+<p>DOPRI5 is a 7-stage explicit Runge-Kutta method with embedded
+4th-order error estimator. For a system
+<span class="arithmatex">\(\dot{\mathbf{x}} = f(t, \mathbf{x})\)</span>, one step from <span class="arithmatex">\((t_n, \mathbf{x}_n)\)</span> to
+<span class="arithmatex">\((t_n + h, \mathbf{x}_{n+1})\)</span> evaluates:</p>
+<div class="arithmatex">\[
+\begin{aligned}
+\mathbf{k}_1 &amp;= f(t_n,\, \mathbf{x}_n) \\
+\mathbf{k}_i &amp;= f\Bigl(t_n + c_i h,\; \mathbf{x}_n + h\sum_{j=1}^{i-1} a_{ij}\, \mathbf{k}_j\Bigr), \quad i=2,\ldots,7 \\
+\mathbf{x}_{n+1}^{(5)} &amp;= \mathbf{x}_n + h \sum_{i=1}^{7} b_i\, \mathbf{k}_i \quad\text{(5th-order)} \\
+\mathbf{x}_{n+1}^{(4)} &amp;= \mathbf{x}_n + h \sum_{i=1}^{7} \hat{b}_i\, \mathbf{k}_i \quad\text{(embedded 4th)}
+\end{aligned}
+\]</div>
+<p>The local error estimate is the 5th-vs-4th difference:</p>
+<div class="arithmatex">\[
+\mathbf{e}_{n+1} = \mathbf{x}_{n+1}^{(5)} - \mathbf{x}_{n+1}^{(4)}
+                = h \sum_{i=1}^{7} (b_i - \hat{b}_i)\, \mathbf{k}_i
+\]</div>
+<p>The full Butcher tableau Pulsim uses is the standard
+Dormand-Prince (1980):</p>
+<div class="arithmatex">\[
+\begin{array}{c|ccccccc}
+0       &amp; &amp; &amp; &amp; &amp; &amp; &amp; \\
+1/5     &amp; 1/5 &amp; &amp; &amp; &amp; &amp; &amp; \\
+3/10    &amp; 3/40 &amp; 9/40 &amp; &amp; &amp; &amp; &amp; \\
+4/5     &amp; 44/45 &amp; -56/15 &amp; 32/9 &amp; &amp; &amp; &amp; \\
+8/9     &amp; 19372/6561 &amp; -25360/2187 &amp; 64448/6561 &amp; -212/729 &amp; &amp; &amp; \\
+1       &amp; 9017/3168 &amp; -355/33 &amp; 46732/5247 &amp; 49/176 &amp; -5103/18656 &amp; &amp; \\
+1       &amp; 35/384 &amp; 0 &amp; 500/1113 &amp; 125/192 &amp; -2187/6784 &amp; 11/84 &amp; 0 \\ \hline
+b_i^{(5)} &amp; 35/384 &amp; 0 &amp; 500/1113 &amp; 125/192 &amp; -2187/6784 &amp; 11/84 &amp; 0 \\
+\hat{b}_i^{(4)} &amp; 5179/57600 &amp; 0 &amp; 7571/16695 &amp; 393/640 &amp; -92097/339200 &amp; 187/2100 &amp; 1/40 \\
+\end{array}
+\]</div>
+<h3 id="fsal-first-same-as-last">FSAL — First-Same-As-Last<a class="headerlink" href="#fsal-first-same-as-last" title="Permanent link">&para;</a></h3>
+<p>Notice the last row of <span class="arithmatex">\(a_{ij}\)</span> equals <span class="arithmatex">\(b_i^{(5)}\)</span>: the 7th stage
+is evaluated <strong>at</strong> <span class="arithmatex">\((t_n + h, \mathbf{x}_{n+1}^{(5)})\)</span>. If the
+step is accepted, that same evaluation is <span class="arithmatex">\(\mathbf{k}_1\)</span> for the
+<strong>next</strong> step. The FSAL trick saves one <span class="arithmatex">\(f\)</span>-evaluation per step
+(reducing the cost from 7 to 6 RHS calls).</p>
+<p>The C++ implementation <code>pulsim::dsed::rk45::step</code> keeps an
+<code>RK45State::k7_cached</code> between steps; on <code>invalidate()</code> (called at
+gate events or when the controller rejects), the cache is dropped
+and the next step pays the full 7 evaluations.</p>
+<hr />
+<h2 id="132-soderlind-pi-step-controller">13.2 Söderlind PI step controller<a class="headerlink" href="#132-soderlind-pi-step-controller" title="Permanent link">&para;</a></h2>
+<p>Given the per-component scaled error norm</p>
+<div class="arithmatex">\[
+\text{err} = \sqrt{\frac{1}{n_s} \sum_{i=1}^{n_s}
+                    \left(\frac{e_{n+1,i}}{\text{atol} + \text{rtol}\cdot\max(|x_{n,i}|, |x_{n+1,i}|)}\right)^2}
+\]</div>
+<p>the controller decides whether to <strong>accept</strong> the step and what
+<span class="arithmatex">\(h_{\text{new}}\)</span> to try next.</p>
+<p><strong>Acceptance</strong>: <span class="arithmatex">\(\text{err} \le 1\)</span> accepts. Otherwise reject, shrink
+<span class="arithmatex">\(h\)</span>, retry.</p>
+<h3 id="the-pi-law">The PI law<a class="headerlink" href="#the-pi-law" title="Permanent link">&para;</a></h3>
+<p>Söderlind 2002 (<em>Automatic control and adaptive time-stepping</em>)
+proves that classical I-only step control — <span class="arithmatex">\(h_{\text{new}} = h \cdot
+\text{err}^{-1/(p+1)}\)</span> — has poles on the imaginary axis and
+oscillates around the optimal <span class="arithmatex">\(h^\ast\)</span>. A <strong>PI controller</strong> stabilises
+the loop:</p>
+<div class="arithmatex">\[
+\boxed{
+h_{\text{new}} = \text{safety} \cdot h \cdot
+                  \underbrace{\left(\frac{1}{\text{err}}\right)^{k_P}}_{\text{proportional}}
+                  \cdot
+                  \underbrace{\left(\frac{\text{err}_{\text{prev}}}{\text{err}}\right)^{k_I}}_{\text{integral}}
+}
+\]</div>
+<p>For DOPRI5 (<span class="arithmatex">\(p = 5\)</span>) Pulsim uses the standard Söderlind constants:</p>
+<table>
+<thead>
+<tr>
+<th>Constant</th>
+<th style="text-align: right;">Value</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(k_P\)</span></td>
+<td style="text-align: right;"><span class="arithmatex">\(0.7 / p = 0.14\)</span></td>
+<td>Proportional gain</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(k_I\)</span></td>
+<td style="text-align: right;"><span class="arithmatex">\(0.4 / p = 0.08\)</span></td>
+<td>Integral gain</td>
+</tr>
+<tr>
+<td>safety</td>
+<td style="text-align: right;">0.9</td>
+<td>Reduces <span class="arithmatex">\(h\)</span> slightly below ideal to allow margin</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(h_{\max} / h_{\min}\)</span></td>
+<td style="text-align: right;">5 / 0.2</td>
+<td>Per-step growth/shrink caps</td>
+</tr>
+</tbody>
+</table>
+<h3 id="accept-path-vs-reject-path">Accept-path vs reject-path<a class="headerlink" href="#accept-path-vs-reject-path" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// In pulsim::dsed::PIController::accept(...)</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">factor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pow</span><span class="p">(</span><span class="n">Real</span><span class="p">{</span><span class="mi">1</span><span class="p">}</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">err</span><span class="p">,</span><span class="w"> </span><span class="n">kP</span><span class="p">)</span>
+<span class="w">                  </span><span class="o">*</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pow</span><span class="p">(</span><span class="n">err_prev</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">err</span><span class="p">,</span><span class="w"> </span><span class="n">kI</span><span class="p">);</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">h_proposed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">h</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">clamp</span><span class="p">(</span><span class="n">safety</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">factor</span><span class="p">,</span>
+<span class="w">                                        </span><span class="n">h_shrink_min</span><span class="p">,</span>
+<span class="w">                                        </span><span class="n">h_grow_max</span><span class="p">);</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mi">1</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Accept the step. Store err for next iteration&#39;s I term.</span>
+<span class="w">    </span><span class="n">err_prev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">max</span><span class="p">(</span><span class="n">err</span><span class="p">,</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mf">1e-2</span><span class="p">});</span><span class="w">  </span><span class="c1">// protect against zero</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="n">h_proposed</span><span class="p">};</span>
+<span class="p">}</span>
+<span class="c1">// Reject — back off, retry. NO `err_prev` update (avoid windup).</span>
+<span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">clamp</span><span class="p">(</span><span class="n">safety</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pow</span><span class="p">(</span><span class="n">Real</span><span class="p">{</span><span class="mi">1</span><span class="p">}</span><span class="o">/</span><span class="n">err</span><span class="p">,</span><span class="w"> </span><span class="n">kP</span><span class="p">),</span>
+<span class="w">                                </span><span class="n">h_shrink_min</span><span class="p">,</span><span class="w"> </span><span class="n">h_grow_max</span><span class="p">)};</span>
+</code></pre></div>
+<p>The reject path uses <strong>only</strong> the proportional term (no integral
+accumulation across failed attempts) and the same safety factor.</p>
+<h3 id="a-subtle-bug-we-fixed-gate-4d3">A subtle bug we fixed (Gate 4.D.3)<a class="headerlink" href="#a-subtle-bug-we-fixed-gate-4d3" title="Permanent link">&para;</a></h3>
+<p>The original implementation had the rejection branch as</p>
+<div class="highlight"><pre><span></span><code><span class="n">factor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pow</span><span class="p">(</span><span class="n">Real</span><span class="p">{</span><span class="mi">1</span><span class="p">}</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">err</span><span class="p">,</span><span class="w"> </span><span class="n">kP</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">safety</span><span class="p">;</span><span class="w">  </span><span class="c1">// BUG</span>
+</code></pre></div>
+<p>For <code>err</code> just over 1.0, <code>(1/err)^kP</code> was ~0.99 and dividing by
+0.9 (safety) gave ratio ~1.1 → step grew on reject. The PI
+controller would oscillate forever. Fix: <code>safety * (1/err)^kP</code>
+per Hairer-Wanner Vol. II §IV.2. After the fix the controller
+converges in 1-2 retries on every test scenario.</p>
+<hr />
+<h2 id="133-sub-step-predicate-events-hermite-illinois">13.3 Sub-step predicate events: Hermite + Illinois<a class="headerlink" href="#133-sub-step-predicate-events-hermite-illinois" title="Permanent link">&para;</a></h2>
+<p>PWM gate edges are <strong>scheduled</strong> events — the scheduler knows
+exactly when they fire (<code>switch_fn.next_edge_after(t)</code> returns the
+analytical time). The DSED scheduler simply caps the step at the
+predicted gate-edge time, integrates up to it exactly, swaps the
+mask, restarts.</p>
+<p><strong>Predicate events</strong> are different. Examples:</p>
+<ul>
+<li>Body-diode commutation: triggered when <span class="arithmatex">\(i_L\)</span> crosses zero in
+  DCM, time unknown a priori.</li>
+<li>Voltage-threshold protection: triggered when <span class="arithmatex">\(v_{\text{out}} &gt; V_{\text{max}}\)</span>.</li>
+<li>Custom user predicates: anything <code>g(t, x) = 0</code>.</li>
+</ul>
+<p>These can fire <strong>inside</strong> a successful RK step at some
+<span class="arithmatex">\(t^\ast \in (t_n, t_n + h)\)</span>. The scheduler needs to:</p>
+<ol>
+<li><strong>Detect</strong> that a predicate sign-change happened in the step.</li>
+<li><strong>Locate</strong> <span class="arithmatex">\(t^\ast\)</span> to high precision without re-integrating.</li>
+<li><strong>Apply</strong> the state projection (e.g., zero <span class="arithmatex">\(i_L\)</span> at commutation)
+   and reset <span class="arithmatex">\(h\)</span>.</li>
+</ol>
+<h3 id="step-1-detection-via-hermite-interpolation">Step 1: detection via Hermite interpolation<a class="headerlink" href="#step-1-detection-via-hermite-interpolation" title="Permanent link">&para;</a></h3>
+<p>After accepting the DOPRI5 step we have <span class="arithmatex">\((t_n, \mathbf{x}_n,
+\mathbf{k}_1)\)</span> at the left endpoint and <span class="arithmatex">\((t_n+h, \mathbf{x}_{n+1},
+\mathbf{k}_7)\)</span> at the right (both FSAL). The cubic Hermite
+interpolant fits an order-4-accurate trajectory through both
+endpoints:</p>
+<div class="arithmatex">\[
+\mathbf{x}(t_n + \theta h) = h_{00}(\theta)\mathbf{x}_n
+                              + h_{10}(\theta)\, h\, \mathbf{k}_1
+                              + h_{01}(\theta)\mathbf{x}_{n+1}
+                              + h_{11}(\theta)\, h\, \mathbf{k}_7
+\]</div>
+<p>with the Hermite basis functions</p>
+<div class="arithmatex">\[
+h_{00}(\theta) = 2\theta^3 - 3\theta^2 + 1, \quad
+h_{10}(\theta) = \theta^3 - 2\theta^2 + \theta, \quad
+h_{01}(\theta) = -2\theta^3 + 3\theta^2, \quad
+h_{11}(\theta) = \theta^3 - \theta^2
+\]</div>
+<p>for <span class="arithmatex">\(\theta \in [0, 1]\)</span>. Evaluate each registered predicate
+<span class="arithmatex">\(g_k(t, \mathbf{x})\)</span> at <span class="arithmatex">\(\theta = 0\)</span> and <span class="arithmatex">\(\theta = 1\)</span>; a <strong>sign
+change</strong> means a root in <span class="arithmatex">\((0, 1)\)</span>.</p>
+<p>The interpolation is FREE — the FSAL slots <span class="arithmatex">\(\mathbf{k}_1\)</span> and
+<span class="arithmatex">\(\mathbf{k}_7\)</span> are already in memory.</p>
+<h3 id="step-2-localisation-via-illinois">Step 2: localisation via Illinois<a class="headerlink" href="#step-2-localisation-via-illinois" title="Permanent link">&para;</a></h3>
+<p>For each predicate that flipped sign, the Illinois (modified
+regula falsi) root finder finds <span class="arithmatex">\(t^\ast\)</span> inside the step:</p>
+<div class="highlight"><pre><span></span><code>g_left, g_right are the predicate values at θ = 0 and θ = 1.
+Both have opposite signs (we wouldn&#39;t be here otherwise).
+
+while abs(t_right - t_left) &gt; tol:
+    t_mid = t_left - g_left * (t_right - t_left) / (g_right - g_left)
+    g_mid = g(t_mid)                       # interpolate via Hermite
+
+    if g_left * g_mid &lt; 0:
+        # Root in [t_left, t_mid]
+        if g_right &gt; 0 was just halved: g_right /= 2  # Illinois rule
+        t_right = t_mid
+        g_right = g_mid
+    else:
+        if g_left &gt; 0 was just halved: g_left /= 2
+        t_left  = t_mid
+        g_left  = g_mid
+</code></pre></div>
+<p>The Illinois variant halves the <em>non-bracketing</em> endpoint's
+<span class="arithmatex">\(g\)</span>-value to break the slow-convergence pathology of plain regula
+falsi (where one endpoint stays stuck). Convergence is
+<strong>superlinear</strong> (order ~1.65 — golden ratio).</p>
+<p><strong>Fallback</strong>: if Illinois fails to converge in 20 iterations
+(possible for non-monotone predicates near a root), the scheduler
+switches to <strong>Brent's method</strong> which guarantees convergence in
+<span class="arithmatex">\(O(\log(1/\epsilon))\)</span> via bracket halving + inverse quadratic
+interpolation.</p>
+<h3 id="step-3-state-projection-at-tast">Step 3: state projection at <span class="arithmatex">\(t^\ast\)</span><a class="headerlink" href="#step-3-state-projection-at-tast" title="Permanent link">&para;</a></h3>
+<p>For body-diode commutation, the user supplies a
+<code>state_projection_fn(t, x)</code> callback that zero-clamps the inductor
+current at the commutation:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">project_at_zcd</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+    <span class="n">x</span><span class="p">[</span><span class="n">I_L_INDEX</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>   <span class="c1"># snap to zero — DCM transition</span>
+    <span class="k">return</span> <span class="n">x</span>
+</code></pre></div>
+<p>The scheduler:</p>
+<ol>
+<li>Evaluates <code>x_hermite = hermite_interp(t_star)</code> to get the
+   pre-projection state at <span class="arithmatex">\(t^\ast\)</span>.</li>
+<li>Calls <code>x = state_projection(t_star, x_hermite)</code>.</li>
+<li>Logs the event in <code>result.event_log</code> with type=<code>Predicate</code>.</li>
+<li><strong>Invalidates</strong> the RK45 FSAL cache and resets the PI controller
+   (the projected state has a different first derivative — old
+   <span class="arithmatex">\(\mathbf{k}_7\)</span> is stale).</li>
+<li>Continues integration from <span class="arithmatex">\((t^\ast, x_{\text{projected}})\)</span>.</li>
+</ol>
+<p>Validated end-to-end in Gate 3 on a buck DCM scenario: the
+scheduler placed the body-diode commutation within <span class="arithmatex">\(10^{-9}\)</span> s of
+the analytical zero-crossing, matching a PWL fixed-step reference
+to 5 significant figures on the output ripple.</p>
+<hr />
+<h2 id="134-worked-example-1-rk-step-in-the-buck-ccm-hot-loop">13.4 Worked example: 1 RK step in the buck CCM hot loop<a class="headerlink" href="#134-worked-example-1-rk-step-in-the-buck-ccm-hot-loop" title="Permanent link">&para;</a></h2>
+<p>Concrete numbers from <code>test_dsed_returns_fewer_steps_than_pwl</code> at
+<span class="arithmatex">\(t = 1.5 \times 10^{-5}\)</span> s (well into transient, <span class="arithmatex">\(\mathbf{x} =
+[6.2, 4.7]\)</span> for <span class="arithmatex">\([v_C, i_L]\)</span>):</p>
+<ol>
+<li><code>switch_fn.next_edge_after(1.5e-5)</code> returns <code>2.0e-5</code> (next
+   HS-off transition).</li>
+<li>Controller proposes <span class="arithmatex">\(h = 2.7 \times 10^{-7}\)</span> s (PI says "previous
+   step was clean, grow 1.2×"). Capped at <code>t_gate - t = 5e-6</code> —
+   plenty of room.</li>
+<li><code>rk45_step(f, t, x, h, state)</code> runs 6 evaluations of <span class="arithmatex">\(f =
+   A\mathbf{x} + \mathbf{b}\)</span> (FSAL inherits <span class="arithmatex">\(\mathbf{k}_1\)</span> from the
+   previous step), returns
+   <span class="arithmatex">\(\mathbf{x}_{\text{new}} = [6.21, 4.92]\)</span> and <span class="arithmatex">\(\mathbf{e} =
+   [1.4 \times 10^{-8}, 2.9 \times 10^{-8}]\)</span>.</li>
+<li>Error norm: <span class="arithmatex">\(\sqrt{\tfrac{1}{2}((1.4 \times 10^{-8}/(10^{-9} +
+   10^{-6}\cdot 6.21))^2 + \ldots)} \approx 0.014\)</span>.</li>
+<li>Controller: <span class="arithmatex">\(\text{err} = 0.014 \ll 1\)</span>, accept; propose <span class="arithmatex">\(h_{\text{new}}
+   = 0.9 \cdot 2.7\times 10^{-7} \cdot (1/0.014)^{0.14} \cdot
+   (\text{err}_{\text{prev}}/0.014)^{0.08} \approx 4.1 \times 10^{-7}\)</span> s.</li>
+<li>No predicate sign change (<span class="arithmatex">\(i_L &gt; 0\)</span> throughout — buck CCM has no
+   body diode). Commit, advance to <span class="arithmatex">\(t = 1.527 \times 10^{-5}\)</span> s.</li>
+</ol>
+<p>Total per-step C++ cost: ~3.8 µs on a M1 (chapter 16 §16.2). Of
+that:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th style="text-align: right;">Cost</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>6× RHS (A·x + b)</td>
+<td style="text-align: right;">~1.6 µs</td>
+<td>dense gemv at <span class="arithmatex">\(n_s = 2\)</span>, vectorised</td>
+</tr>
+<tr>
+<td>PI controller decision</td>
+<td style="text-align: right;">~0.1 µs</td>
+<td>scalar arithmetic</td>
+</tr>
+<tr>
+<td><code>compute_*_b_extra</code> walk</td>
+<td style="text-align: right;">~0.4 µs</td>
+<td>pool iteration (could be cached, future Bridge.14)</td>
+</tr>
+<tr>
+<td>Bookkeeping (state copy, history)</td>
+<td style="text-align: right;">~0.1 µs</td>
+<td>small allocations</td>
+</tr>
+<tr>
+<td>Per-step total</td>
+<td style="text-align: right;"><strong>~3.8 µs</strong></td>
+<td>(vs 60 µs in pure Python — chapter 15)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="135-takeaways">13.5 Takeaways<a class="headerlink" href="#135-takeaways" title="Permanent link">&para;</a></h2>
+<ul>
+<li>DOPRI5 is the right choice for non-stiff PE between events:
+  high order (5) on smooth segments, FSAL halves cost, error
+  estimator is "free".</li>
+<li>The PI step controller is what keeps the adaptive size <strong>near
+  optimal</strong> without oscillation. The 2002 Söderlind paper is
+  the literature anchor.</li>
+<li>Cubic Hermite + Illinois lets us locate sub-step predicate
+  events in <span class="arithmatex">\(O(\log(1/\epsilon))\)</span> without re-integrating —
+  critical for body-diode commutation in DCM converters.</li>
+<li>Between gate edges the scheduler grows <span class="arithmatex">\(h\)</span> to whatever
+  accuracy allows. On buck CCM the grown <span class="arithmatex">\(h\)</span> approaches
+  <span class="arithmatex">\(\sim T_{\text{sw}}/2 \approx 5\)</span> µs (capped by the next gate
+  edge, not by accuracy).</li>
+</ul>
+<h2 id="further-reading">Further reading<a class="headerlink" href="#further-reading" title="Permanent link">&para;</a></h2>
+<ul>
+<li>C++ implementation: <code>core/include/pulsim/dsed/rk45_dormand_prince.hpp</code>,
+  <code>step_controller.hpp</code>, <code>event_predictor.hpp</code>.</li>
+<li>Python prototype (Gate 1): <code>prototype/dsed/rk45_dormand_prince.py</code>.</li>
+<li><a href="../14-dsed-bdf2-and-dispatch/">Chapter 14 → BDF2 + stiffness detector + auto-dispatch</a></li>
+</ul>
+<p>External references:</p>
+<ul>
+<li><strong>Dormand &amp; Prince</strong>, <em>A family of embedded Runge-Kutta formulae</em>,
+  J. Comp. Appl. Math. 6 (1980).</li>
+<li><strong>Söderlind, G.</strong>, <em>Automatic control and adaptive
+  time-stepping</em>, Numerical Algorithms 31 (2002) — the PI law +
+  pole analysis.</li>
+<li><strong>Hairer, Norsett, Wanner</strong>, <em>Solving Ordinary Differential
+  Equations I</em>, Springer 1993 — DOPRI5 + Hermite continuous
+  extension, the canonical reference.</li>
+<li><strong>Brent, R.</strong>, <em>Algorithms for Minimization Without Derivatives</em>,
+  Prentice-Hall 1973 — Brent's method root finder.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../12-dsed-state-space-extraction/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 12 — MNA → State-Space Extraction">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                12 — MNA → State-Space Extraction
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../14-dsed-bdf2-and-dispatch/" class="md-footer__link md-footer__link--next" aria-label="Next: 14 — BDF2 + Stiffness Dispatch">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                14 — BDF2 + Stiffness Dispatch
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>

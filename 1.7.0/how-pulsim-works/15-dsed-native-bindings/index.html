@@ -1,0 +1,2672 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/how-pulsim-works/15-dsed-native-bindings/">
+      
+      
+        <link rel="prev" href="../14-dsed-bdf2-and-dispatch/">
+      
+      
+        <link rel="next" href="../16-dsed-benchmarks/">
+      
+      
+      <link rel="icon" href="../../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>15 — Native Bindings (24× story) - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#15-native-bindings-architecture-the-24-story" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              15 — Native Bindings (24× story)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../loss-thermal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#151-bridge5-baseline-pure-python-schedulers" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.1 Bridge.5 baseline — pure Python schedulers
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#152-bridge10-wrap-the-c-schedulers-with-python-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.2 Bridge.10 — wrap the C++ schedulers with Python callbacks
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.2 Bridge.10 — wrap the C++ schedulers with Python callbacks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-it-helped" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it helped
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-it-wasnt-enough" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it wasn't enough
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#153-bridge11-the-native-c-circuitbuilderadapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.3 Bridge.11 — the native C++ CircuitBuilderAdapter
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.3 Bridge.11 — the native C++ CircuitBuilderAdapter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scheduler-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scheduler integration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-it-helped-a-lot" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it helped (a lot)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-subtle-adl-hook" class="md-nav__link">
+    <span class="md-ellipsis">
+      A subtle ADL hook
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#154-bridge12-native-pwm-switch_fn" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.4 Bridge.12 — native PWM switch_fn
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.4 Bridge.12 — native PWM switch_fn">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-detection-trick" class="md-nav__link">
+    <span class="md-ellipsis">
+      The detection trick
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-it-helped_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it helped
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#155-bridge13-pwl-engine-also-detects-native-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.5 Bridge.13 — PWL engine also detects native PWM
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#156-dispatch-hierarchy-in-_dsed_dispatchrun_dsed_from_builder" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.6 Dispatch hierarchy in _dsed_dispatch.run_dsed_from_builder
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#157-the-residual-25-and-why-we-stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.7 The residual 25% — and why we stopped
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#158-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.8 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#151-bridge5-baseline-pure-python-schedulers" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.1 Bridge.5 baseline — pure Python schedulers
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#152-bridge10-wrap-the-c-schedulers-with-python-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.2 Bridge.10 — wrap the C++ schedulers with Python callbacks
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.2 Bridge.10 — wrap the C++ schedulers with Python callbacks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-it-helped" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it helped
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-it-wasnt-enough" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it wasn't enough
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#153-bridge11-the-native-c-circuitbuilderadapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.3 Bridge.11 — the native C++ CircuitBuilderAdapter
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.3 Bridge.11 — the native C++ CircuitBuilderAdapter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scheduler-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scheduler integration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-it-helped-a-lot" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it helped (a lot)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-subtle-adl-hook" class="md-nav__link">
+    <span class="md-ellipsis">
+      A subtle ADL hook
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#154-bridge12-native-pwm-switch_fn" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.4 Bridge.12 — native PWM switch_fn
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.4 Bridge.12 — native PWM switch_fn">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-detection-trick" class="md-nav__link">
+    <span class="md-ellipsis">
+      The detection trick
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-it-helped_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why it helped
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#155-bridge13-pwl-engine-also-detects-native-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.5 Bridge.13 — PWL engine also detects native PWM
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#156-dispatch-hierarchy-in-_dsed_dispatchrun_dsed_from_builder" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.6 Dispatch hierarchy in _dsed_dispatch.run_dsed_from_builder
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#157-the-residual-25-and-why-we-stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.7 The residual 25% — and why we stopped
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#158-takeaways" class="md-nav__link">
+    <span class="md-ellipsis">
+      15.8 Takeaways
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Further reading
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/how-pulsim-works/15-dsed-native-bindings.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/how-pulsim-works/15-dsed-native-bindings.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="15-native-bindings-architecture-the-24-story">15. Native bindings architecture — the 24× story<a class="headerlink" href="#15-native-bindings-architecture-the-24-story" title="Permanent link">&para;</a></h1>
+<p>Chapters 12-14 cover the <strong>algorithm</strong>. This chapter covers the
+<strong>implementation language boundary</strong> — and why moving each piece
+of the per-step hot loop from Python to C++ matters for
+performance.</p>
+<p>The headline: the same DSED algorithm went from <strong>0.85× of PWL
+wall-clock</strong> (pure-Python scheduler, Bridge.5) to <strong>24.3× faster
+than PWL</strong> (Bridge.12) on the canonical buck CCM benchmark. None
+of the algorithm changed — only the language boundary moved.</p>
+<p>The story is structured as 4 bridges (each one a measured speedup
+over the last):</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Bridge</th>
+<th>What moved to C++</th>
+<th style="text-align: right;">Per-step</th>
+<th style="text-align: right;">vs PWL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">5</td>
+<td>(none — pure Python schedulers)</td>
+<td style="text-align: right;">60.8 µs</td>
+<td style="text-align: right;">0.85×</td>
+</tr>
+<tr>
+<td style="text-align: right;">10</td>
+<td>The 3 scheduler templates (RK45/BDF2/Auto)</td>
+<td style="text-align: right;">22.2 µs</td>
+<td style="text-align: right;">2.3×</td>
+</tr>
+<tr>
+<td style="text-align: right;">11</td>
+<td>The <code>CircuitBuilderAdapter</code> (<code>A_matrix / b_vector / rhs</code>)</td>
+<td style="text-align: right;">3.80 µs</td>
+<td style="text-align: right;">13.3×</td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>12</strong></td>
+<td>The PWM <code>switch_fn</code> (<code>NativePwm2Switch</code>)</td>
+<td style="text-align: right;"><strong>2.19 µs</strong></td>
+<td style="text-align: right;"><strong>24.3×</strong></td>
+</tr>
+<tr>
+<td style="text-align: right;">Plus 13</td>
+<td>PWL engine ALSO detects native PWM (decoupled win)</td>
+<td style="text-align: right;">PWL → 0.52 µs/step</td>
+<td style="text-align: right;">PWL → 2× faster</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Per-step cost ladder across the 4 bridges" src="../_figures/output/fig151_bridge_ladder.png" /></p>
+<p><em>Figure 15.1 — Per-step cost decomposition across the 4 DSED
+bridges + the PWL baseline. Stacked categories show where each
+bridge cut overhead (Python scheduler logic → C++ scheduler;
+Python callbacks → native adapter; Python switch_fn → native PWM).
+The horizontal arrows mark which transition each bridge made.
+Regenerable from <code>_figures/fig151_bridge_ladder.py</code>.</em></p>
+<p>§15.1-15.4 cover each bridge. §15.5 walks the dispatch hierarchy.
+§15.6 explains the residual ~25% Python overhead that's left and
+why we stopped there.</p>
+<hr />
+<h2 id="151-bridge5-baseline-pure-python-schedulers">15.1 Bridge.5 baseline — pure Python schedulers<a class="headerlink" href="#151-bridge5-baseline-pure-python-schedulers" title="Permanent link">&para;</a></h2>
+<p>Gates 1-5 (the algorithm validation) lived entirely in Python:</p>
+<div class="highlight"><pre><span></span><code>pulsim.simulate(b, engine=&#39;dsed&#39;, switch_fn=sf, ...)
+       ↓
+   _dsed_dispatch.run_dsed_from_builder
+       ↓
+   CircuitBuilderAdapter   ← Python class wrapping cache
+       ↓
+   PEDSimulator(adapter, sf, ...)   ← Python scheduler
+       ↓
+   while not done:
+       sf(t)         ← Python call (mask)
+       adapter.rhs(t, x)   ← Python: A @ x + b   (numpy)
+       ... PI controller ... ← Python
+       ... event scan ...      ← Python
+</code></pre></div>
+<p>Per-step decomposition (60.8 µs total):</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th style="text-align: right;">µs/step</th>
+<th>Comment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scheduler control flow (while loops, dict updates)</td>
+<td style="text-align: right;">~10</td>
+<td>Python interpreter overhead</td>
+</tr>
+<tr>
+<td>6 × <code>adapter.rhs(t, x)</code> (RK45 stages)</td>
+<td style="text-align: right;">~30</td>
+<td>numpy gemv + Python call overhead</td>
+</tr>
+<tr>
+<td><code>adapter.b_vector(t)</code></td>
+<td style="text-align: right;">~5</td>
+<td>numpy + dict</td>
+</tr>
+<tr>
+<td><code>switch_fn(t) + next_edge_after(t)</code> (per event)</td>
+<td style="text-align: right;">~2</td>
+<td>amortised over the steps within a segment</td>
+</tr>
+<tr>
+<td>PI controller + Hermite + Illinois</td>
+<td style="text-align: right;">~10</td>
+<td>Python arithmetic + numpy</td>
+</tr>
+<tr>
+<td>Misc</td>
+<td style="text-align: right;">~4</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The algorithm took 50× fewer steps than PWL, but <strong>each step was
+60× slower</strong> in Python than PWL's C++ trap step → wall-clock
+finished 1.18× slower than PWL.</p>
+<p>The conclusion was inescapable: <strong>the algorithm is right, the
+language is wrong</strong>.</p>
+<hr />
+<h2 id="152-bridge10-wrap-the-c-schedulers-with-python-callbacks">15.2 Bridge.10 — wrap the C++ schedulers with Python callbacks<a class="headerlink" href="#152-bridge10-wrap-the-c-schedulers-with-python-callbacks" title="Permanent link">&para;</a></h2>
+<p>The first port moved the <em>scheduler control flow</em> to C++. The C++
+schedulers (<code>PEDSimulator</code>, <code>PEDSimulatorBDF2</code>, <code>PEDSimulatorAuto</code>
+in <code>core/include/pulsim/dsed/scheduler*.hpp</code>) are templated on
+<code>System</code> and <code>SwitchFn</code>. To run them from Python we need a
+<strong>Python-callable adapter</strong> that satisfies the C++ concepts.</p>
+<p><code>python/dsed_bindings.cpp</code> defines two wrapper structs:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">PySystem</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">explicit</span><span class="w"> </span><span class="n">PySystem</span><span class="p">(</span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="w"> </span><span class="n">obj</span><span class="p">)</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">obj_</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">obj</span><span class="p">)),</span>
+<span class="w">          </span><span class="n">A_attr_</span><span class="p">(</span><span class="n">obj_</span><span class="p">.</span><span class="n">attr</span><span class="p">(</span><span class="s">&quot;A_matrix&quot;</span><span class="p">)),</span>
+<span class="w">          </span><span class="n">b_attr_</span><span class="p">(</span><span class="n">obj_</span><span class="p">.</span><span class="n">attr</span><span class="p">(</span><span class="s">&quot;b_vector&quot;</span><span class="p">)),</span>
+<span class="w">          </span><span class="n">rhs_attr_</span><span class="p">(</span><span class="n">obj_</span><span class="p">.</span><span class="n">attr</span><span class="p">(</span><span class="s">&quot;rhs&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{}</span>
+
+<span class="w">    </span><span class="n">DenseMatrix</span><span class="w"> </span><span class="n">A_matrix</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">A_attr_</span><span class="p">().</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">DenseMatrix</span><span class="o">&gt;</span><span class="p">();</span><span class="w">   </span><span class="c1">// GIL must be held</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">Vector</span><span class="w"> </span><span class="n">b_vector</span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">b_attr_</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">Vector</span><span class="o">&gt;</span><span class="p">();</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="n">Vector</span><span class="w"> </span><span class="n">rhs</span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">Vector</span><span class="o">&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">rhs_attr_</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">).</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">Vector</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// ... current_mask / set_mask similar ...</span>
+
+<span class="w">    </span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="w"> </span><span class="n">obj_</span><span class="p">,</span><span class="w"> </span><span class="n">A_attr_</span><span class="p">,</span><span class="w"> </span><span class="n">b_attr_</span><span class="p">,</span><span class="w"> </span><span class="n">rhs_attr_</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">PySwitchFn</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="w"> </span><span class="nf">operator</span><span class="p">()(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">fn_</span><span class="p">(</span><span class="n">t</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="nf">next_edge_after</span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* same pattern */</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>The C++ scheduler is then explicitly instantiated:</p>
+<div class="highlight"><pre><span></span><code><span class="n">PEDSimulator</span><span class="o">&lt;</span><span class="n">PySystem</span><span class="p">,</span><span class="w"> </span><span class="n">PySwitchFn</span><span class="o">&gt;</span><span class="w"> </span><span class="n">sim</span><span class="p">(</span>
+<span class="w">    </span><span class="n">PySystem</span><span class="p">(</span><span class="n">system_obj</span><span class="p">),</span><span class="w"> </span><span class="n">PySwitchFn</span><span class="p">(</span><span class="n">sf_obj</span><span class="p">),</span><span class="w"> </span><span class="p">...);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sim</span><span class="p">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">x0</span><span class="p">,</span><span class="w"> </span><span class="n">t_end</span><span class="p">);</span><span class="w">   </span><span class="c1">// C++ inner loop!</span>
+</code></pre></div>
+<p>The control flow (while loops, PI controller, Hermite/Illinois,
+mode-segment bookkeeping) is <strong>all C++</strong>. But each call to
+<code>rhs(t, x)</code> and <code>b_vector(t)</code> and <code>switch_fn(t)</code> still crosses
+back into Python (acquires GIL, attribute lookup, numpy conversion).</p>
+<h3 id="why-it-helped">Why it helped<a class="headerlink" href="#why-it-helped" title="Permanent link">&para;</a></h3>
+<p>The Python interpreter overhead per step was ~10 µs (Python
+arithmetic, dict lookups, control flow). Moving control to C++
+eliminated that. The remaining ~22 µs/step is dominated by the
+6 RHS callbacks (~3.5 µs each: GIL + attribute + numpy round-trip).</p>
+<h3 id="why-it-wasnt-enough">Why it wasn't enough<a class="headerlink" href="#why-it-wasnt-enough" title="Permanent link">&para;</a></h3>
+<p>Per-step: 22.2 µs. PWL is 1.05 µs. Ratio 21:1. Even with 50× fewer
+steps, DSED only beat PWL by 2.3×. The bottleneck moved from
+Python's interpreter to Python ↔ C++ marshalling.</p>
+<hr />
+<h2 id="153-bridge11-the-native-c-circuitbuilderadapter">15.3 Bridge.11 — the native C++ <code>CircuitBuilderAdapter</code><a class="headerlink" href="#153-bridge11-the-native-c-circuitbuilderadapter" title="Permanent link">&para;</a></h2>
+<p>To eliminate the per-RHS marshalling, we ported
+<code>CircuitBuilderAdapter</code> itself to C++ —
+<code>pulsim::dsed::NativeCircuitBuilderAdapter</code> in
+<code>core/include/pulsim/dsed/builder_adapter.hpp</code>. It mirrors the
+Python adapter's contract but holds:</p>
+<ol>
+<li>Non-owning refs to <code>Graph</code>, <code>DevicePool</code>, <code>PwlStateSpaceCache</code>.</li>
+<li>A <code>std::unordered_map&lt;MaskT, LTIEntry&gt;</code> for per-mask LTI cache.</li>
+<li>A pre-detected <code>has_dynamic_sources_</code> flag (set at construction).</li>
+<li>An optional <code>std::function&lt;Vector(Real)&gt;</code> for user
+   <code>b_extra_fn</code> (wrapped from Python with <code>py::gil_scoped_acquire</code>).</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">NativeCircuitBuilderAdapter</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">DenseMatrix</span><span class="o">&amp;</span><span class="w"> </span><span class="n">A_matrix</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ensure_current_resolved_</span><span class="p">();</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">current_entry_</span><span class="o">-&gt;</span><span class="n">A</span><span class="p">;</span><span class="w">      </span><span class="c1">// pure C++ — no GIL touch!</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">Vector</span><span class="w"> </span><span class="n">b_vector</span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ensure_current_resolved_</span><span class="p">();</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">has_dynamic_sources_</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">current_entry_</span><span class="o">-&gt;</span><span class="n">b_constant</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Vector</span><span class="w"> </span><span class="n">b_extra</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">build_time_varying_b_extra_</span><span class="p">(</span><span class="n">t</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">current_entry_</span><span class="o">-&gt;</span><span class="n">b_constant</span>
+<span class="w">             </span><span class="o">+</span><span class="w"> </span><span class="n">current_entry_</span><span class="o">-&gt;</span><span class="n">b_projection</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">b_extra</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>The lazy resolution <code>ensure_current_resolved_()</code> calls
+<code>cache_.compute_lti_state_space(mask)</code> (chapter 12) on first
+visit and caches the result. Subsequent calls in the same mask
+do an <code>unordered_map.find</code> and return a hot pointer — no Python.</p>
+<h3 id="scheduler-integration">Scheduler integration<a class="headerlink" href="#scheduler-integration" title="Permanent link">&para;</a></h3>
+<p>The Bridge.10 wrappers (<code>run_ped_native</code>, <code>run_bdf2_native</code>,
+<code>run_auto_native</code>) take a <code>py::object system</code>. We add three
+<strong>parallel</strong> entry points that take <code>NativeCircuitBuilderAdapter&amp;</code>
+directly:</p>
+<div class="highlight"><pre><span></span><code><span class="n">m</span><span class="p">.</span><span class="n">def</span><span class="p">(</span><span class="s">&quot;run_ped_native_builder&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="p">[](</span><span class="n">NativeAdapter</span><span class="o">&amp;</span><span class="w"> </span><span class="n">adapter</span><span class="p">,</span><span class="w"> </span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="w"> </span><span class="n">switch_fn_obj</span><span class="p">,</span><span class="w"> </span><span class="p">...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">PySwitchFnSSM</span><span class="w"> </span><span class="nf">sf</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">switch_fn_obj</span><span class="p">));</span><span class="w">   </span><span class="c1">// still Python for switch</span>
+<span class="w">        </span><span class="n">PEDSimulator</span><span class="o">&lt;</span><span class="n">NativeAdapter</span><span class="p">,</span><span class="w"> </span><span class="n">PySwitchFnSSM</span><span class="o">&gt;</span><span class="w"> </span><span class="n">sim</span><span class="p">(</span><span class="n">adapter</span><span class="p">,</span><span class="w"> </span><span class="n">sf</span><span class="p">,</span><span class="w"> </span><span class="p">...);</span>
+<span class="w">        </span><span class="n">py</span><span class="o">::</span><span class="n">gil_scoped_release</span><span class="w"> </span><span class="n">release</span><span class="p">;</span><span class="w">               </span><span class="c1">// ← release GIL entirely</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sim</span><span class="p">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">x0</span><span class="p">,</span><span class="w"> </span><span class="n">t_end</span><span class="p">);</span>
+<span class="w">        </span><span class="n">py</span><span class="o">::</span><span class="n">gil_scoped_acquire</span><span class="w"> </span><span class="n">acquire</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">ped_result_to_dict</span><span class="p">(</span><span class="n">res</span><span class="p">);</span>
+<span class="w">    </span><span class="p">});</span>
+</code></pre></div>
+<p><strong>Critical detail</strong>: <code>py::gil_scoped_release</code> around the entire
+<code>sim.simulate()</code> call. The scheduler runs the whole simulation
+without ever touching the GIL — until <code>switch_fn(t)</code> is called at
+a gate event, when <code>PySwitchFnSSM</code> re-acquires it (see §15.4).</p>
+<h3 id="why-it-helped-a-lot">Why it helped (a lot)<a class="headerlink" href="#why-it-helped-a-lot" title="Permanent link">&para;</a></h3>
+<p>The per-step path is now:</p>
+<div class="highlight"><pre><span></span><code>C++ scheduler →
+    adapter.rhs(t, x)      ← pure C++: A·x + b in Eigen, no Python
+        (one Eigen gemv at n_s ≤ 10 → ~50-100 ns)
+    PI controller          ← pure C++
+    Hermite/Illinois       ← pure C++
+</code></pre></div>
+<p>Per-step dropped from 22.2 µs → <strong>3.80 µs</strong> (5.8× speedup over
+Bridge.10). Buck CCM wall-clock from 22.4 ms → 3.83 ms. <strong>DSED
+is now 13.3× faster than PWL.</strong></p>
+<h3 id="a-subtle-adl-hook">A subtle ADL hook<a class="headerlink" href="#a-subtle-adl-hook" title="Permanent link">&para;</a></h3>
+<p><code>PEDSimulatorAuto</code> calls <code>mode_id_of(mask)</code> to key the per-mode
+integrator cache. The default template only matches integral/enum
+types — <code>SwitchStateMask</code> doesn't. The fix: a free function in
+<code>pulsim::topology::</code> namespace (so ADL finds it during template
+instantiation):</p>
+<div class="highlight"><pre><span></span><code><span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">::</span><span class="nn">topology</span><span class="w"> </span><span class="p">{</span>
+<span class="kr">inline</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">mode_id_of</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">SwitchStateMask</span><span class="o">&amp;</span><span class="w"> </span><span class="n">m</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">hash</span><span class="o">&lt;</span><span class="n">SwitchStateMask</span><span class="o">&gt;</span><span class="p">{}(</span><span class="n">m</span><span class="p">));</span>
+<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Without this, the Bridge.11 build fails with <code>no matching function
+for call to 'mode_id_of'</code> on the auto-dispatcher template.</p>
+<hr />
+<h2 id="154-bridge12-native-pwm-switch_fn">15.4 Bridge.12 — native PWM switch_fn<a class="headerlink" href="#154-bridge12-native-pwm-switch_fn" title="Permanent link">&para;</a></h2>
+<p>After Bridge.11, the profile showed:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th style="text-align: right;">µs/step (Bridge.11)</th>
+<th style="text-align: right;">% of total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C++ scheduler control + RHS + LU</td>
+<td style="text-align: right;">2.8</td>
+<td style="text-align: right;">74%</td>
+</tr>
+<tr>
+<td><code>PySwitchFnSSM::operator()</code> + <code>next_edge_after</code></td>
+<td style="text-align: right;"><strong>1.0</strong></td>
+<td style="text-align: right;"><strong>26%</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The remaining 25% was GIL acquire + attribute lookup + numpy
+cast for the per-step <code>next_edge_after(t)</code> call (recall: the
+scheduler asks for the next gate edge <strong>every iteration</strong>, even
+on segments with no events in sight, just to know where to cap
+<span class="arithmatex">\(h\)</span>). Each call: ~1 µs.</p>
+<p>The fix: a <strong>pure-C++ PWM class</strong> the user can pass as
+<code>switch_fn</code>. <code>core/include/pulsim/sources/native_pwm_switch_fn.hpp</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">NativePwm2Switch</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">T_sw</span><span class="p">;</span>
+<span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">D</span><span class="p">;</span>
+<span class="w">    </span><span class="n">topology</span><span class="o">::</span><span class="n">SwitchStateMask</span><span class="w"> </span><span class="n">mask_a</span><span class="p">;</span><span class="w">   </span><span class="c1">// when phase &lt; D</span>
+<span class="w">    </span><span class="n">topology</span><span class="o">::</span><span class="n">SwitchStateMask</span><span class="w"> </span><span class="n">mask_b</span><span class="p">;</span><span class="w">   </span><span class="c1">// when phase ≥ D</span>
+
+<span class="w">    </span><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">topology</span><span class="o">::</span><span class="n">SwitchStateMask</span><span class="w"> </span><span class="k">operator</span><span class="p">()(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">phase</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">fmod</span><span class="p">(</span><span class="n">t</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">T_sw</span><span class="p">,</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mf">1.0</span><span class="p">});</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">phase</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">D</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">mask_a</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">mask_b</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">next_edge_after</span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">floor</span><span class="p">(</span><span class="n">t</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">T_sw</span><span class="p">);</span>
+<span class="w">        </span><span class="k">constexpr</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">eps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mf">1e-15</span><span class="p">};</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">candidates</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">k</span><span class="o">*</span><span class="n">T_sw</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">D</span><span class="o">*</span><span class="n">T_sw</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">T_sw</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">T_sw</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">D</span><span class="o">*</span><span class="n">T_sw</span><span class="p">,</span>
+<span class="w">        </span><span class="p">};</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">candidates</span><span class="p">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">c</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">eps</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">c</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mi">2</span><span class="p">})</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">T_sw</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>Bound to Python as <code>pulsim.NativePwm2Switch(T_sw, D, n_switches,
+hs_first=True)</code>.</p>
+<h3 id="the-detection-trick">The detection trick<a class="headerlink" href="#the-detection-trick" title="Permanent link">&para;</a></h3>
+<p><code>PySwitchFnSSM</code> (in <code>python/dsed_bindings.cpp</code>) checks the
+underlying <code>py::object</code> at construction:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">PySwitchFnSSM</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">explicit</span><span class="w"> </span><span class="n">PySwitchFnSSM</span><span class="p">(</span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="w"> </span><span class="n">fn</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">fn_</span><span class="p">{</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">fn</span><span class="p">)}</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">native_pwm2_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fn_</span><span class="p">.</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">sources</span><span class="o">::</span><span class="n">NativePwm2Switch</span><span class="o">*&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">py</span><span class="o">::</span><span class="n">cast_error</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">native_pwm2_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">nullptr</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="c1">// ... try NativeMultiMaskPwm too ...</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">native_pwm2_</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">native_multi_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Fall back to generic Python callable</span>
+<span class="w">            </span><span class="n">nea_attr_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">py</span><span class="o">::</span><span class="n">hasattr</span><span class="p">(</span><span class="n">fn_</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;next_edge_after&quot;</span><span class="p">)</span>
+<span class="w">                          </span><span class="o">?</span><span class="w"> </span><span class="n">fn_</span><span class="p">.</span><span class="n">attr</span><span class="p">(</span><span class="s">&quot;next_edge_after&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="p">{};</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">SSM</span><span class="w"> </span><span class="k">operator</span><span class="p">()(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">native_pwm2_</span><span class="p">)</span><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="n">native_pwm2_</span><span class="p">)(</span><span class="n">t</span><span class="p">);</span><span class="w">   </span><span class="c1">// pure C++!</span>
+<span class="w">        </span><span class="n">py</span><span class="o">::</span><span class="n">gil_scoped_acquire</span><span class="w"> </span><span class="n">gil</span><span class="p">;</span><span class="w">                      </span><span class="c1">// generic fallback</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">fn_</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">SSM</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">next_edge_after</span><span class="p">(</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">native_pwm2_</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">native_pwm2_</span><span class="o">-&gt;</span><span class="n">next_edge_after</span><span class="p">(</span><span class="n">t</span><span class="p">);</span>
+<span class="w">        </span><span class="n">py</span><span class="o">::</span><span class="n">gil_scoped_acquire</span><span class="w"> </span><span class="n">gil</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">nea_attr_</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">Real</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><strong>Lifecycle invariant</strong>: the <code>py::object fn_</code> member holds a
+reference to the Python wrapper around <code>NativePwm2Switch</code>, which
+in turn owns the underlying C++ instance via pybind11's
+ref-counted storage. As long as <code>PySwitchFnSSM</code> is alive (= the
+scheduler is running), the C++ pointer <code>native_pwm2_</code> is valid.</p>
+<h3 id="why-it-helped_1">Why it helped<a class="headerlink" href="#why-it-helped_1" title="Permanent link">&para;</a></h3>
+<p>The fast-path branch is a single integer compare + virtual
+indirection (no GIL, no marshalling). Each <code>next_edge_after</code> call
+drops from ~1 µs to ~50 ns. Per-step total: <strong>2.19 µs</strong> (1.7×
+speedup over Bridge.11).</p>
+<p><strong>Buck CCM wall-clock: 3.83 ms → 2.21 ms. DSED is now 24.3×
+faster than PWL.</strong> Final <span class="arithmatex">\(v_C = 12.0000\)</span> V — bit-for-bit identical
+to the Python PWM path.</p>
+<hr />
+<h2 id="155-bridge13-pwl-engine-also-detects-native-pwm">15.5 Bridge.13 — PWL engine also detects native PWM<a class="headerlink" href="#155-bridge13-pwl-engine-also-detects-native-pwm" title="Permanent link">&para;</a></h2>
+<p>Bridge.12 only helped DSED. PWL's <code>run_transient</code> accepted
+<code>switch_fn</code> as <code>std::function&lt;Mask(Real)&gt;</code> and pybind11 wrapped
+any Python callable (including <code>NativePwm2Switch</code>) by calling
+<code>__call__</code> — paying the GIL per step.</p>
+<p>Bridge.13 applies the same detection trick to the PWL binding:</p>
+<div class="highlight"><pre><span></span><code><span class="n">m</span><span class="p">.</span><span class="n">def</span><span class="p">(</span><span class="s">&quot;run_transient&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="p">[](...,</span><span class="w"> </span><span class="n">py</span><span class="o">::</span><span class="n">object</span><span class="w"> </span><span class="n">switch_fn_obj</span><span class="p">,</span><span class="w"> </span><span class="p">...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">SwitchScheduleFn</span><span class="w"> </span><span class="n">switch_fn</span><span class="p">;</span>
+<span class="w">        </span><span class="n">sources</span><span class="o">::</span><span class="n">NativePwm2Switch</span><span class="o">*</span><span class="w"> </span><span class="n">native_pwm2</span><span class="w"> </span><span class="o">=</span>
+<span class="w">            </span><span class="n">try_cast</span><span class="p">(</span><span class="n">switch_fn_obj</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">native_pwm2</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">keepalive</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">switch_fn_obj</span><span class="p">;</span><span class="w">     </span><span class="c1">// ref-count lifetime</span>
+<span class="w">            </span><span class="n">switch_fn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="n">native_pwm2</span><span class="p">,</span><span class="w"> </span><span class="n">keepalive</span><span class="p">](</span><span class="n">Real</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="n">native_pwm2</span><span class="p">)(</span><span class="n">t</span><span class="p">);</span><span class="w">        </span><span class="c1">// pure C++, no GIL</span>
+<span class="w">            </span><span class="p">};</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Fallback: pybind11 auto-converts py::object → std::function</span>
+<span class="w">            </span><span class="n">switch_fn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">switch_fn_obj</span><span class="p">.</span><span class="n">cast</span><span class="o">&lt;</span><span class="n">SwitchScheduleFn</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="c1">// ... existing run_transient invocation ...</span>
+<span class="w">    </span><span class="p">});</span>
+</code></pre></div>
+<p>PWL buck CCM (50001 steps): from 52.67 ms → <strong>26.19 ms</strong> = <strong>2.01×
+faster</strong>. Per-step from 1.05 µs → 0.52 µs.</p>
+<p>This is decoupled from DSED — every existing PWL user who
+upgrades to <code>NativePwm2Switch</code> gets the speedup without code
+changes beyond the constructor swap.</p>
+<hr />
+<h2 id="156-dispatch-hierarchy-in-_dsed_dispatchrun_dsed_from_builder">15.6 Dispatch hierarchy in <code>_dsed_dispatch.run_dsed_from_builder</code><a class="headerlink" href="#156-dispatch-hierarchy-in-_dsed_dispatchrun_dsed_from_builder" title="Permanent link">&para;</a></h2>
+<p>The Python entry point handles all three bridges with graceful
+fallback:</p>
+<div class="highlight"><pre><span></span><code>1. Try Bridge.11  — `NativeCircuitBuilderAdapter` available?
+                    AND `run_ped_native_builder` available?
+   YES → use it.  Bridge.12 fast path engages automatically if user
+                  passed NativePwm2Switch.
+   NO  ↓
+2. Try Bridge.10  — `run_ped_native` available?
+                    Use Python adapter + C++ scheduler.
+   NO  ↓
+3. Fall back to Bridge.5 — pure-Python scheduler. (Used in dev
+                            installs without C++ recompile.)
+</code></pre></div>
+<p>The fallback layers are useful for:</p>
+<ul>
+<li><strong>Editable installs</strong> without <code>pip install --no-build-isolation -e .</code>
+  rebuild: the C++ bindings might be stale; Bridge.5 still works.</li>
+<li><strong>Nonlinear circuits</strong> that Bridge.11's native adapter rejects:
+  the dispatcher catches the <code>RuntimeError</code>, falls through to
+  Bridge.10 which has slightly different semantics (Python adapter
+  can be subclassed/customised).</li>
+</ul>
+<p>End-to-end behaviour is identical across all three bridges
+(<code>test_dsed_native_pwm_matches_python_pwm</code> asserts
+<code>abs(v_C_native - v_C_python) &lt; 1e-6</code>).</p>
+<hr />
+<h2 id="157-the-residual-25-and-why-we-stopped">15.7 The residual 25% — and why we stopped<a class="headerlink" href="#157-the-residual-25-and-why-we-stopped" title="Permanent link">&para;</a></h2>
+<p>Post-Bridge.12 profile (5 simulations of buck CCM, 16 ms total):</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th style="text-align: right;">% of total</th>
+<th style="text-align: center;">Hot?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run_ped_native_builder</code> (pure C++ inner loop)</td>
+<td style="text-align: right;">62%</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>switch_fn</code> (NativePwm2Switch native)</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>compute_*_b_extra</code> walks (Python overlay)</td>
+<td style="text-align: right;">~10%</td>
+<td style="text-align: center;">⚠️</td>
+</tr>
+<tr>
+<td>Misc Python (numpy casts, dict updates, conversions)</td>
+<td style="text-align: right;">~15%</td>
+<td style="text-align: center;">⚠️</td>
+</tr>
+<tr>
+<td><code>A_matrix</code> Python wrapper (one-time per simulation, n_state probe)</td>
+<td style="text-align: right;">~6%</td>
+<td style="text-align: center;">(one-time)</td>
+</tr>
+</tbody>
+</table>
+<p>The remaining ~25% is split across:</p>
+<ul>
+<li><strong>Per-source stamp re-walk</strong>: <code>build_time_varying_b_extra_(t)</code>
+  walks the device pool 3 times per step (sine + PWM + pulse).
+  Could be cached: precompute the stamp vectors once per mask and
+  do <code>b(t) = sum_k value_k(t) · stamp_k</code>. Estimated +20% speedup
+  on time-varying-source circuits. <strong>Bridge.14 candidate</strong>.</li>
+<li><strong>numpy round-trips at boundaries</strong>: e.g. <code>result.states[i]</code>
+  conversion from C++ <code>std::vector&lt;Vector&gt;</code> to Python list of
+  ndarrays. Unavoidable for user-facing API.</li>
+<li><strong>One-time n_state probe</strong>: trivial, ~6% but only one call.</li>
+</ul>
+<p>We stopped at Bridge.12 because:</p>
+<ol>
+<li><strong>The story is sold</strong>: 24× wall-clock vs PWL is a defensible
+   marketing claim for the paper + release.</li>
+<li><strong>Diminishing returns</strong>: chasing the last 25% requires
+   per-circuit-specific optimisations (source caching depends on
+   which sources are present).</li>
+<li><strong>Maintenance cost</strong>: every bridge added complexity to the
+   dispatch hierarchy. Bridge.12 already has 3 fallback layers.</li>
+</ol>
+<p>The hot loop is <strong>75% C++ for typical PE circuits</strong> — a healthy
+amortised state.</p>
+<hr />
+<h2 id="158-takeaways">15.8 Takeaways<a class="headerlink" href="#158-takeaways" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Moving the <strong>scheduler control flow</strong> to C++ (Bridge.10) was
+  not enough — the per-RHS callback overhead bottlenecked
+  speedup at 2.3× vs PWL.</li>
+<li>Moving the <strong>adapter</strong> to C++ (Bridge.11) eliminated the GIL
+  on every RHS call — speedup jumped to 13.3× vs PWL.</li>
+<li>Moving the <strong>PWM switch_fn</strong> to C++ (Bridge.12) eliminated the
+  GIL on every gate-edge query — final speedup 24.3× vs PWL.</li>
+<li>The <strong>detection trick</strong> (<code>py::cast&lt;NativeType*&gt;</code> at construction</li>
+<li>branch in <code>operator()</code>) makes the fast path opt-in via the
+  user's choice of switch_fn class. No magic, no breaking changes.</li>
+<li>The PWL engine <strong>also</strong> benefits from <code>NativePwm2Switch</code> via
+  Bridge.13 — 2× speedup for free.</li>
+<li>The architecture <strong>composes</strong> with the existing
+  <code>PwlStateSpaceCache</code> (chapter 4) — Bridges 5-13 are all built
+  on top of the same C++ infrastructure.</li>
+</ul>
+<h2 id="further-reading">Further reading<a class="headerlink" href="#further-reading" title="Permanent link">&para;</a></h2>
+<ul>
+<li>C++ files:</li>
+<li><code>core/include/pulsim/dsed/builder_adapter.hpp</code> (Bridge.11)</li>
+<li><code>core/include/pulsim/sources/native_pwm_switch_fn.hpp</code> (Bridge.12)</li>
+<li><code>python/dsed_bindings.cpp</code> (Bridges 10-12 bindings)</li>
+<li><code>python/bindings.cpp::m.def("run_transient", ...)</code> (Bridge.13)</li>
+<li>Python: <code>python/pulsim/_dsed_dispatch.run_dsed_from_builder</code> —
+  the dispatch hierarchy.</li>
+<li>Design notes: <code>notes/DSED_BRIDGE_DESIGN.md</code> §§ 8, 10-13.</li>
+<li><a href="../16-dsed-benchmarks/">Chapter 16 → DSED benchmarks</a> — the
+  numbers backed by these bridges.</li>
+</ul>
+<p>External references:</p>
+<ul>
+<li><strong>pybind11 docs</strong>, <em>Python types</em>, <em>Calling Python from C++</em> —
+  the <code>py::cast&lt;T*&gt;</code> and <code>py::gil_scoped_release</code> idioms.</li>
+<li><strong>CPython internals</strong>, <em>Global Interpreter Lock</em> — why GIL
+  acquire-release costs ~100-200 ns even for held threads.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../14-dsed-bdf2-and-dispatch/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 14 — BDF2 + Stiffness Dispatch">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                14 — BDF2 + Stiffness Dispatch
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../16-dsed-benchmarks/" class="md-footer__link md-footer__link--next" aria-label="Next: 16 — DSED Benchmarks">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                16 — DSED Benchmarks
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>
