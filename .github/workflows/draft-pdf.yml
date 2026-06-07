@@ -1,0 +1,42 @@
+name: Draft PDF (JOSS)
+
+# Compiles the JOSS paper to PDF on every push/PR that touches the paper
+# sources, so we can confirm it builds cleanly before submitting and on
+# every later edit. The PDF is uploaded as a build artifact (Actions tab
+# → run → Artifacts → "paper"). This mirrors the check JOSS runs itself.
+# See https://joss.readthedocs.io/en/latest/paper.html#checking-that-your-paper-compiles
+
+on:
+  push:
+    paths:
+      - 'artigos/01_joss_tool_paper/paper.md'
+      - 'artigos/01_joss_tool_paper/paper.bib'
+      - '.github/workflows/draft-pdf.yml'
+  pull_request:
+    paths:
+      - 'artigos/01_joss_tool_paper/paper.md'
+      - 'artigos/01_joss_tool_paper/paper.bib'
+      - '.github/workflows/draft-pdf.yml'
+  workflow_dispatch:        # allow manual runs from the Actions tab
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    name: Build JOSS paper PDF
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build draft PDF
+        uses: openjournals/openjournals-draft-action@master
+        with:
+          journal: joss
+          # paper.md lives in a subdirectory; the action emits paper.pdf
+          # next to it (same folder as the input markdown).
+          paper-path: artigos/01_joss_tool_paper/paper.md
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper
+          path: artigos/01_joss_tool_paper/paper.pdf

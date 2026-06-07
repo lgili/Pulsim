@@ -237,17 +237,16 @@ straightforward. Development was supported by personal time.
 
 The draft of this paper was prepared with the assistance of
 Anthropic's *Claude* generative AI (model versions in the
-*Sonnet 4.5*–*Opus 4.7* range, accessed between May 2026 and the
-submission date). Claude was used for two purposes: (i) drafting
-initial text from a structured outline supplied by the author, and
-(ii) suggesting comparable-software citations to consider for the
-*State of the field* section. The author reviewed, edited and
-validated every paragraph; every fact, citation, claim of novelty,
-performance number, and design-trade-off rationale was
-independently checked against the Pulsim source, its commit
-history, and the cited references. The same author wrote and
-reviewed every line of code in the repository; AI-assisted code
-edits were inspected before commit. No AI tool was used to
-communicate with JOSS editors or reviewers.
+*Sonnet 4.5*–*Opus 4.8* range, accessed between May and June 2026).
+Claude was used for two purposes: (i) drafting and updating text from
+a structured outline supplied by the author, and (ii) suggesting
+comparable-software citations to consider for the *State of the field*
+section. The author reviewed, edited and validated every paragraph;
+every fact, citation, claim of novelty, performance number, test
+count, and design-trade-off rationale was independently checked
+against the Pulsim source, its commit history, and the cited
+references. The same author wrote and reviewed every line of code in
+the repository; AI-assisted code edits were inspected before commit.
+No AI tool was used to communicate with JOSS editors or reviewers.
 
 # References
