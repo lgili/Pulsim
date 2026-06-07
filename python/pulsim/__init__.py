@@ -303,6 +303,10 @@ from .losses import (
     device_loss_summary,
     average_power_at_node,
 )
+# Custom-code block ("C block"): user code (Python / C / C++) wired to
+# the circuit, running at its own sample time.
+from .c_block import (
+    add_c_block, CBlockHandle, CBLOCK_ABI, wire_c_blocks_from_yaml)
 # Records the true per-step switch mask at simulate-time so closed-loop
 # loss/thermal summaries don't re-evaluate a stateful switch_fn post-hoc.
 from ._result_views import SwitchMaskRecorder
@@ -599,6 +603,11 @@ __all__ = [
     "EfficiencyCalculator",
     "device_loss_summary",
     "average_power_at_node",
+    # Custom-code block (C block).
+    "add_c_block",
+    "CBlockHandle",
+    "CBLOCK_ABI",
+    "wire_c_blocks_from_yaml",
     # Modular Multilevel Converter (Phase 20) helpers live as
     # top-level attributes for backward compatibility, but are
     # excluded from `__all__` so `from pulsim import *` and
@@ -1466,6 +1475,13 @@ def simulate(
     # adaptive-RK selector below is PWL-specific and must NOT apply
     # to DSED integrator names.
     if engine == "dsed":
+        if getattr(builder, "_c_blocks", None):
+            import warnings
+            warnings.warn(
+                "simulate(engine='dsed'): C blocks added via add_c_block() "
+                "are not yet wired into the DSED engine (their outputs use "
+                "b_extra, which DSED does not consume). Use engine='pwl' to "
+                "run C blocks.")
         return _dsed.run_dsed_from_builder(
             builder=builder,
             t_end=t_end,
@@ -1577,6 +1593,39 @@ def simulate(
         _composed_observer._inner_observers = per_observers  # type: ignore[attr-defined]
 
         step_observer = _composed_observer
+
+    # Custom-code blocks (C blocks) registered via add_c_block(): compose
+    # each block's throttled observer (reads inputs + runs user code) and
+    # its b_extra injector (drives the controlled output sources) on top
+    # of any user/closed-loop callbacks. PWL path only — outputs use
+    # b_extra, which the DSED engine does not consume.
+    _c_blocks = list(getattr(builder, "_c_blocks", []) or [])
+    if _c_blocks:
+        _cb_obs = [cb.step_observer for cb in _c_blocks]
+        _cb_bex = [cb.b_extra_fn for cb in _c_blocks]
+        _prior_obs = step_observer
+        _prior_bex = b_extra_fn
+
+        def _cblock_observer(t: float, x) -> None:
+            if _prior_obs is not None:
+                _prior_obs(t, x)
+            for _obs in _cb_obs:
+                _obs(t, x)
+
+        def _cblock_b_extra(t: float) -> list:
+            total: Optional[list] = (
+                list(_prior_bex(t)) if _prior_bex is not None else None)
+            for _fn in _cb_bex:
+                contrib = _fn(t)
+                if total is None:
+                    total = list(contrib)
+                else:
+                    for i, v in enumerate(contrib):
+                        total[i] += v
+            return total if total is not None else []
+
+        step_observer = _cblock_observer
+        b_extra_fn = _cblock_b_extra
 
     # add-python-builder-ergonomics: if the caller didn't pass an
     # explicit initial_state, ask the builder for its recorded ICs.

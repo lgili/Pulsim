@@ -1,0 +1,37 @@
+## 1. Core (Python step fn, PWL, wires, ZOH)
+- [x] 1.1 `python/pulsim/c_block.py`: `CBlockHandle` dataclass + `add_c_block(builder, inputs, outputs, *, dt, fn=…, name=…)`
+- [x] 1.2 Resolve input wires (`("v",node)` / `("i",branch)`) to state indices at add time
+- [x] 1.3 Insert one controlled source per output wire (`("v",n+,n-)` voltage / `("i",n+,n-)` current); record RHS rows (voltage → augmented row; current → node KCL rows, ground skipped)
+- [x] 1.4 Build the throttled `step_observer` (read inputs → call fn → store outputs; ZOH) + `b_extra_fn` (inject held outputs; sign `-1` per kernel source convention)
+- [x] 1.5 Compose into `simulate()` alongside user `step_observer`/`b_extra_fn`/`closed_loops` (auto-pickup via `builder._c_blocks`); DSED warns (PWL-only)
+- [x] 1.6 Validate `dt_block ≥ dt` (warn + clamp); first firing at t=0
+
+## 2. C / C++ via shared library (ctypes)
+- [x] 2.1 Define the C ABI (`pulsim_cblock_step` + optional `init`/`term`) — `python/pulsim/cblock_abi.h` header + `p.CBLOCK_ABI` constant
+- [x] 2.2 `lib=` loader: `ctypes.CDLL`, resolve symbols, marshal numpy↔`double*`, manage opaque `state` (`symbol=` for custom names)
+- [x] 2.3 Lifetime: `init` on add, `term` via `weakref.finalize`; lazy `*state` fallback
+
+## 3. C / C++ inline source (auto-compile)
+- [x] 3.1 Source template wrapping user `code` with the ABI for `lang="c"|"cpp"` (`extern "C"` for C++)
+- [x] 3.2 Compile via `cc`/`c++` (`-shared -fPIC -O2`); content-hash cache in tempdir; honour `include_dirs`/`extra_compile_args`/`extra_link_args`
+- [x] 3.3 Clear error when no compiler is found (points to `lib=`)
+
+## 4. YAML surface
+- [x] 4.1 `wire_c_blocks_from_yaml(loaded, spec)`: `inputs`, `outputs`, `dt`, `lang`, inline `code` or `lib`/`file` (YAML string or list-of-dicts)
+- [x] 4.2 Round-trip tests (list-of-dicts + YAML string + unknown-field guard)
+
+## 5. Tests
+- [x] 5.1 Python fn: gain block (out = k·in) drives a controlled source; verify circuit response (+ current-source output)
+- [x] 5.2 C shared-lib block: compile a tiny `.so` in the test, load, verify identical result to the Python fn (+ native init/term/`*state` integrator)
+- [x] 5.3 Inline-source block (skip if no compiler): C + C++ verify same result; cache-reuse + one-source-required guards
+- [x] 5.4 Sample time / ZOH: `dt_block = 25·dt` → output is piecewise-constant at the block rate
+- [x] 5.5 Multi-IO: 2-in / 1-out block; state persistence across steps (integrator) + sub-dt clamp warning
+- [x] 5.6 End-to-end: a discrete PI in a c-block regulates an LC load to setpoint
+
+## 6. Docs
+- [x] 6.1 User-guide page "Custom Code Blocks (C / C++ / Python)": model, wires, sample time, the 3 delivery modes, ABI, security note, runnable examples
+- [x] 6.2 Wire into `mkdocs.yml`; `mkdocs build --strict` (clean)
+
+## 7. GUI (PulsimGUI — separate repo, tracked here)
+- [ ] 7.1 C-block node with N/M pins that serialises to the `c_block` YAML/Python representation
+- [ ] 7.2 GUI ↔ kernel round-trip smoke test
