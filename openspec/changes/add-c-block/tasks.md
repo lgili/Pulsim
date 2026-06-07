@@ -1,10 +1,10 @@
 ## 1. Core (Python step fn, PWL, wires, ZOH)
-- [ ] 1.1 `python/pulsim/c_block.py`: `CBlock` dataclass + `add_c_block(builder, inputs, outputs, *, dt, fn=…, name=…)`
-- [ ] 1.2 Resolve input wires (`("v",node)` / `("i",branch)`) to state indices at add time
-- [ ] 1.3 Insert one controlled source per output wire (`("v",n+,n-)` / `("i",n+,n-)`); record RHS rows
-- [ ] 1.4 Build the throttled `step_observer` (read inputs → call fn → store outputs; ZOH) + `b_extra_fn` (inject held outputs)
-- [ ] 1.5 Compose into `simulate()` alongside user `step_observer`/`b_extra_fn`/`closed_loops`
-- [ ] 1.6 Validate `dt_block ≥ dt` (warn + clamp); first firing at t=0
+- [x] 1.1 `python/pulsim/c_block.py`: `CBlockHandle` dataclass + `add_c_block(builder, inputs, outputs, *, dt, fn=…, name=…)`
+- [x] 1.2 Resolve input wires (`("v",node)` / `("i",branch)`) to state indices at add time
+- [x] 1.3 Insert one controlled source per output wire (`("v",n+,n-)` voltage / `("i",n+,n-)` current); record RHS rows (voltage → augmented row; current → node KCL rows, ground skipped)
+- [x] 1.4 Build the throttled `step_observer` (read inputs → call fn → store outputs; ZOH) + `b_extra_fn` (inject held outputs; sign `-1` per kernel source convention)
+- [x] 1.5 Compose into `simulate()` alongside user `step_observer`/`b_extra_fn`/`closed_loops` (auto-pickup via `builder._c_blocks`); DSED warns (PWL-only)
+- [x] 1.6 Validate `dt_block ≥ dt` (warn + clamp); first firing at t=0
 
 ## 2. C / C++ via shared library (ctypes)
 - [ ] 2.1 Define the C ABI (`pulsim_cblock_step` + optional `init`/`term`) in a public header `include/pulsim_cblock.h`
@@ -21,11 +21,11 @@
 - [ ] 4.2 Round-trip example YAML + loader test
 
 ## 5. Tests
-- [ ] 5.1 Python fn: gain block (out = k·in) drives a controlled source; verify circuit response
+- [x] 5.1 Python fn: gain block (out = k·in) drives a controlled source; verify circuit response (+ current-source output)
 - [ ] 5.2 C shared-lib block: compile a tiny `.so` in the test, load, verify identical result to the Python fn
 - [ ] 5.3 Inline-source block (skip if no compiler): verify same result
-- [ ] 5.4 Sample time / ZOH: `dt_block = 10·dt` → output is piecewise-constant at the block rate
-- [ ] 5.5 Multi-IO: 2-in / 2-in block; state persistence across steps (integrator)
+- [x] 5.4 Sample time / ZOH: `dt_block = 25·dt` → output is piecewise-constant at the block rate
+- [x] 5.5 Multi-IO: 2-in / 1-out block; state persistence across steps (integrator) + sub-dt clamp warning
 - [ ] 5.6 End-to-end: a discrete PI in a c-block regulates a buck to setpoint (cross-check vs `bind_pi_to_switch`)
 
 ## 6. Docs
