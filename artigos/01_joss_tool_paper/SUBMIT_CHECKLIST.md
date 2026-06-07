@@ -15,6 +15,53 @@ to GitHub + Zenodo + JOSS.
 
 ---
 
+## Compliance audit vs the official JOSS requirements
+
+Checked against [submitting.html](https://joss.readthedocs.io/en/latest/submitting.html)
+and [paper.html](https://joss.readthedocs.io/en/latest/paper.html) on
+7 June 2026.
+
+**Paper (`paper.md`)** — all green:
+
+| Requirement | Status |
+|---|---|
+| Length 750–1750 words | ✅ ~1655 words |
+| Summary for non-specialists | ✅ |
+| Statement of need | ✅ |
+| State of the field | ✅ |
+| Software design / functionality | ✅ |
+| Research impact statement | ✅ |
+| AI usage disclosure (tools+versions, scope, human-review) | ✅ all 3 points |
+| Acknowledgements + funding statement | ✅ |
+| References (BibLaTeX, full venue names) | ✅ 12/12 keys resolve |
+| Author + ORCID + affiliation + date (`%e %B %Y`) | ✅ |
+| **Paper compiles** (JOSS inara via CI) | ✅ `Draft PDF (JOSS)` action green; PDF artifact built |
+
+**Repository** — all green:
+
+| Requirement | Status |
+|---|---|
+| OSI-approved license | ✅ MIT (`LICENSE`) |
+| Public, cloneable, open issue tracker | ✅ |
+| Feature-complete, not a thin wrapper | ✅ C++23 kernel + Python API + 10 projects |
+| Packaged to community standards | ✅ `pip install pulsim`, wheels in CI |
+| Documentation + tests + CI | ✅ 577 C++ cases, Python suite, mkdocs site |
+| Single-author signals (changelog, tags, CONTRIBUTING) | ✅ CHANGELOG, releases, CONTRIBUTING.md |
+| Research-impact evidence | ✅ ten executed validation projects + methods paper in prep |
+| Version tag matches submission | ⚠️ **tag `v1.7.0` not yet pushed — do step 2** |
+
+**⚠️ One risk to be aware of (not a blocker, but JOSS may probe it):**
+JOSS runs an automated check for a *genuine, distributed* public commit
+history. The GitHub repo has been **public since 6 Dec 2025** (satisfies
+the 6-month rule), but the commit history on `main` spans **1 Mar →
+3 Jun 2026** (~3 months, 679 commits). If an editor flags the gap
+between repo-creation and first commit, the honest explanation is that
+early development happened before the history was imported/squashed onto
+the current `main`. Have that explanation ready; it is not grounds for
+desk rejection on its own.
+
+---
+
 ## ✅ 0. Submission timing gate — OPEN as of today (7 June 2026)
 
 JOSS requires the repository to have been public for **more than 6
