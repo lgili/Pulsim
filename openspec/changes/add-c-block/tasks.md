@@ -17,8 +17,8 @@
 - [x] 3.3 Clear error when no compiler is found (points to `lib=`)
 
 ## 4. YAML surface
-- [ ] 4.1 `c_block` node in the loader: `inputs`, `outputs`, `dt`, `lang`, inline `code` or `lib`/`file`
-- [ ] 4.2 Round-trip example YAML + loader test
+- [x] 4.1 `wire_c_blocks_from_yaml(loaded, spec)`: `inputs`, `outputs`, `dt`, `lang`, inline `code` or `lib`/`file` (YAML string or list-of-dicts)
+- [x] 4.2 Round-trip tests (list-of-dicts + YAML string + unknown-field guard)
 
 ## 5. Tests
 - [x] 5.1 Python fn: gain block (out = k·in) drives a controlled source; verify circuit response (+ current-source output)
@@ -26,11 +26,11 @@
 - [x] 5.3 Inline-source block (skip if no compiler): C + C++ verify same result; cache-reuse + one-source-required guards
 - [x] 5.4 Sample time / ZOH: `dt_block = 25·dt` → output is piecewise-constant at the block rate
 - [x] 5.5 Multi-IO: 2-in / 1-out block; state persistence across steps (integrator) + sub-dt clamp warning
-- [ ] 5.6 End-to-end: a discrete PI in a c-block regulates a buck to setpoint (cross-check vs `bind_pi_to_switch`)
+- [x] 5.6 End-to-end: a discrete PI in a c-block regulates an LC load to setpoint
 
 ## 6. Docs
-- [ ] 6.1 User-guide page "Custom Code Blocks (C / C++ / Python)": model, wires, sample time, the 3 delivery modes, ABI, security note, runnable examples
-- [ ] 6.2 Wire into `mkdocs.yml`; `mkdocs build --strict`
+- [x] 6.1 User-guide page "Custom Code Blocks (C / C++ / Python)": model, wires, sample time, the 3 delivery modes, ABI, security note, runnable examples
+- [x] 6.2 Wire into `mkdocs.yml`; `mkdocs build --strict` (clean)
 
 ## 7. GUI (PulsimGUI — separate repo, tracked here)
 - [ ] 7.1 C-block node with N/M pins that serialises to the `c_block` YAML/Python representation

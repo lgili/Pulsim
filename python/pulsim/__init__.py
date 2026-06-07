@@ -305,7 +305,8 @@ from .losses import (
 )
 # Custom-code block ("C block"): user code (Python; C/C++ in later
 # phases) wired to the circuit, running at its own sample time.
-from .c_block import add_c_block, CBlockHandle, CBLOCK_ABI
+from .c_block import (
+    add_c_block, CBlockHandle, CBLOCK_ABI, wire_c_blocks_from_yaml)
 # MMC re-exports — kept as top-level attributes for backward
 # compatibility but EXCLUDED from `__all__` so `dir(p)` and
 # `from pulsim import *` stay focused on the everyday surface.
@@ -601,6 +602,7 @@ __all__ = [
     "add_c_block",
     "CBlockHandle",
     "CBLOCK_ABI",
+    "wire_c_blocks_from_yaml",
     # Modular Multilevel Converter (Phase 20) helpers live as
     # top-level attributes for backward compatibility, but are
     # excluded from `__all__` so `from pulsim import *` and

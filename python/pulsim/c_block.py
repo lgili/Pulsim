@@ -54,7 +54,11 @@ from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
-__all__ = ["CBlockHandle", "add_c_block", "CBLOCK_ABI"]
+__all__ = ["CBlockHandle", "add_c_block", "wire_c_blocks_from_yaml",
+           "CBLOCK_ABI"]
+
+_YAML_FIELDS = {"name", "lang", "code", "lib", "symbol", "include_dirs",
+                "extra_compile_args", "extra_link_args"}
 
 # Public C ABI a block's compiled code must export (C and C++ via
 # ``extern "C"``). ``in``/``out`` are length ``n_in``/``n_out`` double
@@ -436,3 +440,69 @@ def add_c_block(builder,
                 "attributes; cannot register the block.")
     builder._c_blocks.append(handle)
     return handle
+
+
+def wire_c_blocks_from_yaml(loaded, spec, *,
+                            sim_dt: Optional[float] = None) -> list:
+    """Add one or more C blocks from a YAML / Python ``c_blocks`` spec.
+
+    Parameters
+    ----------
+    loaded
+        A ``LoadedCircuit`` (from :func:`pulsim.load_yaml_file` /
+        :func:`pulsim.load_yaml_string`) or a bare ``CircuitBuilder``.
+    spec
+        A YAML string, or a Python list of dicts (or a dict with a
+        top-level ``c_blocks:`` key). Each block has ``inputs``,
+        ``outputs``, ``dt``, and the step code as either ``code`` +
+        ``lang``, a source ``file`` + ``lang``, or a precompiled ``lib``.
+        (Python ``fn`` callables can't be serialised, so YAML blocks use
+        ``code`` / ``file`` / ``lib``.)
+
+    Returns
+    -------
+    list[CBlockHandle]
+    """
+    builder = getattr(loaded, "builder", loaded)
+    if isinstance(spec, str):
+        try:
+            import yaml as _yaml
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "wire_c_blocks_from_yaml: parsing a YAML string needs "
+                "PyYAML (`pip install 'pulsim[dev]'`), or pass a Python "
+                "list of dicts instead.") from exc
+        blocks = _yaml.safe_load(spec)
+    else:
+        blocks = spec
+    if blocks is None:
+        return []
+    if isinstance(blocks, dict):
+        blocks = blocks.get("c_blocks", blocks)
+    if not isinstance(blocks, list):
+        raise ValueError(
+            "c_blocks spec must be a list of mappings; got "
+            f"{type(blocks).__name__}")
+
+    handles = []
+    for i, blk in enumerate(blocks):
+        if not isinstance(blk, dict):
+            raise ValueError(f"c_block #{i} must be a mapping")
+        b = dict(blk)
+        b.pop("type", None)
+        inputs = [tuple(w) for w in b.pop("inputs", [])]
+        outputs = [tuple(w) for w in b.pop("outputs", [])]
+        if "dt" not in b:
+            raise ValueError(f"c_block #{i} missing required field 'dt'")
+        dt = float(b.pop("dt"))
+        file = b.pop("file", None)
+        if file is not None and "code" not in b:
+            b["code"] = Path(file).read_text()
+        bad = set(b) - _YAML_FIELDS
+        if bad:
+            raise ValueError(
+                f"c_block #{i} has unknown field(s) {sorted(bad)}; "
+                f"allowed: {sorted(_YAML_FIELDS | {'inputs', 'outputs', 'dt', 'file', 'type'})}")
+        handles.append(add_c_block(builder, inputs, outputs,
+                                   dt=dt, sim_dt=sim_dt, **b))
+    return handles

@@ -113,3 +113,38 @@ def test_exactly_one_source_required():
     b = _buck_in_out()
     with pytest.raises(ValueError, match="exactly one"):
         p.add_c_block(b, inputs=[], outputs=[("v", "out", "gnd")], dt=1e-4)
+
+
+def test_yaml_c_blocks_list_of_dicts():
+    """wire_c_blocks_from_yaml from a Python list (no PyYAML needed)."""
+    b = _buck_in_out()
+    hs = p.wire_c_blocks_from_yaml(b, [{
+        "inputs": [["v", "in"]], "outputs": [["v", "out", "gnd"]],
+        "dt": 1e-4, "lang": "c", "code": "out[0] = 3.0*in[0];"}])
+    assert len(hs) == 1
+    res = p.simulate(b, t_end=2e-3, dt=2e-6)
+    assert abs(_v_out(res) - 6.0) < 1e-6
+
+
+def test_yaml_c_blocks_yaml_string():
+    """wire_c_blocks_from_yaml from a YAML string (needs PyYAML)."""
+    pytest.importorskip("yaml")
+    b = _buck_in_out()
+    spec = """
+- inputs:  [["v", "in"]]
+  outputs: [["v", "out", "gnd"]]
+  dt: 1.0e-4
+  lang: c
+  code: "out[0] = 3.0 * in[0];"
+"""
+    p.wire_c_blocks_from_yaml(b, spec)
+    res = p.simulate(b, t_end=2e-3, dt=2e-6)
+    assert abs(_v_out(res) - 6.0) < 1e-6
+
+
+def test_yaml_c_block_unknown_field_rejected():
+    b = _buck_in_out()
+    with pytest.raises(ValueError, match="unknown field"):
+        p.wire_c_blocks_from_yaml(b, [{
+            "inputs": [], "outputs": [("v", "out", "gnd")], "dt": 1e-4,
+            "code": "out[0]=1;", "lang": "c", "bogus": 42}])

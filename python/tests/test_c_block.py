@@ -104,3 +104,33 @@ def test_sub_dt_block_warns_and_clamps():
     with pytest.warns(UserWarning, match="clamping"):
         p.add_c_block(b, inputs=[], outputs=[("v", "out", "gnd")],
                       dt=1e-7, fn=step, sim_dt=2e-6)
+
+
+def test_pi_controller_in_c_block_regulates_lc():
+    """End-to-end: a discrete PI living in a C block reads V(out),
+    computes a control voltage, and drives it back into an (overdamped)
+    LC load — V(out) converges to the setpoint."""
+    b = p.CircuitBuilder()
+    # The block's output creates the controlled source between sw and gnd.
+    b.add_inductor("L", "sw", "out", 10e-3)
+    b.add_capacitor("C", "out", "gnd", 10e-6)
+    b.add_resistor("R", "out", "gnd", 10.0)
+
+    setpoint, Kp, Ki, umin, umax = 5.0, 0.3, 200.0, 0.0, 20.0
+
+    def pi(t, dt, inp, out, st):
+        e = setpoint - inp[0]
+        integ = st.get("i", 0.0) + e * dt
+        u = Kp * e + Ki * integ
+        if u > umax:                      # clamp + anti-windup
+            u, integ = umax, (umax - Kp * e) / Ki
+        elif u < umin:
+            u, integ = umin, (umin - Kp * e) / Ki
+        st["i"] = integ
+        out[0] = u
+
+    p.add_c_block(b, inputs=[("v", "out")], outputs=[("v", "sw", "gnd")],
+                  dt=50e-6, fn=pi, name="PI")
+    res = p.simulate(b, t_end=40e-3, dt=2e-6)
+    v_ss = float(np.mean(np.asarray(res.v("out"), dtype=float)[-2000:]))
+    assert abs(v_ss - setpoint) < 0.5, f"V(out) settled at {v_ss} (want 5±0.5)"

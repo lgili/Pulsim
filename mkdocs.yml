@@ -130,6 +130,7 @@ nav:
       - 'Motors — Sensorless Observers (Phase 2)': motors-sensorless.md
       - 'Modular Multilevel Converters (MMC)': mmc.md
       - 'Loss & Thermal Modelling': loss-thermal.md
+      - 'Custom Code Blocks (C / C++ / Python)': c-block.md
       - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
