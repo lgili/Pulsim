@@ -4,6 +4,42 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-06-07
+
+Custom code blocks ("C block") and a closed-loop loss/thermal fix.
+
+### Added
+
+* **Custom code block** — `add_c_block(builder, inputs, outputs, *, dt,
+  fn=… | lib=… | code=…)`: a PSIM-/Simulink-style sampled subsystem
+  wired into the circuit. It reads circuit signals (input wires
+  `("v", node)` / `("i", branch)`), runs **your code** at a sample time
+  you choose (zero-order hold between steps), and drives signals back
+  (output wires `("v", n+, n-)` / `("i", n+, n-)` — controlled voltage /
+  current sources). The step code can be **Python** (`fn=` callable),
+  **compiled C/C++** (`lib=` shared library via the
+  `pulsim_cblock_step` C ABI, loaded with ctypes), or **inline C/C++**
+  (`code=` + `lang=`, auto-compiled to a content-hash-cached shared
+  library). Optional `init`/`term` manage opaque per-block state. Rides
+  the existing PWL `step_observer` + `b_extra` path — no kernel change;
+  `simulate()` picks up registered blocks automatically.
+* **`wire_c_blocks_from_yaml(loaded, spec)`** — declare C blocks from a
+  YAML string or list of dicts.
+* **`CBLOCK_ABI`** constant + `pulsim/cblock_abi.h` header documenting
+  the C ABI; `CBlockHandle` exposes live `outputs` / `state` / `n_fires`.
+* **Docs** — new User-Guide page *Custom Code Blocks (C / C++ / Python)*.
+
+### Fixed
+
+* **Loss/thermal summary on closed-loop transients** —
+  `device_thermal_summary`, `device_loss_summary` and `result.i()` no
+  longer report an unphysical conduction spike (`P_cond` ~ 1e4 W,
+  `T_j` ~ 1e4 °C) for switches driven by a stateful (closed-loop)
+  `switch_fn`. The mask is now taken from an exact simulate-time record
+  (new opt-in `SwitchMaskRecorder`) or, in the fallback, a
+  voltage-consistency guard drops samples that claim ON while the device
+  is clearly blocking. No-op for stateless / settled designs.
+
 ## [1.7.0] — 2026-06-03
 
 Precision loss & thermal modelling for inverter thermal optimisation.
