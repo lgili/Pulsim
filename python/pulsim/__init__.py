@@ -303,6 +303,9 @@ from .losses import (
     device_loss_summary,
     average_power_at_node,
 )
+# Records the true per-step switch mask at simulate-time so closed-loop
+# loss/thermal summaries don't re-evaluate a stateful switch_fn post-hoc.
+from ._result_views import SwitchMaskRecorder
 # MMC re-exports — kept as top-level attributes for backward
 # compatibility but EXCLUDED from `__all__` so `dir(p)` and
 # `from pulsim import *` stay focused on the everyday surface.
@@ -497,6 +500,8 @@ __all__ = [
     "make_thermal_observer",
     "device_thermal_summary",
     "ThermalLimitMonitor",
+    # Switch-mask recorder — exact masks for closed-loop loss/thermal.
+    "SwitchMaskRecorder",
     # Shared heatsink — N devices coupled through one sink (P1).
     "HeatsinkDevice",
     "SharedHeatsink",
@@ -783,6 +788,7 @@ def _result_i(self, name: str, t=None):
     from ._result_views import (
         node_voltage_trace as _node_v,
         evaluate_switch_mask_trace as _mask_trace,
+        resolve_switch_closed_trace as _resolve_switch_closed,
         states_as_array as _sa,
         times_as_array as _ta,
     )
@@ -962,9 +968,14 @@ def _result_i(self, name: str, t=None):
                 f"({exc!r}); make sure {name!r} is a switch added "
                 f"via `builder.add_switch`.") from None
         times_arr = _ta(self)
-        closed = _mask_trace(sf, times_arr, seq_idx)
+        v_sw = _v_branch()
+        # Prefer the recorded mask; else re-evaluate switch_fn with a
+        # voltage-consistency guard (robust to the closed-loop post-hoc
+        # mask desync — see _result_views.resolve_switch_closed_trace).
+        closed = _resolve_switch_closed(
+            self, sf, times_arr, seq_idx, v_sw, name=name)
         G_arr = _np.where(closed, g_on, g_off)
-        return _finalize(_v_branch() * G_arr)
+        return _finalize(v_sw * G_arr)
 
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(

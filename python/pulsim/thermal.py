@@ -560,6 +560,16 @@ def device_thermal_summary(
 ):
     """End-to-end ``per-device P(t) → T_j(t)`` glue.
 
+    .. note::
+       For a **closed-loop** ``switch_fn`` (PI / PFC / FOC), wrap it in
+       :class:`pulsim.SwitchMaskRecorder` and pass that to both
+       :func:`pulsim.simulate` and this call, so the true historical
+       switch state is used. Otherwise ``switch_fn`` is re-evaluated
+       post-hoc — fine for stateless PWM, but a stateful controller has
+       since converged; a voltage-consistency guard catches the
+       resulting blocking-while-ON samples and warns, but the recorder
+       is exact.
+
     When a device appears in ``conduction_specs`` (``{name|bid:
     {"V_f0"/"V_ce0": …, "r_on"/"r_ce": …}}``) its conduction power trace
     uses the datasheet offset+slope model ``V_f0·|i| + r_on·i²`` instead
@@ -754,10 +764,13 @@ def device_thermal_summary(
             sidx = switch_seq_idx_by_bid.get(bid)
             if sidx is None:
                 continue
-            closed = _views.evaluate_switch_mask_trace(
-                switch_fn, times, sidx)
             v_SW = (_views.node_voltage_trace(states, int(from_id))
                     - _views.node_voltage_trace(states, int(to_id)))
+            # Use the recorded mask when available, else re-evaluate
+            # switch_fn with a voltage-consistency guard — robust to the
+            # closed-loop post-hoc mask desync (see _result_views).
+            closed = _views.resolve_switch_closed_trace(
+                result, switch_fn, times, sidx, v_SW, name=name)
             g_arr = np.where(closed, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
