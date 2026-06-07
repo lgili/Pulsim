@@ -787,7 +787,6 @@ def _result_i(self, name: str, t=None):
     import numpy as _np
     from ._result_views import (
         node_voltage_trace as _node_v,
-        evaluate_switch_mask_trace as _mask_trace,
         resolve_switch_closed_trace as _resolve_switch_closed,
         states_as_array as _sa,
         times_as_array as _ta,
