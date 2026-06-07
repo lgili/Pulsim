@@ -16,10 +16,13 @@ authors:
   - name: Luiz Carlos Gili
     orcid: 0000-0002-5749-7199
     corresponding: true
-    affiliation: 1
+    affiliation: "1, 2"
 affiliations:
- - name: Independent Researcher, Brazil
+ - name: Universidade Federal de Santa Catarina (UFSC), Florianópolis, Brazil
    index: 1
+   ror: 041akq887
+ - name: Independent Researcher, Brazil
+   index: 2
 date: 7 June 2026
 bibliography: paper.bib
 ---
