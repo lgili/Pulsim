@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.8.0] — 2026-06-07
 
-Custom code blocks ("C block") and a closed-loop loss/thermal fix.
+Custom code blocks ("C block"): user code wired into the circuit.
 
 ### Added
 
@@ -28,6 +28,8 @@ Custom code blocks ("C block") and a closed-loop loss/thermal fix.
 * **`CBLOCK_ABI`** constant + `pulsim/cblock_abi.h` header documenting
   the C ABI; `CBlockHandle` exposes live `outputs` / `state` / `n_fires`.
 * **Docs** — new User-Guide page *Custom Code Blocks (C / C++ / Python)*.
+
+## [1.7.1] — 2026-06-07
 
 ### Fixed
 
