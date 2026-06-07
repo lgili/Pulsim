@@ -209,7 +209,6 @@ class EfficiencyCalculator:
 _states_as_array = _views.states_as_array
 _times_as_array = _views.times_as_array
 _node_voltage_trace = _views.node_voltage_trace
-_evaluate_switch_mask_trace = _views.evaluate_switch_mask_trace
 
 
 def average_power_at_node(builder,
@@ -974,10 +973,14 @@ def device_loss_summary(
             if from_id is None or to_id is None:
                 switch_seq_idx += 1
                 continue
-            closed = _evaluate_switch_mask_trace(
-                switch_fn, times, switch_seq_idx)
             v_SW = (_node_voltage_trace(states, int(from_id))
                     - _node_voltage_trace(states, int(to_id)))
+            # Recorded mask if available, else re-evaluate switch_fn with
+            # a voltage-consistency guard (robust to the closed-loop
+            # post-hoc mask desync — see _result_views).
+            closed = _views.resolve_switch_closed_trace(
+                switch_fn=switch_fn, result=result, times=times,
+                switch_idx=switch_seq_idx, v_branch=v_SW, name=name)
             g_arr = np.where(closed, g_on, g_off)
             i_SW = v_SW * g_arr  # branch current at each sample
             stats = _conduction_stats(v_SW, g_arr, times)
