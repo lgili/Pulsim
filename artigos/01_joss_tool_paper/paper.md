@@ -11,6 +11,7 @@ tags:
   - MMC
   - PWL state-space
   - sparse LU
+  - event-driven simulation
 authors:
   - name: Luiz Carlos Gili
     orcid: 0000-0002-5749-7199
@@ -19,7 +20,7 @@ authors:
 affiliations:
  - name: Independent Researcher, Brazil
    index: 1
-date: 24 May 2026
+date: 7 June 2026
 bibliography: paper.bib
 ---
 
@@ -45,17 +46,25 @@ and harmonic balance.
 space cache**: every reachable combination of binary switch and diode
 states is enumerated once, the corresponding linear state-space
 matrix is factored once, and the transient solver indexes the cached
-factor at every time step. From `v1.3.0` onward the LU factorisation
-is performed by an **in-house C++23 sparse LU solver** that requires
-no third-party LU dependency; `v1.4.0` extends this kernel to a
-templated `Scalar` type (real and `std::complex<double>`) and adds a
-generalised path-based partial-refactorisation framework that
-amortises factor work across switch flips, multi-bit transitions, and
-parameter sweeps. The package also ships **ten validated reference
-projects** spanning buck through MMC, each combining an analytical-
-derivation notebook, a closed-loop controller-design notebook, and an
-*executed* Pulsim cross-validation notebook whose waveforms render
-inline on GitHub.
+factor at every time step. The LU factorisation is performed by an
+**in-house C++23 sparse LU solver** that requires no third-party LU
+dependency, templated on the scalar type (real and
+`std::complex<double>`) and equipped with a path-based partial-
+refactorisation framework that amortises factor work across switch
+flips, multi-bit transitions, and parameter sweeps. Pulsim also offers
+an alternative **event-driven engine** (`engine='dsed'`) that predicts
+each commutation analytically and integrates between events with an
+adaptive Runge-Kutta/BDF2 step; on a buck converter this is ~24×
+faster than the fixed-step PWL loop, with a 14.5× geometric-mean
+speedup across six topologies. Beyond the power stage, the kernel adds
+electrical-machine models, magnetic-hysteresis inductors, sensorless
+rotor observers, and a PSIM/PLECS-style post-processing layer for
+conduction/switching/core losses and Foster-network junction
+temperatures. The package ships **ten validated reference projects**
+spanning buck through MMC, each pairing an analytical-derivation
+notebook, a closed-loop controller-design notebook, and an *executed*
+Pulsim cross-validation notebook whose waveforms render inline on
+GitHub.
 
 # Statement of need
 
@@ -103,12 +112,14 @@ the author's knowledge, the first permissively-licensed simulator
 that combines the PWL state-space cache, automatic switch + diode
 event detection, optional Newton refinement for nonlinear devices,
 an in-house sparse LU with path-based partial-refactorisation
-[@Chan:1986; @Dinkelbach:2021], and a Python-first user API in a
-single package.
+[@Chan:1986; @Dinkelbach:2021], an optional event-driven engine in
+the tradition of piecewise-LTI / hybrid-system solvers
+[@Bedrosian:1992; @Allmendinger:2002], and a Python-first user API in
+a single package.
 
 # Software design
 
-Four design decisions deserve explicit mention because they are
+Five design decisions deserve explicit mention because they are
 trade-offs that shape what Pulsim is good at — and what it is not.
 
 **Header-only C++23 kernel.** All of the solver, the device library
@@ -142,30 +153,41 @@ at C++ kernel speed via the `MixedDomainBlockChain` (no Python-
 interpreter cost per step).
 
 **In-house sparse LU with path-based partial-refactorisation.**
-From `v1.3.0` onward the LU factorisation is performed by Pulsim's
-own C++23 sparse LU implementation (RCM ordering, Liu-Davis
-elimination tree, Gilbert-Peierls left-looking factor with threshold
-partial pivoting), avoiding any third-party LU dependency
-(SuiteSparse, KLU, UMFPACK). When consecutive switch masks differ in
-one bit — the common case under Gray-coded PWM — the solver re-
-eliminates only the columns along the etree path of the affected
-column, following Chan, Brandwajn, and Tinney [@Chan:1986] and the
-more recent treatment by Dinkelbach, Reichenbach, and Pflugradt
-[@Dinkelbach:2021]. `v1.4.0` templates the solver on the scalar type
-so the same code path serves the real-valued transient solver and a
-complex-valued AC sweep, and generalises the path-based update to
-multi-bit switch transitions (via the union of column etree paths)
-and to parameter sweeps on $R$, $L$, $C$, and source voltages
-(via `PwlStateSpaceCache::refactor_parametric`). The trade-off is
-algorithmic complexity inside the kernel; reproducibility is
-preserved through a comprehensive unit and microbenchmark suite
-(498 C++ tests, 6 Python tests as of the release version), and the
-mathematical primitives are exposed both at the C++ and Python
-levels (`sweep_path_aware`, `monte_carlo_path_aware`).
+The LU factorisation is performed by Pulsim's own C++23 sparse LU
+implementation (RCM ordering, Liu-Davis elimination tree,
+Gilbert-Peierls left-looking factor with threshold partial pivoting),
+avoiding any third-party LU dependency (SuiteSparse, KLU, UMFPACK).
+When consecutive switch masks differ in one bit — the common case
+under Gray-coded PWM — the solver re-eliminates only the columns along
+the etree path of the affected column, following Chan, Brandwajn, and
+Tinney [@Chan:1986] and the more recent treatment by Dinkelbach et al.
+[@Dinkelbach:2021]. The solver is templated on the scalar type so the
+same code path serves the real-valued transient solver and a complex-
+valued AC sweep, and the path-based update generalises to multi-bit
+switch transitions (via the union of column etree paths) and to
+parameter sweeps on $R$, $L$, $C$, and source voltages (via
+`PwlStateSpaceCache::refactor_parametric`). The trade-off is
+algorithmic complexity inside the kernel; reproducibility is preserved
+through a comprehensive unit and microbenchmark suite (577 C++ test
+cases and a 58-module Python test suite as of v1.7.0), and the
+mathematical primitives are exposed at both the C++ and Python levels
+(`sweep_path_aware`, `monte_carlo_path_aware`).
+
+**Two interchangeable time-stepping engines.** The default `'pwl'`
+engine takes fixed time steps and is simple to reason about. The
+optional `'dsed'` engine instead predicts the next event (gate edge,
+body-diode commutation, voltage-threshold crossing) analytically,
+integrates between events with an adaptive Runge-Kutta/BDF2 step that
+auto-detects stiffness per mode, and applies mask transitions without
+aliasing — the ~24× buck speedup quoted above. The trade-off is that
+this engine requires each switch mode to be linear time-invariant, so
+circuits with smooth-nonlinear devices inside the loop stay on the
+`'pwl'` path. Both engines share the same `simulate(...)` surface, so
+choosing between them is a single keyword argument.
 
 # Research impact
 
-Pulsim is a young project; its near-term impact case rests on three
+Pulsim is a young project; its near-term impact case rests on four
 concrete artefacts that already ship in the repository:
 
 1. The **ten-converter validation library** — buck, boost,
@@ -190,6 +212,13 @@ concrete artefacts that already ship in the repository:
    multi-bit transitions, and physical-parameter sweeps. A
    methods-oriented manuscript characterising this kernel on
    reference SMPS topologies is in preparation.
+
+4. The **event-driven engine and electro-thermal post-processing**
+   together close the analysis loop power-electronics designers
+   normally reach for PLECS or PSIM to complete: the `'dsed'` engine
+   resolves switching waveforms quickly and the loss/thermal layer
+   turns them into device losses and Foster-network junction
+   temperatures — here under a permissive licence.
 
 The project welcomes external collaborations; bug reports, feature
 proposals, and converter case studies are tracked through the
