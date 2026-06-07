@@ -220,6 +220,13 @@ concrete artefacts that already ship in the repository:
    turns them into device losses and Foster-network junction
    temperatures — here under a permissive licence.
 
+Pulsim is also designed to be embedded. A separate open-source desktop
+application, **PulsimGUI**
+(<https://github.com/lgili/PulsimGUI>), builds a schematic editor and a
+PLECS-style live waveform scope directly on top of the Pulsim kernel,
+demonstrating that the Python API is stable enough to serve as a
+simulation backend for interactive tools as well as scripted studies.
+
 The project welcomes external collaborations; bug reports, feature
 proposals, and converter case studies are tracked through the
 [GitHub issue tracker](https://github.com/lgili/Pulsim/issues) and
