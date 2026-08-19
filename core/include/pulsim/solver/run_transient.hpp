@@ -64,15 +64,10 @@ namespace pulsim::solver {
 [[nodiscard]] inline topology::SwitchStateMask combine_masks(
     const topology::SwitchStateMask& user,
     const topology::SwitchStateMask& diode,
-    const topology::SwitchStateMask& diode_owned) noexcept {
-    // user, diode, diode_owned must all be the same width.
-    const std::uint64_t owned = diode_owned.bits();
-    const std::uint64_t merged =
-        (user.bits()  & ~owned) |     // keep user bits where diode doesn't own
-        (diode.bits() &  owned);      // overlay diode bits where it does
-    topology::SwitchStateMask out(user.size());
-    out.set_bits(merged);
-    return out;
+    const topology::SwitchStateMask& diode_owned) {
+    // user, diode, diode_owned must all be the same width. Word-wise
+    // since Phase 1 (dynamic mask width — no 64-switch assumption).
+    return user.overlay(diode, diode_owned);
 }
 
 // -----------------------------------------------------------------------------
@@ -612,7 +607,10 @@ inline SimulationResult run_transient(
             Size iters = 0;
             bool flipped = false;
             bool mask_cycle = false;
-            std::array<std::uint64_t, 64> masks_seen{};
+            // Full mask copies (Phase 1: masks can exceed 64 bits; a
+            // copy is 2 inline words for <=128 switches — still no
+            // heap in the loop).
+            std::array<topology::SwitchStateMask, 64> masks_seen{};
             Size n_masks_seen = 0;
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
@@ -639,16 +637,15 @@ inline SimulationResult run_transient(
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
                 if (!nl_refresh_effective) {
-                    const std::uint64_t mbits = mask.bits();
                     for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mbits) {
+                        if (masks_seen[ms] == mask) {
                             mask_cycle = true;
                             break;
                         }
                     }
                     if (mask_cycle) break;
                     if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mbits;
+                        masks_seen[n_masks_seen++] = mask;
                     }
                 }
                 if (nl_refresh_effective) {
@@ -1002,7 +999,10 @@ inline SimulationResult run_transient(
             Size iters = 0;
             bool flipped = false;
             bool mask_cycle = false;
-            std::array<std::uint64_t, 64> masks_seen{};
+            // Full mask copies (Phase 1: masks can exceed 64 bits; a
+            // copy is 2 inline words for <=128 switches — still no
+            // heap in the loop).
+            std::array<topology::SwitchStateMask, 64> masks_seen{};
             Size n_masks_seen = 0;
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
@@ -1029,16 +1029,15 @@ inline SimulationResult run_transient(
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
                 if (!nl_refresh_effective) {
-                    const std::uint64_t mbits = mask.bits();
                     for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mbits) {
+                        if (masks_seen[ms] == mask) {
                             mask_cycle = true;
                             break;
                         }
                     }
                     if (mask_cycle) break;
                     if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mbits;
+                        masks_seen[n_masks_seen++] = mask;
                     }
                 }
                 if (nl_refresh_effective) {
