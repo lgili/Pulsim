@@ -29,6 +29,8 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/nonlinear_solve.hpp"
+#include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
@@ -260,6 +262,59 @@ inline Vector compute_dc_op(const topology::Graph& graph,
     Vector rhs = -b;   // J · x = -b solves f = J·x + b = 0
     solver->solve(rhs, x);
     return x;
+}
+
+/// Phase-0 fix #2 — Newton DC operating point.
+///
+/// `compute_dc_op` stamps `BranchKind::Nonlinear` devices as OPEN
+/// CIRCUITS (see the case label above), so for any circuit with a
+/// smooth diode / MOSFET L1 / IGBT L1 it converges — with no
+/// warning — to the operating point of a DIFFERENT circuit (audit
+/// finding dc-op-skips-nonlinear-devices, CONFIRMED). This variant
+/// runs the SAME Newton machinery the transient uses
+/// (`solve_with_newton_b_extra` + the caller's NonlinearRefreshFn
+/// chain) on the DC-assembled system:
+///
+///   * linear part: the dc_assemble matrix (caps open, inductors
+///     near-short) — identical to `compute_dc_op`;
+///   * nonlinear part: re-stamped per Newton iterate by `refresh`,
+///     exactly as in the transient inner solve;
+///   * warm start: the linear DC solution (nonlinear-open), which
+///     is the natural continuation seed.
+///
+/// For a circuit with no Newton devices the refresh stamps nothing
+/// and this returns the `compute_dc_op` answer after one iteration.
+inline Vector compute_dc_op_newton(
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const topology::SwitchStateMask& mask,
+    const NonlinearRefreshFn& refresh,
+    Real t_eval = Real{0},
+    Size max_iters = Size{50},
+    Real tol_dx  = Real{1e-9},
+    Real tol_res = Real{1e-9},
+    bool enable_line_search = false,
+    bool enable_lm = false) {
+    // Warm start from the nonlinear-open linear solve.
+    Vector x0 = compute_dc_op(graph, pool, mask, t_eval);
+    if (!refresh) {
+        return x0;
+    }
+
+    // Local DC "segment": same shape solve_with_newton_b_extra
+    // consumes for transient steps (it reads only J, b_constant,
+    // state_size — the pre-factored solver member is unused there).
+    PwlSegment seg;
+    dc_assemble(graph, pool, mask, seg.J, seg.b_constant, t_eval);
+    sparse::compress_in_place(seg.J);
+    seg.state_size = static_cast<Size>(seg.b_constant.size());
+
+    const Vector b_extra =
+        Vector::Zero(static_cast<Index>(seg.state_size));
+    return solve_with_newton_b_extra(
+        seg, refresh, graph, pool, x0, b_extra,
+        max_iters, tol_dx, tol_res,
+        enable_line_search, enable_lm);
 }
 
 }  // namespace pulsim::pwl

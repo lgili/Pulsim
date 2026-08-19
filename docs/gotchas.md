@@ -61,7 +61,7 @@ You hit a Newton "limit cycle" — the iterate ping-pongs between two faces of a
 
 The cache enumerates all `2^N` reachable switch combinations. With `N = 8` switches that's 256 entries; with `N = 12` it's 4096. Each entry stamps the MNA matrix + KLU-factorizes it.
 
-**Fix:** lazy-build (Layer 4 V6) is the default — only states reached by `switch_fn` are factored. If yours isn't lazy, check that you haven't pinned all bits via a custom switch driver. For pathological topologies with very many switches, consider partitioning into sub-circuits.
+**Fix:** `simulate()` builds lazily (v1.8+) — only states actually reached by `switch_fn` are factored, so many-switch circuits start immediately. If you drive the cache DIRECTLY, `cache.build(dt)` is the eager 2^N path; call `cache.build_lazy(dt)` instead (`cache.num_built_segments()` shows how many states the run really visited). For pathological topologies, consider partitioning into sub-circuits.
 
 ### Symptom: KLU singular-matrix error
 
@@ -72,7 +72,7 @@ This usually means:
 - All sources are current sources and the topology has no DC path to ground.
 - A nonlinear branch (`BranchKind::Nonlinear`) has no diagonal contribution. Pulsim already adds a 1e-12 G_min for `SaturableInductor`; for other custom devices you may need to add your own.
 
-**Fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). Add a 1 µΩ resistor between any floating node and ground.
+**Fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.
 
 ## Time-step (`dt`) choices
 
@@ -98,9 +98,9 @@ You called the wrong typed accessor on `DevicePool`. The `kind_of(b_id)` casts t
 
 ### Symptom: forgotten ground
 
-Every isolated subnet must have a path to ground. Even galvanically-isolated transformer secondaries need a 1 µΩ resistor to primary ground (or use a `BranchKind::Source` like a 0 V source to tie the secondary somewhere).
+Every isolated subnet must have a DC reference. A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it.
 
-**Fix:** add `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e-6)`. The current flowing through `R_iso` will be in the picoamps and doesn't perturb the result.
+**Fix:** `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` for a reference-only tie (leakage ~nA, invisible in the waveforms), or `1e-6` only when you intend an actual bond between the grounds.
 
 ### Symptom: switch_fn never fires the bit I expect
 

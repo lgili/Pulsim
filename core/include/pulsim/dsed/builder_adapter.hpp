@@ -51,18 +51,14 @@
 #include <utility>
 #include <vector>
 
-// ADL hook so `PEDSimulatorAuto<NativeCircuitBuilderAdapter<SSM>,
-// SwitchFn>` can call `mode_id_of(mask)` for SSM masks (the default
-// `pulsim::dsed::mode_id_of<MaskT>` template only matches integral
-// / enum types). Lives in the SSM's namespace so two-phase lookup
-// picks it up at template instantiation.
-namespace pulsim::topology {
-inline int mode_id_of(const SwitchStateMask& m) noexcept {
-    // SwitchStateMask already has std::hash specialised — reuse it
-    // so semantically-equal masks map to the same mode id.
-    return static_cast<int>(std::hash<SwitchStateMask>{}(m));
-}
-}  // namespace pulsim::topology
+// Phase-0 fix #5: the old ADL hook here mapped SwitchStateMask →
+// mode id by TRUNCATING std::hash to int32. Two distinct masks
+// colliding in 32 bits silently poisoned StiffnessDetector's
+// eigenvalue cache (wrong λ_max → wrong integrator, no diagnostic).
+// The adapter now owns an injective, dense `mode_id()` (below) that
+// `resolve_mode_id` in scheduler_auto.hpp prefers; the hash shim is
+// deleted so any future stateless consumer fails to compile instead
+// of aliasing silently.
 
 namespace pulsim::dsed {
 
@@ -175,23 +171,53 @@ public:
         return mask_cache_.size();
     }
 
+    /// Injective, dense mode id for `mask` (Phase-0 fix #5).
+    ///
+    /// First-seen masks get sequential ids (0, 1, 2, …), interned in
+    /// an exact-mask map — no hashing-to-int32 collision is possible,
+    /// so StiffnessDetector's per-mode λ_max cache can never alias
+    /// two different topologies. Preferred over the free-function
+    /// `mode_id_of` by `resolve_mode_id` (scheduler_auto.hpp).
+    [[nodiscard]] int mode_id(const MaskT& m) const {
+        const auto next = static_cast<int>(mode_ids_.size());
+        return mode_ids_.try_emplace(m, next).first->second;
+    }
+
 private:
     // -----------------------------------------------------------------
 
-    /// Probe `compute_*_b_extra` at t = 0 and t = 1 µs. If neither
-    /// is non-zero AND there's no user callback, the circuit is
-    /// DC-only and the fast path in b_vector / rhs skips the
-    /// B-projection product entirely.
+    /// STRUCTURAL detection of time-varying sources (Phase-0 fix #3).
+    ///
+    /// The previous implementation probed `compute_*_b_extra` at
+    /// t = 0 and t = 1 µs and declared the circuit DC-only when both
+    /// norms were zero. That is a correctness trap, not an
+    /// optimisation: a pulse source with `delay > 1 µs` (zero at
+    /// both probe instants) was classified as "no dynamic sources"
+    /// and silently dropped from the ENTIRE run — the worst kind of
+    /// wrong answer. Deciding structurally from the device pool has
+    /// zero false negatives and is cheaper than two full b_extra
+    /// builds.
     [[nodiscard]] bool detect_dynamic_sources_() const {
         if (b_extra_fn_) return true;
-        Vector b0 = sources::compute_pwm_b_extra(pool_, graph_, Real{0});
-        b0 += sources::compute_sine_b_extra(pool_, graph_, Real{0});
-        b0 += sources::compute_pulse_b_extra(pool_, graph_, Real{0});
-        if (b0.norm() != Real{0}) return true;
-        Vector b1 = sources::compute_pwm_b_extra(pool_, graph_, Real{1e-6});
-        b1 += sources::compute_sine_b_extra(pool_, graph_, Real{1e-6});
-        b1 += sources::compute_pulse_b_extra(pool_, graph_, Real{1e-6});
-        return b1.norm() != Real{0};
+        using K = pwl::DevicePool::StoredKind;
+        const auto n_branches = graph_.num_branches();
+        for (Index b_id = 0; b_id < n_branches; ++b_id) {
+            K kind;
+            try {
+                kind = pool_.kind_of(b_id);
+            } catch (const std::out_of_range&) {
+                // Branch present in the graph but not registered in
+                // the pool (raw-graph construction paths). It cannot
+                // contribute a time-varying b_extra overlay.
+                continue;
+            }
+            if (kind == K::PWMVoltageSource ||
+                kind == K::SineVoltageSource ||
+                kind == K::PulseVoltageSource) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Sum sine + PWM + pulse + user-supplied contributions at time t.
@@ -248,6 +274,9 @@ private:
     // mutable: A_matrix / b_vector / rhs are conceptually const but
     // need to populate the lazy per-mask cache.
     mutable std::unordered_map<MaskT, LTIEntry> mask_cache_;
+    // Phase-0 fix #5: exact-mask → dense sequential mode id intern
+    // table backing mode_id(). Grows by #visited modes only.
+    mutable std::unordered_map<MaskT, int> mode_ids_;
     mutable const LTIEntry* current_entry_ = nullptr;
 };
 

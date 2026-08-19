@@ -40,6 +40,17 @@ struct SimulationOptions {
     /// Set to 0 to disable iteration (V2 behaviour).
     Size max_event_iterations = Size{16};
 
+    /// Phase-0 fix #9 — behaviour when the event iteration hits a
+    /// mask CYCLE (diode pair flip-flopping A→B→A, which no budget
+    /// resolves) or exhausts `max_event_iterations`.
+    ///
+    /// false (default): accept the last consistent solve, record an
+    /// `EventIterationBreach` on the result, and CONTINUE — a
+    /// multilevel run no longer dies at t = 37 ms after minutes of
+    /// compute. true: restore the pre-v1.8 hard throw (paper-grade
+    /// strictness).
+    bool strict_event_iterations = false;
+
     // ---- Newton (Layer 5 V4) ----------------------------------------
     //
     // When `run_transient` is called with a non-empty

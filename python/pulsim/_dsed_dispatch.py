@@ -412,13 +412,32 @@ def run_dsed_from_builder(
         ) from e
 
     cache = _PwlCache(builder.graph, builder.pool)
-    cache.build(opts.dt_max)
+    # Lazy build (review finding PY-3): the DSED adapter derives its
+    # per-mask LTI entries via compute_lti_state_space and never reads
+    # the pre-built trap segments, so the eager 2^N enumeration was
+    # pure waste — and made many-switch circuits hang before t=0.
+    cache.build_lazy(opts.dt_max)
 
     # Default switch_fn — all switches closed (matches the engine='pwl'
-    # default behaviour).
+    # default behaviour, INCLUDING its driverless-controlled-switch
+    # warning — review finding PY-3).
     sf = opts.switch_fn
     if sf is None:
         n_sw = builder.graph.num_switches
+        try:
+            from ._pulsim import _switch_census
+            _, _nd, _controlled = _switch_census(
+                builder.graph, builder.pool)
+        except Exception:  # noqa: BLE001
+            _controlled = []
+        if _controlled:
+            warnings.warn(
+                f"simulate(engine='dsed'): no switch_fn was given, "
+                f"but the circuit has {len(_controlled)} controlled "
+                f"switch(es) (indices {list(_controlled)}). They "
+                "default to ALL CLOSED, which short-circuits bridge "
+                "legs (shoot-through). Pass an explicit switch_fn.",
+                stacklevel=3)
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)

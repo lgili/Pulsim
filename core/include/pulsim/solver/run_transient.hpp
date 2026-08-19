@@ -46,6 +46,8 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <array>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <stdexcept>
@@ -445,8 +447,30 @@ inline SimulationResult run_transient(
                                       diodes.current_diode_mask(),
                                       diode_owned);
             }
-            x = pwl::compute_dc_op(graph, pool, mask,
-                                    opts.t_start);
+            // Phase-0 fix #2: honour the Newton devices. The
+            // plain compute_dc_op stamps Nonlinear branches as
+            // OPEN, silently seeding the run from the operating
+            // point of a different circuit.
+            // Adversarial-review finding P0-R2: pass the RAW
+            // static-device refresh (diodes / MOSFET / IGBT), NOT
+            // nl_refresh_effective — the saturable-inductor wrapper
+            // stamps trap-companion physics (2·L_eff/dt series
+            // resistance), which is time-step-dependent and wrong
+            // at DC. Saturable inductors still lack a DC stamp in
+            // dc_assemble (pre-existing; tracked for Phase 2).
+            if (nl_refresh) {
+                x = pwl::compute_dc_op_newton(
+                    graph, pool, mask, nl_refresh,
+                    opts.t_start,
+                    opts.max_newton_iterations,
+                    opts.tol_newton_dx,
+                    opts.tol_newton_res,
+                    opts.enable_newton_line_search,
+                    opts.enable_newton_lm);
+            } else {
+                x = pwl::compute_dc_op(graph, pool, mask,
+                                        opts.t_start);
+            }
             flipped = has_diodes && diodes.update_from_state(x);
             ++iters;
         } while (flipped && iters < dc_max_iters);
@@ -587,6 +611,14 @@ inline SimulationResult run_transient(
             // it's the cached linear solve.
             Size iters = 0;
             bool flipped = false;
+            bool mask_cycle = false;
+            std::array<std::uint64_t, 64> masks_seen{};
+            Size n_masks_seen = 0;
+            // Diode on-bits consistent with the most recent solve
+            // (captured BEFORE update_from_state advances them) —
+            // restored on breach so x and the diode state agree
+            // (adversarial-review finding P0-R1).
+            std::vector<bool> last_solved_bits;
             do {
                 auto mask = switch_fn(t);
                 if (has_diodes) {
@@ -594,6 +626,30 @@ inline SimulationResult run_transient(
                         diodes.current_diode_mask();
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
+                }
+                // Phase-0 fix #9: a repeated mask within one step's
+                // event iteration is a CYCLE (mask A -> B -> A ...,
+                // the un-hysteresed diode pair around a resonant
+                // node) — but ONLY on the linear path, where
+                // cache.solve is a deterministic, memoryless
+                // function of the mask, making the repeat a proof
+                // of non-convergence. The Newton path warm-starts
+                // from the current x, so revisiting a mask from a
+                // different iterate can legitimately converge
+                // (adversarial-review finding P0-R3); there the
+                // iteration budget alone bounds the cost.
+                if (!nl_refresh_effective) {
+                    const std::uint64_t mbits = mask.bits();
+                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
+                        if (masks_seen[ms] == mbits) {
+                            mask_cycle = true;
+                            break;
+                        }
+                    }
+                    if (mask_cycle) break;
+                    if (n_masks_seen < masks_seen.size()) {
+                        masks_seen[n_masks_seen++] = mbits;
+                    }
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = cache.lookup(mask);
@@ -608,17 +664,38 @@ inline SimulationResult run_transient(
                 } else {
                     cache.solve(mask, b_extra, x);
                 }
+                if (has_diodes) {
+                    last_solved_bits = diodes.snapshot_on_bits();
+                }
                 flipped = has_diodes &&
                           diodes.update_from_state(x);
                 ++iters;
             } while (flipped && iters < max_iters);
 
-            if (flipped) {
-                throw std::runtime_error(std::format(
-                    "run_transient: event-iteration limit "
-                    "reached without convergence at t = {}; "
-                    "raise max_event_iterations or reduce dt",
-                    t));
+            if (flipped || mask_cycle) {
+                if (opts.strict_event_iterations) {
+                    throw std::runtime_error(std::format(
+                        "run_transient: diode event iteration {} at "
+                        "t = {} (strict_event_iterations=true); "
+                        "raise max_event_iterations or reduce dt",
+                        mask_cycle ? "hit a mask cycle"
+                                    : "exhausted its budget",
+                        t));
+                }
+                // Accept the last consistent solve, flag the step,
+                // keep going — losing the whole run was the greater
+                // wrong (audit: event-iteration-throws-away-
+                // simulation, CONFIRMED). Re-sync the diode bits to
+                // the state x was actually solved under, so the
+                // commutation records, trap history and the next
+                // step all start from a CONSISTENT (x, diode) pair
+                // (adversarial-review finding P0-R1).
+                if (has_diodes && !last_solved_bits.empty()) {
+                    diodes.restore_on_bits(last_solved_bits);
+                }
+                result.event_iteration_breaches.push_back(
+                    {.t = t, .iterations = iters,
+                     .cycle_detected = mask_cycle});
             }
 
             // 4. Sub-step commutation timing (Layer 5 V2.2) +
@@ -924,6 +1001,14 @@ inline SimulationResult run_transient(
 
             Size iters = 0;
             bool flipped = false;
+            bool mask_cycle = false;
+            std::array<std::uint64_t, 64> masks_seen{};
+            Size n_masks_seen = 0;
+            // Diode on-bits consistent with the most recent solve
+            // (captured BEFORE update_from_state advances them) —
+            // restored on breach so x and the diode state agree
+            // (adversarial-review finding P0-R1).
+            std::vector<bool> last_solved_bits;
             do {
                 auto mask = switch_fn(t);
                 if (has_diodes) {
@@ -931,6 +1016,30 @@ inline SimulationResult run_transient(
                         diodes.current_diode_mask();
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
+                }
+                // Phase-0 fix #9: a repeated mask within one step's
+                // event iteration is a CYCLE (mask A -> B -> A ...,
+                // the un-hysteresed diode pair around a resonant
+                // node) — but ONLY on the linear path, where
+                // cache.solve is a deterministic, memoryless
+                // function of the mask, making the repeat a proof
+                // of non-convergence. The Newton path warm-starts
+                // from the current x, so revisiting a mask from a
+                // different iterate can legitimately converge
+                // (adversarial-review finding P0-R3); there the
+                // iteration budget alone bounds the cost.
+                if (!nl_refresh_effective) {
+                    const std::uint64_t mbits = mask.bits();
+                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
+                        if (masks_seen[ms] == mbits) {
+                            mask_cycle = true;
+                            break;
+                        }
+                    }
+                    if (mask_cycle) break;
+                    if (n_masks_seen < masks_seen.size()) {
+                        masks_seen[n_masks_seen++] = mbits;
+                    }
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = cache.lookup(mask);
@@ -945,16 +1054,30 @@ inline SimulationResult run_transient(
                 } else {
                     cache.solve(mask, b_extra_user, x);
                 }
+                if (has_diodes) {
+                    last_solved_bits = diodes.snapshot_on_bits();
+                }
                 flipped = has_diodes &&
                           diodes.update_from_state(x);
                 ++iters;
             } while (flipped && iters < max_iters);
 
-            if (flipped) {
-                throw std::runtime_error(std::format(
-                    "run_transient: event-iteration limit "
-                    "reached without convergence at t = {}",
-                    t));
+            if (flipped || mask_cycle) {
+                if (opts.strict_event_iterations) {
+                    throw std::runtime_error(std::format(
+                        "run_transient: diode event iteration {} at "
+                        "t = {} (strict_event_iterations=true)",
+                        mask_cycle ? "hit a mask cycle"
+                                    : "exhausted its budget",
+                        t));
+                }
+                // P0-R1: re-sync diode bits to the solved state.
+                if (has_diodes && !last_solved_bits.empty()) {
+                    diodes.restore_on_bits(last_solved_bits);
+                }
+                result.event_iteration_breaches.push_back(
+                    {.t = t, .iterations = iters,
+                     .cycle_detected = mask_cycle});
             }
 
             // Sub-step bisection on the static path too.

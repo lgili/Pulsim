@@ -243,7 +243,18 @@ public:
         const topology::SwitchStateMask& mask) const {
         auto r = try_lookup(mask);
         if (!r) {
-            throw std::out_of_range(r.error().what());
+            // Exception type carries meaning across the pybind
+            // boundary (adversarial-review finding PY-2): a
+            // SINGULAR matrix is a circuit problem and must stay a
+            // RuntimeError — with lazy building it now surfaces on
+            // first VISIT of the mask, mid-run, and out_of_range
+            // would arrive in Python as a baffling IndexError.
+            // out_of_range is reserved for the eager-mode
+            // "mask not pre-built" bookkeeping case.
+            if (r.error().kind == CacheError::Kind::MaskNotBuilt) {
+                throw std::out_of_range(r.error().what());
+            }
+            throw std::runtime_error(r.error().what());
         }
         return **r;
     }

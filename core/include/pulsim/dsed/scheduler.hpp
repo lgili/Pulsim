@@ -63,6 +63,7 @@
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/dsed/rk45_dormand_prince.hpp"
 #include "pulsim/dsed/step_controller.hpp"
+#include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -171,7 +172,6 @@ public:
         std::size_t step_idx = 0;
 
         constexpr std::size_t kMaxSteps = 10'000'000;
-        constexpr Real kBacktrackTol = Real{1e-15};
 
         auto f = [this](Real tau, const Vector& xx) -> Vector {
             return system_.rhs(tau, xx);
@@ -275,7 +275,13 @@ public:
             }
 
             if (t_pred.has_value()
-                && *t_pred < t + h_use - kBacktrackTol) {
+                && *t_pred < t + h_use - Real{1e-15}) {
+                // ^ absolute on purpose: a RELATIVE margin here
+                // WIDENS the window in which a root at the step
+                // end is discarded (event silently lost until
+                // recross — adversarial-review finding P0-R4).
+                // The proper fix (fire terminal-band roots) is
+                // part of the Phase-3 event-queue overhaul.
                 // Predicate fired strictly inside the step — backtrack.
                 t = *t_pred;
                 x = std::move(x_pred);
@@ -293,7 +299,7 @@ public:
 
                 // 7. Did we land on a gate edge?
                 if (t_gate < t_end &&
-                    std::abs(t - t_gate) < Real{1e-12}) {
+                    near_time(t, t_gate)) {
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
                                   x, rk_state, result);
                 }
@@ -362,7 +368,6 @@ private:
         const Vector& k1, const Vector& k7,
         Real h) {
 
-        constexpr Real kEpsTie = Real{1e-15};
         std::optional<PredicateEvent> best;
         int best_priority = std::numeric_limits<int>::max();
 
@@ -402,10 +407,11 @@ private:
                 };
             };
 
-            if (!best.has_value() || t_root < best->t_event - kEpsTie) {
+            if (!best.has_value()
+                || t_root < best->t_event - Real{1e-15}) {
                 best = make_event();
                 best_priority = p.priority;
-            } else if (std::abs(t_root - best->t_event) <= kEpsTie
+            } else if (std::abs(t_root - best->t_event) <= Real{1e-15}
                        && p.priority < best_priority) {
                 best = make_event();
                 best_priority = p.priority;
@@ -438,7 +444,7 @@ private:
             x = state_projection_(t_event, x, ptype);
         }
 
-        const MaskT new_mask = switch_fn_(t_event + Real{1e-15});
+        const MaskT new_mask = switch_fn_(advance_past(t_event));
 
         // Drop spurious same-mask gate edges silently.
         if (ptype == PredicateType::GateEdge && new_mask == old_mask) {

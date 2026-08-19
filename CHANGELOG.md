@@ -4,6 +4,99 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Phase 0 — silent-wrong-answer fixes (v2.0 audit follow-up)
+
+Nine fixes from the 2026-08 full-kernel audit, all targeting paths
+that produced **plausible-but-wrong results** or destroyed user work
+without telling anyone. See `PULSIM_V2_AUDIT.md` findings referenced
+per item.
+
+### Fixed
+
+* **`simulate(engine='dsed')` silently dropped `step_observer`,
+  `closed_loops`, `should_continue`, `live_stream` and
+  `start_from_dc_op`** — a closed-loop converter ran OPEN-loop and
+  returned plausible waveforms. Now raises `ValueError` naming the
+  offending kwargs. (`dsed-silently-drops-observers`)
+* **DC operating point ignored every Newton device** —
+  `compute_dc_op` stamps `BranchKind::Nonlinear` as open circuits, so
+  `start_from_dc_op=True` seeded runs from the operating point of a
+  *different* circuit. New `compute_dc_op_newton` reuses the
+  transient's `NonlinearRefreshFn` chain (warm-started from the
+  linear solve); `run_transient` routes through it automatically.
+  Known limitation: saturable inductors still lack a DC stamp — the
+  DC Newton chain deliberately excludes their trap-companion refresh
+  (time-step-dependent, wrong at DC) and such circuits keep the
+  pre-existing structurally-singular error at `start_from_dc_op`.
+  (`dc-op-skips-nonlinear-devices`)
+* **DSED dropped time-varying sources that were zero at t=0 and
+  t=1 µs** (e.g. a pulse with `t_start > 1 µs`) — detection is now
+  structural over `DevicePool::kind_of`, zero false negatives.
+  (`dynamic-source-probe-false-negative`)
+* **Diode chattering aborted the whole run** — the event-iteration
+  loop now detects mask cycles, accepts the last consistent solve,
+  records `result.event_iteration_breaches` and continues (loud
+  Python warning). `strict_event_iterations=True` restores the old
+  throw. (`event-iteration-throws-away-simulation`)
+* **Mode-id hash truncation poisoned the DSED stiffness cache** —
+  `std::hash`/`py::hash` truncated to int32 could alias two masks and
+  silently pick the wrong integrator. Replaced by injective interned
+  ids on the native adapter and PySystem; truncating ADL shims
+  deleted. (`mode-id-hash-truncation`)
+* **Absolute time epsilons skipped gate events on long runs** —
+  `switch_fn(t_event + 1e-15)` rounds back to `t_event` once
+  t ≳ 16 s. New shared `time_eps.hpp` makes every scheduler time
+  comparison ULP-relative (legacy floors preserved near t=0).
+  (`absolute-time-epsilons`)
+
+### Changed
+
+* **`simulate()` builds the PWL cache lazily** — only visited switch
+  states are factorised (a PWM converter visits a handful of 2^N).
+  Eager `cache.build()` remains available; `build_lazy` +
+  `num_built_segments` are now bound to Python. Many-switch circuits
+  (3φ NPC, multilevel) no longer hang before the first step.
+  (`eager-2n-is-the-only-production-path`)
+* **Driverless controlled switches now warn loudly** — `switch_fn`
+  omitted + controlled switches present = all-CLOSED default
+  (shoot-through hazard). v2.0 will flip the default to all-open and
+  make it an error. (`default-all-switches-closed`)
+
+### Added
+
+* `pulsim.run_periodic_shooting` / `PeriodicShootingResult` exported
+  (documented in the migration guide since v1.5 but unreachable).
+* `EventIterationBreach` result records + `strict_event_iterations`
+  option (kernel + Python).
+* `PwlStateSpaceCache.build_lazy(dt)` / `.num_built_segments()`
+  bindings; `_switch_census` helper.
+
+### Review hardening (adversarial diff review, 8/8 findings fixed)
+
+* Breach handling re-syncs diode bits to the last-solved state before
+  recording, so `(x, diode)` pairs commit consistently (P0-R1); the
+  mask-cycle break applies only to the memoryless linear path — the
+  warm-started Newton path relies on the budget (P0-R3).
+* Lazy-build singular masks now surface as `RuntimeError` (circuit
+  problem), not `IndexError` (P0/PY-2); sweeps forward
+  `strict_event_iterations` and warn on breached points (PY-1);
+  `engine='dsed'` also builds lazily, warns on driverless controlled
+  switches, and rejects `strict_event_iterations` (PY-3, PY-4).
+* DSED backtrack/tie guards keep their historical ABSOLUTE 1e-15
+  bands — a relative band there would widen the terminal-root discard
+  window; the real fix (firing terminal-band roots) belongs to the
+  Phase-3 event-queue overhaul (P0-R4).
+
+### Docs
+
+* `docs/gotchas.md`: the "1 µΩ to ground" recipe replaced — a 1 µΩ tie
+  on a live node silently bonds the nets; reference-only ties use
+  1 MΩ–1 GΩ. Lazy-build guidance now matches the code.
+* README release badge unstuck from v1.4.0; `docs/solvers.md`
+  variable-step row now reflects the shipped DSED engine.
+
 ## [1.8.0] — 2026-06-07
 
 Custom code blocks ("C block"): user code wired into the circuit.

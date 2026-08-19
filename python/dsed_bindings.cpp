@@ -31,6 +31,11 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <cstddef>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/dsed/builder_adapter.hpp"
 #include "pulsim/dsed/scheduler.hpp"
@@ -78,19 +83,13 @@ struct PyMask {
     }
 };
 
-// Hashable mask → mode_id for PEDSimulatorAuto's per-mode integrator cache.
-inline int mode_id_of(const PyMask& m) noexcept {
-    try {
-        // Python's hash() works for any hashable object (SwitchStateMask
-        // is hashable in the pulsim bindings).
-        return static_cast<int>(py::hash(m.obj));
-    } catch (...) {
-        // Fallback: use the object's identity (works for unhashable
-        // objects, though they shouldn't typically appear).
-        return static_cast<int>(
-            reinterpret_cast<std::uintptr_t>(m.obj.ptr()));
-    }
-}
+// Phase-0 fix #5: the old free-function here truncated py::hash
+// (64-bit Py_hash_t) to int32 for PEDSimulatorAuto's per-mode
+// integrator cache — two distinct masks colliding in 32 bits
+// silently reused the wrong cached λ_max. PySystem now owns an
+// injective interning `mode_id()` (full-hash bucketed, equality-
+// checked) that `resolve_mode_id` prefers; no stateless hash
+// shim remains.
 
 // ---------------------------------------------------------------------------
 // PySystem: adapter that holds a Python `system` object and forwards
@@ -128,6 +127,30 @@ public:
         set_mask_attr_(m.obj);
     }
 
+    /// Injective, dense mode id for `m` (Phase-0 fix #5). Buckets by
+    /// the FULL 64-bit Python hash, then equality-checks within the
+    /// bucket, so distinct masks can never alias an id. Preferred
+    /// over the (removed) truncating hash shim by `resolve_mode_id`.
+    [[nodiscard]] int mode_id(const PyMask& m) const {
+        std::size_t h;
+        try {
+            h = static_cast<std::size_t>(py::hash(m.obj));
+        } catch (...) {
+            // Unhashable mask object — fall back to identity. Two
+            // views of the same underlying object still match via
+            // the equality scan below when hashing is available;
+            // identity is the last resort.
+            h = reinterpret_cast<std::uintptr_t>(m.obj.ptr());
+        }
+        auto& bucket = mode_id_buckets_[h];
+        for (const auto& [seen, id] : bucket) {
+            if (seen == m) return id;
+        }
+        const int id = next_mode_id_++;
+        bucket.emplace_back(m, id);
+        return id;
+    }
+
 private:
     py::object obj_;
     // Pre-resolved attributes to skip the attr-lookup cost per call.
@@ -136,6 +159,10 @@ private:
     py::object rhs_attr_;
     py::object mask_attr_;
     py::object set_mask_attr_;
+    // Phase-0 fix #5: full-hash → [(mask, dense id)] intern table.
+    mutable std::unordered_map<std::size_t,
+        std::vector<std::pair<PyMask, int>>> mode_id_buckets_;
+    mutable int next_mode_id_ = 0;
 };
 
 // ---------------------------------------------------------------------------

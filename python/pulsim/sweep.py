@@ -585,6 +585,7 @@ def sweep_path_aware(
                     if k in {"b_extra_fn", "start_from_dc_op",
                               "step_observer", "initial_state",
                               "should_continue"}})
+            _warn_if_breached(sim, f"sweep point {i} {p_dict}")
             kpi_list.append(kpi_fn(sim, p_dict))
         except Exception as exc:
             failed.append((i, str(exc)))
@@ -730,6 +731,7 @@ def monte_carlo_path_aware(
                     if k in {"b_extra_fn", "start_from_dc_op",
                               "step_observer", "initial_state",
                               "should_continue"}})
+            _warn_if_breached(sim, f"MC sample {i}")
             kpi_list.append(kpi_fn(sim, sample))
         except Exception as exc:
             failed.append((i, str(exc)))
@@ -781,4 +783,26 @@ def _make_options(t_end: float, dt: float, **simulate_kwargs):
                 "enable_substep_state_correction"):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:
             setattr(opts, k, bool(simulate_kwargs[k]))
+    # review finding PY-1: without this, sweeps could neither opt back
+    # into the strict throw nor see it — breaches were fully silent.
+    if simulate_kwargs.get("strict_event_iterations"):
+        opts.strict_event_iterations = True
     return opts
+
+
+def _warn_if_breached(sim, combo_desc: str) -> None:
+    """review finding PY-1: run_transient no longer throws on diode
+    event-iteration breaches, and sweep bypasses simulate()'s loud
+    warning — so surface breaches here or sweep KPIs from breached
+    runs would be silently plausible-but-degraded."""
+    breaches = getattr(sim, "event_iteration_breaches", None)
+    if breaches:
+        import warnings
+        warnings.warn(
+            f"sweep: diode event iteration failed to settle on "
+            f"{len(breaches)} step(s) for {combo_desc} (first at "
+            f"t={breaches[0].t:.6g}). KPIs for this point carry a "
+            "one-flip diode-state error near those instants; pass "
+            "strict_event_iterations=True to fail such points "
+            "instead.",
+            stacklevel=4)

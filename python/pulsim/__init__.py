@@ -47,6 +47,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
     SimulationOptions,
     SimulationResult,
     CommutationEvent,
+    # Phase-0 fix #4 helper (private): controlled-vs-diode census.
+    _switch_census,
     run_transient,
     # Smooth-blend nonlinear diode params (Layer 4 V3).
     IdealDiodeParams,
@@ -163,6 +165,13 @@ from .sweep import (
     # v1.4.0 — path-aware variants exploiting refactor_parametric
     sweep_path_aware,
     monte_carlo_path_aware,
+)
+# Phase-0 fix #8: the migration guide documents
+# `p.run_periodic_shooting(...)` but the symbol was never exported —
+# users landed on a misleading AttributeError from the PEP 562 hook.
+from .periodic import (
+    PeriodicShootingResult,
+    run_periodic_shooting,
 )
 from .kpi import (
     KpiGate,
@@ -483,6 +492,10 @@ __all__ = [
     "monte_carlo",
     "sweep_path_aware",
     "monte_carlo_path_aware",
+    # Periodic steady-state shooting (documented in the migration
+    # guide since v1.5; exported as of Phase 0).
+    "PeriodicShootingResult",
+    "run_periodic_shooting",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -1284,6 +1297,7 @@ def simulate(
     enable_nonlinear_refresh: Optional[bool] = None,
     max_newton_iterations: int = 0,
     max_event_iterations: int = 0,
+    strict_event_iterations: bool = False,
     tol_newton_dx: Optional[float] = None,
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
@@ -1482,6 +1496,35 @@ def simulate(
                 "are not yet wired into the DSED engine (their outputs use "
                 "b_extra, which DSED does not consume). Use engine='pwl' to "
                 "run C blocks.")
+        # Hard-fail on kwargs the DSED path cannot honor. Silently
+        # dropping these is the worst failure mode a simulator can
+        # have: a closed-loop circuit would run OPEN-loop and return
+        # plausible-looking (wrong) waveforms. Mirror of the C-block
+        # warning above, but these change the *physics* of the run,
+        # so they raise instead of warn.
+        _dsed_unsupported = {
+            "step_observer": step_observer is not None,
+            "closed_loops": bool(closed_loops),
+            "should_continue": should_continue is not None,
+            "live_stream": live_stream is not None,
+            "start_from_dc_op": bool(start_from_dc_op),
+            # review finding PY-4: DSED has no diode event iteration,
+            # so silently accepting this flag would be the exact
+            # pattern this block exists to prevent.
+            "strict_event_iterations": bool(strict_event_iterations),
+        }
+        _offending = [k for k, hit in _dsed_unsupported.items() if hit]
+        if _offending:
+            raise ValueError(
+                f"simulate(engine='dsed'): {', '.join(_offending)} "
+                "is/are not supported by the DSED engine yet — the "
+                "run would silently ignore them (e.g. a closed-loop "
+                "converter would simulate OPEN-loop). Use "
+                "engine='pwl' for these features, or drop the "
+                "kwarg(s) if the open-loop behaviour is intended. "
+                "Observer/closed-loop support inside DSED is tracked "
+                "for v2.0 (event-synchronised controller cadence)."
+            )
         return _dsed.run_dsed_from_builder(
             builder=builder,
             t_end=t_end,
@@ -1642,9 +1685,17 @@ def simulate(
         except Exception:  # noqa: BLE001 — test mocks etc.
             pass
 
-    # Build the PWL cache.
+    # Build the PWL cache — LAZY by default (Phase-0 fix #7).
+    # A PWM converter visits only a handful of the 2^N switch
+    # states, and the eager enumeration made many-switch circuits
+    # (3φ NPC: 2^12+ factorizations; MMC: unbuildable) hang before
+    # the first step. Lazy mode factorises each mask on first
+    # visit and produces bit-identical results for every visited
+    # mask. This also makes the docs (gotchas.md "lazy-build is
+    # the default") true — they previously described intent, not
+    # behaviour.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
-    cache.build(dt)
+    cache.build_lazy(dt)
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
@@ -1652,6 +1703,8 @@ def simulate(
         opts.max_newton_iterations = max_newton_iterations
     if max_event_iterations > 0:
         opts.max_event_iterations = max_event_iterations
+    if strict_event_iterations:
+        opts.strict_event_iterations = True
     if tol_newton_dx is not None:
         opts.tol_newton_dx = tol_newton_dx
     if tol_newton_res is not None:
@@ -1667,9 +1720,36 @@ def simulate(
     if inductor_abs_clamp > 0:
         opts.inductor_abs_clamp = float(inductor_abs_clamp)
 
-    # Default switch_fn: all switches closed.
+    # Default switch_fn: all switches closed (v1.x behaviour).
+    #
+    # Phase-0 fix #4: this default is DANGEROUS for circuits with
+    # controlled switches — a half-bridge with a forgotten gate
+    # assignment becomes a dead short across the DC link (shoot-
+    # through), and either dies with an unexplained singular-matrix
+    # error or converges to absurd currents. Diode bits are solver-
+    # owned (combine_masks overlays them), so for diode-only
+    # rectifiers the default is harmless and stays silent. When
+    # CONTROLLED switches exist, warn loudly; v2.0 flips the
+    # default to all-OPEN and makes this an error.
     if switch_fn is None:
         n_sw = builder.graph.num_switches
+        try:
+            _, _n_diode, _controlled = _switch_census(
+                builder.graph, builder.pool)
+        except Exception:  # noqa: BLE001 — test doubles w/o pool
+            _controlled = []
+        if _controlled:
+            import warnings
+            warnings.warn(
+                f"simulate(): no switch_fn was given, but the "
+                f"circuit has {len(_controlled)} controlled "
+                f"switch(es) (indices {list(_controlled)}). They "
+                "default to ALL CLOSED, which short-circuits "
+                "bridge legs (shoot-through). Pass an explicit "
+                "switch_fn / closed_loops that drives these bits. "
+                "In Pulsim v2.0 this becomes an error and the "
+                "default flips to all-OPEN.",
+                stacklevel=2)
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)
@@ -1824,6 +1904,27 @@ def simulate(
         import sys as _sys
         _sys.stdout.write("\n")
         _sys.stdout.flush()
+    # Phase-0 fix #9: the kernel no longer throws away a whole run
+    # on diode event-iteration cycles/budget exhaustion — it records
+    # breaches and continues. Surface them LOUDLY so the accepted
+    # per-step diode-state error is never silent.
+    _breaches = getattr(res, "event_iteration_breaches", None)
+    if _breaches:
+        import warnings
+        _b0 = _breaches[0]
+        warnings.warn(
+            f"simulate(): diode event iteration failed to settle on "
+            f"{len(_breaches)} of {len(res.times)} steps (first at "
+            f"t={_b0.t:.6g}, "
+            f"{'mask cycle' if _b0.cycle_detected else 'budget hit'}). "
+            "The solver kept the last consistent solve each time and "
+            "continued; waveforms near those instants carry a one-"
+            "flip diode-state error. Inspect "
+            "result.event_iteration_breaches, reduce dt, or pass "
+            "strict_event_iterations=True to restore the old hard "
+            "failure.",
+            stacklevel=2)
+
     # Attach the builder so `result.v(name)` / `.i(name)` / `.power(name)`
     # can resolve names without forcing the caller to re-pass the
     # builder. The binding enables `py::dynamic_attr()` precisely so

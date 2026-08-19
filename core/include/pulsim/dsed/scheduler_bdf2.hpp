@@ -50,6 +50,7 @@
 #include <vector>
 
 #include "pulsim/dsed/bdf2_integrator.hpp"
+#include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -181,7 +182,7 @@ public:
             ++result.n_accept;
 
             // 6. Did we land on a gate edge?
-            if (t_gate < t_end && std::abs(t - t_gate) < Real{1e-12}) {
+            if (t_gate < t_end && near_time(t, t_gate)) {
                 fire_gate_event_(t_gate, x, bdf2_state, result);
             }
 
@@ -232,7 +233,7 @@ private:
                             BDF2State& bdf2_state,
                             PEDResult<MaskT>& result) {
         const MaskT old_mask = system_.current_mask();
-        const MaskT new_mask = switch_fn_(t_event + Real{1e-15});
+        const MaskT new_mask = switch_fn_(advance_past(t_event));
         if (new_mask == old_mask) return;   // spurious gate edge
 
         system_.set_mask(new_mask);

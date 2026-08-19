@@ -18,7 +18,7 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599c?logo=cplusplus&logoColor=white)](https://en.cppreference.com/w/cpp/23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Citation](https://img.shields.io/badge/cite-CITATION.cff-orange.svg)](CITATION.cff)
-[![v1.4.0 release](https://img.shields.io/badge/release-v1.4.0-success.svg)](CHANGELOG.md)
+[![v1.8.0 release](https://img.shields.io/badge/release-v1.8.0-success.svg)](CHANGELOG.md)
 
 [**Docs**](https://lgili.github.io/Pulsim/) ·
 [**Tutorials**](docs/tutorials/) ·
