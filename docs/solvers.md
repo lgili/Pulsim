@@ -14,7 +14,7 @@ Pulsim's transient kernel supports two **fixed-step** integrators
 | Stiff circuit (RC ≪ dt) | `pulsim.simulate(..., integrator="bdf1")` (L-stable, fixed) |
 | Non-stiff ODE outside pulsim | `DormandPrince5(f=...).solve(...)` |
 | Stiff ODE outside pulsim | `RadauIIA3(f=...).solve(...)` |
-| Variable step inside pulsim | **v1.6.0** — in-kernel coupling planned |
+| Variable step inside pulsim | **shipped** — `engine='dsed'` (event-driven RK45/BDF2 auto-dispatch) for LTI-per-mask circuits; in-kernel adaptive trap for the PWL engine still planned |
 
 ## Fixed-step integrators (in-kernel)
 
