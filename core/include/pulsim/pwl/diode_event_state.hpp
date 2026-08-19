@@ -161,11 +161,19 @@ public:
     // the original pre-event mask, then update normally.
     [[nodiscard]] std::vector<bool> snapshot_on_bits() const {
         std::vector<bool> bits;
-        bits.reserve(diodes_.size());
-        for (const auto& d : diodes_) {
-            bits.push_back(d.is_on);
-        }
+        snapshot_on_bits_into(bits);
         return bits;
+    }
+
+    /// Fill-in-place variant (v2.0 Phase 1, audit finding
+    /// `per-step-heap-allocations`): reuses `out`'s capacity — no
+    /// heap traffic in the per-step / per-event-iteration loop.
+    void snapshot_on_bits_into(std::vector<bool>& out) const {
+        out.clear();
+        out.reserve(diodes_.size());
+        for (const auto& d : diodes_) {
+            out.push_back(d.is_on);
+        }
     }
 
     void restore_on_bits(const std::vector<bool>& bits) {

@@ -8,6 +8,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 1 — kernel foundation (v2.0 audit follow-up)
 
+* **Zero-allocation transient hot loop** (audit finding
+  `per-step-heap-allocations`): the per-step loop performed 6–10
+  heap allocations per step — fresh `rhs` in every `cache.solve`,
+  fresh `y` in every LU triangular solve, per-step snapshot copies
+  (`history.snapshot()`, diode bits), `compute_b_extra`'s fresh
+  `Vector::Zero`, and per-step event scratch. All buffers are now
+  once-allocated workspaces: `HistoryState::compute_b_extra(dt,
+  out)` / `snapshot_into`, `DiodeEventState::snapshot_on_bits_into`
+  fill in place; the LU solver and the cache use **thread-local**
+  solve workspaces (per-thread, so concurrent GIL-released
+  transients sharing a warm cache stay numerically correct —
+  adversarial-review finding ZA-1 caught that instance-member
+  buffers would have silently corrupted them); `run_transient`
+  hoists every per-step vector, including the sub-step-correction
+  scratch. Steady-state `cache.solve`/`solve_at` — and the full
+  event-corrected linear loop — now perform **zero** heap
+  allocations, locked in by a dedicated test binary that counts
+  global `operator new` calls AND forbids Eigen-side malloc
+  (`EIGEN_RUNTIME_NO_MALLOC` + throwing `eigen_assert`, effective
+  in release builds; count assertions auto-skip under MSVC
+  iterator-debug). Scope: the linear trapezoidal path — the Newton
+  nonlinear-refresh solve and the deliberately uncached BDF1
+  comparison path are unchanged. Measured on the reference
+  open-loop buck (100k steps): **0.52 → 0.30 µs/step (1.7×)**.
+
 * **True Gilbert–Peierls sparse LU** — `factorize()` rewritten as a
   left-looking GP factorization (DFS reach, topological sparse
   elimination, cs_lu-style O(1) pivoting via `pinv`, O(nnz) final

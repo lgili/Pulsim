@@ -284,7 +284,8 @@ public:
             // LRU touch (v2.0 Phase 1) — mutable tick, no
             // structural mutation: outstanding references stay
             // valid across cache HITS.
-            it->second.lru_tick = ++lru_clock_;
+            it->second.lru_tick =
+                lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
             return &it->second;
         }
         if (lazy_mode_) {
@@ -317,7 +318,15 @@ public:
                 const Vector& b_extra,
                 Vector& x) const {
         const PwlSegment& seg = lookup(mask);
-        Vector rhs = -(seg.b_constant + b_extra);
+        // Thread-local rhs workspace (v2.0 Phase 1, audit finding
+        // `per-step-heap-allocations`): the expression assigns
+        // directly into the reused buffer — no temporary, no heap
+        // traffic once sized. thread_local (not an instance
+        // member) so concurrent GIL-released transients sharing a
+        // cache stay numerically correct (adversarial-review
+        // finding ZA-1).
+        Vector& rhs = solve_rhs_tls_();
+        rhs = -(seg.b_constant + b_extra);
         seg.solver->solve(rhs, x);
     }
 
@@ -876,7 +885,8 @@ public:
             solve(mask, b_extra, x);
             return;
         }
-        const std::uint64_t tick = ++lru_clock_;
+        const std::uint64_t tick =
+            lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
         auto it = event_entries_.find(mask);
         if (it == event_entries_.end()) {
             // Fresh mask: make room first (erase invalidates
@@ -936,7 +946,8 @@ public:
             event_hits_.fetch_add(1, std::memory_order_relaxed);
         }
         const EventEntry& e = it->second;
-        Vector rhs = -(e.b_constant + b_extra);
+        Vector& rhs = solve_rhs_tls_();
+        rhs = -(e.b_constant + b_extra);
         e.solver->solve(rhs, x);
     }
 
@@ -1147,7 +1158,8 @@ public:
             }
         }
 
-        Vector rhs = -(rank1_b_constant_ + b_extra);
+        Vector& rhs = solve_rhs_tls_();
+        rhs = -(rank1_b_constant_ + b_extra);
         rank1_solver_->solve(rhs, x);
     }
 
@@ -1474,7 +1486,8 @@ private:
                     1, std::memory_order_relaxed);
             }
         }
-        seg->lru_tick = ++lru_clock_;
+        seg->lru_tick =
+            lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
         segments_.emplace(mask, std::move(*seg));
         return {};
     }
@@ -1746,8 +1759,23 @@ private:
 
     // Monotonic recency clock shared by the event-entry LRU and
     // the lazy segment LRU. `mutable` — bumped from const solve
-    // paths.
-    mutable std::uint64_t lru_clock_ = 0;
+    // paths; atomic so concurrent hits on a shared warm cache
+    // only race benignly on recency ORDER, never on the counter
+    // itself (adversarial-review finding ZA-1 hygiene).
+    mutable std::atomic<std::uint64_t> lru_clock_{0};
+
+    // v2.0 Phase 1 — thread-local rhs workspace shared by solve /
+    // solve_at / solve_rank1 (audit finding
+    // `per-step-heap-allocations`). Function-local thread_local
+    // (NOT an instance member): each thread owns its buffer, so
+    // concurrent solves on a shared warm cache remain numerically
+    // correct exactly as they were with the old stack-local rhs
+    // (adversarial-review finding ZA-1). The buffer is fully
+    // consumed within each call — no live use spans a nested call.
+    [[nodiscard]] static Vector& solve_rhs_tls_() {
+        static thread_local Vector rhs;
+        return rhs;
+    }
 
     // Layer 4 V8: sliding solver + state for the rank-1 fast-path
     // (`solve_rank1`). Independent of `segments_`. `mutable` so
