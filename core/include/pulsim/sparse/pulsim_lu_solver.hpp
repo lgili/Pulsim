@@ -416,8 +416,20 @@ public:
                 "and check its return value.");
         }
 
-        // Apply row permutation: y[i] = b[Prow[i]].
-        VectorType y(static_cast<Index>(n_));
+        // Apply row permutation: y[i] = b[Prow[i]]. `y` is a
+        // THREAD-LOCAL workspace (v2.0 Phase 1, audit finding
+        // `per-step-heap-allocations`): resize is a no-op once
+        // sized, so the per-step hot loop performs zero heap
+        // allocations, and concurrent solves — e.g. two Python
+        // threads running GIL-released transients on caches that
+        // share solver instances — each get their own buffer
+        // (adversarial-review finding ZA-1: an instance-member
+        // workspace silently corrupted concurrent same-cache
+        // solves that were numerically safe with the old
+        // stack-local vector).
+        static thread_local VectorType y_ws;
+        y_ws.resize(static_cast<Index>(n_));
+        VectorType& y = y_ws;
         for (Index i = 0; i < n_; ++i) {
             y[i] = b[Prow_[static_cast<std::size_t>(i)]];
         }

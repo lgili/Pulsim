@@ -285,6 +285,26 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_core_layer4_v1_tests)
 
     # =============================================================================
+    # pulsim_core_perf_tests — v2.0 Phase 1 zero-allocation lock-in
+    # =============================================================================
+    # SEPARATE executable on purpose: it replaces global operator
+    # new/delete with counting versions and redefines eigen_assert +
+    # EIGEN_RUNTIME_NO_MALLOC (which must precede every Eigen include
+    # in the TU) to catch Eigen-side heap traffic in release builds.
+    add_executable(pulsim_core_perf_tests
+        tests/perf/test_zero_alloc.cpp
+    )
+    target_link_libraries(pulsim_core_perf_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_perf_tests)
+    endif()
+    catch_discover_tests(pulsim_core_perf_tests)
+
+    # =============================================================================
     # pulsim_core_layer5_v1_tests — pulsim-v2-trapezoidal-companion (Layer 5 V1)
     # =============================================================================
     # HistoryState + run_transient extended for dynamic devices.

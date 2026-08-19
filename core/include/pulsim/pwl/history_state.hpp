@@ -145,10 +145,21 @@ public:
     /// `dt` must equal the dt that the cache was built with. Layer
     /// 5's run_transient asserts that before calling.
     [[nodiscard]] Vector compute_b_extra(Real dt) const {
-        Vector b_extra =
-            Vector::Zero(static_cast<Index>(state_size_));
+        Vector b_extra;
+        compute_b_extra(dt, b_extra);
+        return b_extra;
+    }
+
+    /// Fill-in-place variant (v2.0 Phase 1, audit finding
+    /// `per-step-heap-allocations`): writes into `out`, resizing
+    /// only when the size changes — zero heap traffic in the
+    /// steady-state transient loop. The returning overload above
+    /// delegates here.
+    void compute_b_extra(Real dt, Vector& out) const {
+        out.setZero(static_cast<Index>(state_size_));
+        Vector& b_extra = out;
         if (entries_.empty() || dt <= Real{0}) {
-            return b_extra;
+            return;
         }
         for (const auto& e : entries_) {
             if (e.kind == DevicePool::StoredKind::Capacitor) {
@@ -199,7 +210,6 @@ public:
             b_extra[tcr.p_row] += cross * i_s_prev;
             b_extra[tcr.s_row] += cross * i_p_prev;
         }
-        return b_extra;
     }
 
     /// Reads (v_{n+1}, i_{n+1}) per dynamic device from x and
@@ -284,6 +294,13 @@ public:
     // Round-trip invariant: `restore(snapshot())` is a no-op.
     [[nodiscard]] std::vector<HistoryEntry> snapshot() const {
         return entries_;
+    }
+
+    /// Fill-in-place snapshot (v2.0 Phase 1): copies into `out`,
+    /// reusing its capacity — no heap traffic after the first
+    /// step. Pairs with `restore(out)` exactly like `snapshot()`.
+    void snapshot_into(std::vector<HistoryEntry>& out) const {
+        out.assign(entries_.begin(), entries_.end());
     }
 
     void restore(const std::vector<HistoryEntry>& snap) {
