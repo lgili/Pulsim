@@ -19,12 +19,16 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <array>
+#include <algorithm>
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 using namespace pulsim;
+using Catch::Approx;
 using pulsim::pwl::PwlStateSpaceCache;
 using pulsim::topology::SwitchStateMask;
 
@@ -275,24 +279,31 @@ TEST_CASE("compute_lti_state_space handles a 2-cap split-bus stack "
     REQUIRE(std::isfinite(lti.b_constant(0)));
     REQUIRE(std::isfinite(lti.b_constant(1)));
 
-    // The system must be stable (eigenvalues have negative real parts).
+    // v2.0 Phase 1 (exact (G, C, b) split): the TRUE spectrum of two
+    // ideal series caps with no midpoint branch is {0, -1/(R_tot ·
+    // C_series)} — the midpoint charge imbalance has NO discharge
+    // path, so its mode is exactly marginal (this is the physical
+    // reason NPC converters need active balancing). The old finite-
+    // difference recovery buried that zero under cancellation noise
+    // and the previous `< 0` assertion validated the NOISE. Assert
+    // the analytic pole and the exact marginal mode instead.
+    const Real pole = -Real{1} / ((R_src + R_load) * (C / Real{2}));
     Eigen::EigenSolver<DenseMatrix> es(lti.A);
     INFO("Eigenvalues: " << es.eigenvalues().transpose());
-    REQUIRE(es.eigenvalues()(0).real() < Real{0});
-    REQUIRE(es.eigenvalues()(1).real() < Real{0});
+    std::array<Real, 2> re{es.eigenvalues()(0).real(),
+                            es.eigenvalues()(1).real()};
+    std::sort(re.begin(), re.end());
+    REQUIRE(re[0] == Approx(pole).epsilon(1e-9));
+    REQUIRE(std::abs(re[1]) <= std::abs(pole) * Real{1e-12});
 
-    // Sanity: at steady state (dx/dt = 0), x_ss = -A^-1 · b.
-    //   For this topology the steady-state cap voltage drop across
-    //   each cap should sum (in absolute terms) to V_dc · R_load /
-    //   (R_load + R_src + ε) ≈ V_dc (since R_load >> R_src).
-    //   We don't predict each cap's split exactly (it depends on the
-    //   BFS-chosen anchor and the algebraic Schur), but their sum
-    //   magnitude must be in (0, V_dc].
-    Vector x_ss = -lti.A.inverse() * lti.b_constant;
+    // Steady state of the DRIVEN mode: caps block DC → no loop
+    // current → the cap-chain voltages sum to V_dc in magnitude.
+    // A is singular (marginal mode), so use least squares; b lies
+    // in range(A), making the particular solution exact.
+    Vector x_ss = lti.A.completeOrthogonalDecomposition()
+                      .solve(Vector(-lti.b_constant));
     INFO("x_ss = " << x_ss.transpose());
-    const Real total_cap_voltage = std::abs(x_ss(0)) + std::abs(x_ss(1));
-    REQUIRE(total_cap_voltage > Real{0});
-    REQUIRE(total_cap_voltage <= V_dc * Real{1.01});  // allow 1% slack
+    REQUIRE(std::abs(x_ss.sum()) == Approx(V_dc).epsilon(1e-9));
 }
 
 TEST_CASE("compute_lti_state_space handles a 3-cap chain (MMC-style stack)",
@@ -340,20 +351,27 @@ TEST_CASE("compute_lti_state_space handles a 3-cap chain (MMC-style stack)",
         REQUIRE(std::isfinite(lti.b_constant(i)));
     }
 
-    // Stable: all eigenvalues' real parts negative
+    // v2.0 Phase 1 (exact split): three ideal series caps have TWO
+    // exactly-marginal imbalance modes plus one driven pole at
+    // -1/(R_tot · C_series), C_series = C/3. See the 2-cap test
+    // above — the old `< 0` assertions validated recovery noise.
+    const Real pole = -Real{1} / ((R_src + R_arm) * (C / Real{3}));
     Eigen::EigenSolver<DenseMatrix> es(lti.A);
     INFO("Eigenvalues: " << es.eigenvalues().transpose());
-    for (int i = 0; i < 3; ++i) {
-        REQUIRE(es.eigenvalues()(i).real() < Real{0});
-    }
+    std::array<Real, 3> re{es.eigenvalues()(0).real(),
+                            es.eigenvalues()(1).real(),
+                            es.eigenvalues()(2).real()};
+    std::sort(re.begin(), re.end());
+    REQUIRE(re[0] == Approx(pole).epsilon(1e-9));
+    REQUIRE(std::abs(re[1]) <= std::abs(pole) * Real{1e-12});
+    REQUIRE(std::abs(re[2]) <= std::abs(pole) * Real{1e-12});
 
-    // Steady-state cap voltages must sum (in magnitude) to ≤ V_in.
-    Vector x_ss = -lti.A.inverse() * lti.b_constant;
+    // Steady state of the driven mode: chain voltages sum to V_in
+    // in magnitude (least squares — A is singular by physics).
+    Vector x_ss = lti.A.completeOrthogonalDecomposition()
+                      .solve(Vector(-lti.b_constant));
     INFO("x_ss = " << x_ss.transpose());
-    const Real total_v = std::abs(x_ss(0)) + std::abs(x_ss(1))
-                       + std::abs(x_ss(2));
-    REQUIRE(total_v > Real{0});
-    REQUIRE(total_v <= V_in * Real{1.01});
+    REQUIRE(std::abs(x_ss.sum()) == Approx(V_in).epsilon(1e-9));
 }
 
 TEST_CASE("compute_lti_state_space rejects parallel inductors "

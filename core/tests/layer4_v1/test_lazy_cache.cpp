@@ -235,3 +235,97 @@ TEST_CASE("70-switch circuit: eager build fails loudly, lazy is the route",
     // space. (The lazy path above is the supported wide-N route.)
     REQUIRE_THROWS_AS(f.cache->build(Real{0}), std::invalid_argument);
 }
+
+// =============================================================================
+// v2.0 Phase 1 — LRU byte-budget eviction on the lazy segment cache
+// (audit finding no-mode-cache-eviction)
+// =============================================================================
+
+TEST_CASE("Lazy cache evicts LRU segments under a byte budget",
+          "[v2][layer4_v6][lazy_cache][lru]") {
+    // 4-switch fixture → 16 masks. With a budget sized for only a
+    // few segments, visiting all masks must (a) keep resident bytes
+    // near the budget, (b) count evictions, (c) stay CORRECT on
+    // re-visit of an evicted mask.
+    Graph g;
+    DevicePool pool;
+    g.add_node("vin");
+    g.add_node("vout");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    pool.add_voltage_source(0, {.V = 12.0});
+    for (int i = 0; i < 4; ++i) {
+        g.add_branch(0, 1, BranchKind::Switch);
+        pool.add_switch(1 + i, /*g_on=*/1.0, /*g_off=*/1e-9);
+    }
+    g.add_branch(1, g.ground(), BranchKind::PassiveLinear);
+    pool.add_resistor(5, {.G = 0.1});
+
+    PwlStateSpaceCache cache{g, pool};
+    cache.build_lazy(Real{0});
+    REQUIRE(cache.segment_budget_bytes() ==
+            PwlStateSpaceCache::kDefaultSegmentBudgetBytes);
+
+    // Measure one segment's cost, then budget for ~3 of them.
+    Vector b_extra = Vector::Zero(3);
+    Vector x;
+    SwitchStateMask probe(4);
+    cache.solve(probe, b_extra, x);
+    const std::size_t one = cache.segment_cache_bytes();
+    REQUIRE(one > 0);
+    cache.set_segment_budget_bytes(3 * one + one / 2);
+
+    auto solve_mask = [&](int m, Vector& out) {
+        SwitchStateMask mask(4);
+        for (int bit = 0; bit < 4; ++bit) {
+            mask.set(static_cast<Size>(bit), ((m >> bit) & 1) != 0);
+        }
+        cache.solve(mask, b_extra, out);
+        return mask;
+    };
+
+    for (int m = 0; m < 16; ++m) {
+        Vector xi;
+        solve_mask(m, xi);
+        REQUIRE(cache.num_built_segments() <= 4);
+        REQUIRE(cache.segment_cache_bytes() <=
+                cache.segment_budget_bytes());
+    }
+    REQUIRE(cache.metrics().segment_evictions >= 12);
+
+    // Re-visit mask 1 (long evicted): rebuild must give the same
+    // answer as an unbounded fresh cache. k=1 switch closed →
+    // v_out = 12·0.1/(0.1 + 1·1.0 + 3e-9).
+    Vector x_again;
+    solve_mask(1, x_again);
+    PwlStateSpaceCache fresh{g, pool};
+    fresh.build_lazy(Real{0});
+    SwitchStateMask m1(4);
+    m1.set(0, true);
+    Vector x_fresh;
+    fresh.solve(m1, b_extra, x_fresh);
+    for (Eigen::Index i = 0; i < x_again.size(); ++i) {
+        REQUIRE(x_again[i] == Approx(x_fresh[i]).margin(1e-12));
+    }
+}
+
+TEST_CASE("Budget 0 disables eviction; eager build never evicts",
+          "[v2][layer4_v6][lazy_cache][lru]") {
+    ChopperFixture f;
+    f.cache->set_segment_budget_bytes(0);
+    f.cache->build_lazy(Real{0});
+
+    Vector zero_b = Vector::Zero(3);
+    Vector x;
+    SwitchStateMask m_off(1), m_on(1);
+    m_on.set(0, true);
+    f.cache->solve(m_off, zero_b, x);
+    f.cache->solve(m_on, zero_b, x);
+    REQUIRE(f.cache->num_built_segments() == 2);
+    REQUIRE(f.cache->metrics().segment_evictions == 0);
+
+    // Eager build with an absurdly small budget: still holds 2^N.
+    f.cache->set_segment_budget_bytes(1);
+    f.cache->build(Real{0});
+    REQUIRE(f.cache->num_built_segments() == 2);
+    REQUIRE(f.cache->metrics().segment_evictions == 0);
+}

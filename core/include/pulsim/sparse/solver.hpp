@@ -155,6 +155,17 @@ public:
         [[maybe_unused]] std::span<const Index> changed_cols) const noexcept {
         return Index{0};
     }
+
+    /// Estimated resident bytes of this solver's numeric factors
+    /// (L/U values + indices + permutation/etree arrays). Consumed
+    /// by the Layer 4 cache's byte-budget LRU (v2.0 Phase 1,
+    /// audit finding `no-mode-cache-eviction`). An ESTIMATE for
+    /// budget arithmetic — not an allocator audit. Default: 0
+    /// (backends without introspection contribute only their
+    /// caller-visible matrix storage to the budget).
+    [[nodiscard]] virtual std::size_t factor_bytes() const noexcept {
+        return 0;
+    }
 };
 
 // Backward-compat alias: every Layer 1-9 consumer that uses

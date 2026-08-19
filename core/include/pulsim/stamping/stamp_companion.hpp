@@ -120,4 +120,43 @@ inline void stamp_inductor_companion(sparse::Matrix& J,
     J.coeffRef(branch_var_id, branch_var_id) -= two_L_over_dt;
 }
 
+// -----------------------------------------------------------------------------
+// stamp_inductor_companion_split — (G, C) split variant (Phase 1).
+//
+// The inductor's trap-companion stamp mixes dt-INDEPENDENT entries
+// (the ±1 incidence terms of i_L in the KCL rows and of v in the
+// constraint row) with ONE dt-DEPENDENT entry (the −2L/dt constraint
+// diagonal). For the per-mode (G, C, b) split — where the full
+// matrix is recombined as J(dt) = G + (1/dt)·C — the incidence
+// terms go into G and the diagonal's 1/dt COEFFICIENT (−2L) goes
+// into C.
+// -----------------------------------------------------------------------------
+inline void stamp_inductor_companion_split(sparse::Matrix& G,
+                                            sparse::Matrix& C,
+                                            const BranchCoord& coord,
+                                            Index branch_var_id,
+                                            Real two_L) noexcept {
+    const bool from_active = node_is_active(coord.from);
+    const bool to_active   = node_is_active(coord.to);
+
+    // (1) KCL of i_L on terminal rows — static.
+    if (from_active) {
+        G.coeffRef(coord.from, branch_var_id) += Real{1};
+    }
+    if (to_active) {
+        G.coeffRef(coord.to, branch_var_id) -= Real{1};
+    }
+
+    // (2) Constraint row: voltage incidence — static.
+    if (from_active) {
+        G.coeffRef(branch_var_id, coord.from) += Real{1};
+    }
+    if (to_active) {
+        G.coeffRef(branch_var_id, coord.to) -= Real{1};
+    }
+
+    // (3) Constraint diagonal: −(2L/dt) → coefficient −2L in C.
+    C.coeffRef(branch_var_id, branch_var_id) -= two_L;
+}
+
 }  // namespace pulsim::stamping

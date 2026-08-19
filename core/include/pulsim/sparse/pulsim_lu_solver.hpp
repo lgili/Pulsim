@@ -824,6 +824,17 @@ public:
         return numeric_singular_;
     }
 
+    /// Estimated resident bytes of the numeric factors + per-instance
+    /// index/permutation arrays (v2.0 Phase 1 — cache byte-budget LRU).
+    [[nodiscard]] std::size_t factor_bytes() const noexcept override {
+        const std::size_t per_entry = sizeof(Scalar) + sizeof(Index);
+        const std::size_t n = static_cast<std::size_t>(n_);
+        return l_values_.size() * per_entry +
+               u_values_.size() * per_entry +
+               // col ptrs (L+U), Pcol/Pinv_col, Prow/Pinv_row, etree
+               (2 * (n + 1) + 5 * n) * sizeof(Index);
+    }
+
     /// Row permutation produced by the most recent `factorize`. Identity
     /// in Section 3 V0 (no partial pivoting yet). `row_permutation()[i]`
     /// is the index of the ORIGINAL row that becomes the i-th row after
