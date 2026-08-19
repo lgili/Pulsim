@@ -917,6 +917,28 @@ void init_module(py::module_& m) {
         .value("CurrentOnly", pwl::ParametricRefactorMode::CurrentOnly);
 
     // ---- PwlStateSpaceCache ----------------------------------------------
+    // Phase-0 fix #4 helper: exact controlled-vs-diode switch census,
+    // computed with the SAME walk the solver uses (DiodeEventState),
+    // so Python-side policy (warn on driverless controlled switches)
+    // can never drift from kernel semantics.
+    m.def("_switch_census",
+          [](const topology::Graph& graph, const pwl::DevicePool& pool) {
+              pwl::DiodeEventState diodes(graph, pool);
+              const auto owned = diodes.diode_owned_bits();
+              const auto n_sw = graph.num_switches();
+              std::vector<Size> controlled;
+              for (Size i = 0; i < n_sw; ++i) {
+                  if (!owned.get(i)) controlled.push_back(i);
+              }
+              return py::make_tuple(n_sw, diodes.num_diodes(),
+                                     controlled);
+          },
+          py::arg("graph"), py::arg("pool"),
+          "Return (num_switches, num_diode_owned, controlled_switch_"
+          "indices). Diode bits are solver-owned (overlaid over the "
+          "user mask by combine_masks); only the controlled indices "
+          "need a switch_fn/driver.");
+
     py::class_<pwl::PwlStateSpaceCache>(m, "PwlStateSpaceCache",
         "PWL state-space cache. Pre-factors the MNA matrix "
         "for every reachable switch combination + dt.")
@@ -931,6 +953,23 @@ void init_module(py::module_& m) {
               }, py::arg("dt") = 0.0,
               "Build the PWL cache eagerly. dt=0 means "
               "static-only (no trap companion).")
+        .def("build_lazy",
+              [](pwl::PwlStateSpaceCache& self, Real dt) {
+                  self.build_lazy(dt);
+              }, py::arg("dt"),
+              "Lazy build: store dt but defer per-mask "
+              "factorisation to first access. A PWM converter "
+              "visits only a handful of the 2^N switch states, "
+              "so this avoids the eager 2^N enumeration that "
+              "makes many-switch circuits (multilevel, MMC) "
+              "unbuildable.")
+        .def("num_built_segments",
+              [](const pwl::PwlStateSpaceCache& self) {
+                  return self.num_segments();
+              },
+              "Number of per-mask segments actually factorised "
+              "so far (useful with build_lazy to see how many "
+              "of the 2^N states the run really visited).")
         .def("dt", &pwl::PwlStateSpaceCache::dt)
         // v1.4.0 — Part B parametric refactor API.
         .def("refactor_parametric",
