@@ -86,6 +86,15 @@ struct CacheMetrics {
     std::uint64_t multi_bit_rank1_hits  = 0;
     std::uint64_t full_refactor_hits    = 0;
     std::uint64_t fallbacks             = 0;
+
+    // ---- v2.0 Phase 1 — LRU segment cache + event-dt solver ----
+    // Invariant: `event_hits + event_refactors + event_builds ==
+    // total solve_at calls with dt != primary dt`.
+    std::uint64_t segment_evictions     = 0;  // lazy LRU evictions
+    std::uint64_t event_hits            = 0;  // solve_at: same (mask, dt)
+    std::uint64_t event_refactors       = 0;  // solve_at: dt changed,
+                                              // in-place numeric refactor
+    std::uint64_t event_builds          = 0;  // solve_at: fresh entry
 };
 
 /// Result of `PwlStateSpaceCache::refactor_parametric` (v1.4.0,
@@ -208,6 +217,7 @@ public:
         dt_ = dt;
         lazy_mode_ = false;
         segments_.clear();
+        event_entries_.clear();
         const Size num_switches = graph_.num_switches();
         for (auto mask :
              topology::enumerate_switch_states(num_switches)) {
@@ -229,6 +239,7 @@ public:
         dt_ = dt;
         lazy_mode_ = true;
         segments_.clear();
+        event_entries_.clear();
     }
 
     /// Currently-built dt. Returns 0 for static-only builds.
@@ -270,6 +281,10 @@ public:
     try_lookup(const topology::SwitchStateMask& mask) const {
         const auto it = segments_.find(mask);
         if (it != segments_.end()) {
+            // LRU touch (v2.0 Phase 1) — mutable tick, no
+            // structural mutation: outstanding references stay
+            // valid across cache HITS.
+            it->second.lru_tick = ++lru_clock_;
             return &it->second;
         }
         if (lazy_mode_) {
@@ -341,11 +356,11 @@ public:
 
     /// Extract continuous-time `(A, b)` for the given switch mask.
     ///
-    /// Uses the MNA finite-difference recovery method documented in
-    /// ``notes/DSED_BRIDGE_DESIGN.md`` §2:
-    ///   1. Assemble `J(h_a)` and `J(h_b)` via the existing assembler
-    ///   2. Recover `M_dyn = (J(h_a) - J(h_b)) / (2/h_a - 2/h_b)`
-    ///   3. Recover `G_static = J(h_a) - (2/h_a) · M_dyn`
+    /// v2.0 Phase 1: uses the assembler's EXACT (G, C, b) split —
+    ///   1. `assemble_segment_split` → G_static, C (1/dt coeffs), b
+    ///   2. `M_dyn = C / 2` (J(h) = G + (2/h)·M_dyn — algebraic,
+    ///      replacing the two-assembly finite-difference recovery
+    ///      of ``notes/DSED_BRIDGE_DESIGN.md`` §2)
     ///   4. Identify state rows via `pool.kind_of` + `branch_var_id_for_inductor`
     ///   5. Schur-complement the algebraic vars out → dense `A, b`
     ///
@@ -359,38 +374,36 @@ public:
     ///   IGBTs, saturable inductors) require per-operating-point
     ///   linearization not modeled by the PED engine; calling this
     ///   on a nonlinear topology will throw.
-    /// * `h_a`, `h_b` are recovery-only step sizes (NOT the PED's
-    ///   actual step). Defaults are chosen for numerical
-    ///   well-conditioning across typical PE scales.
+    /// * `h_a`, `h_b` are legacy recovery step sizes, retained for
+    ///   API compatibility only — the exact split (v2.0 Phase 1)
+    ///   ignores them.
     [[nodiscard]] ContinuousLTI
     compute_lti_state_space(
         const topology::SwitchStateMask& mask,
         Real h_a = Real{1e-6},
         Real h_b = Real{5e-7}) const {
         // ---------------------------------------------------------
-        // Step 1: assemble J at two dt values via the existing
-        // stamper — no new stamping code path.
+        // Steps 1-2 (v2.0 Phase 1): EXACT (G, C, b) split from the
+        // assembler — no more two-assembly finite-difference
+        // recovery (the old path subtracted J(h_a) − J(h_b), losing
+        // precision to cancellation whenever the static conductance
+        // was small against the companion terms; audit finding A.5).
+        // With J(h) = G + (1/h)·C = G_static + (2/h)·M_dyn, the
+        // recovery is algebraic: G_st = G, M_dyn = C / 2.
+        // `h_a` / `h_b` are retained in the signature for API
+        // compatibility but no longer participate.
         // ---------------------------------------------------------
-        sparse::Matrix J_a, J_b;
-        Vector b_a, b_b;
-        assemble_segment(graph_, pool_, mask, h_a, J_a, b_a);
-        assemble_segment(graph_, pool_, mask, h_b, J_b, b_b);
+        (void)h_a;
+        (void)h_b;
+        sparse::Matrix G_split, C_split;
+        Vector b_a;
+        assemble_segment_split(graph_, pool_, mask,
+                                G_split, C_split, b_a);
 
-        const int n_mna = static_cast<int>(J_a.rows());
+        const int n_mna = static_cast<int>(G_split.rows());
 
-        // ---------------------------------------------------------
-        // Step 2: densify the small per-segment matrices and
-        // recover M_dyn / G_static by linear combination
-        //   J(h) = G_static + (2/h) · M_dyn
-        //   → M_dyn  = (J_a - J_b) · (h_a · h_b) / (2 · (h_b - h_a))
-        //   → G_st   = J_a - (2/h_a) · M_dyn
-        // ---------------------------------------------------------
-        DenseMatrix Jd_a = DenseMatrix(J_a);   // Eigen sparse → dense
-        DenseMatrix Jd_b = DenseMatrix(J_b);
-        const Real recovery =
-            (h_a * h_b) / (Real{2} * (h_b - h_a));
-        DenseMatrix M_dyn = (Jd_a - Jd_b) * recovery;
-        DenseMatrix G_st  = Jd_a - (Real{2} / h_a) * M_dyn;
+        DenseMatrix G_st  = DenseMatrix(G_split);  // sparse → dense
+        DenseMatrix M_dyn = DenseMatrix(C_split) * Real{0.5};
 
         // ---------------------------------------------------------
         // Step 3: walk pool to identify caps + inductors. Caps may
@@ -834,13 +847,27 @@ public:
         return segments_.size();
     }
 
-    /// Multi-dt cache (Layer 4 V7). Solves with a dt that MAY
-    /// be different from the primary `this->dt()`. Builds the
-    /// (mask, dt) factor on demand in an auxiliary cache the
-    /// first time each pair is seen.
+    /// Multi-dt solve (Layer 4 V7; REWORKED in v2.0 Phase 1 —
+    /// audit finding `alt-dt-cache-unbounded-factorization`).
+    /// Solves with a dt that MAY be different from the primary
+    /// `this->dt()`.
     ///
-    /// When `dt == this->dt()`, this delegates to the primary
-    /// `solve(mask, b_extra, x)` (same fast path).
+    /// The v1.x implementation kept a map keyed by EXACT Real dt
+    /// of full per-mask segment maps: every event-interpolated dt
+    /// from sub-step bisection (a continuous value, distinct for
+    /// essentially every commutation) permanently retained a full
+    /// analyze+factorize'd segment — unbounded memory AND two full
+    /// symbolic analyses per event.
+    ///
+    /// Now: a small LRU (≤ `kMaxEventEntries` masks) of reusable
+    /// EVENT SOLVERS. Each entry stores the mask's (G, C, b) split
+    /// (`J(dt) = G + (1/dt)·C`, see `assemble_segment_split`) and a
+    /// solver analyzed ONCE — a dt change is a value re-combine +
+    /// numeric `factorize()` on the shared pattern (the sparsity
+    /// pattern is dt-invariant). No dt-keyed storage exists at all.
+    ///
+    /// When `dt == this->dt()`, delegates to the primary
+    /// `solve(mask, b_extra, x)` (same fast path, bit-identical).
     void solve_at(const topology::SwitchStateMask& mask,
                    Real dt,
                    const Vector& b_extra,
@@ -849,32 +876,102 @@ public:
             solve(mask, b_extra, x);
             return;
         }
-        auto& bucket = alt_segments_[dt];
-        auto it = bucket.find(mask);
-        if (it == bucket.end()) {
-            PwlSegment seg =
-                const_cast<PwlStateSpaceCache*>(this)
-                    ->make_segment(mask, dt);
-            auto inserted_it =
-                bucket.emplace(mask, std::move(seg)).first;
-            it = inserted_it;
+        const std::uint64_t tick = ++lru_clock_;
+        auto it = event_entries_.find(mask);
+        if (it == event_entries_.end()) {
+            // Fresh mask: make room first (erase invalidates
+            // references, but so does the emplace below — callers
+            // may not hold entry references across solve_at calls,
+            // same contract as the primary flat_map).
+            if (event_entries_.size() >=
+                static_cast<std::size_t>(kMaxEventEntries)) {
+                evict_lru_event_entry_();
+            }
+            EventEntry e;
+            assemble_segment_split(graph_, pool_, mask,
+                                    e.G, e.C, e.b_constant);
+            e.solver = sparse::make_default_solver(
+                pool_.state_size(graph_), sparse::Backend::Auto);
+            const sparse::Matrix J = combine_event_J_(e, mask, dt);
+            if (!e.solver->analyze(J)) {
+                throw std::runtime_error(std::format(
+                    "PwlStateSpaceCache::solve_at: analyze failed "
+                    "(structurally singular) for mask {} (dt={})",
+                    mask.to_string(), dt));
+            }
+            if (!e.solver->factorize(J)) {
+                throw std::runtime_error(std::format(
+                    "PwlStateSpaceCache::solve_at: factorize failed "
+                    "(numerically singular) for mask {} (dt={})",
+                    mask.to_string(), dt));
+            }
+            e.current_dt = dt;
+            e.lru_tick   = tick;
+            it = event_entries_.emplace(mask, std::move(e)).first;
+            event_builds_.fetch_add(1, std::memory_order_relaxed);
+        } else if (it->second.current_dt != dt) {
+            // Known mask, new dt: numeric refactor on the SAME
+            // symbolic analysis (pattern is dt-invariant).
+            EventEntry& e = it->second;
+            const sparse::Matrix J = combine_event_J_(e, mask, dt);
+            if (!e.solver->factorize(J)) {
+                // The solver destroys its previous factor up-front,
+                // so the entry can no longer serve ANY dt — erase it
+                // before throwing (adversarial-review finding
+                // EVT-STALE-FACTOR: keeping it resident with the old
+                // current_dt made a later solve_at at the previously
+                // WORKING dt hit the reuse branch and die with
+                // logic_error instead of transparently rebuilding).
+                event_entries_.erase(it);
+                throw std::runtime_error(std::format(
+                    "PwlStateSpaceCache::solve_at: refactorize "
+                    "failed (numerically singular) for mask {} "
+                    "(dt={})", mask.to_string(), dt));
+            }
+            e.current_dt = dt;
+            e.lru_tick   = tick;
+            event_refactors_.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            it->second.lru_tick = tick;
+            event_hits_.fetch_add(1, std::memory_order_relaxed);
         }
-        const PwlSegment& seg = it->second;
-        Vector rhs = -(seg.b_constant + b_extra);
-        seg.solver->solve(rhs, x);
+        const EventEntry& e = it->second;
+        Vector rhs = -(e.b_constant + b_extra);
+        e.solver->solve(rhs, x);
     }
 
-    /// Number of distinct auxiliary-dt values currently in
-    /// the multi-dt cache.
+    /// Maximum number of event-solver entries `solve_at` keeps
+    /// resident (LRU beyond this). Sub-step event correction
+    /// alternates between the pre- and post-commutation masks, so
+    /// a handful of slots covers real converters with headroom.
+    static constexpr Size kMaxEventEntries = 8;
+
+    /// Number of event-solver entries currently resident
+    /// (≤ `kMaxEventEntries`).
+    [[nodiscard]] Size num_event_entries() const noexcept {
+        return event_entries_.size();
+    }
+
+    /// Number of DISTINCT dt values currently loaded across the
+    /// event-solver entries. (v2.0 Phase 1: an entry holds ONE
+    /// factor at its most recent dt — dt values are no longer
+    /// accumulated, so this is bounded by `kMaxEventEntries`.)
     [[nodiscard]] Size num_alt_dt_values() const noexcept {
-        return alt_segments_.size();
+        std::set<Real> dts;
+        for (const auto& [mask, e] : event_entries_) {
+            dts.insert(e.current_dt);
+        }
+        return static_cast<Size>(dts.size());
     }
 
-    /// Number of segments factored at the given auxiliary dt
-    /// (0 if `dt` has no cached segments).
+    /// Number of event-solver entries whose CURRENT factor is at
+    /// the given dt (0 if none).
     [[nodiscard]] Size num_alt_segments_at(Real dt) const noexcept {
-        const auto it = alt_segments_.find(dt);
-        return it == alt_segments_.end() ? 0 : it->second.size();
+        Size n = 0;
+        for (const auto& [mask, e] : event_entries_) {
+            if (e.current_dt == dt) ++n;
+        }
+        return n;
     }
 
     // -------------------------------------------------------------------------
@@ -1084,7 +1181,68 @@ public:
                 std::memory_order_relaxed),
             .fallbacks = fallbacks_.load(
                 std::memory_order_relaxed),
+            .segment_evictions = segment_evictions_.load(
+                std::memory_order_relaxed),
+            .event_hits = event_hits_.load(
+                std::memory_order_relaxed),
+            .event_refactors = event_refactors_.load(
+                std::memory_order_relaxed),
+            .event_builds = event_builds_.load(
+                std::memory_order_relaxed),
         };
+    }
+
+    // -------------------------------------------------------------
+    // v2.0 Phase 1 — lazy segment cache byte budget (audit finding
+    // `no-mode-cache-eviction`).
+    //
+    // In LAZY mode, once the estimated resident bytes of the
+    // per-mask segment cache would exceed the budget, the least-
+    // recently-solved segment is evicted before a new one is
+    // inserted. Re-visiting an evicted mask transparently rebuilds
+    // it (one assemble + factorize — the lazy path's normal first-
+    // visit cost). Eviction happens ONLY when a new segment is
+    // built, never on a cache hit. Reference contract: callers must
+    // not hold `lookup()` references across cache-MUTATING calls —
+    // a lazy insert reallocates under the flat_map Dictionary
+    // config, and eviction additionally erases under either config
+    // — and every in-repo caller (run_transient's Newton path
+    // included) consumes its reference before the next cache call.
+    //
+    // Note: the ≤ 8 event-solver entries (`solve_at`) are OUTSIDE
+    // this budget — they are bounded by count, not bytes.
+    //
+    // Eager `build()` mode never evicts: pre-building all 2^N
+    // factors is an explicit caller decision, and the eager
+    // `lookup()` contract ("throws if the mask wasn't pre-built")
+    // cannot survive eviction.
+    // -------------------------------------------------------------
+
+    /// Default lazy-cache budget: 1 GiB — far above any realistic
+    /// visited-mode working set (hundreds of large-circuit factors),
+    /// while bounding a week-long mode-random-walk run.
+    static constexpr std::size_t kDefaultSegmentBudgetBytes =
+        std::size_t{1} << 30;
+
+    /// Set the lazy segment cache budget in bytes. `0` disables
+    /// eviction entirely (the pre-v2.0 unbounded behaviour).
+    void set_segment_budget_bytes(std::size_t bytes) noexcept {
+        segment_budget_bytes_ = bytes;
+    }
+
+    [[nodiscard]] std::size_t segment_budget_bytes() const noexcept {
+        return segment_budget_bytes_;
+    }
+
+    /// Estimated resident bytes of the per-mask segment cache
+    /// (assembled J + b + numeric LU factors per segment). An
+    /// ESTIMATE for budget arithmetic, not an allocator audit.
+    [[nodiscard]] std::size_t segment_cache_bytes() const noexcept {
+        std::size_t total = 0;
+        for (const auto& [mask, seg] : segments_) {
+            total += seg.approx_bytes();
+        }
+        return total;
     }
 
     // -------------------------------------------------------------------------
@@ -1124,6 +1282,12 @@ public:
         ParametricRefactorMode mode = ParametricRefactorMode::AllActive) {
         ParametricRefactorResult result;
         const auto t0 = std::chrono::steady_clock::now();
+
+        // v2.0 Phase 1: parameter updates invalidate the event
+        // entries' (G, C, b) snapshots. Drop them — the next
+        // solve_at rebuilds from the updated pool. (The v1.x aux
+        // cache silently kept STALE factors here.)
+        event_entries_.clear();
 
         if (updates.empty()) {
             // No-op. Still report wall_time for telemetry callers.
@@ -1280,6 +1444,37 @@ private:
         if (!seg) {
             return std::unexpected(seg.error());
         }
+        // v2.0 Phase 1: LRU eviction BEFORE the insert (lazy mode
+        // only — see the budget block above). Reference-safety
+        // contract: callers must not hold segment references across
+        // cache-mutating calls (a lazy insert reallocates under the
+        // flat_map Dictionary config, and eviction erases under
+        // either config) — every in-repo caller consumes its
+        // `lookup()` reference before the next cache call
+        // (run_transient's Newton path included). The incoming
+        // segment is ALWAYS inserted even when it alone exceeds the
+        // budget — refusing to build would turn a memory knob into
+        // a wrong-answer knob.
+        if (lazy_mode_ && segment_budget_bytes_ > 0) {
+            const std::size_t incoming = seg->approx_bytes();
+            std::size_t resident = segment_cache_bytes();
+            while (!segments_.empty() &&
+                   resident + incoming > segment_budget_bytes_) {
+                auto victim = segments_.begin();
+                for (auto it = segments_.begin();
+                     it != segments_.end(); ++it) {
+                    if (it->second.lru_tick <
+                        victim->second.lru_tick) {
+                        victim = it;
+                    }
+                }
+                resident -= victim->second.approx_bytes();
+                segments_.erase(victim);
+                segment_evictions_.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
+        }
+        seg->lru_tick = ++lru_clock_;
         segments_.emplace(mask, std::move(*seg));
         return {};
     }
@@ -1487,12 +1682,72 @@ private:
     Real dt_ = Real{0};   // 0 = static-only build (V0)
     bool lazy_mode_ = false;
 
-    // Layer 4 V7: auxiliary multi-dt cache for sub-step
-    // bisection state correction (`solve_at`). Keyed first by
-    // dt then by mask. `mutable` so `solve_at` (const) can
-    // populate on demand.
-    mutable numeric::Dictionary<Real, numeric::Dictionary<
-        topology::SwitchStateMask, PwlSegment>> alt_segments_;
+    // -------------------------------------------------------------
+    // v2.0 Phase 1 — event-dt solver entries (`solve_at`).
+    //
+    // One entry per recently-evented mask, LRU-bounded at
+    // `kMaxEventEntries`. Each stores the (G, C, b) split so a dt
+    // change is `J = G + (1/dt)·C` + numeric factorize on the
+    // entry's ONE symbolic analysis — replacing the v1.x
+    // exact-Real-dt-keyed map that retained a full analyzed +
+    // factorized segment per (mask, dt) pair forever.
+    // `mutable` so `solve_at` (const) can populate on demand.
+    // -------------------------------------------------------------
+    struct EventEntry {
+        sparse::Matrix G;          // static stamps for this mask
+        sparse::Matrix C;          // 1/dt coefficients (mask-inv.)
+        Vector b_constant;          // dt-independent source stamps
+        std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
+        Real current_dt = Real{-1};
+        std::uint64_t lru_tick = 0;
+
+        EventEntry() = default;
+        EventEntry(EventEntry&&) noexcept = default;
+        EventEntry& operator=(EventEntry&&) noexcept = default;
+        EventEntry(const EventEntry&) = delete;
+        EventEntry& operator=(const EventEntry&) = delete;
+    };
+
+    /// Recombine an event entry's split at `dt`. `dt > 0` is the
+    /// hot path (`G + (1/dt)·C`); `dt <= 0` falls back to the V0
+    /// static-only assembly (caps/inductors skipped — matching
+    /// what the v1.x aux cache produced for a static solve_at).
+    [[nodiscard]] sparse::Matrix combine_event_J_(
+        const EventEntry& e,
+        const topology::SwitchStateMask& mask,
+        Real dt) const {
+        if (dt > Real{0}) {
+            sparse::Matrix J = e.G + (Real{1} / dt) * e.C;
+            return J;
+        }
+        sparse::Matrix J;
+        Vector b_unused;
+        assemble_segment(graph_, pool_, mask, Real{0}, J, b_unused);
+        sparse::compress_in_place(J);
+        return J;
+    }
+
+    /// Erase the least-recently-used event entry. Called only when
+    /// the table is full and a NEW mask arrives.
+    void evict_lru_event_entry_() const {
+        if (event_entries_.empty()) return;
+        auto victim = event_entries_.begin();
+        for (auto it = event_entries_.begin();
+             it != event_entries_.end(); ++it) {
+            if (it->second.lru_tick < victim->second.lru_tick) {
+                victim = it;
+            }
+        }
+        event_entries_.erase(victim);
+    }
+
+    mutable numeric::Dictionary<topology::SwitchStateMask,
+                                 EventEntry> event_entries_;
+
+    // Monotonic recency clock shared by the event-entry LRU and
+    // the lazy segment LRU. `mutable` — bumped from const solve
+    // paths.
+    mutable std::uint64_t lru_clock_ = 0;
 
     // Layer 4 V8: sliding solver + state for the rank-1 fast-path
     // (`solve_rank1`). Independent of `segments_`. `mutable` so
@@ -1510,6 +1765,22 @@ private:
     mutable std::atomic<std::uint64_t> multi_bit_rank1_hits_{0};
     mutable std::atomic<std::uint64_t> full_refactor_hits_{0};
     mutable std::atomic<std::uint64_t> fallbacks_{0};
+
+    // v2.0 Phase 1 telemetry — same atomic-sampling contract.
+    mutable std::atomic<std::uint64_t> segment_evictions_{0};
+    mutable std::atomic<std::uint64_t> event_hits_{0};
+    mutable std::atomic<std::uint64_t> event_refactors_{0};
+    mutable std::atomic<std::uint64_t> event_builds_{0};
+
+    // v2.0 Phase 1 — lazy segment cache byte budget (audit finding
+    // `no-mode-cache-eviction`). 0 disables eviction. The default
+    // is deliberately generous: far above any realistic per-mode
+    // working set, so behaviour is unchanged for normal runs while
+    // a mode-random-walking week-long simulation can no longer grow
+    // RSS without bound. Applies to LAZY mode only — an eager
+    // `build()` is an explicit request to hold all 2^N factors,
+    // and evicting one would break the eager `lookup()` contract.
+    std::size_t segment_budget_bytes_ = kDefaultSegmentBudgetBytes;
 };
 
 }  // namespace pulsim::pwl

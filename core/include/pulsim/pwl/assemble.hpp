@@ -6,6 +6,7 @@
 //
 // `pulsim-v2-pwl-state-space-cache` Phase 3 (Layer 4 V0).
 // `pulsim-v2-trapezoidal-companion` Phase 4 (Layer 4 V1 — dt-aware).
+// v2.0 Phase 1: (G, C, b) split assembly.
 //
 // For one `SwitchStateMask`, build the MNA matrix `J` + constant
 // RHS `b` by stamping every branch in the graph using Layer 3's
@@ -21,6 +22,25 @@
 //                trap-companion g_eq into J. History contributions
 //                are NOT stamped here — Layer 5 adds them via
 //                b_extra at solve time.
+//
+// (G, C, b) split (v2.0 Phase 1, audit finding A.5): every
+// dt-dependent trap-companion entry in this kernel is EXACTLY
+// linear in 1/dt —
+//   * capacitor block      ±(2·C_cap)/dt
+//   * inductor constraint  −(2·L)/dt on the branch-var diagonal
+//   * transformer cross    −(2·M)/dt between winding branch rows
+// — so the full matrix decomposes as
+//       J(mask, dt) = G(mask) + (1/dt) · C
+// with `G` holding every dt-independent stamp (including the
+// inductor's ±1 incidence terms, which the dt-monolithic V1 path
+// only emitted when dt > 0) and `C` holding the 1/dt COEFFICIENTS
+// (2·C_cap, −2·L, −2·M). `C` does not depend on the switch mask.
+// `b` receives source stamps only and is dt-independent.
+//
+// `assemble_segment_split` exposes the split directly (consumed by
+// the cache's event-dt solver reuse and the EXACT continuous-LTI
+// extraction); the dt-aware `assemble_segment` recombines
+// J = G + (1/dt)·C so every caller shares one stamping loop.
 
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/transformer.hpp"
@@ -41,16 +61,21 @@
 
 namespace pulsim::pwl {
 
+namespace detail {
+
 // -----------------------------------------------------------------------------
-// assemble_segment — build (J, b) for one switch state.
+// assemble_impl — the ONE stamping loop behind both public entry
+// points.
 //
-// Sizes J + b to `pool.state_size(graph)`, zeroes them, then
-// iterates every branch in branch_id order. For each branch the
-// dispatch by BranchKind picks the right Layer 3 stamper.
-//
-// PassiveLinear branches dispatch by pool kind: Resistor uses the
-// generic stamp_device; Capacitor + Inductor use companion stamps
-// IF dt > 0.
+// `S` is the static-stamp target (the caller's G, or the legacy
+// static-only J). `C_out` selects the mode:
+//   * C_out != nullptr → full split: static stamps land in S,
+//     1/dt-coefficient stamps land in *C_out, and the inductor's
+//     ±1 incidence terms land in S (they are dt-independent).
+//   * C_out == nullptr → legacy V0 static-only assembly: Cap /
+//     Inductor / transformer-coupling stamps are SKIPPED ENTIRELY
+//     (including the inductor incidence — at dt = 0 the inductor
+//     branch is absent from the system, matching V0 behaviour).
 //
 // V1 still uses `x = Vector::Zero(state_size)` during stamping —
 // every device class supported here is linear, so the stamp
@@ -60,19 +85,13 @@ namespace pulsim::pwl {
 // Capacitor / Inductor companions contribute 0 to b at assembly;
 // the history term lives in `b_extra` at solve time.
 // -----------------------------------------------------------------------------
-inline void assemble_segment(const topology::Graph& graph,
-                              const DevicePool& pool,
-                              const topology::SwitchStateMask& mask,
-                              Real dt,
-                              sparse::Matrix& J,
-                              Vector& b) {
+inline void assemble_impl(const topology::Graph& graph,
+                           const DevicePool& pool,
+                           const topology::SwitchStateMask& mask,
+                           sparse::Matrix& S,
+                           sparse::Matrix* C_out,
+                           Vector& b) {
     const Size state_size = pool.state_size(graph);
-
-    // Reset / size J and b.
-    J = sparse::Matrix(static_cast<Index>(state_size),
-                        static_cast<Index>(state_size));
-    b = Vector::Zero(static_cast<Index>(state_size));
-
     if (state_size == 0) {
         return;
     }
@@ -98,29 +117,31 @@ inline void assemble_segment(const topology::Graph& graph,
             switch (k) {
             case DevicePool::StoredKind::Resistor: {
                 const auto& p = pool.resistor_params(branch.id);
-                stamping::stamp_device<models::Resistor>(J, b, x,
+                stamping::stamp_device<models::Resistor>(S, b, x,
                                                           coord, p);
                 break;
             }
             case DevicePool::StoredKind::Capacitor: {
-                if (dt > Real{0}) {
+                if (C_out != nullptr) {
                     const auto& p = pool.capacitor_params(branch.id);
-                    const Real g_eq = models::Capacitor::g_eq(dt, p);
-                    stamping::stamp_capacitor_companion(J, b, coord,
-                                                         g_eq);
+                    // Coefficient of 1/dt: g_eq(dt) = 2C/dt →
+                    // stamp the block with 2C into C_out.
+                    stamping::stamp_capacitor_companion(
+                        *C_out, b, coord, Real{2} * p.C);
                 }
-                // dt == 0: V0 backwards-compat path — skip.
+                // Static-only: V0 backwards-compat path — skip.
                 break;
             }
             case DevicePool::StoredKind::Inductor: {
-                if (dt > Real{0}) {
+                if (C_out != nullptr) {
                     const auto& p = pool.inductor_params(branch.id);
-                    const Real g_eq_inv =
-                        models::Inductor::g_eq_inv(dt, p);
                     const Index branch_var_id =
                         pool.branch_var_id_for_inductor(branch.id, graph);
-                    stamping::stamp_inductor_companion(
-                        J, b, coord, branch_var_id, g_eq_inv);
+                    // Incidence (±1) → S; diagonal coefficient
+                    // (−2L) → C_out.
+                    stamping::stamp_inductor_companion_split(
+                        S, *C_out, coord, branch_var_id,
+                        Real{2} * p.L);
                 }
                 break;
             }
@@ -149,7 +170,7 @@ inline void assemble_segment(const topology::Graph& graph,
                 // run_transient's PWM pass.
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                stamping::stamp_voltage_source(J, b, x, coord,
+                stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, Real{0});
             } else if (src_kind ==
                        DevicePool::StoredKind::SineVoltageSource) {
@@ -157,14 +178,14 @@ inline void assemble_segment(const topology::Graph& graph,
                 // value comes from b_extra each step.
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                stamping::stamp_voltage_source(J, b, x, coord,
+                stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, Real{0});
             } else if (src_kind ==
                        DevicePool::StoredKind::PulseVoltageSource) {
                 // V12: same V=0 baseline + b_extra overlay.
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                stamping::stamp_voltage_source(J, b, x, coord,
+                stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, Real{0});
             } else if (src_kind ==
                        DevicePool::StoredKind::VCVS) {
@@ -175,14 +196,14 @@ inline void assemble_segment(const topology::Graph& graph,
                     pool.vcvs_input_nodes(branch.id);
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                stamping::stamp_vcvs(J, b, x, coord,
+                stamping::stamp_vcvs(S, b, x, coord,
                                        in_pos, in_neg,
                                        branch_var_id, vp.gain);
             } else {
                 const auto& p = pool.voltage_source_params(branch.id);
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                stamping::stamp_voltage_source(J, b, x, coord,
+                stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, p.V);
             }
             break;
@@ -204,7 +225,7 @@ inline void assemble_segment(const topology::Graph& graph,
                 g_on  = pool.switch_g_on(branch.id);
                 g_off = pool.switch_g_off(branch.id);
             }
-            stamping::stamp_switch_fixed(J, b, x, coord, closed,
+            stamping::stamp_switch_fixed(S, b, x, coord, closed,
                                           g_on, g_off);
             ++switch_idx;
             break;
@@ -225,7 +246,7 @@ inline void assemble_segment(const topology::Graph& graph,
                 const Index branch_var_id =
                     pool.branch_var_id_for_inductor(
                         branch.id, graph);
-                J.coeffRef(branch_var_id, branch_var_id) +=
+                S.coeffRef(branch_var_id, branch_var_id) +=
                     Real{1e-12};
             }
             break;
@@ -236,16 +257,16 @@ inline void assemble_segment(const topology::Graph& graph,
     // ----- Layer 2 V2: transformer cross-coupling pass ---------------------
     //
     // For each registered (primary, secondary) inductor pair,
-    // add the mutual-inductance cross-terms to J:
-    //   J[p_row, s_col] += -(2M/dt)
-    //   J[s_row, p_col] += -(2M/dt)
+    // add the mutual-inductance cross-terms:
+    //   J[p_row, s_col] += -(2M/dt)  →  C[p_row, s_col] += -2M
+    //   J[s_row, p_col] += -(2M/dt)  →  C[s_row, p_col] += -2M
     //
     // This runs AFTER per-branch stamping so each inductor's
-    // self-inductance diagonal is already in place. Skipped
-    // when dt == 0 (static path — couplings have no static
-    // contribution; transformers behave as open circuits at
-    // DC, matching the inductor's static path).
-    if (dt > Real{0}) {
+    // self-inductance diagonal is already in place. Skipped in
+    // static-only mode (couplings have no static contribution;
+    // transformers behave as open circuits at DC, matching the
+    // inductor's static path).
+    if (C_out != nullptr) {
         for (const auto& tc : pool.transformer_couplings()) {
             const Index p_row =
                 pool.branch_var_id_for_inductor(
@@ -254,12 +275,64 @@ inline void assemble_segment(const topology::Graph& graph,
                 pool.branch_var_id_for_inductor(
                     tc.secondary_branch_id, graph);
             const Real cross =
-                models::TwoWindingTransformer::cross_dt(
-                    tc.params, dt);
-            J.coeffRef(p_row, s_row) += -cross;
-            J.coeffRef(s_row, p_row) += -cross;
+                Real{2} * models::TwoWindingTransformer::
+                              mutual_inductance(tc.params);
+            C_out->coeffRef(p_row, s_row) += -cross;
+            C_out->coeffRef(s_row, p_row) += -cross;
         }
     }
+}
+
+}  // namespace detail
+
+// -----------------------------------------------------------------------------
+// assemble_segment_split — build (G, C, b) for one switch state.
+//
+// `G` holds every dt-independent stamp; `C` holds the 1/dt
+// coefficients, so J(dt) = G + (1/dt)·C for ANY dt > 0. Both are
+// returned COMPRESSED. `C` is mask-invariant (switches only touch
+// G) — callers may cache it across masks if the pool's L/C/M
+// parameters have not changed.
+// -----------------------------------------------------------------------------
+inline void assemble_segment_split(const topology::Graph& graph,
+                                    const DevicePool& pool,
+                                    const topology::SwitchStateMask& mask,
+                                    sparse::Matrix& G,
+                                    sparse::Matrix& C,
+                                    Vector& b) {
+    const auto n = static_cast<Index>(pool.state_size(graph));
+    G = sparse::Matrix(n, n);
+    C = sparse::Matrix(n, n);
+    b = Vector::Zero(n);
+    detail::assemble_impl(graph, pool, mask, G, &C, b);
+    G.makeCompressed();
+    C.makeCompressed();
+}
+
+// -----------------------------------------------------------------------------
+// assemble_segment — build (J, b) for one switch state.
+//
+// dt > 0 recombines the split: J = G + (1/dt)·C (single stamping
+// loop shared with assemble_segment_split — no drift between the
+// monolithic and split assemblies). dt == 0 is the V0 static-only
+// path: Caps and Inductors are skipped entirely.
+// -----------------------------------------------------------------------------
+inline void assemble_segment(const topology::Graph& graph,
+                              const DevicePool& pool,
+                              const topology::SwitchStateMask& mask,
+                              Real dt,
+                              sparse::Matrix& J,
+                              Vector& b) {
+    const auto n = static_cast<Index>(pool.state_size(graph));
+    if (dt > Real{0}) {
+        sparse::Matrix G, C;
+        assemble_segment_split(graph, pool, mask, G, C, b);
+        J = G + (Real{1} / dt) * C;
+        return;
+    }
+    J = sparse::Matrix(n, n);
+    b = Vector::Zero(n);
+    detail::assemble_impl(graph, pool, mask, J, nullptr, b);
 }
 
 // -----------------------------------------------------------------------------

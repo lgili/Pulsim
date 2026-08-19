@@ -971,6 +971,30 @@ void init_module(py::module_& m) {
               "so far (useful with build_lazy to see how many "
               "of the 2^N states the run really visited).")
         .def("dt", &pwl::PwlStateSpaceCache::dt)
+        // v2.0 Phase 1 — LRU byte-budget on the lazy segment cache
+        // (audit finding no-mode-cache-eviction).
+        .def("set_segment_budget_bytes",
+              &pwl::PwlStateSpaceCache::set_segment_budget_bytes,
+              py::arg("bytes"),
+              "Set the lazy-mode segment cache byte budget. Once "
+              "the estimated resident bytes would exceed it, the "
+              "least-recently-solved mask's factor is evicted "
+              "(transparently rebuilt on re-visit). 0 disables "
+              "eviction. Default: 1 GiB. Eager build() never "
+              "evicts.")
+        .def("segment_budget_bytes",
+              &pwl::PwlStateSpaceCache::segment_budget_bytes,
+              "Current lazy segment cache byte budget (0 = "
+              "unbounded).")
+        .def("segment_cache_bytes",
+              &pwl::PwlStateSpaceCache::segment_cache_bytes,
+              "Estimated resident bytes of the per-mask segment "
+              "cache (assembled matrices + LU factors).")
+        .def("num_event_entries",
+              &pwl::PwlStateSpaceCache::num_event_entries,
+              "Number of resident event-dt solver entries used by "
+              "sub-step event correction (LRU-bounded at 8; each "
+              "holds ONE factor refreshed in place per dt).")
         // v1.4.0 — Part B parametric refactor API.
         .def("refactor_parametric",
               [](pwl::PwlStateSpaceCache& self,

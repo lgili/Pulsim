@@ -33,6 +33,27 @@ struct PwlSegment {
     std::unique_ptr<sparse::DirectSolver> solver;      // pre-factorized
     Size state_size = 0;                                // N + M
 
+    // v2.0 Phase 1 — LRU recency tick for the lazy segment cache's
+    // byte-budget eviction. `mutable`: cache HITS touch it through
+    // the const lookup path without structural mutation.
+    mutable std::uint64_t lru_tick = 0;
+
+    /// Estimated resident bytes of this segment (assembled J +
+    /// RHS + the solver's numeric factors). Budget arithmetic
+    /// only — not an allocator audit.
+    [[nodiscard]] std::size_t approx_bytes() const noexcept {
+        const auto nnz  = static_cast<std::size_t>(J.nonZeros());
+        const auto cols = static_cast<std::size_t>(J.cols());
+        std::size_t total =
+            nnz * (sizeof(Real) + sizeof(sparse::Matrix::StorageIndex)) +
+            (cols + 1) * sizeof(sparse::Matrix::StorageIndex) +
+            static_cast<std::size_t>(b_constant.size()) * sizeof(Real);
+        if (solver) {
+            total += solver->factor_bytes();
+        }
+        return total;
+    }
+
     PwlSegment() = default;
     PwlSegment(PwlSegment&&) noexcept = default;
     PwlSegment& operator=(PwlSegment&&) noexcept = default;

@@ -77,14 +77,20 @@ Key properties:
 - **Lazy expansion.** Combinations not reached in the simulation
   are never factored. Cold-start cost ≈ (num reached configs) ×
   (single LU cost).
-- **Multi-dt cache.** Several `dt` values can coexist in the same
-  cache (`cache.build_at_dt(dt_1)`, `cache.build_at_dt(dt_2)`);
-  the solver picks the right factor by `dt` key.
+- **Event-dt solves.** Sub-step event correction solves at
+  interpolated fractions of `dt` through a small pool of reusable
+  event solvers (≤ 8 masks resident); a new event `dt` is a cheap
+  in-place numeric refactor (`J = G + (1/dt)·C` on a shared
+  symbolic analysis), never a permanently cached factor.
 
 For circuits with many switches (3-φ VSI with 6 IGBTs has 64
 reachable states; PFC + boost cascade can have hundreds), the
-cache can become memory-heavy. Profile with `cache.num_entries()`
-and `cache.factor_bytes_estimate()`.
+cache can become memory-heavy. In lazy mode the cache is
+LRU-bounded to a byte budget (default 1 GiB) — least-recently
+solved masks are evicted and transparently rebuilt on re-visit.
+Profile with `cache.num_built_segments()` and
+`cache.segment_cache_bytes()`; tune with
+`cache.set_segment_budget_bytes(n)` (`0` disables eviction).
 
 ## DC operating-point seeding
 
