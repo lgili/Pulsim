@@ -969,8 +969,8 @@ public:
             //     partial_refactor on the multi-column changed set
             //   - else → fall back to full factorize (path-based wouldn't
             //     be cheaper anyway)
-            const std::uint64_t diff = mask.bits() ^ rank1_mask_.bits();
-            const int pop = std::popcount(diff);
+            const int pop = static_cast<int>(
+                mask.hamming_distance(rank1_mask_));
 
             const auto changed_cols =
                 compute_changed_columns_(rank1_mask_, mask);
@@ -1456,8 +1456,7 @@ private:
     [[nodiscard]] std::vector<Index> compute_changed_columns_(
         const topology::SwitchStateMask& prev_mask,
         const topology::SwitchStateMask& curr_mask) const {
-        const std::uint64_t diff = prev_mask.bits() ^ curr_mask.bits();
-        if (diff == 0) {
+        if (prev_mask.hamming_distance(curr_mask) == 0) {
             return {};
         }
         // Use a set for in-place dedup. Switches sharing a node (common
@@ -1471,7 +1470,7 @@ private:
         for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
             const auto& branch = graph_.branch(b_id);
             if (branch.kind == topology::BranchKind::Switch) {
-                if (((diff >> switch_idx) & 1ULL) != 0ULL) {
+                if (prev_mask.get(switch_idx) != curr_mask.get(switch_idx)) {
                     if (branch.from >= 0) uniq.insert(branch.from);
                     if (branch.to   >= 0) uniq.insert(branch.to);
                 }
