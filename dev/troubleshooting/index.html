@@ -1872,7 +1872,7 @@
 <p>Fix:</p>
 <div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim; print(pulsim.__version__)&quot;</span>
+<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import pulsim; print(pulsim.__version__)"</span>
 </code></pre></div>
 <h2 id="modulenotfounderror-pulsimsignal_evaluator"><code>ModuleNotFoundError: pulsim.signal_evaluator</code><a class="headerlink" href="#modulenotfounderror-pulsimsignal_evaluator" title="Permanent link">&para;</a></h2>
 <p>Cause:</p>
@@ -1901,7 +1901,7 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"
 </ul>
 <p>Fix:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Verify active module origin</span>
-python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
+python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'PY'</span>
 <span class="s">import pulsim</span>
 <span class="s">print(pulsim.__file__)</span>
 <span class="s">PY</span>
@@ -1929,7 +1929,7 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
 <p>Fix:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/tools/benchmark_ngspice.py<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--backend<span class="w"> </span>ltspice<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--ltspice-exe<span class="w"> </span><span class="s2">&quot;/Applications/LTspice.app/Contents/MacOS/LTspice&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ltspice-exe<span class="w"> </span><span class="s2">"/Applications/LTspice.app/Contents/MacOS/LTspice"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/ltspice_out
 </code></pre></div>
 <h2 id="slow-or-unstable-switched-converter-runs">Slow or unstable switched-converter runs<a class="headerlink" href="#slow-or-unstable-switched-converter-runs" title="Permanent link">&para;</a></h2>

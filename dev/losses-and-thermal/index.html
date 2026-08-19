@@ -1776,8 +1776,8 @@ call two pure-Python helpers on the result.</p>
                                <span class="n">core_loss_specs</span><span class="o">=</span><span class="p">{</span><span class="o">...</span><span class="p">})</span>
 <span class="n">therm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_thermal_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span>
                                    <span class="n">thermal_specs</span><span class="o">=</span><span class="p">{</span>
-                                     <span class="s2">&quot;M1&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;stages&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">FosterStage</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="o">...</span><span class="p">],</span>
-                                            <span class="s2">&quot;T_ambient_C&quot;</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">},</span>
+                                     <span class="s2">"M1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="p">[</span><span class="n">FosterStage</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="o">...</span><span class="p">],</span>
+                                            <span class="s2">"T_ambient_C"</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">},</span>
                                    <span class="p">},</span>
                                    <span class="c1"># same loss kwargs forwarded:</span>
                                    <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span>
@@ -1849,19 +1849,19 @@ recognises. Common fields:</p>
 </table>
 <h2 id="resistor">Resistor<a class="headerlink" href="#resistor" title="Permanent link">&para;</a></h2>
 <p><code>P_avg = v_R² / R</code> reconstructed from node voltages. Zero new kwargs.</p>
-<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">&quot;R_load&quot;</span><span class="p">,</span> <span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R_load"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">)</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
 <span class="n">loss</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">loss</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;R_load&quot;</span><span class="p">)[</span><span class="s2">&quot;P_avg&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">loss</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"R_load"</span><span class="p">)[</span><span class="s2">"P_avg"</span><span class="p">])</span>
 </code></pre></div>
 <h2 id="switch-psim-style-e_on-e_off">Switch — PSIM-style E_on / E_off<a class="headerlink" href="#switch-psim-style-e_on-e_off" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="s2">&quot;ds&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="n">g_on</span><span class="o">=</span><span class="mf">1e3</span><span class="p">,</span> <span class="n">g_off</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="s2">"M1"</span><span class="p">,</span> <span class="s2">"ds"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="n">g_on</span><span class="o">=</span><span class="mf">1e3</span><span class="p">,</span> <span class="n">g_off</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
 
-<span class="n">switch_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;M1&quot;</span><span class="p">:</span> <span class="p">{</span>
-    <span class="s2">&quot;E_on_ref&quot;</span><span class="p">:</span>  <span class="mf">120e-6</span><span class="p">,</span>    <span class="c1"># 120 µJ from datasheet</span>
-    <span class="s2">&quot;E_off_ref&quot;</span><span class="p">:</span> <span class="mf">180e-6</span><span class="p">,</span>
-    <span class="s2">&quot;V_ref&quot;</span><span class="p">:</span>     <span class="mf">48.0</span><span class="p">,</span>      <span class="c1"># datasheet test condition</span>
-    <span class="s2">&quot;I_ref&quot;</span><span class="p">:</span>     <span class="mf">10.0</span><span class="p">,</span>
+<span class="n">switch_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"M1"</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">"E_on_ref"</span><span class="p">:</span>  <span class="mf">120e-6</span><span class="p">,</span>    <span class="c1"># 120 µJ from datasheet</span>
+    <span class="s2">"E_off_ref"</span><span class="p">:</span> <span class="mf">180e-6</span><span class="p">,</span>
+    <span class="s2">"V_ref"</span><span class="p">:</span>     <span class="mf">48.0</span><span class="p">,</span>      <span class="c1"># datasheet test condition</span>
+    <span class="s2">"I_ref"</span><span class="p">:</span>     <span class="mf">10.0</span><span class="p">,</span>
 <span class="p">}}</span>
 <span class="n">loss</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span>
                                 <span class="n">switch_specs</span><span class="o">=</span><span class="n">switch_specs</span><span class="p">)</span>
@@ -1877,10 +1877,10 @@ E_off_event = E_off_ref · ...
 <h2 id="diode-q_rr-or-e_rr_ref">Diode — Q_rr or E_rr_ref<a class="headerlink" href="#diode-q_rr-or-e_rr_ref" title="Permanent link">&para;</a></h2>
 <p>Two equivalent entry points:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Raw recovery charge (hard-recovery diodes):</span>
-<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;D1&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;Q_rr&quot;</span><span class="p">:</span> <span class="mf">50e-9</span><span class="p">}}</span>
+<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"Q_rr"</span><span class="p">:</span> <span class="mf">50e-9</span><span class="p">}}</span>
 
 <span class="c1"># Datasheet energy + reference voltage (fast/soft recovery):</span>
-<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;D1&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;E_rr_ref&quot;</span><span class="p">:</span> <span class="mf">30e-6</span><span class="p">,</span> <span class="s2">&quot;V_R_ref&quot;</span><span class="p">:</span> <span class="mf">600.0</span><span class="p">}}</span>
+<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"E_rr_ref"</span><span class="p">:</span> <span class="mf">30e-6</span><span class="p">,</span> <span class="s2">"V_R_ref"</span><span class="p">:</span> <span class="mf">600.0</span><span class="p">}}</span>
 </code></pre></div>
 <p>For every turn-off event in <code>result.commutation_events</code> matching the
 branch, Pulsim interpolates <code>|V_R(t_event)|</code> from the trace and
@@ -1889,12 +1889,12 @@ accumulates <code>E_rr = Q_rr · V_R</code> or <code>E_rr = E_rr_ref · (V_R / V
 is a datasheet annotation pass, matching the LTspice "ideal-diode-with-Qrr"
 option and the PSIM diode loss panel.</p>
 <h2 id="magnetic-core-loss">Magnetic core loss<a class="headerlink" href="#magnetic-core-loss" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">core_loss_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;L1&quot;</span><span class="p">:</span> <span class="p">{</span>
-    <span class="s2">&quot;material&quot;</span><span class="p">:</span> <span class="s2">&quot;N87&quot;</span><span class="p">,</span>       <span class="c1"># built-in catalogue (or CoreMaterial obj)</span>
-    <span class="s2">&quot;N_turns&quot;</span><span class="p">:</span>  <span class="mi">20</span><span class="p">,</span>
-    <span class="s2">&quot;A_core&quot;</span><span class="p">:</span>   <span class="mf">1.0e-4</span><span class="p">,</span>      <span class="c1"># m²</span>
-    <span class="s2">&quot;V_core&quot;</span><span class="p">:</span>   <span class="mf">5.0e-6</span><span class="p">,</span>      <span class="c1"># m³</span>
-    <span class="s2">&quot;use_igse&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>        <span class="c1"># default; falls back to Steinmetz if trace</span>
+<div class="highlight"><pre><span></span><code><span class="n">core_loss_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"L1"</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">"material"</span><span class="p">:</span> <span class="s2">"N87"</span><span class="p">,</span>       <span class="c1"># built-in catalogue (or CoreMaterial obj)</span>
+    <span class="s2">"N_turns"</span><span class="p">:</span>  <span class="mi">20</span><span class="p">,</span>
+    <span class="s2">"A_core"</span><span class="p">:</span>   <span class="mf">1.0e-4</span><span class="p">,</span>      <span class="c1"># m²</span>
+    <span class="s2">"V_core"</span><span class="p">:</span>   <span class="mf">5.0e-6</span><span class="p">,</span>      <span class="c1"># m³</span>
+    <span class="s2">"use_igse"</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>        <span class="c1"># default; falls back to Steinmetz if trace</span>
                               <span class="c1">#   is shorter than one period</span>
 <span class="p">}}</span>
 </code></pre></div>
@@ -1919,8 +1919,8 @@ option and the PSIM diode loss panel.</p>
 <span class="n">therm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_thermal_summary</span><span class="p">(</span>
     <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span>
     <span class="n">thermal_specs</span><span class="o">=</span><span class="p">{</span>
-        <span class="s2">&quot;M1&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;stages&quot;</span><span class="p">:</span> <span class="n">foster_M1</span><span class="p">,</span> <span class="s2">&quot;T_ambient_C&quot;</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">},</span>
-        <span class="s2">&quot;D1&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;stages&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="n">R_th_K_per_W</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+        <span class="s2">"M1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="n">foster_M1</span><span class="p">,</span> <span class="s2">"T_ambient_C"</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">},</span>
+        <span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="n">R_th_K_per_W</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
                                             <span class="n">tau_s</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)]},</span>
     <span class="p">},</span>
     <span class="n">T_ambient_C</span><span class="o">=</span><span class="mf">25.0</span><span class="p">,</span>        <span class="c1"># fallback default</span>

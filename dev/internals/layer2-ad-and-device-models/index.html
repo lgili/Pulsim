@@ -1877,7 +1877,7 @@ a type error.</p>
 <span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">evaluate_current</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">ModelInputs</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&amp;</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">T</span><span class="o">::</span><span class="n">Params</span><span class="o">&amp;</span><span class="p">);</span>
 <span class="p">}</span>
 
-<span class="c1">// pulsim/models/resistor.hpp        — linear passive (Ohm&#39;s law)</span>
+<span class="c1">// pulsim/models/resistor.hpp        — linear passive (Ohm's law)</span>
 <span class="c1">// pulsim/models/voltage_source.hpp  — constraint (kind = Source)</span>
 <span class="c1">// pulsim/models/ideal_diode.hpp     — nonlinear (smooth-blend)</span>
 </code></pre></div>
@@ -1970,7 +1970,7 @@ boilerplate, no factory, no virtual dispatch.</p>
 <span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">is_linear</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
 
 <span class="w">    </span><span class="c1">// For trapezoidal companion, the stamp depends on dt and the</span>
-<span class="w">    </span><span class="c1">// previous step&#39;s voltage — Layer 3 handles the dt scaling</span>
+<span class="w">    </span><span class="c1">// previous step's voltage — Layer 3 handles the dt scaling</span>
 <span class="w">    </span><span class="c1">// and the history term separately. The device-model side just</span>
 <span class="w">    </span><span class="c1">// provides the conductance-equivalent and history-current at a</span>
 <span class="w">    </span><span class="c1">// given state.</span>

@@ -1905,7 +1905,7 @@ cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>
 <span class="c1"># Build everything</span>
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
 
-<span class="c1"># Or build just one layer&#39;s test binary</span>
+<span class="c1"># Or build just one layer's test binary</span>
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_layer4_tests
 
 <span class="c1"># Run the full test harness</span>
@@ -2008,8 +2008,8 @@ pulls the full template tree).</p>
 <p>For local Python development without <code>pip install</code>:</p>
 <div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-<span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/build/python:</span><span class="nv">$PYTHONPATH</span><span class="s2">&quot;</span>
-python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as p; print(p.__version__)&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/build/python:</span><span class="nv">$PYTHONPATH</span><span class="s2">"</span>
+python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import pulsim as p; print(p.__version__)"</span>
 </code></pre></div>
 <p>For a proper wheel build (used by <code>pip install .</code> and by CI):</p>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>scikit-build-core<span class="w"> </span>pybind11

@@ -1799,16 +1799,16 @@ mean output voltage equals <code>V_dc · duty</code> to within 1 %.</p>
 <span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">t_end</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 <span class="w">    </span><span class="n">Real</span><span class="w"> </span><span class="n">dt</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
 
-<span class="w">    </span><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">valid</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
-<span class="w">    </span><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Size</span><span class="w"> </span><span class="n">expected_step_count</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">valid</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Size</span><span class="w"> </span><span class="n">expected_step_count</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
 <span class="p">};</span>
 
 <span class="k">struct</span><span class="w"> </span><span class="nc">SimulationResult</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Real</span><span class="o">&gt;</span><span class="w">   </span><span class="n">times</span><span class="p">;</span>
 <span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Vector</span><span class="o">&gt;</span><span class="w"> </span><span class="n">states</span><span class="p">;</span>
 
-<span class="w">    </span><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Size</span><span class="w"> </span><span class="n">num_steps</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
-<span class="w">    </span><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">empty</span><span class="p">()</span><span class="w">     </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Size</span><span class="w"> </span><span class="n">num_steps</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">empty</span><span class="p">()</span><span class="w">     </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
 <span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">reserve</span><span class="p">(</span><span class="n">Size</span><span class="w"> </span><span class="n">n</span><span class="p">);</span>
 <span class="p">};</span>
 
@@ -1863,18 +1863,18 @@ ideal model expects.</p>
 <p>V0 uses <code>t = t_start + k · dt</code> with <code>k</code> an integer counter. One
 extra multiply per step (negligible) + exact reproducibility.</p>
 <h2 id="worked-example-10-khz-pwm-chopper">Worked example: 10 kHz PWM chopper<a class="headerlink" href="#worked-example-10-khz-pwm-chopper" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/cache.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/device_pool.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/solver/options.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/solver/run_transient.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/topology/graph.hpp&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/cache.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/device_pool.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/solver/options.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/solver/run_transient.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/topology/graph.hpp"</span>
 
 <span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="p">;</span>
 
 <span class="c1">// Build the chopper: V_dc → Switch → R → GND</span>
 <span class="n">topology</span><span class="o">::</span><span class="n">Graph</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
-<span class="k">auto</span><span class="w"> </span><span class="n">vin</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">&quot;vin&quot;</span><span class="p">);</span>
-<span class="k">auto</span><span class="w"> </span><span class="n">vout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">&quot;vout&quot;</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">vin</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">"vin"</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">vout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">"vout"</span><span class="p">);</span>
 <span class="n">g</span><span class="p">.</span><span class="n">add_branch</span><span class="p">(</span><span class="n">vin</span><span class="p">,</span><span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">ground</span><span class="p">(),</span><span class="w"> </span><span class="n">topology</span><span class="o">::</span><span class="n">BranchKind</span><span class="o">::</span><span class="n">Source</span><span class="p">);</span>
 <span class="n">g</span><span class="p">.</span><span class="n">add_branch</span><span class="p">(</span><span class="n">vin</span><span class="p">,</span><span class="w">  </span><span class="n">vout</span><span class="p">,</span><span class="w">       </span><span class="n">topology</span><span class="o">::</span><span class="n">BranchKind</span><span class="o">::</span><span class="n">Switch</span><span class="p">);</span>
 <span class="n">g</span><span class="p">.</span><span class="n">add_branch</span><span class="p">(</span><span class="n">vout</span><span class="p">,</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">ground</span><span class="p">(),</span><span class="w"> </span><span class="n">topology</span><span class="o">::</span><span class="n">BranchKind</span><span class="o">::</span><span class="n">PassiveLinear</span><span class="p">);</span>

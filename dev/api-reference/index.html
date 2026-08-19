@@ -2443,12 +2443,12 @@
 - <code>result.commutations</code> — list[CommutationEvent] (event-detection details)
 - <code>result.num_steps()</code> — int</p>
 <h2 id="yaml-loader">YAML loader<a class="headerlink" href="#yaml-loader" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;examples/buck.yaml&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/buck.yaml"</span><span class="p">)</span>
 <span class="c1"># or</span>
-<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">"""</span>
 <span class="s2">nodes: [n0]</span>
 <span class="s2">components: ...</span>
-<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+<span class="s2">"""</span><span class="p">)</span>
 <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span>              <span class="c1"># CircuitBuilder</span>
 <span class="n">loaded</span><span class="o">.</span><span class="n">switch_fn</span>            <span class="c1"># combined Callable</span>
 <span class="n">loaded</span><span class="o">.</span><span class="n">t_start</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">dt</span>
@@ -2482,11 +2482,11 @@
 </tbody>
 </table>
 <p>C++ code lives header-only under <code>core/include/pulsim/</code>. Includes you'll commonly need:</p>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/builder/circuit_builder.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/pwl_state_space_cache.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/solver/run_transient.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/sources/make_pwm_switch_fn.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp&quot;</span><span class="c1">   // for combined refresh</span>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/builder/circuit_builder.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/pwl_state_space_cache.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/solver/run_transient.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/sources/make_pwm_switch_fn.hpp"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"</span><span class="w">   </span><span class="c1">// for combined refresh</span>
 </code></pre></div>
 
 

@@ -2289,7 +2289,7 @@ returned a corrupted <span class="arithmatex">\(L+U\)</span>.</p>
 <p><strong>Fix:</strong> <strong>discover the <span class="arithmatex">\(L+U\)</span> pattern dynamically from <span class="arithmatex">\(x\)</span>'s
 runtime nonzeros</strong>, ignoring the pre-pivot symbolic pattern
 (which becomes diagnostic-only).</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// Step 4: store new column&#39;s L+U entries dynamically.</span>
+<div class="highlight"><pre><span></span><code><span class="c1">// Step 4: store new column's L+U entries dynamically.</span>
 <span class="c1">// IGNORES the pre-pivot symbolic pattern.</span>
 <span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">VALUE_TOL</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
@@ -2362,7 +2362,7 @@ loop tries to read it:</p>
 <span class="w">    </span><span class="c1">// Partial pivoting + dynamic pattern discovery (steps 3a, 4)</span>
 <span class="w">    </span><span class="c1">// ...</span>
 
-<span class="w">    </span><span class="c1">// CRITICAL: set the *next* column&#39;s start pointer to the</span>
+<span class="w">    </span><span class="c1">// CRITICAL: set the *next* column's start pointer to the</span>
 <span class="w">    </span><span class="c1">// current end of L storage BEFORE moving on to k+1.</span>
 <span class="w">    </span><span class="n">l_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">Index</span><span class="o">&gt;</span><span class="p">(</span><span class="n">l_values_</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
 <span class="w">    </span><span class="n">u_col_ptr_</span><span class="p">[</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">Index</span><span class="o">&gt;</span><span class="p">(</span><span class="n">u_values_</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>

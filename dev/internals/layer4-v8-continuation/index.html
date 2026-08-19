@@ -1764,11 +1764,11 @@ that runs <code>solve_with_newton_b_extra</code> once per refresh in a
 caller-supplied sequence, threading the converged <code>x</code> from
 step <em>k</em> as the warm-start for step <em>k+1</em>.</p>
 <h2 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/continuation.hpp&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/continuation.hpp"</span>
 
 <span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">::</span><span class="nn">pwl</span><span class="w"> </span><span class="p">{</span>
 
-<span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Vector</span><span class="w"> </span><span class="n">continuation_solve</span><span class="p">(</span>
+<span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Vector</span><span class="w"> </span><span class="n">continuation_solve</span><span class="p">(</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">PwlSegment</span><span class="o">&amp;</span><span class="w"> </span><span class="n">seg</span><span class="p">,</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">NonlinearRefreshFn</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">refresh_sequence</span><span class="p">,</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">topology</span><span class="o">::</span><span class="n">Graph</span><span class="o">&amp;</span><span class="w"> </span><span class="n">graph</span><span class="p">,</span>

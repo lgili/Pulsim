@@ -1780,9 +1780,9 @@ simulations without writing any C++. Bindings sit under
 
 <span class="c1"># Build a circuit.</span>
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;Vin&quot;</span><span class="p">,</span> <span class="s2">&quot;n0&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">)</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span>      <span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span>  <span class="s2">&quot;n0&quot;</span><span class="p">,</span> <span class="s2">&quot;n1&quot;</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>  <span class="c1"># ohms</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span>     <span class="p">(</span><span class="s2">&quot;C1&quot;</span><span class="p">,</span>  <span class="s2">&quot;n1&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">)</span>  <span class="c1"># farads</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"n0"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span>      <span class="p">(</span><span class="s2">"R1"</span><span class="p">,</span>  <span class="s2">"n0"</span><span class="p">,</span> <span class="s2">"n1"</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>  <span class="c1"># ohms</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span>     <span class="p">(</span><span class="s2">"C1"</span><span class="p">,</span>  <span class="s2">"n1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">)</span>  <span class="c1"># farads</span>
 
 <span class="c1"># Pre-factor the MNA matrix per switch state.</span>
 <span class="n">cache</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">PwlStateSpaceCache</span><span class="p">(</span><span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">pool</span><span class="p">)</span>
@@ -1795,8 +1795,8 @@ simulations without writing any C++. Bindings sit under
     <span class="n">switch_fn</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
 <span class="p">)</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;recorded </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">num_steps</span><span class="p">()</span><span class="si">}</span><span class="s2"> samples&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;final state:&quot;</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>   <span class="c1"># numpy array</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"recorded </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">num_steps</span><span class="p">()</span><span class="si">}</span><span class="s2"> samples"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"final state:"</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>   <span class="c1"># numpy array</span>
 </code></pre></div>
 <h2 id="bound-symbols">Bound symbols<a class="headerlink" href="#bound-symbols" title="Permanent link">&para;</a></h2>
 <table>
@@ -1911,8 +1911,8 @@ either drop to the C++ kernel for the inner loop or wait
 for V1 of these bindings.</p>
 <h2 id="submodule-layout-under-the-hood">Submodule layout under the hood<a class="headerlink" href="#submodule-layout-under-the-hood" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pulsim._pulsim       (the pybind11 extension shared lib)
-├── (v1 bindings)    (top-level, ~258 KB of v1&#39;s API)
-└── v2_kernel        (def_submodule(&quot;v2_kernel&quot;))
+├── (v1 bindings)    (top-level, ~258 KB of v1's API)
+└── v2_kernel        (def_submodule("v2_kernel"))
     ├── CircuitBuilder
     ├── PwlStateSpaceCache
     └── ...

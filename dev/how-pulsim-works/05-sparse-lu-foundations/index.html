@@ -2175,7 +2175,7 @@ core inner loop, in pseudo-code:</p>
 <div class="highlight"><pre><span></span><code>for k in 0..n-1:
     x = A[:, P_col[k]]            # load the column from A
     for j in 0..k-1:
-        if x[j] != 0:               # there&#39;s a pending L-update
+        if x[j] != 0:               # there's a pending L-update
             x[j+1:n] -= L[j+1:n, j] * x[j]
     pivot = argmax(|x[k:n]|)        # partial pivoting
     swap rows k and pivot in L and P_row

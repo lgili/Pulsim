@@ -1780,9 +1780,9 @@ line search, this finally cracks the κ=20 stiff rectifier
 that's been deferred for 6 successive OpenSpecs.</p>
 <h2 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
 <h3 id="primary-smart-warm-start">Primary: smart warm-start<a class="headerlink" href="#primary-smart-warm-start" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/initial_guess.hpp&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/initial_guess.hpp"</span>
 
-<span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Vector</span><span class="w"> </span><span class="n">make_diode_aware_initial_guess</span><span class="p">(</span>
+<span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Vector</span><span class="w"> </span><span class="n">make_diode_aware_initial_guess</span><span class="p">(</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">Graph</span><span class="o">&amp;</span><span class="w"> </span><span class="n">graph</span><span class="p">,</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">DevicePool</span><span class="o">&amp;</span><span class="w"> </span><span class="n">pool</span><span class="p">,</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">Vector</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b_extra</span><span class="p">);</span>
@@ -1800,9 +1800,9 @@ Newton inside the correct basin of attraction:
 - If <code>V_source &lt; V_F0</code>, Newton finds <code>v_cathode ≈ 0</code>
   (diode off).</p>
 <h3 id="research-grade-pseudo-transient-continuation">Research-grade: pseudo-transient continuation<a class="headerlink" href="#research-grade-pseudo-transient-continuation" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/pwl/pseudo_transient.hpp&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/pwl/pseudo_transient.hpp"</span>
 
-<span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Vector</span><span class="w"> </span><span class="n">pseudo_transient_solve</span><span class="p">(</span>
+<span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">Vector</span><span class="w"> </span><span class="n">pseudo_transient_solve</span><span class="p">(</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">PwlSegment</span><span class="o">&amp;</span><span class="w"> </span><span class="n">seg</span><span class="p">,</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">NonlinearRefreshFn</span><span class="o">&amp;</span><span class="w"> </span><span class="n">refresh</span><span class="p">,</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">Graph</span><span class="o">&amp;</span><span class="w"> </span><span class="n">graph</span><span class="p">,</span>

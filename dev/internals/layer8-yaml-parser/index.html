@@ -1826,7 +1826,7 @@ ready to feed into <code>PwlStateSpaceCache</code> and <code>run_transient</code
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
-<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;my_buck.yaml&quot;</span><span class="p">)</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"my_buck.yaml"</span><span class="p">)</span>
 <span class="n">cache</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">PwlStateSpaceCache</span><span class="p">(</span><span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span>
                               <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">pool</span><span class="p">)</span>
 <span class="n">cache</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">)</span>
@@ -1927,19 +1927,19 @@ clearer error messages.</p>
 </code></pre></div>
 <h2 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
 <h3 id="c">C++<a class="headerlink" href="#c" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/yaml/loader.hpp&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"pulsim/yaml/loader.hpp"</span>
 
-<span class="k">auto</span><span class="w"> </span><span class="n">loaded</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pulsim</span><span class="o">::</span><span class="n">yaml</span><span class="o">::</span><span class="n">load_file</span><span class="p">(</span><span class="s">&quot;my_circuit.yaml&quot;</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">loaded</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pulsim</span><span class="o">::</span><span class="n">yaml</span><span class="o">::</span><span class="n">load_file</span><span class="p">(</span><span class="s">"my_circuit.yaml"</span><span class="p">);</span>
 <span class="c1">// loaded.builder, loaded.options</span>
 </code></pre></div>
 <h3 id="python">Python<a class="headerlink" href="#python" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
-<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;path/to/circuit.yaml&quot;</span><span class="p">)</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"path/to/circuit.yaml"</span><span class="p">)</span>
 <span class="c1"># loaded.builder, loaded.options</span>
 
 <span class="c1"># Or from an in-memory string:</span>
-<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">"""</span>
 <span class="s2">circuit:</span>
 <span class="s2">  devices:</span>
 <span class="s2">    - type: resistor</span>
@@ -1947,7 +1947,7 @@ clearer error messages.</p>
 <span class="s2">      from: a</span>
 <span class="s2">      to: b</span>
 <span class="s2">      R: 100.0</span>
-<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+<span class="s2">"""</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="error-handling">Error handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
 <p>The loader throws <code>std::runtime_error</code> (in C++) /
@@ -1962,8 +1962,8 @@ clearer error messages.</p>
 <p>Errors mention the device's <code>name:</code> if provided, otherwise
 the device's index in the YAML's <code>devices:</code> list, plus the
 missing field name:</p>
-<div class="highlight"><pre><span></span><code>yaml::load: device &#39;R_load&#39; (resistor) is missing required
-field &#39;R&#39;
+<div class="highlight"><pre><span></span><code>yaml::load: device 'R_load' (resistor) is missing required
+field 'R'
 </code></pre></div>
 <h2 id="sample-yamls">Sample YAMLs<a class="headerlink" href="#sample-yamls" title="Permanent link">&para;</a></h2>
 <p>Three working examples ship in <code>examples/</code>:</p>

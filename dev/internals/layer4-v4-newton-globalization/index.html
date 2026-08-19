@@ -1754,7 +1754,7 @@ step can overshoot and make the residual worse. Layer 4 V4 adds
        α *= 0.5
        repeat (up to 8 backtracks)
 4. If no α reduced the residual, fall back to α = 1
-   (plain Newton&#39;s behaviour at that step)
+   (plain Newton's behaviour at that step)
 5. Update: x := x + α · dx
 </code></pre></div>
 <p>This is "Armijo-lite": only checks that the residual norm

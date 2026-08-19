@@ -2121,13 +2121,13 @@ device builders, analyses, and helpers live directly on the
 <h3 id="pulsimcircuit-pulsimcircuitbuilder"><code>pulsim.Circuit</code> → <code>pulsim.CircuitBuilder</code><a class="headerlink" href="#pulsimcircuit-pulsimcircuitbuilder" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Pre-1.0</span>
 <span class="n">ckt</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="p">()</span>
-<span class="n">r1</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;n1&quot;</span><span class="p">)</span>          <span class="c1"># node names were integer IDs returned by add_node</span>
-<span class="n">gnd</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;gnd&quot;</span><span class="p">)</span>
-<span class="n">ckt</span><span class="o">.</span><span class="n">add_component</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">Resistor</span><span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span> <span class="n">r1</span><span class="p">,</span> <span class="n">gnd</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">))</span>
+<span class="n">r1</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">"n1"</span><span class="p">)</span>          <span class="c1"># node names were integer IDs returned by add_node</span>
+<span class="n">gnd</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">"gnd"</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_component</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">Resistor</span><span class="p">(</span><span class="s2">"R1"</span><span class="p">,</span> <span class="n">r1</span><span class="p">,</span> <span class="n">gnd</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">))</span>
 
 <span class="c1"># 1.0 — string node names; helpers per device kind</span>
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span> <span class="s2">&quot;n1&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R1"</span><span class="p">,</span> <span class="s2">"n1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="pulsimsimulator-pulsimsimulate"><code>pulsim.Simulator</code> → <code>pulsim.simulate(...)</code><a class="headerlink" href="#pulsimsimulator-pulsimsimulate" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Pre-1.0</span>
@@ -2149,10 +2149,10 @@ explicit form is still available:</p>
 <h3 id="pulsimyamlparser-pulsimload_yaml_file"><code>pulsim.YamlParser</code> → <code>pulsim.load_yaml_file(...)</code><a class="headerlink" href="#pulsimyamlparser-pulsimload_yaml_file" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Pre-1.0</span>
 <span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">())</span>
-<span class="n">ckt</span><span class="p">,</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;circuit.yaml&quot;</span><span class="p">)</span>
+<span class="n">ckt</span><span class="p">,</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">"circuit.yaml"</span><span class="p">)</span>
 
 <span class="c1"># 1.0</span>
-<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;circuit.yaml&quot;</span><span class="p">)</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"circuit.yaml"</span><span class="p">)</span>
 <span class="n">b</span> <span class="o">=</span> <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=...</span><span class="p">,</span> <span class="n">dt</span><span class="o">=...</span><span class="p">)</span>
 </code></pre></div>
@@ -2233,8 +2233,8 @@ are replaced by the <code>MixedDomainBlockChain</code> executor (runs in C++,
 no Python interpreter cost per step):</p>
 <div class="highlight"><pre><span></span><code><span class="n">chain</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">MixedDomainBlockChain</span><span class="p">()</span>
 <span class="n">pi</span>    <span class="o">=</span> <span class="n">chain</span><span class="o">.</span><span class="n">add_block</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">PIController</span><span class="p">(</span><span class="n">kp</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">ki</span><span class="o">=</span><span class="mf">1200.0</span><span class="p">))</span>
-<span class="n">chain</span><span class="o">.</span><span class="n">wire</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="n">pi</span><span class="o">.</span><span class="n">input</span><span class="p">)</span>
-<span class="n">chain</span><span class="o">.</span><span class="n">wire</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">pi</span><span class="o">.</span><span class="n">output</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="s2">&quot;duty&quot;</span><span class="p">)</span>
+<span class="n">chain</span><span class="o">.</span><span class="n">wire</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="s2">"vout"</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="n">pi</span><span class="o">.</span><span class="n">input</span><span class="p">)</span>
+<span class="n">chain</span><span class="o">.</span><span class="n">wire</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">pi</span><span class="o">.</span><span class="n">output</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="s2">"duty"</span><span class="p">)</span>
 
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">run_transient_with_chain</span><span class="p">(</span>
     <span class="n">cache</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">pool</span><span class="p">,</span> <span class="n">opts</span><span class="p">,</span>
@@ -2351,8 +2351,8 @@ binders don't trip on the same shape.</p>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pulsim.sweep</span><span class="w"> </span><span class="kn">import</span> <span class="n">Distribution</span><span class="p">,</span> <span class="n">Cartesian</span><span class="p">,</span> <span class="n">metrics</span>
 
 <span class="n">dist</span> <span class="o">=</span> <span class="n">Distribution</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="n">mean</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="n">std</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
-<span class="n">grid</span> <span class="o">=</span> <span class="n">Cartesian</span><span class="p">({</span><span class="s2">&quot;R&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">10</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">50</span><span class="p">]})</span>
-<span class="n">kpi</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">rms_voltage</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">)</span>
+<span class="n">grid</span> <span class="o">=</span> <span class="n">Cartesian</span><span class="p">({</span><span class="s2">"R"</span><span class="p">:</span> <span class="p">[</span><span class="mi">10</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">50</span><span class="p">]})</span>
+<span class="n">kpi</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">rms_voltage</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">)</span>
 </code></pre></div>
 <p>In 1.6, <code>pulsim.sweep</code> is a single <em>function</em> (Cartesian grid by
 default) and <code>pulsim.monte_carlo</code> is its random-draw sibling. The
@@ -2368,11 +2368,11 @@ their own lambdas:</p>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">kpi</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">params</span><span class="p">):</span>
     <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;V_out&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">))[</span><span class="o">-</span><span class="mi">1</span><span class="p">])}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">"V_out"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">))[</span><span class="o">-</span><span class="mi">1</span><span class="p">])}</span>
 
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">sweep</span><span class="p">(</span>
     <span class="n">build_buck</span><span class="p">,</span>
-    <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;R&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mf">10.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">]},</span>   <span class="c1"># Cartesian grid</span>
+    <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">"R"</span><span class="p">:</span> <span class="p">[</span><span class="mf">10.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">]},</span>   <span class="c1"># Cartesian grid</span>
     <span class="n">kpi_fn</span><span class="o">=</span><span class="n">kpi</span><span class="p">,</span>
     <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span>
 <span class="p">)</span>
@@ -2382,7 +2382,7 @@ their own lambdas:</p>
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">monte_carlo</span><span class="p">(</span>
     <span class="n">build_buck</span><span class="p">,</span>
     <span class="n">distributions</span><span class="o">=</span><span class="p">{</span>
-        <span class="s2">&quot;R&quot;</span><span class="p">:</span> <span class="k">lambda</span> <span class="n">rng</span><span class="p">:</span> <span class="n">rng</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mf">10.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>    <span class="c1"># ← was Distribution.normal</span>
+        <span class="s2">"R"</span><span class="p">:</span> <span class="k">lambda</span> <span class="n">rng</span><span class="p">:</span> <span class="n">rng</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mf">10.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>    <span class="c1"># ← was Distribution.normal</span>
     <span class="p">},</span>
     <span class="n">kpi_fn</span><span class="o">=</span><span class="n">kpi</span><span class="p">,</span>
     <span class="n">n_samples</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span>
@@ -2436,12 +2436,12 @@ returns a single float. Use <code>rng.normal</code>, <code>rng.uniform</code>,
 KPIs in one pass:</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">kpi</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">params</span><span class="p">):</span>
     <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-    <span class="n">vout</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">))</span>
-    <span class="n">iL</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">&quot;L1&quot;</span><span class="p">))</span>
+    <span class="n">vout</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">))</span>
+    <span class="n">iL</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"L1"</span><span class="p">))</span>
     <span class="k">return</span> <span class="p">{</span>
-        <span class="s2">&quot;V_out_ss&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">vout</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span>
-        <span class="s2">&quot;V_out_rms&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">vout</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))),</span>
-        <span class="s2">&quot;I_L_peak&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">iL</span><span class="p">))),</span>
+        <span class="s2">"V_out_ss"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">vout</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span>
+        <span class="s2">"V_out_rms"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">vout</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))),</span>
+        <span class="s2">"I_L_peak"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">iL</span><span class="p">))),</span>
     <span class="p">}</span>
 </code></pre></div>
 <p>This is a deliberate API simplification — the 1.5 helper classes
@@ -2454,8 +2454,8 @@ duplicated what callers can express in three lines of numpy.</p>
 <span class="n">p</span><span class="o">.</span><span class="n">add_rc_snubber</span><span class="p">(</span>
     <span class="n">builder</span><span class="p">,</span>
     <span class="n">R</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="mf">470e-9</span><span class="p">,</span>
-    <span class="n">from_node</span><span class="o">=</span><span class="s2">&quot;vdc&quot;</span><span class="p">,</span> <span class="n">to_node</span><span class="o">=</span><span class="s2">&quot;sw&quot;</span><span class="p">,</span>
-    <span class="n">name_prefix</span><span class="o">=</span><span class="s2">&quot;Snub&quot;</span><span class="p">,</span>     <span class="c1"># optional, defaults to &quot;Snub&quot;</span>
+    <span class="n">from_node</span><span class="o">=</span><span class="s2">"vdc"</span><span class="p">,</span> <span class="n">to_node</span><span class="o">=</span><span class="s2">"sw"</span><span class="p">,</span>
+    <span class="n">name_prefix</span><span class="o">=</span><span class="s2">"Snub"</span><span class="p">,</span>     <span class="c1"># optional, defaults to "Snub"</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>The full 1.6 signature:</p>
@@ -2463,7 +2463,7 @@ duplicated what callers can express in three lines of numpy.</p>
     <span class="n">builder</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span>
     <span class="n">R</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">C</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="n">from_node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">to_node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-    <span class="n">name_prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Snub&quot;</span><span class="p">,</span>
+    <span class="n">name_prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"Snub"</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
 </code></pre></div>
 <p>Positional calls now raise <code>TypeError: add_rc_snubber() takes 1
@@ -2478,9 +2478,9 @@ struct — pass the parameters directly:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1.6</span>
 <span class="n">motor</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">add_pmsm</span><span class="p">(</span>
     <span class="n">builder</span><span class="p">,</span>
-    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span>
-    <span class="n">phase_nodes</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;ua&quot;</span><span class="p">,</span> <span class="s2">&quot;ub&quot;</span><span class="p">,</span> <span class="s2">&quot;uc&quot;</span><span class="p">),</span>
-    <span class="n">neutral_node</span><span class="o">=</span><span class="s2">&quot;nn&quot;</span><span class="p">,</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">"M1"</span><span class="p">,</span>
+    <span class="n">phase_nodes</span><span class="o">=</span><span class="p">(</span><span class="s2">"ua"</span><span class="p">,</span> <span class="s2">"ub"</span><span class="p">,</span> <span class="s2">"uc"</span><span class="p">),</span>
+    <span class="n">neutral_node</span><span class="o">=</span><span class="s2">"nn"</span><span class="p">,</span>
     <span class="n">R_s</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">Ld</span><span class="o">=</span><span class="mf">1.8e-3</span><span class="p">,</span> <span class="n">Lq</span><span class="o">=</span><span class="mf">2.2e-3</span><span class="p">,</span>   <span class="c1"># T2.1: per-axis Ld/Lq for IPM</span>
     <span class="n">psi_pm</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">pole_pairs</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
     <span class="n">J</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">B</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span>
@@ -2496,16 +2496,16 @@ params struct.</p>
 <p>If a GUI converter built against the old <code>Params</code> shape needs to
 construct kwargs from a settings dict, just splat it:</p>
 <div class="highlight"><pre><span></span><code><span class="n">pmsm_kwargs</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;M1&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;phase_nodes&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;ua&quot;</span><span class="p">,</span> <span class="s2">&quot;ub&quot;</span><span class="p">,</span> <span class="s2">&quot;uc&quot;</span><span class="p">),</span>
-    <span class="s2">&quot;neutral_node&quot;</span><span class="p">:</span> <span class="s2">&quot;nn&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;R_s&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">&quot;Rs&quot;</span><span class="p">],</span>
-    <span class="s2">&quot;Ld&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">&quot;Ld&quot;</span><span class="p">],</span>
-    <span class="s2">&quot;Lq&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">&quot;Lq&quot;</span><span class="p">],</span>
-    <span class="s2">&quot;psi_pm&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">&quot;psi_pm&quot;</span><span class="p">],</span>
-    <span class="s2">&quot;pole_pairs&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">&quot;pp&quot;</span><span class="p">],</span>
-    <span class="s2">&quot;J&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">&quot;J&quot;</span><span class="p">],</span>
-    <span class="s2">&quot;B&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;B&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
+    <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"M1"</span><span class="p">,</span>
+    <span class="s2">"phase_nodes"</span><span class="p">:</span> <span class="p">(</span><span class="s2">"ua"</span><span class="p">,</span> <span class="s2">"ub"</span><span class="p">,</span> <span class="s2">"uc"</span><span class="p">),</span>
+    <span class="s2">"neutral_node"</span><span class="p">:</span> <span class="s2">"nn"</span><span class="p">,</span>
+    <span class="s2">"R_s"</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"Rs"</span><span class="p">],</span>
+    <span class="s2">"Ld"</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"Ld"</span><span class="p">],</span>
+    <span class="s2">"Lq"</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"Lq"</span><span class="p">],</span>
+    <span class="s2">"psi_pm"</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"psi_pm"</span><span class="p">],</span>
+    <span class="s2">"pole_pairs"</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"pp"</span><span class="p">],</span>
+    <span class="s2">"J"</span><span class="p">:</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"J"</span><span class="p">],</span>
+    <span class="s2">"B"</span><span class="p">:</span> <span class="n">settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"B"</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
 <span class="p">}</span>
 <span class="n">motor</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">add_pmsm</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="o">**</span><span class="n">pmsm_kwargs</span><span class="p">)</span>
 </code></pre></div>

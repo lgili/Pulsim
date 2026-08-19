@@ -1992,7 +1992,7 @@
 </tr>
 <tr>
 <td>Variable step inside pulsim</td>
-<td><strong>v1.6.0</strong> — in-kernel coupling planned</td>
+<td><strong>shipped</strong> — <code>engine='dsed'</code> (event-driven RK45/BDF2 auto-dispatch) for LTI-per-mask circuits; in-kernel adaptive trap for the PWL engine still planned</td>
 </tr>
 </tbody>
 </table>
@@ -2034,8 +2034,8 @@ matrices, queued for v1.6.0.</p>
 
 <span class="n">solver</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">DormandPrince5</span><span class="p">(</span><span class="n">f</span><span class="o">=</span><span class="n">lorenz</span><span class="p">,</span> <span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">)</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">solve</span><span class="p">(</span><span class="n">t_span</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">),</span> <span class="n">x0</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]))</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">n_accepted</span><span class="si">}</span><span class="s2"> accepted, </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">n_rejected</span><span class="si">}</span><span class="s2"> rejected, &quot;</span>
-      <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">n_f_evals</span><span class="si">}</span><span class="s2"> f evals&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">n_accepted</span><span class="si">}</span><span class="s2"> accepted, </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">n_rejected</span><span class="si">}</span><span class="s2"> rejected, "</span>
+      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">n_f_evals</span><span class="si">}</span><span class="s2"> f evals"</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="radauiia3-implicit-l-stable"><code>RadauIIA3</code> — implicit, L-stable<a class="headerlink" href="#radauiia3-implicit-l-stable" title="Permanent link">&para;</a></h3>
 <p>2-stage Radau IIA, order 3.</p>

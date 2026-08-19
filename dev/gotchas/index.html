@@ -2196,7 +2196,7 @@
 <p>A <code>PulseVoltageSource</code> with <code>rise_time = fall_time = 0</code> driving a MOSFET/IGBT gate, with an inductor in the drain/collector path, will diverge within a few PWM cycles. The trapezoidal companion model for <code>L</code> can't follow a discontinuous current command.</p>
 <p><strong>Fix:</strong> add realistic ramps:</p>
 <div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_pulse_voltage_source</span><span class="p">(</span>
-    <span class="s2">&quot;Vg&quot;</span><span class="p">,</span> <span class="s2">&quot;g&quot;</span><span class="p">,</span> <span class="s2">&quot;gnd&quot;</span><span class="p">,</span>
+    <span class="s2">"Vg"</span><span class="p">,</span> <span class="s2">"g"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span>
     <span class="n">v_pulsed</span><span class="o">=</span><span class="mf">15.0</span><span class="p">,</span>
     <span class="n">rise_time</span><span class="o">=</span><span class="mf">100e-9</span><span class="p">,</span> <span class="n">fall_time</span><span class="o">=</span><span class="mf">100e-9</span><span class="p">,</span>   <span class="c1"># ← critical</span>
     <span class="n">pulse_width</span><span class="o">=...</span><span class="p">,</span> <span class="n">period</span><span class="o">=...</span><span class="p">,</span>
@@ -2221,14 +2221,14 @@
 <h2 id="cache-size-build-time">Cache size + build time<a class="headerlink" href="#cache-size-build-time" title="Permanent link">&para;</a></h2>
 <h3 id="symptom-cachebuilddt-takes-forever">Symptom: <code>cache.build(dt)</code> takes forever<a class="headerlink" href="#symptom-cachebuilddt-takes-forever" title="Permanent link">&para;</a></h3>
 <p>The cache enumerates all <code>2^N</code> reachable switch combinations. With <code>N = 8</code> switches that's 256 entries; with <code>N = 12</code> it's 4096. Each entry stamps the MNA matrix + KLU-factorizes it.</p>
-<p><strong>Fix:</strong> lazy-build (Layer 4 V6) is the default — only states reached by <code>switch_fn</code> are factored. If yours isn't lazy, check that you haven't pinned all bits via a custom switch driver. For pathological topologies with very many switches, consider partitioning into sub-circuits.</p>
+<p><strong>Fix:</strong> <code>simulate()</code> builds lazily (v1.8+) — only states actually reached by <code>switch_fn</code> are factored, so many-switch circuits start immediately. If you drive the cache DIRECTLY, <code>cache.build(dt)</code> is the eager 2^N path; call <code>cache.build_lazy(dt)</code> instead (<code>cache.num_built_segments()</code> shows how many states the run really visited). For pathological topologies, consider partitioning into sub-circuits.</p>
 <h3 id="symptom-klu-singular-matrix-error">Symptom: KLU singular-matrix error<a class="headerlink" href="#symptom-klu-singular-matrix-error" title="Permanent link">&para;</a></h3>
 <p>Cache build fails with <code>compute_dc_op: DC matrix structurally singular for mask ...</code>.</p>
 <p>This usually means:
 - A node is dangling (no connection to ground).
 - All sources are current sources and the topology has no DC path to ground.
 - A nonlinear branch (<code>BranchKind::Nonlinear</code>) has no diagonal contribution. Pulsim already adds a 1e-12 G_min for <code>SaturableInductor</code>; for other custom devices you may need to add your own.</p>
-<p><strong>Fix:</strong> check the topology with a small dump (<code>pool.state_size(graph)</code> should equal <code>num_active_nodes + num_sources + num_inductors</code>). Add a 1 µΩ resistor between any floating node and ground.</p>
+<p><strong>Fix:</strong> check the topology with a small dump (<code>pool.state_size(graph)</code> should equal <code>num_active_nodes + num_sources + num_inductors</code>). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — <code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)</code> — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.</p>
 <h2 id="time-step-dt-choices">Time-step (<code>dt</code>) choices<a class="headerlink" href="#time-step-dt-choices" title="Permanent link">&para;</a></h2>
 <h3 id="symptom-ringing-or-instability-with-reasonable-circuits">Symptom: ringing or instability with reasonable circuits<a class="headerlink" href="#symptom-ringing-or-instability-with-reasonable-circuits" title="Permanent link">&para;</a></h3>
 <p>If <code>dt</code> is too large compared to the system's smallest time constant, the trapezoidal companion can ring (overshoot a true exponential by 10-20 %).</p>
@@ -2241,8 +2241,8 @@
 <p>You called the wrong typed accessor on <code>DevicePool</code>. The <code>kind_of(b_id)</code> casts the variant index directly to <code>StoredKind</code>.</p>
 <p><strong>Fix:</strong> always go through the typed accessor matching <code>pool.kind_of(b_id)</code>, or use the variant directly.</p>
 <h3 id="symptom-forgotten-ground">Symptom: forgotten ground<a class="headerlink" href="#symptom-forgotten-ground" title="Permanent link">&para;</a></h3>
-<p>Every isolated subnet must have a path to ground. Even galvanically-isolated transformer secondaries need a 1 µΩ resistor to primary ground (or use a <code>BranchKind::Source</code> like a 0 V source to tie the secondary somewhere).</p>
-<p><strong>Fix:</strong> add <code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e-6)</code>. The current flowing through <code>R_iso</code> will be in the picoamps and doesn't perturb the result.</p>
+<p>Every isolated subnet must have a DC reference. A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it.</p>
+<p><strong>Fix:</strong> <code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)</code> for a reference-only tie (leakage ~nA, invisible in the waveforms), or <code>1e-6</code> only when you intend an actual bond between the grounds.</p>
 <h3 id="symptom-switch_fn-never-fires-the-bit-i-expect">Symptom: switch_fn never fires the bit I expect<a class="headerlink" href="#symptom-switch_fn-never-fires-the-bit-i-expect" title="Permanent link">&para;</a></h3>
 <p><code>SwitchStateMask</code> indexes by <strong>switch order in the graph</strong>, not by <code>branch_id</code>. The mapping is established by <code>add_switch</code> / <code>add_diode</code> insertion order.</p>
 <p><strong>Fix:</strong> inspect <code>b.graph.num_switches</code> and check the insertion sequence. The first switch added gets bit 0, the next gets bit 1, etc.</p>

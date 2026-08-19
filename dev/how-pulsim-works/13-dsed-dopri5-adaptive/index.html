@@ -2136,7 +2136,7 @@ h_{\text{new}} = \text{safety} \cdot h \cdot
 <span class="w">                                        </span><span class="n">h_grow_max</span><span class="p">);</span>
 
 <span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mi">1</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="c1">// Accept the step. Store err for next iteration&#39;s I term.</span>
+<span class="w">    </span><span class="c1">// Accept the step. Store err for next iteration's I term.</span>
 <span class="w">    </span><span class="n">err_prev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">max</span><span class="p">(</span><span class="n">err</span><span class="p">,</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mf">1e-2</span><span class="p">});</span><span class="w">  </span><span class="c1">// protect against zero</span>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="n">h_proposed</span><span class="p">};</span>
 <span class="p">}</span>
@@ -2205,7 +2205,7 @@ change</strong> means a root in <span class="arithmatex">\((0, 1)\)</span>.</p>
 <p>For each predicate that flipped sign, the Illinois (modified
 regula falsi) root finder finds <span class="arithmatex">\(t^\ast\)</span> inside the step:</p>
 <div class="highlight"><pre><span></span><code>g_left, g_right are the predicate values at θ = 0 and θ = 1.
-Both have opposite signs (we wouldn&#39;t be here otherwise).
+Both have opposite signs (we wouldn't be here otherwise).
 
 while abs(t_right - t_left) &gt; tol:
     t_mid = t_left - g_left * (t_right - t_left) / (g_right - g_left)

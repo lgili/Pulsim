@@ -1807,7 +1807,7 @@
 </ol>
 <blockquote>
 <p><strong>TL;DR</strong></p>
-<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;im_dol.yaml&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"im_dol.yaml"</span><span class="p">)</span>
 <span class="n">chain</span>  <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">wire_chain_from_yaml</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="n">chain_spec_yaml</span><span class="p">)</span>
 <span class="n">step_obs</span> <span class="o">=</span> <span class="n">chain</span><span class="o">.</span><span class="n">make_step_observer</span><span class="p">(</span><span class="n">dt</span><span class="p">)</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=...</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">dt</span><span class="p">,</span>
@@ -1861,7 +1861,7 @@ writes <code>+N·A·µ₀·dM/dt</code> into the <code>L_core_V_M</code> source 
 because the kernel's <code>CxxBlockChain</code> is a different module than
 the YAML circuit loader. Pass the chain spec as a YAML string OR
 a Python list of dicts:</p>
-<div class="highlight"><pre><span></span><code><span class="n">chain</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">wire_chain_from_yaml</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="s2">&quot;&quot;&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="n">chain</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">wire_chain_from_yaml</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="s2">"""</span>
 <span class="s2">- type: induction_motor</span>
 <span class="s2">  device: IM</span>
 <span class="s2">  J: 0.01</span>
@@ -1889,7 +1889,7 @@ a Python list of dicts:</p>
 <span class="s2">  A_core: 1e-4</span>
 <span class="s2">  M_channel: M</span>
 <span class="s2">  B_channel: B</span>
-<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+<span class="s2">"""</span><span class="p">)</span>
 </code></pre></div>
 <p>Each block must carry:</p>
 <ul>
@@ -1938,11 +1938,11 @@ branch indices. Wire them as standalone blocks alongside the IM
 or PMSM that produces the αβ inputs.</p>
 <h3 id="unknown-block-types">Unknown block types<a class="headerlink" href="#unknown-block-types" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="n">pulsim</span><span class="o">.</span><span class="n">wire_chain_from_yaml</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="p">[</span>
-    <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;not_a_real_block&quot;</span><span class="p">,</span> <span class="s2">&quot;device&quot;</span><span class="p">:</span> <span class="s2">&quot;IM&quot;</span><span class="p">}</span>
+    <span class="p">{</span><span class="s2">"type"</span><span class="p">:</span> <span class="s2">"not_a_real_block"</span><span class="p">,</span> <span class="s2">"device"</span><span class="p">:</span> <span class="s2">"IM"</span><span class="p">}</span>
 <span class="p">])</span>
-<span class="c1"># → KeyError: chain block #0 has unknown type &#39;not_a_real_block&#39;;</span>
-<span class="c1">#   supported: [&#39;flux_mras_observer&#39;, &#39;hysteretic_inductor&#39;,</span>
-<span class="c1">#               &#39;induction_motor&#39;, &#39;sliding_mode_observer&#39;]</span>
+<span class="c1"># → KeyError: chain block #0 has unknown type 'not_a_real_block';</span>
+<span class="c1">#   supported: ['flux_mras_observer', 'hysteretic_inductor',</span>
+<span class="c1">#               'induction_motor', 'sliding_mode_observer']</span>
 </code></pre></div>
 <p>Honest error — no silent skip.</p>
 <h3 id="empty-spec">Empty spec<a class="headerlink" href="#empty-spec" title="Permanent link">&para;</a></h3>
@@ -1966,7 +1966,7 @@ options:</p>
 <span class="w">  </span><span class="nt">tol_newton_dx</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">1.0e-9</span>
 <span class="w">  </span><span class="nt">tol_newton_res</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0e-9</span>
 <span class="w">  </span><span class="c1"># Phase 2.4 schema — adaptive RK selector (v1.5).</span>
-<span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">kernel</span><span class="w">       </span><span class="c1"># &quot;kernel&quot; | &quot;dopri5&quot; | &quot;radau&quot;</span>
+<span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">kernel</span><span class="w">       </span><span class="c1"># "kernel" | "dopri5" | "radau"</span>
 <span class="w">  </span><span class="nt">rtol</span><span class="p">:</span><span class="w">        </span><span class="l l-Scalar l-Scalar-Plain">1.0e-5</span><span class="w">       </span><span class="c1"># tolerances for adaptive paths</span>
 <span class="w">  </span><span class="nt">atol</span><span class="p">:</span><span class="w">        </span><span class="l l-Scalar l-Scalar-Plain">1.0e-8</span>
 <span class="w">  </span><span class="nt">dt_init</span><span class="p">:</span><span class="w">     </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
@@ -1974,7 +1974,7 @@ options:</p>
 <p>The loader puts the parsed values on <code>loaded.options</code>
 (a <code>SimulationOptions</code> instance). You can forward them into
 <code>simulate()</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;buck.yaml&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"buck.yaml"</span><span class="p">)</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span>
     <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span>
     <span class="n">t_end</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span>
@@ -1992,12 +1992,12 @@ files stay forward-compatible. See <a href="../solvers/">solvers.md</a> for
 the detailed rationale.</p>
 <h2 id="end-to-end-example">End-to-end example<a class="headerlink" href="#end-to-end-example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1. Load the topology + simulation options.</span>
-<span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">&quot;examples/im_dol.yaml&quot;</span><span class="p">)</span>
+<span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/im_dol.yaml"</span><span class="p">)</span>
 <span class="n">b</span>      <span class="o">=</span> <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span>
 <span class="n">opts</span>   <span class="o">=</span> <span class="n">loaded</span><span class="o">.</span><span class="n">options</span>
 
 <span class="c1"># 2. Wire the chain.</span>
-<span class="n">chain</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">wire_chain_from_yaml</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="n">chain</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">wire_chain_from_yaml</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="s2">"""</span>
 <span class="s2">- type: induction_motor</span>
 <span class="s2">  device: IM</span>
 <span class="s2">  J: 0.01</span>
@@ -2010,7 +2010,7 @@ the detailed rationale.</p>
 <span class="s2">  L_m: 0.087392</span>
 <span class="s2">  pole_pairs: 2</span>
 <span class="s2">  omega_channel: omega</span>
-<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+<span class="s2">"""</span><span class="p">)</span>
 
 <span class="c1"># 3. Pull observer + b_extra wiring out of the chain.</span>
 <span class="n">step_obs</span>   <span class="o">=</span> <span class="n">chain</span><span class="o">.</span><span class="n">make_step_observer</span><span class="p">(</span><span class="n">opts</span><span class="o">.</span><span class="n">dt</span><span class="p">)</span>
@@ -2023,7 +2023,7 @@ the detailed rationale.</p>
     <span class="n">step_observer</span><span class="o">=</span><span class="n">step_obs</span><span class="p">,</span>
     <span class="n">b_extra_fn</span><span class="o">=</span><span class="n">b_extra_fn</span><span class="p">,</span>
 <span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ω =&quot;</span><span class="p">,</span> <span class="n">chain</span><span class="o">.</span><span class="n">get_channel</span><span class="p">(</span><span class="s2">&quot;omega&quot;</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"ω ="</span><span class="p">,</span> <span class="n">chain</span><span class="o">.</span><span class="n">get_channel</span><span class="p">(</span><span class="s2">"omega"</span><span class="p">))</span>
 </code></pre></div>
 <h2 id="extending-add-your-own-block-type">Extending — add your own block type<a class="headerlink" href="#extending-add-your-own-block-type" title="Permanent link">&para;</a></h2>
 <p>Three steps:</p>
@@ -2033,11 +2033,11 @@ the detailed rationale.</p>
    block.</li>
 <li>Register it in <code>_BLOCK_HANDLERS</code>:
    <div class="highlight"><pre><span></span><code><span class="n">_BLOCK_HANDLERS</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s2">&quot;induction_motor&quot;</span><span class="p">:</span>      <span class="n">_add_induction_motor_block</span><span class="p">,</span>
-    <span class="s2">&quot;hysteretic_inductor&quot;</span><span class="p">:</span>  <span class="n">_add_hysteretic_inductor_block</span><span class="p">,</span>
-    <span class="s2">&quot;sliding_mode_observer&quot;</span><span class="p">:</span> <span class="n">_add_sliding_mode_observer_block</span><span class="p">,</span>
-    <span class="s2">&quot;flux_mras_observer&quot;</span><span class="p">:</span>   <span class="n">_add_flux_mras_observer_block</span><span class="p">,</span>
-    <span class="s2">&quot;your_new_type&quot;</span><span class="p">:</span>        <span class="n">_add_your_new_block</span><span class="p">,</span>   <span class="c1"># ← here</span>
+    <span class="s2">"induction_motor"</span><span class="p">:</span>      <span class="n">_add_induction_motor_block</span><span class="p">,</span>
+    <span class="s2">"hysteretic_inductor"</span><span class="p">:</span>  <span class="n">_add_hysteretic_inductor_block</span><span class="p">,</span>
+    <span class="s2">"sliding_mode_observer"</span><span class="p">:</span> <span class="n">_add_sliding_mode_observer_block</span><span class="p">,</span>
+    <span class="s2">"flux_mras_observer"</span><span class="p">:</span>   <span class="n">_add_flux_mras_observer_block</span><span class="p">,</span>
+    <span class="s2">"your_new_type"</span><span class="p">:</span>        <span class="n">_add_your_new_block</span><span class="p">,</span>   <span class="c1"># ← here</span>
 <span class="p">}</span>
 </code></pre></div></li>
 <li>Add a test in <code>python/tests/test_yaml_chain_*.py</code> exercising

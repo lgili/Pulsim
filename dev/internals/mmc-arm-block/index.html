@@ -2218,8 +2218,8 @@ circulating currents (degrees of freedom for energy-balance control).</p>
 <p>This is the model we want at L2. Still one state per arm, but
 faithfully reproduces dead-time and minimum-pulse-width effects.</p>
 <p>Two simultaneous level counts:</p>
-<div class="highlight"><pre><span></span><code>s_w = Σ s_{d1,n}            (3.97)  → &quot;defined&quot; SMs (one switch on)
-s_u = Σ (1 − s_{d1,n} − s_{d2,n})    (3.98)  → &quot;free-wheel&quot; SMs (both off)
+<div class="highlight"><pre><span></span><code>s_w = Σ s_{d1,n}            (3.97)  → "defined" SMs (one switch on)
+s_u = Σ (1 − s_{d1,n} − s_{d2,n})    (3.98)  → "free-wheel" SMs (both off)
 </code></pre></div>
 <p>Voltages (with <code>v_C_SMₙ ≈ v_C / N</code>):</p>
 <div class="highlight"><pre><span></span><code>v_w = (s_w / N) · v_C        (3.95)
@@ -2394,20 +2394,20 @@ parameters; that's a later concern.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;Vdc&quot;</span><span class="p">,</span> <span class="s2">&quot;p&quot;</span><span class="p">,</span> <span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="mf">11.5e3</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vdc"</span><span class="p">,</span> <span class="s2">"p"</span><span class="p">,</span> <span class="s2">"n"</span><span class="p">,</span> <span class="mf">11.5e3</span><span class="p">)</span>
 
 <span class="c1"># One arm — L0 average model</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_mmc_arm_average</span><span class="p">(</span>
-    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;B_a_p&quot;</span><span class="p">,</span>
-    <span class="n">node_a</span><span class="o">=</span><span class="s2">&quot;p&quot;</span><span class="p">,</span>            <span class="c1"># arm top</span>
-    <span class="n">node_b</span><span class="o">=</span><span class="s2">&quot;mid_a&quot;</span><span class="p">,</span>        <span class="c1"># arm midpoint (before L_b)</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">"B_a_p"</span><span class="p">,</span>
+    <span class="n">node_a</span><span class="o">=</span><span class="s2">"p"</span><span class="p">,</span>            <span class="c1"># arm top</span>
+    <span class="n">node_b</span><span class="o">=</span><span class="s2">"mid_a"</span><span class="p">,</span>        <span class="c1"># arm midpoint (before L_b)</span>
     <span class="n">n_sm</span><span class="o">=</span><span class="mi">7</span><span class="p">,</span>
     <span class="n">c_sm</span><span class="o">=</span><span class="mf">100e-6</span><span class="p">,</span>
-    <span class="n">sm_type</span><span class="o">=</span><span class="s2">&quot;half_bridge&quot;</span><span class="p">,</span>
+    <span class="n">sm_type</span><span class="o">=</span><span class="s2">"half_bridge"</span><span class="p">,</span>
     <span class="n">v_c0</span><span class="o">=</span><span class="mf">11.5e3</span><span class="p">,</span>
     <span class="n">m</span><span class="o">=</span><span class="n">p</span><span class="o">.</span><span class="n">const_signal</span><span class="p">(</span><span class="mf">0.5</span><span class="p">),</span>  <span class="c1"># or a switch_fn returning m_b(t) ∈ [0,1]</span>
 <span class="p">)</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">&quot;L_a_p&quot;</span><span class="p">,</span> <span class="s2">&quot;mid_a&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_a&quot;</span><span class="p">,</span> <span class="mf">750e-6</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L_a_p"</span><span class="p">,</span> <span class="s2">"mid_a"</span><span class="p">,</span> <span class="s2">"phase_a"</span><span class="p">,</span> <span class="mf">750e-6</span><span class="p">)</span>
 
 <span class="c1"># Symmetric negative arm + b, c phases ...</span>
 <span class="c1"># (pulsim helper p.add_mmc_three_phase_dc_ac() will do this in one call)</span>
@@ -2416,11 +2416,11 @@ parameters; that's a later concern.</p>
 <div class="highlight"><pre><span></span><code><span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">p</span><span class="o">.</span><span class="n">add_mmc_three_phase_dc_ac</span><span class="p">(</span>
     <span class="n">b</span><span class="p">,</span>
-    <span class="n">dc_pos</span><span class="o">=</span><span class="s2">&quot;p&quot;</span><span class="p">,</span> <span class="n">dc_neg</span><span class="o">=</span><span class="s2">&quot;n&quot;</span><span class="p">,</span>
-    <span class="n">ac_nodes</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;phase_a&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_b&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_c&quot;</span><span class="p">),</span>
+    <span class="n">dc_pos</span><span class="o">=</span><span class="s2">"p"</span><span class="p">,</span> <span class="n">dc_neg</span><span class="o">=</span><span class="s2">"n"</span><span class="p">,</span>
+    <span class="n">ac_nodes</span><span class="o">=</span><span class="p">(</span><span class="s2">"phase_a"</span><span class="p">,</span> <span class="s2">"phase_b"</span><span class="p">,</span> <span class="s2">"phase_c"</span><span class="p">),</span>
     <span class="n">n_sm</span><span class="o">=</span><span class="mi">7</span><span class="p">,</span> <span class="n">c_sm</span><span class="o">=</span><span class="mf">100e-6</span><span class="p">,</span> <span class="n">l_b</span><span class="o">=</span><span class="mf">750e-6</span><span class="p">,</span>
-    <span class="n">sm_type</span><span class="o">=</span><span class="s2">&quot;half_bridge&quot;</span><span class="p">,</span>
-    <span class="n">layer</span><span class="o">=</span><span class="s2">&quot;average&quot;</span><span class="p">,</span>        <span class="c1"># &quot;average&quot; | &quot;multilevel&quot; | &quot;equivalent&quot; | &quot;detailed&quot;</span>
+    <span class="n">sm_type</span><span class="o">=</span><span class="s2">"half_bridge"</span><span class="p">,</span>
+    <span class="n">layer</span><span class="o">=</span><span class="s2">"average"</span><span class="p">,</span>        <span class="c1"># "average" | "multilevel" | "equivalent" | "detailed"</span>
     <span class="n">modulator</span><span class="o">=...</span><span class="p">,</span>          <span class="c1"># callable t -&gt; (m_a, m_b, m_c) for each phase × pos/neg</span>
 <span class="p">)</span>
 </code></pre></div>
