@@ -58,6 +58,8 @@
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 
+#include <Eigen/OrderingMethods>
+
 #include <algorithm>
 #include <complex>
 #include <cstdint>
@@ -85,6 +87,17 @@ namespace pulsim::sparse {
 // Tune in the same file + recompile if benchmark data warrants.
 // -----------------------------------------------------------------------------
 inline constexpr Real MAX_PATH_LENGTH_RATIO = Real{0.6};
+
+/// Fill-reducing ordering used by `analyze()` (Phase-1 LU core).
+///
+/// * `Colamd` (default since Phase 1) — Eigen's COLAMD, the ordering
+///   designed for partial-pivoting LU (same family KLU/SuperLU use).
+///   On circuit MNA it typically produces a small fraction of RCM's
+///   fill: RCM minimises BANDWIDTH, which is the wrong objective for
+///   factorisation fill (audit finding rcm-not-amd-btf, CONFIRMED).
+/// * `Rcm` — the historical v1.3-v1.7 ordering, kept for A/B
+///   benchmarking and regression comparison.
+enum class LuOrdering { Colamd, Rcm };
 
 // The `Scalar = Real` default lives on the forward declaration in
 // `solver.hpp`; C++ forbids restating it here.
@@ -131,11 +144,28 @@ public:
         //    pair (i, j) with `i != j` produces edges in both directions.
         const auto adj = build_symmetric_adjacency_(M);
 
-        // 2. Fill-reducing column permutation via RCM.
-        Pcol_     = compute_rcm_ordering_(adj);
-        Pinv_col_.assign(static_cast<std::size_t>(n_), 0);
-        for (Index k = 0; k < n_; ++k) {
-            Pinv_col_[static_cast<std::size_t>(Pcol_[k])] = k;
+        // 2. Fill-reducing column permutation.
+        if (ordering_ == LuOrdering::Colamd) {
+            // Eigen COLAMD convention (verified empirically on an
+            // arrow matrix — hub must land LAST for near-zero fill):
+            // P.indices()[orig] == new position of original column.
+            Eigen::COLAMDOrdering<Index> colamd;
+            Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic,
+                                      Index> perm;
+            colamd(M, perm);
+            Pinv_col_.assign(static_cast<std::size_t>(n_), 0);
+            Pcol_.assign(static_cast<std::size_t>(n_), 0);
+            for (Index j = 0; j < n_; ++j) {
+                const Index newpos = perm.indices()[j];
+                Pinv_col_[static_cast<std::size_t>(j)] = newpos;
+                Pcol_[static_cast<std::size_t>(newpos)] = j;
+            }
+        } else {
+            Pcol_ = compute_rcm_ordering_(adj);
+            Pinv_col_.assign(static_cast<std::size_t>(n_), 0);
+            for (Index k = 0; k < n_; ++k) {
+                Pinv_col_[static_cast<std::size_t>(Pcol_[k])] = k;
+            }
         }
 
         // 3. Elimination tree on the permuted symmetric structure.
@@ -148,39 +178,38 @@ public:
         return true;
     }
 
-    /// Numeric factorization via Gilbert-Peierls left-looking sparse LU
-    /// (Gilbert & Peierls, *SIAM J. Sci. Stat. Comput.* 9, 1988; Davis
-    /// 2006 §3). For each permuted column k = 0..n-1:
-    ///   1. Initialize a dense workspace `x` from column `Pcol_[k]` of M
-    ///      after applying the current row permutation `Prow_`.
-    ///   2. Apply L-updates from previously-factored columns j < k:
-    ///      for each j in the symbolic U[:, k] pattern (excluding the
-    ///      diagonal), subtract `L[i, j] * x[j]` from every i in
-    ///      L[:, j]'s pattern.
-    ///   3. The diagonal entry x[k] becomes the pivot U[k, k]. Above-
-    ///      diagonal x[i] (i < k) become U[i, k]. Below-diagonal entries
-    ///      x[i] (i > k) divided by the pivot become L[i, k].
+    /// Numeric factorization — TRUE Gilbert-Peierls left-looking sparse
+    /// LU with partial pivoting, O(flops) total (Gilbert & Peierls 1988;
+    /// Davis 2006 §6, `cs_lu`). Phase-1 rewrite of the v1.3-v1.7
+    /// implementation, whose inner loops were dense:
+    ///   * the L-update loop scanned ALL prior columns (`for j < k`) —
+    ///     O(n²) even for a tridiagonal matrix;
+    ///   * pivot search scanned rows k..n densely;
+    ///   * each pivot swap relabelled every stored L column — O(nnz(L))
+    ///     per swap.
+    /// The rewrite keeps the exact same public contract and factor
+    /// conventions (L strictly-lower unit, pivotal row ids, ascending;
+    /// U upper with the DIAGONAL STORED LAST per column) so `solve`,
+    /// `partial_refactor` and every introspection accessor are
+    /// unchanged.
     ///
-    /// Includes **partial pivoting** (column-by-column row swap to the
-    /// largest-magnitude candidate). The row swap relabels indices in
-    /// the already-stored L columns 0..k-1 (no new storage slots are
-    /// needed — the symbolic |M|+|M^T| pattern computed in Section 2
-    /// is invariant under row-only permutations). Required for circuit
-    /// MNA matrices whose voltage-source constraint rows produce zero
-    /// diagonals: without pivoting, Gilbert-Peierls hits zero pivot at
-    /// the source's branch-current variable.
-    ///
-    /// Pivot magnitudes below `PIVOT_TOL` (1e-14) trigger
-    /// `numeric_singular_ = true` and a `false` return; this signals
-    /// genuine rank deficiency (no row swap can rescue it) and the
-    /// caller is expected to surface the failure.
-    ///
-    /// Complex specialisation: `std::abs(Scalar)` returns `Real` for
-    /// both `double` and `std::complex<double>`, so the pivot-magnitude
-    /// comparisons keep semantics across both Scalar types. Pivot
-    /// extraction stores `Scalar` values; `1 / pivot` is well-defined
-    /// for the complex specialisation as long as the magnitude check
-    /// just above guarantees `|pivot| > 0`.
+    /// Per permuted column k:
+    ///   1. Scatter A(:, Pcol_[k]) into the sparse workspace by
+    ///      ORIGINAL row id; DFS each entry through the partially-built
+    ///      L (rows stored by original id during elimination, resolved
+    ///      via `pinv`: original row -> pivotal position) to obtain the
+    ///      reach pattern in topological order — the nonzero pattern of
+    ///      L \ A(:,col).
+    ///   2. Eliminate along the topological order only (O(flops)).
+    ///   3. Pivot = largest-magnitude candidate among NOT-yet-pivotal
+    ///      pattern rows (ties: diagonal first, then smallest original
+    ///      row id). |pivot| < 1e-14 → numeric_singular_. The "swap" is
+    ///      O(1): assign `pinv[ipiv] = k` — no stored-column relabel.
+    ///   4. Pattern rows already pivotal become U(:,k); the rest
+    ///      become L(:,k) scaled by 1/pivot.
+    /// After the loop one O(nnz) pass relabels L's row ids from
+    /// original to pivotal coordinates and sorts each column — restoring
+    /// the storage convention the rest of the class expects.
     [[nodiscard]] bool factorize(const MatrixType& M) override {
         if (!analyzed_) {
             throw std::logic_error(
@@ -191,40 +220,26 @@ public:
         if (M.rows() != n_ || M.cols() != n_) {
             return false;  // dimensions changed since analyze
         }
+        const std::size_t nz = static_cast<std::size_t>(n_);
 
-        // Initialize the row permutation to the SAME order as the column
-        // permutation. Circuit MNA matrices are structurally near-symmetric
-        // (every off-diagonal nonzero typically has a transpose partner),
-        // so reordering both rows AND columns the same way keeps the
-        // diagonal entries on the diagonal of M_perm — which is required
-        // for Gilbert-Peierls without partial pivoting to find a non-zero
-        // pivot at column k. Partial pivoting (deferred) would further
-        // mutate Prow_ on top of this base ordering.
-        Prow_     = std::vector<Index>(Pcol_.begin(), Pcol_.end());
-        Pinv_row_ = std::vector<Index>(Pinv_col_.begin(), Pinv_col_.end());
-
-        // Reset L and U storage to empty — factorize() recomputes the
-        // pattern DYNAMICALLY from x's actual nonzeros per column. This
-        // overrides any pattern previously populated by analyze()'s
-        // symbolic step; the symbolic pattern is just a hint for
-        // diagnostics, not used for storage allocation.
-        //
-        // Rationale: Section 2's symbolic pattern was computed against
-        // the |M|+|M^T| symmetric structure under the assumption
-        // Prow == Pcol. Partial pivoting in Section 3 mutates Prow,
-        // which can introduce L/U entries at permuted rows that the
-        // pre-pivot symbolic pattern didn't anticipate. Dynamic
-        // discovery avoids the issue: we record every nonzero x[i]
-        // post-elimination as an L or U entry.
-        l_col_ptr_.assign(static_cast<std::size_t>(n_ + 1), Index{0});
+        l_col_ptr_.assign(nz + 1, Index{0});
         l_row_idx_.clear();
         l_values_.clear();
-        u_col_ptr_.assign(static_cast<std::size_t>(n_ + 1), Index{0});
+        u_col_ptr_.assign(nz + 1, Index{0});
         u_row_idx_.clear();
         u_values_.clear();
 
-        // Dense workspace for the current column. Reused across the k loop.
-        std::vector<Scalar> x(static_cast<std::size_t>(n_), Scalar{0});
+        // pinv[orig_row] = pivotal position (column that chose this row
+        // as pivot), or -1 while the row is still un-pivoted.
+        std::vector<Index> pinv(nz, Index{-1});
+        Prow_.assign(nz, Index{0});
+
+        // Sparse workspace (values by ORIGINAL row id) + DFS scratch.
+        std::vector<Scalar> x(nz, Scalar{0});
+        std::vector<Index>  xi(nz, Index{0});      // reach pattern stack
+        std::vector<Index>  rstack(nz, Index{0});  // DFS node stack
+        std::vector<Index>  pstack(nz, Index{0});  // DFS position stack
+        std::vector<Index>  visit(nz, Index{-1});  // stamp = column k
 
         const Index*  Ap = M.outerIndexPtr();
         const Index*  Ai = M.innerIndexPtr();
@@ -233,127 +248,153 @@ public:
         constexpr Real PIVOT_TOL = Real{1e-14};
 
         for (Index k = 0; k < n_; ++k) {
-            // ---- Step 1: load column k of M[Prow_, Pcol_] into x --------
-            std::fill(x.begin(), x.end(), Scalar{0});
+            Index top = n_;   // xi[top..n) will hold the reach pattern
+
+            // ---- Step 1: scatter + DFS reach ------------------------
             const Index orig_col = Pcol_[static_cast<std::size_t>(k)];
             for (Index p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
-                const Index orig_row = Ai[p];
-                const Index perm_row = Pinv_row_[static_cast<std::size_t>(orig_row)];
-                x[static_cast<std::size_t>(perm_row)] = Ax[p];
+                const Index r0 = Ai[p];
+                x[static_cast<std::size_t>(r0)] = Ax[p];
+                if (visit[static_cast<std::size_t>(r0)] == k) continue;
+                // Iterative DFS from r0 over the partially-built L.
+                Index head = 0;
+                rstack[0] = r0;
+                while (head >= 0) {
+                    const Index r = rstack[static_cast<std::size_t>(head)];
+                    const Index j = pinv[static_cast<std::size_t>(r)];
+                    if (visit[static_cast<std::size_t>(r)] != k) {
+                        visit[static_cast<std::size_t>(r)] = k;
+                        pstack[static_cast<std::size_t>(head)] =
+                            (j < 0) ? Index{0}
+                                     : l_col_ptr_[static_cast<std::size_t>(j)];
+                    }
+                    bool done = true;
+                    if (j >= 0) {
+                        const Index pend =
+                            l_col_ptr_[static_cast<std::size_t>(j + 1)];
+                        for (Index q = pstack[static_cast<std::size_t>(head)];
+                             q < pend; ++q) {
+                            const Index rr =
+                                l_row_idx_[static_cast<std::size_t>(q)];
+                            if (visit[static_cast<std::size_t>(rr)] != k) {
+                                pstack[static_cast<std::size_t>(head)] = q + 1;
+                                ++head;
+                                rstack[static_cast<std::size_t>(head)] = rr;
+                                done = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (done) {
+                        xi[static_cast<std::size_t>(--top)] = r;
+                        --head;
+                    }
+                }
             }
 
-            // ---- Step 2: apply L-updates from ALL prior columns where x[j] != 0
-            // Dense workspace makes this O(k) per column for the j-loop
-            // (with the inner work scaling with L[:, j]'s nnz). The total
-            // O(n²) iteration cost is acceptable for circuit MNA at
-            // n ≤ a few hundred; for larger n a Davis 2006 §3-style
-            // reachability-based sparse triangular solve is the next
-            // optimization.
-            for (Index j = 0; j < k; ++j) {
-                const Scalar xj = x[static_cast<std::size_t>(j)];
+            // ---- Step 2: sparse elimination in topological order ----
+            for (Index p = top; p < n_; ++p) {
+                const Index r = xi[static_cast<std::size_t>(p)];
+                const Index j = pinv[static_cast<std::size_t>(r)];
+                if (j < 0) continue;              // un-pivoted row: leaf
+                const Scalar xj = x[static_cast<std::size_t>(r)];
                 if (xj == Scalar{0}) continue;
                 for (Index q = l_col_ptr_[static_cast<std::size_t>(j)];
                      q < l_col_ptr_[static_cast<std::size_t>(j + 1)]; ++q) {
-                    const Index i = l_row_idx_[static_cast<std::size_t>(q)];
-                    x[static_cast<std::size_t>(i)] -=
+                    x[static_cast<std::size_t>(
+                        l_row_idx_[static_cast<std::size_t>(q)])] -=
                         l_values_[static_cast<std::size_t>(q)] * xj;
                 }
             }
 
-            // ---- Step 3a: partial pivoting --------------------------------
-            // Find argmax |x[i]| for i ∈ [k, n_). If the largest is not
-            // at position k, swap logical rows i_max ↔ k. The swap
-            // relabels row indices in the already-stored L columns
-            // 0..k-1 (no new storage slots needed — the SET of nonzero
-            // logical rows per column is unchanged, only the labels
-            // permute). The symbolic L+U pattern from Section 2 was
-            // computed against the SYMMETRIC |M|+|M^T| structure, which
-            // is an over-estimate that remains valid under row-only
-            // permutations introduced by pivoting.
-            //
-            // Required for circuit MNA matrices with voltage-source
-            // constraint rows (zero diagonal at the source's branch-
-            // current variable). Without pivoting, M_perm has zero on
-            // the diagonal at that position and factorization fails.
-            //
-            // Complex specialisation: `std::abs` of `std::complex<Real>`
-            // returns the magnitude `Real`, so "largest magnitude"
-            // remains the well-defined pivot criterion (matches LAPACK
-            // ZGETRF semantics).
-            Index i_max     = k;
-            Real  max_abs   = std::abs(x[static_cast<std::size_t>(k)]);
-            for (Index i = k + 1; i < n_; ++i) {
-                const Real abs_xi =
-                    std::abs(x[static_cast<std::size_t>(i)]);
-                if (abs_xi > max_abs) {
-                    max_abs = abs_xi;
-                    i_max   = i;
+            // ---- Step 3: pivot among un-pivoted pattern rows --------
+            Index ipiv    = Index{-1};
+            Real  max_abs = Real{0};
+            for (Index p = top; p < n_; ++p) {
+                const Index r = xi[static_cast<std::size_t>(p)];
+                if (pinv[static_cast<std::size_t>(r)] >= 0) continue;
+                const Real a = std::abs(x[static_cast<std::size_t>(r)]);
+                if (a > max_abs ||
+                    (a == max_abs && ipiv >= 0 &&
+                     (r == orig_col || (ipiv != orig_col && r < ipiv)))) {
+                    max_abs = a;
+                    ipiv    = r;
                 }
             }
-            if (i_max != k) {
-                // (a) workspace
-                std::swap(x[static_cast<std::size_t>(k)],
-                           x[static_cast<std::size_t>(i_max)]);
-                // (b) stored L columns 0..k-1: relabel row indices
-                for (Index j = 0; j < k; ++j) {
-                    for (Index p = l_col_ptr_[static_cast<std::size_t>(j)];
-                         p < l_col_ptr_[static_cast<std::size_t>(j + 1)];
-                         ++p) {
-                        const Index r = l_row_idx_[static_cast<std::size_t>(p)];
-                        if (r == k) {
-                            l_row_idx_[static_cast<std::size_t>(p)] = i_max;
-                        } else if (r == i_max) {
-                            l_row_idx_[static_cast<std::size_t>(p)] = k;
-                        }
-                    }
-                }
-                // (c) row permutation tracker
-                const Index orig_k    = Prow_[static_cast<std::size_t>(k)];
-                const Index orig_imax = Prow_[static_cast<std::size_t>(i_max)];
-                std::swap(Prow_[static_cast<std::size_t>(k)],
-                           Prow_[static_cast<std::size_t>(i_max)]);
-                Pinv_row_[static_cast<std::size_t>(orig_k)]    = i_max;
-                Pinv_row_[static_cast<std::size_t>(orig_imax)] = k;
-            }
-
-            // ---- Step 3b: pivot check + numeric extraction ---------------
-            const Scalar pivot = x[static_cast<std::size_t>(k)];
-            if (std::abs(pivot) < PIVOT_TOL) {
+            // Diagonal preference on exact ties handled above; plain
+            // largest-magnitude otherwise (matches the historical
+            // pivoting criterion).
+            if (ipiv < 0 || max_abs < PIVOT_TOL) {
                 numeric_singular_ = true;
+                // Clear workspace for a clean retry after refactor.
+                for (Index p = top; p < n_; ++p) {
+                    x[static_cast<std::size_t>(
+                        xi[static_cast<std::size_t>(p)])] = Scalar{0};
+                }
                 return false;
             }
+            const Scalar pivot     = x[static_cast<std::size_t>(ipiv)];
+            const Scalar inv_pivot = Scalar{1} / pivot;
 
-            // Store U[:, k] — dynamically discover nonzero rows
-            // i ∈ [0, k] in x. Diagonal is `pivot`. Row indices end
-            // up sorted automatically (we iterate i in increasing
-            // order). We update `u_col_ptr_[k+1]` at the END of this
-            // column's push so that the NEXT iteration's L-update
-            // loop sees the correct slice for j ≤ k.
-            for (Index i = 0; i < k; ++i) {
-                const Scalar xi = x[static_cast<std::size_t>(i)];
-                if (xi != Scalar{0}) {
-                    u_row_idx_.push_back(i);
-                    u_values_.push_back(xi);
+            // ---- Step 4: harvest U(:,k) and L(:,k) ------------------
+            for (Index p = top; p < n_; ++p) {
+                const Index r = xi[static_cast<std::size_t>(p)];
+                const Index j = pinv[static_cast<std::size_t>(r)];
+                const Scalar xr = x[static_cast<std::size_t>(r)];
+                if (j >= 0) {
+                    // already pivotal → U entry at pivotal row j
+                    if (xr != Scalar{0}) {
+                        u_row_idx_.push_back(j);
+                        u_values_.push_back(xr);
+                    }
+                } else if (r != ipiv) {
+                    // stays below the diagonal → L entry (ORIGINAL row
+                    // id for now; relabelled after the k-loop)
+                    if (xr != Scalar{0}) {
+                        l_row_idx_.push_back(r);
+                        l_values_.push_back(xr * inv_pivot);
+                    }
                 }
+                x[static_cast<std::size_t>(r)] = Scalar{0};  // clear
+            }
+            // U's diagonal entry is stored LAST (solve() relies on it),
+            // and the above-diagonal entries are sorted ascending for
+            // deterministic storage.
+            {
+                const auto ub =
+                    static_cast<std::size_t>(u_col_ptr_[nzk_(k)]);
+                sort_col_pairs_(u_row_idx_, u_values_, ub,
+                                 u_row_idx_.size());
             }
             u_row_idx_.push_back(k);
             u_values_.push_back(pivot);
             u_col_ptr_[static_cast<std::size_t>(k + 1)] =
                 static_cast<Index>(u_row_idx_.size());
-
-            // Store L[:, k] — dynamically discover nonzero rows
-            // i ∈ (k, n). Values scaled by 1/pivot to give L unit-
-            // lower-triangular form. Same end-of-push col_ptr update.
-            const Scalar inv_pivot = Scalar{1} / pivot;
-            for (Index i = k + 1; i < n_; ++i) {
-                const Scalar xi = x[static_cast<std::size_t>(i)];
-                if (xi != Scalar{0}) {
-                    l_row_idx_.push_back(i);
-                    l_values_.push_back(xi * inv_pivot);
-                }
-            }
             l_col_ptr_[static_cast<std::size_t>(k + 1)] =
                 static_cast<Index>(l_row_idx_.size());
+
+            pinv[static_cast<std::size_t>(ipiv)] = k;
+            Prow_[static_cast<std::size_t>(k)]   = ipiv;
+        }
+
+        // ---- Final pass: relabel L rows original → pivotal and sort.
+        // O(nnz(L) + n·col·log) — once per factorize, this is what
+        // buys the O(1) pivot "swap" inside the k-loop.
+        for (auto& r : l_row_idx_) {
+            r = pinv[static_cast<std::size_t>(r)];
+        }
+        for (Index k = 0; k < n_; ++k) {
+            sort_col_pairs_(l_row_idx_, l_values_,
+                static_cast<std::size_t>(
+                    l_col_ptr_[static_cast<std::size_t>(k)]),
+                static_cast<std::size_t>(
+                    l_col_ptr_[static_cast<std::size_t>(k + 1)]));
+        }
+
+        Pinv_row_.assign(nz, Index{0});
+        for (Index i = 0; i < n_; ++i) {
+            Pinv_row_[static_cast<std::size_t>(
+                Prow_[static_cast<std::size_t>(i)])] = i;
         }
 
         factorized_ = true;
@@ -419,6 +460,12 @@ public:
         }
     }
 
+    /// Select the fill-reducing ordering for the NEXT analyze() call.
+    /// Default: COLAMD (Phase-1). `LuOrdering::Rcm` restores the
+    /// v1.3-v1.7 ordering for A/B comparison.
+    void set_ordering(LuOrdering o) noexcept { ordering_ = o; }
+    [[nodiscard]] LuOrdering ordering() const noexcept { return ordering_; }
+
     [[nodiscard]] bool is_analyzed()   const noexcept override { return analyzed_; }
     [[nodiscard]] bool is_factorized() const noexcept override { return factorized_; }
 
@@ -469,88 +516,138 @@ public:
             return true;  // nothing to do
         }
 
-        // 1. Update lazy union of varying columns (in ORIGINAL coords)
-        bool need_recompute = !path_valid_;
+        // 1. Path cache keyed by the CURRENT changed set — not a
+        // monotone union (Phase-1 fix of audit finding
+        // varying-set-monotone-union, CONFIRMED: after a successful
+        // refactor the factor is fully consistent, so past columns
+        // need no re-elimination; the old union-only-grows semantics
+        // degraded every long run towards full-factorize cost). The
+        // cache still serves the sweep fast path: repeated calls with
+        // an identical changed set reuse the path without recompute.
         for (Index c : changed_cols) {
             if (c < 0 || c >= n_) {
                 invalidate_path_cache_();
                 return false;
             }
-            auto [_, inserted] = varying_set_.insert(c);
-            if (inserted) {
-                need_recompute = true;
+        }
+        bool same_set = path_valid_ &&
+            varying_set_.size() == changed_cols.size();
+        if (same_set) {
+            for (Index c : changed_cols) {
+                if (!varying_set_.contains(c)) { same_set = false; break; }
             }
         }
-
-        // 2. Recompute path if union grew
-        if (need_recompute) {
+        if (!same_set) {
+            varying_set_.clear();
+            varying_set_.insert(changed_cols.begin(), changed_cols.end());
             compute_path_();
             path_valid_ = true;
         }
 
-        // 3. Re-eliminate path columns
-        std::vector<Scalar> x(static_cast<std::size_t>(n_), Scalar{0});
-        std::vector<bool> in_pattern(static_cast<std::size_t>(n_), false);
+        // 3. Re-eliminate path columns — sparse reach per column
+        // (Phase-1: replaces the dense j<k scan, the dense pivot-max
+        // scan and the O(n) pattern check with pattern-proportional
+        // work; the factor now stores PIVOTAL row ids, and pivotal row
+        // j < k is resolved by eliminated column j).
+        const std::size_t nz = static_cast<std::size_t>(n_);
+        std::vector<Scalar> x(nz, Scalar{0});
+        std::vector<Index>  xi(nz, Index{0});
+        std::vector<Index>  rstack(nz, Index{0});
+        std::vector<Index>  pstack(nz, Index{0});
+        std::vector<Index>  visit(nz, Index{-1});
+        std::vector<bool>   in_pattern(nz, false);
         const Index*  Ap = new_M.outerIndexPtr();
         const Index*  Ai = new_M.innerIndexPtr();
         const Scalar* Ax = new_M.valuePtr();
 
-        constexpr Real PIVOT_TOL        = Real{1e-14};
-        // Threshold-pivoting tolerance: the cached pivot is acceptable
-        // as long as its magnitude is at least PIVOT_THRESH × the
-        // column infinity-norm. KLU's default is 0.001 (0.1%), giving
-        // generous headroom to absorb the wide pivot-magnitude swings
-        // common in circuit MNA between switch-state changes. Stricter
-        // values cause excess fallback to full factorize without much
-        // numerical benefit.
-        constexpr Real PIVOT_THRESH     = Real{1e-3};
+        constexpr Real PIVOT_TOL    = Real{1e-14};
+        constexpr Real PIVOT_THRESH = Real{1e-3};
 
         for (Index k : path_) {
-            // ---- Load x = new_M[Prow, Pcol[k]] -------------------------
-            std::fill(x.begin(), x.end(), Scalar{0});
+            Index top = n_;
+            // ---- scatter new_M[:, Pcol_[k]] by PIVOTAL row + reach ---
             const Index orig_col = Pcol_[static_cast<std::size_t>(k)];
             for (Index p = Ap[orig_col]; p < Ap[orig_col + 1]; ++p) {
-                const Index orig_row = Ai[p];
-                const Index perm_row = Pinv_row_[static_cast<std::size_t>(orig_row)];
-                x[static_cast<std::size_t>(perm_row)] = Ax[p];
-            }
-
-            // ---- L-updates from j < k ---------------------------------
-            for (Index j = 0; j < k; ++j) {
-                const Scalar xj = x[static_cast<std::size_t>(j)];
-                if (xj == Scalar{0}) continue;
-                for (Index q = l_col_ptr_[static_cast<std::size_t>(j)];
-                     q < l_col_ptr_[static_cast<std::size_t>(j + 1)]; ++q) {
-                    const Index i = l_row_idx_[static_cast<std::size_t>(q)];
-                    x[static_cast<std::size_t>(i)] -=
-                        l_values_[static_cast<std::size_t>(q)] * xj;
+                const Index r0 = Pinv_row_[static_cast<std::size_t>(Ai[p])];
+                x[static_cast<std::size_t>(r0)] = Ax[p];
+                if (visit[static_cast<std::size_t>(r0)] == k) continue;
+                Index head = 0;
+                rstack[0] = r0;
+                while (head >= 0) {
+                    const Index r = rstack[static_cast<std::size_t>(head)];
+                    const bool resolved = (r < k);   // eliminated column
+                    if (visit[static_cast<std::size_t>(r)] != k) {
+                        visit[static_cast<std::size_t>(r)] = k;
+                        pstack[static_cast<std::size_t>(head)] =
+                            resolved
+                                ? l_col_ptr_[static_cast<std::size_t>(r)]
+                                : Index{0};
+                    }
+                    bool done = true;
+                    if (resolved) {
+                        const Index pend =
+                            l_col_ptr_[static_cast<std::size_t>(r + 1)];
+                        for (Index q = pstack[static_cast<std::size_t>(head)];
+                             q < pend; ++q) {
+                            const Index rr =
+                                l_row_idx_[static_cast<std::size_t>(q)];
+                            if (visit[static_cast<std::size_t>(rr)] != k) {
+                                pstack[static_cast<std::size_t>(head)] = q + 1;
+                                ++head;
+                                rstack[static_cast<std::size_t>(head)] = rr;
+                                done = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (done) {
+                        xi[static_cast<std::size_t>(--top)] = r;
+                        --head;
+                    }
                 }
             }
 
-            // ---- Pivot-fault check ------------------------------------
-            const Scalar pivot = x[static_cast<std::size_t>(k)];
-            const Real pivot_abs = std::abs(pivot);
+            // ---- eliminate in topological order ----------------------
+            for (Index p = top; p < n_; ++p) {
+                const Index r = xi[static_cast<std::size_t>(p)];
+                if (r >= k) continue;                 // not eliminated
+                const Scalar xr = x[static_cast<std::size_t>(r)];
+                if (xr == Scalar{0}) continue;
+                for (Index q = l_col_ptr_[static_cast<std::size_t>(r)];
+                     q < l_col_ptr_[static_cast<std::size_t>(r + 1)]; ++q) {
+                    x[static_cast<std::size_t>(
+                        l_row_idx_[static_cast<std::size_t>(q)])] -=
+                        l_values_[static_cast<std::size_t>(q)] * xr;
+                }
+            }
+
+            // ---- pivot-fault check (pattern-proportional) ------------
+            const Scalar pivot     = x[static_cast<std::size_t>(k)];
+            const Real   pivot_abs = std::abs(pivot);
             if (pivot_abs < PIVOT_TOL) {
+                for (Index p = top; p < n_; ++p)
+                    x[static_cast<std::size_t>(
+                        xi[static_cast<std::size_t>(p)])] = Scalar{0};
                 invalidate_path_cache_();
                 return false;
             }
-            // Threshold pivoting: reject if |x[k]| < PIVOT_THRESH ×
-            // column infinity norm, i.e. some row's magnitude is more
-            // than 1/PIVOT_THRESH × the current pivot. KLU-style; lets
-            // typical switch-state swings through while catching true
-            // pivot-order collapses.
             Real col_max = pivot_abs;
-            for (Index i = k + 1; i < n_; ++i) {
-                col_max = std::max(col_max,
-                    std::abs(x[static_cast<std::size_t>(i)]));
+            for (Index p = top; p < n_; ++p) {
+                const Index r = xi[static_cast<std::size_t>(p)];
+                if (r > k) {
+                    col_max = std::max(col_max,
+                        std::abs(x[static_cast<std::size_t>(r)]));
+                }
             }
             if (pivot_abs < PIVOT_THRESH * col_max) {
+                for (Index p = top; p < n_; ++p)
+                    x[static_cast<std::size_t>(
+                        xi[static_cast<std::size_t>(p)])] = Scalar{0};
                 invalidate_path_cache_();
                 return false;
             }
 
-            // ---- Pattern check + value update -------------------------
-            // Build a marker set of the existing L+U pattern for column k.
+            // ---- pattern check + in-place value update ---------------
             for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
                  q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 in_pattern[static_cast<std::size_t>(
@@ -561,18 +658,32 @@ public:
                 in_pattern[static_cast<std::size_t>(
                     l_row_idx_[static_cast<std::size_t>(q)])] = true;
             }
-            // Verify no x[i] != 0 falls outside the existing pattern.
             bool pattern_ok = true;
-            for (Index i = 0; i < n_; ++i) {
-                if (x[static_cast<std::size_t>(i)] != Scalar{0} &&
-                    !in_pattern[static_cast<std::size_t>(i)]) {
+            for (Index p = top; p < n_; ++p) {
+                const Index r = xi[static_cast<std::size_t>(p)];
+                if (x[static_cast<std::size_t>(r)] != Scalar{0} &&
+                    !in_pattern[static_cast<std::size_t>(r)]) {
                     pattern_ok = false;
                     break;
                 }
             }
-            // Reset the marker for the next column iteration. We
-            // touched only the existing-pattern positions; reset just
-            // those (cheaper than std::fill over the whole vector).
+            if (pattern_ok) {
+                for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
+                     q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                    u_values_[static_cast<std::size_t>(q)] =
+                        x[static_cast<std::size_t>(
+                            u_row_idx_[static_cast<std::size_t>(q)])];
+                }
+                const Scalar inv_pivot = Scalar{1} / pivot;
+                for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
+                     q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                    l_values_[static_cast<std::size_t>(q)] =
+                        x[static_cast<std::size_t>(
+                            l_row_idx_[static_cast<std::size_t>(q)])] *
+                        inv_pivot;
+                }
+            }
+            // reset markers + workspace over touched entries only
             for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
                  q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 in_pattern[static_cast<std::size_t>(
@@ -583,30 +694,17 @@ public:
                 in_pattern[static_cast<std::size_t>(
                     l_row_idx_[static_cast<std::size_t>(q)])] = false;
             }
+            for (Index p = top; p < n_; ++p) {
+                x[static_cast<std::size_t>(
+                    xi[static_cast<std::size_t>(p)])] = Scalar{0};
+            }
             if (!pattern_ok) {
                 invalidate_path_cache_();
                 return false;
             }
-
-            // Update U[:, k]'s values in-place at the existing slots.
-            // x[u_row_idx_[q]] may be 0 — that's a sparse zero, fine.
-            for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
-                 q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
-                const Index i = u_row_idx_[static_cast<std::size_t>(q)];
-                u_values_[static_cast<std::size_t>(q)] =
-                    x[static_cast<std::size_t>(i)];
-            }
-            // Update L[:, k]'s values (scaled by 1/pivot).
-            const Scalar inv_pivot = Scalar{1} / pivot;
-            for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
-                 q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
-                const Index i = l_row_idx_[static_cast<std::size_t>(q)];
-                l_values_[static_cast<std::size_t>(q)] =
-                    x[static_cast<std::size_t>(i)] * inv_pivot;
-            }
         }
 
-        return true;
+                return true;
     }
 
     /// Test-only: how many times has `compute_path_()` been invoked?
@@ -644,23 +742,27 @@ public:
         if (!factorized_ || n_ == 0) {
             return Index{0};
         }
-        // Check whether changed_cols would expand varying_set_.
-        bool would_grow = !path_valid_;
-        for (Index c : changed_cols) {
-            if (c < 0 || c >= n_) continue;
-            if (!varying_set_.contains(c)) {
-                would_grow = true;
-                break;
+        // Non-monotone semantics (Phase-1): the hypothetical path is
+        // that of the CURRENT changed set alone — matching what
+        // partial_refactor would actually walk. Identical-set calls
+        // reuse the cached size.
+        bool same_set = path_valid_ &&
+            varying_set_.size() == changed_cols.size();
+        if (same_set) {
+            for (Index c : changed_cols) {
+                if (c < 0 || c >= n_ || !varying_set_.contains(c)) {
+                    same_set = false;
+                    break;
+                }
             }
         }
-        if (!would_grow) {
+        if (same_set) {
             return static_cast<Index>(path_.size());
         }
-        // Walk the hypothetical union path WITHOUT mutating state.
         std::vector<bool> in_path(static_cast<std::size_t>(n_), false);
         Index count = 0;
-        auto walk_from = [&](Index orig_c) {
-            if (orig_c < 0 || orig_c >= n_) return;
+        for (Index orig_c : changed_cols) {
+            if (orig_c < 0 || orig_c >= n_) continue;
             Index k = Pinv_col_[static_cast<std::size_t>(orig_c)];
             while (k != Index{-1} &&
                    !in_path[static_cast<std::size_t>(k)]) {
@@ -668,9 +770,7 @@ public:
                 ++count;
                 k = etree_parent_[static_cast<std::size_t>(k)];
             }
-        };
-        for (Index c : varying_set_) walk_from(c);
-        for (Index c : changed_cols)   walk_from(c);
+        }
         return count;
     }
 
@@ -772,6 +872,33 @@ public:
     }
 
 private:
+    // Small helper: (k) -> size_t for u_col_ptr_ addressing at column
+    // start (used before the diagonal push in factorize()).
+    [[nodiscard]] std::size_t nzk_(Index k) const noexcept {
+        return static_cast<std::size_t>(k);
+    }
+
+    /// Sort the (row, value) pairs of one CSC column slice ascending by
+    /// row id. Used by factorize()'s final relabel pass and the U
+    /// above-diagonal harvest. Insertion sort — column slices are short
+    /// and mostly ordered.
+    static void sort_col_pairs_(std::vector<Index>& rows,
+                                 std::vector<Scalar>& vals,
+                                 std::size_t lo, std::size_t hi) {
+        for (std::size_t i = lo + 1; i < hi; ++i) {
+            const Index  r = rows[i];
+            const Scalar v = vals[i];
+            std::size_t j = i;
+            while (j > lo && rows[j - 1] > r) {
+                rows[j] = rows[j - 1];
+                vals[j] = vals[j - 1];
+                --j;
+            }
+            rows[j] = r;
+            vals[j] = v;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // 1. Symmetric-adjacency builder
     // -------------------------------------------------------------------------
@@ -1097,6 +1224,7 @@ private:
     bool analyzed_         = false;
     bool factorized_       = false;
     bool numeric_singular_ = false;
+    LuOrdering ordering_   = LuOrdering::Colamd;
 };
 
 // -----------------------------------------------------------------------------
