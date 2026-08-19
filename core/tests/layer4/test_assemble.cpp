@@ -225,3 +225,79 @@ TEST_CASE("assemble_segment_split: C is mask-invariant, G is not",
     // C's only entry: the 2·C_cap block at (0,0) (grounded cap).
     REQUIRE(DenseMatrix(C_on)(0, 0) == Real{2} * Real{1e-6});
 }
+
+TEST_CASE("assemble_segment_split: hand-stamped companion values",
+          "[v2][layer4][assemble][split]") {
+    // NON-tautological check (adversarial-review finding
+    // TEST-TAUTOLOGY): assemble_segment recombines the split, so
+    // J == G + (1/dt)·C cannot catch a wrong stamp. Here every
+    // dt-coefficient is asserted against its HAND-DERIVED value:
+    //   cap block         ±2·C_cap        in C
+    //   inductor diagonal −2·L            in C (branch-var row)
+    //   inductor incidence ±1             in G (NOT in C)
+    //   transformer cross −2·M            in C (both off-diagonals)
+    topology::Graph g;
+    DevicePool pool;
+    g.add_node("a");   // 0
+    g.add_node("b");   // 1
+    g.add_branch(0, g.ground(), topology::BranchKind::Source);
+    g.add_branch(0, 1, topology::BranchKind::PassiveLinear);          // L1 a→b
+    g.add_branch(1, g.ground(), topology::BranchKind::PassiveLinear); // C1 b→gnd
+    g.add_branch(1, g.ground(), topology::BranchKind::PassiveLinear); // L2 b→gnd
+
+    const Real Lp = 2e-3, Ls = 1e-3, Cc = 4.7e-6, kk = 0.9;
+    pool.add_voltage_source(0, {.V = 1.0});
+    pool.add_inductor(1, {.L = Lp});
+    pool.add_capacitor(2, {.C = Cc});
+    pool.add_inductor(3, {.L = Ls});
+    pool.add_transformer_coupling(1, 3,
+        {.L_p = Lp, .L_s = Ls, .k = kk});
+    const Real M = kk * std::sqrt(Lp * Ls);
+
+    topology::SwitchStateMask m(0);
+    sparse::Matrix G, C;
+    Vector b;
+    assemble_segment_split(g, pool, m, G, C, b);
+    DenseMatrix Gd = DenseMatrix(G);
+    DenseMatrix Cd = DenseMatrix(C);
+
+    const Index bv1 = pool.branch_var_id_for_inductor(1, g);
+    const Index bv2 = pool.branch_var_id_for_inductor(3, g);
+
+    // Capacitor block at node b (index 1), grounded → only (1,1).
+    REQUIRE(Cd(1, 1) == Real{2} * Cc);
+
+    // Inductor constraint diagonals: −2L.
+    REQUIRE(Cd(bv1, bv1) == -Real{2} * Lp);
+    REQUIRE(Cd(bv2, bv2) == -Real{2} * Ls);
+
+    // Transformer cross terms: −2M, symmetric.
+    REQUIRE(Cd(bv1, bv2) == Approx(-Real{2} * M).epsilon(1e-15));
+    REQUIRE(Cd(bv2, bv1) == Approx(-Real{2} * M).epsilon(1e-15));
+
+    // Inductor incidence lives in G (dt-independent), NOT in C.
+    REQUIRE(Gd(0, bv1)  == Real{1});    // KCL of i_L1 at node a
+    REQUIRE(Gd(1, bv1)  == Real{-1});   // KCL of i_L1 at node b
+    REQUIRE(Gd(bv1, 0)  == Real{1});    // constraint row v_a
+    REQUIRE(Gd(bv1, 1)  == Real{-1});   // constraint row v_b
+    REQUIRE(Gd(1, bv2)  == Real{1});    // L2: from = node b
+    REQUIRE(Gd(bv2, 1)  == Real{1});
+    REQUIRE(Cd(0, bv1)  == Real{0});
+    REQUIRE(Cd(bv1, 0)  == Real{0});
+    REQUIRE(Gd(bv1, bv1) == Real{0});   // diagonal ONLY in C
+    REQUIRE(Gd(1, 1)     == Real{0});   // cap block ONLY in C
+
+    // And the recombined matrix carries the classic forms:
+    // 2C/dt on the cap diagonal, −2L/dt on the constraint row.
+    const Real dt = 1e-6;
+    sparse::Matrix J;
+    Vector b2;
+    assemble_segment(g, pool, m, dt, J, b2);
+    DenseMatrix Jd = DenseMatrix(J);
+    REQUIRE(Jd(1, 1) ==
+            Approx(Real{2} * Cc / dt).epsilon(1e-15));
+    REQUIRE(Jd(bv1, bv1) ==
+            Approx(-Real{2} * Lp / dt).epsilon(1e-15));
+    REQUIRE(Jd(bv1, bv2) ==
+            Approx(-Real{2} * M / dt).epsilon(1e-15));
+}

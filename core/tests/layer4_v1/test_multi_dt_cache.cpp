@@ -232,3 +232,116 @@ TEST_CASE("Multi-dt solve_at gives correct chopper answer",
     REQUIRE(x[0] == Approx(12.0).margin(1e-9));
     REQUIRE(x[1] == Approx(11.9988).epsilon(0.001));
 }
+
+TEST_CASE("Failed event refactorize erases the entry; old dt recovers",
+          "[v2][layer4_v7][multi_dt][singular]") {
+    // Adversarial-review finding EVT-STALE-FACTOR: the solver
+    // destroys its previous factor before attempting the new one,
+    // so a failed dt-change refactorize must ERASE the entry — a
+    // stale entry claiming the old current_dt would make the next
+    // solve_at at the previously WORKING dt take the reuse branch
+    // and die on an unfactorized solver (logic_error) instead of
+    // rebuilding.
+    //
+    // Singularity rig: node0—gnd carries a NEGATIVE conductance
+    // G = −1 S and a 0.5 F capacitor → J(dt) = −1 + 1/dt, exactly
+    // singular at dt = 1. A current source keeps b non-trivial.
+    Graph g;
+    DevicePool pool;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);  // R<0
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);  // C
+    g.add_branch(0, g.ground(), BranchKind::Source);         // I
+
+    pool.add_resistor(0, {.G = -1.0});
+    pool.add_capacitor(1, {.C = 0.5});
+    pool.add_current_source(2, {.I = 1.0});
+
+    PwlStateSpaceCache cache{g, pool};
+    cache.build_lazy(Real{1e-3});
+
+    SwitchStateMask m(0);
+    Vector b_extra = Vector::Zero(1);
+    Vector x;
+
+    // dt = 0.5 → J = −1 + 2 = 1: fine.
+    cache.solve_at(m, 0.5, b_extra, x);
+    REQUIRE(cache.num_event_entries() == 1);
+    REQUIRE(x[0] == Approx(1.0).margin(1e-12));  // x = −b/J = 1
+
+    // dt = 1 → J = 0: numerically singular refactorize.
+    REQUIRE_THROWS_AS(cache.solve_at(m, 1.0, b_extra, x),
+                       std::runtime_error);
+    REQUIRE(cache.num_event_entries() == 0);  // entry erased
+
+    // Retry at the previously working dt: transparent rebuild.
+    cache.solve_at(m, 0.5, b_extra, x);
+    REQUIRE(x[0] == Approx(1.0).margin(1e-12));
+    REQUIRE(cache.num_event_entries() == 1);
+}
+
+TEST_CASE("refactor_parametric invalidates event-solver entries",
+          "[v2][layer4_v7][multi_dt][parametric]") {
+    // The v1.x aux cache silently served STALE factors after a
+    // parameter update. The event entries snapshot (G, C, b), so
+    // refactor_parametric must drop them; the next solve_at rebuilds
+    // from the UPDATED pool.
+    Chopper f;
+    f.cache->build_lazy(Real{0});
+
+    SwitchStateMask mask_on(1);
+    mask_on.set(0, true);
+    Vector b_extra = Vector::Zero(3);
+    Vector x_before, x_after, x_fresh;
+
+    f.cache->solve_at(mask_on, 1e-6, b_extra, x_before);
+    REQUIRE(f.cache->num_event_entries() == 1);
+
+    // R: 10 Ω → 5 Ω (branch 2 is the load resistor, R-form value).
+    auto r = f.cache->refactor_parametric(2, 5.0);
+    (void)r;
+    REQUIRE(f.cache->num_event_entries() == 0);  // dropped
+
+    f.cache->solve_at(mask_on, 1e-6, b_extra, x_after);
+
+    // Independent cache built AFTER the update agrees.
+    PwlStateSpaceCache fresh{f.g, f.pool};
+    fresh.build_lazy(Real{0});
+    fresh.solve_at(mask_on, 1e-6, b_extra, x_fresh);
+    for (Eigen::Index i = 0; i < x_after.size(); ++i) {
+        REQUIRE(x_after[i] == Approx(x_fresh[i]).margin(1e-12));
+    }
+    // And genuinely differs from the pre-update answer.
+    REQUIRE(std::abs(x_after[1] - x_before[1]) > 1e-6);
+}
+
+TEST_CASE("solve_at dt<=0 falls back to static assembly",
+          "[v2][layer4_v7][multi_dt][static]") {
+    // Primary cache at dt>0; solve_at(dt=0) must reproduce a
+    // static-only (V0) build: caps/inductors skipped entirely.
+    Graph g;
+    DevicePool pool;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);  // R
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);  // C
+    pool.add_voltage_source(0, {.V = 7.0});
+    pool.add_resistor(1, {.G = 0.5});
+    pool.add_capacitor(2, {.C = 1e-6});
+
+    PwlStateSpaceCache cache{g, pool};
+    cache.build_lazy(Real{1e-6});
+
+    SwitchStateMask m(0);
+    const auto n = static_cast<Index>(pool.state_size(g));
+    Vector b_extra = Vector::Zero(n);
+    Vector x_evt, x_ref;
+    cache.solve_at(m, Real{0}, b_extra, x_evt);
+
+    PwlStateSpaceCache ref{g, pool};
+    ref.build_lazy(Real{0});   // static primary
+    ref.solve(m, b_extra, x_ref);
+    for (Eigen::Index i = 0; i < x_evt.size(); ++i) {
+        REQUIRE(x_evt[i] == Approx(x_ref[i]).margin(1e-12));
+    }
+}

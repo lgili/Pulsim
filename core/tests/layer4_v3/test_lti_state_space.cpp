@@ -290,6 +290,12 @@ TEST_CASE("compute_lti_state_space handles a 2-cap split-bus stack "
     const Real pole = -Real{1} / ((R_src + R_load) * (C / Real{2}));
     Eigen::EigenSolver<DenseMatrix> es(lti.A);
     INFO("Eigenvalues: " << es.eigenvalues().transpose());
+    // Real spectrum expected (RC relaxation + marginal mode) —
+    // a spurious oscillatory pair must not hide in the imag part.
+    REQUIRE(std::abs(es.eigenvalues()(0).imag()) <=
+            std::abs(pole) * Real{1e-12});
+    REQUIRE(std::abs(es.eigenvalues()(1).imag()) <=
+            std::abs(pole) * Real{1e-12});
     std::array<Real, 2> re{es.eigenvalues()(0).real(),
                             es.eigenvalues()(1).real()};
     std::sort(re.begin(), re.end());
@@ -358,6 +364,10 @@ TEST_CASE("compute_lti_state_space handles a 3-cap chain (MMC-style stack)",
     const Real pole = -Real{1} / ((R_src + R_arm) * (C / Real{3}));
     Eigen::EigenSolver<DenseMatrix> es(lti.A);
     INFO("Eigenvalues: " << es.eigenvalues().transpose());
+    for (int i = 0; i < 3; ++i) {
+        REQUIRE(std::abs(es.eigenvalues()(i).imag()) <=
+                std::abs(pole) * Real{1e-12});
+    }
     std::array<Real, 3> re{es.eigenvalues()(0).real(),
                             es.eigenvalues()(1).real(),
                             es.eigenvalues()(2).real()};

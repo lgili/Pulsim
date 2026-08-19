@@ -915,6 +915,14 @@ public:
             EventEntry& e = it->second;
             const sparse::Matrix J = combine_event_J_(e, mask, dt);
             if (!e.solver->factorize(J)) {
+                // The solver destroys its previous factor up-front,
+                // so the entry can no longer serve ANY dt — erase it
+                // before throwing (adversarial-review finding
+                // EVT-STALE-FACTOR: keeping it resident with the old
+                // current_dt made a later solve_at at the previously
+                // WORKING dt hit the reuse branch and die with
+                // logic_error instead of transparently rebuilding).
+                event_entries_.erase(it);
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: refactorize "
                     "failed (numerically singular) for mask {} "
@@ -1194,9 +1202,15 @@ public:
     // inserted. Re-visiting an evicted mask transparently rebuilds
     // it (one assemble + factorize — the lazy path's normal first-
     // visit cost). Eviction happens ONLY when a new segment is
-    // built, never on a cache hit, so `lookup()` references stay
-    // valid exactly as long as they do today (any lazy INSERT
-    // already invalidates flat_map references).
+    // built, never on a cache hit. Reference contract: callers must
+    // not hold `lookup()` references across cache-MUTATING calls —
+    // a lazy insert reallocates under the flat_map Dictionary
+    // config, and eviction additionally erases under either config
+    // — and every in-repo caller (run_transient's Newton path
+    // included) consumes its reference before the next cache call.
+    //
+    // Note: the ≤ 8 event-solver entries (`solve_at`) are OUTSIDE
+    // this budget — they are bounded by count, not bytes.
     //
     // Eager `build()` mode never evicts: pre-building all 2^N
     // factors is an explicit caller decision, and the eager
@@ -1431,17 +1445,21 @@ private:
             return std::unexpected(seg.error());
         }
         // v2.0 Phase 1: LRU eviction BEFORE the insert (lazy mode
-        // only — see the budget block above). The insert itself
-        // invalidates flat_map references anyway, so evicting here
-        // opens no new invalidation window. The incoming segment is
-        // ALWAYS inserted even when it alone exceeds the budget —
-        // refusing to build would turn a memory knob into a wrong-
-        // answer knob.
+        // only — see the budget block above). Reference-safety
+        // contract: callers must not hold segment references across
+        // cache-mutating calls (a lazy insert reallocates under the
+        // flat_map Dictionary config, and eviction erases under
+        // either config) — every in-repo caller consumes its
+        // `lookup()` reference before the next cache call
+        // (run_transient's Newton path included). The incoming
+        // segment is ALWAYS inserted even when it alone exceeds the
+        // budget — refusing to build would turn a memory knob into
+        // a wrong-answer knob.
         if (lazy_mode_ && segment_budget_bytes_ > 0) {
             const std::size_t incoming = seg->approx_bytes();
+            std::size_t resident = segment_cache_bytes();
             while (!segments_.empty() &&
-                   segment_cache_bytes() + incoming >
-                       segment_budget_bytes_) {
+                   resident + incoming > segment_budget_bytes_) {
                 auto victim = segments_.begin();
                 for (auto it = segments_.begin();
                      it != segments_.end(); ++it) {
@@ -1450,6 +1468,7 @@ private:
                         victim = it;
                     }
                 }
+                resident -= victim->second.approx_bytes();
                 segments_.erase(victim);
                 segment_evictions_.fetch_add(
                     1, std::memory_order_relaxed);
