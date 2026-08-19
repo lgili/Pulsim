@@ -46,6 +46,8 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <array>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <stdexcept>
@@ -445,8 +447,23 @@ inline SimulationResult run_transient(
                                       diodes.current_diode_mask(),
                                       diode_owned);
             }
-            x = pwl::compute_dc_op(graph, pool, mask,
-                                    opts.t_start);
+            // Phase-0 fix #2: honour the Newton devices. The
+            // plain compute_dc_op stamps Nonlinear branches as
+            // OPEN, silently seeding the run from the operating
+            // point of a different circuit.
+            if (nl_refresh_effective) {
+                x = pwl::compute_dc_op_newton(
+                    graph, pool, mask, nl_refresh_effective,
+                    opts.t_start,
+                    opts.max_newton_iterations,
+                    opts.tol_newton_dx,
+                    opts.tol_newton_res,
+                    opts.enable_newton_line_search,
+                    opts.enable_newton_lm);
+            } else {
+                x = pwl::compute_dc_op(graph, pool, mask,
+                                        opts.t_start);
+            }
             flipped = has_diodes && diodes.update_from_state(x);
             ++iters;
         } while (flipped && iters < dc_max_iters);
@@ -587,6 +604,9 @@ inline SimulationResult run_transient(
             // it's the cached linear solve.
             Size iters = 0;
             bool flipped = false;
+            bool mask_cycle = false;
+            std::array<std::uint64_t, 64> masks_seen{};
+            Size n_masks_seen = 0;
             do {
                 auto mask = switch_fn(t);
                 if (has_diodes) {
@@ -594,6 +614,23 @@ inline SimulationResult run_transient(
                         diodes.current_diode_mask();
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
+                }
+                // Phase-0 fix #9: a repeated mask within one step's
+                // event iteration is a CYCLE (mask A -> B -> A ...,
+                // the un-hysteresed diode pair around a resonant
+                // node). Re-solving cannot converge — it only burns
+                // the budget — so break with the last consistent
+                // solve and let the breach handling below decide.
+                const std::uint64_t mbits = mask.bits();
+                for (Size ms = 0; ms < n_masks_seen; ++ms) {
+                    if (masks_seen[ms] == mbits) {
+                        mask_cycle = true;
+                        break;
+                    }
+                }
+                if (mask_cycle) break;
+                if (n_masks_seen < masks_seen.size()) {
+                    masks_seen[n_masks_seen++] = mbits;
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = cache.lookup(mask);
@@ -613,12 +650,23 @@ inline SimulationResult run_transient(
                 ++iters;
             } while (flipped && iters < max_iters);
 
-            if (flipped) {
-                throw std::runtime_error(std::format(
-                    "run_transient: event-iteration limit "
-                    "reached without convergence at t = {}; "
-                    "raise max_event_iterations or reduce dt",
-                    t));
+            if (flipped || mask_cycle) {
+                if (opts.strict_event_iterations) {
+                    throw std::runtime_error(std::format(
+                        "run_transient: diode event iteration {} at "
+                        "t = {} (strict_event_iterations=true); "
+                        "raise max_event_iterations or reduce dt",
+                        mask_cycle ? "hit a mask cycle"
+                                    : "exhausted its budget",
+                        t));
+                }
+                // Accept the last consistent solve, flag the step,
+                // keep going — losing the whole run was the greater
+                // wrong (audit: event-iteration-throws-away-
+                // simulation, CONFIRMED).
+                result.event_iteration_breaches.push_back(
+                    {.t = t, .iterations = iters,
+                     .cycle_detected = mask_cycle});
             }
 
             // 4. Sub-step commutation timing (Layer 5 V2.2) +
@@ -924,6 +972,9 @@ inline SimulationResult run_transient(
 
             Size iters = 0;
             bool flipped = false;
+            bool mask_cycle = false;
+            std::array<std::uint64_t, 64> masks_seen{};
+            Size n_masks_seen = 0;
             do {
                 auto mask = switch_fn(t);
                 if (has_diodes) {
@@ -931,6 +982,23 @@ inline SimulationResult run_transient(
                         diodes.current_diode_mask();
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
+                }
+                // Phase-0 fix #9: a repeated mask within one step's
+                // event iteration is a CYCLE (mask A -> B -> A ...,
+                // the un-hysteresed diode pair around a resonant
+                // node). Re-solving cannot converge — it only burns
+                // the budget — so break with the last consistent
+                // solve and let the breach handling below decide.
+                const std::uint64_t mbits = mask.bits();
+                for (Size ms = 0; ms < n_masks_seen; ++ms) {
+                    if (masks_seen[ms] == mbits) {
+                        mask_cycle = true;
+                        break;
+                    }
+                }
+                if (mask_cycle) break;
+                if (n_masks_seen < masks_seen.size()) {
+                    masks_seen[n_masks_seen++] = mbits;
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = cache.lookup(mask);
@@ -950,11 +1018,18 @@ inline SimulationResult run_transient(
                 ++iters;
             } while (flipped && iters < max_iters);
 
-            if (flipped) {
-                throw std::runtime_error(std::format(
-                    "run_transient: event-iteration limit "
-                    "reached without convergence at t = {}",
-                    t));
+            if (flipped || mask_cycle) {
+                if (opts.strict_event_iterations) {
+                    throw std::runtime_error(std::format(
+                        "run_transient: diode event iteration {} at "
+                        "t = {} (strict_event_iterations=true)",
+                        mask_cycle ? "hit a mask cycle"
+                                    : "exhausted its budget",
+                        t));
+                }
+                result.event_iteration_breaches.push_back(
+                    {.t = t, .iterations = iters,
+                     .cycle_detected = mask_cycle});
             }
 
             // Sub-step bisection on the static path too.

@@ -38,9 +38,31 @@ struct CommutationEvent {
     bool  new_state;
 };
 
+/// Phase-0 fix #9 — one record per time step where the diode
+/// event-iteration loop could NOT reach a stable diode state:
+/// either the iteration budget ran out, or a mask CYCLE was
+/// detected (mask A → B → A …, the classic un-hysteresed diode
+/// pair around a resonant node, which no budget resolves).
+///
+/// Pre-fix behaviour was a hard throw that discarded the whole
+/// run ("minutes of compute lost at t = 37 ms"). The solver now
+/// accepts the last consistent solve, records this breach, and
+/// continues; the Python layer surfaces a loud warning. Set
+/// `SimulationOptions::strict_event_iterations = true` to
+/// restore the old throw.
+struct EventIterationBreach {
+    Real t;                 ///< step time of the breach
+    Size iterations;        ///< solves attempted this step
+    bool cycle_detected;    ///< true = mask cycle, false = budget
+};
+
 struct SimulationResult {
     std::vector<Real>   times;
     std::vector<Vector> states;
+
+    /// Phase-0 fix #9 — steps where diode event iteration hit a
+    /// cycle or the budget. Empty on a fully-converged run.
+    std::vector<EventIterationBreach> event_iteration_breaches;
 
     /// Per-step count of how many `cache.solve` invocations were
     /// needed before the diode state stabilised. Parallel to

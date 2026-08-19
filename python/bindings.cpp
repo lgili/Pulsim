@@ -1061,6 +1061,12 @@ void init_module(py::module_& m) {
         .def_readwrite("t_end",
                         &SimulationOptions::t_end)
         .def_readwrite("dt", &SimulationOptions::dt)
+        .def_readwrite("strict_event_iterations",
+                        &SimulationOptions::strict_event_iterations,
+                        "Phase-0 fix #9: true restores the pre-v1.8 "
+                        "hard throw on diode event-iteration cycles/"
+                        "budget exhaustion; false (default) records "
+                        "an EventIterationBreach and continues.")
         .def_readwrite("max_event_iterations",
                         &SimulationOptions::max_event_iterations)
         .def_readwrite("max_newton_iterations",
@@ -1089,6 +1095,16 @@ void init_module(py::module_& m) {
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);
 
+    py::class_<solver::EventIterationBreach>(m, "EventIterationBreach",
+        "One time step where the diode event-iteration loop hit a "
+        "mask cycle or its budget (Phase-0 fix #9). The solver kept "
+        "the last consistent solve and continued.")
+        .def_readonly("t", &solver::EventIterationBreach::t)
+        .def_readonly("iterations",
+                       &solver::EventIterationBreach::iterations)
+        .def_readonly("cycle_detected",
+                       &solver::EventIterationBreach::cycle_detected);
+
     py::class_<CommutationEvent>(m, "CommutationEvent",
         "Sub-step commutation timing event (V2.2 + V3).")
         .def_readonly("t_estimated",
@@ -1108,6 +1124,8 @@ void init_module(py::module_& m) {
                        &SimulationResult::event_iteration_count)
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
+        .def_readonly("event_iteration_breaches",
+                       &SimulationResult::event_iteration_breaches)
         .def("num_steps", &SimulationResult::num_steps);
 
     // ---- run_transient ---------------------------------------------------

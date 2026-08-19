@@ -1297,6 +1297,7 @@ def simulate(
     enable_nonlinear_refresh: Optional[bool] = None,
     max_newton_iterations: int = 0,
     max_event_iterations: int = 0,
+    strict_event_iterations: bool = False,
     tol_newton_dx: Optional[float] = None,
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
@@ -1698,6 +1699,8 @@ def simulate(
         opts.max_newton_iterations = max_newton_iterations
     if max_event_iterations > 0:
         opts.max_event_iterations = max_event_iterations
+    if strict_event_iterations:
+        opts.strict_event_iterations = True
     if tol_newton_dx is not None:
         opts.tol_newton_dx = tol_newton_dx
     if tol_newton_res is not None:
@@ -1897,6 +1900,27 @@ def simulate(
         import sys as _sys
         _sys.stdout.write("\n")
         _sys.stdout.flush()
+    # Phase-0 fix #9: the kernel no longer throws away a whole run
+    # on diode event-iteration cycles/budget exhaustion — it records
+    # breaches and continues. Surface them LOUDLY so the accepted
+    # per-step diode-state error is never silent.
+    _breaches = getattr(res, "event_iteration_breaches", None)
+    if _breaches:
+        import warnings
+        _b0 = _breaches[0]
+        warnings.warn(
+            f"simulate(): diode event iteration failed to settle on "
+            f"{len(_breaches)} of {len(res.times)} steps (first at "
+            f"t={_b0.t:.6g}, "
+            f"{'mask cycle' if _b0.cycle_detected else 'budget hit'}). "
+            "The solver kept the last consistent solve each time and "
+            "continued; waveforms near those instants carry a one-"
+            "flip diode-state error. Inspect "
+            "result.event_iteration_breaches, reduce dt, or pass "
+            "strict_event_iterations=True to restore the old hard "
+            "failure.",
+            stacklevel=2)
+
     # Attach the builder so `result.v(name)` / `.i(name)` / `.power(name)`
     # can resolve names without forcing the caller to re-pass the
     # builder. The binding enables `py::dynamic_attr()` precisely so
