@@ -1508,6 +1508,10 @@ def simulate(
             "should_continue": should_continue is not None,
             "live_stream": live_stream is not None,
             "start_from_dc_op": bool(start_from_dc_op),
+            # review finding PY-4: DSED has no diode event iteration,
+            # so silently accepting this flag would be the exact
+            # pattern this block exists to prevent.
+            "strict_event_iterations": bool(strict_event_iterations),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:

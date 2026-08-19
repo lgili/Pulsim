@@ -26,6 +26,10 @@ per item.
   *different* circuit. New `compute_dc_op_newton` reuses the
   transient's `NonlinearRefreshFn` chain (warm-started from the
   linear solve); `run_transient` routes through it automatically.
+  Known limitation: saturable inductors still lack a DC stamp — the
+  DC Newton chain deliberately excludes their trap-companion refresh
+  (time-step-dependent, wrong at DC) and such circuits keep the
+  pre-existing structurally-singular error at `start_from_dc_op`.
   (`dc-op-skips-nonlinear-devices`)
 * **DSED dropped time-varying sources that were zero at t=0 and
   t=1 µs** (e.g. a pulse with `t_start > 1 µs`) — detection is now
@@ -68,6 +72,22 @@ per item.
   option (kernel + Python).
 * `PwlStateSpaceCache.build_lazy(dt)` / `.num_built_segments()`
   bindings; `_switch_census` helper.
+
+### Review hardening (adversarial diff review, 8/8 findings fixed)
+
+* Breach handling re-syncs diode bits to the last-solved state before
+  recording, so `(x, diode)` pairs commit consistently (P0-R1); the
+  mask-cycle break applies only to the memoryless linear path — the
+  warm-started Newton path relies on the budget (P0-R3).
+* Lazy-build singular masks now surface as `RuntimeError` (circuit
+  problem), not `IndexError` (P0/PY-2); sweeps forward
+  `strict_event_iterations` and warn on breached points (PY-1);
+  `engine='dsed'` also builds lazily, warns on driverless controlled
+  switches, and rejects `strict_event_iterations` (PY-3, PY-4).
+* DSED backtrack/tie guards keep their historical ABSOLUTE 1e-15
+  bands — a relative band there would widen the terminal-root discard
+  window; the real fix (firing terminal-band roots) belongs to the
+  Phase-3 event-queue overhaul (P0-R4).
 
 ### Docs
 

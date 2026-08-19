@@ -275,7 +275,13 @@ public:
             }
 
             if (t_pred.has_value()
-                && *t_pred < t + h_use - time_margin(t + h_use)) {
+                && *t_pred < t + h_use - Real{1e-15}) {
+                // ^ absolute on purpose: a RELATIVE margin here
+                // WIDENS the window in which a root at the step
+                // end is discarded (event silently lost until
+                // recross — adversarial-review finding P0-R4).
+                // The proper fix (fire terminal-band roots) is
+                // part of the Phase-3 event-queue overhaul.
                 // Predicate fired strictly inside the step — backtrack.
                 t = *t_pred;
                 x = std::move(x_pred);
@@ -402,11 +408,10 @@ private:
             };
 
             if (!best.has_value()
-                || (t_root < best->t_event
-                    && !near_time(t_root, best->t_event, Real{1e-15}))) {
+                || t_root < best->t_event - Real{1e-15}) {
                 best = make_event();
                 best_priority = p.priority;
-            } else if (near_time(t_root, best->t_event, Real{1e-15})
+            } else if (std::abs(t_root - best->t_event) <= Real{1e-15}
                        && p.priority < best_priority) {
                 best = make_event();
                 best_priority = p.priority;
