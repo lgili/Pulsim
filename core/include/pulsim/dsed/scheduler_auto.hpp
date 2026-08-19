@@ -59,6 +59,7 @@
 #include "pulsim/dsed/scheduler_bdf2.hpp"   // HasLTIPerMode concept
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/stiffness_detector.hpp"
+#include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -102,6 +103,29 @@ template <class MaskT>
     return static_cast<int>(m);
 }
 
+/// Phase-0 fix #5 — mode-id resolution that prefers a System-owned
+/// injective id over the free-function fallback.
+///
+/// The old contract keyed StiffnessDetector's per-mode eigenvalue
+/// cache on `mode_id_of(mask)`, and the SwitchStateMask/PyMask ADL
+/// shims implemented that by TRUNCATING a 64-bit hash to int32. Two
+/// distinct masks colliding in 32 bits (~50% probability once ~77k
+/// masks are visited — realistic for rich multilevel mode sets)
+/// silently reused the WRONG cached λ_max and picked the wrong
+/// integrator with no diagnostic. Systems that can dedupe masks
+/// exactly (the native builder adapter, the PySystem bridge) now
+/// expose `mode_id(mask)` returning dense sequential ids; the
+/// integral fallback below keeps demo/bench systems working.
+template <class System, class MaskT>
+[[nodiscard]] inline int resolve_mode_id(const System& sys,
+                                          const MaskT& m) {
+    if constexpr (requires { sys.mode_id(m); }) {
+        return static_cast<int>(sys.mode_id(m));
+    } else {
+        return mode_id_of(m);
+    }
+}
+
 /// Auto-dispatch PED simulator: picks DOPRI5 or BDF2 per mode-segment.
 ///
 /// Templated on `System` (must satisfy `HasLTIPerMode` + provide
@@ -142,7 +166,7 @@ public:
 
         // Pick integrator for the initial mode-segment.
         IntegratorChoice choice = detector_.select(
-            mode_id_of(mask), system_.A_matrix(), dt_max_);
+            resolve_mode_id(system_, mask), system_.A_matrix(), dt_max_);
 
         RK45State rk_state;
         BDF2State bdf2_state;
@@ -152,7 +176,6 @@ public:
         std::size_t step_idx = 0;
 
         constexpr std::size_t kMaxSteps = 10'000'000;
-        constexpr Real kEpsEdge = Real{1e-12};
 
         auto f = [this](Real tau, const Vector& xx) -> Vector {
             return system_.rhs(tau, xx);
@@ -203,7 +226,7 @@ public:
                                             prev_choice, result);
                         t = t_gate;
                         choice = detector_.select(
-                            mode_id_of(system_.current_mask()),
+                            resolve_mode_id(system_, system_.current_mask()),
                             system_.A_matrix(), dt_max_);
                         // Only reset h_rk45 when SWITCHING from BDF2 to RK45
                         // (no good prior value); otherwise PI adapts h
@@ -230,7 +253,7 @@ public:
                                             prev_choice, result);
                         t = t_gate;
                         choice = detector_.select(
-                            mode_id_of(system_.current_mask()),
+                            resolve_mode_id(system_, system_.current_mask()),
                             system_.A_matrix(), dt_max_);
                         if (prev_choice == IntegratorChoice::BDF2
                             && choice == IntegratorChoice::DOPRI5) {
@@ -314,13 +337,13 @@ public:
             ++result.n_accept;
 
             // 4. Did we land on a gate edge?
-            if (t_gate < t_end && std::abs(t - t_gate) < kEpsEdge) {
+            if (t_gate < t_end && near_time(t, t_gate)) {
                 const IntegratorChoice prev_choice = choice;
                 fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                     prev_choice, result);
                 // Re-query stiffness for the new mode
                 choice = detector_.select(
-                    mode_id_of(system_.current_mask()),
+                    resolve_mode_id(system_, system_.current_mask()),
                     system_.A_matrix(), dt_max_);
                 // Only reset h_rk45 when SWITCHING from BDF2 to RK45
                 // (no good prior value); otherwise let PI adapt h
@@ -370,7 +393,7 @@ private:
                             IntegratorChoice segment_integrator,
                             PEDResultAuto<MaskT>& result) {
         const MaskT old_mask = system_.current_mask();
-        const MaskT new_mask = switch_fn_(t_event + Real{1e-15});
+        const MaskT new_mask = switch_fn_(advance_past(t_event));
         if (new_mask == old_mask) return;   // spurious
 
         system_.set_mask(new_mask);
