@@ -11,16 +11,27 @@
 //   * `times[k]`  → simulation time of sample k
 //   * `states[k]` → state vector at `times[k]`
 //
-// `reserve(n)` pre-allocates both vectors; `run_transient` calls
-// it before the time-stepping loop to avoid per-step
-// reallocation.
+// `reserve(n)` pre-allocates both; `run_transient` calls it
+// before the time-stepping loop to avoid per-step reallocation.
 //
-// V0 keeps every sample. Strided / downsampled output is a V1
-// add (the solver loop already records into this struct; adding
-// stride is a 2-line change inside the loop).
+// v2.0 Phase 1 (audit finding `waveform-storage-vector-of-vectors`):
+// `states` is no longer a `std::vector<Vector>` (one heap block per
+// sample) but a `StateTrajectory` — ONE contiguous row-major
+// buffer, allocated once, handed to Python as a zero-copy 2-D
+// numpy view. The read API (`states[k]`, `size()`, `back()`,
+// range-for) is unchanged except that element access yields an
+// `Eigen::Map<const Vector>` by value; bind with `const auto&` or
+// `const Vector&`, never a non-const `auto&`.
+//
+// Decimation now exists too: `SimulationOptions::store_every`
+// records every m-th step (a PURE stride — steps 0, m, 2m, …, so
+// the recorded grid stays strictly uniform at m·dt; the final step
+// is included only when it lands on the stride), so a long
+// high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/solver/state_trajectory.hpp"
 
 #include <vector>
 
@@ -57,8 +68,11 @@ struct EventIterationBreach {
 };
 
 struct SimulationResult {
-    std::vector<Real>   times;
-    std::vector<Vector> states;
+    std::vector<Real> times;
+
+    /// Recorded state samples, contiguous (v2.0 Phase 1).
+    /// `states[k]` is the state at `times[k]`.
+    StateTrajectory states;
 
     /// Phase-0 fix #9 — steps where diode event iteration hit a
     /// cycle or the budget. Empty on a fully-converged run.
@@ -91,10 +105,30 @@ struct SimulationResult {
 
     /// Pre-allocate space for `n` samples on all internal
     /// vectors. Does NOT change `num_steps()` — capacity only.
+    ///
+    /// Pass `state_size` (v2.0 Phase 1) so the contiguous sample
+    /// buffer can be allocated in ONE shot for the whole run; the
+    /// no-size overload leaves it to the first recorded sample.
     void reserve(Size n) {
         times.reserve(n);
         states.reserve(n);
         event_iteration_count.reserve(n);
+    }
+
+    void reserve(Size n, Index state_size) {
+        states.set_state_size(state_size);
+        reserve(n);
+    }
+
+    /// Estimated bytes held by the recorded waveform (contiguous
+    /// sample buffer + the parallel time / diagnostic vectors).
+    [[nodiscard]] std::size_t approx_bytes() const noexcept {
+        return states.bytes() +
+               times.size() * sizeof(Real) +
+               event_iteration_count.size() * sizeof(Size) +
+               commutation_events.size() * sizeof(CommutationEvent) +
+               event_iteration_breaches.size() *
+                   sizeof(EventIterationBreach);
     }
 };
 

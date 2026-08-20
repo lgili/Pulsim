@@ -734,7 +734,12 @@ def _result_v(self, name: str, t=None):
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "node", sugg) from None
     states = _np.asarray(self.states)
-    col = states[:, idx]
+    # `states` is a READ-ONLY zero-copy view over the kernel buffer
+    # (v2.0). A per-signal trace is small (one column), and v1.x
+    # handed back a writable owned array here — so copy the column
+    # out rather than leaking read-onlyness (and a reference pinning
+    # the whole run) into `res.v(...)`.
+    col = _np.array(states[:, idx], dtype=float)
     if t is None:
         return col
     return col[t]
@@ -852,7 +857,12 @@ def _result_i(self, name: str, t=None):
             continue
     states = _sa(self)
     if state_idx is not None:
-        col = states[:, state_idx]
+        # Owned, writable copy of the single column — see the note
+        # in `_result_v`. Keeps `res.i(...)` writable regardless of
+        # whether the device is state-native (inductor branch var)
+        # or computed (resistor), so writability never depends on
+        # the device kind.
+        col = _np.array(states[:, state_idx], dtype=float)
         if t is None:
             return col
         return col[t]
@@ -1298,6 +1308,7 @@ def simulate(
     max_newton_iterations: int = 0,
     max_event_iterations: int = 0,
     strict_event_iterations: bool = False,
+    store_every: int = 1,
     tol_newton_dx: Optional[float] = None,
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
@@ -1512,6 +1523,12 @@ def simulate(
             # so silently accepting this flag would be the exact
             # pattern this block exists to prevent.
             "strict_event_iterations": bool(strict_event_iterations),
+            # v2.0 Phase 1: output decimation is a fixed-grid
+            # concept; the DSED engine emits variable-step samples,
+            # so honouring `store_every` there would mean something
+            # different (and unstated). Fail loudly rather than
+            # returning a full-rate trace the caller did not ask for.
+            "store_every": int(store_every) != 1,
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -1699,6 +1716,12 @@ def simulate(
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
+    if store_every != 1:
+        if int(store_every) < 1:
+            raise ValueError(
+                f"simulate(store_every={store_every}): must be >= 1 "
+                "(1 records every step)")
+        opts.store_every = int(store_every)
     if max_newton_iterations > 0:
         opts.max_newton_iterations = max_newton_iterations
     if max_event_iterations > 0:

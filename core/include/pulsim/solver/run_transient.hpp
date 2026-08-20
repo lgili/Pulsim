@@ -150,9 +150,13 @@ using ShouldContinueFn = std::function<bool()>;
 //   * state_size > 0                     — state vector must have entries
 //   * static_cast<bool>(switch_fn)       — schedule callback required
 //
-// Postcondition: result.num_steps() == opts.expected_step_count()
-//                result.times[k]   == opts.t_start + k * opts.dt
-//                result.states[k]  is the solution at result.times[k]
+// Postcondition: result.num_steps() == opts.expected_sample_count()
+//                result.times[j]   == opts.t_start
+//                                      + j * opts.store_every * opts.dt
+//                result.states[j]  is the solution at result.times[j]
+//                (with the default store_every == 1 these reduce to
+//                 the v1.x form: one sample per step at k·dt. An
+//                 early `should_continue` stop yields fewer samples.)
 //
 // Lifetime: borrows `cache`, `opts`, `switch_fn`, `b_extra_fn`.
 // Returns by value (NRVO + move).
@@ -169,7 +173,8 @@ inline SimulationResult run_transient(
     if (!opts.valid()) {
         throw std::invalid_argument(
             "run_transient: SimulationOptions are not valid "
-            "(check t_start < t_end, dt > 0, all finite)");
+            "(check t_start < t_end, dt > 0, store_every >= 1, "
+            "all finite)");
     }
     if (state_size == 0) {
         throw std::invalid_argument(
@@ -184,7 +189,11 @@ inline SimulationResult run_transient(
     // ---- Pre-allocate output + working buffers ----------------------------
     const Size n_steps = opts.expected_step_count();
     SimulationResult result;
-    result.reserve(n_steps);
+    // v2.0 Phase 1: state size up front → the contiguous sample
+    // buffer is allocated ONCE for the whole run, sized by the
+    // DECIMATED sample count (opts.store_every).
+    result.reserve(opts.expected_sample_count(),
+                    static_cast<Index>(state_size));
 
     Vector x = Vector::Zero(state_size);
 
@@ -220,9 +229,13 @@ inline SimulationResult run_transient(
 
         // Record the sample. `x` is copied into the result so the
         // next iteration can mutate the working `x` without
-        // disturbing the recorded sample.
-        result.times.push_back(t);
-        result.states.push_back(x);
+        // disturbing the recorded sample. `store_every` decimates
+        // on a STRICTLY UNIFORM grid (steps 0, m, 2m, …) so the
+        // recorded trace keeps a constant spacing of m·dt.
+        if (k % opts.store_every == 0) {
+            result.times.push_back(t);
+            result.states.push_back(x);
+        }
     }
 
     return result;
@@ -262,7 +275,8 @@ inline SimulationResult run_transient(
     if (!opts.valid()) {
         throw std::invalid_argument(
             "run_transient: SimulationOptions are not valid "
-            "(check t_start < t_end, dt > 0, all finite)");
+            "(check t_start < t_end, dt > 0, store_every >= 1, "
+            "all finite)");
     }
     if (!switch_fn) {
         throw std::invalid_argument(
@@ -289,7 +303,11 @@ inline SimulationResult run_transient(
     // ---- Pre-allocate ---------------------------------------------------
     const Size n_steps = opts.expected_step_count();
     SimulationResult result;
-    result.reserve(n_steps);
+    // v2.0 Phase 1: state size up front → the contiguous sample
+    // buffer is allocated ONCE for the whole run, sized by the
+    // DECIMATED sample count (opts.store_every).
+    result.reserve(opts.expected_sample_count(),
+                    static_cast<Index>(state_size));
 
     Vector x = Vector::Zero(state_size);
     pwl::HistoryState history{graph, pool};
@@ -962,9 +980,14 @@ inline SimulationResult run_transient(
             // 6. Record. event_iteration_count = iters - 1 (the
             //    first iteration always runs; the count is the
             //    number of EXTRA solves caused by diode flips).
-            result.times.push_back(t);
-            result.states.push_back(x);
-            result.event_iteration_count.push_back(iters - 1);
+            // Decimated recording (v2.0 Phase 1): uniform grid at
+            // m·dt. Sample 0 (the IC, k = 0) is always recorded
+            // above, keeping the parallel arrays aligned.
+            if (k % opts.store_every == 0) {
+                result.times.push_back(t);
+                result.states.push_back(x);
+                result.event_iteration_count.push_back(iters - 1);
+            }
         }
     } else {
         // ----------- STATIC PATH ----------------------------------------
@@ -1126,9 +1149,11 @@ inline SimulationResult run_transient(
                 }
             }
 
-            result.times.push_back(t);
-            result.states.push_back(x);
-            result.event_iteration_count.push_back(iters - 1);
+            if (k % opts.store_every == 0) {
+                result.times.push_back(t);
+                result.states.push_back(x);
+                result.event_iteration_count.push_back(iters - 1);
+            }
         }
     }
 

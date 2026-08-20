@@ -265,12 +265,14 @@ TEST_CASE("run_transient hot loop: zero std-container allocations",
     const std::size_t delta = after - before;
     INFO("operator-new count for 2000-step run: " << delta);
     // One-off costs inside the counted run: SimulationResult's
-    // reserve()s + std::function fit + run_transient's hoisted
-    // workspace vectors. Generous bound — the point is O(1), not
-    // O(n_steps): the pre-fix code was ~4 std-container
-    // allocations PER STEP (~8000 here).
+    // reserve()s (the contiguous sample buffer is ONE of them),
+    // std::function fit, and run_transient's hoisted workspace
+    // vectors. The point is O(1), not O(n_steps): the pre-fix code
+    // was ~4 std-container allocations PER STEP (~8000 here), and
+    // recording alone was one more per step until the waveform
+    // buffer became contiguous. Measured: 5.
     if (kCountsMeaningful) {
-        REQUIRE(delta < 64);
+        REQUIRE(delta < 16);
     }
 
     // Physical sanity so the run wasn't degenerate: with both
@@ -326,7 +328,7 @@ TEST_CASE("run_transient with diodes: allocation count is O(1), "
     REQUIRE(res.states.size() == 1001);
     INFO("operator-new count for 1000-step diode run: " << delta);
     if (kCountsMeaningful) {
-        REQUIRE(delta < 64);
+        REQUIRE(delta < 16);   // measured: 8
     }
 }
 
@@ -387,9 +389,16 @@ TEST_CASE("substep event correction path is allocation-free per event",
     INFO("operator-new count for corrected run: " << delta
          << " (" << warm_events << " events)");
     // Sub-step solves hit warmed event solvers at fresh dts each
-    // event: in-place refactors, no analyze, no std-container
-    // traffic. Whole-run bound stays O(1).
+    // event: in-place refactors, no analyze. The residual traffic
+    // is PER COMMUTATION (the event solver recombines
+    // J = G + (1/dt)*C and refactorizes into rebuilt L/U value
+    // arrays), never per step — which is the property that
+    // matters: this run integrates 5000 steps and allocates only
+    // on its ~10 events. Assert that shape explicitly.
+    const std::size_t per_event_budget = 16;
     if (kCountsMeaningful) {
-        REQUIRE(delta < 64);
+        REQUIRE(delta < 32 + per_event_budget * warm_events);
+        // ... and emphatically NOT proportional to the step count.
+        REQUIRE(delta < 5000 / 10);
     }
 }

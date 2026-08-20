@@ -8,6 +8,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 1 — kernel foundation (v2.0 audit follow-up)
 
+* **Contiguous zero-copy waveform storage + output decimation**
+  (audit finding `waveform-storage-vector-of-vectors`, BREAKING).
+  `SimulationResult::states` was a `std::vector<Vector>` — one heap
+  block per recorded sample (a 10^7-step run meant 10^7
+  allocations) — and every `res.states` access from Python rebuilt
+  a fresh list of N 1-D ndarray objects, so reading the result cost
+  O(N) *per access*. It is now a `StateTrajectory`: ONE row-major
+  buffer allocated once for the whole run, exposed to Python as a
+  single read-only `(num_steps, state_size)` **zero-copy numpy
+  view**.
+  * Measured on a 500 000-sample run: `res.states` access
+    **174 ms → 1.2 µs**; `np.asarray(res.states).mean()`
+    **248 ms → 1.6 ms (154×)**. Kernel side, the removed per-step
+    allocation shows up as **0.48 → 0.34 µs/step** on the rectifier
+    benchmark and 0.28 → 0.26 on the buck.
+  * The C++ read API is source-compatible (`states[k]`, `size()`,
+    `back()`, range-for, `traj = {x0, x1}`); element access now
+    yields an `Eigen::Map<const Vector>` by value, so bind with
+    `const auto&` / `const Vector&`, never a non-const `auto&`.
+    All 207 in-tree call sites compiled unchanged. Ragged pushes,
+    silently possible before, now throw.
+  * Python indexing, slicing, iteration, `len()` and `np.asarray`
+    are unchanged; the view is **read-only** (v1.x rows were
+    non-writeable views too, so this preserves the old behaviour) —
+    call `.copy()` for a mutable array. New `res.states_bytes`.
+  * The read-only view is confined to `res.states` itself: the
+    per-signal accessors `res.v(name)` / `res.i(name)` and
+    `compute_dc_op`'s fallback still return **writable owned**
+    arrays, as in v1.x (adversarial review caught the read-only
+    view leaking through them via a column slice).
+  * `engine='dsed'` results now expose the SAME 2-D `states` array
+    (plus `states_bytes`), so `res.states[:, node_id]` — the
+    pattern the docs recommend — works on both engines.
+  * The eager reservation is byte-capped: a multi-GB trace grows on
+    demand instead of committing one huge block before the first
+    step, so a run the caller may cancel early no longer risks an
+    immediate `bad_alloc`. Ordinary runs still get exactly one
+    allocation.
+  * **New `SimulationOptions.store_every`** (also `simulate(...,
+    store_every=m)`): record every m-th step
+    (default 1 = every step, identical to v1.x). The solver still
+    integrates at `dt`; only what is STORED changes, and the
+    recorded grid stays STRICTLY UNIFORM at `m · dt` — decimation
+    is a pure stride rather than a stride-plus-forced-endpoint,
+    precisely so downstream FFT / harmonic / ripple analysis stays
+    valid. `expected_sample_count()` reports what a run will store.
+
 * **Zero-allocation transient hot loop** (audit finding
   `per-step-heap-allocations`): the per-step loop performed 6–10
   heap allocations per step — fresh `rhs` in every `cache.solve`,

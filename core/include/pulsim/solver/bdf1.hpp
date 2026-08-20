@@ -287,7 +287,8 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     const Size n_steps = opts.expected_step_count();
 
     SimulationResult result;
-    result.reserve(n_steps);
+    result.reserve(opts.expected_sample_count(),
+                    static_cast<Index>(state_size));
 
     Vector x = Vector::Zero(static_cast<Index>(state_size));
     Bdf1HistoryState history{graph, pool};
@@ -366,9 +367,11 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
 
         history.update_from_state(x, opts.dt);
 
-        result.times.push_back(t);
-        result.states.push_back(x);
-        result.event_iteration_count.push_back(0);
+        if (k % opts.store_every == 0) {
+            result.times.push_back(t);
+            result.states.push_back(x);
+            result.event_iteration_count.push_back(0);
+        }
     }
     return result;
 }

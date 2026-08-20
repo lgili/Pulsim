@@ -231,7 +231,10 @@ def _dc_naive(builder, *, t_eval: float, verbose: bool) -> np.ndarray:
                          dt=dt,
                          t_start=t_eval,
                          start_from_dc_op=True)
-    x = np.asarray(res.states[0])
+    # Owned copy: res.states is a read-only zero-copy view over the
+    # kernel buffer (v2.0), and callers treat the returned operating
+    # point as a plain writable vector.
+    x = np.array(res.states[0], dtype=float)
     if verbose:
         print(f"  _dc_naive (sim fallback): t={t_eval}, "
                f"||x||_∞={np.linalg.norm(x, np.inf):.3e}")

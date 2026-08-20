@@ -120,7 +120,7 @@ The installed `pulsim` wheel is stale relative to the source tree.
 
 `SimulationResult.states[k]` is a NumPy 1-D array; `SimulationResult.times` is a Python list of floats.
 
-**Fix:** pass `times` through `np.asarray(...)` if you need to do vectorized arithmetic. For state, just index directly: `res.states[k][node_id]`.
+**Fix:** pass `times` through `np.asarray(...)` if you need to do vectorized arithmetic. `res.states` is already a 2-D numpy array (v2.0), so `res.states[k][node_id]`, `res.states[:, node_id]` and `res.states[k, node_id]` all work directly — but it is a READ-ONLY view over kernel memory, so `.copy()` first if you need to modify it in place.
 
 ## When to ask for help
 
