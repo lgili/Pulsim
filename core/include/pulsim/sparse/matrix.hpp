@@ -26,6 +26,9 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
+#include <cstddef>
+#include <vector>
+
 #include <Eigen/SparseCore>
 
 namespace pulsim::sparse {
@@ -114,6 +117,66 @@ inline void reserve_capacity(Matrix& M, Size nnz_estimate) noexcept {
 // -----------------------------------------------------------------------------
 inline void compress_in_place(Matrix& M) noexcept {
     M.makeCompressed();
+}
+
+// -----------------------------------------------------------------------------
+// Structural emptiness probes (v2.0 Phase 1, audit finding
+// `singular-errors-dont-name-the-node`).
+//
+// An all-zero column means NOTHING in the system depends on that
+// unknown; an all-zero row means no equation constrains it. In MNA
+// that is the textbook "this node has no path to ground" — the most
+// common way a circuit is unsolvable, and the one case we can name
+// for the user BEFORE any factorization, independently of which
+// backend is in use (the Eigen backend exposes no pivot index at
+// all, so a solver-side accessor alone would leave the DC / Newton
+// paths blind).
+//
+// Both probes are O(n) / O(nnz), i.e. free next to the factorization
+// they precede.
+//
+// COMPRESSED INPUT ONLY: on an uncompressed matrix `outerIndexPtr`
+// spans allocated slots rather than stored non-zeros, so an empty
+// column would go undetected. Rather than risk a FALSE "node is
+// floating" claim, an uncompressed matrix reports "unknown"
+// (kInvalidIndex). Every production caller compresses first.
+// -----------------------------------------------------------------------------
+
+/// Index of the first structurally empty column, or `kInvalidIndex`
+/// when every column has an entry (or the matrix is uncompressed).
+[[nodiscard]] inline Index first_empty_column(const Matrix& M) noexcept {
+    if (!M.isCompressed()) {
+        return kInvalidIndex;
+    }
+    const Index* outer = M.outerIndexPtr();
+    for (Index j = 0; j < M.cols(); ++j) {
+        if (outer[j + 1] == outer[j]) {
+            return j;
+        }
+    }
+    return kInvalidIndex;
+}
+
+/// Index of the first structurally empty row, or `kInvalidIndex`
+/// when every row has an entry (or the matrix is uncompressed).
+/// One counting pass over the inner indices (the storage is
+/// column-major, so rows need the sweep).
+[[nodiscard]] inline Index first_empty_row(const Matrix& M) {
+    if (!M.isCompressed()) {
+        return kInvalidIndex;
+    }
+    std::vector<bool> seen(static_cast<std::size_t>(M.rows()), false);
+    const Index* inner = M.innerIndexPtr();
+    const auto nnz = static_cast<Index>(M.nonZeros());
+    for (Index p = 0; p < nnz; ++p) {
+        seen[static_cast<std::size_t>(inner[p])] = true;
+    }
+    for (Index i = 0; i < M.rows(); ++i) {
+        if (!seen[static_cast<std::size_t>(i)]) {
+            return i;
+        }
+    }
+    return kInvalidIndex;
 }
 
 }  // namespace pulsim::sparse

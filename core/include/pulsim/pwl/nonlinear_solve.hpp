@@ -27,6 +27,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -100,6 +101,10 @@ using NonlinearRefreshFn = std::function<
 
     Real last_dx_norm  = std::numeric_limits<Real>::infinity();
     Real last_res_norm = std::numeric_limits<Real>::infinity();
+    // Argmax companions to the two norms above (v2.0 Phase 1) —
+    // the MNA row where each is worst, for the failure message.
+    Index worst_dx_row  = kInvalidIndex;
+    Index worst_res_row = kInvalidIndex;
 
     // ----- Auto-LM detection state (GUI integration findings T1.2) -----
     // Two failure modes promote `enable_lm` to true mid-solve:
@@ -317,8 +322,20 @@ using NonlinearRefreshFn = std::function<
         //    (returned by the refresh) is the magnitude of the
         //    device CURRENTS, not a residual, and at convergence
         //    the currents are typically O(mA-A), not zero.
-        last_dx_norm  = (alpha * dx).lpNorm<Eigen::Infinity>();
-        last_res_norm = f_combined.lpNorm<Eigen::Infinity>();
+        // v2.0 Phase 1 (audit finding
+        // `singular-errors-dont-name-the-node`): keep the ARGMAX, not
+        // just the magnitude. `lpNorm<Infinity>()` throws away the
+        // one piece of information a stuck user actually needs —
+        // WHERE the residual lives. maxCoeff(&idx) costs the same
+        // pass and yields an original MNA row index (no permutation
+        // is involved: f_combined and dx are in state-vector space),
+        // which `pwl::row_label` turns into "node sw3_e".
+        Eigen::Index dx_at = 0;
+        Eigen::Index res_at = 0;
+        last_dx_norm  = (alpha * dx).cwiseAbs().maxCoeff(&dx_at);
+        last_res_norm = f_combined.cwiseAbs().maxCoeff(&res_at);
+        worst_dx_row  = static_cast<Index>(dx_at);
+        worst_res_row = static_cast<Index>(res_at);
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;
         }
@@ -345,8 +362,11 @@ using NonlinearRefreshFn = std::function<
 
     throw std::runtime_error(std::format(
         "solve_with_newton: failed to converge after {} iterations "
-        "(||dx||_inf = {}, ||residual||_inf = {})",
-        max_iters, last_dx_norm, last_res_norm));
+        "(||dx||_inf = {:.3e} worst at {}, ||residual||_inf = {:.3e} "
+        "worst at {})",
+        max_iters,
+        last_dx_norm, row_label(graph, pool, worst_dx_row),
+        last_res_norm, row_label(graph, pool, worst_res_row)));
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

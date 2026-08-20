@@ -217,6 +217,9 @@ public:
         }
         factorized_       = false;
         numeric_singular_ = false;
+        singular_column_  = kInvalidIndex;
+        singular_row_     = kInvalidIndex;
+        singular_pivot_magnitude_ = Real{0};
         if (M.rows() != n_ || M.cols() != n_) {
             return false;  // dimensions changed since analyze
         }
@@ -326,6 +329,23 @@ public:
             // pivoting criterion).
             if (ipiv < 0 || max_abs < PIVOT_TOL) {
                 numeric_singular_ = true;
+                // v2.0 Phase 1 (audit finding
+                // `singular-errors-dont-name-the-node`): remember
+                // WHERE it failed so the caller can name the node or
+                // device instead of only printing a mask bitstring.
+                //
+                // Both indices are ALREADY in ORIGINAL matrix space:
+                // `orig_col = Pcol_[k]` was resolved at the top of
+                // this k-loop, and the sparse workspace / reach stack
+                // are indexed by original row id (see the workspace
+                // comment above), so `ipiv` needs NO permutation.
+                // Do NOT map either through Prow_/Pinv_row_ — those
+                // are only partially written at this point (Pinv_row_
+                // is rebuilt after the loop) and would name the wrong
+                // unknown.
+                singular_column_ = orig_col;
+                singular_row_    = ipiv;   // -1 = no candidate at all
+                singular_pivot_magnitude_ = max_abs;
                 // Clear workspace for a clean retry after refactor.
                 for (Index p = top; p < n_; ++p) {
                     x[static_cast<std::size_t>(
@@ -836,6 +856,33 @@ public:
         return numeric_singular_;
     }
 
+    /// Matrix column whose elimination failed in the most recent
+    /// `factorize`, in ORIGINAL (pre-ordering) index space, or
+    /// `kInvalidIndex` when the last factorization succeeded.
+    ///
+    /// For a square MNA system, column j and row j are the same
+    /// unknown, so this maps directly to a node voltage or a branch
+    /// current via `pwl::describe_row`.
+    [[nodiscard]] Index singular_index() const noexcept override {
+        return singular_column_;
+    }
+
+    /// Original row that would have been the pivot, or
+    /// `kInvalidIndex` when the reach pattern offered NO un-pivoted
+    /// candidate at all. The distinction matters to the diagnostic:
+    /// no candidate = structurally nothing to eliminate against;
+    /// a candidate below `PIVOT_TOL` = numerically collapsed.
+    [[nodiscard]] Index singular_pivot_row() const noexcept {
+        return singular_row_;
+    }
+
+    /// Magnitude of the best available pivot at the failure (0 when
+    /// there was no candidate). Lets the message quote how close to
+    /// zero the circuit actually got.
+    [[nodiscard]] Real singular_pivot_magnitude() const noexcept {
+        return singular_pivot_magnitude_;
+    }
+
     /// Estimated resident bytes of the numeric factors + per-instance
     /// index/permutation arrays (v2.0 Phase 1 — cache byte-budget LRU).
     [[nodiscard]] std::size_t factor_bytes() const noexcept override {
@@ -1236,13 +1283,25 @@ private:
     bool               path_valid_         = false;
     std::uint64_t      path_compute_count_ = 0;
 
-    // Section 3 — row permutation from partial pivoting. V0 of this
-    // header initializes both to identity and never mutates them
-    // (partial pivoting is deferred). The data structures are in place
-    // so a follow-up commit can add pivoting without changing the
-    // factorize() API.
+    // Row permutation from partial pivoting. NOTE (v2.0): partial
+    // pivoting is LIVE since the Gilbert-Peierls rewrite — `Prow_` is
+    // written one entry per successfully eliminated column inside the
+    // factorize loop, and `Pinv_row_` is rebuilt only AFTER that loop
+    // completes. On a FAILED factorize both are therefore partial or
+    // stale; never use them to interpret a failure. (The older
+    // comment here claimed both stayed identity, which has been false
+    // since pivoting landed and is exactly how one ends up naming the
+    // wrong node in a diagnostic.)
     std::vector<Index> Prow_;       // size n; Prow_[i] = original row at new position i
     std::vector<Index> Pinv_row_;   // size n; inverse of Prow_
+
+    // v2.0 Phase 1 — where the last factorize() failed, in ORIGINAL
+    // index space (see the note at the failure site). Reset at the
+    // top of every factorize so a stale location can never be
+    // attributed to a later call.
+    Index singular_column_ = kInvalidIndex;
+    Index singular_row_    = kInvalidIndex;
+    Real  singular_pivot_magnitude_ = Real{0};
 
     bool analyzed_         = false;
     bool factorized_       = false;

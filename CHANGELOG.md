@@ -8,6 +8,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 1 — kernel foundation (v2.0 audit follow-up)
 
+* **Kernel diagnostics now name the node or device** (audit findings
+  `kernel-has-no-name-context-for-errors` and
+  `singular-errors-dont-name-the-node`). Every solver failure used to
+  report a mask bitstring and a norm — `numerically singular for mask
+  0010111…1 (dt=1e-7)` — which on a 200-switch MMC is unactionable.
+  Now:
+  ```
+  PwlStateSpaceCache: numerically singular for mask 0b0 N=0 (dt=0)
+    — nothing connects node vfloat: its column in the MNA matrix is
+    empty, i.e. no device ties it to the rest of the circuit (a node
+    reachable only through a capacitor has no DC path; add a
+    bleeder/parallel resistance or tie it to ground)
+  ```
+  * `topology::Graph` gained an optional branch name table
+    (`add_branch(..., name)`, `set_branch_name`, `branch_name`),
+    populated by `CircuitBuilder` at its single branch-creation
+    choke point. Nodes already carried names; branches did not, so
+    names never crossed into the kernel. Unnamed branches (raw-kernel
+    users, hand-built graphs) stay empty and every message falls back
+    to the id. Branch names are deliberately excluded from the
+    structural hash, so PWL cache identity is unchanged.
+  * New `pwl/row_names.hpp` resolves an MNA row to its owner using
+    the documented layout `[v_0…v_{N-1} | i_src | i_L]` —
+    `describe_row`, `row_label`, `branch_label`,
+    `top_entries_by_name`, and `explain_singular`.
+  * Two independent localisation sources, because one is not enough:
+    a structural empty-column/row probe (`sparse::first_empty_column`
+    / `first_empty_row`, O(n), works on BOTH backends — the Eigen
+    backend used by the DC and Newton paths exposes no pivot index at
+    all), plus the new `DirectSolver::singular_index()` implemented by
+    the in-house LU, which catches what structure cannot (a node
+    behind an OPEN switch is not empty — `g_off` is always stamped —
+    it just pivots to ~0).
+  * Wired into: `compute_dc_op`, the PWL cache (`CacheError` gained a
+    structured `failing_row` + `detail` so a GUI can highlight the
+    element instead of parsing `what()`), Newton non-convergence
+    (`lpNorm<Infinity>()` discarded the argmax; now reports *where*
+    the worst residual and step live), and the strict diode
+    event-iteration throw (names the devices still flipping).
+
 * **Contiguous zero-copy waveform storage + output decimation**
   (audit finding `waveform-storage-vector-of-vectors`, BREAKING).
   `SimulationResult::states` was a `std::vector<Vector>` — one heap

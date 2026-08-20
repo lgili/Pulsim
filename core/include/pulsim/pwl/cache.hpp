@@ -24,6 +24,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -177,14 +178,23 @@ struct CacheError {
     topology::SwitchStateMask  mask;
     Real                       dt = Real{0};   // 0 for static-only
 
+    /// Where the failure was localised, when it could be (v2.0
+    /// Phase 1, audit finding `singular-errors-dont-name-the-node`).
+    /// `detail` is a ready-to-append human sentence naming the node
+    /// or device; empty when the failure could not be attributed.
+    /// Structured so the Python frontend / GUI can highlight the
+    /// element instead of parsing `what()`.
+    Index                      failing_row = kInvalidIndex;
+    std::string                detail;
+
     [[nodiscard]] std::string what() const {
         const char* k =
             kind == Kind::StructurallySingular ? "structurally singular"
           : kind == Kind::NumericallySingular  ? "numerically singular"
                                                 : "no segment built";
         return std::format(
-            "PwlStateSpaceCache: {} for mask {} (dt={})",
-            k, mask.to_string(), dt);
+            "PwlStateSpaceCache: {} for mask {} (dt={}){}",
+            k, mask.to_string(), dt, detail);
     }
 };
 
@@ -1390,6 +1400,28 @@ public:
     }
 
 private:
+    /// Build a CacheError with the failure LOCALISED where possible
+    /// (v2.0 Phase 1). The cache runs on the Pulsim LU backend, so
+    /// `singular_index()` is a real column here; the structural
+    /// probe covers the rest.
+    [[nodiscard]] CacheError make_cache_error_(
+        CacheError::Kind kind,
+        const topology::SwitchStateMask& mask,
+        Real dt,
+        const sparse::Matrix& J,
+        const sparse::DirectSolver* solver) const {
+        CacheError e{.kind = kind, .mask = mask, .dt = dt};
+        e.detail = explain_singular(graph_, pool_, J, solver);
+        if (solver != nullptr) {
+            e.failing_row = solver->singular_index();
+        }
+        if (e.failing_row == kInvalidIndex) {
+            const Index empty = sparse::first_empty_column(J);
+            if (empty != kInvalidIndex) e.failing_row = empty;
+        }
+        return e;
+    }
+
     /// Non-throwing build of a single segment. Returns the
     /// segment by move on success, or a `CacheError` carrying
     /// the singularity kind + mask + dt on failure.
@@ -1413,18 +1445,14 @@ private:
         auto solver = sparse::make_default_solver(
             pool_.state_size(graph_), sparse::Backend::Auto);
         if (!solver->analyze(J)) {
-            return std::unexpected(CacheError{
-                .kind = CacheError::Kind::StructurallySingular,
-                .mask = mask,
-                .dt   = dt,
-            });
+            return std::unexpected(make_cache_error_(
+                CacheError::Kind::StructurallySingular, mask, dt, J,
+                solver.get()));
         }
         if (!solver->factorize(J)) {
-            return std::unexpected(CacheError{
-                .kind = CacheError::Kind::NumericallySingular,
-                .mask = mask,
-                .dt   = dt,
-            });
+            return std::unexpected(make_cache_error_(
+                CacheError::Kind::NumericallySingular, mask, dt, J,
+                solver.get()));
         }
 
         PwlSegment seg;
