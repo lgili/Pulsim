@@ -245,6 +245,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5/test_main.cpp
         tests/layer5/test_options.cpp
         tests/layer5/test_result.cpp
+        tests/layer5/test_state_trajectory.cpp  # v2.0 Phase 1 — contiguous storage
         tests/layer5/test_run_transient.cpp
         tests/layer5/test_integration_chopper_pwm.cpp
     )

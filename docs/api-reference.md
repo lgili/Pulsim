@@ -74,8 +74,20 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 
 Returns a `SimulationResult` with parallel arrays:
 - `result.times` — `list[float]`, length `(t_end − t_start) / dt + 1`.
-- `result.states` — `list[numpy.ndarray]`, each of length `pool.state_size(graph)`.
+- `result.states` — read-only `numpy.ndarray` of shape
+  `(num_steps, pool.state_size(graph))`. A **zero-copy view** over the
+  kernel's contiguous sample buffer (v2.0): indexing, slicing,
+  iteration and `np.asarray` behave as before, but access is O(1)
+  instead of rebuilding a list of per-sample arrays. Call `.copy()`
+  for a writable array.
 - `result.num_steps()` — convenience accessor.
+- `result.states_bytes` — bytes held by the sample buffer.
+
+Set `SimulationOptions.store_every = m` to record only every m-th
+step. The solver still integrates at `dt`; the recorded grid stays
+strictly uniform at `m · dt` (so FFT / harmonic analysis on the
+result remains valid), and memory drops by the same factor.
+`opts.expected_sample_count()` reports what a run will store.
 
 ## `CircuitBuilder`
 
@@ -181,7 +193,8 @@ opts.event_tol_i              # float
 
 `SimulationResult`:
 - `result.times` — list[float]
-- `result.states` — list[numpy.ndarray]
+- `result.states` — read-only 2-D `numpy.ndarray`, shape
+  `(num_steps, state_size)` (zero-copy view)
 - `result.commutations` — list[CommutationEvent] (event-detection details)
 - `result.num_steps()` — int
 
