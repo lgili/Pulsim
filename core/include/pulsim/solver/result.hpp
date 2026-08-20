@@ -24,7 +24,9 @@
 // `const Vector&`, never a non-const `auto&`.
 //
 // Decimation now exists too: `SimulationOptions::store_every`
-// records every m-th step (plus the first and last), so a long
+// records every m-th step (a PURE stride — steps 0, m, 2m, …, so
+// the recorded grid stays strictly uniform at m·dt; the final step
+// is included only when it lands on the stride), so a long
 // high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"

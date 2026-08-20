@@ -33,7 +33,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     are unchanged; the view is **read-only** (v1.x rows were
     non-writeable views too, so this preserves the old behaviour) —
     call `.copy()` for a mutable array. New `res.states_bytes`.
-  * **New `SimulationOptions.store_every`**: record every m-th step
+  * The read-only view is confined to `res.states` itself: the
+    per-signal accessors `res.v(name)` / `res.i(name)` and
+    `compute_dc_op`'s fallback still return **writable owned**
+    arrays, as in v1.x (adversarial review caught the read-only
+    view leaking through them via a column slice).
+  * `engine='dsed'` results now expose the SAME 2-D `states` array
+    (plus `states_bytes`), so `res.states[:, node_id]` — the
+    pattern the docs recommend — works on both engines.
+  * The eager reservation is byte-capped: a multi-GB trace grows on
+    demand instead of committing one huge block before the first
+    step, so a run the caller may cancel early no longer risks an
+    immediate `bad_alloc`. Ordinary runs still get exactly one
+    allocation.
+  * **New `SimulationOptions.store_every`** (also `simulate(...,
+    store_every=m)`): record every m-th step
     (default 1 = every step, identical to v1.x). The solver still
     integrates at `dt`; only what is STORED changes, and the
     recorded grid stays STRICTLY UNIFORM at `m · dt` — decimation

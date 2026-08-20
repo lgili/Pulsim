@@ -73,27 +73,58 @@ def test_states_view_survives_result_temporary():
     assert abs(float(s[-1][0]) - 12.0) < 1e-6   # source node at 12 V
 
 
-def test_states_access_is_O1_not_O_n():
-    # v1.x rebuilt a list of N ndarray objects per access; the view
-    # is a constant-cost wrapper. Compare a short and a long run:
-    # per-access cost must not scale with the sample count.
-    import time
+def test_states_is_zero_copy_view_not_a_copy():
+    # THE contract of this change, pinned deterministically (a
+    # wall-clock timing test would be both flaky and too loose):
+    # the array must be a VIEW whose base is the result object, so
+    # a silent regression to "copy the whole run per access" fails
+    # here instead of merely getting slower.
+    res, _ = _rc_run()
+    a = res.states
+    assert a.base is res              # zero-copy, keepalive in place
+    assert not a.flags.owndata        # does not own the buffer
+    b = res.states
+    assert b.base is res
+    # Two accesses view the SAME memory (v1.x rebuilt fresh objects).
+    assert a.__array_interface__["data"][0] == \
+        b.__array_interface__["data"][0]
 
-    short, _ = _rc_run(t_end=1e-4)      # ~101 samples
-    long_, _ = _rc_run(t_end=1e-2)      # ~10001 samples
-    assert long_.num_steps() > 50 * short.num_steps()
 
-    def cost(res, reps=200):
-        t0 = time.perf_counter()
-        for _ in range(reps):
-            _ = res.states
-        return (time.perf_counter() - t0) / reps
+def test_states_view_outlives_intermediate_references():
+    # The keepalive must survive dropping every obvious reference
+    # to the array's owner chain except the array itself.
+    import gc
 
-    # Warm up, then measure. Generous 10x bound: the point is that
-    # a 100x larger run does not cost 100x more to access.
-    cost(short, 20)
-    cost(long_, 20)
-    assert cost(long_) < 10 * cost(short) + 1e-4
+    res, _ = _rc_run()
+    a = res.states
+    expected = float(a[-1][0])
+    del res
+    gc.collect()
+    assert float(a[-1][0]) == expected   # buffer still alive
+
+
+def test_v_and_i_return_writable_owned_arrays():
+    # Regression guard (adversarial-review finding
+    # readonly-view-silently-propagates-into-res-v-and-res-i): the
+    # read-only kernel view must NOT leak through the per-signal
+    # accessors — v1.x handed back writable owned arrays and
+    # in-place arithmetic on a trace is ordinary usage.
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 12.0)
+    b.add_resistor("R1", "vin", "vout", 1.0)
+    b.add_inductor("L1", "vout", "gnd", 1e-3)
+    res = pulsim.simulate(b, t_end=1e-4, dt=1e-6)
+
+    v = res.v("vout")
+    assert v.flags.writeable
+    v -= v.mean()          # must not raise
+
+    i = res.i("L1")        # state-native (inductor branch variable)
+    assert i.flags.writeable
+    i *= 2.0
+
+    i_r = res.i("R1")      # computed from node voltages
+    assert i_r.flags.writeable
 
 
 def test_states_bytes_matches_shape():
@@ -132,3 +163,45 @@ def test_store_every_default_is_one():
     opts.store_every = 4
     assert opts.expected_sample_count() == (
         opts.expected_step_count() + 3) // 4
+
+
+def test_simulate_accepts_store_every():
+    # The option must be reachable from the public entry point, not
+    # just from the raw SimulationOptions (review finding
+    # store-every-unreachable-from-every-public-entry-point).
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 12.0)
+    b.add_resistor("R", "vin", "gnd", 10.0)
+    full = pulsim.simulate(b, t_end=1e-4, dt=1e-6)
+    dec = pulsim.simulate(b, t_end=1e-4, dt=1e-6, store_every=10)
+    assert dec.num_steps() < full.num_steps()
+    np.testing.assert_array_equal(dec.states[1], full.states[10])
+    with pytest.raises(ValueError, match="store_every"):
+        pulsim.simulate(b, t_end=1e-4, dt=1e-6, store_every=0)
+
+
+def test_dsed_states_is_also_2d():
+    # The public `states` contract must not depend on which engine
+    # ran (review finding states-type-diverges-between-pwl-and-dsed):
+    # docs tell users to write res.states[:, idx].
+    pytest.importorskip("scipy")
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 12.0)
+    b.add_resistor("R", "vin", "vout", 10.0)
+    b.add_capacitor("C", "vout", "gnd", 1e-6)
+    res = pulsim.simulate(b, t_end=1e-4, engine="dsed")
+    s = res.states
+    assert isinstance(s, np.ndarray)
+    assert s.ndim == 2
+    assert s.shape[0] == len(res.times)
+    _ = s[:, 0]                 # the documented 2-D pattern works
+    assert res.states_bytes == s.nbytes
+
+
+def test_store_every_rejected_by_dsed_engine():
+    pytest.importorskip("scipy")
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 12.0)
+    b.add_resistor("R", "vin", "gnd", 10.0)
+    with pytest.raises(ValueError, match="store_every"):
+        pulsim.simulate(b, t_end=1e-4, engine="dsed", store_every=10)

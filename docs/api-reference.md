@@ -73,7 +73,7 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `max_event_iterations` | `int` | `0` (engine default) | Event-iteration cap. |
 
 Returns a `SimulationResult` with parallel arrays:
-- `result.times` — `list[float]`, length `(t_end − t_start) / dt + 1`.
+- `result.times` — `list[float]`, length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on.
 - `result.states` — read-only `numpy.ndarray` of shape
   `(num_steps, pool.state_size(graph))`. A **zero-copy view** over the
   kernel's contiguous sample buffer (v2.0): indexing, slicing,

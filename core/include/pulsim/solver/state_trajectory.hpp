@@ -166,18 +166,21 @@ public:
     [[nodiscard]] Size size() const noexcept { return n_samples_; }
     [[nodiscard]] bool empty() const noexcept { return n_samples_ == 0; }
 
-    /// Samples that fit without reallocating. Before the row width
-    /// is known (`reserve` called but no `set_state_size` and no
-    /// push yet) this reports the committed RESERVATION — the byte
-    /// allocation happens as soon as the width arrives.
+    /// Samples that fit without reallocating.
+    ///
+    /// Before the row width is known (`reserve` called with neither
+    /// `set_state_size` nor a push yet) no bytes exist to count, so
+    /// this reports the PENDING reservation — the allocation
+    /// happens as soon as the width arrives. Once the width is
+    /// known it reports the real buffer capacity, which may be
+    /// SMALLER than a very large requested reservation (see
+    /// `kEagerReserveByteCap`).
     [[nodiscard]] Size capacity() const noexcept {
         if (n_state_ <= 0) {
             return reserve_samples_;
         }
-        const auto from_buffer = static_cast<Size>(
+        return static_cast<Size>(
             data_.capacity() / static_cast<std::size_t>(n_state_));
-        return from_buffer > reserve_samples_ ? from_buffer
-                                              : reserve_samples_;
     }
 
     // -------------------------------------------------------------
@@ -258,6 +261,13 @@ public:
     [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
     [[nodiscard]] const_iterator cend() const noexcept { return end(); }
 
+    /// Upper bound on the EAGER (pre-run) reservation. Runs whose
+    /// full trace exceeds this still record everything — the buffer
+    /// simply grows on demand instead of being committed up front.
+    /// 256 MiB covers e.g. 10^6 samples x 32 states comfortably.
+    static constexpr std::size_t kEagerReserveByteCap =
+        std::size_t{256} << 20;
+
 private:
     [[nodiscard]] const Real* row_ptr_(Size k) const noexcept {
         return data_.data() +
@@ -267,14 +277,28 @@ private:
 
     /// Reserve the flat buffer once BOTH the sample count hint and
     /// the state size are known. Idempotent; never shrinks.
+    ///
+    /// The eager reservation is CAPPED (adversarial-review finding
+    /// contig-02): `expected_sample_count() * state_size * 8 B` can
+    /// be many gigabytes for a long high-fidelity run, and
+    /// committing that in one block before the first step would
+    /// turn a run the user might cancel early (`should_continue`,
+    /// live streaming) — or simply mis-specify — into an immediate
+    /// bad_alloc. Beyond the cap the buffer grows geometrically
+    /// like any std::vector: still amortized O(1) per sample and
+    /// still contiguous, just not a single up-front commitment.
+    /// Every ordinary run fits under the cap and gets exactly one
+    /// allocation.
     void apply_reserve_() {
         if (reserve_samples_ == 0 || n_state_ <= 0) {
             return;
         }
-        const auto want = static_cast<std::size_t>(reserve_samples_) *
-                          static_cast<std::size_t>(n_state_);
-        if (data_.capacity() < want) {
-            data_.reserve(want);
+        const auto row = static_cast<std::size_t>(n_state_);
+        const auto want = static_cast<std::size_t>(reserve_samples_) * row;
+        const std::size_t cap_reals = kEagerReserveByteCap / sizeof(Real);
+        const std::size_t take = want < cap_reals ? want : cap_reals;
+        if (data_.capacity() < take) {
+            data_.reserve(take);
         }
     }
 

@@ -150,9 +150,13 @@ using ShouldContinueFn = std::function<bool()>;
 //   * state_size > 0                     — state vector must have entries
 //   * static_cast<bool>(switch_fn)       — schedule callback required
 //
-// Postcondition: result.num_steps() == opts.expected_step_count()
-//                result.times[k]   == opts.t_start + k * opts.dt
-//                result.states[k]  is the solution at result.times[k]
+// Postcondition: result.num_steps() == opts.expected_sample_count()
+//                result.times[j]   == opts.t_start
+//                                      + j * opts.store_every * opts.dt
+//                result.states[j]  is the solution at result.times[j]
+//                (with the default store_every == 1 these reduce to
+//                 the v1.x form: one sample per step at k·dt. An
+//                 early `should_continue` stop yields fewer samples.)
 //
 // Lifetime: borrows `cache`, `opts`, `switch_fn`, `b_extra_fn`.
 // Returns by value (NRVO + move).
@@ -169,7 +173,8 @@ inline SimulationResult run_transient(
     if (!opts.valid()) {
         throw std::invalid_argument(
             "run_transient: SimulationOptions are not valid "
-            "(check t_start < t_end, dt > 0, all finite)");
+            "(check t_start < t_end, dt > 0, store_every >= 1, "
+            "all finite)");
     }
     if (state_size == 0) {
         throw std::invalid_argument(
@@ -270,7 +275,8 @@ inline SimulationResult run_transient(
     if (!opts.valid()) {
         throw std::invalid_argument(
             "run_transient: SimulationOptions are not valid "
-            "(check t_start < t_end, dt > 0, all finite)");
+            "(check t_start < t_end, dt > 0, store_every >= 1, "
+            "all finite)");
     }
     if (!switch_fn) {
         throw std::invalid_argument(

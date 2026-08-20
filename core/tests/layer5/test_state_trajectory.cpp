@@ -128,9 +128,42 @@ TEST_CASE("StateTrajectory: empty trajectory is well-defined",
     REQUIRE(t.rows() == 0);
     REQUIRE(t.cols() == 0);
     REQUIRE(t.bytes() == 0);
+    // With no row width yet, capacity() reports the PENDING
+    // reservation — nothing is allocated until the width arrives
+    // (adversarial-review finding F8: the old comment claimed the
+    // reservation was already committed).
     t.reserve(50);
-    REQUIRE(t.capacity() >= 50);   // reservation committed
+    REQUIRE(t.capacity() == 50);
+    REQUIRE(t.bytes() == 0);       // genuinely nothing allocated yet
     REQUIRE(t.empty());
+    // Supplying the width is what materialises the buffer.
+    t.set_state_size(4);
+    REQUIRE(t.capacity() >= 50);
+    const Real* base = t.data();
+    for (int k = 0; k < 50; ++k) t.push_back(make_state(4, 0));
+    REQUIRE(t.data() == base);     // no reallocation
+}
+
+TEST_CASE("StateTrajectory: eager reservation is byte-capped",
+          "[v2][layer5][trajectory]") {
+    // Adversarial-review finding contig-02: reserving
+    // n_samples x n_state x 8 B up front can be many GB for a long
+    // high-fidelity run, turning a cancellable run into an
+    // immediate bad_alloc. Beyond the cap the buffer grows on
+    // demand instead (still contiguous, still amortized O(1)).
+    StateTrajectory t;
+    t.set_state_size(64);
+    const Size absurd =
+        (StateTrajectory::kEagerReserveByteCap / (64 * sizeof(Real))) * 8;
+    t.reserve(absurd);
+    REQUIRE(t.bytes() == 0);           // nothing recorded yet
+    REQUIRE(t.capacity() < absurd);    // capped, not committed
+    REQUIRE(t.capacity() * 64 * sizeof(Real) <=
+            StateTrajectory::kEagerReserveByteCap);
+    // Still correct — recording past the cap simply grows.
+    for (int k = 0; k < 10; ++k) t.push_back(make_state(64, k));
+    REQUIRE(t.size() == 10);
+    REQUIRE(t[9][0] == Approx(9.0));
 }
 
 // =============================================================================
