@@ -6,6 +6,7 @@ error paths use them). Before this, an unsolvable circuit produced
 only a mask bitstring — on a 200-switch MMC that is unactionable.
 """
 
+import numpy as np
 import pytest
 
 import pulsim
@@ -48,11 +49,9 @@ def test_message_is_actionable_not_just_located():
 
 
 def test_healthy_circuit_still_builds():
-    # The structural probe must not produce false positives. A plain
-    # R-only circuit can't exercise that (it was never at risk), so
-    # use a circuit that DOES have capacitors and switches — the
-    # kinds whose stamping decides whether a column ends up empty —
-    # and build it on the dynamic path where every device is stamped.
+    # The structural probe must not produce false positives on a
+    # circuit that DOES have the device kinds whose stamping decides
+    # whether a column ends up empty.
     b = pulsim.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b.add_switch("S1", "vin", "sw", 1e-3, 1e9)
@@ -63,7 +62,61 @@ def test_healthy_circuit_still_builds():
     cache = pulsim.PwlStateSpaceCache(b.graph, b.pool)
     cache.build(1e-6)          # dt > 0: caps and inductors stamped
     assert cache.num_built_segments() == 2     # 2^1 switch states
-    # And it actually solves.
     res = pulsim.simulate(b, t_end=1e-4, dt=1e-6)
     assert res.num_steps() > 0
     assert all(abs(v) < 1e6 for v in res.states[-1])
+
+
+def test_device_row_empty_by_construction_is_not_blamed_as_unwired():
+    # This is the assertion that actually depends on the diagnostics
+    # change (review finding F7: the previous "healthy circuit" test
+    # would have passed with the whole feature reverted).
+    #
+    # The SAME healthy circuit, built at dt = 0, leaves the
+    # inductor's row empty because the static assembler omits
+    # companion stamps — not because L1 is disconnected. The message
+    # must say so instead of telling the user to rewire a correct
+    # part.
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_resistor("R1", "vin", "gnd", 10.0)
+    b.add_inductor("L1", "vin", "gnd", 1e-3)
+    cache = pulsim.PwlStateSpaceCache(b.graph, b.pool)
+    with pytest.raises(RuntimeError) as exc:
+        cache.build(0.0)
+    msg = str(exc.value)
+    assert "L1" in msg                       # names the device
+    assert "no equation in this system" in msg
+    assert "dt > 0" in msg                   # and the real fix
+    assert "no device ties it" not in msg    # NOT a wiring accusation
+    assert "bleeder" not in msg
+
+
+def test_uncoupled_transformer_is_not_rejected_by_the_lti_guard():
+    # Regression guard: the coupled-inductor refusal must key on
+    # ACTUAL mutual inductance, not on a registered coupling.
+    # `add_transformer(..., k=0)` is a documented way to model two
+    # independent windings — there M really is 0, the mass matrix
+    # really is diagonal, and the extraction is exact.
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_resistor("Rp", "vin", "p1", 0.1)
+    b.add_transformer("T1", "p1", "gnd", "s1", "gnd", 1e-3, 4e-3, 0.0)
+    b.add_resistor("Rs", "s1", "gnd", 10.0)
+    cache = pulsim.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build_lazy(1e-6)
+    A, bb, rows, is_cap, proj = cache.compute_lti_state_space(
+        pulsim.SwitchStateMask(0))
+    assert A.shape[0] == A.shape[1] == 2        # two inductor states
+    assert np.isfinite(A).all()
+
+    # ...while a genuinely coupled pair IS refused.
+    b2 = pulsim.CircuitBuilder()
+    b2.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b2.add_resistor("Rp", "vin", "p1", 0.1)
+    b2.add_transformer("T1", "p1", "gnd", "s1", "gnd", 1e-3, 4e-3, 0.98)
+    b2.add_resistor("Rs", "s1", "gnd", 10.0)
+    c2 = pulsim.PwlStateSpaceCache(b2.graph, b2.pool)
+    c2.build_lazy(1e-6)
+    with pytest.raises(RuntimeError, match="magnetically coupled"):
+        c2.compute_lti_state_space(pulsim.SwitchStateMask(0))

@@ -864,18 +864,34 @@ public:
         // the Phase-1 review). Supporting coupled windings needs a
         // real M_ss solve rather than row scaling, which is Phase-2
         // work, not something to fake here.
-        if (!pool_.transformer_couplings().empty()) {
+        // Gate on ACTUAL mutual inductance, not on the mere
+        // presence of a registered coupling: `add_transformer(...,
+        // k = 0)` is a documented way to model two independent
+        // windings, and there M really is 0, the mass matrix really
+        // is diagonal, and the extraction is exact. Rejecting it
+        // would be a false positive whose message ("would silently
+        // return dynamics computed as if the coupling were absent")
+        // is itself untrue for that circuit.
+        Size coupled_pairs = 0;
+        for (const auto& tc : pool_.transformer_couplings()) {
+            if (models::TwoWindingTransformer::mutual_inductance(
+                    tc.params) != Real{0}) {
+                ++coupled_pairs;
+            }
+        }
+        if (coupled_pairs > 0) {
             throw std::runtime_error(std::format(
-                "compute_lti_state_space: this circuit has {} coupled "
-                "inductor pair(s) (transformer / coupled-inductor "
-                "API). The continuous-time LTI extraction applies a "
-                "DIAGONAL inverse mass matrix, so it cannot represent "
-                "the mutual-inductance off-diagonal terms and would "
+                "compute_lti_state_space: this circuit has {} "
+                "magnetically coupled inductor pair(s) (k != 0 on the "
+                "transformer / coupled-inductor API). The "
+                "continuous-time LTI extraction applies a DIAGONAL "
+                "inverse mass matrix, so it cannot represent the "
+                "mutual-inductance off-diagonal terms and would "
                 "silently return dynamics computed as if the coupling "
                 "were absent. Use the fixed-step PWL engine "
                 "(engine='pwl'), which stamps the mutual terms "
                 "exactly, for magnetically coupled circuits.",
-                pool_.transformer_couplings().size()));
+                coupled_pairs));
         }
         // ---------------------------------------------------------
         DenseMatrix A = Schur_G;
@@ -955,14 +971,12 @@ public:
             it = event_entries_.end();
         }
         if (it == event_entries_.end()) {
-            // Fresh mask: make room first (erase invalidates
-            // references, but so does the emplace below — callers
-            // may not hold entry references across solve_at calls,
-            // same contract as the primary flat_map).
-            if (event_entries_.size() >=
-                static_cast<std::size_t>(kMaxEventEntries)) {
-                evict_lru_event_entry_();
-            }
+            // Fresh mask. NOTE the ordering: eviction happens just
+            // before the emplace, AFTER every step that can throw.
+            // Evicting first would sacrifice a healthy, analyzed and
+            // factorized event solver and then throw on a singular
+            // new mask, leaving the table one entry poorer for
+            // nothing (adversarial-review finding F6-c).
             EventEntry e;
             assemble_segment_split(graph_, pool_, mask,
                                     e.G, e.C, e.b_constant);
@@ -984,6 +998,11 @@ public:
             e.current_dt       = dt;
             e.lru_tick         = tick;
             e.analyzed_dynamic = (dt > Real{0});
+            // Everything that can throw is behind us; NOW make room.
+            if (event_entries_.size() >=
+                static_cast<std::size_t>(kMaxEventEntries)) {
+                evict_lru_event_entry_();
+            }
             it = event_entries_.emplace(mask, std::move(e)).first;
             event_builds_.fetch_add(1, std::memory_order_relaxed);
         } else if (it->second.current_dt != dt) {
@@ -1316,6 +1335,13 @@ public:
     /// Estimated resident bytes of the per-mask segment cache
     /// (assembled J + b + numeric LU factors per segment). An
     /// ESTIMATE for budget arithmetic, not an allocator audit.
+    ///
+    /// NOT SAFE to call while a simulation is running on this same
+    /// cache from another thread: it walks `segments_`, which lazy
+    /// builds and budget evictions mutate (the Dictionary is a
+    /// flat_map, so an erase shifts the underlying vector and
+    /// invalidates iterators). Sample it between runs. The
+    /// `metrics()` counters are atomic and MAY be sampled live.
     [[nodiscard]] std::size_t segment_cache_bytes() const noexcept {
         std::size_t total = 0;
         for (const auto& [mask, seg] : segments_) {
@@ -1807,6 +1833,12 @@ private:
         Vector b_constant;          // dt-independent source stamps
         std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
         Real current_dt = Real{-1};
+        /// Plain (non-atomic) on purpose: unlike the segment cache,
+        /// `solve_at` STRUCTURALLY mutates `event_entries_` (erase
+        /// + emplace) on every miss, so this path is single-threaded
+        /// by construction — an atomic tick would suggest a safety
+        /// this container cannot offer. The documented contract is
+        /// one simulation per cache instance.
         std::uint64_t lru_tick = 0;
         /// Which assembly REGIME the entry's symbolic analysis was
         /// taken under. `J(dt)` for dt > 0 is the dynamic pattern

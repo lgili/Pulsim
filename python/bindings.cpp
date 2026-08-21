@@ -1026,7 +1026,11 @@ void init_module(py::module_& m) {
         .def("segment_cache_bytes",
               &pwl::PwlStateSpaceCache::segment_cache_bytes,
               "Estimated resident bytes of the per-mask segment "
-              "cache (assembled matrices + LU factors).")
+              "cache (assembled matrices + LU factors). Sample it "
+              "BETWEEN runs: it walks the segment map, which lazy "
+              "builds and evictions mutate, and run_transient "
+              "releases the GIL — `metrics()` is the thread-safe "
+              "counter set.")
         .def("metrics", &pwl::PwlStateSpaceCache::metrics,
               "Snapshot the cache counters (evictions, event-solver "
               "hits/refactors/builds, rank-1 telemetry).")

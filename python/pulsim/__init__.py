@@ -1315,7 +1315,7 @@ def simulate(
     max_newton_iterations: int = 0,
     max_event_iterations: int = 0,
     strict_event_iterations: bool = False,
-    store_every: int = 1,
+    store_every: Optional[int] = None,
     tol_newton_dx: Optional[float] = None,
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
@@ -1461,7 +1461,12 @@ def simulate(
             max_newton_iterations = solver.max_newton_iterations
         if max_event_iterations == 0:
             max_event_iterations = solver.max_event_iterations
-        if store_every == 1:
+        # `1` is a MEANINGFUL value here ("record every step"), not a
+        # "not passed" sentinel like the 0s above — so the flat kwarg
+        # only defers to the bundle when it was genuinely omitted.
+        # Using 1 as the sentinel silently discarded an explicit
+        # store_every=1 in favour of a bundle's decimation.
+        if store_every is None:
             store_every = solver.store_every
         if tol_newton_dx is None:
             tol_newton_dx = solver.tol_newton_dx
@@ -1537,7 +1542,8 @@ def simulate(
             # so honouring `store_every` there would mean something
             # different (and unstated). Fail loudly rather than
             # returning a full-rate trace the caller did not ask for.
-            "store_every": int(store_every) != 1,
+            "store_every": store_every is not None
+                            and int(store_every) != 1,
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -1725,7 +1731,7 @@ def simulate(
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
-    if store_every != 1:
+    if store_every is not None and int(store_every) != 1:
         if int(store_every) < 1:
             raise ValueError(
                 f"simulate(store_every={store_every}): must be >= 1 "

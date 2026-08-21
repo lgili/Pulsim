@@ -117,3 +117,24 @@ def test_store_every_via_solver_options_bundle():
         solver=pulsim.SolverOptions(store_every=10))
     assert flat.num_steps() == bundled.num_steps()
     assert bundled.num_steps() == 11
+
+
+def test_flat_store_every_beats_the_bundle_in_both_directions():
+    """Regression guard: `1` is a MEANINGFUL value for store_every
+    ("record every step"), not a "not passed" sentinel like the 0s
+    used by the other SolverOptions fields. Using it as a sentinel
+    made `simulate(..., store_every=1, solver=SolverOptions(
+    store_every=100))` silently return a 100x-decimated trace,
+    contradicting the documented "flat kwargs override solver"."""
+    b = _four_switch_builder()
+    bundle = pulsim.SolverOptions(store_every=100)
+
+    # Explicit full rate must WIN over a decimating bundle.
+    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6,
+                           store_every=1, solver=bundle).num_steps() == 101
+    # Omitted -> the bundle applies.
+    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6,
+                           solver=bundle).num_steps() == 2
+    # A different explicit value also wins.
+    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6,
+                           store_every=10, solver=bundle).num_steps() == 11
