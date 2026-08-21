@@ -1411,14 +1411,15 @@ private:
         const sparse::Matrix& J,
         const sparse::DirectSolver* solver) const {
         CacheError e{.kind = kind, .mask = mask, .dt = dt};
-        e.detail = explain_singular(graph_, pool_, J, solver);
-        if (solver != nullptr) {
-            e.failing_row = solver->singular_index();
-        }
-        if (e.failing_row == kInvalidIndex) {
-            const Index empty = sparse::first_empty_column(J);
-            if (empty != kInvalidIndex) e.failing_row = empty;
-        }
+        // ONE resolution feeds both fields (adversarial-review
+        // finding cache-error-detail-and-failing-row-use-inverted-
+        // precedence): computing them independently let the human
+        // sentence and the machine-readable row name DIFFERENT
+        // devices, which is the one thing a GUI highlight must never
+        // do.
+        const auto diag = diagnose_singular(graph_, pool_, J, solver);
+        e.detail      = diag.text;
+        e.failing_row = diag.row;
         return e;
     }
 

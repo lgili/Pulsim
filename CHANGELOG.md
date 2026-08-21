@@ -41,12 +41,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     the in-house LU, which catches what structure cannot (a node
     behind an OPEN switch is not empty — `g_off` is always stamped —
     it just pivots to ~0).
-  * Wired into: `compute_dc_op`, the PWL cache (`CacheError` gained a
-    structured `failing_row` + `detail` so a GUI can highlight the
-    element instead of parsing `what()`), Newton non-convergence
+  * The phrasing branches on WHAT the empty row belongs to. Some
+    unknowns are reserved by `state_size` but deliberately not
+    stamped by the current assembly mode (every inductor at
+    `dt == 0`; saturable inductors in the DC assembly), so their row
+    is empty *by construction*, not because the device is
+    disconnected — telling that user to "add a bleeder resistor to
+    L1" would send them to debug a correctly wired part. A node gets
+    the wiring advice; a device branch-current gets the truth about
+    the assembly mode and the real fix (`build with dt > 0`).
+  * Wired into: `compute_dc_op`, `pseudo_transient_dc`,
+    `source_stepping_dc`, the PWL cache (`CacheError` gained a
+    structured `failing_row` + `detail` for C++ consumers of the
+    non-throwing `try_*` API — Python still receives the message as
+    the exception string; surfacing the structured fields through
+    pybind is a follow-up), Newton non-convergence
     (`lpNorm<Infinity>()` discarded the argmax; now reports *where*
     the worst residual and step live), and the strict diode
-    event-iteration throw (names the devices still flipping).
+    event-iteration throw on BOTH the dynamic and static paths
+    (names the devices still flipping). The Newton residual is
+    phrased as an EQUATION (`the KCL balance at node vout`) and the
+    step as an UNKNOWN (`current through inductor L1`), which is
+    what each actually is.
 
 * **Contiguous zero-copy waveform storage + output decimation**
   (audit finding `waveform-storage-vector-of-vectors`, BREAKING).

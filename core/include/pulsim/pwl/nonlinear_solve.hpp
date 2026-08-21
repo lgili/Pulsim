@@ -330,12 +330,25 @@ using NonlinearRefreshFn = std::function<
         // pass and yields an original MNA row index (no permutation
         // is involved: f_combined and dx are in state-vector space),
         // which `pwl::row_label` turns into "node sw3_e".
+        //
+        // Eigen defines lpNorm<Infinity>() as exactly
+        // `cwiseAbs().maxCoeff()` (Core/Dot.h) — with ONE extra
+        // guard: it short-circuits a size-0 vector to 0 instead of
+        // calling maxCoeff, which asserts on an empty input. Keep
+        // that guard so this stays a strictly value-preserving
+        // change for every input the old code accepted.
         Eigen::Index dx_at = 0;
         Eigen::Index res_at = 0;
-        last_dx_norm  = (alpha * dx).cwiseAbs().maxCoeff(&dx_at);
-        last_res_norm = f_combined.cwiseAbs().maxCoeff(&res_at);
-        worst_dx_row  = static_cast<Index>(dx_at);
-        worst_res_row = static_cast<Index>(res_at);
+        last_dx_norm  = dx.size() == 0
+            ? Real{0}
+            : (alpha * dx).cwiseAbs().maxCoeff(&dx_at);
+        last_res_norm = f_combined.size() == 0
+            ? Real{0}
+            : f_combined.cwiseAbs().maxCoeff(&res_at);
+        worst_dx_row  = dx.size() == 0
+            ? kInvalidIndex : static_cast<Index>(dx_at);
+        worst_res_row = f_combined.size() == 0
+            ? kInvalidIndex : static_cast<Index>(res_at);
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;
         }
@@ -366,7 +379,8 @@ using NonlinearRefreshFn = std::function<
         "worst at {})",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
-        last_res_norm, row_label(graph, pool, worst_res_row)));
+        last_res_norm,
+        row_equation_label(graph, pool, worst_res_row)));
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

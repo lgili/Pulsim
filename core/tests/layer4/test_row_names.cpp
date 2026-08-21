@@ -21,6 +21,7 @@
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <set>
 #include <string>
 
 using namespace pulsim;
@@ -95,6 +96,9 @@ TEST_CASE("describe_row maps every MNA row segment to its owner",
         REQUIRE(info.kind == RowKind::NodeVoltage);
         REQUIRE(info.index == r);
         REQUIRE(contains(info.label, "node "));
+        // Guard against the tautology: contains(x, "") is always
+        // true, so only assert the name when there IS one.
+        REQUIRE_FALSE(g.node(r).name.empty());
         REQUIRE(contains(info.label, g.node(r).name));
     }
 
@@ -218,4 +222,140 @@ TEST_CASE("Cache singular error carries a localised detail + row",
     // The row it points at really is the floating node.
     REQUIRE(contains(row_label(b.graph(), b.pool(), err.failing_row),
                       "vfloat"));
+}
+
+TEST_CASE("Row→device mapping survives many sources and inductors",
+          "[v2][layer4][row_names]") {
+    // The single-source/single-inductor tests above cannot catch an
+    // OFF-BY-ONE in the reverse lookup: with one of each, any shift
+    // still lands on "the" source or "the" inductor. Here each row
+    // must resolve to a SPECIFIC named device, so a shifted segment
+    // boundary or a miscounted source kind fails loudly.
+    //
+    // The source band also mixes kinds on purpose — DC, PWM, sine and
+    // pulse sources all own a branch-current row, and all of them
+    // must be counted by `num_voltage_sources()` for the
+    // source/inductor boundary to be right.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("Vdc",  "a", "gnd", 12.0);
+    b.add_pwm_voltage_source("Vpwm", "b", "gnd",
+                              /*v_high=*/5.0, /*v_low=*/0.0,
+                              /*frequency=*/1e3, /*duty=*/0.5);
+    b.add_sine_voltage_source("Vac", "c", "gnd",
+                               /*v_dc=*/0.0, /*v_amplitude=*/1.0,
+                               /*frequency=*/50.0);
+    b.add_inductor("La", "a", "b", 1e-3);
+    b.add_inductor("Lb", "b", "c", 2e-3);
+    b.add_inductor("Lc", "c", "gnd", 3e-3);
+    b.add_resistor("Rload", "a", "gnd", 10.0);
+
+    const auto& g = b.graph();
+    const auto& pool = b.pool();
+
+    // Every named source/inductor must be found at EXACTLY the row
+    // the pool says it owns, and the label must name that device.
+    auto check = [&](const char* name, Index row, RowKind kind) {
+        const auto info = describe_row(g, pool, row);
+        INFO("row " << row << " -> " << info.label
+             << " (expected " << name << ")");
+        REQUIRE(info.kind == kind);
+        REQUIRE(contains(info.label, name));
+    };
+
+    for (Index bid = 0; bid < g.num_branches(); ++bid) {
+        const auto name = g.branch_name(bid);
+        if (name.empty()) continue;
+        if (pool.is_voltage_source(bid)) {
+            check(std::string{name}.c_str(),
+                  pool.branch_var_id_for_source(bid, g),
+                  RowKind::SourceCurrent);
+        } else if (pool.is_inductor(bid)) {
+            check(std::string{name}.c_str(),
+                  pool.branch_var_id_for_inductor(bid, g),
+                  RowKind::InductorCurrent);
+        }
+    }
+
+    // And no two devices may claim the same row (a shifted boundary
+    // would alias an inductor onto a source row).
+    std::set<Index> claimed;
+    for (Index bid = 0; bid < g.num_branches(); ++bid) {
+        if (pool.is_voltage_source(bid)) {
+            REQUIRE(claimed.insert(
+                pool.branch_var_id_for_source(bid, g)).second);
+        } else if (pool.is_inductor(bid)) {
+            REQUIRE(claimed.insert(
+                pool.branch_var_id_for_inductor(bid, g)).second);
+        }
+    }
+    // Together the branch-current rows exactly fill [N, state_size).
+    REQUIRE(claimed.size() ==
+            static_cast<std::size_t>(pool.state_size(g)) -
+                static_cast<std::size_t>(g.num_nodes()));
+}
+
+TEST_CASE("A device row empty BY CONSTRUCTION is not blamed as unwired",
+          "[v2][layer4][row_names][diagnostics]") {
+    // Adversarial-review finding
+    // `dt0-static-build-blames-a-perfectly-connected-inductor`
+    // (HIGH). At dt = 0 the assembler deliberately omits inductor
+    // companion stamps, yet `state_size` still reserves the
+    // inductor's branch-current row — so that row is empty because
+    // of the ASSEMBLY MODE, not because the device is disconnected.
+    //
+    // The first version of this feature told such a user "nothing
+    // connects current through inductor L1 ... add a bleeder
+    // resistance", sending them to debug a correctly wired part.
+    // That is worse than the old uninformative message. The
+    // phrasing must branch on what the empty row belongs to.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0);
+    b.add_resistor("R1", "vin", "gnd", 10.0);
+    b.add_inductor("L1", "vin", "gnd", 1e-3);   // perfectly wired
+
+    PwlStateSpaceCache cache{b.graph(), b.pool()};
+    bool threw = false;
+    try {
+        cache.build(Real{0});      // static build: no L stamps
+    } catch (const std::runtime_error& e) {
+        threw = true;
+        const std::string msg = e.what();
+        INFO("message: " << msg);
+        // It may name L1 — that IS where the empty row is — but it
+        // must NOT claim the device is disconnected or tell the user
+        // to rewire it.
+        REQUIRE_FALSE(contains(msg, "no device ties it"));
+        REQUIRE_FALSE(contains(msg, "bleeder"));
+        // Instead it must explain the real cause and the real fix.
+        REQUIRE(contains(msg, "no equation in this system"));
+        REQUIRE(contains(msg, "dt > 0"));
+    }
+    REQUIRE(threw);
+}
+
+TEST_CASE("CacheError.detail and .failing_row always agree",
+          "[v2][layer4][row_names][diagnostics]") {
+    // Adversarial-review finding
+    // `cache-error-detail-and-failing-row-use-inverted-precedence`
+    // (HIGH): the sentence and the machine-readable index were
+    // resolved independently with OPPOSITE priority, so a GUI could
+    // highlight one device while the text named another. One
+    // resolution now feeds both.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0);
+    b.add_resistor("R1", "vin", "gnd", 10.0);
+    b.add_capacitor("Cfloat", "vin", "vfloat", 1e-6);
+
+    PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(Real{0});
+    auto r = cache.try_lookup(topology::SwitchStateMask(0));
+    REQUIRE_FALSE(r.has_value());
+    const auto err = r.error();
+    REQUIRE(err.failing_row != kInvalidIndex);
+    REQUIRE_FALSE(err.detail.empty());
+    // The row the tooling would highlight must be the one the
+    // sentence talks about.
+    const auto label = row_label(b.graph(), b.pool(), err.failing_row);
+    INFO("detail: " << err.detail << "\n  row label: " << label);
+    REQUIRE(contains(err.detail, label));
 }

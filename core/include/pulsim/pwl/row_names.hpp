@@ -146,59 +146,122 @@ struct RowInfo {
                                        std::string{name}, b_id);
 }
 
-/// Explain WHY a factorization failed, in the user's vocabulary.
+/// A localised singularity: the offending row (for tooling) and the
+/// sentence to show the user. ONE resolution feeds both, so the
+/// human text and the machine-readable index can never disagree.
+struct SingularDiagnosis {
+    Index       row = kInvalidIndex;
+    std::string text;               ///< empty when unlocalisable
+};
+
+/// Diagnose WHY a factorization failed, in the user's vocabulary.
 ///
-/// Two independent sources of location, in order of confidence:
+/// Two independent sources of location, because one is not enough:
 ///
-///  1. A structurally EMPTY column in the assembled matrix. Nothing
-///     in the system depends on that unknown — the textbook "this
-///     node has no path to ground". Detected before/independently of
-///     the factorization and available on EVERY backend, which
-///     matters because the Eigen backend (used by the DC and Newton
-///     paths) reports no pivot index at all.
-///  2. The failing pivot column reported by the solver, when the
-///     backend supports `singular_index()`. This catches the cases
-///     structure cannot: a node tied to the circuit only through an
-///     OPEN switch or a 1 GΩ resistor is not structurally empty —
-///     `g_off` is always stamped — it just pivots to ~0.
+///  1. A structurally EMPTY column/row in the assembled matrix.
+///     Available on EVERY backend — which matters, since the DC and
+///     Newton paths use the Eigen backend, and it reports no pivot
+///     index at all.
+///  2. The failing pivot column from `singular_index()`, when the
+///     backend has one. This catches what structure cannot: a node
+///     behind an OPEN switch is not empty (`g_off` is always
+///     stamped) — it just pivots to ~0.
 ///
-/// `solver` may be null (pure structural check). Returns an empty
-/// string when neither source can localise the failure, so callers
-/// can append it unconditionally.
+/// CRITICAL — an empty row is not always a wiring fault. Some
+/// unknowns are reserved by `DevicePool::state_size` but
+/// deliberately NOT stamped by the current assembly mode:
+///   * every inductor at `dt == 0` (the static/V0 build omits
+///     companion stamps entirely), and
+///   * saturable inductors in the DC assembly (no DC stamp yet).
+/// Their rows are empty BY CONSTRUCTION, not because the device is
+/// disconnected. Telling such a user to "add a bleeder resistor to
+/// L1" sends them to debug a correctly wired part — actively worse
+/// than the old, merely-uninformative message. So the phrasing
+/// branches on WHAT the empty row belongs to: a node gets the
+/// wiring advice, a device branch-current gets the truth about the
+/// assembly mode.
+[[nodiscard]] inline SingularDiagnosis diagnose_singular(
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const sparse::Matrix& J,
+    const sparse::DirectSolver* solver = nullptr) {
+    auto empty_explanation = [&](Index row) -> std::string {
+        const auto info = describe_row(graph, pool, row);
+        if (info.kind == RowKind::NodeVoltage) {
+            return std::format(
+                " — nothing connects {}: its column in the MNA matrix "
+                "is empty, i.e. no device ties it to the rest of the "
+                "circuit (a node reachable only through a capacitor "
+                "has no DC path; add a bleeder/parallel resistance or "
+                "tie it to ground)",
+                info.label);
+        }
+        // A branch-current unknown with no entries: the DEVICE was
+        // not stamped into this particular system.
+        return std::format(
+            " — {} has no equation in this system: the device owns an "
+            "MNA unknown but contributed no stamps. This is expected "
+            "when a static system is built with dt = 0 (inductor "
+            "companions need dt > 0) or when a saturable inductor "
+            "reaches the DC assembly, which has no DC stamp for it — "
+            "build with dt > 0, or seed from a transient instead of a "
+            "DC operating point",
+            info.label);
+    };
+
+    const Index empty_col = sparse::first_empty_column(J);
+    if (empty_col != kInvalidIndex) {
+        return {empty_col, empty_explanation(empty_col)};
+    }
+    const Index empty_row = sparse::first_empty_row(J);
+    if (empty_row != kInvalidIndex) {
+        return {empty_row, empty_explanation(empty_row)};
+    }
+    if (solver != nullptr) {
+        const Index col = solver->singular_index();
+        if (col != kInvalidIndex) {
+            return {col, std::format(
+                " — elimination collapsed at {}: the pivot there fell "
+                "to ~0, so that unknown is (nearly) unconstrained "
+                "— typically an isolated node behind an open switch "
+                "or a very large series resistance",
+                row_label(graph, pool, col))};
+        }
+    }
+    return {};
+}
+
+/// Text-only convenience over `diagnose_singular`. Returns an empty
+/// string when the failure cannot be localised, so callers can
+/// append it unconditionally.
 [[nodiscard]] inline std::string explain_singular(
     const topology::Graph& graph,
     const DevicePool& pool,
     const sparse::Matrix& J,
     const sparse::DirectSolver* solver = nullptr) {
-    const Index empty_col = sparse::first_empty_column(J);
-    if (empty_col != kInvalidIndex) {
-        return std::format(
-            " — nothing connects {}: its column in the MNA matrix is "
-            "empty, i.e. no device ties it to the rest of the circuit "
-            "(a node reachable only through a capacitor has no DC "
-            "path; add a bleeder/parallel resistance or tie it to "
-            "ground)",
-            row_label(graph, pool, empty_col));
+    return diagnose_singular(graph, pool, J, solver).text;
+}
+
+/// Phrase a row as the EQUATION it represents, rather than as the
+/// unknown it solves for. A Newton residual lives in equation space:
+/// row i of `f` is the KCL balance at node i, or a device's
+/// constraint equation — not "the current through L1".
+[[nodiscard]] inline std::string row_equation_label(
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    Index row) {
+    const auto info = describe_row(graph, pool, row);
+    switch (info.kind) {
+        case RowKind::NodeVoltage:
+            return std::format("the KCL balance at {}", info.label);
+        case RowKind::SourceCurrent:
+        case RowKind::InductorCurrent:
+            return std::format("the branch equation of {}",
+                                info.label);
+        case RowKind::OutOfRange:
+        default:
+            return info.label;
     }
-    const Index empty_row = sparse::first_empty_row(J);
-    if (empty_row != kInvalidIndex) {
-        return std::format(
-            " — no equation constrains {}: its row in the MNA matrix "
-            "is empty",
-            row_label(graph, pool, empty_row));
-    }
-    if (solver != nullptr) {
-        const Index col = solver->singular_index();
-        if (col != kInvalidIndex) {
-            return std::format(
-                " — elimination collapsed at {}: the pivot there fell "
-                "to ~0, so that unknown is (nearly) unconstrained "
-                "— typically an isolated node behind an open switch "
-                "or a very large series resistance",
-                row_label(graph, pool, col));
-        }
-    }
-    return {};
 }
 
 /// Report the `k` largest-magnitude entries of `v` by name, e.g.

@@ -1129,12 +1129,38 @@ inline SimulationResult run_transient(
 
             if (flipped || mask_cycle) {
                 if (opts.strict_event_iterations) {
+                    // Same naming as the dynamic path — the static
+                    // path runs whenever the cache was built at
+                    // dt = 0, and a user there deserves the same
+                    // answer to "which device is chattering?"
+                    // (adversarial-review finding F2: only the
+                    // dynamic throw had been updated).
+                    std::string culprits;
+                    if (has_diodes && !last_solved_bits.empty()) {
+                        const auto& entries = diodes.entries();
+                        for (Size i = 0; i < entries.size() &&
+                                          i < last_solved_bits.size(); ++i) {
+                            if (entries[i].is_on == last_solved_bits[i]) {
+                                continue;
+                            }
+                            if (!culprits.empty()) culprits += ", ";
+                            culprits += pwl::branch_label(
+                                graph, entries[i].branch_id);
+                        }
+                    }
                     throw std::runtime_error(std::format(
                         "run_transient: diode event iteration {} at "
-                        "t = {} (strict_event_iterations=true)",
+                        "t = {} after {} solves "
+                        "(strict_event_iterations=true){}; raise "
+                        "max_event_iterations, reduce dt, or give the "
+                        "offending device(s) a small hysteresis band",
                         mask_cycle ? "hit a mask cycle"
                                     : "exhausted its budget",
-                        t));
+                        t, iters,
+                        culprits.empty()
+                            ? std::string{}
+                            : std::format(" — still flipping: {}",
+                                           culprits)));
                 }
                 // P0-R1: re-sync diode bits to the solved state.
                 if (has_diodes && !last_solved_bits.empty()) {
