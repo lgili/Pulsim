@@ -179,6 +179,85 @@ void init_module(py::module_& m) {
               });
 
     // ---- CircuitBuilder ---------------------------------------------------
+    // ---- v2.0 Phase 2 (B.1) — preflight + auto-regularization -----------
+    //
+    // Bound (not C++-only) deliberately: an unbound diagnostic is an
+    // untestable one, and users need to see exactly what Pulsim
+    // changed about their circuit.
+    py::enum_<pwl::PreflightIssue>(m, "PreflightIssue")
+        .value("IsolatedSubnet", pwl::PreflightIssue::IsolatedSubnet,
+                "No connection to ground through any device.")
+        .value("NoDcPathToGround", pwl::PreflightIssue::NoDcPathToGround,
+                "Connected, but only through capacitors / current "
+                "sources, which are open at DC.");
+
+    py::class_<pwl::PreflightFinding>(m, "PreflightFinding",
+        "One topology issue the preflight pass found, and what it "
+        "did about it.")
+        .def_readonly("issue", &pwl::PreflightFinding::issue)
+        .def_readonly("anchor_node", &pwl::PreflightFinding::anchor_node,
+                       "Node id that received the reference tie.")
+        .def_readonly("component", &pwl::PreflightFinding::component,
+                       "Every node id in the affected subnet.")
+        .def_readonly("inserted_resistance",
+                       &pwl::PreflightFinding::inserted_resistance,
+                       "Ohms of the inserted tie; 0 when the pass only "
+                       "reported the issue.")
+        .def_readonly("detail", &pwl::PreflightFinding::detail,
+                       "Human-facing explanation, naming the node.")
+        .def("was_fixed", &pwl::PreflightFinding::was_fixed)
+        .def("__repr__", [](const pwl::PreflightFinding& f) {
+            return std::string("PreflightFinding(node=") +
+                   std::to_string(f.anchor_node) +
+                   ", fixed=" + (f.was_fixed() ? "True" : "False") + ")";
+        });
+
+    py::class_<pwl::PreflightReport>(m, "PreflightReport",
+        "What the topology preflight found, and which reference ties "
+        "it inserted. Empty when the circuit was already well-posed.")
+        .def_readonly("findings", &pwl::PreflightReport::findings)
+        .def("empty", &pwl::PreflightReport::empty)
+        .def("num_fixed", &pwl::PreflightReport::num_fixed)
+        .def("summary", &pwl::PreflightReport::summary,
+              "One paragraph naming every issue and fix; empty string "
+              "when there is nothing to report.")
+        .def("__len__", [](const pwl::PreflightReport& r) {
+            return r.findings.size();
+        })
+        .def("__repr__", [](const pwl::PreflightReport& r) {
+            return std::string("PreflightReport(findings=") +
+                   std::to_string(r.findings.size()) + ", fixed=" +
+                   std::to_string(r.num_fixed()) + ")";
+        });
+
+    py::class_<pwl::PreflightOptions>(m, "PreflightOptions",
+        "Knobs for the preflight pass.")
+        .def(py::init<>())
+        .def(py::init([](bool auto_regularize, Real tie_resistance,
+                          std::string name_prefix) {
+                  pwl::PreflightOptions o;
+                  o.auto_regularize = auto_regularize;
+                  o.tie_resistance  = tie_resistance;
+                  o.name_prefix     = std::move(name_prefix);
+                  return o;
+              }),
+              py::arg("auto_regularize") = true,
+              py::arg("tie_resistance")  = Real{1e9},
+              py::arg("name_prefix")     = std::string{"R_auto_iso_"})
+        .def_readwrite("auto_regularize",
+                        &pwl::PreflightOptions::auto_regularize,
+                        "Insert the ties (default) rather than only "
+                        "reporting them.")
+        .def_readwrite("tie_resistance",
+                        &pwl::PreflightOptions::tie_resistance,
+                        "Ohms of an inserted reference tie. The "
+                        "default 1e9 draws nanoamps, so it supplies "
+                        "the MNA reference without loading the node — "
+                        "a SMALL value here would be a galvanic bond "
+                        "that silently rewires the circuit.")
+        .def_readwrite("name_prefix",
+                        &pwl::PreflightOptions::name_prefix);
+
     py::class_<builder::CircuitBuilder>(m, "CircuitBuilder",
         "High-level v2 circuit constructor. Hides the "
         "two-object Graph + DevicePool setup; users pass "
@@ -316,6 +395,20 @@ void init_module(py::module_& m) {
               "`run_transient` with "
               "`enable_nonlinear_refresh=True` so the Newton "
               "loop stamps the MOSFET each iteration.")
+        .def("run_preflight",
+              [](builder::CircuitBuilder& self,
+                  const pwl::PreflightOptions& opts) {
+                  return self.run_preflight(opts);
+              },
+              py::arg("options") = pwl::PreflightOptions{},
+              "Check the topology for nodes with no voltage "
+              "reference and (by default) tie each offending subnet "
+              "to ground through a high-value resistor. Returns a "
+              "PreflightReport naming everything it found and "
+              "inserted. `simulate()` runs this automatically; call "
+              "it directly to inspect a circuit, or with "
+              "PreflightOptions(auto_regularize=False) to look "
+              "without touching.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("n_pos"),
@@ -777,6 +870,21 @@ void init_module(py::module_& m) {
               &topology::Graph::num_nodes)
         .def_property_readonly("num_branches",
               &topology::Graph::num_branches)
+        // v2.0 Phase 1 gave branches names so kernel diagnostics
+        // could speak them; expose them here too, so tooling and
+        // tests can see what a pass (e.g. preflight) inserted.
+        .def("branch_name",
+              [](const topology::Graph& g, Index b) {
+                  return std::string{g.branch_name(b)};
+              }, py::arg("branch_id"),
+              "The branch's user-facing name, or '' when it was "
+              "created without one.")
+        .def("node_name",
+              [](const topology::Graph& g, Index n) {
+                  return (n < 0 || n >= g.num_nodes())
+                      ? std::string{} : g.node(n).name;
+              }, py::arg("node_id"),
+              "The node's name, or '' when out of range/unnamed.")
         .def_property_readonly("num_switches",
               &topology::Graph::num_switches,
               "Count of branches with kind = Switch — "

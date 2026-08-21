@@ -72,7 +72,14 @@ This usually means:
 - All sources are current sources and the topology has no DC path to ground.
 - A nonlinear branch (`BranchKind::Nonlinear`) has no diagonal contribution. Pulsim already adds a 1e-12 G_min for `SaturableInductor`; for other custom devices you may need to add your own.
 
-**Fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.
+**Fix (v2.0 and later): none needed.** `simulate()` runs a topology
+preflight that finds unreferenced subnets and ties each one to ground
+through a 1 GΩ resistor, then tells you what it inserted. Read it with
+`result._preflight`, or pass `auto_regularize=False` to get the error
+back. What follows is what that pass does for you, and what to type if
+you build the cache yourself.
+
+**Manual fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.
 
 ## Time-step (`dt`) choices
 
@@ -98,9 +105,15 @@ You called the wrong typed accessor on `DevicePool`. The `kind_of(b_id)` casts t
 
 ### Symptom: forgotten ground
 
-Every isolated subnet must have a DC reference. A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it.
+Every isolated subnet must have a DC reference. Since v2.0 `simulate()`
+supplies one for you — see the preflight note above — so this section is
+about the cases where you want to place the tie yourself, or where you
+need a BOND rather than a reference.
 
-**Fix:** `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` for a reference-only tie (leakage ~nA, invisible in the waveforms), or `1e-6` only when you intend an actual bond between the grounds.
+A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it, and preflight will never insert one: it only ever adds references.
+
+**Fix:** nothing, if you let `simulate()` do it. Otherwise
+`b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` for a reference-only tie (leakage ~nA, invisible in the waveforms), or `1e-6` only when you intend an actual bond between the grounds.
 
 ### Symptom: switch_fn never fires the bit I expect
 

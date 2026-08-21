@@ -342,6 +342,14 @@ public:
         return false;
     }
 
+    /// Non-throwing companion to `kind_of`: is there a device
+    /// registered on this branch at all? Diagnostic passes (the
+    /// preflight sweep, error paths) need to ask without risking a
+    /// second exception on top of the one they are explaining.
+    [[nodiscard]] bool is_registered(Index branch_id) const noexcept {
+        return entries_.find(branch_id) != entries_.end();
+    }
+
     [[nodiscard]] StoredKind kind_of(Index branch_id) const {
         const auto it = entries_.find(branch_id);
         if (it == entries_.end()) {

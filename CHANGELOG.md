@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Phase 2 — automatic robustness (v2.0 audit follow-up)
+
+* **Topology preflight + auto-regularization** (audit finding
+  `no-topology-preflight-or-auto-shunt`, CRITICAL). A node nobody gave
+  a voltage reference — an isolated transformer secondary, a divider
+  tap hanging off one capacitor, a sub-circuit fed only by current
+  sources — used to make the factorization singular. Since Phase 1 the
+  error at least named the node; now the circuit just runs.
+  * `simulate()` sweeps the topology before the engine dispatch (so
+    BOTH engines benefit), finds every subnet with no path to ground,
+    and ties each one to ground through a **1 GΩ** resistor. Large is
+    the point: a 1 GΩ reference draws nanoamps and leaves the physics
+    untouched, whereas the 1 µΩ tie an older tutorial prescribed is a
+    galvanic BOND that silently welds an isolated secondary to primary
+    ground. A test asserts the auto-tied circuit's waveforms match a
+    hand-tied one exactly.
+  * Two passes, because they catch different things: galvanic
+    reachability over every branch, and DC reachability over the
+    branches that conduct at DC (capacitors are open, ideal current
+    sources contribute no conductance). A cap-only node is fine in a
+    transient and singular at DC — both halves are pinned by tests.
+  * Nothing happens silently. Every insertion lands in a
+    `PreflightReport` naming the node and the value, surfaced once as
+    a warning and attached to `result._preflight`.
+    `auto_regularize=False` restores the previous named error, and
+    `builder.run_preflight(PreflightOptions(auto_regularize=False))`
+    inspects a circuit without touching it. The pass is idempotent and
+    finds nothing on a well-posed circuit.
+  * Deliberately NOT auto-fixed: a node reachable only through an
+    inductor is floating in the legacy `dt = 0` static build, but the
+    right answer there is `dt > 0`, which the existing error already
+    says — inserting a resistor would hide a modelling mistake.
+  * New: `PreflightReport` / `PreflightFinding` / `PreflightOptions`
+    exported from `pulsim`, `Graph.branch_name()` / `node_name()`
+    bound, and `DevicePool::is_registered()` as a non-throwing
+    companion to `kind_of`.
+  * `docs/tutorials/03-flyback-isolated.md` prescribed the 1 µΩ tie;
+    corrected, with the reason spelled out.
+
 ### Phase 1 — kernel foundation (v2.0 audit follow-up)
 
 * **Kernel diagnostics now name the node or device** (audit findings
