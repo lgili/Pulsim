@@ -21,11 +21,11 @@ import pytest
 import pulsim as p
 
 
-def _run(builder, **kw):
+def _run(builder, t_end=2e-4, dt=1e-6, **kw):
     """Simulate, swallowing the (expected) preflight warning."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return p.simulate(builder, t_end=2e-4, dt=1e-6, **kw)
+        return p.simulate(builder, t_end=t_end, dt=dt, **kw)
 
 
 # ---------------------------------------------------------------------
@@ -112,16 +112,28 @@ def test_hostile_circuit_simulates_with_no_manual_intervention(
     assert res._preflight.num_fixed() == expected_ties
 
 
+# The node each hostile circuit's error must name when the user opts
+# out. Asserting the bare word "node" would be vacuous — it appears in
+# every singular-matrix message the kernel emits.
+OPT_OUT_NAMES = {
+    "isolated-secondary": ("s1", "s_gnd"),
+    "two-islands": ("a1", "a2", "b1", "b2"),
+    "floating-rc-ladder": ("x1", "x2", "x3"),
+}
+
+
 @pytest.mark.parametrize("make", BREAKS_IN_TRANSIENT)
-def test_opting_out_restores_the_named_error(make):
+def test_opting_out_restores_the_named_error(make, request):
     """auto_regularize=False must give back the Phase-1 diagnostic —
-    which names the node — not a bare mask bitstring."""
+    which names the OFFENDING node — not a bare mask bitstring."""
     with pytest.raises(RuntimeError) as exc:
         _run(make(), auto_regularize=False)
     msg = str(exc.value)
     assert "singular" in msg
-    # Phase 1's contribution: the message localises the failure.
-    assert "node" in msg
+    # Phase 1's contribution: the message localises the failure to a
+    # node of the actually-floating subnet.
+    case = request.node.callspec.id
+    assert any(n in msg for n in OPT_OUT_NAMES[case]), msg
 
 
 def test_capacitor_only_node_breaks_at_dc_and_is_fixed_there():
@@ -232,3 +244,80 @@ def test_preflight_also_runs_for_the_dsed_engine():
     # to read — was a PWL-only attribute.
     assert res._preflight is not None
     assert res._preflight.num_fixed() == 1
+
+
+def test_dc_floating_block_nested_inside_an_isolated_island():
+    """Adversarial-review finding (CRITICAL): a galvanic finding covers
+    a whole island but earns it ONE tie, so a DC-floating sub-block
+    INSIDE that island is still floating afterwards. The first version
+    filtered DC findings against galvanic ones by component
+    MEMBERSHIP, so it reported those sub-blocks as fixed and then threw
+    the very error the feature exists to remove — with a spurious
+    resistor already in the user's circuit.
+
+    A current source is the clean repro: it connects na-nb
+    galvanically but contributes no DC conductance at all.
+    """
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_resistor("R1", "vin", "gnd", 10.0)
+    b.add_current_source("Ibias", "na", "nb", 1e-3)
+    b.add_resistor("Rb", "nb", "nc", 100.0)
+
+    report = b.run_preflight()
+    # TWO ties: one for the island, one for the DC-floating sub-block.
+    assert report.num_fixed() == 2
+    kinds = {f.issue for f in report.findings}
+    assert p.PreflightIssue.IsolatedSubnet in kinds
+    assert p.PreflightIssue.NoDcPathToGround in kinds
+
+    # ...and the circuit actually runs.
+    b2 = p.CircuitBuilder()
+    b2.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b2.add_resistor("R1", "vin", "gnd", 10.0)
+    b2.add_current_source("Ibias", "na", "nb", 1e-3)
+    b2.add_resistor("Rb", "nb", "nc", 100.0)
+    res = _run(b2, t_end=1e-5)
+    assert np.isfinite(np.asarray(res.states)).all()
+
+
+def test_node_behind_a_nonlinear_device_is_not_mistaken_for_grounded():
+    """Adversarial-review finding (HIGH): `conducts_at_dc` claimed
+    nonlinear branches "stamp their linearization" and returned True.
+    They do not — `dc_assemble` skips them as OPEN CIRCUITS — so a node
+    touching only a nonlinear device and a capacitor sailed through
+    preflight and then failed at DC."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_nonlinear_diode("D1", "vin", "out",
+                          p.IdealDiodeParams())
+    b.add_capacitor("Cout", "out", "gnd", 10e-6)
+
+    report = b.run_preflight()
+    assert report.num_fixed() == 1
+    f = report.findings[0]
+    assert f.issue == p.PreflightIssue.NoDcPathToGround
+    assert "out" in f.detail
+
+
+def test_tie_resistance_must_be_positive_and_finite():
+    """It becomes a conductance 1/R, so 0 would stamp an infinity and
+    turn the solution into NaN without a word."""
+    b = isolated_transformer_secondary()
+    for bad in (0.0, -1.0, float("inf")):
+        with pytest.raises(ValueError, match="tie_resistance"):
+            b.run_preflight(p.PreflightOptions(tie_resistance=bad))
+
+
+def test_preflight_options_accepts_keyword_arguments():
+    """The docs (and this file) use PreflightOptions(auto_regularize=
+    False); the first binding exposed only a no-arg constructor."""
+    o = p.PreflightOptions(auto_regularize=False, tie_resistance=1e7)
+    assert o.auto_regularize is False
+    assert o.tie_resistance == 1e7
+    b = isolated_transformer_secondary()
+    n_before = b.graph.num_branches
+    report = b.run_preflight(o)
+    assert not report.empty()
+    assert report.num_fixed() == 0          # reported, not applied
+    assert b.graph.num_branches == n_before  # untouched

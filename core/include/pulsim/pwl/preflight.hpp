@@ -186,12 +186,21 @@ private:
 
 /// Does this branch carry current at DC?
 ///
-/// Capacitors are open at DC (`dc_assemble` skips them outright) and
-/// an ideal current source contributes no conductance to the matrix,
-/// so neither can give a node a DC reference. Everything else does:
-/// resistors and inductors conduct, sources impose a branch
-/// relation, switches always stamp `g_on` or `g_off`, and nonlinear
-/// devices stamp their linearization.
+/// Three kinds cannot give a node a DC reference:
+///   * capacitors — `dc_assemble` skips them ("open circuit at DC");
+///   * ideal current sources — matrix-free, they only write the RHS;
+///   * NONLINEAR branches — `dc_assemble` skips these too, stamping
+///     them as OPEN CIRCUITS (its own header says so). An earlier
+///     version of this predicate claimed they "stamp their
+///     linearization" and returned true, which made the pass miss
+///     the very case it exists to catch: a node touching only a
+///     nonlinear device and a capacitor sails through preflight and
+///     then fails at DC. (The transient path stamps only a 1e-12
+///     diagonal, and only for a saturable inductor's branch
+///     variable — not a node reference either.)
+/// Everything else conducts: resistors and inductors, sources
+/// (which impose a branch relation), and switches, which always
+/// stamp `g_on` or `g_off`.
 [[nodiscard]] inline bool conducts_at_dc(const DevicePool& pool,
                                           const topology::Branch& branch) {
     using SK = DevicePool::StoredKind;
@@ -208,8 +217,9 @@ private:
             return pool.kind_of(branch.id) != SK::Capacitor;
         case topology::BranchKind::Source:
             return pool.kind_of(branch.id) != SK::CurrentSource;
-        case topology::BranchKind::Switch:
         case topology::BranchKind::Nonlinear:
+            return false;
+        case topology::BranchKind::Switch:
             return true;
     }
     return true;
@@ -299,34 +309,45 @@ components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
 
     // ---- 2. Connected, but with no DC path to ground -------------
     //
-    // Skip anything already covered above: an isolated subnet is
-    // trivially also DC-isolated, and reporting it twice would be
-    // noise.
+    // Note this pass runs on the graph AS GIVEN. A caller that
+    // APPLIES the galvanic ties must re-analyze afterwards rather
+    // than filtering these findings against the galvanic ones:
+    // a galvanic finding covers a whole island but earns it only
+    // ONE tie, so DC-floating sub-blocks INSIDE that island are
+    // still floating after it lands. Suppressing them by component
+    // membership (the first version of this code) left them
+    // singular while the report claimed they were fixed — see
+    // `CircuitBuilder::run_preflight`, which iterates to a fixed
+    // point instead.
     const auto dc_floating = detail::components_without_ground(
         graph, [&pool](const topology::Branch& br) {
             return detail::conducts_at_dc(pool, br);
         });
 
-    auto already_reported = [&](Index node) {
+    // A component that is ALSO galvanically isolated is already
+    // described by finding 1 at the same anchor; reporting the same
+    // anchor twice would be noise. Compare ANCHORS, not membership.
+    auto anchor_taken = [&](Index node) {
         for (const auto& f : report.findings) {
-            for (Index n : f.component) if (n == node) return true;
+            if (f.anchor_node == node) return true;
         }
         return false;
     };
 
     for (const auto& comp : dc_floating) {
-        if (comp.empty() || already_reported(comp.front())) continue;
+        if (comp.empty() || anchor_taken(comp.front())) continue;
         PreflightFinding f;
         f.issue     = PreflightIssue::NoDcPathToGround;
         f.component = comp;
         f.anchor_node = comp.front();
         f.detail = std::format(
             "{} has no DC path to ground — it is reachable only "
-            "through capacitors (open at DC) or current sources "
-            "(no conductance), so the DC operating point and any "
-            "static (dt = 0) build are singular there. A high-value "
-            "bleeder to ground ({:g} Ω) fixes it without loading the "
-            "node.",
+            "through capacitors (open at DC), current sources (no "
+            "conductance) or nonlinear devices (which the DC "
+            "assembly stamps as open circuits), so the DC operating "
+            "point and any static (dt = 0) build are singular there. "
+            "A high-value bleeder to ground ({:g} Ω) fixes it without "
+            "loading the node.",
             node_label(graph, f.anchor_node), opts.tie_resistance);
         report.findings.push_back(std::move(f));
     }

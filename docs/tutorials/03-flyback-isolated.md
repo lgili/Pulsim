@@ -52,8 +52,12 @@ b.add_resistor ("R_L",  "vout", "sec_gnd", 10.0)
 > are physically separate, and MNA needs every node to have a voltage
 > reference — so the secondary must be tied to ground *somehow*.
 > Since v2.0 you do not write that tie yourself: `simulate()` runs a
-> topology preflight, spots the unreferenced secondary, inserts
-> `R_auto_iso_sec_gnd` (1 GΩ) and tells you it did. Inspect it with
+> topology preflight, spots the unreferenced secondary, inserts a
+> 1 GΩ tie and tells you exactly which node it anchored to (the
+> lowest-numbered node of the subnet — here `sec_pos`, so the device
+> is called `R_auto_iso_sec_pos`; which node carries the tie does not
+> matter, since all it does is fix the subnet's reference). Inspect it
+> with
 > `result._preflight`, or pass `auto_regularize=False` to get the
 > original named error instead.
 >

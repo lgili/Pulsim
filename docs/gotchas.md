@@ -105,9 +105,15 @@ You called the wrong typed accessor on `DevicePool`. The `kind_of(b_id)` casts t
 
 ### Symptom: forgotten ground
 
-Every isolated subnet must have a DC reference. A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it.
+Every isolated subnet must have a DC reference. Since v2.0 `simulate()`
+supplies one for you — see the preflight note above — so this section is
+about the cases where you want to place the tie yourself, or where you
+need a BOND rather than a reference.
 
-**Fix:** `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` for a reference-only tie (leakage ~nA, invisible in the waveforms), or `1e-6` only when you intend an actual bond between the grounds.
+A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it, and preflight will never insert one: it only ever adds references.
+
+**Fix:** nothing, if you let `simulate()` do it. Otherwise
+`b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` for a reference-only tie (leakage ~nA, invisible in the waveforms), or `1e-6` only when you intend an actual bond between the grounds.
 
 ### Symptom: switch_fn never fires the bit I expect
 

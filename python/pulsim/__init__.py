@@ -1529,29 +1529,6 @@ def simulate(
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
     # engine='pwl' it just warns on DSED-only kwarg leakage.
-    # ---- Topology preflight (v2.0 Phase 2) --------------------------
-    #
-    # Runs BEFORE the engine dispatch on purpose: it mutates the
-    # BUILDER (adding high-value reference ties), so both engines
-    # inherit the fix and neither has to know about it. Placing it
-    # after the dispatch would have made auto_regularize a
-    # PWL-only feature that the DSED path silently ignored.
-    _preflight_report = None
-    if auto_regularize is not False:
-        _pf_opts = PreflightOptions()
-        _pf_opts.auto_regularize = True
-        _preflight_report = builder.run_preflight(_pf_opts)
-        if not _preflight_report.empty():
-            import warnings
-            warnings.warn(
-                "simulate(): " + _preflight_report.summary() +
-                "\n  These ties give the MNA a voltage reference "
-                "without loading the circuit (1 GΩ draws nanoamps). "
-                "Inspect them via result._preflight, or pass "
-                "auto_regularize=False to get the original singular"
-                "-matrix error instead.",
-                stacklevel=2)
-
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -1563,6 +1540,39 @@ def simulate(
         stiffness_threshold=stiffness_threshold,
         h_bdf2=h_bdf2,
     )
+
+    # ---- Topology preflight (v2.0 Phase 2) --------------------------
+    #
+    # Placed AFTER kwarg validation and BEFORE the engine dispatch,
+    # both deliberately. After validation, because this MUTATES the
+    # caller's builder (it appends reference ties) and a call that
+    # dies on a typo'd kwarg must not leave the circuit changed.
+    # Before the dispatch, because mutating the builder is what lets
+    # BOTH engines inherit the fix — placing it later would have made
+    # auto_regularize a PWL-only feature the DSED path ignored.
+    #
+    # `None` means "not set"; resolve it here rather than relying on
+    # an `is not False` identity test, which would silently treat
+    # numpy.False_ or 0 as opt-IN.
+    if auto_regularize is None:
+        auto_regularize = True
+    _preflight_report = None
+    if auto_regularize:
+        _preflight_report = builder.run_preflight(
+            PreflightOptions(auto_regularize=True))
+        if not _preflight_report.empty():
+            import warnings
+            warnings.warn(
+                "simulate(): " + _preflight_report.summary() +
+                "\n  These ties give the MNA a voltage reference "
+                "without loading the circuit (1 GΩ draws nanoamps). "
+                "Inspect them via result._preflight, or pass "
+                "auto_regularize=False to get the original singular"
+                "-matrix error instead. Note the ties persist on the "
+                "builder, so re-running the SAME builder with "
+                "auto_regularize=False will not restore the error — "
+                "rebuild the circuit for that.",
+                stacklevel=2)
 
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.

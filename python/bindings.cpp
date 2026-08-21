@@ -233,6 +233,17 @@ void init_module(py::module_& m) {
     py::class_<pwl::PreflightOptions>(m, "PreflightOptions",
         "Knobs for the preflight pass.")
         .def(py::init<>())
+        .def(py::init([](bool auto_regularize, Real tie_resistance,
+                          std::string name_prefix) {
+                  pwl::PreflightOptions o;
+                  o.auto_regularize = auto_regularize;
+                  o.tie_resistance  = tie_resistance;
+                  o.name_prefix     = std::move(name_prefix);
+                  return o;
+              }),
+              py::arg("auto_regularize") = true,
+              py::arg("tie_resistance")  = Real{1e9},
+              py::arg("name_prefix")     = std::string{"R_auto_iso_"})
         .def_readwrite("auto_regularize",
                         &pwl::PreflightOptions::auto_regularize,
                         "Insert the ties (default) rather than only "
