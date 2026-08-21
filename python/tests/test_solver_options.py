@@ -56,15 +56,32 @@ def test_solver_options_defaults_match_legacy_kwarg_defaults() -> None:
     assert opts.tol_newton_res is None
     assert opts.enable_newton_line_search is None
     assert opts.enable_newton_lm is None
-    assert opts.max_event_iterations == 0
+    # Note the deliberate asymmetry between the BUNDLE and the
+    # KWARG. The bundle holds real values, so its store_every
+    # default is 1 ("record every step"). The simulate() kwarg needs
+    # a distinguishable "not passed" marker, so ITS default is None
+    # — using the meaningful value as the sentinel silently
+    # discarded an explicit request (see the override test below).
+    # max_event_iterations is None on BOTH because there 0 is itself
+    # a request ("disable event iteration") and the engine default
+    # is 16, so the bundle has no real value to hold.
+    assert opts.max_event_iterations is None
+    assert opts.store_every == 1
     assert opts.enable_substep_state_correction is None
-    assert opts.inductor_freeze_di_max == 0.0
-    assert opts.inductor_abs_clamp == 0.0
-    # Phase 2.4 adaptive-RK schema.
-    assert opts.integrator == "kernel"
-    assert math.isclose(opts.rtol, 1.0e-5, rel_tol=1e-12)
-    assert math.isclose(opts.atol, 1.0e-8, rel_tol=1e-12)
-    assert opts.dt_init == 0.0
+    # Both guards: 0.0 is the documented OFF switch, so it cannot be
+    # the "not set" sentinel either.
+    assert opts.inductor_freeze_di_max is None
+    assert opts.inductor_abs_clamp is None
+    # Phase 2.4 adaptive-RK schema. None, not the PWL-flavoured
+    # values: a dataclass default is indistinguishable from a user
+    # choice, and merging these unconditionally pushed
+    # integrator="kernel" / dt_init=0.0 into the DSED path, breaking
+    # every `simulate(engine='dsed', solver=...)` call and emitting a
+    # bogus "these kwargs are ignored" warning on every PWL one.
+    assert opts.integrator is None
+    assert opts.rtol is None
+    assert opts.atol is None
+    assert opts.dt_init is None
 
 
 def test_simulate_with_default_solver_matches_flat_default() -> None:
@@ -153,3 +170,82 @@ def test_solver_options_integrator_field_round_trips() -> None:
     with pytest.raises(ValueError, match="unknown"):
         p.simulate(b, t_end=1e-4, dt=1e-5,
                      solver=p.SolverOptions(integrator="bogus"))
+
+
+def test_explicit_flat_kwargs_beat_the_bundle_even_at_their_defaults() -> None:
+    """The class documents "flat kwargs override the corresponding
+    fields on `solver`". For fields whose DEFAULT value is also a
+    meaningful request, that promise is only real if the sentinel is
+    distinguishable from the value — otherwise the explicit request
+    is silently swallowed. This pins both such fields."""
+    b = _build_simple_plant()
+
+    # store_every: 1 means "record every step".
+    bundle = p.SolverOptions(store_every=100)
+    n_flat = p.simulate(b, t_end=1e-3, dt=1e-5,
+                        store_every=1, solver=bundle).num_steps()
+    n_bundle = p.simulate(b, t_end=1e-3, dt=1e-5,
+                          solver=bundle).num_steps()
+    assert n_flat == 101      # explicit full rate honoured
+    assert n_bundle == 2      # bundle applies when omitted
+
+    # max_event_iterations: 0 means "disable event iteration".
+    # It must reach the kernel rather than being replaced by the
+    # bundle's value or by the kernel default.
+    b2 = p.SolverOptions(max_event_iterations=32)
+    res = p.simulate(b, t_end=1e-3, dt=1e-5,
+                     max_event_iterations=0, solver=b2)
+    assert res.num_steps() > 0            # ran with iteration off
+    # Negative is rejected rather than silently clamped.
+    import pytest
+    with pytest.raises(ValueError, match="max_event_iterations"):
+        p.simulate(b, t_end=1e-3, dt=1e-5, max_event_iterations=-1)
+
+
+def test_bundle_does_not_leak_pwl_defaults_into_dsed() -> None:
+    """Regression guard: SolverOptions' own defaults must not reach
+    the engine. They used to, which made every DSED run authored via
+    the bundle die on a parameter the caller never set."""
+    pytest.importorskip("scipy")
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 5.0)
+    b.add_resistor("R", "vin", "vout", 10.0)
+    b.add_capacitor("C", "vout", "gnd", 1e-6)
+
+    # Previously: ValueError "dt_init must be positive, got 0.0".
+    res = p.simulate(b, t_end=1e-4, engine="dsed",
+                     solver=p.SolverOptions(max_newton_iterations=100))
+    assert res.num_steps() > 0
+
+
+def test_bundle_run_emits_no_bogus_ignored_kwarg_warning() -> None:
+    """The same leak made every PWL run with a bundle warn that
+    rtol/atol/dt_init/integrator were 'ignored by the fixed-step
+    engine' — kwargs the caller never passed."""
+    import warnings
+
+    b = _build_simple_plant()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        p.simulate(b, t_end=1e-3, dt=1e-5, solver=p.SolverOptions())
+    bogus = [w for w in caught
+             if "ignored by the fixed-step engine" in str(w.message)]
+    assert bogus == []
+
+
+def test_flat_zero_disables_the_inductor_guards_over_a_bundle() -> None:
+    """0.0 is the documented OFF switch for both inductor guards, so
+    an explicit flat 0.0 must beat a bundle that enables them."""
+    b = _build_simple_plant()
+    bundle = p.SolverOptions(inductor_freeze_di_max=200.0,
+                             inductor_abs_clamp=500.0)
+    # Should run without the guards; we can only observe that the
+    # call is accepted and produces a trajectory identical to the
+    # no-guard flat run.
+    res_off = p.simulate(b, t_end=1e-3, dt=1e-5,
+                         inductor_freeze_di_max=0.0,
+                         inductor_abs_clamp=0.0, solver=bundle)
+    res_plain = p.simulate(b, t_end=1e-3, dt=1e-5)
+    np.testing.assert_allclose(np.asarray(res_off.states),
+                               np.asarray(res_plain.states),
+                               rtol=0, atol=1e-12)

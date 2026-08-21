@@ -105,10 +105,20 @@ def test_uncoupled_transformer_is_not_rejected_by_the_lti_guard():
     b.add_resistor("Rs", "s1", "gnd", 10.0)
     cache = pulsim.PwlStateSpaceCache(b.graph, b.pool)
     cache.build_lazy(1e-6)
-    A, bb, rows, is_cap, proj = cache.compute_lti_state_space(
+    A, b_const, _rows, _is_cap, _proj = cache.compute_lti_state_space(
         pulsim.SwitchStateMask(0))
     assert A.shape[0] == A.shape[1] == 2        # two inductor states
     assert np.isfinite(A).all()
+    # Shape and finiteness are not the claim. The claim is that with
+    # M = 0 the mass matrix really IS diagonal, so the extraction is
+    # EXACT — assert the analytic answer, which is what would catch
+    # a future predicate that got widened too far.
+    #   di_Lp/dt = -(Rp/L_p)·i_Lp + Vin/L_p ,  di_Ls/dt = -(Rs/L_s)·i_Ls
+    np.testing.assert_allclose(A[0, 1], 0.0, atol=1e-12)
+    np.testing.assert_allclose(A[1, 0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(A[0, 0], -0.1 / 1e-3, rtol=1e-9)
+    np.testing.assert_allclose(A[1, 1], -10.0 / 4e-3, rtol=1e-9)
+    assert np.isfinite(b_const).all()
 
     # ...while a genuinely coupled pair IS refused.
     b2 = pulsim.CircuitBuilder()

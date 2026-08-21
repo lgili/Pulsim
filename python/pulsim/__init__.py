@@ -1270,7 +1270,10 @@ class SolverOptions:
     enable_newton_lm: Optional[bool] = None
 
     # Event detection -----------------------------------------------
-    max_event_iterations: int = 0
+    # None = engine default (16). 0 is a MEANINGFUL value — it
+    # disables event iteration entirely (the pre-V2.1 behaviour) —
+    # so it cannot double as the "not set" sentinel.
+    max_event_iterations: Optional[int] = None
     enable_substep_state_correction: Optional[bool] = None
 
     # Output ---------------------------------------------------------
@@ -1281,14 +1284,27 @@ class SolverOptions:
     store_every: int = 1
 
     # Inductor regularisation (rare — kept for completeness) --------
-    inductor_freeze_di_max: float = 0.0
-    inductor_abs_clamp: float = 0.0
+    # Optional because 0.0 is the documented OFF switch for both
+    # guards, not merely "engine default" — using it as the "not
+    # set" sentinel silently overrode an explicit flat request to
+    # DISABLE them (same contract violation as the store_every bug).
+    inductor_freeze_di_max: Optional[float] = None
+    inductor_abs_clamp: Optional[float] = None
 
     # Adaptive RK schema (Phase 2.4 — execution deferred to v1.6) ---
-    integrator: str = "kernel"
-    rtol: float = 1.0e-5
-    atol: float = 1.0e-8
-    dt_init: float = 0.0
+    #
+    # All Optional with a None default: a dataclass cannot otherwise
+    # tell "the user set this" from "this is the class default", and
+    # these four carry PWL-flavoured values. Merging them
+    # unconditionally pushed dt_init=0.0 and integrator="kernel"
+    # into the DSED path, so ANY `simulate(engine='dsed',
+    # solver=...)` died on "dt_init must be positive, got 0.0" for a
+    # parameter the caller never touched — and every PWL run with a
+    # bundle emitted a bogus "these kwargs are ignored" warning.
+    integrator: Optional[str] = None
+    rtol: Optional[float] = None
+    atol: Optional[float] = None
+    dt_init: Optional[float] = None
 
 
 def simulate(
@@ -1313,7 +1329,7 @@ def simulate(
     start_from_dc_op: bool = False,
     enable_nonlinear_refresh: Optional[bool] = None,
     max_newton_iterations: int = 0,
-    max_event_iterations: int = 0,
+    max_event_iterations: Optional[int] = None,
     strict_event_iterations: bool = False,
     store_every: Optional[int] = None,
     tol_newton_dx: Optional[float] = None,
@@ -1321,8 +1337,8 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
-    inductor_freeze_di_max: float = 0.0,
-    inductor_abs_clamp: float = 0.0,
+    inductor_freeze_di_max: Optional[float] = None,
+    inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
     initial_state=None,
     should_continue=None,
@@ -1459,7 +1475,7 @@ def simulate(
             enable_nonlinear_refresh = solver.enable_nonlinear_refresh
         if max_newton_iterations == 0:
             max_newton_iterations = solver.max_newton_iterations
-        if max_event_iterations == 0:
+        if max_event_iterations is None:
             max_event_iterations = solver.max_event_iterations
         # `1` is a MEANINGFUL value here ("record every step"), not a
         # "not passed" sentinel like the 0s above — so the flat kwarg
@@ -1479,9 +1495,9 @@ def simulate(
         if enable_substep_state_correction is None:
             enable_substep_state_correction = (
                 solver.enable_substep_state_correction)
-        if inductor_freeze_di_max == 0.0:
+        if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
-        if inductor_abs_clamp == 0.0:
+        if inductor_abs_clamp is None:
             inductor_abs_clamp = solver.inductor_abs_clamp
         if integrator is None:
             integrator = solver.integrator
@@ -1739,8 +1755,15 @@ def simulate(
         opts.store_every = int(store_every)
     if max_newton_iterations > 0:
         opts.max_newton_iterations = max_newton_iterations
-    if max_event_iterations > 0:
-        opts.max_event_iterations = max_event_iterations
+    if max_event_iterations is not None:
+        # Including 0 — "disable event iteration" is a documented
+        # request, and gating on `> 0` silently discarded it (the
+        # kernel default of 16 applied instead).
+        if int(max_event_iterations) < 0:
+            raise ValueError(
+                f"simulate(max_event_iterations={max_event_iterations}"
+                "): must be >= 0 (0 disables event iteration)")
+        opts.max_event_iterations = int(max_event_iterations)
     if strict_event_iterations:
         opts.strict_event_iterations = True
     if tol_newton_dx is not None:
@@ -1753,9 +1776,9 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
-    if inductor_freeze_di_max > 0:
+    if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
-    if inductor_abs_clamp > 0:
+    if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
         opts.inductor_abs_clamp = float(inductor_abs_clamp)
 
     # Default switch_fn: all switches closed (v1.x behaviour).

@@ -921,6 +921,10 @@ public:
     /// Number of segments currently cached. In eager mode this
     /// is `2^N` after `build()`; in lazy mode it grows as
     /// `solve(mask, ...)` calls populate the cache.
+    ///
+    /// Like `segment_cache_bytes()`, this reads a container that
+    /// lazy builds and budget evictions mutate; sample it BETWEEN
+    /// runs, not from a monitor thread during a GIL-released run.
     [[nodiscard]] Size num_built_segments() const noexcept {
         return segments_.size();
     }
@@ -996,7 +1000,7 @@ public:
                     mask.to_string(), dt));
             }
             e.current_dt       = dt;
-            e.lru_tick         = tick;
+            e.touch(tick);
             e.analyzed_dynamic = (dt > Real{0});
             // Everything that can throw is behind us; NOW make room.
             if (event_entries_.size() >=
@@ -1025,10 +1029,10 @@ public:
                     "(dt={})", mask.to_string(), dt));
             }
             e.current_dt = dt;
-            e.lru_tick   = tick;
+            e.touch(tick);
             event_refactors_.fetch_add(1, std::memory_order_relaxed);
         } else {
-            it->second.lru_tick = tick;
+            it->second.touch(tick);
             event_hits_.fetch_add(1, std::memory_order_relaxed);
         }
         const EventEntry& e = it->second;
@@ -1044,7 +1048,8 @@ public:
     static constexpr Size kMaxEventEntries = 8;
 
     /// Number of event-solver entries currently resident
-    /// (≤ `kMaxEventEntries`).
+    /// (≤ `kMaxEventEntries`). Same sampling caveat as
+    /// `num_built_segments()` — `solve_at` mutates this container.
     [[nodiscard]] Size num_event_entries() const noexcept {
         return event_entries_.size();
     }
@@ -1341,7 +1346,10 @@ public:
     /// builds and budget evictions mutate (the Dictionary is a
     /// flat_map, so an erase shifts the underlying vector and
     /// invalidates iterators). Sample it between runs. The
-    /// `metrics()` counters are atomic and MAY be sampled live.
+    /// `metrics()` counters are individually atomic and MAY be
+    /// sampled live — though the fields are loaded independently,
+    /// so a mid-run sample is not a consistent snapshot and the
+    /// documented sum invariants can appear violated in flight.
     [[nodiscard]] std::size_t segment_cache_bytes() const noexcept {
         std::size_t total = 0;
         for (const auto& [mask, seg] : segments_) {
@@ -1833,13 +1841,16 @@ private:
         Vector b_constant;          // dt-independent source stamps
         std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
         Real current_dt = Real{-1};
-        /// Plain (non-atomic) on purpose: unlike the segment cache,
-        /// `solve_at` STRUCTURALLY mutates `event_entries_` (erase
-        /// + emplace) on every miss, so this path is single-threaded
-        /// by construction — an atomic tick would suggest a safety
-        /// this container cannot offer. The documented contract is
-        /// one simulation per cache instance.
-        std::uint64_t lru_tick = 0;
+        /// Atomic for the same reason PwlSegment's is: the solve_at
+        /// HIT branch writes this from a const method that the
+        /// Python bindings reach with the GIL released, and a hit
+        /// performs NO structural mutation — so it is a plain data
+        /// race, not a container-mutation hazard. (An earlier
+        /// comment here argued the opposite from "solve_at always
+        /// mutates"; that is true of MISSES only, i.e. exactly the
+        /// path where the race is NOT.) Relaxed: the LRU needs
+        /// approximate recency, nothing more.
+        mutable std::atomic<std::uint64_t> lru_tick{0};
         /// Which assembly REGIME the entry's symbolic analysis was
         /// taken under. `J(dt)` for dt > 0 is the dynamic pattern
         /// (capacitor blocks, inductor rows, transformer cross
@@ -1854,8 +1865,31 @@ private:
         bool analyzed_dynamic = false;
 
         EventEntry() = default;
-        EventEntry(EventEntry&&) noexcept = default;
-        EventEntry& operator=(EventEntry&&) noexcept = default;
+        EventEntry(EventEntry&& o) noexcept
+            : G{std::move(o.G)}, C{std::move(o.C)},
+              b_constant{std::move(o.b_constant)},
+              solver{std::move(o.solver)},
+              current_dt{o.current_dt},
+              lru_tick{o.tick()},
+              analyzed_dynamic{o.analyzed_dynamic} {}
+        EventEntry& operator=(EventEntry&& o) noexcept {
+            if (this != &o) {
+                G                = std::move(o.G);
+                C                = std::move(o.C);
+                b_constant       = std::move(o.b_constant);
+                solver           = std::move(o.solver);
+                current_dt       = o.current_dt;
+                analyzed_dynamic = o.analyzed_dynamic;
+                touch(o.tick());
+            }
+            return *this;
+        }
+        [[nodiscard]] std::uint64_t tick() const noexcept {
+            return lru_tick.load(std::memory_order_relaxed);
+        }
+        void touch(std::uint64_t t) const noexcept {
+            lru_tick.store(t, std::memory_order_relaxed);
+        }
         EventEntry(const EventEntry&) = delete;
         EventEntry& operator=(const EventEntry&) = delete;
     };
@@ -1886,7 +1920,7 @@ private:
         auto victim = event_entries_.begin();
         for (auto it = event_entries_.begin();
              it != event_entries_.end(); ++it) {
-            if (it->second.lru_tick < victim->second.lru_tick) {
+            if (it->second.tick() < victim->second.tick()) {
                 victim = it;
             }
         }
