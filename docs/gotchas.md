@@ -72,7 +72,14 @@ This usually means:
 - All sources are current sources and the topology has no DC path to ground.
 - A nonlinear branch (`BranchKind::Nonlinear`) has no diagonal contribution. Pulsim already adds a 1e-12 G_min for `SaturableInductor`; for other custom devices you may need to add your own.
 
-**Fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.
+**Fix (v2.0 and later): none needed.** `simulate()` runs a topology
+preflight that finds unreferenced subnets and ties each one to ground
+through a 1 GΩ resistor, then tells you what it inserted. Read it with
+`result._preflight`, or pass `auto_regularize=False` to get the error
+back. What follows is what that pass does for you, and what to type if
+you build the cache yourself.
+
+**Manual fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — `b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)` — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.
 
 ## Time-step (`dt`) choices
 

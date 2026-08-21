@@ -47,6 +47,10 @@ from ._pulsim import (  # type: ignore[import-not-found]
     SimulationOptions,
     SimulationResult,
     CommutationEvent,
+    PreflightFinding,
+    PreflightIssue,
+    PreflightOptions,
+    PreflightReport,
     # Phase-0 fix #4 helper (private): controlled-vs-diode census.
     _switch_census,
     run_transient,
@@ -399,6 +403,10 @@ __all__ = [
     "SimulationOptions",
     "SimulationResult",
     "CommutationEvent",
+    "PreflightFinding",
+    "PreflightIssue",
+    "PreflightOptions",
+    "PreflightReport",
     "run_transient",
     "IdealDiodeParams",
     "LoadedCircuit",
@@ -1276,6 +1284,12 @@ class SolverOptions:
     max_event_iterations: Optional[int] = None
     enable_substep_state_correction: Optional[bool] = None
 
+    # Topology preflight ---------------------------------------------
+    # None = engine default (True). False must mean "the user
+    # explicitly opted out", which a plain `bool = True` could not
+    # express — see the sentinel rules above.
+    auto_regularize: Optional[bool] = None
+
     # Output ---------------------------------------------------------
     # Record every m-th step (1 = every step). The solver still
     # integrates at `dt`; only what is stored changes, and the
@@ -1332,6 +1346,7 @@ def simulate(
     max_event_iterations: Optional[int] = None,
     strict_event_iterations: bool = False,
     store_every: Optional[int] = None,
+    auto_regularize: Optional[bool] = None,
     tol_newton_dx: Optional[float] = None,
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
@@ -1484,6 +1499,8 @@ def simulate(
         # store_every=1 in favour of a bundle's decimation.
         if store_every is None:
             store_every = solver.store_every
+        if auto_regularize is None:
+            auto_regularize = solver.auto_regularize
         if tol_newton_dx is None:
             tol_newton_dx = solver.tol_newton_dx
         if tol_newton_res is None:
@@ -1512,6 +1529,29 @@ def simulate(
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
     # engine='pwl' it just warns on DSED-only kwarg leakage.
+    # ---- Topology preflight (v2.0 Phase 2) --------------------------
+    #
+    # Runs BEFORE the engine dispatch on purpose: it mutates the
+    # BUILDER (adding high-value reference ties), so both engines
+    # inherit the fix and neither has to know about it. Placing it
+    # after the dispatch would have made auto_regularize a
+    # PWL-only feature that the DSED path silently ignored.
+    _preflight_report = None
+    if auto_regularize is not False:
+        _pf_opts = PreflightOptions()
+        _pf_opts.auto_regularize = True
+        _preflight_report = builder.run_preflight(_pf_opts)
+        if not _preflight_report.empty():
+            import warnings
+            warnings.warn(
+                "simulate(): " + _preflight_report.summary() +
+                "\n  These ties give the MNA a voltage reference "
+                "without loading the circuit (1 GΩ draws nanoamps). "
+                "Inspect them via result._preflight, or pass "
+                "auto_regularize=False to get the original singular"
+                "-matrix error instead.",
+                stacklevel=2)
+
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2000,6 +2040,12 @@ def simulate(
     # mask schedule at each result time. ``switch_fn`` here is the
     # post-compose version (closed_loops + user) so it sees every
     # switch the result actually exercised.
+    try:
+        # The preflight facts are properties of the CIRCUIT, but a
+        # user reads them off the result, so attach both.
+        res._preflight = _preflight_report
+    except AttributeError:  # pragma: no cover
+        pass
     try:
         res._switch_fn = switch_fn
     except AttributeError:  # pragma: no cover

@@ -46,12 +46,29 @@ b.add_mosfet ("Q1", "sw_pri", "gnd")   # low-side switch on primary
 b.add_diode  ("Dout", "sec_pos", "vout", 1e3, 1e-9, V_th=0.7)
 b.add_capacitor("Cout", "vout", "sec_gnd", 47e-6)
 b.add_resistor ("R_L",  "vout", "sec_gnd", 10.0)
-# Secondary needs a path to primary ground (otherwise the
-# secondary node-set is dangling). Use a tiny resistor.
-b.add_resistor ("R_iso", "sec_gnd", "gnd", 1e-6)
 ```
 
-> **Note on isolation.** A real flyback's primary and secondary grounds are physically separate. Pulsim's MNA solver requires a connected matrix, so we tie them through a 1 µΩ "isolation resistor". This is a numerical artifact; it does not affect the physics.
+> **Note on isolation.** A real flyback's primary and secondary grounds
+> are physically separate, and MNA needs every node to have a voltage
+> reference — so the secondary must be tied to ground *somehow*.
+> Since v2.0 you do not write that tie yourself: `simulate()` runs a
+> topology preflight, spots the unreferenced secondary, inserts
+> `R_auto_iso_sec_gnd` (1 GΩ) and tells you it did. Inspect it with
+> `result._preflight`, or pass `auto_regularize=False` to get the
+> original named error instead.
+>
+> If you do write it by hand, make it **large**:
+>
+> ```python
+> b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)   # reference, not a bond
+> ```
+>
+> Earlier versions of this tutorial suggested 1 µΩ. That is wrong and
+> the reason matters: a 1 µΩ tie is a galvanic **bond**. It does not
+> give the secondary a reference — it welds it to primary ground,
+> destroying the very isolation the circuit exists to provide, and it
+> does so silently. A 1 GΩ tie draws nanoamps and leaves the physics
+> untouched.
 
 ## Switch driver
 
