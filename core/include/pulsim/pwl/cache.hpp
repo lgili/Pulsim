@@ -923,6 +923,15 @@ public:
         const std::uint64_t tick =
             lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
         auto it = event_entries_.find(mask);
+        if (it != event_entries_.end() &&
+            it->second.analyzed_dynamic != (dt > Real{0})) {
+            // Regime change (dynamic <-> static): different sparsity
+            // pattern, so the cached symbolic analysis no longer
+            // applies. Drop the entry and rebuild rather than
+            // refactorizing onto a mismatched analysis.
+            event_entries_.erase(it);
+            it = event_entries_.end();
+        }
         if (it == event_entries_.end()) {
             // Fresh mask: make room first (erase invalidates
             // references, but so does the emplace below — callers
@@ -950,8 +959,9 @@ public:
                     "(numerically singular) for mask {} (dt={})",
                     mask.to_string(), dt));
             }
-            e.current_dt = dt;
-            e.lru_tick   = tick;
+            e.current_dt       = dt;
+            e.lru_tick         = tick;
+            e.analyzed_dynamic = (dt > Real{0});
             it = event_entries_.emplace(mask, std::move(e)).first;
             event_builds_.fetch_add(1, std::memory_order_relaxed);
         } else if (it->second.current_dt != dt) {
@@ -1767,6 +1777,18 @@ private:
         std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
         Real current_dt = Real{-1};
         std::uint64_t lru_tick = 0;
+        /// Which assembly REGIME the entry's symbolic analysis was
+        /// taken under. `J(dt)` for dt > 0 is the dynamic pattern
+        /// (capacitor blocks, inductor rows, transformer cross
+        /// terms); at dt <= 0 those stamps are absent entirely, so
+        /// the two are DIFFERENT sparsity patterns. Reusing one
+        /// analysis across the boundary would violate the solver
+        /// contract ("factorize on a matrix with matching pattern")
+        /// — it happens to work on the in-house LU, which rebuilds
+        /// the pattern inside factorize, but is unsound in general
+        /// and would silently corrupt `partial_refactor`. Track it
+        /// and re-analyze on a regime change (Phase-1 audit F6).
+        bool analyzed_dynamic = false;
 
         EventEntry() = default;
         EventEntry(EventEntry&&) noexcept = default;
