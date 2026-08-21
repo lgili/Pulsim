@@ -169,11 +169,20 @@ using NonlinearRefreshFn = std::function<
         // refresh (f_nl) or b_extra even when x itself is still finite —
         // otherwise it silently corrupts the convergence/LM/line-search tests.
         if (!f_combined.allFinite()) {
+            // Name WHERE the NaN entered — on a big converter the
+            // first non-finite row is usually the offending device
+            // itself (v2.0 Phase 1 diagnostics parity).
+            Index bad = kInvalidIndex;
+            for (Index i = 0; i < static_cast<Index>(f_combined.size());
+                 ++i) {
+                if (!std::isfinite(f_combined[i])) { bad = i; break; }
+            }
             throw std::runtime_error(std::format(
-                "solve_with_newton: non-finite residual at iter {} — the "
-                "nonlinear refresh or b_extra produced a NaN/Inf (check "
-                "device parameters and matrix conditioning)",
-                iter));
+                "solve_with_newton: non-finite residual at iter {}, "
+                "first at {} — the nonlinear refresh or b_extra "
+                "produced a NaN/Inf (check device parameters and "
+                "matrix conditioning)",
+                iter, row_equation_label(graph, pool, bad)));
         }
 
         (void)nl_residual_norm;   // diagnostic only

@@ -40,6 +40,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
@@ -101,6 +102,10 @@ namespace pulsim::pwl {
     Real dt = dt_init;
     constexpr Real dt_min = Real{1e-12};
     Real F_norm_prev = std::numeric_limits<Real>::infinity();
+    // Where the worst residual sat on the last iteration — reported
+    // if we give up, so the user gets a location and not just a
+    // magnitude (v2.0 Phase 1 diagnostics parity).
+    Index F_worst_row = kInvalidIndex;
 
     for (Size iter = 0; iter < max_iters; ++iter) {
         // 1. Refresh nonlinear contributions.
@@ -109,7 +114,12 @@ namespace pulsim::pwl {
 
         // 2. Residual of the ORIGINAL problem.
         Vector F = seg.J * x + seg.b_constant + b_extra + f_nl;
-        const Real F_norm = F.lpNorm<Eigen::Infinity>();
+        Eigen::Index f_at = 0;
+        const Real F_norm = F.size() == 0
+            ? Real{0}
+            : F.cwiseAbs().maxCoeff(&f_at);
+        F_worst_row = F.size() == 0 ? kInvalidIndex
+                                     : static_cast<Index>(f_at);
 
         // 3. Convergence on original residual.
         if (F_norm < tol_res) {
@@ -188,8 +198,9 @@ namespace pulsim::pwl {
 
     throw std::runtime_error(std::format(
         "pseudo_transient_solve: failed to converge after {} iterations "
-        "(last ||F||_inf = {})",
-        max_iters, F_norm_prev));
+        "(last ||F||_inf = {:.3e}, worst at {})",
+        max_iters, F_norm_prev,
+        row_equation_label(graph, pool, F_worst_row)));
 }
 
 }  // namespace pulsim::pwl
