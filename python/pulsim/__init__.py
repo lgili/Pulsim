@@ -1613,7 +1613,12 @@ def simulate(
                 "Observer/closed-loop support inside DSED is tracked "
                 "for v2.0 (event-synchronised controller cadence)."
             )
-        return _dsed.run_dsed_from_builder(
+        # The DSED branch returns here, ~400 lines before the PWL
+        # tail that attaches `_builder` / `_preflight`. Attach the
+        # preflight report on the way out, so `result._preflight` —
+        # which the warning tells every user to read — is not a
+        # PWL-only attribute.
+        _dsed_res = _dsed.run_dsed_from_builder(
             builder=builder,
             t_end=t_end,
             dt=dt,
@@ -1629,6 +1634,11 @@ def simulate(
             initial_state=initial_state,
             progress=progress,
         )
+        try:
+            _dsed_res._preflight = _preflight_report
+        except AttributeError:  # pragma: no cover
+            pass
+        return _dsed_res
 
     # ---- engine='pwl' from here on ----
     # mypy/pyright: narrow Optional[float] → float.

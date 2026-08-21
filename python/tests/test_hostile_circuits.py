@@ -226,3 +226,9 @@ def test_preflight_also_runs_for_the_dsed_engine():
     # The tie really was inserted into the builder both engines share.
     assert any(b.graph.branch_name(i).startswith("R_auto_iso_")
                for i in range(b.graph.num_branches))
+    # ...and the report reaches the DSED result too. It used to not:
+    # that branch returns ~400 lines before the PWL tail that attaches
+    # it, so `result._preflight` — which the warning tells every user
+    # to read — was a PWL-only attribute.
+    assert res._preflight is not None
+    assert res._preflight.num_fixed() == 1
