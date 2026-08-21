@@ -144,8 +144,9 @@ namespace pulsim::pwl {
         if (!solver->analyze(J_pt)) {
             throw std::runtime_error(std::format(
                 "pseudo_transient_solve: J_pt is "
-                "structurally singular at iter {}",
-                iter));
+                "structurally singular at iter {}{}",
+                iter,
+                explain_singular(graph, pool, J_pt, solver.get())));
         }
         if (!solver->factorize(J_pt)) {
             // Shrink dt and retry (J_pt should ALWAYS be

@@ -271,9 +271,10 @@ using NonlinearRefreshFn = std::function<
             }
             if (!accepted) {
                 throw std::runtime_error(std::format(
-                    "solve_with_newton (LM): "
-                    "no improving step at iter {}",
-                    iter));
+                    "solve_with_newton (LM): no improving step at "
+                    "iter {} — worst residuals: {}",
+                    iter,
+                    top_entries_by_name(graph, pool, f_combined)));
             }
         } else {
             // Plain Newton + optional line search.
@@ -281,8 +282,10 @@ using NonlinearRefreshFn = std::function<
             if (!solver->analyze(J_combined)) {
                 throw std::runtime_error(std::format(
                     "solve_with_newton: combined matrix is "
-                    "structurally singular at iter {}",
-                    iter));
+                    "structurally singular at iter {}{}",
+                    iter,
+                    explain_singular(graph, pool, J_combined,
+                                      solver.get())));
             }
             if (!solver->factorize(J_combined)) {
                 // Auto-LM promotion (GUI integration findings T1.2):

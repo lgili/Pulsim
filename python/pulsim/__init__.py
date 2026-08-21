@@ -1273,6 +1273,13 @@ class SolverOptions:
     max_event_iterations: int = 0
     enable_substep_state_correction: Optional[bool] = None
 
+    # Output ---------------------------------------------------------
+    # Record every m-th step (1 = every step). The solver still
+    # integrates at `dt`; only what is stored changes, and the
+    # recorded grid stays uniform at m*dt so FFT / harmonic analysis
+    # remains valid.
+    store_every: int = 1
+
     # Inductor regularisation (rare — kept for completeness) --------
     inductor_freeze_di_max: float = 0.0
     inductor_abs_clamp: float = 0.0
@@ -1454,6 +1461,8 @@ def simulate(
             max_newton_iterations = solver.max_newton_iterations
         if max_event_iterations == 0:
             max_event_iterations = solver.max_event_iterations
+        if store_every == 1:
+            store_every = solver.store_every
         if tol_newton_dx is None:
             tol_newton_dx = solver.tol_newton_dx
         if tol_newton_res is None:

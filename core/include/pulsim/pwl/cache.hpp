@@ -106,7 +106,14 @@ struct CacheMetrics {
 ///
 /// * `masks_processed`     — total number of cached masks the call
 ///                           visited. For `Mode::AllActive` this is
-///                           `segments_.size()`; for
+///                           `segments_.size()` — i.e. the RESIDENT
+///                           masks. Under a byte budget that is
+///                           fewer than the masks the run has
+///                           visited: an evicted mask is not
+///                           refactored, it is rebuilt from the
+///                           updated pool on its next solve, which
+///                           is equally correct but does not show
+///                           up in this count. For
 ///                           `Mode::CurrentOnly` it is at most 1 (the
 ///                           rank-1 sliding solver's current mask
 ///                           if rank-1 has been used).
@@ -293,9 +300,15 @@ public:
         if (it != segments_.end()) {
             // LRU touch (v2.0 Phase 1) — mutable tick, no
             // structural mutation: outstanding references stay
-            // valid across cache HITS.
-            it->second.lru_tick =
-                lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
+            // valid across cache HITS. Skipped in eager mode, where
+            // eviction can never fire, so the hot lookup does no
+            // shared write at all there.
+            if (lazy_mode_) {
+                it->second.touch(
+                    lru_clock_.fetch_add(
+                        std::uint64_t{1},
+                        std::memory_order_relaxed) + 1);
+            }
             return &it->second;
         }
         if (lazy_mode_) {
@@ -377,9 +390,10 @@ public:
     ///
     /// v2.0 Phase 1: uses the assembler's EXACT (G, C, b) split —
     ///   1. `assemble_segment_split` → G_static, C (1/dt coeffs), b
-    ///   2. `M_dyn = C / 2` (J(h) = G + (2/h)·M_dyn — algebraic,
-    ///      replacing the two-assembly finite-difference recovery
-    ///      of ``notes/DSED_BRIDGE_DESIGN.md`` §2)
+    ///   2. the mass matrix is applied analytically in Step 7
+    ///      (per-row 1/C and -1/L), replacing the two-assembly
+    ///      finite-difference recovery of
+    ///      ``notes/DSED_BRIDGE_DESIGN.md`` §2
     ///   4. Identify state rows via `pool.kind_of` + `branch_var_id_for_inductor`
     ///   5. Schur-complement the algebraic vars out → dense `A, b`
     ///
@@ -421,8 +435,15 @@ public:
 
         const int n_mna = static_cast<int>(G_split.rows());
 
-        DenseMatrix G_st  = DenseMatrix(G_split);  // sparse → dense
-        DenseMatrix M_dyn = DenseMatrix(C_split) * Real{0.5};
+        DenseMatrix G_st = DenseMatrix(G_split);   // sparse → dense
+        // NOTE: the mass matrix would be M_dyn = C_split / 2 (from
+        // J(h) = G + (2/h)·M_dyn). It is NOT materialised: Step 7
+        // applies M_ss^{-1} analytically as per-row 1/C and -1/L
+        // scaling, and the coupled case that would need the real
+        // matrix is rejected before it (see the guard there). The
+        // previous code built it and congruence-transformed it with
+        // an O(n^3) dense triple product whose result nothing read
+        // (adversarial-review finding MDYN-DEAD).
 
         // ---------------------------------------------------------
         // Step 3: walk pool to identify caps + inductors. Caps may
@@ -513,9 +534,10 @@ public:
                 Index a = find_root_ind(map_idx_ind(l.from));
                 Index b = find_root_ind(map_idx_ind(l.to));
                 if (a == b) {
-                    throw std::runtime_error(
+                    throw std::runtime_error(std::format(
                         "compute_lti_state_space: inductors form a "
-                        "cycle (parallel inductors or longer all-"
+                        "cycle closed by {} (parallel "
+                        "inductors or longer all-"
                         "inductor loops). The KVL around the loop "
                         "creates a linear dependency on di_L/dt that "
                         "makes the LTI state-space singular. Merge "
@@ -523,7 +545,8 @@ public:
                         "inductor upstream (parallel inductors: "
                         "L_eq = (L1·L2)/(L1+L2); series in the same "
                         "loop with mutual coupling: use Pulsim's "
-                        "transformer/coupled-inductor API).");
+                        "transformer/coupled-inductor API).",
+                        row_label(graph_, pool_, l.branch_var)));
                 }
                 uf_ind[a] = b;
             }
@@ -671,9 +694,10 @@ public:
             // -----------------------------------------------------
             // Step 3c: build T (sparse), apply congruence transform.
             //
-            //   M_new = T^T · M_dyn · T
-            //   G_new = T^T · G_st  · T
+            //   G_new = T^T · G_st · T
             //   b_new = T^T · b_a
+            // (The mass matrix would transform the same way; it is
+            // never materialised — see the note at Step 2.)
             //
             // T is constructed by processing tree edges in *reverse*
             // BFS order and doing T.col(neg) += T.col(pos). After
@@ -698,10 +722,8 @@ public:
             t_is_identity = T.isIdentity();
             if (!t_is_identity) {
                 DenseMatrix Tt = T.transpose();
-                DenseMatrix M_tmp = Tt * M_dyn * T;
-                DenseMatrix G_tmp = Tt * G_st  * T;
+                DenseMatrix G_tmp = Tt * G_st * T;
                 Vector      b_tmp = Tt * b_a;
-                M_dyn = std::move(M_tmp);
                 G_st  = std::move(G_tmp);
                 b_a   = std::move(b_tmp);
             }
@@ -1340,19 +1362,22 @@ public:
         ParametricRefactorResult result;
         const auto t0 = std::chrono::steady_clock::now();
 
-        // v2.0 Phase 1: parameter updates invalidate the event
-        // entries' (G, C, b) snapshots. Drop them — the next
-        // solve_at rebuilds from the updated pool. (The v1.x aux
-        // cache silently kept STALE factors here.)
-        event_entries_.clear();
-
         if (updates.empty()) {
-            // No-op. Still report wall_time for telemetry callers.
+            // No-op: change nothing, including the event entries —
+            // dropping them here would make a documented no-op cost
+            // 8 re-analyses on the next commutation
+            // (adversarial-review finding F3-tests).
             const auto t1 = std::chrono::steady_clock::now();
             result.wall_time_us =
                 std::chrono::duration<double, std::micro>(t1 - t0).count();
             return result;
         }
+
+        // v2.0 Phase 1: parameter updates invalidate the event
+        // entries' (G, C, b) snapshots. Drop them — the next
+        // solve_at rebuilds from the updated pool. (The v1.x aux
+        // cache silently kept STALE factors here.)
+        event_entries_.clear();
 
         // 1. Push the updates into the pool. Each `update_*` mutator
         //    dispatches on the stored device kind; mismatched kinds
@@ -1539,8 +1564,7 @@ private:
                 auto victim = segments_.begin();
                 for (auto it = segments_.begin();
                      it != segments_.end(); ++it) {
-                    if (it->second.lru_tick <
-                        victim->second.lru_tick) {
+                    if (it->second.tick() < victim->second.tick()) {
                         victim = it;
                     }
                 }
@@ -1550,8 +1574,8 @@ private:
                     1, std::memory_order_relaxed);
             }
         }
-        seg->lru_tick =
-            lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
+        seg->touch(lru_clock_.fetch_add(
+            std::uint64_t{1}, std::memory_order_relaxed) + 1);
         segments_.emplace(mask, std::move(*seg));
         return {};
     }
@@ -1629,6 +1653,13 @@ private:
                 it->second.J, it->second.b_constant,
                 new_J, new_b, affected_cols);
             any_path_succeeded = any_path_succeeded || ok;
+            // Just re-stamped and re-factored: this segment is the
+            // freshest thing in the cache, not the stalest. Without
+            // the touch it stays first in line for eviction and a
+            // path-aware sweep pays to rebuild what it just paid to
+            // refactor (adversarial-review finding F6-b).
+            it->second.touch(lru_clock_.fetch_add(
+                std::uint64_t{1}, std::memory_order_relaxed) + 1);
         }
         if (rank1_initialized_ && mask == rank1_mask_) {
             any_target_existed = true;

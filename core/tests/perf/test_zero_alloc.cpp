@@ -286,10 +286,12 @@ TEST_CASE("run_transient hot loop: zero std-container allocations",
 TEST_CASE("run_transient with diodes: allocation count is O(1), "
           "not O(n_steps)",
           "[v2][perf][zero_alloc]") {
-    // Same engine with a diode present so the snapshot / breach /
-    // event-detection scratch paths all execute per step. Steady
-    // conduction (no commutations) → std-container traffic must
-    // stay a one-off constant.
+    // Same engine with a diode present so the per-step snapshot and
+    // event-detection scratch paths execute every step. (The BREACH
+    // path is not reached here — this circuit converges in one or
+    // two inner iterations; breach coverage is a separate concern,
+    // adversarial-review finding ZA-3.) Steady conduction, so
+    // std-container traffic must stay a one-off constant.
     Graph g;
     DevicePool pool;
     g.add_node("vin");

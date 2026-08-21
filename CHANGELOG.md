@@ -51,7 +51,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     the wiring advice; a device branch-current gets the truth about
     the assembly mode and the real fix (`build with dt > 0`).
   * Wired into: `compute_dc_op`, `pseudo_transient_dc`,
-    `source_stepping_dc`, the PWL cache (`CacheError` gained a
+    `source_stepping_dc`, `pseudo_transient_solve` (both the
+    singular and the non-convergence exits), the Newton
+    structurally-singular and LM no-improving-step throws, the
+    non-finite-residual guard, the inductor-cycle error (which now
+    names the device closing the loop), the PWL cache (`CacheError` gained a
     structured `failing_row` + `detail` for C++ consumers of the
     non-throwing `try_*` API — Python still receives the message as
     the exception string; surfacing the structured fields through
@@ -154,7 +158,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     solved masks are evicted and transparently rebuilt on re-visit;
     eager `build()` never evicts. New telemetry:
     `CacheMetrics.segment_evictions`, `segment_cache_bytes()`,
-    `DirectSolver::factor_bytes()`.
+    `DirectSolver::factor_bytes()`. `CacheMetrics` is now bound to
+    Python (`cache.metrics()`), so eviction and event-solver
+    behaviour is observable — and therefore testable — from there;
+    `SimulationResult.total_bytes` exposes the whole result's
+    footprint alongside `states_bytes`. The recency tick is atomic
+    and is only written in lazy mode, where eviction can actually
+    fire.
   * *`alt-dt-cache-unbounded-factorization`* — `solve_at` no longer
     keeps a map keyed by *exact Real dt* of fully analyzed +
     factorized segments (one per commutation, forever). Each
