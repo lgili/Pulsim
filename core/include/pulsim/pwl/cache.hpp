@@ -827,9 +827,34 @@ public:
         }
 
         // ---------------------------------------------------------
-        // Step 7: apply M_ss^{-1}. M_ss is diagonal: +C for caps,
-        // -L for inductors. Apply per-row scaling to A, b_reduced,
-        // AND B (since b_reduced and B both go through M_ss^{-1}).
+        // Step 7: apply M_ss^{-1}. M_ss is DIAGONAL: +C for caps,
+        // -L for inductors — which is exactly why coupled windings
+        // must be rejected first.
+        //
+        // A transformer contributes OFF-DIAGONAL -M terms between
+        // the two winding rows of M_ss. The per-row scaling below
+        // cannot represent them, so it would silently return
+        // dynamics computed as if M = 0: a flyback's LTI poles
+        // would come back mutual-free, plausible and wrong, and the
+        // DSED bridge consumes this result without any signal.
+        // Reject loudly instead — the same stance as the inductor-
+        // cycle guard above (audit finding MDYN-DEAD / F5, raised by
+        // the Phase-1 review). Supporting coupled windings needs a
+        // real M_ss solve rather than row scaling, which is Phase-2
+        // work, not something to fake here.
+        if (!pool_.transformer_couplings().empty()) {
+            throw std::runtime_error(std::format(
+                "compute_lti_state_space: this circuit has {} coupled "
+                "inductor pair(s) (transformer / coupled-inductor "
+                "API). The continuous-time LTI extraction applies a "
+                "DIAGONAL inverse mass matrix, so it cannot represent "
+                "the mutual-inductance off-diagonal terms and would "
+                "silently return dynamics computed as if the coupling "
+                "were absent. Use the fixed-step PWL engine "
+                "(engine='pwl'), which stamps the mutual terms "
+                "exactly, for magnetically coupled circuits.",
+                pool_.transformer_couplings().size()));
+        }
         // ---------------------------------------------------------
         DenseMatrix A = Schur_G;
         Vector b_reduced = Schur_b;

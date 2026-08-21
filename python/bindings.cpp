@@ -1055,8 +1055,15 @@ void init_module(py::module_& m) {
               py::arg("h_a") = Real{1e-6},
               py::arg("h_b") = Real{5e-7},
               "Extract continuous-time LTI state-space (A, b) for "
-              "the given switch mask via MNA finite-difference "
-              "recovery. Returns a tuple "
+              "the given switch mask from the assembler's exact "
+              "(G, C, b) split (v2.0 — this replaced the earlier "
+              "finite-difference recovery; `h_a`/`h_b` are accepted "
+              "for backwards compatibility and ignored). "
+              "Raises RuntimeError for magnetically coupled "
+              "inductors (transformers): the extraction applies a "
+              "diagonal inverse mass matrix and cannot represent "
+              "the mutual terms — use engine='pwl' there. "
+              "Returns a tuple "
               "(A_ndarray, b_ndarray, state_row_indices, "
               "state_is_cap, b_projection). "
               "Used by pulsim.dsed.PEDSimulatorAuto through the "

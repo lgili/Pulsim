@@ -48,11 +48,22 @@ def test_message_is_actionable_not_just_located():
 
 
 def test_healthy_circuit_still_builds():
-    # The structural probe must not produce false positives on a
-    # perfectly normal circuit.
+    # The structural probe must not produce false positives. A plain
+    # R-only circuit can't exercise that (it was never at risk), so
+    # use a circuit that DOES have capacitors and switches — the
+    # kinds whose stamping decides whether a column ends up empty —
+    # and build it on the dynamic path where every device is stamped.
     b = pulsim.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
-    b.add_resistor("R1", "vin", "gnd", 10.0)
+    b.add_switch("S1", "vin", "sw", 1e-3, 1e9)
+    b.add_resistor("R1", "sw", "gnd", 10.0)
+    b.add_capacitor("C1", "sw", "gnd", 1e-6)
+    b.add_capacitor("C2", "sw", "vin", 1e-7)   # floating cap
+    b.add_inductor("L1", "sw", "gnd", 1e-3)
     cache = pulsim.PwlStateSpaceCache(b.graph, b.pool)
-    cache.build(0.0)
-    assert cache.num_built_segments() >= 1
+    cache.build(1e-6)          # dt > 0: caps and inductors stamped
+    assert cache.num_built_segments() == 2     # 2^1 switch states
+    # And it actually solves.
+    res = pulsim.simulate(b, t_end=1e-4, dt=1e-6)
+    assert res.num_steps() > 0
+    assert all(abs(v) < 1e6 for v in res.states[-1])

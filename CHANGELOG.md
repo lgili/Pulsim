@@ -168,7 +168,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     inductor diagonals, −2·M transformer cross terms; mask-
     invariant) and the dt-independent b; `assemble_segment`
     recombines `J = G + (1/dt)·C` through the same single stamping
-    loop. `compute_lti_state_space` now uses the split EXACTLY,
+    loop. Note for anyone holding v1.x golden traces: companion
+    entries are now `fl(fl(1/dt)·2C)` instead of `fl(2C/dt)`, a
+    shift of at most ~2 ulp (far below trapezoidal LTE), so
+    bit-identical baselines recorded on v1.x will differ in the last
+    bit. `compute_lti_state_space` now uses the split EXACTLY,
     replacing the two-assembly finite-difference recovery — which
     had been burying *physically real zero eigenvalues* (series-cap
     midpoint imbalance modes in NPC/MMC stacks) under cancellation
