@@ -17,7 +17,6 @@ These tests pin:
 """
 from __future__ import annotations
 
-import math
 
 import numpy as np
 import pytest
