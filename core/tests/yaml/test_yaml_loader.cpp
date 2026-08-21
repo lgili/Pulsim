@@ -519,3 +519,66 @@ TEST_CASE("YAML loader: malformed YAML throws cleanly",
     REQUIRE_THROWS_AS(yaml::load_string(yaml),
                        std::runtime_error);
 }
+
+TEST_CASE("YAML loader: simulation.store_every is honoured, not ignored",
+          "[v2][layer8][yaml][store_every]") {
+    // Phase-1 audit: the loader accepts unknown keys, so an
+    // unparsed option vanishes without a word — a user who wrote
+    // `store_every: 50` to cap a long run's memory would get a
+    // full-rate trace and no warning. That is the exact silent-drop
+    // pattern Phase 0 eliminated elsewhere.
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: n0
+      to: gnd
+      V: 5.0
+simulation:
+  t_start: 0.0
+  t_end: 1.0e-4
+  dt: 1.0e-6
+  store_every: 10
+)YAML";
+    auto loaded = yaml::load_string(yaml);
+    REQUIRE(loaded.options.store_every == 10);
+    REQUIRE(loaded.options.expected_step_count() == 101);
+    REQUIRE(loaded.options.expected_sample_count() == 11);
+
+    // Omitted -> every step, exactly as before.
+    const std::string plain = R"YAML(
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: n0
+      to: gnd
+      V: 5.0
+simulation:
+  t_start: 0.0
+  t_end: 1.0e-4
+  dt: 1.0e-6
+)YAML";
+    auto d = yaml::load_string(plain);
+    REQUIRE(d.options.store_every == 1);
+    REQUIRE(d.options.expected_sample_count() ==
+             d.options.expected_step_count());
+
+    // 0 would record nothing — reject rather than accept silently.
+    const std::string zero = R"YAML(
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: n0
+      to: gnd
+      V: 5.0
+simulation:
+  t_start: 0.0
+  t_end: 1.0e-4
+  dt: 1.0e-6
+  store_every: 0
+)YAML";
+    REQUIRE_THROWS_AS(yaml::load_string(zero), std::invalid_argument);
+}

@@ -3,7 +3,7 @@ name: Docs
 on:
   pull_request:
     branches:
-      - main
+      - '**'   # stacked PRs must run too
     paths:
       - "docs/**"
       - "mkdocs.yml"

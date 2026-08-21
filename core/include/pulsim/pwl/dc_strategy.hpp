@@ -35,11 +35,13 @@
 #include "pulsim/pwl/continuation.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/pseudo_transient.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
+#include <format>
 #include <stdexcept>
 #include <string>
 
@@ -90,14 +92,16 @@ namespace detail {
 
     auto solver = sparse::make_default_solver();
     if (!solver->analyze(J)) {
-        throw std::runtime_error(
-            "pseudo_transient_dc: matrix structurally singular for "
-            "mask " + mask.to_string());
+        throw std::runtime_error(std::format(
+            "pseudo_transient_dc: matrix structurally singular for mask {}{}",
+            mask.to_string(),
+            explain_singular(graph, pool, J, solver.get())));
     }
     if (!solver->factorize(J)) {
-        throw std::runtime_error(
-            "pseudo_transient_dc: matrix numerically singular for "
-            "mask " + mask.to_string());
+        throw std::runtime_error(std::format(
+            "pseudo_transient_dc: matrix numerically singular for mask {}{}",
+            mask.to_string(),
+            explain_singular(graph, pool, J, solver.get())));
     }
 
     PwlSegment seg;
@@ -150,14 +154,16 @@ namespace detail {
 
     auto solver = sparse::make_default_solver();
     if (!solver->analyze(J)) {
-        throw std::runtime_error(
-            "source_stepping_dc: matrix structurally singular for "
-            "mask " + mask.to_string());
+        throw std::runtime_error(std::format(
+            "source_stepping_dc: matrix structurally singular for mask {}{}",
+            mask.to_string(),
+            explain_singular(graph, pool, J, solver.get())));
     }
     if (!solver->factorize(J)) {
-        throw std::runtime_error(
-            "source_stepping_dc: matrix numerically singular for "
-            "mask " + mask.to_string());
+        throw std::runtime_error(std::format(
+            "source_stepping_dc: matrix numerically singular for mask {}{}",
+            mask.to_string(),
+            explain_singular(graph, pool, J, solver.get())));
     }
 
     Vector x = Vector::Zero(static_cast<Index>(b_full.size()));

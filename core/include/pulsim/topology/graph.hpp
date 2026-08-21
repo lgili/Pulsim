@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -112,6 +113,7 @@ public:
     Index add_branch(Index from, Index to, BranchKind kind) {
         const auto id = static_cast<Index>(branches_.size());
         branches_.push_back(Branch{id, from, to, kind});
+        branch_names_.emplace_back();   // unnamed by default
         // Adjacency: only record real (non-ground) endpoints.
         if (from >= 0 && from < num_nodes()) {
             node_to_branches_[static_cast<Size>(from)].push_back(id);
@@ -123,7 +125,40 @@ public:
         return id;
     }
 
+    /// Name-carrying overload (v2.0 Phase 1, audit finding
+    /// `kernel-has-no-name-context-for-errors`). Nodes have always
+    /// carried a name; branches did not, so every kernel diagnostic
+    /// could only speak in integer ids and mask bitstrings. The
+    /// builder passes the user's device name here so errors can say
+    /// "inductor L1 has no closed conduction path" instead of
+    /// "numerically singular for mask 00101…11".
+    Index add_branch(Index from, Index to, BranchKind kind,
+                      std::string name) {
+        const Index id = add_branch(from, to, kind);
+        branch_names_[static_cast<Size>(id)] = std::move(name);
+        return id;
+    }
+
+    /// Attach (or replace) a branch's name after the fact.
+    void set_branch_name(Index branch_id, std::string name) {
+        if (branch_id >= 0 && branch_id < num_branches()) {
+            branch_names_[static_cast<Size>(branch_id)] = std::move(name);
+        }
+    }
+
     // ---- Const queries -------------------------------------------------------
+
+    /// The branch's user-facing name, or an EMPTY view when the
+    /// branch was created without one (raw-kernel users, tests,
+    /// hand-built graphs). Callers must tolerate the empty case and
+    /// fall back to the id.
+    [[nodiscard]] std::string_view branch_name(Index branch_id) const noexcept {
+        if (branch_id < 0 || branch_id >= num_branches()) {
+            return {};
+        }
+        return branch_names_[static_cast<Size>(branch_id)];
+    }
+
 
     [[nodiscard]] Index num_nodes() const noexcept {
         return static_cast<Index>(nodes_.size());
@@ -204,6 +239,9 @@ private:
 
     std::vector<Node> nodes_{};
     std::vector<Branch> branches_{};
+    /// Parallel to `branches_`; empty string = unnamed. Kept out of
+    /// `Branch` so the hot SoA stays a trivially-copyable POD.
+    std::vector<std::string> branch_names_{};
     std::vector<std::vector<Index>> node_to_branches_{};
     mutable std::uint64_t graph_id_ = 0;
     mutable bool graph_id_cached_ = false;

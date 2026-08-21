@@ -25,6 +25,7 @@
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/solver/run_transient.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 using namespace pulsim;
@@ -453,4 +454,56 @@ TEST_CASE("compute_lti_state_space rejects parallel capacitors",
     REQUIRE_THROWS_AS(
         cache.compute_lti_state_space(m),
         std::runtime_error);
+}
+
+TEST_CASE("compute_lti_state_space rejects magnetically coupled circuits",
+          "[bridge][lti][transformer][guard]") {
+    // Phase-1 audit finding MDYN-DEAD / F5: Step 7 applies a
+    // DIAGONAL inverse mass matrix (1/C per cap row, -1/L per
+    // inductor row). A transformer puts OFF-DIAGONAL -M terms
+    // between the two winding rows, which that scaling simply drops
+    // — so before this guard a flyback returned LTI poles computed
+    // as if the windings were uncoupled: plausible, wrong, silent,
+    // and consumed by the DSED bridge with no signal.
+    //
+    // The honest behaviour is to refuse, exactly as the inductor-
+    // cycle case already does.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0);
+    b.add_resistor("Rp", "vin", "p1", 0.1);
+    b.add_transformer("T1", "p1", "gnd", "s1", "gnd",
+                       /*L_p=*/1e-3, /*L_s=*/4e-3, /*k=*/0.98);
+    b.add_resistor("Rs", "s1", "gnd", 10.0);
+
+    PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build(Real{1e-6});
+
+    SwitchStateMask m(0);
+    REQUIRE_THROWS_AS(cache.compute_lti_state_space(m),
+                       std::runtime_error);
+    try {
+        (void)cache.compute_lti_state_space(m);
+    } catch (const std::runtime_error& e) {
+        const std::string msg = e.what();
+        INFO("message: " << msg);
+        // Must name the cause AND the way forward, not just refuse.
+        REQUIRE(msg.find("coupled") != std::string::npos);
+        REQUIRE(msg.find("mutual") != std::string::npos);
+        REQUIRE(msg.find("engine='pwl'") != std::string::npos);
+    }
+
+    // The same circuit must still simulate perfectly well on the
+    // fixed-step PWL path the message points at — the guard is
+    // about the LTI extraction only, not the circuit.
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.t_end   = 1e-4;
+    opts.dt      = 1e-6;
+    solver::SwitchScheduleFn sw = [](Real) {
+        return SwitchStateMask(0);
+    };
+    auto res = solver::run_transient(cache, b.graph(), b.pool(),
+                                       opts, sw);
+    REQUIRE(res.num_steps() == opts.expected_sample_count());
+    REQUIRE(std::isfinite(res.states.back()[0]));
 }

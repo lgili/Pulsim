@@ -166,6 +166,26 @@ public:
     [[nodiscard]] virtual std::size_t factor_bytes() const noexcept {
         return 0;
     }
+
+    /// Index of the matrix column whose elimination failed in the
+    /// most recent `factorize`, in ORIGINAL (pre-ordering) index
+    /// space — or `kInvalidIndex` when the backend cannot say.
+    ///
+    /// v2.0 Phase 1 (audit finding
+    /// `singular-errors-dont-name-the-node`): for a square MNA
+    /// system this index IS an unknown — a node voltage or a branch
+    /// current — so a caller can turn "numerically singular for mask
+    /// 0010111…1" into "node vout has no path to ground".
+    ///
+    /// Default: `kInvalidIndex`. The Eigen backend deliberately
+    /// keeps the default: Eigen's SparseLU leaks its failing column
+    /// only inside a free-text `lastErrorMessage()` that is compiled
+    /// out under `EIGEN_NO_IO`, and parsing that would be worse than
+    /// saying nothing. Every caller must therefore tolerate
+    /// `kInvalidIndex` and degrade to the un-named message.
+    [[nodiscard]] virtual Index singular_index() const noexcept {
+        return kInvalidIndex;
+    }
 };
 
 // Backward-compat alias: every Layer 1-9 consumer that uses

@@ -1068,16 +1068,21 @@ private:
 
     /// Helper used by every `add_*` method: forwards to
     /// `graph_.add_branch`, then registers the user-supplied
-    /// component name (if any) keyed on the new branch id. The
-    /// schematic renderer consumes these names; the kernel solver
-    /// ignores them. Empty / temporary string_views are stored as
-    /// the empty string so the lookup is uniform.
+    /// component name (if any) keyed on the new branch id.
+    ///
+    /// v2.0 Phase 1: the name is ALSO pushed into the Graph itself
+    /// (audit finding `kernel-has-no-name-context-for-errors`).
+    /// Before, names lived only here and never crossed into the
+    /// kernel, so every solver diagnostic could speak only in
+    /// integer ids and mask bitstrings; now a singular factorization
+    /// or a stalled Newton can name the offending device.
     Index add_branch_(std::string_view component_name,
                       Index from, Index to,
                       topology::BranchKind kind) {
         const Index b_id = graph_.add_branch(from, to, kind);
         if (!component_name.empty()) {
             branch_names_.emplace(b_id, std::string{component_name});
+            graph_.set_branch_name(b_id, std::string{component_name});
         }
         return b_id;
     }

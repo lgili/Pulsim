@@ -19,7 +19,7 @@ on:
       - 'examples/*.yaml'
       - '.github/workflows/schematic-smoke.yml'
   pull_request:
-    branches: [main]
+    branches: ['**']   # stacked PRs must run too
     paths:
       - 'python/pulsim/schematic/**'
       - 'python/bindings.cpp'
