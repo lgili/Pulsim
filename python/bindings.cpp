@@ -2095,8 +2095,10 @@ void init_module(py::module_& m) {
             bool enable_cascade,
             Real gmin,
             Real gmin_start,
-            Size gmin_steps) {
+            Size gmin_steps,
+            analysis::ShouldContinueFn should_continue) {
             pwl::DCOperatingPointOptions o;
+            o.should_continue = std::move(should_continue);
             o.t_eval = t_eval;
             o.max_event_iterations = max_event_iterations;
             o.max_newton_iters = max_newton_iters;
@@ -2126,6 +2128,7 @@ void init_module(py::module_& m) {
         py::arg("gmin") = pwl::kDefaultGmin,
         py::arg("gmin_start") = Real{1e-2},
         py::arg("gmin_steps") = Size{10},
+        py::arg("should_continue") = analysis::ShouldContinueFn{},
         "THE DC operating point: nonlinear devices stamped, PWL "
         "diode states iterated to consistency, and the DC cascade "
         "walked if the direct solve fails. Returns a "

@@ -241,3 +241,47 @@ def test_bdf1_refuses_a_circuit_it_would_silently_open():
     with pytest.raises((ValueError, RuntimeError),
                         match="Newton|trapezoidal"):
         k.run_transient_bdf1(b, opts, sw)
+
+
+def test_settle_is_reachable_and_agrees_where_a_fixed_point_exists():
+    """`"settle"` runs an actual transient, so it is the only strategy
+    that can answer for a switching steady state. On a circuit that
+    HAS a fixed point it must still land on it — otherwise the escape
+    hatch the failure message points at is broken."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 12.0)
+    b.add_resistor("R1", "vin", "vout", 4.0)
+    b.add_resistor("R2", "vout", "gnd", 6.0)
+    b.add_capacitor("C", "vout", "gnd", 1e-6)
+
+    cfg = p.SettleConfig(t_settle=2e-3, dt=1e-6, tol_steady=1e-3,
+                          t_check=1e-4)
+    settled = _dc(b, strategy="settle", pseudo_trans=cfg)
+    assert settled[1] == pytest.approx(7.2, abs=1e-4)   # 12·6/10
+    np.testing.assert_allclose(settled, _dc(b), rtol=0, atol=1e-4)
+
+
+def test_cancellation_reaches_inside_the_cascade():
+    """`should_continue` has to be honoured DURING the walk, not only
+    before it starts. A cascade can spend seconds on a hostile
+    circuit, and a Cancel button that only responds beforehand is not
+    a Cancel button."""
+    calls = {"n": 0}
+
+    def keep_going():
+        calls["n"] += 1
+        return calls["n"] < 2       # stop on the second check
+
+    with pytest.raises(p.Cancelled) as exc:
+        _dc(stiff_diode_chain(), strategy="auto",
+            should_continue=keep_going)
+    assert calls["n"] >= 2
+    # The typed exception must survive the cascade's error wrapping —
+    # a user pressing Cancel is not a convergence failure.
+    assert "compute_dc_op" in str(exc.value)
+
+
+def test_cancellation_is_not_reported_as_a_convergence_failure():
+    with pytest.raises(p.Cancelled):
+        _dc(diode_divider(), strategy="auto",
+            should_continue=lambda: False)

@@ -50,6 +50,7 @@ Example
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -120,6 +121,31 @@ _KERNEL_STRATEGIES = {
 }
 
 _VALID = tuple(_KERNEL_STRATEGIES) + ("settle",)
+
+
+def _reraise_as_cancelled(exc, where="compute_dc_op"):
+    """Translate the kernel's `_CxxCancelled` into `pulsim.Cancelled`.
+
+    `py::register_exception` can only carry a message, and the
+    user-facing type is defined in a Python module that imports the
+    extension — so the two cannot be related by inheritance and the
+    translation has to happen at the boundary. Without it a Cancel
+    arrives as `pulsim._pulsim._CxxCancelled`, which
+    `except pulsim.Cancelled` does not catch, breaking the contract
+    `docs/helpers.md` states.
+    """
+    from . import Cancelled as _Cancelled
+    m = re.search(r"progress index (-?\d+)", str(exc))
+    idx = int(m.group(1)) if m else None
+    if idx is not None and idx < 0:
+        idx = None
+    raise _Cancelled(where, point_index=idx) from exc
+
+
+def _is_kernel_cancellation(exc) -> bool:
+    from . import _pulsim as _k  # type: ignore[import-not-found]
+    cxx = getattr(_k, "_CxxCancelled", None)
+    return cxx is not None and isinstance(exc, cxx)
 
 
 def compute_dc_op(builder,
@@ -235,6 +261,10 @@ def compute_dc_op(builder,
         t_eval=float(t_eval),
         enable_nonlinear_refresh=enable_nonlinear_refresh,
     )
+    # Threaded into the kernel, not just checked once above: the
+    # cascade can spend seconds on a hostile circuit, and a Cancel
+    # that only lands before the work starts is not a Cancel.
+    op_kw = dict(kw, should_continue=should_continue)
     if gmin is not None:
         kw["gmin"] = float(gmin)
 
@@ -243,12 +273,18 @@ def compute_dc_op(builder,
         # the point. It still stamps nonlinear devices and still
         # resolves diode states: those are not fallbacks, they are
         # what the question means.
-        op = _k.compute_dc_operating_point(
-            builder.graph, builder.pool, mask,
-            enable_cascade=False,
-            max_event_iterations=(16 if max_event_iterations is None
-                                   else int(max_event_iterations)),
-            **kw)
+        try:
+            op = _k.compute_dc_operating_point(
+                builder.graph, builder.pool, mask,
+                enable_cascade=False,
+                max_event_iterations=(
+                    16 if max_event_iterations is None
+                    else int(max_event_iterations)),
+                **op_kw)
+        except Exception as exc:
+            if _is_kernel_cancellation(exc):
+                _reraise_as_cancelled(exc)
+            raise
         if report is not None:
             report.append(op.report)
         if verbose:
@@ -266,12 +302,18 @@ def compute_dc_op(builder,
         # point is the silent wrong answer this module exists to
         # stop. Ask for "settle" explicitly when a switching steady
         # state is what you actually want.
-        op = _k.compute_dc_operating_point(
-            builder.graph, builder.pool, mask,
-            enable_cascade=True,
-            max_event_iterations=(16 if max_event_iterations is None
-                                   else int(max_event_iterations)),
-            **kw)
+        try:
+            op = _k.compute_dc_operating_point(
+                builder.graph, builder.pool, mask,
+                enable_cascade=True,
+                max_event_iterations=(
+                    16 if max_event_iterations is None
+                    else int(max_event_iterations)),
+                **op_kw)
+        except Exception as exc:
+            if _is_kernel_cancellation(exc):
+                _reraise_as_cancelled(exc)
+            raise
         if report is not None:
             report.append(op.report)
         if verbose:
@@ -279,12 +321,17 @@ def compute_dc_op(builder,
         return np.asarray(op.x)
 
     # A single named kernel rung.
-    x, rep = _k.compute_dc_op_with_strategy(
-        builder.graph, builder.pool, mask,
-        getattr(_k.DCStrategy, _KERNEL_STRATEGIES[strategy]),
-        ss_n_steps=int(source_step.n_steps),
-        should_continue=should_continue,
-        **kw)
+    try:
+        x, rep = _k.compute_dc_op_with_strategy(
+            builder.graph, builder.pool, mask,
+            getattr(_k.DCStrategy, _KERNEL_STRATEGIES[strategy]),
+            ss_n_steps=int(source_step.n_steps),
+            should_continue=should_continue,
+            **kw)
+    except Exception as exc:
+        if _is_kernel_cancellation(exc):
+            _reraise_as_cancelled(exc)
+        raise
     if report is not None:
         report.append(rep)
     if verbose:

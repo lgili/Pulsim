@@ -28,6 +28,7 @@
 // pre-charge, the BDF1 bootstrap, and the public Python entry point
 // all route through `compute_dc_operating_point`.
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
@@ -67,6 +68,12 @@ struct DCOperatingPointOptions {
     /// of giving up. Turning this off is how you ask for the raw
     /// diagnostic rather than an answer.
     bool enable_cascade = true;
+
+    /// Checked between diode-consistency rounds and between cascade
+    /// rungs. A cascade can take seconds on a hostile circuit, and a
+    /// Cancel button that only responds before the work starts is
+    /// not a Cancel button.
+    analysis::ShouldContinueFn should_continue{};
 };
 
 /// The resolved operating point, plus what it took to get there.
@@ -115,6 +122,8 @@ struct DCOperatingPoint {
     Size iters = 0;
 
     do {
+        analysis::check_cancellation(opts.should_continue, who,
+                                      static_cast<long>(iters));
         topology::SwitchStateMask mask = user_mask;
         if (has_diodes) {
             mask = mask.overlay(diodes->current_diode_mask(),
@@ -134,6 +143,8 @@ struct DCOperatingPoint {
             out.report.strategy = DCStrategy::Naive;
             out.report.rungs_attempted = Size{1};
             out.report.final_gmin = opts.gmin.floor;
+        } catch (const analysis::Cancelled&) {
+            throw;
         } catch (const std::exception& direct_failed) {
             if (!opts.enable_cascade) {
                 throw;
@@ -145,8 +156,13 @@ struct DCOperatingPoint {
                 out.x = compute_dc_op_with_strategy(
                     graph, pool, mask, DCStrategy::Auto, opts.t_eval,
                     PseudoTransientConfig{}, SourceSteppingConfig{},
-                    analysis::ShouldContinueFn{}, refresh, opts.gmin,
+                    opts.should_continue, refresh, opts.gmin,
                     &out.report);
+            } catch (const analysis::Cancelled&) {
+                // A user pressing Cancel is not a convergence
+                // failure. Let the typed exception through instead of
+                // burying it in a "no DC operating point" message.
+                throw;
             } catch (const std::exception& cascade_failed) {
                 throw std::runtime_error(std::format(
                     "{}: no DC operating point. The direct solve "
