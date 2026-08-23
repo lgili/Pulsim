@@ -285,3 +285,165 @@ def test_cancellation_is_not_reported_as_a_convergence_failure():
     with pytest.raises(p.Cancelled):
         _dc(diode_divider(), strategy="auto",
             should_continue=lambda: False)
+
+
+# ---------------------------------------------------------------------
+# Regression guards for the adversarial review of this change
+# ---------------------------------------------------------------------
+
+def coupled_floating_subnet():
+    """GMIN-COVERS-DC-FLOATING-SUBNET. `na`/`nb` reach ground only
+    through a capacitor, so the DC block is rank-deficient — but the
+    subnet is galvanically connected AND every column is populated by
+    its own resistor, so neither a reachability probe over all
+    branches nor an emptiness probe can see it."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_resistor("R1", "vin", "gnd", 10.0)
+    b.add_capacitor("Cc", "vin", "na", 1e-6)
+    b.add_resistor("Rload", "na", "nb", 1000.0)
+    return b
+
+
+def current_source_island():
+    """The same hole reached the other way: an ideal current source
+    is an edge in the graph but contributes no conductance, so the
+    nodes behind it have no DC equation."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_resistor("Rk", "vin", "gnd", 10.0)
+    b.add_current_source("I1", "gnd", "n1", 1.0)
+    b.add_resistor("R1", "n1", "n2", 1000.0)
+    b.add_capacitor("C1", "n2", "gnd", 1e-6)
+    return b
+
+
+@pytest.mark.parametrize("make,node", [
+    (coupled_floating_subnet, "na"),
+    (current_source_island, "n1"),
+])
+def test_the_floor_does_not_supply_missing_rank(make, node):
+    """A conductance floor made these factorizable and the solver
+    reported 0 V — or I/(2·gmin) volts — as an operating point. The
+    structural check has to see rank, not just emptiness."""
+    with pytest.raises(RuntimeError) as exc:
+        _dc(make(), auto_regularize=False)
+    msg = str(exc.value)
+    assert node in msg, msg
+    assert "no DC path to ground" in msg, msg
+
+    # And with the preflight on it is repaired rather than refused.
+    x = _dc(make())
+    assert np.isfinite(x).all()
+
+
+def test_named_rungs_resolve_pwl_diode_states_too():
+    """PY-RUNGS-SKIP-DIODE-ITERATION. Iterating a PWL diode's on/off
+    bit is part of what "the DC operating point" MEANS, not a feature
+    of one rung — so every strategy must do it, or the same function
+    answers a different circuit depending on the name you passed."""
+    def rectified():
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "vin", "gnd", 5.0)
+        b.add_resistor("R", "vin", "na", 1000.0)
+        b.add_diode("D", "na", "gnd", 1.0, 1e-9)   # PWL switch diode
+        return b
+
+    ref = _dc(rectified(), strategy="naive")
+    # The diode conducts: v(na) is a few mV, not the 5 V you get with
+    # it frozen open.
+    assert ref[1] < 0.1, ref
+    for strategy in ("gmin_step", "source_step", "auto"):
+        x = _dc(rectified(), strategy=strategy)
+        np.testing.assert_allclose(
+            x, ref, rtol=0, atol=1e-6,
+            err_msg=f"strategy={strategy} froze the diode open")
+
+
+def test_the_report_measures_the_residual_it_advertises():
+    """REPORT-RESIDUAL-FABRICATED-ON-NAIVE. The default path never
+    measured it and reported a default-constructed 0 — worse than
+    reporting nothing, for the one field that can reveal a
+    load-bearing floor."""
+    rep = []
+    _dc(diode_divider(), strategy="auto", report=rep)
+    assert rep[0].strategy == "naive"
+    # A real measurement of a converged Newton: small but not the
+    # tell-tale exact zero of an unset field.
+    assert 0.0 <= rep[0].residual < 1e-6
+    assert rep[0].final_gmin == pytest.approx(1e-12)
+
+
+def test_the_dc_vector_is_writable_and_owned():
+    """DC-OP-RETURNS-READONLY — the same leak Phase 1's review caught
+    in res.v()/res.i(). An operating point is a plain vector users
+    subtract and scale."""
+    from pulsim import _pulsim as k
+
+    b = diode_divider()
+    m = k.SwitchStateMask(b.graph.num_switches)
+    op = k.compute_dc_operating_point(b.graph, b.pool, m)
+
+    x = np.asarray(op.x)
+    assert x.flags.writeable
+    x -= x.mean()                    # must not raise
+    # And it was a COPY, not a view onto the kernel object: mutating
+    # it must not be visible through a second read.
+    np.testing.assert_allclose(np.asarray(op.x),
+                               _dc(diode_divider()), rtol=0, atol=1e-9)
+
+    y = _dc(diode_divider())
+    assert y.flags.writeable
+    y *= 2.0
+
+
+def test_settle_refuses_what_it_cannot_honour():
+    """SETTLE-IGNORES-KWARGS. Silently dropping `gmin=0` or a `mask`
+    would leave the caller believing something else was computed."""
+    with pytest.raises(ValueError, match="gmin"):
+        p.compute_dc_op(diode_divider(), strategy="settle", gmin=0.0)
+    with pytest.raises(ValueError, match="max_event_iterations"):
+        p.compute_dc_op(diode_divider(), strategy="settle",
+                         max_event_iterations=4)
+
+
+def test_bdf1_refuses_pwl_diodes_as_well():
+    """BDF1-GUARD-MISSES-PWL-DIODES. A PWL diode is a Switch branch,
+    so `has_nonlinear_devices()` never saw it — and BDF1 has no event
+    iteration, so a rectifier would run with no rectification."""
+    from pulsim import _pulsim as k
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 5.0)
+    b.add_resistor("R", "vin", "na", 1000.0)
+    b.add_diode("D", "na", "gnd", 1.0, 1e-9)
+    opts = k.SimulationOptions(t_start=0.0, t_end=1e-5, dt=1e-6)
+
+    with pytest.raises((ValueError, RuntimeError),
+                        match="PWL diode|frozen"):
+        k.run_transient_bdf1(b, opts,
+                              lambda _t: k.SwitchStateMask(
+                                  b.graph.num_switches))
+
+
+def test_a_settle_config_is_never_silently_dropped():
+    """PSEUDO-TRANS-CONFIG-DROPPED. `"pseudo_trans"` changed meaning
+    in v2.0, so passing the settling config alongside it configures
+    nothing. Say so rather than discarding it."""
+    cfg = p.SettleConfig(t_settle=1e-3)
+    with pytest.raises(ValueError, match="strategy='settle'"):
+        p.compute_dc_op(diode_divider(), strategy="pseudo_trans",
+                         settle=cfg)
+    with pytest.raises(ValueError, match="not both"):
+        p.compute_dc_op(diode_divider(), strategy="settle",
+                         settle=cfg, pseudo_trans=cfg)
+    # The old keyword still works under the new strategy name.
+    rc = p.CircuitBuilder()
+    rc.add_voltage_source("V", "vin", "gnd", 12.0)
+    rc.add_resistor("R1", "vin", "vout", 4.0)
+    rc.add_resistor("R2", "vout", "gnd", 6.0)
+    rc.add_capacitor("C", "vout", "gnd", 1e-6)
+    x = _dc(rc, strategy="settle",
+            pseudo_trans=p.SettleConfig(t_settle=2e-3, dt=1e-6,
+                                         t_check=1e-4))
+    assert x[1] == pytest.approx(7.2, abs=1e-4)

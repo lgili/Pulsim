@@ -206,6 +206,15 @@ struct DCResidual {
 /// Reject an operating point that only satisfies the AUGMENTED
 /// system. Whatever homotopy produced `x`, the answer handed back
 /// must solve the circuit the user actually described.
+///
+/// What this CAN catch: a homotopy that returned at α < 1, or at a
+/// conductance rung above the floor, or a rung that reported success
+/// on a system it had modified. What it CANNOT catch is a
+/// load-bearing floor: augmented and un-augmented differ by exactly
+/// gmin·v on the node rows, so at gmin = 1e-12 the gate would only
+/// trip above 1e6 V. Detecting a floor that is holding the answer up
+/// is a STRUCTURAL question, and `dc_structural_defect` is what
+/// answers it — before any conductance is stamped.
 inline void require_unaugmented_residual(
     const topology::Graph& graph,
     const DevicePool& pool,
@@ -360,6 +369,11 @@ inline void require_unaugmented_residual(
         while (next_idx < ramp.size() && ramp[next_idx] >= g) {
             ++next_idx;
         }
+        // Back to the scheduled decade rather than the width the
+        // last bisection settled on — see the note in
+        // `source_stepping_dc`: carrying a reduction forward without
+        // ever letting it grow back converts one hard rung into a
+        // step so small the budget runs out first.
         g = (next_idx < ramp.size()) ? ramp[next_idx] : target;
     }
 
@@ -474,6 +488,15 @@ namespace detail {
         if (alpha >= Real{1}) {
             break;
         }
+        // Deliberately back to the FULL nominal increment, not the
+        // one the last bisection settled on. A shrink-only step
+        // controller turns one hard spot into a permanently tiny
+        // step and exhausts the budget before reaching α = 1; the
+        // re-bisection this costs is bounded by that same budget,
+        // which is the cheaper of the two failure modes. (Review
+        // finding HOMOTOPY-STEP-NOT-STICKY, declined on that
+        // ground — a shrink-and-grow controller would be correct
+        // but is more machinery than the saving justifies.)
         alpha = std::min(Real{1},
                           alpha + Real{1} / static_cast<Real>(n_steps));
     }
@@ -481,6 +504,10 @@ namespace detail {
     if (report != nullptr) {
         report->strategy = DCStrategy::SourceStepping;
         report->rungs_attempted = attempts;
+        // Explicitly zero, not left alone: a stale value inherited
+        // from the gmin rung that ran before this one would claim a
+        // conductance this answer does not carry.
+        report->final_gmin = Real{0};
     }
     require_unaugmented_residual(graph, pool, mask, refresh, x,
                                   t_eval, cfg.tol_res,
@@ -514,10 +541,11 @@ namespace detail {
     const GminConfig& gmin_cfg = {},
     DCSolveReport* report = nullptr) {
 
-    auto stamp_report = [&](DCStrategy s, Size rungs) {
+    auto stamp_report = [&](DCStrategy s, Size rungs, Real gmin) {
         if (report != nullptr) {
             report->strategy = s;
             report->rungs_attempted = rungs;
+            report->final_gmin = gmin;
         }
     };
 
@@ -529,9 +557,8 @@ namespace detail {
                                     /*lm=*/false, gmin_cfg.floor)
             : compute_dc_op(graph, pool, mask, t_eval,
                              gmin_cfg.floor);
-        stamp_report(DCStrategy::Naive, Size{1});
+        stamp_report(DCStrategy::Naive, Size{1}, gmin_cfg.floor);
         if (report != nullptr) {
-            report->final_gmin = gmin_cfg.floor;
             report->residual = detail::dc_residual(
                 graph, pool, mask, refresh, x, t_eval).norm;
         }
@@ -549,7 +576,8 @@ namespace detail {
         Vector x = detail::pseudo_transient_dc(graph, pool, mask,
                                                  refresh, pt_cfg,
                                                  t_eval);
-        stamp_report(DCStrategy::PseudoTransient, Size{1});
+        stamp_report(DCStrategy::PseudoTransient, Size{1},
+                      Real{0});
         detail::require_unaugmented_residual(
             graph, pool, mask, refresh, x, t_eval,
             pt_cfg.tol_res, "pseudo_transient_dc", report);

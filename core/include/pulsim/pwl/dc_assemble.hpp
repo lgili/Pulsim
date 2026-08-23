@@ -282,7 +282,13 @@ struct DCStructuralDefect {
 ///      for a circuit whose isolation is the entire point of its
 ///      design. `preflight.hpp` owns this repair, with a report.
 ///   2. **An unknown with no equation at all** — an empty MNA column
-///      or row.
+///      or row. Checked before the next one because it names a more
+///      specific mechanism for the same node.
+///   3. **A subnet with no DC path to ground.** Galvanically
+///      connected — through a coupling capacitor, or fed by an ideal
+///      current source — but rank-deficient in the DC system, where
+///      those devices contribute nothing. Emptiness cannot see this:
+///      the subnet's own internal resistors populate every column.
 ///
 /// Neither probe may libel a healthy circuit, so both are careful:
 /// reachability unions EVERY branch regardless of kind (a diode is a
@@ -304,14 +310,13 @@ struct DCStructuralDefect {
     Real t_eval) {
     DCStructuralDefect out;
 
-    // 1. Reachability: a subnet with no path to ground through ANY
-    //    device has no voltage reference.
+    // 1. GALVANIC reachability: a subnet with no path to ground
+    //    through ANY device has no voltage reference at all.
     const auto isolated = detail::components_without_ground(
         graph, [](const topology::Branch&) { return true; });
     if (!isolated.empty() && !isolated.front().empty()) {
-        const Index anchor = isolated.front().front();
         out.present = true;
-        out.row = anchor;
+        out.row = isolated.front().front();
         out.detail = std::format(
             " — {} is in a {}-node subnet with no connection to "
             "ground through any device, so its voltage is undefined "
@@ -320,7 +325,7 @@ struct DCStructuralDefect {
             "run the topology preflight (Python: it is on by "
             "default) to insert an explicit 1 GΩ tie, or add one "
             "yourself",
-            node_label(graph, anchor), isolated.front().size());
+            node_label(graph, out.row), isolated.front().size());
         return out;
     }
 
@@ -348,7 +353,50 @@ struct DCStructuralDefect {
         out.present = true;
         out.row = row;
         out.detail = explain_singular(graph, pool, J, nullptr);
+        return out;
     }
+
+    // 3. DC reachability. Galvanic connection is not enough: a
+    //    subnet whose only path to ground runs through capacitors
+    //    (open at DC) or ideal current sources (no conductance) has
+    //    a rank-deficient DC block even though every one of its
+    //    columns is populated by its own internal devices. Probe 2
+    //    above cannot see that — emptiness is not rank — and with
+    //    the floor stamped the block becomes invertible and the
+    //    solver reports 0 V, or I/(2·gmin) volts, as an operating
+    //    point.
+    //
+    //    Nonlinear branches conduct here IF AND ONLY IF a refresh
+    //    will stamp them. `dc_assemble` skips them, which is why
+    //    `conducts_at_dc` says no; but Newton puts them back, and
+    //    treating an interior node of a diode chain as floating
+    //    would be the same false accusation this function exists to
+    //    avoid.
+    const bool nonlinear_is_stamped = static_cast<bool>(refresh);
+    const auto dc_floating = detail::components_without_ground(
+        graph, [&](const topology::Branch& br) {
+            if (br.kind == topology::BranchKind::Nonlinear) {
+                return nonlinear_is_stamped;
+            }
+            return detail::conducts_at_dc(pool, br);
+        });
+    if (!dc_floating.empty() && !dc_floating.front().empty()) {
+        out.present = true;
+        out.row = dc_floating.front().front();
+        out.detail = std::format(
+            " — {} is in a {}-node subnet with no DC path to ground: "
+            "it is connected only through devices that are open at "
+            "DC (capacitors, ideal current sources), so the DC "
+            "system is rank-deficient there. Its columns are all "
+            "populated by the subnet's own devices, so no emptiness "
+            "probe can see this, and a conductance floor would "
+            "silently supply the missing rank. Run the topology "
+            "preflight (Python: it is on by default) or add a "
+            "bleeder resistance to ground",
+            node_label(graph, out.row), dc_floating.front().size());
+        return out;
+    }
+
     return out;
 }
 

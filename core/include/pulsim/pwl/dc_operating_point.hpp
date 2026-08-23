@@ -61,7 +61,22 @@ struct DCOperatingPointOptions {
     bool enable_line_search = false;
     bool enable_lm = false;
 
+    /// Which rung to run. `Auto` is the cascade; a named rung runs
+    /// exactly that one. Whichever you pick, the diode-consistency
+    /// loop below wraps it — resolving diode states is part of what
+    /// "the DC operating point" MEANS, not a feature of one rung.
+    DCStrategy strategy = DCStrategy::Auto;
+
+    /// Knobs for the conductance floor and the gmin ramp. The Newton
+    /// fields above win over the ones in here, so a caller sets
+    /// tolerances once.
     GminConfig gmin{};
+
+    /// Knobs for the other two homotopy rungs. Carried here rather
+    /// than defaulted at the call site so a caller that asks for a
+    /// named rung actually gets the configuration it passed.
+    SourceSteppingConfig source_stepping{};
+    PseudoTransientConfig pseudo_transient{};
 
     /// When the direct solve fails, walk rungs 2-4 of the cascade
     /// (gmin stepping → source stepping → pseudo-transient) instead
@@ -121,6 +136,20 @@ struct DCOperatingPoint {
     bool flipped = false;
     Size iters = 0;
 
+    // One source of truth for the Newton knobs: whatever the caller
+    // set on the options wins over GminConfig's own defaults.
+    GminConfig gcfg = opts.gmin;
+    gcfg.max_newton_iters   = opts.max_newton_iters;
+    gcfg.tol_dx             = opts.tol_dx;
+    gcfg.tol_res            = opts.tol_res;
+    gcfg.enable_line_search = opts.enable_line_search;
+    gcfg.enable_lm          = opts.enable_lm;
+
+    const bool want_direct = opts.strategy == DCStrategy::Naive ||
+                              opts.strategy == DCStrategy::Auto;
+    const bool may_fall_through =
+        opts.strategy == DCStrategy::Auto && opts.enable_cascade;
+
     do {
         analysis::check_cancellation(opts.should_continue, who,
                                       static_cast<long>(iters));
@@ -131,45 +160,65 @@ struct DCOperatingPoint {
         }
         out.mask = mask;
 
-        try {
-            out.x = refresh
-                ? compute_dc_op_newton(
-                      graph, pool, mask, refresh, opts.t_eval,
-                      opts.max_newton_iters, opts.tol_dx,
-                      opts.tol_res, opts.enable_line_search,
-                      opts.enable_lm, opts.gmin.floor)
-                : compute_dc_op(graph, pool, mask, opts.t_eval,
-                                 opts.gmin.floor);
-            out.report.strategy = DCStrategy::Naive;
-            out.report.rungs_attempted = Size{1};
-            out.report.final_gmin = opts.gmin.floor;
-        } catch (const analysis::Cancelled&) {
-            throw;
-        } catch (const std::exception& direct_failed) {
-            if (!opts.enable_cascade) {
-                throw;
-            }
-            // The direct solve is rung 1. A stiff operating point is
-            // exactly what the rest of the cascade exists for, so
-            // walk it before handing the user an error.
+        // A named rung runs alone — but INSIDE this loop, at the
+        // mask the diode iteration has reached. Running it outside
+        // would solve the circuit with every PWL diode frozen open,
+        // which is the silent wrong answer this header exists to
+        // close, reintroduced one strategy name at a time.
+        if (!want_direct) {
+            out.x = compute_dc_op_with_strategy(
+                graph, pool, mask, opts.strategy, opts.t_eval,
+                opts.pseudo_transient, opts.source_stepping,
+                opts.should_continue, refresh, gcfg, &out.report);
+        } else {
             try {
-                out.x = compute_dc_op_with_strategy(
-                    graph, pool, mask, DCStrategy::Auto, opts.t_eval,
-                    PseudoTransientConfig{}, SourceSteppingConfig{},
-                    opts.should_continue, refresh, opts.gmin,
-                    &out.report);
+                out.x = refresh
+                    ? compute_dc_op_newton(
+                          graph, pool, mask, refresh, opts.t_eval,
+                          opts.max_newton_iters, opts.tol_dx,
+                          opts.tol_res, opts.enable_line_search,
+                          opts.enable_lm, opts.gmin.floor)
+                    : compute_dc_op(graph, pool, mask, opts.t_eval,
+                                     opts.gmin.floor);
+                out.report.strategy = DCStrategy::Naive;
+                out.report.rungs_attempted = Size{1};
+                out.report.final_gmin = opts.gmin.floor;
+                // Measure it. Reporting a default-constructed 0 for
+                // the field the API documents as "the residual of the
+                // ORIGINAL circuit" is worse than reporting nothing,
+                // and this is the rung the default path takes.
+                out.report.residual = detail::dc_residual(
+                    graph, pool, mask, refresh, out.x,
+                    opts.t_eval).norm;
             } catch (const analysis::Cancelled&) {
-                // A user pressing Cancel is not a convergence
-                // failure. Let the typed exception through instead of
-                // burying it in a "no DC operating point" message.
                 throw;
-            } catch (const std::exception& cascade_failed) {
-                throw std::runtime_error(std::format(
-                    "{}: no DC operating point. The direct solve "
-                    "failed with: {}\nThe fallback cascade then "
-                    "reported: {}",
-                    who, direct_failed.what(),
-                    cascade_failed.what()));
+            } catch (const std::exception& direct_failed) {
+                if (!may_fall_through) {
+                    throw;
+                }
+                // The direct solve is rung 1. A stiff operating point
+                // is exactly what the rest of the cascade exists for,
+                // so walk it before handing the user an error.
+                try {
+                    out.x = compute_dc_op_with_strategy(
+                        graph, pool, mask, DCStrategy::Auto,
+                        opts.t_eval, opts.pseudo_transient,
+                        opts.source_stepping, opts.should_continue,
+                        refresh, gcfg, &out.report);
+                } catch (const analysis::Cancelled&) {
+                    // A user pressing Cancel is not a convergence
+                    // failure. Let the typed exception through
+                    // instead of burying it in a "no DC operating
+                    // point" message.
+                    throw;
+                } catch (const std::exception& cascade_failed) {
+                    throw std::runtime_error(std::format(
+                        "{}: no DC operating point. The direct solve "
+                        "failed with: {}\nThe fallback cascade then "
+                        "reported: {}",
+                        who, direct_failed.what(),
+                        cascade_failed.what()));
+                }
             }
         }
 

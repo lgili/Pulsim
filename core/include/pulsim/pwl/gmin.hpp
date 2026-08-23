@@ -99,9 +99,15 @@ struct GminConfig {
     bool enable_lm = false;
 
     /// Reject a returned operating point whose residual in the
-    /// UN-augmented system exceeds this. Catches the case where the
-    /// floor turned out to be load-bearing, i.e. the answer depends
-    /// on a conductance the user never put in the circuit.
+    /// UN-augmented system exceeds this — a homotopy that stopped
+    /// short of the floor, or of full source amplitude, or that
+    /// reported success on a system it had modified.
+    ///
+    /// It does NOT detect a load-bearing floor: the two systems
+    /// differ by exactly gmin·v on the node rows, so at gmin = 1e-12
+    /// this would only trip above 1e6 V. That question is
+    /// structural, and `dc_structural_defect` answers it before any
+    /// conductance is stamped.
     Real max_unaugmented_residual = Real{1e-6};
 };
 
@@ -139,9 +145,16 @@ inline void stamp_gmin(sparse::Matrix& J, Index num_nodes,
 [[nodiscard]] inline std::vector<Real> gmin_ramp(
     const GminConfig& cfg) {
     std::vector<Real> ramp;
-    const Real last = std::max(cfg.floor, Real{0});
-    if (!(cfg.start > Real{0}) || cfg.steps == 0 ||
-        !(cfg.start > last)) {
+    const Real last =
+        std::isfinite(cfg.floor) ? std::max(cfg.floor, Real{0})
+                                   : Real{0};
+    // `std::isfinite` on the start too: an inf or NaN makes `span`
+    // non-finite, every rung NaN — and a NaN rung is invisible to
+    // both `stamp_gmin`'s `g > 0` guard and the stepping loop's
+    // `ramp[k] >= g` comparison, so the solver would re-solve the
+    // identical system until its budget ran out.
+    if (!std::isfinite(cfg.start) || !(cfg.start > Real{0}) ||
+        cfg.steps == 0 || !(cfg.start > last)) {
         ramp.push_back(last);
         return ramp;
     }

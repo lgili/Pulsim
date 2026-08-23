@@ -1856,8 +1856,17 @@ void init_module(py::module_& m) {
         "A resolved DC operating point: the state vector, the switch "
         "and diode configuration it was solved at, and how it was "
         "obtained.")
-        .def_readonly("x", &pwl::DCOperatingPoint::x,
-                       "The DC state vector.")
+        .def_property_readonly("x",
+            [](const pwl::DCOperatingPoint& op) {
+                // An owned, writable copy. `def_readonly` on an Eigen
+                // member hands back a READ-ONLY view that also pins
+                // the C++ object alive — the same leak Phase 1's
+                // review caught in res.v()/res.i(). An operating
+                // point is a plain vector users subtract, scale and
+                // index into.
+                return Vector(op.x);
+            },
+            "The DC state vector (an owned, writable copy).")
         .def_readonly("mask", &pwl::DCOperatingPoint::mask,
                        "Switch mask with the resolved PWL diode bits "
                        "overlaid.")
@@ -2086,6 +2095,7 @@ void init_module(py::module_& m) {
         [resolve_refresh](const topology::Graph& graph,
             const pwl::DevicePool& pool,
             const topology::SwitchStateMask& mask,
+            pwl::DCStrategy strategy,
             Real t_eval,
             std::optional<bool> enable_nonlinear_refresh,
             Size max_event_iterations,
@@ -2096,9 +2106,13 @@ void init_module(py::module_& m) {
             Real gmin,
             Real gmin_start,
             Size gmin_steps,
+            Size ss_n_steps,
+            Real pt_tol_res,
+            Size pt_max_iters,
             analysis::ShouldContinueFn should_continue) {
             pwl::DCOperatingPointOptions o;
             o.should_continue = std::move(should_continue);
+            o.strategy = strategy;
             o.t_eval = t_eval;
             o.max_event_iterations = max_event_iterations;
             o.max_newton_iters = max_newton_iters;
@@ -2108,6 +2122,9 @@ void init_module(py::module_& m) {
             o.gmin.floor = gmin;
             o.gmin.start = gmin_start;
             o.gmin.steps = gmin_steps;
+            o.source_stepping.n_steps = ss_n_steps;
+            o.pseudo_transient.tol_res = pt_tol_res;
+            o.pseudo_transient.max_iters = pt_max_iters;
             auto refresh =
                 resolve_refresh(pool, enable_nonlinear_refresh);
             pwl::DiodeEventState diodes{graph, pool};
@@ -2118,6 +2135,7 @@ void init_module(py::module_& m) {
                 "compute_dc_operating_point");
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
+        py::arg("strategy") = pwl::DCStrategy::Auto,
         py::arg("t_eval") = Real{0},
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("max_event_iterations") = Size{16},
@@ -2128,6 +2146,9 @@ void init_module(py::module_& m) {
         py::arg("gmin") = pwl::kDefaultGmin,
         py::arg("gmin_start") = Real{1e-2},
         py::arg("gmin_steps") = Size{10},
+        py::arg("ss_n_steps") = Size{10},
+        py::arg("pt_tol_res") = Real{1e-7},
+        py::arg("pt_max_iters") = Size{500},
         py::arg("should_continue") = analysis::ShouldContinueFn{},
         "THE DC operating point: nonlinear devices stamped, PWL "
         "diode states iterated to consistency, and the DC cascade "

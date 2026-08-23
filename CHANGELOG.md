@@ -79,6 +79,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     node with no DC equation it answers it confidently — it would
     report whatever the initial condition decayed to. `"settle"` is
     still available explicitly, and the failure message points at it.
+  * **Adversarial review (39 agents) caught two more silent wrong
+    answers**, both in the guard rails this change added:
+    - the structural check tested *emptiness*, not *rank*, so a
+      subnet reachable only through a coupling capacitor or an ideal
+      current source passed both probes — every column populated by
+      its own resistors, galvanically connected to ground — and the
+      floor then supplied the missing rank and reported 0 V (or
+      I/2gmin volts) as an operating point. There is now a third
+      probe: DC reachability, with nonlinear branches counted as
+      conducting exactly when a refresh will stamp them.
+    - a named rung (`strategy="gmin_step"` and friends) bypassed the
+      PWL diode-state iteration, so it answered for a circuit with
+      every switched diode frozen open — reintroducing this change's
+      own headline bug, one strategy name at a time. Every strategy
+      now runs inside the diode loop; resolving diode states is part
+      of what "the DC operating point" means, not a feature of one
+      rung.
+    Also from the review: `DCSolveReport.residual` was reported as a
+    default-constructed 0 on the default path rather than measured;
+    the DC vector came back as a read-only view pinning the kernel
+    object (the leak Phase 1's review caught in `res.v()`);
+    `run_transient_bdf1`'s guard missed PWL diodes, which it also
+    cannot commutate, and its gmin fallback re-solved the identical
+    system; `"settle"` silently dropped arguments it cannot honour;
+    and `gmin_ramp` produced an all-NaN ramp for a non-finite start,
+    which the stepping loop could not advance past.
+    Declined, with the reason recorded in the code: carrying a
+    homotopy's bisected step width forward. A shrink-only controller
+    turns one hard rung into a step so small the budget runs out
+    before the ramp ends — it failed two tests when tried.
   * New Python surface: `strategy="gmin_step"`, `gmin=`,
     `enable_nonlinear_refresh=`, `report=[]` (a `DCSolveReport` saying
     which rung answered), `SettleConfig`. `"pseudo_trans"` now means

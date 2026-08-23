@@ -72,7 +72,15 @@ __all__ = [
 
 @dataclass
 class PseudoTransientConfig:
-    """Knobs for the `pseudo_trans` strategy."""
+    """Knobs for the ``"settle"`` strategy — running a transient until
+    the state stops moving.
+
+    The name is historical: before v2.0, ``strategy="pseudo_trans"``
+    meant this settling transient. It now means the kernel's
+    pseudo-transient continuation rung, which is a different algorithm
+    with different knobs, so this config no longer belongs to it.
+    :data:`SettleConfig` is the alias to prefer.
+    """
     t_settle: float = 5.0e-3
     """Simulation horizon. Should exceed the slowest plant time
     constant by ≈ 10×."""
@@ -111,6 +119,24 @@ DCStrategy = str
 # rung is a different algorithm with its own knobs; this alias makes
 # the Python-side meaning unambiguous without breaking imports.
 SettleConfig = PseudoTransientConfig
+
+class _SettleReport:
+    """What `"settle"` can honestly say about itself: it ran a
+    transient, so there is no rung, no conductance floor and no
+    residual against a DC system it never assembled."""
+
+    strategy = "settle"
+    rungs_attempted = 0
+    final_gmin = 0.0
+    residual = float("nan")
+
+    def summary(self) -> str:
+        return ("DC operating point taken from a settled transient "
+                 "(no DC system was solved)")
+
+    def __repr__(self) -> str:
+        return f"<DCSolveReport: {self.summary()}>"
+
 
 _KERNEL_STRATEGIES = {
     "naive": "Naive",
@@ -152,6 +178,7 @@ def compute_dc_op(builder,
                     *,
                     strategy: DCStrategy = "auto",
                     t_eval: float = 0.0,
+                    settle: Optional["SettleConfig"] = None,
                     pseudo_trans: Optional[PseudoTransientConfig] = None,
                     source_step: Optional[SourceStepConfig] = None,
                     gmin: Optional[float] = None,
@@ -216,8 +243,27 @@ def compute_dc_op(builder,
         If the chosen strategy (or, for ``"auto"``, every strategy)
         fails.
     """
-    if pseudo_trans is None:
-        pseudo_trans = PseudoTransientConfig()
+    # `pseudo_trans=` used to configure the settling transient. It
+    # still does, under its new name — but passing it alongside
+    # strategy="pseudo_trans" now means two different algorithms, so
+    # say so instead of ignoring the argument.
+    if settle is not None and pseudo_trans is not None:
+        raise ValueError(
+            "compute_dc_op(): pass either settle= or its old name "
+            "pseudo_trans=, not both.")
+    if settle is None:
+        settle = pseudo_trans
+    if settle is not None and strategy == "pseudo_trans":
+        raise ValueError(
+            "compute_dc_op(strategy='pseudo_trans'): since v2.0 this "
+            "name means the KERNEL's pseudo-transient continuation "
+            "rung, and SettleConfig/PseudoTransientConfig configures "
+            "the transient-settling strategy instead. Use "
+            "strategy='settle' with settle=..., or drop the config "
+            "and let the kernel rung use its own defaults.")
+    if settle is None:
+        settle = PseudoTransientConfig()
+    pseudo_trans = settle
     if source_step is None:
         source_step = SourceStepConfig()
     if strategy not in _VALID:
@@ -250,93 +296,69 @@ def compute_dc_op(builder,
                 stacklevel=2)
 
     if strategy == "settle":
-        return _dc_settle(builder, pseudo_trans, verbose=verbose)
+        # "settle" is a transient, not a solve: it has no rung, no
+        # gmin, no diode iteration to report on. Refuse the arguments
+        # it cannot honour rather than dropping them silently — a
+        # discarded `gmin=0` or `mask=` would change what the caller
+        # believes was computed.
+        unhonoured = [
+            name for name, given in (
+                ("gmin", gmin is not None),
+                ("mask", mask is not None),
+                ("t_eval", bool(t_eval)),
+                ("max_event_iterations",
+                 max_event_iterations is not None),
+                ("enable_nonlinear_refresh",
+                 enable_nonlinear_refresh is not None),
+            ) if given
+        ]
+        if unhonoured:
+            raise ValueError(
+                "compute_dc_op(strategy='settle') runs a transient to "
+                "steady state, so it cannot honour: "
+                + ", ".join(unhonoured)
+                + ". Drop them, or use a DC strategy "
+                  "('auto', 'naive', 'gmin_step', 'source_step', "
+                  "'pseudo_trans').")
+        x = _dc_settle(builder, pseudo_trans, verbose=verbose,
+                        should_continue=should_continue)
+        if report is not None:
+            report.append(_SettleReport())
+        return x
 
     from . import _pulsim as _k  # type: ignore[import-not-found]
 
     if mask is None:
         mask = _k.SwitchStateMask(builder.graph.num_switches)
 
-    kw = dict(
-        t_eval=float(t_eval),
-        enable_nonlinear_refresh=enable_nonlinear_refresh,
-    )
-    # Threaded into the kernel, not just checked once above: the
-    # cascade can spend seconds on a hostile circuit, and a Cancel
-    # that only lands before the work starts is not a Cancel.
-    op_kw = dict(kw, should_continue=should_continue)
-    if gmin is not None:
-        kw["gmin"] = float(gmin)
-
-    if strategy == "naive":
-        # "naive" means one solve and no fallback — the diagnostic is
-        # the point. It still stamps nonlinear devices and still
-        # resolves diode states: those are not fallbacks, they are
-        # what the question means.
-        try:
-            op = _k.compute_dc_operating_point(
-                builder.graph, builder.pool, mask,
-                enable_cascade=False,
-                max_event_iterations=(
-                    16 if max_event_iterations is None
-                    else int(max_event_iterations)),
-                **op_kw)
-        except Exception as exc:
-            if _is_kernel_cancellation(exc):
-                _reraise_as_cancelled(exc)
-            raise
-        if report is not None:
-            report.append(op.report)
-        if verbose:
-            print(f"  compute_dc_op[naive]: {op.report.summary()}")
-        return np.asarray(op.x)
-
-    if strategy == "auto":
-        # `auto` walks the kernel cascade and stops there. It does
-        # NOT fall through to "settle": running a transient answers a
-        # different question, and on a circuit with a structurally
-        # undetermined node it answers it confidently — a node hung
-        # off nothing but a capacitor has no DC voltage at all, but a
-        # transient will happily report whatever its initial
-        # condition decayed to. Substituting that for an operating
-        # point is the silent wrong answer this module exists to
-        # stop. Ask for "settle" explicitly when a switching steady
-        # state is what you actually want.
-        try:
-            op = _k.compute_dc_operating_point(
-                builder.graph, builder.pool, mask,
-                enable_cascade=True,
-                max_event_iterations=(
-                    16 if max_event_iterations is None
-                    else int(max_event_iterations)),
-                **op_kw)
-        except Exception as exc:
-            if _is_kernel_cancellation(exc):
-                _reraise_as_cancelled(exc)
-            raise
-        if report is not None:
-            report.append(op.report)
-        if verbose:
-            print(f"  compute_dc_op[auto]: {op.report.summary()}")
-        return np.asarray(op.x)
-
-    # A single named kernel rung.
+    # ONE dispatch for every kernel strategy. Routing named rungs
+    # around `compute_dc_operating_point` would solve the circuit
+    # with every PWL diode frozen in the all-open default mask —
+    # reintroducing, one strategy name at a time, exactly the silent
+    # wrong answer this module exists to close.
     try:
-        x, rep = _k.compute_dc_op_with_strategy(
+        op = _k.compute_dc_operating_point(
             builder.graph, builder.pool, mask,
-            getattr(_k.DCStrategy, _KERNEL_STRATEGIES[strategy]),
+            strategy=getattr(_k.DCStrategy,
+                              _KERNEL_STRATEGIES[strategy]),
+            enable_cascade=(strategy == "auto"),
+            max_event_iterations=(16 if max_event_iterations is None
+                                   else int(max_event_iterations)),
             ss_n_steps=int(source_step.n_steps),
+            t_eval=float(t_eval),
+            enable_nonlinear_refresh=enable_nonlinear_refresh,
             should_continue=should_continue,
-            **kw)
+            **({} if gmin is None else {"gmin": float(gmin)}))
     except Exception as exc:
         if _is_kernel_cancellation(exc):
             _reraise_as_cancelled(exc)
         raise
+
     if report is not None:
-        report.append(rep)
+        report.append(op.report)
     if verbose:
-        print(f"  compute_dc_op[{strategy}]: {rep.summary()}")
-    return np.asarray(x)
+        print(f"  compute_dc_op[{strategy}]: {op.report.summary()}")
+    return np.asarray(op.x)
 
 
 # =============================================================================
@@ -345,7 +367,8 @@ def compute_dc_op(builder,
 
 def _dc_settle(builder,
                        cfg: PseudoTransientConfig,
-                       *, verbose: bool) -> np.ndarray:
+                       *, verbose: bool,
+                       should_continue=None) -> np.ndarray:
     """Run the transient solver until d/dt(x) stops moving.
 
     Not a DC solve at all — an actual simulation, sampled once it
@@ -361,7 +384,8 @@ def _dc_settle(builder,
                          dt=cfg.dt,
                          t_start=0.0,
                          start_from_dc_op=False,
-                         max_event_iterations=8)
+                         max_event_iterations=8,
+                         should_continue=should_continue)
     # Steady-state check: look at the last 2 sampling windows of size
     # t_check and confirm the state barely moves between them.
     states = np.asarray(res.states)
