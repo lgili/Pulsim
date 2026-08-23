@@ -152,6 +152,7 @@ from .blockchain import (
 from .dc_strategy import (
     compute_dc_op,
     PseudoTransientConfig,
+    SettleConfig,
     SourceStepConfig,
 )
 from .mna_sweep import (
@@ -487,6 +488,7 @@ __all__ = [
     # DC operating-point strategies (v1 parity Phase A.2).
     "compute_dc_op",
     "PseudoTransientConfig",
+    "SettleConfig",
     "SourceStepConfig",
     # Fast frequency sweep via impulse-response (v1 parity Phase A.3).
     "MnaSweepResult",

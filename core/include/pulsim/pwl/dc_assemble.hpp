@@ -29,6 +29,8 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/gmin.hpp"
+#include "pulsim/pwl/preflight.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/segment.hpp"
@@ -102,12 +104,23 @@ inline void stamp_inductor_dc(sparse::Matrix& J, Vector& b,
 ///   * SineVoltageSource  — V = SineVoltageSource::value_at(p, t_eval)
 ///   * PulseVoltageSource — V = PulseVoltageSource::value_at(p, t_eval)
 ///   * VCVS               — linear gain stamp (no time)
+///
+/// `source_scale` multiplies every INDEPENDENT source amplitude — the
+/// homotopy parameter for source stepping. Dependent sources (VCVS)
+/// are deliberately left alone: their gain is a property of the
+/// circuit, not an excitation level, and ramping it would change what
+/// is being solved rather than how hard it is.
+///
+/// `gmin` is the conductance floor stamped node-to-ground; see
+/// `gmin.hpp`. Zero (the default) leaves the matrix untouched.
 inline void dc_assemble(const topology::Graph& graph,
                          const DevicePool& pool,
                          const topology::SwitchStateMask& mask,
                          sparse::Matrix& J,
                          Vector& b,
-                         Real t_eval = Real{0}) {
+                         Real t_eval = Real{0},
+                         Real gmin = Real{0},
+                         Real source_scale = Real{1}) {
     const Size state_size = pool.state_size(graph);
     J = sparse::Matrix(static_cast<Index>(state_size),
                         static_cast<Index>(state_size));
@@ -157,13 +170,15 @@ inline void dc_assemble(const topology::Graph& graph,
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
                 stamping::stamp_voltage_source(J, b, x, coord,
-                                                branch_var_id, p.V);
+                                                branch_var_id,
+                                                source_scale * p.V);
                 break;
             }
             case DevicePool::StoredKind::CurrentSource: {
                 const auto& p =
                     pool.current_source_params(branch.id);
-                stamping::stamp_current_source(b, coord, p.I);
+                stamping::stamp_current_source(b, coord,
+                                                source_scale * p.I);
                 break;
             }
             case DevicePool::StoredKind::PWMVoltageSource: {
@@ -171,7 +186,7 @@ inline void dc_assemble(const topology::Graph& graph,
                     pool.pwm_voltage_source_params(branch.id);
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                const Real V_t =
+                const Real V_t = source_scale *
                     models::PWMVoltageSource::value_at(p, t_eval);
                 stamping::stamp_voltage_source(J, b, x, coord,
                                                 branch_var_id, V_t);
@@ -182,7 +197,7 @@ inline void dc_assemble(const topology::Graph& graph,
                     pool.sine_voltage_source_params(branch.id);
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                const Real V_t =
+                const Real V_t = source_scale *
                     models::SineVoltageSource::value_at(p, t_eval);
                 stamping::stamp_voltage_source(J, b, x, coord,
                                                 branch_var_id, V_t);
@@ -193,7 +208,7 @@ inline void dc_assemble(const topology::Graph& graph,
                     pool.pulse_voltage_source_params(branch.id);
                 const Index branch_var_id =
                     pool.branch_var_id_for_source(branch.id, graph);
-                const Real V_t =
+                const Real V_t = source_scale *
                     models::PulseVoltageSource::value_at(p, t_eval);
                 stamping::stamp_voltage_source(J, b, x, coord,
                                                 branch_var_id, V_t);
@@ -237,16 +252,143 @@ inline void dc_assemble(const topology::Graph& graph,
             break;
         }
     }
+
+    // v2.0 Phase 2 (B.2): the conductance floor, stamped last so it
+    // lands on the node block only — see `gmin.hpp` for why the
+    // branch-current rows must be left alone. Defaults to zero: the
+    // assembler stays neutral and the SOLVER opts in, so AC / LTI /
+    // sweep consumers that build their own matrices are unaffected.
+    stamp_gmin(J, graph.num_nodes(), gmin);
 }
 
+/// A rank deficiency of the DC system that no amount of
+/// conditioning may cover for.
+struct DCStructuralDefect {
+    bool present = false;
+    Index row = kInvalidIndex;   //!< the offending unknown, if any
+    std::string detail;          //!< " — ..." suffix for a message
+};
+
+/// Decide whether the DC system is structurally rank-deficient — and
+/// therefore whether a conductance floor would be CONDITIONING the
+/// matrix or INVENTING equations for it.
+///
+/// Two defects qualify, and they are found different ways:
+///
+///   1. **A galvanically isolated subnet.** Its nodes have plenty of
+///      stamps, so no column is empty; the block simply has no
+///      reference, and only reachability sees that. A floor would
+///      quietly supply the reference and report an operating point
+///      for a circuit whose isolation is the entire point of its
+///      design. `preflight.hpp` owns this repair, with a report.
+///   2. **An unknown with no equation at all** — an empty MNA column
+///      or row.
+///
+/// Neither probe may libel a healthy circuit, so both are careful:
+/// reachability unions EVERY branch regardless of kind (a diode is a
+/// galvanic connection even though it does not conduct at DC), and
+/// the emptiness probe is taken on the linear stamps UNIONED with
+/// the nonlinear ones. `dc_assemble` skips `BranchKind::Nonlinear`,
+/// so an interior node of a diode chain has an empty LINEAR column
+/// while being perfectly well determined once the diodes are
+/// stamped — the same false accusation Phase 1's review caught in
+/// the singular-matrix message.
+///
+/// Nonlinear structure is taken at x = 0: sparsity is a property of
+/// which devices touch which nodes, not of the operating point.
+[[nodiscard]] inline DCStructuralDefect dc_structural_defect(
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const topology::SwitchStateMask& mask,
+    const NonlinearRefreshFn& refresh,
+    Real t_eval) {
+    DCStructuralDefect out;
+
+    // 1. Reachability: a subnet with no path to ground through ANY
+    //    device has no voltage reference.
+    const auto isolated = detail::components_without_ground(
+        graph, [](const topology::Branch&) { return true; });
+    if (!isolated.empty() && !isolated.front().empty()) {
+        const Index anchor = isolated.front().front();
+        out.present = true;
+        out.row = anchor;
+        out.detail = std::format(
+            " — {} is in a {}-node subnet with no connection to "
+            "ground through any device, so its voltage is undefined "
+            "rather than merely hard to compute. A conductance floor "
+            "would invent a reference and report a confident answer; "
+            "run the topology preflight (Python: it is on by "
+            "default) to insert an explicit 1 GΩ tie, or add one "
+            "yourself",
+            node_label(graph, anchor), isolated.front().size());
+        return out;
+    }
+
+    // 2. Emptiness: an unknown that appears in no equation.
+    sparse::Matrix J;
+    Vector b;
+    dc_assemble(graph, pool, mask, J, b, t_eval, Real{0});
+    sparse::compress_in_place(J);
+    if (refresh) {
+        const Index n = static_cast<Index>(b.size());
+        sparse::Matrix J_nl(n, n);
+        Vector f_nl = Vector::Zero(n);
+        const Vector x0 = Vector::Zero(n);
+        (void)refresh(x0, J_nl, f_nl, graph, pool);
+        sparse::compress_in_place(J_nl);
+        if (J_nl.nonZeros() > 0) {
+            J += J_nl;
+            sparse::compress_in_place(J);
+        }
+    }
+    const Index col = sparse::first_empty_column(J);
+    const Index row = (col == kInvalidIndex)
+        ? sparse::first_empty_row(J) : col;
+    if (row != kInvalidIndex) {
+        out.present = true;
+        out.row = row;
+        out.detail = explain_singular(graph, pool, J, nullptr);
+    }
+    return out;
+}
+
+/// Solve the DC operating point of the LINEAR part of the circuit.
+///
+/// `gmin` is the conductance floor (S) stamped from every non-ground
+/// node to ground before factorization — see `gmin.hpp`. It is on by
+/// default because a DC matrix is where near-open devices (every
+/// diode in a bridge reverse-biased, a MOSFET below threshold) leave
+/// pivots that are technically nonzero and numerically worthless.
+/// Pass 0 to reproduce the un-augmented system exactly.
+///
+/// NOTE the floor is never allowed to substitute for topology: the
+/// structural probe below runs on the UN-augmented matrix, so a node
+/// that genuinely has no equation still produces the named Phase-1
+/// error rather than a confident 0 V.
 inline Vector compute_dc_op(const topology::Graph& graph,
                               const DevicePool& pool,
                               const topology::SwitchStateMask& mask,
-                              Real t_eval = Real{0}) {
+                              Real t_eval = Real{0},
+                              Real gmin = kDefaultGmin) {
     sparse::Matrix J;
     Vector b;
     dc_assemble(graph, pool, mask, J, b, t_eval);
     sparse::compress_in_place(J);
+
+    if (gmin > Real{0}) {
+        // The floor may CONDITION a matrix; it may not INVENT
+        // equations for one. Check first and let the diagnostic win.
+        const auto defect =
+            dc_structural_defect(graph, pool, mask, {}, t_eval);
+        if (defect.present) {
+            throw std::runtime_error(std::format(
+                "compute_dc_op: DC matrix structurally singular for "
+                "mask {}{}",
+                mask.to_string(), defect.detail));
+        }
+        stamp_gmin(J, graph.num_nodes(), gmin);
+        sparse::compress_in_place(J);
+    }
 
     auto solver = sparse::make_default_solver();
     if (!solver->analyze(J)) {
@@ -305,18 +447,46 @@ inline Vector compute_dc_op_newton(
     Real tol_dx  = Real{1e-9},
     Real tol_res = Real{1e-9},
     bool enable_line_search = false,
-    bool enable_lm = false) {
-    // Warm start from the nonlinear-open linear solve.
-    Vector x0 = compute_dc_op(graph, pool, mask, t_eval);
+    bool enable_lm = false,
+    Real gmin = kDefaultGmin) {
     if (!refresh) {
-        return x0;
+        return compute_dc_op(graph, pool, mask, t_eval, gmin);
+    }
+
+    // Structural check against the system Newton actually solves.
+    // Doing it here rather than inheriting `compute_dc_op`'s
+    // linear-only probe is the difference between naming a genuinely
+    // floating node and libelling every interior node of a diode
+    // chain (whose LINEAR column is empty by construction).
+    {
+        const auto defect =
+            dc_structural_defect(graph, pool, mask, refresh, t_eval);
+        if (defect.present) {
+            throw std::runtime_error(std::format(
+                "compute_dc_op_newton: DC system structurally "
+                "singular for mask {}{}",
+                mask.to_string(), defect.detail));
+        }
+    }
+
+    // Warm start from the nonlinear-open linear solve. That system
+    // can be singular on its own merits — nodes reachable only
+    // through the nonlinear devices we just proved DO stamp them —
+    // in which case a cold start is the honest fallback.
+    Vector x0;
+    try {
+        x0 = compute_dc_op(graph, pool, mask, t_eval, gmin);
+    } catch (const std::exception&) {
+        x0 = Vector::Zero(
+            static_cast<Index>(pool.state_size(graph)));
     }
 
     // Local DC "segment": same shape solve_with_newton_b_extra
     // consumes for transient steps (it reads only J, b_constant,
     // state_size — the pre-factored solver member is unused there).
     PwlSegment seg;
-    dc_assemble(graph, pool, mask, seg.J, seg.b_constant, t_eval);
+    dc_assemble(graph, pool, mask, seg.J, seg.b_constant, t_eval,
+                 gmin);
     sparse::compress_in_place(seg.J);
     seg.state_size = static_cast<Size>(seg.b_constant.size());
 

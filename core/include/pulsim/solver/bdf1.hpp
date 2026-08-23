@@ -42,6 +42,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
+#include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
@@ -51,6 +52,7 @@
 #include "pulsim/stamping/stamp_companion.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <format>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -283,6 +285,22 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
 
     const auto& graph = builder.graph();
     const auto& pool  = builder.pool();
+
+    // v2.0 Phase 2 (B.2). This driver has no Newton loop and no
+    // NonlinearRefreshFn — `dc_assemble` skips BranchKind::Nonlinear
+    // as an open circuit, and nothing here ever stamps it back. A
+    // circuit with a smooth diode / MOSFET / IGBT would therefore run
+    // to completion and report the waveforms of a DIFFERENT circuit.
+    // Refuse instead: a clear "use the trapezoidal engine" beats a
+    // plausible wrong answer.
+    if (pool.has_nonlinear_devices()) {
+        throw std::invalid_argument(
+            "run_transient_bdf1: this circuit has nonlinear devices "
+            "(smooth diode / MOSFET / IGBT / saturable inductor) and "
+            "the BDF1 driver has no Newton iteration, so it would "
+            "silently simulate them as open circuits. Use the "
+            "trapezoidal engine (the default) instead.");
+    }
     const Size state_size = pool.state_size(graph);
     const Size n_steps = opts.expected_step_count();
 
@@ -294,10 +312,24 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     Bdf1HistoryState history{graph, pool};
     history.reset();
 
-    // DC OP bootstrap.
+    // DC OP bootstrap. Rung 1 is the direct solve; a stiff or
+    // badly-pivoted operating point falls through to the cascade
+    // rather than aborting the run (v2.0 Phase 2, B.2).
     if (start_from_dc_op) {
         auto mask = switch_fn(opts.t_start);
-        x = pwl::compute_dc_op(graph, pool, mask, opts.t_start);
+        try {
+            x = pwl::compute_dc_op(graph, pool, mask, opts.t_start);
+        } catch (const std::exception& naive_failed) {
+            try {
+                x = pwl::compute_dc_op_gmin_stepped(
+                    graph, pool, mask, {}, opts.t_start);
+            } catch (const std::exception& gmin_failed) {
+                throw std::runtime_error(std::format(
+                    "run_transient_bdf1: no DC operating point to "
+                    "start from. Direct solve: {}\ngmin stepping: "
+                    "{}", naive_failed.what(), gmin_failed.what()));
+            }
+        }
         history.seed_from_dc_op(x);
     }
 

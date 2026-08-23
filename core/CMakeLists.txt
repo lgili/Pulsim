@@ -221,6 +221,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4/test_assemble.cpp
         tests/layer4/test_row_names.cpp   # v2.0 Phase 1 — named diagnostics
         tests/layer4/test_preflight.cpp    # v2.0 Phase 2 — preflight
+        tests/layer4/test_gmin.cpp         # v2.0 Phase 2 — gmin + DC cascade
         tests/layer4/test_cache.cpp
         tests/layer4/test_integration_chopper.cpp
         tests/layer4/test_pwl_cache_rank1.cpp       # Layer 4 V8 — rank-1 fast path

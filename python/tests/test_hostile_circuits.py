@@ -321,3 +321,68 @@ def test_preflight_options_accepts_keyword_arguments():
     assert not report.empty()
     assert report.num_fixed() == 0          # reported, not applied
     assert b.graph.num_branches == n_before  # untouched
+
+
+# ---------------------------------------------------------------------
+# Class 2 (Phase 2, B.2) — circuits that are well-posed but that the
+# direct solve cannot converge on. B.1 gave every node a reference;
+# these need the operating point itself to be walked in.
+# ---------------------------------------------------------------------
+
+def stiff_diode_chain(n=12, kappa=50.0):
+    """A dozen smooth diodes with a sharp knee. Topologically fine —
+    the difficulty is entirely Newton's."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 20.0)
+    b.add_resistor("R", "vin", "n0", 100.0)
+    for i in range(n):
+        q = p.IdealDiodeParams()
+        q.kappa = kappa
+        to = "gnd" if i == n - 1 else f"n{i+1}"
+        b.add_nonlinear_diode(f"D{i}", f"n{i}", to, q)
+    return b
+
+
+def test_stiff_chain_finds_its_operating_point_unaided():
+    """The direct solve diverges here. Nothing should be asked of
+    the user for that: the cascade walks the conductance down and
+    lands on the answer."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(RuntimeError):
+            p.compute_dc_op(stiff_diode_chain(), strategy="naive")
+
+        rep = []
+        x = p.compute_dc_op(stiff_diode_chain(), report=rep)
+
+    assert np.isfinite(x).all()
+    assert x[1] == pytest.approx(8.4, abs=0.2)     # 12 × ~0.70 V
+    assert rep[0].strategy != "naive"
+
+
+def test_stiff_chain_simulates_from_its_dc_operating_point():
+    """The same recovery has to be reachable from the place users
+    actually meet it — `simulate(start_from_dc_op=True)`, which used
+    to abort the whole run when the DC solve failed."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = p.simulate(stiff_diode_chain(), t_end=2e-6, dt=1e-8,
+                          start_from_dc_op=True)
+    states = np.asarray(res.states)
+    assert np.isfinite(states).all()
+    assert states[0][1] == pytest.approx(8.4, abs=0.2)
+
+
+def test_a_circuit_beyond_every_rung_names_them_all():
+    """The Phase-2 bar is not "always converges" — it is "every
+    remaining failure tells you where you stand"."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(RuntimeError) as exc:
+            p.compute_dc_op(stiff_diode_chain(kappa=5000.0))
+    msg = str(exc.value)
+    for rung in ("naive", "gmin stepping", "source stepping",
+                  "pseudo-transient"):
+        assert rung in msg, f"{rung!r} missing from:\n{msg}"
+    # And it points at the one thing left to try.
+    assert "settle" in msg
