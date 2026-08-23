@@ -64,6 +64,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_layer0_tests
         tests/layer0/test_main.cpp
         tests/layer0/test_numeric_types.cpp
+        tests/layer0/test_logistic.cpp     # v2.0 Phase 2 — overflow-free sigmoid
         tests/layer0/test_sparse_matrix.cpp
         tests/layer0/test_sparse_solver.cpp
         tests/layer0/test_pulsim_lu_solver.cpp

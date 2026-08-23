@@ -40,6 +40,7 @@
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/numeric/concepts.hpp"
+#include "pulsim/numeric/logistic.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -73,8 +74,8 @@ struct IgbtLevel1 {
         const S V_CE = v[0] - v[1];
 
         // Cutoff sigmoid: α=0 below threshold, α=1 above.
-        const S alpha_on = S{1} /
-            (S{1} + exp(-p.kappa * (V_GE - p.V_T)));
+        const S alpha_on =
+            numeric::logistic(S{p.kappa * (V_GE - p.V_T)});
 
         // Linear conduction with V_CE_sat offset.
         const S i_on = (V_CE - p.V_CE_sat) / p.R_CE_sat;

@@ -109,6 +109,7 @@ struct GminConfig {
     /// structural, and `dc_structural_defect` answers it before any
     /// conductance is stamped.
     Real max_unaugmented_residual = Real{1e-6};
+
 };
 
 /// Add `g` siemens from every non-ground node to ground.

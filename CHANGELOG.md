@@ -8,6 +8,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **A mains rectifier can be simulated** (v2.0 Phase 2). Every smooth
+  device model blends its regions with a logistic, written the
+  textbook way:
+
+  ```
+  alpha = 1 / (1 + exp(-kappa * u))
+  ```
+
+  For `u` sufficiently negative the exponent is a large POSITIVE
+  number and `exp` overflows. The *value* survives that — `1/(1+inf)`
+  is 0, the right answer — but forward-mode AD propagates
+  `d = exp(x)·dx`, so the derivative is `inf`, and the reciprocal's
+  is `inf/inf` = **NaN**. One NaN in the Jacobian defeats
+  Levenberg-Marquardt at every λ, and the run ends with
+  `solve_with_newton (LM): factor failed at λ = 1e+09`.
+
+  The threshold is exactly `kappa·|u| > 709`, the double-precision
+  `exp` limit. At the default `kappa = 20` that is 35 V of reverse
+  bias — a 170 V half-wave rectifier passes it in the first
+  half-cycle. It is a property of how the formula was *written*, not
+  of the circuit, the model or the time step.
+
+  `numeric/logistic.hpp` evaluates the same function with the
+  exponent's sign forced non-positive (`u ≥ 0: 1/(1+exp(-u))`,
+  `u < 0: e/(1+e)`). The branches are algebraically identical, agree
+  exactly at 0, and keep `exp` in (0, 1] where neither value nor
+  derivative can overflow. `IdealDiode`, `MosfetLevel1` and
+  `IgbtLevel1` all use it. This is the job SPICE's `pnjlim` does for
+  a Shockley junction, done in the formula rather than by limiting
+  the Newton step — there is no iterate from which it can fail.
+
+  **How much of the "stiffness" this was.** A 12-diode chain that
+  needed gmin stepping now converges on the direct solve, at every
+  sharpness tried up to `kappa = 20000`; a 27-point sweep of chains
+  that previously defeated all four DC rungs now defeats none. The
+  Phase 2 B.2 tests that used a sharp forward chain to demonstrate a
+  rescue have been repointed at the case that survives — reverse-
+  biased junctions at `G_off = 1e-9`, where a node's pivot genuinely
+  has no significant digits left. A test whose premise a later fix
+  removes is worse than no test.
+
+  **What it did NOT fix**, stated plainly: the same rectifier still
+  fails at `dt = 5e-5` and runs correctly at `dt = 1e-5`. That
+  remaining failure is a genuine convergence failure and it IS
+  step-size dependent — which is what local time-step reduction is
+  for, and why that work is sequenced after this rather than before.
+
 * **The DC operating point tells the truth** — and recovers by
   itself (audit finding `no-gmin-infrastructure`, plus a
   silent-wrong-answer this work uncovered).
