@@ -1347,6 +1347,7 @@ def simulate(
     max_newton_iterations: int = 0,
     max_event_iterations: Optional[int] = None,
     strict_event_iterations: bool = False,
+    max_dt_halvings: Optional[int] = None,
     store_every: Optional[int] = None,
     auto_regularize: Optional[bool] = None,
     tol_newton_dx: Optional[float] = None,
@@ -1605,6 +1606,10 @@ def simulate(
             # so silently accepting this flag would be the exact
             # pattern this block exists to prevent.
             "strict_event_iterations": bool(strict_event_iterations),
+            # A fixed-step concept: the DSED engine already adapts its
+            # own step, so accepting this would promise a mechanism
+            # that does not exist there.
+            "max_dt_halvings": max_dt_halvings is not None,
             # v2.0 Phase 1: output decimation is a fixed-grid
             # concept; the DSED engine emits variable-step samples,
             # so honouring `store_every` there would mean something
@@ -1828,6 +1833,15 @@ def simulate(
         opts.max_event_iterations = int(max_event_iterations)
     if strict_event_iterations:
         opts.strict_event_iterations = True
+    if max_dt_halvings is not None:
+        # 0 is a MEANINGFUL value here (disable the retry and restore
+        # the pre-v2.0 hard failure), which is why the default is
+        # None rather than 0.
+        if int(max_dt_halvings) < 0:
+            raise ValueError(
+                f"simulate(max_dt_halvings={max_dt_halvings}): must "
+                "be >= 0 (0 disables the retry)")
+        opts.max_dt_halvings = int(max_dt_halvings)
     if tol_newton_dx is not None:
         opts.tol_newton_dx = tol_newton_dx
     if tol_newton_res is not None:

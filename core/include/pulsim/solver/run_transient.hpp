@@ -492,6 +492,7 @@ inline SimulationResult run_transient(
     // uncached BDF1 comparison path still allocate per call — out of the
     // Phase-1 zero-alloc scope.)
     Vector x_prev;                                  // pre-step state snapshot
+    pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
     std::vector<pwl::HistoryEntry> history_snap;    // V3 rollback snapshot
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
@@ -524,6 +525,33 @@ inline SimulationResult run_transient(
         }
     }
     Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
+
+    // v2.0 Phase 2: one accumulator for the step's right-hand side,
+    // used by the nominal step, by both halves of the sub-step
+    // commutation correction, and by the dt-retry path. It was
+    // duplicated three times before; the order of the terms is what
+    // makes results bit-identical (trap history, then the user's
+    // b_extra_fn, then only the built-in source kinds this circuit
+    // actually contains), so having one copy of it is also the only
+    // way to keep that promise honest.
+    auto accumulate_b_extra = [&](Real at_t, Real for_dt) {
+        history.compute_b_extra(for_dt, b_extra);
+        if (b_extra_fn) {
+            b_extra += b_extra_fn(at_t);
+        }
+        if (has_pwm) {
+            sources::compute_pwm_b_extra(pool, graph, at_t, be_pwm);
+            b_extra += be_pwm;
+        }
+        if (has_sine) {
+            sources::compute_sine_b_extra(pool, graph, at_t, be_sine);
+            b_extra += be_sine;
+        }
+        if (has_pulse) {
+            sources::compute_pulse_b_extra(pool, graph, at_t, be_pulse);
+            b_extra += be_pulse;
+        }
+    };
 
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
@@ -599,25 +627,7 @@ inline SimulationResult run_transient(
             // built-in source kinds the circuit contains. A null user fn and
             // absent source kinds contribute (and cost) nothing instead of
             // allocating + adding a zero vector every step.
-            // 1. History from the previous step.
-            history.compute_b_extra(opts.dt, b_extra);
-            // 2. Optional user-supplied b_extra(t).
-            if (b_extra_fn) {
-                b_extra += b_extra_fn(t);
-            }
-            // 3. Built-in PWM (V4) + sine (V11) + pulse (V12) sources.
-            if (has_pwm) {
-                sources::compute_pwm_b_extra(pool, graph, t, be_pwm);
-                b_extra += be_pwm;
-            }
-            if (has_sine) {
-                sources::compute_sine_b_extra(pool, graph, t, be_sine);
-                b_extra += be_sine;
-            }
-            if (has_pulse) {
-                sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
-                b_extra += be_pulse;
-            }
+            accumulate_b_extra(t, opts.dt);
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
@@ -634,13 +644,26 @@ inline SimulationResult run_transient(
             // heap in the loop).
             std::array<topology::SwitchStateMask, 64> masks_seen{};
             Size n_masks_seen = 0;
+
+            // One step of `for_dt` ending at `at_t`: solve, let the
+            // PWL diodes re-decide from the result, re-solve until
+            // they agree. Factored out so the dt-retry path below can
+            // run exactly the same iteration at a smaller step
+            // (v2.0 Phase 2, B.4) — the nominal `for_dt == opts.dt`
+            // call still takes the cached factorization and is
+            // bit-identical to before.
+            auto run_event_iteration = [&](Real at_t, Real for_dt) {
+            iters = 0;
+            flipped = false;
+            mask_cycle = false;
+            n_masks_seen = 0;
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             do {
-                auto mask = switch_fn(t);
+                auto mask = switch_fn(at_t);
                 if (has_diodes) {
                     const auto diode_mask =
                         diodes.current_diode_mask();
@@ -671,17 +694,41 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (nl_refresh_effective) {
-                    const auto& seg = cache.lookup(mask);
-                    x = pwl::solve_with_newton_b_extra(
-                        seg, nl_refresh_effective, graph, pool,
-                        /*x_init=*/x, b_extra,
-                        opts.max_newton_iterations,
-                        opts.tol_newton_dx,
-                        opts.tol_newton_res,
-                        opts.enable_newton_line_search,
-                        opts.enable_newton_lm);
+                    if (for_dt == opts.dt) {
+                        const auto& seg = cache.lookup(mask);
+                        x = pwl::solve_with_newton_b_extra(
+                            seg, nl_refresh_effective, graph, pool,
+                            /*x_init=*/x, b_extra,
+                            opts.max_newton_iterations,
+                            opts.tol_newton_dx,
+                            opts.tol_newton_res,
+                            opts.enable_newton_line_search,
+                            opts.enable_newton_lm);
+                    } else {
+                        // Off-nominal dt: assemble the companion
+                        // system for this step size. No factorization
+                        // is wasted — Newton refactorizes
+                        // J_lin + J_nl every iteration anyway, so the
+                        // segment is only a carrier for J and b.
+                        pwl::assemble_segment(
+                            graph, pool, mask, for_dt,
+                            retry_seg.J, retry_seg.b_constant);
+                        sparse::compress_in_place(retry_seg.J);
+                        retry_seg.state_size = state_size;
+                        x = pwl::solve_with_newton_b_extra(
+                            retry_seg, nl_refresh_effective, graph,
+                            pool, /*x_init=*/x, b_extra,
+                            opts.max_newton_iterations,
+                            opts.tol_newton_dx,
+                            opts.tol_newton_res,
+                            opts.enable_newton_line_search,
+                            opts.enable_newton_lm);
+                    }
                 } else {
-                    cache.solve(mask, b_extra, x);
+                    // `solve_at` delegates to `solve` bit-identically
+                    // when the dt matches, so the nominal path costs
+                    // nothing extra.
+                    cache.solve_at(mask, for_dt, b_extra, x);
                 }
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
@@ -690,6 +737,116 @@ inline SimulationResult run_transient(
                           diodes.update_from_state(x);
                 ++iters;
             } while (flipped && iters < max_iters);
+            };  // run_event_iteration
+
+            // --- The nominal attempt, then local step reduction ---
+            //
+            // A failed step used to end the run and discard
+            // everything computed before it. A smaller step is the
+            // standard answer and a genuinely DIFFERENT problem: the
+            // trapezoidal companion's 2C/dt grows as dt shrinks,
+            // which both improves the Jacobian's diagonal dominance
+            // and puts the previous state closer to the answer. (A
+            // retry that re-ran the identical computation would be
+            // the dead-rung defect Phase 2 B.2 removed from the DC
+            // cascade — this one is not that.)
+            // dt of the FINAL solve of this outer step, fed to the
+            // deferred trap-history commit below. opts.dt on the
+            // normal path; dt2 when sub-step correction splits the
+            // step; the retry's sub_dt when a step had to be
+            // re-taken. Also distinguishes the corrected path — no
+            // separate flag is needed.
+            Real committed_dt = opts.dt;
+            bool step_retried = false;
+            try {
+                run_event_iteration(t, opts.dt);
+            } catch (const analysis::Cancelled&) {
+                throw;
+            } catch (const std::exception& nominal_failed) {
+                if (opts.max_dt_halvings == 0) {
+                    throw;
+                }
+                std::string why = nominal_failed.what();
+                for (Size h = 1; h <= opts.max_dt_halvings; ++h) {
+                    // Back to the state at t_prev. Note what is NOT
+                    // restored: `sat_history`, which this step has
+                    // not touched yet (it commits at the very end),
+                    // and the cache, whose contents are a function of
+                    // the circuit rather than of the run.
+                    x = x_prev;
+                    history.restore(history_snap);
+                    if (has_diodes) {
+                        diodes.restore_on_bits(diodes_snap);
+                    }
+
+                    const Size n_sub = Size{1} << h;
+                    const Real sub_dt =
+                        opts.dt / static_cast<Real>(n_sub);
+                    bool all_ok = true;
+                    for (Size j = 0; j < n_sub; ++j) {
+                        const Real t_sub =
+                            t_prev + static_cast<Real>(j + 1) * sub_dt;
+                        accumulate_b_extra(t_sub, sub_dt);
+                        try {
+                            run_event_iteration(t_sub, sub_dt);
+                        } catch (const analysis::Cancelled&) {
+                            throw;
+                        } catch (const std::exception& sub_failed) {
+                            why = sub_failed.what();
+                            all_ok = false;
+                            break;
+                        }
+                        // Commit each sub-step before the next one
+                        // reads the history — `compute_b_extra(dt)`,
+                        // the solve at `dt` and `update_from_state(
+                        // x, dt)` must all share the same dt or the
+                        // capacitor companion current is silently
+                        // wrong.
+                        //
+                        // EXCEPT the last one, whose commit is
+                        // deferred past the inductor freeze guard
+                        // exactly as the nominal path defers its own,
+                        // so a snapped-back i_L is what gets baked
+                        // into the history rather than the raw solve.
+                        //
+                        // And `sat_history` is never advanced here.
+                        // It has no snapshot/restore, so a sub-step
+                        // that advanced it and a later halving that
+                        // rolled back would leave the flux history at
+                        // a mid-step value with nothing able to undo
+                        // it. Leaving it alone reproduces the nominal
+                        // step's semantics exactly; it is committed
+                        // once, at the end, from the final x.
+                        if (j + 1 < n_sub) {
+                            history.update_from_state(x, sub_dt);
+                        } else {
+                            committed_dt = sub_dt;
+                        }
+                    }
+                    if (all_ok) {
+                        step_retried = true;
+                        result.dt_retries.push_back(
+                            solver::DtRetry{t, h,
+                                             nominal_failed.what()});
+                        break;
+                    }
+                }
+                if (!step_retried) {
+                    throw std::runtime_error(std::format(
+                        "run_transient: the step ending at t = {} "
+                        "could not be taken, even split into {} "
+                        "sub-steps of {:.3e} s (dt/{}). Last failure: "
+                        "{}\nThis is no longer a step-size problem — "
+                        "raise max_dt_halvings only if you believe "
+                        "otherwise; more likely the circuit needs a "
+                        "snubber, a softer device model, or a look at "
+                        "the device the message above names.",
+                        t, Size{1} << opts.max_dt_halvings,
+                        opts.dt / static_cast<Real>(
+                            Size{1} << opts.max_dt_halvings),
+                        Size{1} << opts.max_dt_halvings, why));
+                }
+            }
 
             if (flipped || mask_cycle) {
                 if (opts.strict_event_iterations) {
@@ -797,9 +954,8 @@ inline SimulationResult run_transient(
             // commits the dt1 half inline; the dt2 commit is deferred past the
             // freeze guard). This also distinguishes the corrected path — no
             // separate `corrected` flag is needed.
-            Real committed_dt = opts.dt;
             if (opts.enable_substep_state_correction &&
-                !step_events.empty()) {
+                !step_retried && !step_events.empty()) {
                 // Find earliest event in the step.
                 Real t_est = step_events.front().t_estimated;
                 for (const auto& ev : step_events) {
@@ -826,25 +982,7 @@ inline SimulationResult run_transient(
                         // — so the result is bit-identical. The outer
                         // `b_extra` is free here: the main event-iteration
                         // solve already consumed it this step.
-                        history.compute_b_extra(dt1, b_extra);
-                        if (b_extra_fn) {
-                            b_extra += b_extra_fn(t_est);
-                        }
-                        if (has_pwm) {
-                            sources::compute_pwm_b_extra(
-                                pool, graph, t_est, be_pwm);
-                            b_extra += be_pwm;
-                        }
-                        if (has_sine) {
-                            sources::compute_sine_b_extra(
-                                pool, graph, t_est, be_sine);
-                            b_extra += be_sine;
-                        }
-                        if (has_pulse) {
-                            sources::compute_pulse_b_extra(
-                                pool, graph, t_est, be_pulse);
-                            b_extra += be_pulse;
-                        }
+                        accumulate_b_extra(t_est, dt1);
                         cache.solve_at(
                             mask_pre, dt1, b_extra, x);
                         history.update_from_state(x, dt1);
@@ -890,25 +1028,7 @@ inline SimulationResult run_transient(
                         }
                         // Same reused-buffer accumulation as sub-step 1
                         // (audit #16), at time t with dt2.
-                        history.compute_b_extra(dt2, b_extra);
-                        if (b_extra_fn) {
-                            b_extra += b_extra_fn(t);
-                        }
-                        if (has_pwm) {
-                            sources::compute_pwm_b_extra(
-                                pool, graph, t, be_pwm);
-                            b_extra += be_pwm;
-                        }
-                        if (has_sine) {
-                            sources::compute_sine_b_extra(
-                                pool, graph, t, be_sine);
-                            b_extra += be_sine;
-                        }
-                        if (has_pulse) {
-                            sources::compute_pulse_b_extra(
-                                pool, graph, t, be_pulse);
-                            b_extra += be_pulse;
-                        }
+                        accumulate_b_extra(t, dt2);
                         cache.solve_at(
                             mask_post, dt2, b_extra, x);
                         // History commit DEFERRED to after the freeze guard
@@ -1054,6 +1174,20 @@ inline SimulationResult run_transient(
             // heap in the loop).
             std::array<topology::SwitchStateMask, 64> masks_seen{};
             Size n_masks_seen = 0;
+
+            // One step of `for_dt` ending at `at_t`: solve, let the
+            // PWL diodes re-decide from the result, re-solve until
+            // they agree. Factored out so the dt-retry path below can
+            // run exactly the same iteration at a smaller step
+            // (v2.0 Phase 2, B.4) — the nominal `for_dt == opts.dt`
+            // call still takes the cached factorization and is
+            // bit-identical to before.
+            // No dt-retry on this path, deliberately. With no
+            // capacitors or inductors there is no companion term, so
+            // dt does not enter the matrix at all and a smaller step
+            // would re-run the byte-identical computation — the
+            // dead-rung defect Phase 2 B.2 removed from the DC
+            // cascade.
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree

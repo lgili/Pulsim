@@ -1269,6 +1269,14 @@ void init_module(py::module_& m) {
                         "hard throw on diode event-iteration cycles/"
                         "budget exhaustion; false (default) records "
                         "an EventIterationBreach and continues.")
+        .def_readwrite("max_dt_halvings",
+                        &SimulationOptions::max_dt_halvings,
+                        "v2.0 Phase 2: when a step's inner solve "
+                        "fails, re-take it as 2^n sub-steps of "
+                        "dt/2^n, up to this many halvings, instead "
+                        "of ending the run. The output grid is "
+                        "unchanged — sub-steps are internal. 0 "
+                        "restores the pre-v2.0 hard failure.")
         .def_readwrite("max_event_iterations",
                         &SimulationOptions::max_event_iterations)
         .def_readwrite("max_newton_iterations",
@@ -1296,6 +1304,20 @@ void init_module(py::module_& m) {
         .def("valid", &SimulationOptions::valid)
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);
+
+    py::class_<solver::DtRetry>(m, "DtRetry",
+        "A step the solver could not take at the nominal dt and "
+        "re-took as 2^halvings sub-steps. The sampling grid is "
+        "unaffected; what changed is that the interval was "
+        "integrated more finely than requested.")
+        .def_readonly("t", &solver::DtRetry::t)
+        .def_readonly("halvings", &solver::DtRetry::halvings)
+        .def_readonly("reason", &solver::DtRetry::reason,
+                       "What the nominal-dt attempt reported.")
+        .def("__repr__", [](const solver::DtRetry& r) {
+            return "<DtRetry t=" + std::to_string(r.t) + " dt/" +
+                    std::to_string(std::size_t{1} << r.halvings) + ">";
+        });
 
     py::class_<solver::EventIterationBreach>(m, "EventIterationBreach",
         "One time step where the diode event-iteration loop hit a "
@@ -1373,6 +1395,9 @@ void init_module(py::module_& m) {
                        &SimulationResult::event_iteration_count)
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
+        .def_readonly("dt_retries", &SimulationResult::dt_retries,
+                       "Steps that had to be re-taken at a reduced "
+                       "dt. Empty on a run that never needed one.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def("num_steps", &SimulationResult::num_steps);

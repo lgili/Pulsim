@@ -67,12 +67,30 @@ struct EventIterationBreach {
     bool cycle_detected;    ///< true = mask cycle, false = budget
 };
 
+/// v2.0 Phase 2 (B.4) — a step the solver could not take at the
+/// nominal dt, and had to re-take as 2^`halvings` sub-steps.
+///
+/// The output grid is UNCHANGED: sub-steps are internal, and a
+/// sample is still only recorded at a nominal grid point. What this
+/// records is that the trajectory between two samples was integrated
+/// more finely than the user asked for — which is a change in
+/// accuracy, not in the sampling, and the user should be told.
+struct DtRetry {
+    Real t;             ///< step time that had to be re-taken
+    Size halvings;      ///< 2^halvings sub-steps were used
+    std::string reason; ///< what the nominal-dt attempt reported
+};
+
 struct SimulationResult {
     std::vector<Real> times;
 
     /// Recorded state samples, contiguous (v2.0 Phase 1).
     /// `states[k]` is the state at `times[k]`.
     StateTrajectory states;
+
+    /// v2.0 Phase 2 — steps re-taken at a reduced dt. Empty on a run
+    /// that never needed one.
+    std::vector<DtRetry> dt_retries;
 
     /// Phase-0 fix #9 — steps where diode event iteration hit a
     /// cycle or the budget. Empty on a fully-converged run.
