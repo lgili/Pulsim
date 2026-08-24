@@ -36,16 +36,20 @@ def diode_divider():
     return b
 
 
-def stiff_diode_chain(n=10, g_off=1e-9):
+def stiff_diode_chain(n=20, g_off=1e-9):
     """A chain of REVERSE-biased junctions: nothing is singular, but
     every interior node is held by a nanosiemens, so its pivot has
     almost no significant digits and Newton wanders. This is the
     textbook case gmin exists for.
 
-    (It used to be a chain of sharp FORWARD-biased diodes. That was
-    not stiffness — it was the logistic overflow fixed in
-    `numeric/logistic.hpp`; once the NaN was gone the forward chain
-    converged directly at every sharpness tried, up to kappa=20000.)
+    Twice this session a cheaper fix dissolved this fixture. It was a
+    chain of sharp FORWARD-biased diodes until `numeric/logistic.hpp`
+    showed that was an arithmetic overflow rather than stiffness, and
+    it was ten diodes until the Newton loop learned to promote line
+    search on a diverging step. Twenty reverse-biased junctions is
+    what survives both — which is the point of the layering: the free
+    globalization goes first, and gmin stepping is measured on what
+    it leaves behind.
     """
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vin", "gnd", 10.0)

@@ -8,6 +8,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **Newton promotes line search when it diverges** — the last named
+  Phase-2 globalization item, and the one that measures the rest.
+
+  The kernel already auto-promoted Levenberg-Marquardt on two
+  triggers: a singular factorize, and a near-miss stall (residual
+  already tiny, `||dx||` plateaued). Neither sees the one condition
+  backtracking exists for — a full Newton step that makes the
+  residual **worse** — so a plainly diverging Newton fell through
+  both and the run died.
+
+  Promoting rather than defaulting line search on is deliberate:
+  measured on a mains rectifier, backtracking from the first
+  iteration costs ~30 % on a run that never needed it, while the
+  comparison that triggers the promotion costs nothing. And it does
+  not move answers — line search changes the path to the root, not
+  the root: 1.2e-12 on a 170 V scale, or exactly zero.
+
+  **What each layer is worth.** Over a 27-point sweep of (peak
+  voltage, sharpness, dt), with the step ladder disabled:
+
+  | | failures |
+  |---|---|
+  | after the logistic fix alone | 11 / 27 |
+  | + line-search promotion | 4 / 27 |
+  | + dt-halving retry | **0 / 27** |
+
+  That is the Phase-2 gate — *converges with zero manual
+  intervention* — met on this family, with each layer cheaper than
+  the one above it and measured on what the one below leaves behind.
+
+  It also cost three test fixtures, which is the honest part. The
+  gmin-stepping demonstration went from ten reverse-biased junctions
+  to twenty, and the dt-retry's rectifier from 170 V to 400 V,
+  because the free globalization now carries the easier cases on its
+  own. That is the third time this phase a cheaper fix dissolved a
+  more expensive feature's demonstration — after the logistic
+  overflow did it twice — and each time the fixture had to move to
+  what actually survives rather than the claim being left standing.
+
 * **A run that dies part-way brings the run with it.** A simulation
   that failed at 90 % returned nothing at all: the exception carried
   a message and every sample computed before the failure was

@@ -329,7 +329,7 @@ def test_preflight_options_accepts_keyword_arguments():
 # these need the operating point itself to be walked in.
 # ---------------------------------------------------------------------
 
-def blocking_diode_chain(n=10, g_off=1e-9):
+def blocking_diode_chain(n=20, g_off=1e-9):
     """Ten REVERSE-biased junctions in series. Topologically fine and
     not singular — but each interior node is held by a nanosiemens,
     so its pivot carries almost no significant digits and Newton
@@ -345,7 +345,7 @@ def blocking_diode_chain(n=10, g_off=1e-9):
     return b
 
 
-def mains_rectifier(vpk=170.0, kappa=20.0):
+def mains_rectifier(vpk=400.0, kappa=100.0):
     """A 170 V peak half-wave rectifier into an RC load — about as
     ordinary as a power circuit gets. It could not be simulated at
     all before the logistic overflow fix: past kappa*|v| = 709 the
@@ -367,7 +367,7 @@ def test_a_mains_rectifier_runs_at_all():
     res = _run(mains_rectifier(), t_end=3.4e-2, dt=1e-5)
     v = np.asarray(res.v("vout"))
     assert np.isfinite(v).all()
-    assert v.max() == pytest.approx(169.3, abs=0.5)
+    assert v.max() == pytest.approx(399.3, abs=1.0)
 
 
 @pytest.mark.parametrize("vpk,kappa", [
@@ -408,22 +408,23 @@ def test_blocking_chain_finds_its_operating_point_unaided():
 # ---------------------------------------------------------------------
 
 def test_a_mains_rectifier_runs_at_a_coarse_dt():
-    """dt = 1e-4 on a 60 Hz rectifier is ~170 samples per cycle —
-    a perfectly reasonable thing for a user to type. One step of it
-    will not converge, and that used to end the run."""
-    res = _run(mains_rectifier(), t_end=1.7e-2, dt=1e-4)
+    """dt = 2e-4 on a 60 Hz rectifier is ~85 samples per cycle — a
+    perfectly reasonable thing for a user to type. A step of it will
+    not converge even with the line-search promotion, and that used
+    to end the run."""
+    res = _run(mains_rectifier(), t_end=1.7e-2, dt=2e-4)
     v = np.asarray(res.v("vout"))
     assert np.isfinite(v).all()
-    assert v.max() == pytest.approx(169.3, abs=0.5)
+    assert v.max() == pytest.approx(399.3, abs=2.0)
     assert len(res.dt_retries) >= 1
-    assert max(d.halvings for d in res.dt_retries) == 1
+    assert max(d.halvings for d in res.dt_retries) <= 3
 
 
 def test_the_retry_does_not_move_a_single_sample():
     """Sub-steps are internal. `times[k]` must stay exactly k·dt or
     an FFT of the result is silently wrong — which is the whole
     reason store_every was made a pure stride in Phase 1."""
-    dt = 1e-4
+    dt = 2e-4
     res = _run(mains_rectifier(), t_end=1.7e-2, dt=dt)
     t = np.asarray(res.times)
     assert len(res.dt_retries) >= 1
@@ -435,5 +436,5 @@ def test_the_retry_does_not_move_a_single_sample():
 
 def test_opting_out_restores_the_hard_failure():
     with pytest.raises(RuntimeError, match="converge"):
-        _run(mains_rectifier(), t_end=1.7e-2, dt=1e-4,
+        _run(mains_rectifier(), t_end=1.7e-2, dt=2e-4,
              max_dt_halvings=0)

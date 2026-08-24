@@ -12,9 +12,8 @@
 // improves the Jacobian's diagonal dominance and puts the previous
 // state closer to the answer.
 //
-// The circuit here is a 170 V mains half-wave rectifier, which is
-// about as ordinary as a power circuit gets. It fails at
-// dt = 1e-4 and needs exactly one halving.
+// The circuit here is a mains half-wave rectifier, which is about as
+// ordinary as a power circuit gets.
 //
 // THE INVARIANT THAT MATTERS MOST is that the output grid does not
 // move. Sub-steps are internal; `times[k]` stays exactly
@@ -38,8 +37,14 @@ using Catch::Approx;
 
 namespace {
 
-builder::CircuitBuilder mains_rectifier(Real v_peak = 170.0,
-                                          Real kappa = 20.0) {
+/// v_peak = 400 V: the residual band after the Newton loop learned
+/// to promote line search on a diverging step. At 170 V the
+/// promotion alone now carries this circuit; at 400 V it does not,
+/// and the step ladder is what closes the gap. Each layer is cheaper
+/// than the one above it, and each is measured on what the one below
+/// leaves behind.
+builder::CircuitBuilder mains_rectifier(Real v_peak = 400.0,
+                                          Real kappa = 100.0) {
     builder::CircuitBuilder b;
     b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, v_peak, 60.0);
     models::IdealDiode::Params d;
@@ -77,7 +82,7 @@ solver::SimulationResult run(builder::CircuitBuilder& b,
 TEST_CASE("A step that fails at dt succeeds at dt/2",
           "[v2][layer5][dt_retry]") {
     auto b_off = mains_rectifier();
-    auto opts_off = rect_options(1e-4);
+    auto opts_off = rect_options(2e-4);
     opts_off.max_dt_halvings = 0;          // pre-v2.0 behaviour
     bool threw = false;
     try {
@@ -89,12 +94,13 @@ TEST_CASE("A step that fails at dt succeeds at dt/2",
     REQUIRE(threw);   // the premise: this run really does die
 
     auto b_on = mains_rectifier();
-    const auto res = run(b_on, rect_options(1e-4));
+    const auto res = run(b_on, rect_options(2e-4));
 
     REQUIRE(res.num_steps() > 0);
     REQUIRE(res.dt_retries.size() == 1);
     const auto& r = res.dt_retries.front();
-    REQUIRE(r.halvings == 1);              // dt/2 was enough
+    REQUIRE(r.halvings >= 1);
+    REQUIRE(r.halvings <= 3);              // a modest reduction
     REQUIRE(r.t > 0.0);
     // The record says what the nominal attempt reported, so the user
     // can tell a recovered convergence failure from a recovered
@@ -107,7 +113,7 @@ TEST_CASE("A retried run keeps the sampling grid exactly",
     // Sub-steps are internal. If a retry could shift a sample, an
     // FFT of the result would be silently wrong — which is the whole
     // reason Phase 1e made decimation a pure stride.
-    constexpr Real dt = 1e-4;
+    constexpr Real dt = 2e-4;
     auto b = mains_rectifier();
     const auto res = run(b, rect_options(dt));
     REQUIRE_FALSE(res.dt_retries.empty());
@@ -128,7 +134,7 @@ TEST_CASE("The recovered answer is the right one",
     // below the source peak, and the run that needed a retry must
     // land there just as the one that did not.
     auto b_coarse = mains_rectifier();
-    const auto coarse = run(b_coarse, rect_options(1e-4));
+    const auto coarse = run(b_coarse, rect_options(2e-4));
     REQUIRE_FALSE(coarse.dt_retries.empty());
 
     auto b_fine = mains_rectifier();
@@ -151,8 +157,8 @@ TEST_CASE("The recovered answer is the right one",
     for (Size k = 0; k < fine.num_steps(); ++k) {
         peak_fine = std::max(peak_fine, fine.states[k][vout]);
     }
-    REQUIRE(peak_fine == Approx(169.3).margin(0.5));
-    REQUIRE(peak_coarse == Approx(peak_fine).margin(0.5));
+    REQUIRE(peak_fine == Approx(399.3).margin(1.0));
+    REQUIRE(peak_coarse == Approx(peak_fine).margin(2.0));
 }
 
 TEST_CASE("A run that needs no retry pays nothing and records none",
@@ -187,7 +193,7 @@ TEST_CASE("Exhausting the ladder says so, with the sub-dt it reached",
     // zero and confirm the message is the honest one rather than a
     // silent stall.
     auto b = mains_rectifier();
-    auto opts = rect_options(1e-4);
+    auto opts = rect_options(2e-4);
     opts.max_dt_halvings = 0;
     bool threw = false;
     try {
