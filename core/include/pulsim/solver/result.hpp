@@ -180,7 +180,19 @@ struct SimulationResult {
                event_iteration_count.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
                event_iteration_breaches.size() *
-                   sizeof(EventIterationBreach);
+                   sizeof(EventIterationBreach) +
+               inductor_guard_actions.size() *
+                   sizeof(InductorGuardAction) +
+               // Each DtRetry carries the full Newton failure text
+               // (a few hundred bytes with the row naming Phase 1
+               // added), so the strings dominate the structs.
+               [this] {
+                   std::size_t n = 0;
+                   for (const auto& r : dt_retries) {
+                       n += sizeof(DtRetry) + r.reason.capacity();
+                   }
+                   return n;
+               }();
     }
 };
 

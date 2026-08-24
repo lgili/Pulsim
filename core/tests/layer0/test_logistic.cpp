@@ -99,3 +99,133 @@ TEST_CASE("the two branches agree across the seam",
     REQUIRE(numeric::logistic(AD{Real{0}, {Real{1}}}).deriv(0) ==
              Approx(0.25));
 }
+
+// -----------------------------------------------------------------
+// The call sites, not just the helper.
+// -----------------------------------------------------------------
+//
+// The three models pass `S{p.kappa * u}` into `logistic`. If that
+// braced construction ever routed through ADRealN's Real converting
+// constructor instead of copying the AD scalar, the derivative would
+// be SILENTLY ZEROED — a worse bug than the overflow being fixed,
+// and one the helper's own tests could never see because they call
+// `logistic` directly with a seeded scalar.
+//
+// So compare the AD Jacobian each model reports against a central
+// difference of its own current function, on both sides of every
+// sigmoid's knee.
+
+#include "pulsim/models/device_model.hpp"
+#include "pulsim/models/ideal_diode.hpp"
+#include "pulsim/models/igbt_level1.hpp"
+#include "pulsim/models/mosfet_level1.hpp"
+
+namespace {
+
+/// Central difference of T::current in terminal `k`.
+template <class T>
+Real fd_di_dv(std::array<Real, T::num_terminals> v,
+               const typename T::Params& p, Size k, Real h) {
+    auto probe = [&](Real delta) {
+        auto vv = v;
+        vv[k] += delta;
+        return T::template current<Real>(vv.data(), p);
+    };
+    return (probe(h) - probe(-h)) / (Real{2} * h);
+}
+
+}  // namespace
+
+TEST_CASE("The models' AD Jacobians survive the logistic rewrite",
+          "[v2][layer0][logistic][ad][models]") {
+    SECTION("IdealDiode") {
+        models::IdealDiode::Params p;   // V_F0 0.7, kappa 20
+        for (const Real v_a : {-5.0, -0.2, 0.65, 0.7, 0.75, 2.0}) {
+            const std::array<Real, 2> v{v_a, 0.0};
+            const auto [i, d] =
+                models::evaluate_current_and_jacobian<
+                    models::IdealDiode>(v, p);
+            REQUIRE(std::isfinite(i));
+            for (Size k = 0; k < 2; ++k) {
+                const Real fd =
+                    fd_di_dv<models::IdealDiode>(v, p, k, 1e-6);
+                INFO("v_a = " << v_a << " terminal " << k
+                      << " ad = " << d[k] << " fd = " << fd);
+                REQUIRE(std::isfinite(d[k]));
+                REQUIRE(d[k] == Approx(fd).epsilon(1e-4)
+                                  .margin(1e-9));
+                // And it is NOT the tell-tale zero of a dropped
+                // derivative — at least on the conducting side.
+                if (v_a > 0.75) {
+                    REQUIRE(std::abs(d[k]) > Real{1});
+                }
+            }
+        }
+    }
+
+    SECTION("MosfetLevel1") {
+        models::MosfetLevel1::Params p;
+        // Terminals: drain, source, gate.
+        for (const Real v_g : {0.0, 1.5, 3.0, 6.0}) {
+            const std::array<Real, 3> v{5.0, 0.0, v_g};
+            const auto [i, d] =
+                models::evaluate_current_and_jacobian<
+                    models::MosfetLevel1>(v, p);
+            REQUIRE(std::isfinite(i));
+            for (Size k = 0; k < 3; ++k) {
+                const Real fd =
+                    fd_di_dv<models::MosfetLevel1>(v, p, k, 1e-6);
+                INFO("v_g = " << v_g << " terminal " << k);
+                REQUIRE(std::isfinite(d[k]));
+                REQUIRE(d[k] == Approx(fd).epsilon(1e-3)
+                                  .margin(1e-7));
+            }
+        }
+    }
+
+    SECTION("IgbtLevel1") {
+        models::IgbtLevel1::Params p;
+        for (const Real v_g : {0.0, 3.0, 8.0, 15.0}) {
+            const std::array<Real, 3> v{10.0, 0.0, v_g};
+            const auto [i, d] =
+                models::evaluate_current_and_jacobian<
+                    models::IgbtLevel1>(v, p);
+            REQUIRE(std::isfinite(i));
+            for (Size k = 0; k < 3; ++k) {
+                const Real fd =
+                    fd_di_dv<models::IgbtLevel1>(v, p, k, 1e-6);
+                INFO("v_g = " << v_g << " terminal " << k);
+                REQUIRE(std::isfinite(d[k]));
+                REQUIRE(d[k] == Approx(fd).epsilon(1e-3)
+                                  .margin(1e-7));
+            }
+        }
+    }
+}
+
+TEST_CASE("A model's Jacobian stays finite far past the old limit",
+          "[v2][layer0][logistic][ad][models]") {
+    // kappa*|u| = 709 was where the old form's derivative became
+    // NaN. Go two orders past it, on every model.
+    models::IdealDiode::Params d;
+    const std::array<Real, 2> vd{-1000.0, 0.0};   // kappa*|u| = 20000
+    const auto [id, dd] =
+        models::evaluate_current_and_jacobian<models::IdealDiode>(vd, d);
+    REQUIRE(std::isfinite(id));
+    REQUIRE(std::isfinite(dd[0]));
+    REQUIRE(std::isfinite(dd[1]));
+
+    models::MosfetLevel1::Params m;
+    const std::array<Real, 3> vm{5.0, 0.0, -1000.0};
+    const auto [im, dm] =
+        models::evaluate_current_and_jacobian<models::MosfetLevel1>(vm, m);
+    REQUIRE(std::isfinite(im));
+    for (Size k = 0; k < 3; ++k) REQUIRE(std::isfinite(dm[k]));
+
+    models::IgbtLevel1::Params g;
+    const std::array<Real, 3> vg{10.0, 0.0, -1000.0};
+    const auto [ig, dg] =
+        models::evaluate_current_and_jacobian<models::IgbtLevel1>(vg, g);
+    REQUIRE(std::isfinite(ig));
+    for (Size k = 0; k < 3; ++k) REQUIRE(std::isfinite(dg[k]));
+}

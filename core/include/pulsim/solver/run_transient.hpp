@@ -349,6 +349,12 @@ inline SimulationResult run_transient(
     // V17: shared dt that the saturable-inductor refresh
     // reads each iteration. Updated when sub-step correction
     // splits dt into dt1 + dt2.
+    // Fixed for the whole run. An earlier comment here claimed it
+    // was "updated when sub-step correction splits dt into dt1+dt2";
+    // it never was, and it is safe only because that path solves
+    // linearly through cache.solve_at and never consults this. The
+    // dt-retry refuses saturable-inductor circuits for the same
+    // reason — see `dt_retry_can_help`.
     Real refresh_dt = opts.dt;
 
     // V17: if any saturable inductors are present, wrap the
@@ -536,8 +542,23 @@ inline SimulationResult run_transient(
     // wrapper — which is the dead-rung defect Phase 2 B.2 removed
     // from the DC cascade, reintroduced here. Decide once, before
     // the loop, and let those circuits fail fast and legibly.
+    //
+    // A SATURABLE INDUCTOR disqualifies the retry outright. Its
+    // Newton stamp divides by `refresh_dt`, which is fixed at
+    // opts.dt for the whole run (the comment on its declaration
+    // claims otherwise and has always been wrong — harmless until
+    // now, because the only other off-nominal path, the commutation
+    // sub-step, is a purely LINEAR solve through cache.solve_at). A
+    // sub-step would therefore assemble every capacitor and plain
+    // inductor at 2C/sub_dt while the saturable one still used
+    // 2L/opts.dt — 64x out at the bottom of the ladder — and the
+    // mixed-dt answer would be committed as good. Threading the dt
+    // through is not enough on its own either: SaturableInductorHistory
+    // has no snapshot/restore, so its flux cannot be rolled back when
+    // a deeper halving is needed. Refusing is the honest option until
+    // that exists.
     const bool dt_retry_can_help =
-        opts.max_dt_halvings > 0 &&
+        opts.max_dt_halvings > 0 && !has_saturable &&
         pwl::detail::components_without_ground(
             graph, [](const topology::Branch&) { return true; })
             .empty();
@@ -680,7 +701,12 @@ inline SimulationResult run_transient(
             auto run_event_iteration = [&](Real at_t, Real for_dt) {
             iters = 0;
             flipped = false;
-            mask_cycle = false;
+            // NOT reset: a mask cycle in ANY sub-step of a retry is a
+            // breach of the whole outer step. Clearing it here would
+            // let every sub-step but the last vanish from
+            // `event_iteration_breaches` — and would let
+            // `strict_event_iterations` be violated in silence, which
+            // is the opposite of what that flag is for.
             n_masks_seen = 0;
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
@@ -783,16 +809,39 @@ inline SimulationResult run_transient(
             // separate flag is needed.
             Real committed_dt = opts.dt;
             bool step_retried = false;
+            mask_cycle = false;    // per OUTER step, not per sub-step
             try {
                 run_event_iteration(t, opts.dt);
-            } catch (const analysis::Cancelled&) {
-                throw;
-            } catch (const std::exception& nominal_failed) {
+            } catch (const std::runtime_error& nominal_failed) {
+                // NOTE the narrow catch. Everything the solver throws
+                // is a runtime_error; a foreign exception is not.
+                // `pybind11::error_already_set` derives from
+                // std::exception but NOT from runtime_error, and its
+                // constructor calls PyErr_Fetch, which CLEARS the
+                // Python error indicator — so catching it here would
+                // treat a KeyboardInterrupt raised inside the user's
+                // switch_fn as a step-size problem, re-take the step
+                // (this time with no pending signal, so it
+                // succeeds), record a DtRetry that never happened,
+                // and run to completion with Ctrl-C swallowed. A
+                // deterministic callback error would instead be
+                // re-invoked up to 126 times before surfacing
+                // stripped of its type. Neither is a numerical
+                // failure and neither is ours to retry.
                 if (!dt_retry_can_help) {
                     throw;
                 }
                 std::string why = nominal_failed.what();
-                for (Size h = 1; h <= opts.max_dt_halvings; ++h) {
+                // `Size{1} << h` is undefined for h >= 64 and
+                // pointless long before that: 2^25 sub-steps of one
+                // outer step is not a recovery, it is a hang. The
+                // option is read/write from Python and unchecked by
+                // SimulationOptions::valid(), so clamp at the point
+                // of use.
+                constexpr Size kMaxHalvings = Size{20};
+                const Size halving_cap =
+                    std::min(opts.max_dt_halvings, kMaxHalvings);
+                for (Size h = 1; h <= halving_cap; ++h) {
                     // Back to the state at t_prev. Note what is NOT
                     // restored: `sat_history`, which this step has
                     // not touched yet (it commits at the very end),
@@ -814,9 +863,7 @@ inline SimulationResult run_transient(
                         accumulate_b_extra(t_sub, sub_dt);
                         try {
                             run_event_iteration(t_sub, sub_dt);
-                        } catch (const analysis::Cancelled&) {
-                            throw;
-                        } catch (const std::exception& sub_failed) {
+                        } catch (const std::runtime_error& sub_failed) {
                             why = sub_failed.what();
                             all_ok = false;
                             break;
@@ -866,10 +913,10 @@ inline SimulationResult run_transient(
                         "otherwise; more likely the circuit needs a "
                         "snubber, a softer device model, or a look at "
                         "the device the message above names.",
-                        t, Size{1} << opts.max_dt_halvings,
+                        t, Size{1} << halving_cap,
                         opts.dt / static_cast<Real>(
-                            Size{1} << opts.max_dt_halvings),
-                        Size{1} << opts.max_dt_halvings, why));
+                            Size{1} << halving_cap),
+                        Size{1} << halving_cap, why));
                 }
             }
 
@@ -1149,8 +1196,16 @@ inline SimulationResult run_transient(
                             i_solved < Real{0} ? -i_solved : i_solved;
                         rec->worst_solved =
                             std::max(rec->worst_solved, a_solved);
-                        rec->reported_limit =
+                        // The largest magnitude the user actually
+                        // SEES for this device, not whatever the last
+                        // firing happened to leave. Last-write was
+                        // meaningless for the freeze guard, whose
+                        // substituted value is the previous step's
+                        // current and can be arbitrarily small.
+                        const Real a_new =
                             i_new < Real{0} ? -i_new : i_new;
+                        rec->reported_limit =
+                            std::max(rec->reported_limit, a_new);
                     }
                     x[e.inductor_branch_var_id] = i_new;
                 }
@@ -1397,7 +1452,12 @@ inline SimulationResult run_transient(
     catch (const SimulationAborted&) {
         throw;                       // already carries its payload
     }
-    catch (const std::exception& e) {
+    catch (const std::runtime_error& e) {
+        // Narrow on purpose — see the note at the dt-retry above.
+        // Everything the solver throws is a runtime_error; a Python
+        // callback's exception is not, and re-labelling one as
+        // SimulationAborted would destroy its type and traceback for
+        // the sake of attaching a partial trace it never asked for.
         throw SimulationAborted(e.what(), std::move(result),
                                  t_reached);
     }

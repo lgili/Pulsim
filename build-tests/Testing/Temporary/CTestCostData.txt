@@ -1,0 +1,635 @@
+PIController accepts a small-error step + grows h 3 0.00322674
+PIController rejects a too-large error + shrinks h 3 0.00307236
+PIController err_norm normalises by atol/rtol scale 3 0.0041339
+PIController throws after max_rejects consecutive rejections 3 0.00295781
+PIController reset clears wind-up 3 0.00416011
+illinois finds root of a linear function 3 0.00376082
+illinois finds root of a quadratic 3 0.00510131
+illinois handles a near-tangent crossing without stalling 3 0.00273458
+illinois throws if root not bracketed 3 0.00380448
+bisect_fallback agrees with illinois on linear g 3 0.00306155
+EventPredictor finds soonest event in horizon 3 0.00326451
+EventPredictor priority breaks simultaneous-event ties 3 0.00340478
+EventPredictor returns -1 idx when no predicates fire 3 0.00312465
+DOPRI5 integrates x' = x exactly to within 5th-order error 3 0.0038936
+DOPRI5 FSAL reuses k7 → 6 RHS evals per accepted step 3 0.00311704
+DOPRI5 invalidating FSAL forces k1 recompute 3 0.00404357
+DOPRI5 embedded error estimate is small for smooth ODE 3 0.00384461
+DOPRI5 advances x' = A·x linearly for a 2x2 buck-like system 3 0.00366667
+Buck CCM in PED matches fixed-step trapezoidal within 0.1% RMSE 3 0.00577839
+Buck CCM PED wall-clock within 2× of fixed-step trapezoidal 3 0.00600745
+Buck CCM PED takes many fewer steps than fixed-step trap 3 0.00369696
+BuckDCMParams analytical equations are correct 3 0.00373797
+PED captures one ZCD per cycle in DCM steady state 3 0.00315794
+State projection clamps i_L = 0 on ZCD event 3 0.0039318
+BuckDCMSwitchFn returns ZERO_CURRENT after ZCD register 3 0.00359393
+hermite_interp reproduces endpoints + matches linear case 3 0.00345388
+PED event log shows correct A→B→C→A mode progression 3 0.00304157
+PED DCM steady-state V_out matches analytical within 1% V_in (Gate 3A) 3 0.00422006
+PED DCM wall-clock at most reference ×5 (prototype-level Gate 3B) 3 0.00526391
+StiffnessDetector selects BDF2 above threshold and DOPRI5 below 3 0.00295504
+StiffnessDetector caches eigenvalues per mode_id 3 0.0039697
+BDF2 holds y at analytical steady state if x0 = x_ss 3 0.00373325
+BDF2 is order-2: halving h reduces global error 2-8× 3 0.00363545
+BDF2 at h>>stability limit matches DOPRI5 ground truth ≤0.5% V_in 3 0.00444452
+BDF2State invalidate clears history + LU cache 3 0.0028002
+TwoModeStiffRLC satisfies HasLTIPerMode concept 3 0.00291905
+PEDSimulatorBDF2 on switching stiff RLC tracks DOPRI5 reference 3 0.0211483
+PEDSimulatorBDF2 on switching stiff RLC beats DOPRI5 wall-clock 3 0.00597787
+PEDSimulatorBDF2 invalidates BDF2 state on every gate edge 3 0.00309938
+PEDSimulatorAuto: stiffness detector picks BDF2 for stiff mode, DOPRI5 for non-stiff mode 3 0.00298399
+PEDSimulatorAuto event log records integrator-per-segment 3 0.00714012
+PEDSimulatorAuto matches DOPRI5 ground truth within envelope 3 0.0279972
+PEDSimulatorAuto invalidates both RK45 and BDF2 state on every mask change 3 0.00887831
+Index is exactly 4 bytes and signed 3 0.0040037
+Real is a floating-point type 3 0.00347525
+Sentinel values are well-defined 3 0.0034281
+Vector::Zero creates a zero-initialised column vector 3 0.00439703
+Fixed-size dense aliases compile and match Eigen layout 3 0.00268448
+FloatingPoint concept accepts Real and standard floats, rejects int 3 0.00388837
+IndexLike concept accepts Index and rejects unsigned 3 0.00329268
+logistic matches the textbook formula where that works 3 0.00366825
+logistic saturates instead of overflowing 3 0.0047489
+the AD derivative stays finite where the naive form NaNs 3 0.00330478
+the two branches agree across the seam 3 0.00385686
+The models' AD Jacobians survive the logistic rewrite 3 0.00414326
+A model's Jacobian stays finite far past the old limit 3 0.00369972
+Sparse matrix is ColMajor int32 by default 3 0.00377099
+Triplet assembly preserves all entries 3 0.00362491
+stamp_dense adds a small block at the requested offset 3 0.00403672
+stamp_dense accumulates on repeated calls 3 0.0027875
+compress_in_place puts the matrix in compressed form 3 0.00367921
+reserve_capacity pre-allocates so subsequent inserts avoid quadratic re-allocation 3 0.00307189
+SparseLuSolver solves an SPD 3x3 system to high precision 3 0.00402014
+SparseLuSolver throws when solve is called before factorize 3 0.0047833
+SparseLuSolver throws when factorize is called before analyze 3 0.00292749
+SparseLuSolver caches the symbolic factor across reanalyze-free refactorize calls 3 0.00381758
+make_default_solver returns a non-null SparseLuSolver 3 0.00361502
+Solver via abstract interface dispatches polymorphically 3 0.00377178
+PulsimSparseLuSolver::analyze succeeds on SPD 3x3 3 0.0037603
+PulsimSparseLuSolver fill on buck-like 8x8 is within ±50% of Eigen COLAMD 3 0.00304311
+PulsimSparseLuSolver::analyze rejects 0x0 matrix 3 0.00310993
+PulsimSparseLuSolver::analyze rejects non-square matrix 3 0.00310215
+PulsimSparseLuSolver::factorize identity holds on SPD 3x3 3 0.00347088
+PulsimSparseLuSolver::factorize identity holds on buck-like 8x8 3 0.00332265
+PulsimSparseLuSolver::factorize returns false on a structurally singular matrix 3 0.0042359
+PulsimSparseLuSolver::solve before factorize throws 3 0.00437515
+PulsimSparseLuSolver::solve matches Eigen on SPD 3x3 within 1e-12 3 0.00360795
+PulsimSparseLuSolver::solve matches Eigen on buck-like 8x8 within 1e-12 3 0.00338176
+PulsimSparseLuSolver::solve can be called multiple times after factorize 3 0.00415043
+PulsimSparseLuSolver::solve uses the latest factor after refactorize 3 0.00411089
+PulsimSparseLuSolver advertises partial_refactor support 3 0.00358175
+PulsimSparseLuSolver::partial_refactor matches fresh full factorize on solve 3 0.00320982
+PulsimSparseLuSolver::partial_refactor reuses cached path on repeats 3 0.00335668
+PulsimSparseLuSolver::partial_refactor recomputes path when varying set grows 3 0.00281065
+PulsimSparseLuSolver::analyze invalidates the path cache 3 0.00535722
+PulsimSparseLuSolver::partial_refactor before factorize returns false 3 0.00265529
+PulsimSparseLuSolver::partial_refactor with empty changed_cols is a no-op 3 0.00315699
+PulsimSparseLuSolver::factorize before analyze throws 3 0.00303866
+make_default_solver(n, Backend::Pulsim) returns a PulsimSparseLuSolver 3 0.00553353
+make_default_solver(n, Backend::Auto) returns PulsimSparseLuSolver (in-house LU is the default since v1.3.0) 3 0.00364897
+v1.4.0: partial_refactor with 2-col changed_cols matches fresh-factorise 3 0.00475792
+v1.4.0: partial_refactor_count_path is monotone and bounded 3 0.00491041
+v1.4.0: partial_refactor_count_path on empty input returns 0 3 0.00453409
+v1.4.0: MAX_PATH_LENGTH_RATIO is a valid ratio in (0, 1] 3 0.00557451
+Phase-1 LU: correctness across MNA-like sizes 3 0.0058407
+Phase-1 LU: banded factor time scales ~linearly (kills the O(n^2) floor) 3 0.0136253
+Phase-1 LU: COLAMD beats RCM on a 2-D grid 3 0.00658911
+Phase-1 gate: n=5000 circuit-like factorization under budget 3 0.00578677
+PulsimSparseLuSolverT<Complex>: factorize identity on Hermitian PD 3×3 3 0.00304597
+PulsimSparseLuSolverT<Complex>: factorize identity on asymmetric 8×8 MNA 3 0.00455754
+PulsimSparseLuSolverT<Complex>: partial_refactor matches fresh factorise 3 0.00391165
+PulsimSparseLuSolverT<Complex>: solve before factorize throws 3 0.00345346
+make_default_solver_t<Complex>: factory returns expected backend 3 0.00502748
+Graph default-constructs empty with ground sentinel 3 0.00398
+add_node returns monotonically increasing indices 3 0.00380443
+add_branch records endpoints + kind 3 0.00389083
+branches_of returns adjacency for the node's incident branches 3 0.00366534
+Branches touching ground are not added to adjacency 3 0.00366928
+num_switches counts only Switch-kind branches 3 0.00315653
+Graph is move-only 3 0.00329486
+Graph::id is stable for a structurally identical graph 3 0.00321879
+Graph::id differs for graphs with different structure 3 0.00264917
+Graph::id is cached after first call 3 0.00279763
+Default-constructed mask of size N is all zero 3 0.00303419
+set / get round-trips bits in any order 3 0.0169016
+flip toggles the addressed bit 3 0.0161114
+Equality requires same size AND same bits 3 0.0188007
+Equal masks hash to the same value 3 0.0169389
+Different-size masks with same bits hash differently 3 0.016093
+operator< yields a stable total order usable by std::set 3 0.0157236
+Dynamic width: masks beyond 64 switches (Phase 1) 3 0.0164638
+Usable as unordered_map key 3 0.0158723
+to_string emits a binary representation 3 0.00340503
+N = 0 yields exactly 1 state (the empty mask) 3 0.00336981
+N = 3 yields exactly 8 distinct masks 3 0.00325585
+Consecutive Gray-code states differ by exactly one bit 3 0.00448233
+N = 16 yields exactly 65536 distinct masks (smoke) 3 0.00338848
+Enumerator exposes num_states + num_switches accessors 3 0.00335032
+Iterator equality compares both counter and N 3 0.00364335
+N >= 64 throws instead of silently capping the state space 3 0.00352574
+All switches open → every node is its own class 3 0.00418243
+Closing one switch merges its endpoints 3 0.00329697
+Closed switch touching ground promotes the other endpoint to ground 3 0.00305534
+Both buck switches closed: sw, vin, ground all merge 3 0.0040105
+Chain of closed switches merges every node into ground 3 0.00292675
+class_members returns sorted node ids 3 0.00269448
+Same graph + same state → same TopologyKey 3 0.0033115
+Same graph + different state → different TopologyKey 3 0.00342693
+Different graph + same state → different TopologyKey 3 0.00573713
+TopologyKey round-trips through std::unordered_map 3 0.00378953
+Strong IDs round-trip through get() 3 0.00344361
+Default-constructed strong IDs are invalid 3 0.00342358
+Strong IDs support ground sentinel 3 0.00192058
+Equality only holds within the same strong-type family 3 0.00374612
+Strong IDs are usable as unordered_map keys 3 0.00417601
+Strong IDs are 4-byte trivially copyable POD 3 0.00362896
+Index → strong-type conversion requires explicit cast 3 0.00461422
+Default-constructed ADRealN<3> is zero with zero derivs 3 0.004528
+Construct from Real → value set, derivs zero (constant) 3 0.00509062
+seed2 returns inputs with identity-row derivative slots 3 0.00471912
+Addition propagates value + derivs additively 3 0.00478968
+Multiplication uses the product rule 3 0.00478372
+Division uses the quotient rule 3 0.00439585
+Unary minus negates value and all derivs 3 0.00518892
+Mixed ad-vs-real arithmetic preserves derivs 3 0.00328296
+exp propagates exp(x) as its own derivative 3 0.00284146
+tanh derivative is 1 - tanh² 3 0.00366883
+sqrt derivative is 1 / (2 sqrt(x)) 3 0.00419222
+Composite function exp(x) + y² with chain rule 3 0.00318664
+Comparison operators compare values only 3 0.00381519
+Compound assignment += updates value and derivs 3 0.00388117
+Resistor satisfies DeviceModel (runtime confirmation) 3 0.00365969
+VoltageSource satisfies DeviceModel with Source kind 3 0.00340928
+IdealDiode satisfies DeviceModel with Nonlinear kind 3 0.00326681
+evaluate_current_and_jacobian returns current value + AD partials 3 0.00303866
+evaluate_current returns the value-only forward eval 3 0.00365761
+ModelInputs<T> is an std::array of the right size 3 0.00380819
+Resistor: forward eval i = G·(v[0] - v[1]) 3 0.00355274
+Resistor: AD partials are +G and -G 3 0.0031209
+Resistor: v[0] == v[1] → i = 0, partials still ±G 3 0.00327989
+Resistor: partials sum to zero (current depends on Δv only) 3 0.0040769
+Resistor: large G stamps proportionally 3 0.00354264
+VoltageSource::current returns 0 regardless of terminal voltages 3 0.00346219
+VoltageSource::current returns 0 even with high voltages 3 0.00549957
+VoltageSource AD partials are all zero 3 0.00402398
+VoltageSource::static_voltage returns the configured V 3 0.0042417
+IdealDiode: reverse-biased current is essentially zero 3 0.00423838
+IdealDiode: forward-biased current scales linearly past V_F0 3 0.00315059
+IdealDiode: at V_F0 current is half-way (alpha ≈ 0.5) 3 0.00371375
+IdealDiode: AD partials match central-difference (sub-threshold) 3 0.00300779
+IdealDiode: AD partials match central-difference (at threshold) 3 0.00387446
+IdealDiode: AD partials match central-difference (forward-biased) 3 0.0033749
+IdealDiode: partials sum to zero (current depends on Δv only) 3 0.00359159
+CurrentSource::current returns the parameter I 3 0.002842
+DevicePool stores and retrieves CurrentSource params 3 0.00398301
+CircuitBuilder.add_current_source adds a Source branch 3 0.00292501
+CurrentSource into a resistor — Ohm's law verification 3 0.00330016
+CurrentSource has NO branch-current unknown 3 0.00370285
+CurrentSource sign convention: I from `from` to `to` 3 0.00376093
+PWMVoltageSource::value_at returns v_high in ON portion 3 0.00354996
+PWMVoltageSource handles phase offset correctly 3 0.00266843
+PWMVoltageSource handles duty=0 and duty=1 edge cases 3 0.0034608
+PWMVoltageSource handles frequency=0 safely 3 0.00405714
+DevicePool stores PWMVoltageSource params + branch-var 3 0.00413749
+compute_pwm_b_extra produces correct overlay 3 0.00286297
+PWM source drives a resistor — output tracks square wave 3 0.00300693
+PWM duty=0.25 → mean output = V_high · 0.25 3 0.00463165
+SineVoltageSource::value_at produces v_dc + amp·sin(ωt + φ) 3 0.00451286
+SineVoltageSource respects DC offset 3 0.00398499
+SineVoltageSource phase shift offsets waveform 3 0.00387941
+SineVoltageSource handles frequency=0 safely (returns v_dc) 3 0.00427661
+DevicePool stores SineVoltageSource params + branch-var 3 0.00341382
+compute_sine_b_extra produces correct overlay 3 0.0031
+Sine source drives a resistor — node tracks sine 3 0.00414993
+Sine source through RC — first-order low-pass response 3 0.0394968
+PulseVoltageSource — single-shot pulse semantics 3 0.00320948
+PulseVoltageSource — periodic mode wraps correctly 3 0.00445275
+PulseVoltageSource — rise/fall ramps interpolate linearly 3 0.00293107
+PulseVoltageSource — rise_time=0 preserves V12 behavior 3 0.00301203
+PulseVoltageSource — negative-going pulse 3 0.00343571
+DevicePool stores PulseVoltageSource params + branch-var 3 0.00329925
+compute_pulse_b_extra produces correct overlay 3 0.00317986
+Pulse source step charges an RC circuit exponentially 3 0.00653618
+MosfetLevel1 — cutoff: I_D ≈ 0 when V_GS << V_T 3 0.00273337
+MosfetLevel1 — saturation: I_D = K·V_OV²·(1+λV_DS) 3 0.00336264
+MosfetLevel1 — triode: I_D = K·(2·V_OV·V_DS − V_DS²)·(1+λV_DS) 3 0.00339283
+MosfetLevel1 — value continuity at triode↔sat boundary 3 0.00499719
+MosfetLevel1 — Jacobian via AD returns finite partials 3 0.00400457
+MosfetLevel1 — V_GS sweep: monotonic I_D in saturation 3 0.00309153
+MosfetLevel1 — Newton solves common-source amplifier 3 0.00359184
+DevicePool stores MosfetLevel1 params + gate node id 3 0.00320522
+add_mosfet_level1 with_body_diode=true adds anti-parallel diode 3 0.00364232
+add_mosfet_level1 default (no body diode) still adds 1 branch 3 0.00326566
+IgbtLevel1 — cutoff: I_C ≈ 0 when V_GE << V_T 3 0.00370818
+IgbtLevel1 — on-state linear conduction matches analytical 3 0.00276851
+IgbtLevel1 — Jacobian finite + physically correct 3 0.00352696
+IgbtLevel1 — V_GE sweep: monotonic I_C 3 0.00402353
+DevicePool stores IgbtLevel1 params + gate node id 3 0.00353856
+IgbtLevel1 — Newton solves chopper-style DC operating point 3 0.00254908
+VCVS — open-loop transfer V_out = gain · V_in 3 0.00463387
+VCVS — voltage follower (op-amp + negative feedback) 3 0.00354578
+VCVS — non-inverting amplifier: closed-loop gain = 1 + R_f/R_g 3 0.00306664
+DevicePool stores VCVS params + input-node refs 3 0.00402408
+SaturableInductor — at i=0 returns L_0 3 0.00306021
+SaturableInductor — at |i| = I_sat returns L_0 / 2 3 0.00404467
+SaturableInductor — high |i| approaches L_residual 3 0.0035708
+SaturableInductor — monotonically decreasing in |i| 3 0.00356243
+SaturableInductor — transient: current settles at resistive limit 3 0.030558
+MultiWindingTransformer — mutual inductance math 3 0.00420416
+MultiWindingTransformer — N=2 case matches TwoWindingTransformer 3 0.00471199
+MultiWindingTransformer — N=3 flyback-like topology 3 0.0038872
+CoreLoss — Steinmetz on triangular ripple recovers f and B_peak 3 0.00534217
+CoreLoss — empty window throws 3 0.00427088
+run_mna_sweep: RC low-pass matches 1/(1+jωRC) within 0.1 dB / 1° 3 0.00430079
+run_mna_sweep: series RLC peak matches 1/(2π·sqrt(LC)) within 0.5 % 3 0.00724346
+make_pwm_switch_fn — 50%% duty toggles correctly across cycle 3 0.00521214
+make_pwm_switch_fn — duty=0 → always OFF 3 0.00487976
+make_pwm_switch_fn — duty=1 → always ON 3 0.00317916
+make_pwm_switch_fn — frequency=0 → flat OFF (no division) 3 0.00337322
+make_pwm_switch_fn — phase offset shifts cycle 3 0.00289003
+make_pwm_switch_fn — only target switch toggles; others stay OFF 3 0.00334826
+make_pwm_switch_fn — matches PWMVoltageSource value_at convention 3 0.00307467
+make_pwm_switch_fn — drives a switched resistor end-to-end 3 0.00401052
+make_dead_time_pwm_pair_fn — dt=0 → exact complement 3 0.00350377
+make_dead_time_pwm_pair_fn — dt>0 inserts gap before each commutation 3 0.00315503
+make_dead_time_pwm_pair_fn — shoot-through never happens 3 0.0163971
+make_dead_time_pwm_pair_fn — duty=0 → HS never ON, LS most of cycle 3 0.00283041
+make_dead_time_pwm_pair_fn — duty=1 → HS most of cycle, LS never 3 0.00298519
+make_dead_time_pwm_pair_fn — frequency=0 → flat OFF 3 0.00374371
+make_dead_time_pwm_pair_fn — oversized dt saturates to T/2 3 0.00306508
+make_dead_time_pwm_pair_fn — phase offset shifts entire cycle 3 0.00339161
+make_dead_time_pwm_pair_fn — only HS/LS bits toggle; others OFF 3 0.00287395
+make_dead_time_pwm_pair_fn — average HS time = duty - dt/T 3 0.00393814
+make_dead_time_pwm_pair_fn — half-bridge leg drives RC load to V·duty 3 0.00727208
+make_spwm_pair_fn — M=0 reduces to 50%% constant pair 3 0.00334235
+make_spwm_pair_fn — shoot-through never happens 3 0.01452
+make_spwm_pair_fn — time-averaged duty tracks sine reference 3 0.00387436
+make_spwm_pair_fn — carrier_frequency=0 → flat OFF 3 0.00435582
+make_spwm_pair_fn — only HS/LS bits toggle; others OFF 3 0.00328291
+make_spwm_pair_fn — modulation_phase shifts sine reference 3 0.00382857
+make_spwm_pair_fn — half-bridge mid-point tracks SPWM duty 3 0.016995
+make_three_phase_spwm_fn — shoot-through never happens on any leg 3 0.0100824
+make_three_phase_spwm_fn — M=0 → all 3 legs at constant 50%% duty 3 0.0027255
+make_three_phase_spwm_fn — 120° leg phase rotation at ωt = π/2 3 0.00338211
+make_three_phase_spwm_fn — carrier_frequency=0 → flat OFF 3 0.00372957
+make_three_phase_spwm_fn — only the 6 leg bits toggle 3 0.00464865
+make_three_phase_spwm_fn — 3-phase mid-points form balanced sine set 3 0.00528376
+make_three_phase_spwm_fn — VSI line-to-line peak ≈ V_bus·M·√3/2 3 0.0257306
+make_phase_shift_full_bridge_fn — φ=0 → legs are synchronous 3 0.004027
+make_phase_shift_full_bridge_fn — φ=π → legs are anti-phase 3 0.00300239
+make_phase_shift_full_bridge_fn — shoot-through never happens per leg 3 0.00735654
+make_phase_shift_full_bridge_fn — φ=π/2 → 25%% +V pulse on v_AB 3 0.00327308
+make_phase_shift_full_bridge_fn — switching_frequency=0 → flat OFF 3 0.00368659
+make_phase_shift_full_bridge_fn — only the 4 bridge bits toggle 3 0.00235033
+make_phase_shift_full_bridge_fn — phase wraps for out-of-range angles 3 0.003862
+make_phase_shift_full_bridge_fn — series-L load at φ=π/2 transfers power 3 0.0580725
+make_combined_switch_fn — empty list → all OFF 3 0.00213043
+make_combined_switch_fn — single fn ≡ that fn 3 0.00444643
+make_combined_switch_fn — disjoint bit indices both contribute 3 0.00333625
+make_combined_switch_fn — overlapping bits OR'd together 3 0.00317089
+make_combined_switch_fn — sub-mask larger than num_switches → ignored bits 3 0.00402738
+make_combined_switch_fn — sub-mask smaller than num_switches 3 0.00438203
+make_combined_switch_fn — null function entries skipped 3 0.00326071
+make_combined_switch_fn — realistic: PSFB primary + sync rectifier 3 0.00333003
+read_node_voltage returns x[i] for active nodes 3 0.00408041
+read_node_voltage returns 0 for ground 3 0.00420339
+node_is_active distinguishes real nodes from ground 3 0.00497748
+Resistor stamping: standard 2x2 conductance block 3 0.0040118
+Resistor stamping to ground skips ground entries 3 0.00428071
+Resistor stamping is additive (parallel resistors) 3 0.00656282
+IdealDiode stamping: AD partials match KCL sanity 3 0.00299336
+IdealDiode stamping populates the expected 4 Jacobian entries 3 0.00357333
+Voltage source between active nodes — residual + Jacobian 3 0.00310222
+Voltage source to ground — only active-node entries stamped 3 0.0030908
+Voltage source residual is zero at convergence 3 0.00378292
+Closed switch stamps g_on between its two terminals 3 0.0040772
+Open switch stamps g_off (small but non-singular) 3 0.00298029
+Switch touching ground stamps only the active-row entry 3 0.00342664
+V-R-GND: one Newton step solves the linear system exactly 3 0.00320206
+V-R-GND: residual is zero at the analytical solution 3 0.00318815
+Empty pool reports zero state_size 3 0.00459153
+Resistor adds no branch-current unknown 3 0.00472762
+Voltage sources add sequential branch-current unknowns 3 0.00439114
+kind_of distinguishes the three V0 device categories 3 0.00504322
+Wrong-kind lookup throws std::out_of_range 3 0.00468413
+Missing branch_id lookup throws 3 0.00608747
+Switch params round-trip through g_on/g_off accessors 3 0.00588743
+PwlSegment is move-only 3 0.00375433
+Default-constructed PwlSegment has zero state size 3 0.00305335
+Empty graph assembles to empty (J, b) 3 0.00352514
+Single resistor to ground stamps the right diagonal 3 0.00332112
+Single voltage source to ground adds the constraint row 3 0.00398947
+Switch in OFF state stamps g_off 3 0.00289011
+Switch in ON state stamps g_on 3 0.00369256
+Chopper assembly stamps every branch correctly 3 0.00424478
+assemble_segment_split: J == G + (1/dt)*C exactly 3 0.00400177
+assemble_segment_split: C is mask-invariant, G is not 3 0.00389411
+assemble_segment_split: hand-stamped companion values 3 0.00350814
+Graph carries branch names; unnamed branches stay empty 3 0.00336906
+CircuitBuilder pushes device names into the kernel Graph 3 0.00305829
+describe_row maps every MNA row segment to its owner 3 0.003148
+describe_row falls back to ids on a raw unnamed graph 3 0.00325132
+Empty-column/row probes find the floating unknown 3 0.00292011
+DC singular error names the floating node 3 0.00518522
+Cache singular error carries a localised detail + row 3 0.00407702
+Row→device mapping survives many sources and inductors 3 0.00275515
+A device row empty BY CONSTRUCTION is not blamed as unwired 3 0.00356689
+CacheError.detail and .failing_row always agree 3 0.00379817
+Preflight leaves a well-posed circuit completely alone 3 0.00361993
+Preflight finds and ties an isolated subnet 3 0.00351436
+Preflight is idempotent 3 0.00431254
+Preflight can report without touching the circuit 3 0.00574543
+Preflight finds a node with no DC path to ground 3 0.00439815
+Preflight handles several independent subnets 3 0.00321655
+An auto-tied circuit simulates, and matches a hand-tied one 3 0.00449261
+The tie is high-impedance: it must not load the node 3 0.00398436
+stamp_gmin touches node rows and nothing else 3 0.00350795
+gmin does not cancel the inductor's DC branch epsilon 3 0.00357937
+The gmin floor is electrically invisible 3 0.00302877
+The floor never substitutes for a missing equation 3 0.00364328
+gmin_ramp descends by decades and lands on the floor 3 0.00354973
+source_scale ramps independent sources, not dependent ones 3 0.00357222
+gmin stepping agrees with the direct solve when both work 3 0.00440817
+gmin stepping solves a chain the direct solve cannot 3 0.00556235
+Auto falls through to the rung that can answer 3 0.00783995
+The DC operating point honours nonlinear devices 3 0.00400501
+BDF1 refuses a circuit it would silently open 3 0.00375279
+Cache with 0 switches builds exactly 1 segment 3 0.00300949
+Cache with 1 switch builds exactly 2 segments 3 0.00336208
+Cache with 4 switches builds exactly 16 segments 3 0.00381557
+lookup for a never-built mask throws 3 0.00382255
+solve on V-R-GND returns the analytical answer 3 0.00343481
+try_lookup returns segment pointer on hit 3 0.00393493
+try_lookup returns MaskNotBuilt on miss (eager mode) 3 0.00314707
+try_lookup auto-builds in lazy mode and reports structured singularity 3 0.00319951
+Chopper: cache builds exactly 2 segments (1 switch) 3 0.00382657
+Chopper M1 ON: vout = V_dc within tight tolerance 3 0.00436547
+Chopper M1 OFF: vout ≈ 0 through g_off + R 3 0.00395744
+Chopper: 10k consecutive lookups complete quickly 3 0.00384691
+solve_rank1 produces same output as solve across a Gray-code sweep 3 0.00345333
+solve_rank1 multi-bit flips route through multi_bit_rank1_hits (v1.4.0) 3 0.00342228
+solve_rank1 leaves the per-mask segments_ cache empty 3 0.00359686
+solve_rank1 same-mask repeats increment rank1_hits without refactor 3 0.00369658
+CacheMetrics start at zero on a fresh cache 3 0.00289554
+v1.4.0: 2-bit Gray-code transition routes through multi_bit_rank1_hits 3 0.00294024
+v1.4.0: CacheMetrics invariant holds across mixed-distance sweep 3 0.00306013
+v1.4.0: 4-bit transition still produces correct output 3 0.00521596
+v1.4.0: refactor_parametric (R_load sweep) matches fresh build 3 0.00370599
+v1.4.0: refactor_parametric handles 2-param update (L + C) 3 0.00315162
+v1.4.0: refactor_parametric with empty updates is a no-op 3 0.00453178
+v1.4.0: refactor_parametric on an unsupported device kind throws 3 0.00414025
+v1.4.0: refactor_parametric Mode::CurrentOnly processes 1 mask 3 0.0040844
+v1.4.0: refactor_parametric telemetry invariant over 10 sweep points 3 0.00437972
+A step that fails at dt succeeds at dt/2 3 0.00665312
+A retried run keeps the sampling grid exactly 3 0.0064362
+The recovered answer is the right one 3 0.0177749
+A run that needs no retry pays nothing and records none 3 0.0252669
+Exhausting the ladder says so, with the sub-dt it reached 3 0.00528614
+A topology defect fails fast, not after six futile halvings 3 0.00467301
+SimulationOptions: default-constructed is invalid 3 0.00474842
+SimulationOptions: t_start=0, t_end=1, dt=0.1 → 11 samples 3 0.00337871
+SimulationOptions: negative dt is invalid 3 0.00341455
+SimulationOptions: zero dt is invalid 3 0.003857
+SimulationOptions: t_end <= t_start is invalid 3 0.00354134
+SimulationOptions: NaN values are invalid 3 0.00340438
+SimulationOptions: infinity is invalid 3 0.00363532
+SimulationOptions: 1 ms / 1 µs PWM sim → 1001 samples 3 0.00331301
+SimulationResult: default is empty 3 0.0029628
+SimulationResult: reserve does not change size 3 0.00319908
+SimulationResult: push 3 samples → num_steps == 3 3 0.0035555
+StateTrajectory: contiguous layout, one allocation 3 0.00285943
+StateTrajectory: read API matches vector<Vector> 3 0.00338058
+StateTrajectory: ragged pushes throw instead of corrupting 3 0.0029171
+StateTrajectory: empty trajectory is well-defined 3 0.00448655
+StateTrajectory: eager reservation is byte-capped 3 0.00414525
+store_every: sample count and expected_sample_count agree 3 0.00307553
+store_every: recorded grid stays strictly uniform 3 0.00365659
+store_every: decimated samples equal the full-rate ones 3 0.00410711
+store_every = 1 is byte-identical to v1.x recording 3 0.00339333
+run_transient: invalid options throw 3 0.00320148
+run_transient: state_size == 0 throws 3 0.00374329
+run_transient: empty switch_fn throws 3 0.00236907
+run_transient: V-R-GND static circuit → constant state 3 0.00311618
+run_transient: time grid is exactly t_start + k·dt 3 0.00284597
+run_transient: switch_fn drives the schedule 3 0.00244317
+run_transient: b_extra_fn is consulted every step 3 0.00317643
+Chopper PWM: 10 kHz / 50% duty / 1 ms simulation → 1001 samples 3 0.00373783
+Chopper PWM: mean(v_out) ≈ V_dc · duty (50 %) within 1 % 3 0.00371766
+Chopper PWM: waveform is a clean square wave 3 0.00514318
+Capacitor: g_eq for 1 µF at 1 µs dt equals 2 S 3 0.00483307
+Capacitor: g_eq scales inversely with dt 3 0.00598195
+Capacitor: history_term = g_eq · v_prev + i_prev 3 0.00520021
+Capacitor: zero previous state gives zero history 3 0.00403693
+Capacitor: companion reproduces back-substitution 3 0.00512524
+Capacitor: is_dynamic flag is true 3 0.00435489
+Capacitor: static current contract returns 0 3 0.00269246
+Inductor: g_eq_inv for 1 mH at 1 µs dt equals 5e-4 3 0.00258899
+Inductor: g_eq_inv scales linearly with dt 3 0.00800361
+Inductor: history_term = i_prev + g_eq_inv · v_prev 3 0.00339574
+Inductor: zero previous state gives zero history 3 0.00412583
+Inductor: companion reproduces algebra 3 0.00330027
+Inductor: flags 3 0.00279757
+DevicePool: 1 capacitor → state_size == num_nodes 3 0.00377534
+DevicePool: 1 inductor → state_size == num_nodes + 1 3 0.00316694
+DevicePool: source + inductor → branch_var ordering 3 0.00389435
+DevicePool: 2 inductors → sequential branch_var ids 3 0.00321531
+DevicePool: capacitor params round-trip 3 0.00328772
+DevicePool: inductor params round-trip + kind_of 3 0.00403529
+DevicePool: wrong-kind capacitor lookup throws 3 0.00338127
+DevicePool: branch_var_id_for_inductor on non-L throws 3 0.00322673
+DevicePool V0 path unchanged with no dynamic devices 3 0.00453874
+stamp_capacitor_companion: between node0 and ground 3 0.00292817
+stamp_capacitor_companion: between two non-ground nodes 3 0.00409501
+stamp_capacitor_companion: skip rows for ground endpoints 3 0.00398215
+stamp_inductor_companion: node0 → ground, branch_var_id=1 3 0.00374965
+stamp_inductor_companion: between two non-ground nodes 3 0.00339442
+Cache.build() with no dynamic devices behaves like V0 3 0.00380207
+Cache.build(dt) stamps the cap's g_eq 3 0.00472222
+Cache.build(dt) rebuilds when dt changes 3 0.00464093
+Cache.build() on graph with capacitor SILENTLY skips cap 3 0.00401614
+Cache.build(dt) with inductor stamps the constraint row 3 0.00294965
+Lazy build starts with zero built segments 3 0.00326189
+Lazy build populates on each new mask 3 0.00364511
+Lazy build produces same results as eager build 3 0.00332307
+Eager build after lazy clears + populates all segments 3 0.00380397
+Lazy build after eager clears + waits for solves 3 0.00313333
+70-switch circuit solves through the lazy cache 3 0.00375123
+70-switch circuit: eager build fails loudly, lazy is the route 3 0.00315531
+Lazy cache evicts LRU segments under a byte budget 3 0.00357625
+Budget 0 disables eviction; eager build never evicts 3 0.00357714
+run_transient under a tiny segment budget matches unbounded 3 0.00417131
+Evicted masks rebuild from the UPDATED pool after refactor_parametric 3 0.00335852
+A no-op refactor_parametric changes nothing 3 0.00367329
+A budget smaller than one segment still stores it 3 0.00413739
+solve_at with primary dt matches solve bit-identical 3 0.00348147
+solve_at reuses ONE event solver per mask across dt changes 3 0.00307831
+solve_at event entries are LRU-bounded at kMaxEventEntries 3 0.00400196
+solve_at dt-refactor matches a fresh factorization (RLC) 3 0.00390049
+Multi-dt solve_at gives correct chopper answer 3 0.00404151
+Failed event refactorize erases the entry; old dt recovers 3 0.00418002
+refactor_parametric invalidates event-solver entries 3 0.00450321
+solve_at dt<=0 falls back to static assembly 3 0.00427729
+solve_at re-analyzes across a dynamic<->static dt regime change 3 0.00326539
+steady-state cache.solve performs ZERO heap allocations 3 0.00939337
+steady-state solve_at (same mask+dt) is allocation-free 3 0.0079921
+run_transient hot loop: zero std-container allocations 3 0.00889187
+run_transient with diodes: allocation count is O(1), not O(n_steps) 3 0.00812719
+substep event correction path is allocation-free per event 3 0.0111286
+HistoryState: empty graph yields no entries 3 0.00509746
+HistoryState: 1 cap → 1 entry initialised to zero 3 0.00576536
+HistoryState: capacitor history term sign on b_extra row 3 0.00542557
+HistoryState: reset zeros all entries 3 0.00296885
+HistoryState: inductor entry tracks branch-current i_L 3 0.00379617
+run_transient V1: cache.dt() ≠ opts.dt throws 3 0.00407589
+run_transient V1: static circuit matches V0 output 3 0.00317362
+run_transient V1: empty switch_fn throws 3 0.00322332
+RC integration: V_C(t) tracks 1−e^{−t/τ} within 1 % 3 0.00373814
+RC integration: V_C(5τ) ≈ V_dc · 0.9933 within 1 % 3 0.00513397
+RL integration: I_L(t) tracks (V/R)·(1−e^{−t/τ}) 3 0.00433208
+RL integration: I_L(5τ) ≈ V_dc/R · 0.9933 3 0.0040517
+RLC integration: ω_d and ζ from parameters 3 0.00551446
+RLC integration: v_C(t) matches analytical step response 3 0.00403675
+RLC integration: undamped (R=0) oscillates at ω_n 3 0.00380256
+Synchronous buck converter: cache builds 4 segments 3 0.00333568
+Synchronous buck converter: steady-state matches analytical 3 0.0147107
+TwoWindingTransformer::mutual_inductance computes M correctly 3 0.00305954
+cross_dt is symmetric under L_p ↔ L_s swap 3 0.00336803
+CircuitBuilder.add_transformer creates 2 branches + 1 coupling 3 0.00434918
+Builder add_transformer chains nicely with other devices 3 0.00295251
+Ideal 1:1 transformer transmits voltage to a resistive load 3 0.00427479
+k=0 transformer: secondary stays at quiescent voltage 3 0.00471101
+Transformer with finite k clamps state to physical bounds 3 0.00368166
+SwitchedDiode: OFF + forward bias above V_th → ON 3 0.00469967
+SwitchedDiode: OFF + forward bias below V_th stays OFF 3 0.00459213
+SwitchedDiode: ON + reverse current → OFF 3 0.00418893
+SwitchedDiode: ON + zero current → OFF (boundary) 3 0.00428558
+SwitchedDiode: ON + forward current stays ON 3 0.00495666
+SwitchedDiode: OFF + reverse bias stays OFF 3 0.00361208
+SwitchedDiode: Si V_th = 0.7 threshold check 3 0.00444879
+DiodeEventState: no diodes → empty tracker 3 0.00260755
+DiodeEventState: 1 diode initially OFF 3 0.00330364
+DiodeEventState: forward bias flips OFF → ON 3 0.00349742
+DiodeEventState: reverse bias keeps OFF 3 0.00461922
+DiodeEventState: reverse current flips ON → OFF 3 0.00293785
+DiodeEventState: reset() clears all diodes 3 0.00346989
+combine_masks: overlays diode bits, keeps user bits 3 0.00291375
+Half-wave rectifier: output tracks sine on positive half 3 0.00414986
+Half-wave rectifier: mean output power matches analytical 3 0.00417351
+Boost converter: cache builds 4 segments 3 0.004194
+Boost converter: V_out = V_in/(1-D) with event iteration 3 0.0235932
+Diode-free circuit produces no commutation events 3 0.00296492
+Diode + step-function source records the turn-on event 3 0.00310398
+HistoryState snapshot/restore round-trip on RC circuit 3 0.00517045
+DiodeEventState snapshot/restore round-trip 3 0.00599968
+DiodeEventState restore_on_bits rejects size mismatch 3 0.00473499
+Default options preserve V2.2 behaviour (no correction) 3 0.00452946
+RC half-wave: substep correction stays finite and bounded 3 0.00663909
+Substep correction records commutation events 3 0.00482943
+gnd alias maps to graph.ground() 3 0.00404589
+Node lookup creates on first use, reuses on second 3 0.00393036
+node_id_of throws for unknown node 3 0.0032985
+Implicit node creation via device methods 3 0.00463932
+Resistor: R_ohms is converted to G = 1/R 3 0.00332411
+Capacitor: C_farads is passed through unchanged 3 0.00438741
+Inductor: L_henries is passed through unchanged 3 0.0031805
+Method chaining works 3 0.00304461
+Round-trip V_dc + R: cache.solve gives the right v_node 3 0.00339193
+Half-wave rectifier: builder ≡ manual setup 3 0.00430116
+add_mosfet adds one branch with correct conductance 3 0.00300022
+add_mosfet uses MOSFET defaults when omitted 3 0.00349791
+add_mosfet_with_body_diode adds two branches with diode anti-parallel 3 0.00306723
+add_mosfet_with_body_diode body-diode V_F default = 0.7 V 3 0.00293509
+add_igbt adds one branch with IGBT defaults 3 0.00303645
+MOSFET helper preserves topology (smoke buck setup) 3 0.00613977
+Nonlinear diode builder: DC load-line 3 0.00383608
+add_nonlinear_diode rejects non-positive R_d 3 0.00281461
+add_igbt_level1 rejects non-positive R_CE_sat 3 0.0040207
+add_saturable_inductor rejects non-positive I_sat 3 0.0034515
+add_transformer rejects non-positive winding inductance 3 0.00306034
+add_multi_winding_transformer rejects non-positive inductance 3 0.00318804
+solve_with_newton throws on a non-finite residual (NaN guard) 3 0.00318641
+YAML loader: voltage_source round-trip 3 0.00475247
+YAML loader: pwm_voltage_source round-trip 3 0.00689694
+YAML loader: sine_voltage_source round-trip 3 0.00444876
+YAML loader: mosfet_level1 round-trip 3 0.00596003
+YAML loader: pulse_voltage_source round-trip 3 0.00458084
+YAML loader: current_source round-trip 3 0.00418729
+YAML loader: resistor round-trip (R in ohms → G = 1/R) 3 0.00475457
+YAML loader: capacitor round-trip 3 0.00376339
+YAML loader: inductor round-trip 3 0.00284085
+YAML loader: diode round-trip 3 0.00310092
+YAML loader: nonlinear_diode round-trip 3 0.00301416
+YAML loader: mosfet round-trip 3 0.00321362
+YAML loader: mosfet_with_body_diode adds 2 branches 3 0.00356081
+YAML loader: igbt round-trip 3 0.00446459
+YAML loader: transformer round-trip 3 0.002993
+YAML loader: simulation: block populates SimulationOptions 3 0.00420396
+YAML loader: missing R on resistor throws with name 3 0.00392151
+YAML loader: unknown device type throws with the type name 3 0.00302837
+YAML loader: missing top-level circuit: throws 3 0.0036939
+YAML-built half-wave rectifier matches direct builder 3 0.00365506
+YAML-built V_dc + R: DC solve gives v_node = V_dc 3 0.0038109
+YAML loader: malformed YAML throws cleanly 3 0.00315425
+YAML loader: simulation.store_every is honoured, not ignored 3 0.00306004
+SMPS showcase: open-loop buck via YAML reaches V_in · D 3 0.0161968
+Buck showcase: alternative duty cycle ≈ 25 % → V_out ≈ 6 V 3 0.0151178
+SMPS showcase: open-loop flyback via YAML + make_pwm_switch_fn 3 0.0860214
+SMPS showcase: 3-phase VSI via YAML + make_three_phase_spwm_fn 3 0.118134
+SMPS showcase: ZVS phase-shift full-bridge via YAML + V9 3 0.100877
+Showcase: 3-phase 6-pulse diode rectifier via YAML + V11 3 0.0180292
+Showcase: RLC step response via YAML + V12 PulseVoltageSource 3 0.00547325
+Showcase: common-source MOSFET amplifier (V13 + V11) 3 0.0104619
+Showcase: PWM chopper with realistic SH1 MOSFET 3 0.00451879
+Showcase: real boost converter with IGBT + ramped gate 3 0.47438
+Showcase: real boost converter with SH1 MOSFET + ramped gate 3 0.492922
+Showcase: LDO with op-amp feedback (V13 + V15) 3 0.00810545
+Showcase: boost converter with saturable inductor 3 0.635885
+DC OP: V-R-GND gives v_node = V_dc 3 0.00608549
+DC OP: V-R-C-GND has v_C = V_dc (cap fully charged) 3 0.00499057
+DC OP: V-R-L-GND gives i_L = V/R 3 0.00478687
+DC OP: chopper with switch ON pulls v_out to V_dc 3 0.00356028
+DC OP: SineVoltageSource frozen at t_eval=T/4 → +amplitude 3 0.00352343
+DC OP: SineVoltageSource at t=0 with v_dc offset 3 0.0042175
+DC OP: PWMVoltageSource ON vs OFF at different t_eval 3 0.00288701
+DC OP: PulseVoltageSource before/during/after pulse 3 0.00460192
+DC OP: CurrentSource across R gives I·R drop 3 0.00307093
+DC OP: VCVS amplifies input voltage by gain 3 0.00468633
+Seed history from DC OP — capacitor 3 0.00370962
+Seed history from DC OP — inductor 3 0.0031948
+Diode seeding from DC OP turns on forward-biased diodes 3 0.00316729
+RC from DC OP: v_C stays at V_dc throughout 3 0.00384035
+RC from-zero IC (default) reproduces V0 behaviour 3 0.00364196
+Newton: linear V-R-GND with noop_refresh converges in 1 iter 3 0.00492053
+Newton: matches cache.solve for linear circuit 3 0.00457118
+Newton: throws on max_iters exhausted with bad refresh 3 0.00449986
+DC diode load-line converges to expected operating point 3 0.00426537
+Reverse-biased diode: source constraint holds + bounded v_n1 3 0.004833
+compute_lti_state_space recovers buck CCM analytical (A, b) 3 0.00430236
+compute_lti_state_space rejects a circuit without state vars 3 0.00311621
+compute_lti_state_space handles a single floating capacitor (Phase 5.1b) 3 0.00456303
+compute_lti_state_space handles a 2-cap split-bus stack (NPC-style) 3 0.0044712
+compute_lti_state_space handles a 3-cap chain (MMC-style stack) 3 0.00324314
+compute_lti_state_space rejects parallel inductors (Bridge.9) 3 0.00341742
+compute_lti_state_space rejects 3-inductor triangle loop (Bridge.9) 3 0.00827236
+compute_lti_state_space rejects parallel capacitors 3 0.00336139
+compute_lti_state_space rejects magnetically coupled circuits 3 0.00325991
+run_transient + noop_refresh = cache.solve (bit-identical) 3 0.00474346
+DC diode load-line via run_transient 3 0.0046595
+Line search OFF reproduces Layer 4 V3 (plain Newton) 3 0.00604595
+Line search accepts α < 1 when full step worsens residual 3 0.00347904
+LM converges (perhaps to local min) on soft-sigmoid diode 3 0.00351483
+LM on linear circuit converges cleanly 3 0.00311711
+LM is opt-in: default behaviour preserves V4 3 0.00326904
+continuation_solve with a single refresh == direct Newton 3 0.00296601
+continuation through kappa sequence finds DC diode load-line 3 0.00296502
+continuation_solve rejects empty sequence 3 0.0038129
+Continuation rectifier: κ=20 sinusoidal solve 3 0.00566933
+make_vf0_override_refresh uses override V_F0, not pool V_F0 3 0.00309129
+make_kappa_vf0_override_refresh overrides both 3 0.00305819
+V_F0 continuation: single-element sequence == direct Newton 3 0.00328501
+V_F0 override sweep matches analytical load-line 3 0.00337225
+make_diode_aware_initial_guess writes source values onto from-node 3 0.00328922
+make_diode_aware_initial_guess folds b_extra into the source 3 0.00320883
+κ=20 stiff rectifier solves from AUTO smart warm-start (no manual load-line) 3 0.0084208
+---

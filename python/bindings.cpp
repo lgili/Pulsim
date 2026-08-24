@@ -54,6 +54,7 @@
 #include "pulsim/pwl/dc_operating_point.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/gmin.hpp"
+#include "pulsim/solver/voltage_sanity.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/options.hpp"
@@ -1332,6 +1333,34 @@ void init_module(py::module_& m) {
         .def("valid", &SimulationOptions::valid)
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);
+
+    py::class_<solver::ImplausibleVoltage>(m, "ImplausibleVoltage",
+        "A node whose voltage left the range the circuit's own "
+        "sources can account for. `node == -1` means the trace is "
+        "plausible.")
+        .def_readonly("node", &solver::ImplausibleVoltage::node)
+        .def_readonly("peak", &solver::ImplausibleVoltage::peak)
+        .def_readonly("source_scale",
+                       &solver::ImplausibleVoltage::source_scale)
+        .def_readonly("t_peak", &solver::ImplausibleVoltage::t_peak);
+
+    m.def("find_implausible_voltage",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool,
+            const solver::SimulationResult& result, Real factor) {
+            return solver::find_implausible_voltage(graph, pool,
+                                                      result, factor);
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("result"),
+        py::arg("factor") = Real{100},
+        "Scan a finished run for a node voltage the circuit's "
+        "sources cannot account for. Reads only; changes nothing.");
+
+    m.def("describe_implausible_voltage",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool,
+            const solver::ImplausibleVoltage& v) {
+            return solver::describe(graph, pool, v);
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("finding"));
 
     py::class_<solver::InductorGuardAction>(m, "InductorGuardAction",
         "A post-solve guard OVERWROTE the solver's answer for an "
