@@ -8,6 +8,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **A run that dies part-way brings the run with it.** A simulation
+  that failed at 90 % returned nothing at all: the exception carried
+  a message and every sample computed before the failure was
+  destroyed with the stack. On a run that takes minutes that is the
+  difference between "here is where it broke, and here is the
+  waveform leading into it" and "start again".
+
+  `run_transient` now throws `solver::SimulationAborted`, which
+  carries `partial()` — everything recorded up to but not including
+  the step that failed — and `t_failed()`. Python gets
+  `pulsim.SimulationAborted` with `.partial` and `.t_failed`:
+
+  ```python
+  try:
+      res = p.simulate(b, t_end=..., dt=...)
+  except p.SimulationAborted as e:
+      print(e)                       # still names the row that failed
+      plot(e.partial.times, e.partial.states)   # …and you keep this
+  ```
+
+  **The default is still an exception**, and `SimulationAborted`
+  subclasses `RuntimeError` so existing `except RuntimeError` code is
+  unaffected. Returning a truncated result as if it were whole would
+  be exactly the silent wrong answer this project keeps removing, so
+  the partial trace has to be asked for by catching the type. The
+  partial trace is a genuine prefix on the same uniform grid, not a
+  resampling, and a test pins that. A cancellation via
+  `should_continue` is unchanged — a deliberate stop is not a
+  failure, and it still returns normally.
+
 * **The inductor guards now confess.** The audit's item B.3 was
   "delete `inductor_freeze_di_max` and `inductor_abs_clamp`" — the
   post-solve guards that overwrite an inductor's branch current, and

@@ -33,6 +33,8 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
 
+#include <string>
+#include <stdexcept>
 #include <vector>
 
 namespace pulsim::solver {
@@ -180,6 +182,43 @@ struct SimulationResult {
                event_iteration_breaches.size() *
                    sizeof(EventIterationBreach);
     }
+};
+
+/// Thrown when a transient cannot continue — and it brings the run
+/// with it.
+///
+/// v2.0 Phase 2. A simulation that dies at 90 % used to return
+/// nothing at all: the exception carried a message and every sample
+/// computed before the failure was destroyed with the stack. On a
+/// run that takes minutes that is the difference between "here is
+/// where it broke, and here is the waveform leading into it" and
+/// "start again".
+///
+/// The default remains an exception, deliberately. Returning a
+/// truncated result as if it were a whole one is exactly the silent
+/// wrong answer this project keeps removing; a caller who wants the
+/// partial trace has to ask for it by catching this type.
+class SimulationAborted : public std::runtime_error {
+public:
+    SimulationAborted(const std::string& what,
+                       SimulationResult partial,
+                       Real t_failed)
+        : std::runtime_error(what),
+          partial_(std::move(partial)),
+          t_failed_(t_failed) {}
+
+    /// Everything that WAS computed, up to but not including the
+    /// step that failed.
+    [[nodiscard]] const SimulationResult& partial() const noexcept {
+        return partial_;
+    }
+
+    /// The step time the solver could not reach.
+    [[nodiscard]] Real t_failed() const noexcept { return t_failed_; }
+
+private:
+    SimulationResult partial_;
+    Real t_failed_;
 };
 
 }  // namespace pulsim::solver
