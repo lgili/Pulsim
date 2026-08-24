@@ -40,6 +40,7 @@
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/numeric/concepts.hpp"
+#include "pulsim/numeric/logistic.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -69,7 +70,11 @@ struct IdealDiode {
         using std::exp;
         const S v_diode = v[0] - v[1];
         const S delta = v_diode - p.V_F0;
-        const S alpha = S{1} / (S{1} + exp(-p.kappa * delta));
+        // Overflow-free logistic: written as 1/(1+exp(-k*d)) this
+        // produces a NaN Jacobian entry once k*|d| passes 709, which
+        // an ordinary mains rectifier reaches in its first
+        // half-cycle. See numeric/logistic.hpp.
+        const S alpha = numeric::logistic(S{p.kappa * delta});
         const S i_on  = alpha * delta * (S{1} / p.R_d);
         const S i_off = (S{1} - alpha) * v_diode * p.G_off;
         return i_on + i_off;

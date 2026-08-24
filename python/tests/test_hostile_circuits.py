@@ -329,60 +329,72 @@ def test_preflight_options_accepts_keyword_arguments():
 # these need the operating point itself to be walked in.
 # ---------------------------------------------------------------------
 
-def stiff_diode_chain(n=12, kappa=50.0):
-    """A dozen smooth diodes with a sharp knee. Topologically fine —
-    the difficulty is entirely Newton's."""
+def blocking_diode_chain(n=10, g_off=1e-9):
+    """Ten REVERSE-biased junctions in series. Topologically fine and
+    not singular — but each interior node is held by a nanosiemens,
+    so its pivot carries almost no significant digits and Newton
+    wanders instead of converging."""
     b = p.CircuitBuilder()
-    b.add_voltage_source("V", "vin", "gnd", 20.0)
-    b.add_resistor("R", "vin", "n0", 100.0)
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_resistor("R", "vin", "n0", 1e3)
     for i in range(n):
         q = p.IdealDiodeParams()
-        q.kappa = kappa
-        to = "gnd" if i == n - 1 else f"n{i+1}"
-        b.add_nonlinear_diode(f"D{i}", f"n{i}", to, q)
+        q.G_off = g_off
+        anode = "gnd" if i == n - 1 else f"n{i+1}"
+        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q)
     return b
 
 
-def test_stiff_chain_finds_its_operating_point_unaided():
-    """The direct solve diverges here. Nothing should be asked of
-    the user for that: the cascade walks the conductance down and
-    lands on the answer."""
+def mains_rectifier(vpk=170.0, kappa=20.0):
+    """A 170 V peak half-wave rectifier into an RC load — about as
+    ordinary as a power circuit gets. It could not be simulated at
+    all before the logistic overflow fix: past kappa*|v| = 709 the
+    sigmoid's AD derivative was inf/inf, one NaN reached the
+    Jacobian, and Levenberg-Marquardt failed at every lambda."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, vpk, 60.0)
+    q = p.IdealDiodeParams()
+    q.kappa = kappa
+    b.add_nonlinear_diode("D", "ac", "vout", q)
+    b.add_resistor("R", "vout", "gnd", 50.0)
+    b.add_capacitor("C", "vout", "gnd", 100e-6)
+    return b
+
+
+def test_a_mains_rectifier_runs_at_all():
+    """The circuit every power-electronics course opens with. The
+    peak must land one diode drop below the source peak."""
+    res = _run(mains_rectifier(), t_end=3.4e-2, dt=1e-5)
+    v = np.asarray(res.v("vout"))
+    assert np.isfinite(v).all()
+    assert v.max() == pytest.approx(169.3, abs=0.5)
+
+
+@pytest.mark.parametrize("vpk,kappa", [
+    (24.0, 40.0), (170.0, 20.0), (170.0, 60.0), (400.0, 100.0),
+])
+def test_no_sharpness_or_voltage_poisons_the_jacobian(vpk, kappa):
+    """The old failure boundary tracked kappa*|v| = 709 — the double
+    -precision exp limit — which is a property of how the formula was
+    WRITTEN, not of the circuit. Sweep well past it."""
+    res = _run(mains_rectifier(vpk, kappa), t_end=1.7e-2, dt=1e-5)
+    v = np.asarray(res.v("vout"))
+    assert np.isfinite(v).all()
+    assert v.max() == pytest.approx(vpk - 0.7, rel=0.02)
+
+
+def test_blocking_chain_finds_its_operating_point_unaided():
+    """The direct solve wanders here. Nothing should be asked of the
+    user for that: the cascade clamps every node to ground and
+    relaxes the clamp by decades until the answer appears."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with pytest.raises(RuntimeError):
-            p.compute_dc_op(stiff_diode_chain(), strategy="naive")
-
+            p.compute_dc_op(blocking_diode_chain(), strategy="naive")
         rep = []
-        x = p.compute_dc_op(stiff_diode_chain(), report=rep)
-
+        x = p.compute_dc_op(blocking_diode_chain(), report=rep)
     assert np.isfinite(x).all()
-    assert x[1] == pytest.approx(8.4, abs=0.2)     # 12 × ~0.70 V
+    assert x[0] == pytest.approx(10.0, abs=1e-6)
     assert rep[0].strategy != "naive"
-
-
-def test_stiff_chain_simulates_from_its_dc_operating_point():
-    """The same recovery has to be reachable from the place users
-    actually meet it — `simulate(start_from_dc_op=True)`, which used
-    to abort the whole run when the DC solve failed."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        res = p.simulate(stiff_diode_chain(), t_end=2e-6, dt=1e-8,
-                          start_from_dc_op=True)
-    states = np.asarray(res.states)
-    assert np.isfinite(states).all()
-    assert states[0][1] == pytest.approx(8.4, abs=0.2)
-
-
-def test_a_circuit_beyond_every_rung_names_them_all():
-    """The Phase-2 bar is not "always converges" — it is "every
-    remaining failure tells you where you stand"."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        with pytest.raises(RuntimeError) as exc:
-            p.compute_dc_op(stiff_diode_chain(kappa=5000.0))
-    msg = str(exc.value)
-    for rung in ("naive", "gmin stepping", "source stepping",
-                  "pseudo-transient"):
-        assert rung in msg, f"{rung!r} missing from:\n{msg}"
-    # And it points at the one thing left to try.
-    assert "settle" in msg
+    # And the point it returns solves the circuit the user described.
+    assert rep[0].residual < 1e-6

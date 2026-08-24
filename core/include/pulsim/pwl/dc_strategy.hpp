@@ -386,6 +386,7 @@ inline void require_unaugmented_residual(
         graph, pool, mask, refresh, x, t_eval,
         cfg.max_unaugmented_residual,
         "compute_dc_op_gmin_stepped", report);
+
     return x;
 }
 

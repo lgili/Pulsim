@@ -45,6 +45,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <cmath>
 #include <format>
 #include <stdexcept>
 

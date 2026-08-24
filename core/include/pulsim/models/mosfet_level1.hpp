@@ -56,6 +56,7 @@
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/numeric/concepts.hpp"
+#include "pulsim/numeric/logistic.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -94,13 +95,13 @@ struct MosfetLevel1 {
 
         // Sigmoid α: 0 when V_OV << 0 (cutoff), 1 when
         // V_OV >> 0 (on).
-        const S alpha_on = S{1} /
-            (S{1} + exp(-p.kappa * V_OV));
+        const S alpha_on =
+            numeric::logistic(S{p.kappa * V_OV});
 
         // Sigmoid β: 1 when V_DS << V_OV (triode), 0 when
         // V_DS >> V_OV (saturation).
-        const S beta_triode = S{1} /
-            (S{1} + exp(-p.kappa * (V_OV - V_DS)));
+        const S beta_triode =
+            numeric::logistic(S{p.kappa * (V_OV - V_DS)});
 
         const S clm = S{1} + p.lambda * V_DS;
 
