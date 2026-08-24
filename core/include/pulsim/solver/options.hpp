@@ -32,6 +32,23 @@ struct SimulationOptions {
     Real t_end   = Real{0};
     Real dt      = Real{0};
 
+    /// Output decimation (v2.0 Phase 1, audit finding
+    /// `waveform-storage-vector-of-vectors`). Record every m-th
+    /// step: sample j is step `j · store_every`, so the recorded
+    /// grid stays STRICTLY UNIFORM at an effective step of
+    /// `store_every · dt` — FFT / harmonic / ripple analysis on
+    /// the result remains valid, it just runs at the coarser
+    /// spacing. The solver still INTEGRATES at `dt`; only what is
+    /// stored changes.
+    ///
+    /// 1 (default) records every step, exactly as v1.x did.
+    ///
+    /// Because the grid is kept uniform, the FINAL step is
+    /// recorded only when `(expected_step_count() - 1)` is a
+    /// multiple of `store_every`; choose a divisor of the step
+    /// count when the exact end state matters (or leave it at 1).
+    Size store_every = 1;
+
     /// Per-step event-iteration cap. After each cache.solve,
     /// Layer 5 V2.1 re-solves with the updated diode state until
     /// it stabilises OR this many iterations have run.
@@ -176,6 +193,9 @@ struct SimulationOptions {
         if (t_end <= t_start) {
             return false;
         }
+        if (store_every == 0) {
+            return false;   // would record nothing
+        }
         return true;
     }
 
@@ -200,6 +220,18 @@ struct SimulationOptions {
         // mathematically-exact integer ratios don't lose a sample.
         const Real ratio = span / dt + Real{1e-9};
         return static_cast<Size>(std::floor(ratio)) + 1;
+    }
+
+    /// Number of samples actually RECORDED, i.e.
+    /// `expected_step_count()` decimated by `store_every`
+    /// (steps 0, m, 2m, … — ceil division). Equals
+    /// `expected_step_count()` at the default `store_every = 1`.
+    [[nodiscard]] Size expected_sample_count() const noexcept {
+        const Size n = expected_step_count();
+        if (n == 0 || store_every <= 1) {
+            return n;
+        }
+        return (n + store_every - 1) / store_every;
     }
 };
 

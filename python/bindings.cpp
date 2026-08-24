@@ -24,6 +24,7 @@
 //   print(res.states[-1])
 
 #include <pybind11/eigen.h>
+#include <pybind11/numpy.h>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -1085,6 +1086,19 @@ void init_module(py::module_& m) {
         .def_readwrite("t_end",
                         &SimulationOptions::t_end)
         .def_readwrite("dt", &SimulationOptions::dt)
+        .def_readwrite("store_every",
+                        &SimulationOptions::store_every,
+                        "Output decimation: record every m-th step "
+                        "(default 1 = every step). The solver still "
+                        "integrates at `dt`; only what is STORED "
+                        "changes, and the recorded grid stays "
+                        "uniform at m*dt so FFT/harmonic analysis "
+                        "stays valid. Cuts result memory by m on "
+                        "long high-fidelity runs.")
+        .def("expected_sample_count",
+              &SimulationOptions::expected_sample_count,
+              "Number of samples the run will RECORD "
+              "(expected_step_count() decimated by store_every).")
         .def_readwrite("strict_event_iterations",
                         &SimulationOptions::strict_event_iterations,
                         "Phase-0 fix #9: true restores the pre-v1.8 "
@@ -1143,7 +1157,49 @@ void init_module(py::module_& m) {
         "`states` arrays, plus event diagnostics.",
         py::dynamic_attr())  // allow `result._builder = b` from Python
         .def_readonly("times", &SimulationResult::times)
-        .def_readonly("states", &SimulationResult::states)
+        // v2.0 Phase 1 (audit finding
+        // `waveform-storage-vector-of-vectors`): `states` is ONE
+        // contiguous (n_samples x n_state) buffer in C++, handed
+        // out here as a ZERO-COPY 2-D numpy view whose base is the
+        // result object itself (so the buffer outlives the view).
+        //
+        // v1.x returned a fresh Python LIST of n_samples 1-D
+        // ndarrays — a full copy of the entire run on EVERY
+        // attribute access. Indexing, slicing, iteration, len(),
+        // and np.asarray() all behave the same on the 2-D array;
+        // the view is READ-ONLY because it aliases kernel memory
+        // (call `.copy()` to get a mutable array).
+        .def_property_readonly("states",
+            [](py::object self) -> py::object {
+                const auto& r = self.cast<const SimulationResult&>();
+                const auto& tr = r.states;
+                const auto rows = static_cast<py::ssize_t>(tr.rows());
+                const auto cols = static_cast<py::ssize_t>(tr.cols());
+                if (rows == 0 || cols == 0 ||
+                    tr.data() == nullptr) {
+                    // Nothing recorded: an owned empty array, so
+                    // shape stays well-defined without pointing at
+                    // a null buffer.
+                    return py::array_t<Real>(
+                        std::vector<py::ssize_t>{rows, cols});
+                }
+                py::array_t<Real> arr(
+                    std::vector<py::ssize_t>{rows, cols},
+                    std::vector<py::ssize_t>{
+                        static_cast<py::ssize_t>(sizeof(Real)) * cols,
+                        static_cast<py::ssize_t>(sizeof(Real))},
+                    tr.data(),
+                    self);   // base → keeps the result alive
+                arr.attr("setflags")(py::arg("write") = false);
+                return std::move(arr);
+            },
+            "Recorded state samples as a read-only "
+            "(num_steps, state_size) numpy view — zero-copy over "
+            "the kernel's contiguous buffer. Use `.copy()` for a "
+            "mutable array.")
+        .def_property_readonly("states_bytes",
+            [](const SimulationResult& r) { return r.states.bytes(); },
+            "Bytes held by the contiguous sample buffer.")
         .def_readonly("event_iteration_count",
                        &SimulationResult::event_iteration_count)
         .def_readonly("commutation_events",

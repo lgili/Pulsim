@@ -150,7 +150,7 @@ Before (manual matplotlib):
 res = p.run_transient(cache, b.graph, b.pool, opts, switch_fn=pwm)
 times = np.asarray(res.times) * 1e3
 vout_idx = b.node_id_of("vout")
-v_out = np.array([s[vout_idx] for s in res.states])
+v_out = res.states[:, vout_idx]      # 2-D view → column slice (v2.0)
 fig, ax = plt.subplots(figsize=(10, 4))
 ax.plot(times, v_out, lw=0.8)
 ax.set_xlabel("time [ms]"); ax.set_ylabel("V_out [V]")

@@ -41,7 +41,14 @@ import numpy as np
 
 def states_as_array(result) -> np.ndarray:
     """Coerce ``SimulationResult.states`` (numpy array OR a list of
-    state vectors) to a contiguous ``(N, state_size)`` float array."""
+    state vectors) to a contiguous ``(N, state_size)`` float array.
+
+    .. note::
+       For a kernel ``SimulationResult`` this returns the READ-ONLY
+       zero-copy view itself (v2.0) — deliberately, so walking a
+       long run costs nothing. Callers that need to modify the data
+       must ``.copy()`` first; the public per-signal accessors
+       (``res.v`` / ``res.i``) already hand back owned copies."""
     s = result.states
     if hasattr(s, "shape"):
         return np.asarray(s, dtype=float)

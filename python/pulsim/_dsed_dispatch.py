@@ -34,6 +34,8 @@ reference scenarios.
 from __future__ import annotations
 
 import warnings
+
+import numpy as _np
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
@@ -315,7 +317,17 @@ class _PEDSimulationResult:
         cpu_time_seconds: float = 0.0,
     ) -> None:
         self.times = times
-        self.states = states
+        # v2.0: the PWL engine's `states` is a 2-D (n_samples,
+        # state_size) numpy array. Match that here so the public
+        # contract does not depend on which engine ran — code like
+        # `res.states[:, node_id]` (which the docs recommend) works
+        # for engine='dsed' too. Read-only for the same reason the
+        # kernel view is: a result is an output, not a scratch pad.
+        arr = _np.asarray(states, dtype=float)
+        if arr.ndim == 1:
+            arr = arr.reshape(len(times), -1) if times else arr.reshape(0, 0)
+        arr.setflags(write=False)
+        self.states = arr
         self.n_accept = n_accept
         self.n_reject = n_reject
         self.n_events = n_events
@@ -326,6 +338,12 @@ class _PEDSimulationResult:
         # for API-compat with code that destructures both result types.
         self.event_iteration_count: list = []
         self.commutation_events: list = []
+
+    @property
+    def states_bytes(self) -> int:
+        """Bytes held by the sample buffer (parity with the PWL
+        engine's ``SimulationResult.states_bytes``)."""
+        return int(self.states.nbytes)
 
     def num_steps(self) -> int:
         return len(self.times)
