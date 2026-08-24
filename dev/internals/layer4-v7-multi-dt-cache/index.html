@@ -1775,10 +1775,22 @@ integration).</p>
 <span class="p">};</span>
 </code></pre></div>
 <p>When <code>dt == this-&gt;dt()</code> (the primary dt), <code>solve_at</code> delegates
-to <code>solve</code> — same fast path. When <code>dt</code> is different, <code>solve_at</code>
-uses an auxiliary <code>unordered_map&lt;dt, unordered_map&lt;mask,
-segment&gt;&gt;</code> keyed first by dt. Lazy build on demand per <code>(mask,
-dt)</code> pair.</p>
+to <code>solve</code> — same fast path.</p>
+<p><strong>v2.0 Phase 1 rework</strong> (audit finding
+<code>alt-dt-cache-unbounded-factorization</code>): the original V7 kept an
+auxiliary map keyed by <em>exact Real dt</em> of per-mask segments — one
+fully analyzed + factorized segment per <code>(mask, dt)</code> pair,
+forever. Sub-step event correction produces an essentially unique
+dt per commutation, so that map grew without bound. Now each
+recently-evented mask owns ONE <strong>event solver</strong> (small LRU,
+<code>kMaxEventEntries = 8</code>) storing the mask's <code>(G, C, b)</code> split; a dt
+change recombines <code>J = G + (1/dt)·C</code> and runs a numeric
+<code>factorize()</code> on the entry's single symbolic analysis (the
+sparsity pattern is dt-invariant). No dt-keyed storage exists.
+<code>num_alt_dt_values()</code> / <code>num_alt_segments_at(dt)</code> keep their
+signatures but now report over the ≤ 8 resident entries' <em>current</em>
+dt values. <code>refactor_parametric</code> drops the entries (their split is
+a snapshot of the pool's parameters).</p>
 <h2 id="why-not-sherman-morrison">Why not Sherman-Morrison<a class="headerlink" href="#why-not-sherman-morrison" title="Permanent link">&para;</a></h2>
 <p>The original V7-as-Sherman-Morrison idea would build factors
 for ADJACENT Gray-code switch states via rank-1 updates of an
@@ -1793,11 +1805,20 @@ different angle:
 <ul>
 <li><code>solve_at(mask, primary_dt, ...)</code> matches <code>solve(mask, ...)</code>
   bit-identical.</li>
-<li>Distinct auxiliary dt values populate separate sub-caches;
-  <code>num_alt_dt_values()</code> reports the count.</li>
-<li>Repeat calls reuse cached segments (no rebuild).</li>
-<li>Multi-dt chopper solve at switch-ON gives the expected
-  voltage divider answer regardless of the auxiliary dt.</li>
+<li>A dt change on a known mask is an in-place refactor
+  (<code>metrics().event_refactors</code>), not a new entry; same <code>(mask,
+  dt)</code> is pure factor reuse (<code>event_hits</code>).</li>
+<li>The commutation pattern (pre/post masks at fresh dts every
+  event) holds steady at 2 entries with zero growth.</li>
+<li>Entries are LRU-bounded at <code>kMaxEventEntries</code>; evicted masks
+  rebuild transparently and match a fresh cache at 1e-12.</li>
+<li>The refactor path matches a from-scratch build at the same dt
+  on a dynamic RLC circuit (1e-12).</li>
+<li>A numerically singular refactorize ERASES the entry (a stale
+  entry would poison later solves at the previously working dt).</li>
+<li><code>refactor_parametric</code> invalidates entries; post-update
+  <code>solve_at</code> agrees with a fresh cache built from the updated
+  pool.</li>
 </ul>
 <h2 id="sub-step-state-correction-future">Sub-step state correction (future)<a class="headerlink" href="#sub-step-state-correction-future" title="Permanent link">&para;</a></h2>
 <p>Once <code>solve_at</code> exists, <code>run_transient</code> can:</p>
@@ -1822,9 +1843,11 @@ the auxiliary cache stays bounded:
 - M visited masks × K distinct partial-dt values × ~10 KB per
   segment ≈ M·K·10 KB.
 - For typical M = 4, K = 10: 400 KB. Acceptable.</p>
-<p>For pathological cases (every commutation has a unique
-partial-dt to many decimal places), the cache could grow
-unbounded. Future tuning can add LRU eviction.</p>
+<p>v2.0 Phase 1: the pathological case is gone by construction —
+memory is <code>min(visited_masks, 8) × (split + one factor)</code>,
+independent of how many distinct dt values the run produces. The
+primary lazy segment cache is separately bounded by a byte budget
+(<code>set_segment_budget_bytes</code>, default 1 GiB).</p>
 <h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

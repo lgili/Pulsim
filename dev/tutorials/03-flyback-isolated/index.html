@@ -1901,12 +1901,29 @@
 <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span>  <span class="p">(</span><span class="s2">"Dout"</span><span class="p">,</span> <span class="s2">"sec_pos"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"Cout"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"sec_gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span> <span class="p">(</span><span class="s2">"R_L"</span><span class="p">,</span>  <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"sec_gnd"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
-<span class="c1"># Secondary needs a path to primary ground (otherwise the</span>
-<span class="c1"># secondary node-set is dangling). Use a tiny resistor.</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span> <span class="p">(</span><span class="s2">"R_iso"</span><span class="p">,</span> <span class="s2">"sec_gnd"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">)</span>
 </code></pre></div>
 <blockquote>
-<p><strong>Note on isolation.</strong> A real flyback's primary and secondary grounds are physically separate. Pulsim's MNA solver requires a connected matrix, so we tie them through a 1 µΩ "isolation resistor". This is a numerical artifact; it does not affect the physics.</p>
+<p><strong>Note on isolation.</strong> A real flyback's primary and secondary grounds
+are physically separate, and MNA needs every node to have a voltage
+reference — so the secondary must be tied to ground <em>somehow</em>.
+Since v2.0 you do not write that tie yourself: <code>simulate()</code> runs a
+topology preflight, spots the unreferenced secondary, inserts a
+1 GΩ tie and tells you exactly which node it anchored to (the
+lowest-numbered node of the subnet — here <code>sec_pos</code>, so the device
+is called <code>R_auto_iso_sec_pos</code>; which node carries the tie does not
+matter, since all it does is fix the subnet's reference). Inspect it
+with
+<code>result._preflight</code>, or pass <code>auto_regularize=False</code> to get the
+original named error instead.</p>
+<p>If you do write it by hand, make it <strong>large</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R_iso"</span><span class="p">,</span> <span class="s2">"sec_gnd"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e9</span><span class="p">)</span>   <span class="c1"># reference, not a bond</span>
+</code></pre></div>
+<p>Earlier versions of this tutorial suggested 1 µΩ. That is wrong and
+the reason matters: a 1 µΩ tie is a galvanic <strong>bond</strong>. It does not
+give the secondary a reference — it welds it to primary ground,
+destroying the very isolation the circuit exists to provide, and it
+does so silently. A 1 GΩ tie draws nanoamps and leaves the physics
+untouched.</p>
 </blockquote>
 <h2 id="switch-driver">Switch driver<a class="headerlink" href="#switch-driver" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span>

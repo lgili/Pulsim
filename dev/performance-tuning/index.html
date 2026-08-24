@@ -1958,36 +1958,91 @@ Key properties:</p>
 <li><strong>Lazy expansion.</strong> Combinations not reached in the simulation
   are never factored. Cold-start cost ≈ (num reached configs) ×
   (single LU cost).</li>
-<li><strong>Multi-dt cache.</strong> Several <code>dt</code> values can coexist in the same
-  cache (<code>cache.build_at_dt(dt_1)</code>, <code>cache.build_at_dt(dt_2)</code>);
-  the solver picks the right factor by <code>dt</code> key.</li>
+<li><strong>Event-dt solves.</strong> Sub-step event correction solves at
+  interpolated fractions of <code>dt</code> through a small pool of reusable
+  event solvers (≤ 8 masks resident); a new event <code>dt</code> is a cheap
+  in-place numeric refactor (<code>J = G + (1/dt)·C</code> on a shared
+  symbolic analysis), never a permanently cached factor.</li>
 </ul>
 <p>For circuits with many switches (3-φ VSI with 6 IGBTs has 64
 reachable states; PFC + boost cascade can have hundreds), the
-cache can become memory-heavy. Profile with <code>cache.num_entries()</code>
-and <code>cache.factor_bytes_estimate()</code>.</p>
+cache can become memory-heavy. In lazy mode the cache is
+LRU-bounded to a byte budget (default 1 GiB) — least-recently
+solved masks are evicted and transparently rebuilt on re-visit.
+Profile with <code>cache.num_built_segments()</code> and
+<code>cache.segment_cache_bytes()</code>; tune with
+<code>cache.set_segment_budget_bytes(n)</code> (<code>0</code> disables eviction), and read
+<code>cache.metrics().segment_evictions</code> to see whether the budget is
+actually binding.</p>
+<blockquote>
+<p><strong>Sample these between runs, not during one.</strong> <code>num_built_segments</code>
+and <code>segment_cache_bytes</code> walk the segment map, which lazy builds
+and evictions mutate — and <code>run_transient</code> releases the GIL, so a
+monitor thread polling them mid-run races with that mutation. The
+<code>metrics()</code> counters are atomic and are safe to read live.</p>
+</blockquote>
+<p>Bounding output memory is usually the bigger lever on a long run:
+<code>simulate(..., store_every=m)</code> records every m-th step on a uniform
+<code>m·dt</code> grid, cutting the result buffer by m.</p>
 <h2 id="dc-operating-point-seeding">DC operating-point seeding<a class="headerlink" href="#dc-operating-point-seeding" title="Permanent link">&para;</a></h2>
 <p>A converter that doesn't converge from <code>x=0</code> often converges from
 its DC OP. Two ways to ask:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1) p.simulate(...) flag</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=...</span><span class="p">,</span> <span class="n">dt</span><span class="o">=...</span><span class="p">,</span> <span class="n">start_from_dc_op</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
-<span class="c1"># 2) Explicit compute_dc_op with a strategy</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="kn">import</span> <span class="n">compute_dc_op</span><span class="p">,</span> <span class="n">PseudoTransientConfig</span>
-<span class="n">x0</span> <span class="o">=</span> <span class="n">compute_dc_op</span><span class="p">(</span>
-    <span class="n">b</span><span class="p">,</span> <span class="n">t_eval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
-    <span class="n">config</span><span class="o">=</span><span class="n">PseudoTransientConfig</span><span class="p">(</span><span class="n">num_steps</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">dt_initial</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">),</span>
-<span class="p">)</span>
+<span class="c1"># 2) Explicit, and ask which rung answered</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="kn">import</span> <span class="n">compute_dc_op</span>
+<span class="n">report</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">x0</span> <span class="o">=</span> <span class="n">compute_dc_op</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_eval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">report</span><span class="o">=</span><span class="n">report</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">summary</span><span class="p">())</span>
 </code></pre></div>
-<p>The strategies (<code>compute_dc_op</code> calls them under the hood):</p>
-<ul>
-<li><strong><code>SourceStepConfig</code></strong> — ramp sources from 0 → final value over N
-  steps. Robust for stiff non-linear circuits.</li>
-<li><strong><code>PseudoTransientConfig</code></strong> — Newton iteration with an added
-  pseudo-time damping term that vanishes at convergence; good for
-  systems with multiple Newton basins.</li>
-</ul>
-<p>See <a href="../gotchas/">gotchas.md</a> for which one to reach for first.</p>
+<p>Since v2.0 you rarely pick a strategy: <code>"auto"</code> walks the cascade
+until one rung answers, and the common case never leaves rung 1.</p>
+<table>
+<thead>
+<tr>
+<th><code>strategy=</code></th>
+<th>What it varies</th>
+<th>Reach for it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"naive"</code></td>
+<td>nothing</td>
+<td>you want the diagnostic, not an answer</td>
+</tr>
+<tr>
+<td><code>"gmin_step"</code></td>
+<td>a conductance from every node to ground, 1e-2 S → 1e-12 S by decades</td>
+<td>the matrix pivots badly, or Newton has no basin from <code>x = 0</code></td>
+</tr>
+<tr>
+<td><code>"source_step"</code></td>
+<td>every independent source amplitude, 0 → nominal (<code>SourceStepConfig.n_steps</code>)</td>
+<td>multiple Newton basins</td>
+</tr>
+<tr>
+<td><code>"pseudo_trans"</code></td>
+<td>an artificial <code>dx/dt = -F</code></td>
+<td>resistive-nonlinear problems with no MNA constraint rows</td>
+</tr>
+<tr>
+<td><code>"settle"</code></td>
+<td>nothing — it runs a real transient (<code>SettleConfig</code>)</td>
+<td>the steady state is a <em>switching average</em>, which no DC solve can find</td>
+</tr>
+<tr>
+<td><code>"auto"</code> (default)</td>
+<td>the first four, in order</td>
+<td>always</td>
+</tr>
+</tbody>
+</table>
+<p>Both homotopy rungs warm-start from the previous solve and bisect
+when a step turns out to be too wide. <code>gmin=0</code> disables the 1e-12 S
+conductance floor if you need the un-augmented system exactly.</p>
+<p>See <a href="../gotchas/">gotchas.md</a> for the failure modes each one addresses.</p>
 <h2 id="profiling">Profiling<a class="headerlink" href="#profiling" title="Permanent link">&para;</a></h2>
 <p>The C++ side has no internal profiling hooks — the kernel is
 header-only and any allocation or branch happens inline. To measure:</p>

@@ -872,6 +872,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#c2-gmin-and-what-it-will-not-do-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      (c2) gmin, and what it will not do for you
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#d-sharp-sigmoid-kappa-too-high" class="md-nav__link">
     <span class="md-ellipsis">
       (d) Sharp sigmoid (kappa too high)
@@ -1979,6 +1988,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#c2-gmin-and-what-it-will-not-do-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      (c2) gmin, and what it will not do for you
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#d-sharp-sigmoid-kappa-too-high" class="md-nav__link">
     <span class="md-ellipsis">
       (d) Sharp sigmoid (kappa too high)
@@ -2211,10 +2229,57 @@
 <p><strong>Fix:</strong> seed from the DC OP:</p>
 <div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="n">start_from_dc_op</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
-<p>This calls <code>compute_dc_op(graph, pool, mask, opts.t_start)</code> first and feeds the result into <code>HistoryState</code>.</p>
+<p>Since v2.0 this is not a single solve that either works or aborts the run. It is a cascade, tried in order until one rung answers:</p>
+<table>
+<thead>
+<tr>
+<th>Rung</th>
+<th>What it varies</th>
+<th>What it fixes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>naive</td>
+<td>nothing</td>
+<td>the common case; costs one solve</td>
+</tr>
+<tr>
+<td>gmin stepping</td>
+<td>a conductance from every node to ground, 1e-2 S down to 1e-12 S by decades</td>
+<td>a badly-pivoted matrix, and a Newton with no basin to start from</td>
+</tr>
+<tr>
+<td>source stepping</td>
+<td>every independent source amplitude, 0 → nominal</td>
+<td>a Newton basin problem</td>
+</tr>
+<tr>
+<td>pseudo-transient</td>
+<td>an artificial <code>dx/dt = -F</code></td>
+<td>resistive-nonlinear problems with no constraint rows</td>
+</tr>
+</tbody>
+</table>
+<p>Both homotopies bisect when a step is too wide, and each rung warm-starts from the last. If all four fail you get one message naming every rung and why it stopped — and a pointer to <code>strategy="settle"</code>, which runs an actual transient and is the only route to a <em>switching</em> steady state.</p>
+<p>You can drive the same cascade directly:</p>
+<div class="highlight"><pre><span></span><code><span class="n">report</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">compute_dc_op</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">report</span><span class="o">=</span><span class="n">report</span><span class="p">)</span>     <span class="c1"># strategy="auto" by default</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">summary</span><span class="p">())</span>                <span class="c1"># which rung answered</span>
+</code></pre></div>
+<p><strong><code>compute_dc_op</code> stamps nonlinear devices.</strong> Before v2.0 it did not: a diode fed from 5 V through 1 kΩ was reported at 5.000 V instead of 0.700 V, because <code>dc_assemble</code> treats <code>BranchKind::Nonlinear</code> as an open circuit and nothing put it back. If you want the linear system, ask for it with <code>enable_nonlinear_refresh=False</code>.</p>
+<h4 id="c2-gmin-and-what-it-will-not-do-for-you">(c2) gmin, and what it will not do for you<a class="headerlink" href="#c2-gmin-and-what-it-will-not-do-for-you" title="Permanent link">&para;</a></h4>
+<p>Every DC solve stamps a 1e-12 S conductance from each node to ground — SPICE's <code>GMIN</code>. On a 12 V node that is 12 pA, three decades below the 1 GΩ reference ties the topology preflight inserts, so the two never compete. Pass <code>gmin=0</code> to reproduce the un-augmented system exactly.</p>
+<p>What it deliberately will <strong>not</strong> do is give a <em>floating</em> node an equation. A conductance on every node would make an unreferenced node solvable and report a confident 0 V for a node whose voltage is undefined — so every DC entry point checks the un-augmented system for structural rank deficiency first, and the named error wins:</p>
+<div class="highlight"><pre><span></span><code>compute_dc_op: DC matrix structurally singular for mask 0b0 N=0
+  — node 's1' is in a 2-node subnet with no connection to ground
+  through any device, so its voltage is undefined rather than merely
+  hard to compute...
+</code></pre></div>
+<p>gmin conditions matrices; the preflight repairs topology. Neither covers for the other.</p>
 <h4 id="d-sharp-sigmoid-kappa-too-high">(d) Sharp sigmoid (<code>kappa</code> too high)<a class="headerlink" href="#d-sharp-sigmoid-kappa-too-high" title="Permanent link">&para;</a></h4>
 <p>MOSFETs / IGBTs use sigmoid blending between regions; <code>kappa</code> controls how sharp. A <code>kappa = 50</code> is more accurate at the boundary but makes the Jacobian condition number worse.</p>
-<p><strong>Fix:</strong> dial <code>kappa</code> down to 10–15.</p>
+<p><strong>Fix:</strong> dial <code>kappa</code> down to 10–15. Since v2.0 the DC cascade recovers a 12-diode chain at <code>kappa = 50</code> on its own (gmin stepping gets it), but <code>kappa = 5000</code> defeats every rung — at that sharpness you are asking a smooth model to be an ideal switch, and <code>add_diode()</code> (the PWL switch diode) is the right device instead.</p>
 <h3 id="symptom-residual-oscillates-but-doesnt-shrink">Symptom: residual oscillates but doesn't shrink<a class="headerlink" href="#symptom-residual-oscillates-but-doesnt-shrink" title="Permanent link">&para;</a></h3>
 <p>You hit a Newton "limit cycle" — the iterate ping-pongs between two faces of a non-smooth feature.</p>
 <p><strong>Fix:</strong> the trust-region Newton (V5) and pseudo-transient continuation (V10) are designed for this. Set <code>opts.max_newton_iterations = 50</code> and let the solver escalate strategies internally.</p>
@@ -2228,7 +2293,13 @@
 - A node is dangling (no connection to ground).
 - All sources are current sources and the topology has no DC path to ground.
 - A nonlinear branch (<code>BranchKind::Nonlinear</code>) has no diagonal contribution. Pulsim already adds a 1e-12 G_min for <code>SaturableInductor</code>; for other custom devices you may need to add your own.</p>
-<p><strong>Fix:</strong> check the topology with a small dump (<code>pool.state_size(graph)</code> should equal <code>num_active_nodes + num_sources + num_inductors</code>). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — <code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)</code> — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.</p>
+<p><strong>Fix (v2.0 and later): none needed.</strong> <code>simulate()</code> runs a topology
+preflight that finds unreferenced subnets and ties each one to ground
+through a 1 GΩ resistor, then tells you what it inserted. Read it with
+<code>result._preflight</code>, or pass <code>auto_regularize=False</code> to get the error
+back. What follows is what that pass does for you, and what to type if
+you build the cache yourself.</p>
+<p><strong>Manual fix:</strong> check the topology with a small dump (<code>pool.state_size(graph)</code> should equal <code>num_active_nodes + num_sources + num_inductors</code>). For an isolated subnet (e.g. a transformer secondary) add a HIGH-value tie to ground — <code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)</code> — which gives the MNA a DC reference without bonding the nets. A 1 µΩ resistor is a deliberate galvanic BOND: applied to a live floating node it silently changes the circuit.</p>
 <h2 id="time-step-dt-choices">Time-step (<code>dt</code>) choices<a class="headerlink" href="#time-step-dt-choices" title="Permanent link">&para;</a></h2>
 <h3 id="symptom-ringing-or-instability-with-reasonable-circuits">Symptom: ringing or instability with reasonable circuits<a class="headerlink" href="#symptom-ringing-or-instability-with-reasonable-circuits" title="Permanent link">&para;</a></h3>
 <p>If <code>dt</code> is too large compared to the system's smallest time constant, the trapezoidal companion can ring (overshoot a true exponential by 10-20 %).</p>
@@ -2241,8 +2312,13 @@
 <p>You called the wrong typed accessor on <code>DevicePool</code>. The <code>kind_of(b_id)</code> casts the variant index directly to <code>StoredKind</code>.</p>
 <p><strong>Fix:</strong> always go through the typed accessor matching <code>pool.kind_of(b_id)</code>, or use the variant directly.</p>
 <h3 id="symptom-forgotten-ground">Symptom: forgotten ground<a class="headerlink" href="#symptom-forgotten-ground" title="Permanent link">&para;</a></h3>
-<p>Every isolated subnet must have a DC reference. A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it.</p>
-<p><strong>Fix:</strong> <code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)</code> for a reference-only tie (leakage ~nA, invisible in the waveforms), or <code>1e-6</code> only when you intend an actual bond between the grounds.</p>
+<p>Every isolated subnet must have a DC reference. Since v2.0 <code>simulate()</code>
+supplies one for you — see the preflight note above — so this section is
+about the cases where you want to place the tie yourself, or where you
+need a BOND rather than a reference.</p>
+<p>A galvanically-isolated transformer secondary needs a tie to primary ground: use a HIGH-value resistor (1 MΩ–1 GΩ) when you only need the MNA reference, or a deliberate low-value bond (1 µΩ / 0 V source) when the nets are truly common. The two are NOT interchangeable — a 1 µΩ tie on a node that carries signal silently shorts it, and preflight will never insert one: it only ever adds references.</p>
+<p><strong>Fix:</strong> nothing, if you let <code>simulate()</code> do it. Otherwise
+<code>b.add_resistor("R_iso", "sec_gnd", "gnd", 1e9)</code> for a reference-only tie (leakage ~nA, invisible in the waveforms), or <code>1e-6</code> only when you intend an actual bond between the grounds.</p>
 <h3 id="symptom-switch_fn-never-fires-the-bit-i-expect">Symptom: switch_fn never fires the bit I expect<a class="headerlink" href="#symptom-switch_fn-never-fires-the-bit-i-expect" title="Permanent link">&para;</a></h3>
 <p><code>SwitchStateMask</code> indexes by <strong>switch order in the graph</strong>, not by <code>branch_id</code>. The mapping is established by <code>add_switch</code> / <code>add_diode</code> insertion order.</p>
 <p><strong>Fix:</strong> inspect <code>b.graph.num_switches</code> and check the insertion sequence. The first switch added gets bit 0, the next gets bit 1, etc.</p>
@@ -2252,7 +2328,7 @@
 <p><strong>Fix:</strong> if you're developing locally, set <code>PYTHONPATH=build/python:$PYTHONPATH</code> or do <code>pip install -e .</code>. Confirm via <code>print(pulsim.__file__)</code> that you're using the development tree.</p>
 <h3 id="symptom-numpy-array-vs-list-confusion">Symptom: NumPy-array vs. list confusion<a class="headerlink" href="#symptom-numpy-array-vs-list-confusion" title="Permanent link">&para;</a></h3>
 <p><code>SimulationResult.states[k]</code> is a NumPy 1-D array; <code>SimulationResult.times</code> is a Python list of floats.</p>
-<p><strong>Fix:</strong> pass <code>times</code> through <code>np.asarray(...)</code> if you need to do vectorized arithmetic. For state, just index directly: <code>res.states[k][node_id]</code>.</p>
+<p><strong>Fix:</strong> pass <code>times</code> through <code>np.asarray(...)</code> if you need to do vectorized arithmetic. <code>res.states</code> is already a 2-D numpy array (v2.0), so <code>res.states[k][node_id]</code>, <code>res.states[:, node_id]</code> and <code>res.states[k, node_id]</code> all work directly — but it is a READ-ONLY view over kernel memory, so <code>.copy()</code> first if you need to modify it in place.</p>
 <h2 id="when-to-ask-for-help">When to ask for help<a class="headerlink" href="#when-to-ask-for-help" title="Permanent link">&para;</a></h2>
 <p>If you hit something not listed here, the best signals are:</p>
 <ol>

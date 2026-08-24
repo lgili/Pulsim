@@ -2230,9 +2230,22 @@
 </tbody>
 </table>
 <p>Returns a <code>SimulationResult</code> with parallel arrays:
-- <code>result.times</code> — <code>list[float]</code>, length <code>(t_end − t_start) / dt + 1</code>.
-- <code>result.states</code> — <code>list[numpy.ndarray]</code>, each of length <code>pool.state_size(graph)</code>.
-- <code>result.num_steps()</code> — convenience accessor.</p>
+- <code>result.times</code> — <code>list[float]</code>, length <code>floor((t_end − t_start) / dt) + 1</code>, or that divided by <code>store_every</code> (rounded up) when decimation is on.
+- <code>result.states</code> — read-only <code>numpy.ndarray</code> of shape
+  <code>(num_steps, pool.state_size(graph))</code>. A <strong>zero-copy view</strong> over the
+  kernel's contiguous sample buffer (v2.0): indexing, slicing,
+  iteration and <code>np.asarray</code> behave as before, but access is O(1)
+  instead of rebuilding a list of per-sample arrays. Call <code>.copy()</code>
+  for a writable array.
+- <code>result.num_steps()</code> — convenience accessor.
+- <code>result.states_bytes</code> — bytes held by the sample buffer.</p>
+<p>Pass <code>simulate(..., store_every=m)</code> — or set it on a
+<code>SolverOptions</code> bundle, on a raw <code>SimulationOptions</code>, or as
+<code>simulation.store_every</code> in YAML — to record only every m-th
+step. The solver still integrates at <code>dt</code>; the recorded grid stays
+strictly uniform at <code>m · dt</code> (so FFT / harmonic analysis on the
+result remains valid), and memory drops by the same factor.
+<code>opts.expected_sample_count()</code> reports what a run will store.</p>
 <h2 id="circuitbuilder"><code>CircuitBuilder</code><a class="headerlink" href="#circuitbuilder" title="Permanent link">&para;</a></h2>
 <p>Top-level fluent builder. Stores a <code>Graph</code> (topology) + <code>DevicePool</code> (per-device parameters) + an internal node-name → node-id map.</p>
 <h3 id="node-accessors">Node accessors<a class="headerlink" href="#node-accessors" title="Permanent link">&para;</a></h3>
@@ -2439,7 +2452,8 @@
 </code></pre></div>
 <p><code>SimulationResult</code>:
 - <code>result.times</code> — list[float]
-- <code>result.states</code> — list[numpy.ndarray]
+- <code>result.states</code> — read-only 2-D <code>numpy.ndarray</code>, shape
+  <code>(num_steps, state_size)</code> (zero-copy view)
 - <code>result.commutations</code> — list[CommutationEvent] (event-detection details)
 - <code>result.num_steps()</code> — int</p>
 <h2 id="yaml-loader">YAML loader<a class="headerlink" href="#yaml-loader" title="Permanent link">&para;</a></h2>
