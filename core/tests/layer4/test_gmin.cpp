@@ -47,9 +47,17 @@ builder::CircuitBuilder rl_circuit() {
 
 /// A chain of REVERSE-biased diodes with almost no leakage. This is
 /// the textbook gmin case: nothing here is singular, but every node
-/// between two diodes is held only by a 1e-15 S conductance, so the
+/// between two diodes is held only by a nanosiemens, so the
 /// Jacobian's pivots there carry no significant digits and Newton
 /// wanders instead of converging.
+///
+/// The chain has to be TWENTY diodes now. It was ten until the
+/// Newton loop learned to promote line search on a diverging step,
+/// which rescued the shorter chain on its own — the third time in
+/// this phase that a cheaper fix dissolved a more expensive
+/// feature's demonstration. The layering is the point: line search
+/// is free and goes first, and what survives it is what gmin
+/// stepping is actually for.
 ///
 /// (This fixture used to be a chain of sharp FORWARD-biased diodes.
 /// That was not stiffness — it was an arithmetic bug: the logistic
@@ -58,7 +66,7 @@ builder::CircuitBuilder rl_circuit() {
 /// forward chain became easy at every sharpness tried, up to
 /// kappa = 20000. A test whose premise a later fix removes is worse
 /// than no test, so the fixture had to change with it.)
-builder::CircuitBuilder reverse_biased_chain(Size n = 10,
+builder::CircuitBuilder reverse_biased_chain(Size n = 20,
                                                Real g_off = 1e-9) {
     builder::CircuitBuilder b;
     b.add_voltage_source("V", "vin", "gnd", 10.0);

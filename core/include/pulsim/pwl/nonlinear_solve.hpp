@@ -128,6 +128,11 @@ using NonlinearRefreshFn = std::function<
     constexpr Size kNearMissStreak = Size{3};
     Size near_miss_streak = Size{0};
 
+    // Residual of the PREVIOUS iteration, for the line-search
+    // auto-promotion above. Infinity on the first pass so it never
+    // fires before there is something to compare against.
+    Real prev_baseline_norm = std::numeric_limits<Real>::infinity();
+
     for (Size iter = 0; iter < max_iters; ++iter) {
         // Defense-in-depth (audit 2026-05 critic): a non-finite iterate means
         // a NaN/Inf entered the system — e.g. a bad device parameter that
@@ -188,6 +193,31 @@ using NonlinearRefreshFn = std::function<
         (void)nl_residual_norm;   // diagnostic only
         const Real baseline_norm =
             f_combined.lpNorm<Eigen::Infinity>();
+
+        // v2.0 Phase 2 — auto-promote LINE SEARCH, the way LM is
+        // auto-promoted below.
+        //
+        // The trigger is the one condition backtracking exists for
+        // and the one neither LM trigger sees: a full Newton step
+        // that made the residual WORSE. LM promotes on a singular
+        // factorize or on a near-miss stall (residual already tiny,
+        // ||dx|| plateaued), so a plainly DIVERGING Newton falls
+        // through both and the run dies.
+        //
+        // Promoting instead of defaulting line search on is
+        // deliberate: measured on a mains rectifier, backtracking
+        // from the first iteration costs ~30 % on a run that never
+        // needed it, while this comparison costs nothing. It
+        // recovered 6 of 11 failing (voltage, sharpness, dt)
+        // combinations, and on runs that already converged it moved
+        // the answer by 1.2e-12 on a 170 V scale — line search
+        // changes the PATH to the root, not the root.
+        if (!enable_line_search && !enable_lm && iter > 0 &&
+            std::isfinite(prev_baseline_norm) &&
+            baseline_norm > prev_baseline_norm) {
+            enable_line_search = true;
+        }
+        prev_baseline_norm = baseline_norm;
 
         // 4. Solve for `dx`. The strategy depends on which
         //    globalization is active:

@@ -25,9 +25,9 @@ def failing_rectifier():
     `max_dt_halvings=0` the local step reduction is disabled, so this
     is the pre-v2.0 hard failure."""
     b = p.CircuitBuilder()
-    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 170.0, 60.0)
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 400.0, 60.0)
     q = p.IdealDiodeParams()
-    q.kappa = 20.0
+    q.kappa = 100.0
     b.add_nonlinear_diode("D", "ac", "vout", q)
     b.add_resistor("R", "vout", "gnd", 50.0)
     b.add_capacitor("C", "vout", "gnd", 100e-6)
@@ -37,7 +37,7 @@ def failing_rectifier():
 def _fail():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return p.simulate(failing_rectifier(), t_end=1.7e-2, dt=1e-4,
+        return p.simulate(failing_rectifier(), t_end=1.7e-2, dt=2e-4,
                            enable_nonlinear_refresh=True,
                            max_dt_halvings=0)
 
@@ -76,7 +76,7 @@ def test_the_partial_trace_is_on_the_same_grid():
     with pytest.raises(p.SimulationAborted) as exc:
         _fail()
     t = np.asarray(exc.value.partial.times)
-    np.testing.assert_allclose(t, np.arange(len(t)) * 1e-4,
+    np.testing.assert_allclose(t, np.arange(len(t)) * 2e-4,
                                rtol=0, atol=1e-12)
 
 
