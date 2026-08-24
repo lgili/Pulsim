@@ -8,6 +8,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **Adversarial review of the Phase-2 tail** (44 agents over
+  #100-#105): 30 findings survived refutation, 9 did not. Ten
+  distinct defects, all introduced by this phase, all fixed:
+
+  * **A Python callback's exception was treated as a step-size
+    problem.** Both new catch sites caught every `std::exception`,
+    which includes `pybind11::error_already_set` — and *that* type's
+    constructor calls `PyErr_Fetch`, which **clears** the Python
+    error indicator. So a `KeyboardInterrupt` raised inside the
+    user's `switch_fn` was swallowed: the step was rolled back and
+    re-taken, the signal was gone, the run finished, and a `DtRetry`
+    that never happened was recorded. A deterministic callback error
+    was re-invoked up to 126 times and then surfaced stripped of its
+    type. Both catches are now `std::runtime_error` — everything the
+    solver throws is one; a foreign exception is not.
+  * **A retried step mixed two time steps.** `refresh_dt` has always
+    been fixed at `opts.dt` (its own comment claimed otherwise and
+    was always wrong), which was harmless while the only off-nominal
+    path was a linear solve. The retry made it a silent wrong answer:
+    every capacitor at `2C/sub_dt` while the saturable inductor stayed
+    at `2L/opts.dt` — 64× out at the bottom of the ladder. The retry
+    now refuses circuits with saturable inductors, because threading
+    the dt is not enough on its own: `SaturableInductorHistory` has no
+    snapshot/restore, so its flux cannot be rolled back.
+  * **A diode mask cycle in any sub-step but the last vanished** —
+    including under `strict_event_iterations`, which exists precisely
+    to make that fatal.
+  * The voltage check treated an **op-amp** (a VCVS at gain 1e5) as
+    contributing nothing to the bound, so every op-amp circuit would
+    have tripped it; it now declines to have an opinion there. It
+    also read a **NaN** trace as plausible (`abs(x) > bound` is false
+    for NaN), in a check named for leaving physics.
+  * The whole voltage check sat inside `except Exception: pass`, so
+    under `-W error` its own warning became an exception and was
+    swallowed — **no** warning and no attribute, for the one user who
+    asked for warnings to be fatal.
+  * `result.dt_retries` was recorded and **never surfaced**, though
+    its own documentation says the user is entitled to know.
+    `simulate()` now warns, and `voltage_sanity_factor` is reachable
+    from `simulate()` rather than only from the binding.
+  * `SimulationAborted.partial` had none of the side-table attributes
+    `simulate()` attaches on success, so every name-based accessor on
+    it failed with a message telling the user to do what they had
+    already done.
+  * `Size{1} << h` with an unvalidated `max_dt_halvings` is undefined
+    behaviour at h ≥ 64; clamped at 20. `reported_limit` was
+    last-write rather than a maximum, meaningless for the freeze
+    guard. `approx_bytes()` counted neither of the two new vectors,
+    and `DtRetry` carries a few hundred bytes of failure text each.
+
 * **2.9 megavolts on a 48 V circuit, reported in silence** — and now
   named. This closes audit item B.3, though not the way it was
   written.

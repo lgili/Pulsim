@@ -1358,6 +1358,7 @@ def simulate(
     max_event_iterations: Optional[int] = None,
     strict_event_iterations: bool = False,
     max_dt_halvings: Optional[int] = None,
+    voltage_sanity_factor: Optional[float] = None,
     store_every: Optional[int] = None,
     auto_regularize: Optional[bool] = None,
     tol_newton_dx: Optional[float] = None,
@@ -2042,9 +2043,26 @@ def simulate(
             kwargs["should_continue"] = should_continue
         if live_ring is not None:
             kwargs["live_ring"] = live_ring
-        res = run_transient(
-            cache, builder.graph, builder.pool, opts, **kwargs,
-        )
+        try:
+            res = run_transient(
+                cache, builder.graph, builder.pool, opts, **kwargs,
+            )
+        except SimulationAborted as _aborted:
+            # The partial trace is a fresh pybind-owned object with
+            # none of the side-table attributes simulate() attaches
+            # on success, so without this every name-based accessor
+            # on it — .v(), .i(), .power(), .signal(), .plot() —
+            # fails with a message telling the user to do the thing
+            # they already did. Give the wreckage the same handles
+            # the survivors get.
+            try:
+                _partial = _aborted.partial
+                _partial._builder = builder
+                _partial._preflight = _preflight_report
+                _partial._switch_fn = kwargs.get("switch_fn")
+            except AttributeError:  # pragma: no cover — defensive
+                pass
+            raise
     # Close the progress bar with a newline if we were in bar mode.
     if progress is True or (isinstance(progress, str)
                               and progress.lower() == "bar"):
@@ -2109,19 +2127,49 @@ def simulate(
     # throughout. The current guards cannot see it: they watch i_L,
     # which stays believable. Check the voltage against what the
     # circuit's own sources can account for.
+    # The try covers ONLY the kernel call. Wrapping the warn() too
+    # meant that under `-W error` — where a warning IS an exception —
+    # the detector produced no signal at all: not the warning, and
+    # not the attribute either. A user who asked for warnings to be
+    # fatal is the last one who should be silently spared this.
+    _volt = None
     try:
         from . import _pulsim as _k  # type: ignore[import-not-found]
-        _volt = _k.find_implausible_voltage(builder.graph,
-                                             builder.pool, res)
-        if _volt.node >= 0:
-            import warnings
-            warnings.warn(
-                "simulate(): " + _k.describe_implausible_voltage(
-                    builder.graph, builder.pool, _volt),
-                stacklevel=2)
-            res._implausible_voltage = _volt
+        _volt = _k.find_implausible_voltage(
+            builder.graph, builder.pool, res,
+            100.0 if voltage_sanity_factor is None
+            else float(voltage_sanity_factor))
     except Exception:  # pragma: no cover — never break a good run
-        pass
+        _volt = None
+    if _volt is not None and _volt.node >= 0:
+        import warnings
+        res._implausible_voltage = _volt
+        warnings.warn(
+            "simulate(): " + _k.describe_implausible_voltage(
+                builder.graph, builder.pool, _volt),
+            stacklevel=2)
+
+    # A retried step integrated its interval more finely than the
+    # caller asked for. That is a change in ACCURACY, and the record
+    # exists because they are entitled to know — which is worth
+    # nothing if nobody says it out loud.
+    _retries = list(getattr(res, "dt_retries", []) or [])
+    if _retries:
+        import warnings
+        worst = max(d.halvings for d in _retries)
+        first = min(_retries, key=lambda d: d.t)
+        warnings.warn(
+            f"simulate(): {len(_retries)} step(s) would not converge "
+            f"at dt = {dt:g} and were re-taken at a smaller step "
+            f"(down to dt/{1 << worst}), first at t = "
+            f"{first.t:.6g} s. The sampling grid is unchanged — what "
+            f"changed is that those intervals were integrated more "
+            f"finely than you asked for. If it happens often, the "
+            f"run is telling you dt is too coarse for this circuit. "
+            f"Inspect result.dt_retries; pass max_dt_halvings=0 to "
+            f"get the failure back instead.\n  First reason: "
+            f"{first.reason[:200]}",
+            stacklevel=2)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

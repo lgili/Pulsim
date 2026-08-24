@@ -1,0 +1,5 @@
+if(EXISTS "/Users/lgili/pulsim_phase2/build-tests/core/pulsim_core_layer1_tests-b12d07c_tests.cmake")
+  include("/Users/lgili/pulsim_phase2/build-tests/core/pulsim_core_layer1_tests-b12d07c_tests.cmake")
+else()
+  add_test(pulsim_core_layer1_tests_NOT_BUILT-b12d07c pulsim_core_layer1_tests_NOT_BUILT-b12d07c)
+endif()

@@ -34,10 +34,15 @@
 // this whole phase has been removing. Naming the node is the part
 // the simulator can do honestly.
 //
-// The default factor is 100. A boost converter legitimately exceeds
-// its input, a flyback legitimately multiplies by its turns ratio,
-// and a resonant tank legitimately rings — 100x accommodates all of
-// them and still catches the 60000x above by a wide margin.
+// The default factor is 100, and it is a judgement, not a law —
+// which is why it is a parameter. A boost converter and an ordinary
+// flyback sit well inside it and a 60000x runaway sits well outside.
+// A HIGH-VOLTAGE flyback (a 12 V input driving a 10 kV output, an
+// ignition or CRT-style design) legitimately exceeds it and will
+// trip the check; raise `factor` for those. Reporting a false alarm
+// a user can dismiss is the safer error here than staying silent
+// about a megavolt, but it IS an error and it should be said out
+// loud rather than discovered.
 
 #include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
@@ -125,10 +130,27 @@ struct ImplausibleVoltage {
     if (!(factor > Real{0}) || result.num_steps() == 0) {
         return out;
     }
+    // A DEPENDENT source defeats the bound. `add_op_amp_ideal` is a
+    // VCVS at gain 1e5, and its output is a function of the circuit
+    // rather than of any parameter here — so the bound would be set
+    // by the input sources alone and an ordinary op-amp circuit
+    // would trip it. Folding the gain in instead would define the
+    // bound in terms of the thing being checked. Neither is honest,
+    // so the check declines to have an opinion.
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (graph.branch(b).kind == topology::BranchKind::Source &&
+            pool.is_registered(b) &&
+            pool.kind_of(b) == pwl::DevicePool::StoredKind::VCVS) {
+            return out;
+        }
+    }
+
     const Real scale = max_source_magnitude(graph, pool);
     if (!(scale > Real{0})) {
-        // A current-source-only circuit has no voltage scale to
-        // compare against. Say nothing rather than guess one.
+        // Nothing to compare against: a circuit driven only by
+        // current sources, by a user `b_extra_fn`, by a closed-loop
+        // controller, or by initial conditions alone. Say nothing
+        // rather than invent a scale.
         return out;
     }
     const Real bound = factor * scale;
@@ -140,7 +162,11 @@ struct ImplausibleVoltage {
                                          static_cast<Index>(x.size()));
         for (Index i = 0; i < n; ++i) {
             const Real a = std::abs(x[i]);
-            if (a > bound && a > out.peak) {
+            // `!(a <= bound)` rather than `a > bound`: NaN compares
+            // false against BOTH, and a trace full of NaN read as
+            // "plausible" would be the exact failure a check named
+            // for leaving physics exists to catch.
+            if (!(a <= bound) && !(a <= out.peak)) {
                 out.node = i;
                 out.peak = a;
                 out.t_peak = result.times[k];

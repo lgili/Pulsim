@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/lgili/pulsim_phase2/build-tests/cmake_install.cmake",
+		"/Users/lgili/pulsim_phase2/build-tests/_deps/yaml-cpp-build/cmake_install.cmake",
+		"/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/cmake_install.cmake",
+		"/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/src/cmake_install.cmake",
+		"/Users/lgili/pulsim_phase2/build-tests/core/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
