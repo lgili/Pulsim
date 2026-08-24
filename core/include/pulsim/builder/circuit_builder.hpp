@@ -37,8 +37,10 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/preflight.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <cmath>
 #include <format>
 #include <functional>
 #include <optional>
@@ -339,6 +341,88 @@ public:
             b_id, models::Resistor::Params{
                 .G = Real{1} / R_ohms});
         return *this;
+    }
+
+    // -------------------------------------------------------------
+    // v2.0 Phase 2 (B.1) — topology preflight + auto-regularization
+    // -------------------------------------------------------------
+    //
+    // Closes audit finding `no-topology-preflight-or-auto-shunt`.
+    // Runs the connectivity sweep and, unless the caller opts out,
+    // gives every unreferenced subnet a high-value tie to ground —
+    // the fix `docs/gotchas.md` has been asking users to type by
+    // hand.
+    //
+    // Must run BEFORE a `PwlStateSpaceCache` is constructed: the
+    // cache holds `const Graph&` / `DevicePool&` references, and
+    // this appends branches to both. Appending a BRANCH (never a
+    // node) leaves `state_size` and every branch-variable index
+    // untouched, so nothing downstream shifts; the graph's
+    // structural id correctly changes, since the topology did.
+    //
+    // Idempotent: once a subnet has its tie it reaches ground, so a
+    // second call finds nothing.
+    [[nodiscard]] pwl::PreflightReport run_preflight(
+        const pwl::PreflightOptions& opts = {}) {
+        if (!(opts.tie_resistance > Real{0}) ||
+            !std::isfinite(opts.tie_resistance)) {
+            throw std::invalid_argument(std::format(
+                "run_preflight: tie_resistance must be a positive, "
+                "finite value (got {}). It becomes a conductance "
+                "1/R, so 0 would stamp an infinity and quietly turn "
+                "the whole solution into NaN.", opts.tie_resistance));
+        }
+        if (!opts.auto_regularize) {
+            return pwl::analyze_preflight(graph_, pool_, opts);
+        }
+
+        // ITERATE TO A FIXED POINT rather than applying one analysis.
+        //
+        // A galvanic finding covers a whole island but earns it a
+        // single tie, so DC-floating sub-blocks INSIDE that island
+        // are still floating once it lands — e.g. a current source
+        // feeding a resistor chain, where the source conducts
+        // galvanically but contributes no conductance at DC. The
+        // first version of this code filtered the DC findings
+        // against the galvanic ones by component membership and so
+        // reported those sub-blocks as fixed while leaving them
+        // singular. Re-analysing after each round makes the
+        // nesting fall out for free.
+        //
+        // Terminates: every round ties at least one component to
+        // ground, strictly reducing the number of components that
+        // do not reach it. The bound is a belt-and-braces guard, not
+        // a real limit.
+        pwl::PreflightReport all;
+        const Size max_rounds =
+            static_cast<Size>(graph_.num_nodes()) + 1;
+        for (Size round = 0; round < max_rounds; ++round) {
+            auto found = pwl::analyze_preflight(graph_, pool_, opts);
+            if (found.empty()) break;
+            for (auto& f : found.findings) {
+                const std::string node_key =
+                    graph_.node(f.anchor_node).name.empty()
+                        ? std::format("n{}", f.anchor_node)
+                        : graph_.node(f.anchor_node).name;
+                const std::string tie_name =
+                    opts.name_prefix + node_key;
+                // Branch first, THEN the pool entry — an
+                // unregistered branch would make a re-run of the
+                // sweep (and the assembler) throw on `kind_of`.
+                const Index b_id = add_branch_(
+                    tie_name, f.anchor_node, kGround,
+                    topology::BranchKind::PassiveLinear);
+                pool_.add_resistor(
+                    b_id, models::Resistor::Params{
+                        .G = Real{1} / opts.tie_resistance});
+                f.inserted_resistance = opts.tie_resistance;
+                f.detail += std::format(
+                    " Pulsim inserted '{}' ({:g} Ω to ground).",
+                    tie_name, opts.tie_resistance);
+                all.findings.push_back(std::move(f));
+            }
+        }
+        return all;
     }
 
     CircuitBuilder& add_capacitor(
