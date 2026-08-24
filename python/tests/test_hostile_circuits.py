@@ -398,3 +398,42 @@ def test_blocking_chain_finds_its_operating_point_unaided():
     assert rep[0].strategy != "naive"
     # And the point it returns solves the circuit the user described.
     assert rep[0].residual < 1e-6
+
+
+# ---------------------------------------------------------------------
+# Class 3 (Phase 2, B.4) — circuits that are well-posed and
+# well-conditioned but whose STEP is too big. B.1 gave every node a
+# reference; B.2 gave the operating point a cascade; this class needs
+# the step itself walked in.
+# ---------------------------------------------------------------------
+
+def test_a_mains_rectifier_runs_at_a_coarse_dt():
+    """dt = 1e-4 on a 60 Hz rectifier is ~170 samples per cycle —
+    a perfectly reasonable thing for a user to type. One step of it
+    will not converge, and that used to end the run."""
+    res = _run(mains_rectifier(), t_end=1.7e-2, dt=1e-4)
+    v = np.asarray(res.v("vout"))
+    assert np.isfinite(v).all()
+    assert v.max() == pytest.approx(169.3, abs=0.5)
+    assert len(res.dt_retries) >= 1
+    assert max(d.halvings for d in res.dt_retries) == 1
+
+
+def test_the_retry_does_not_move_a_single_sample():
+    """Sub-steps are internal. `times[k]` must stay exactly k·dt or
+    an FFT of the result is silently wrong — which is the whole
+    reason store_every was made a pure stride in Phase 1."""
+    dt = 1e-4
+    res = _run(mains_rectifier(), t_end=1.7e-2, dt=dt)
+    t = np.asarray(res.times)
+    assert len(res.dt_retries) >= 1
+    np.testing.assert_allclose(t, np.arange(len(t)) * dt,
+                               rtol=0, atol=1e-12)
+    spacing = np.diff(t)
+    assert np.allclose(spacing, dt, rtol=0, atol=1e-15)
+
+
+def test_opting_out_restores_the_hard_failure():
+    with pytest.raises(RuntimeError, match="converge"):
+        _run(mains_rectifier(), t_end=1.7e-2, dt=1e-4,
+             max_dt_halvings=0)

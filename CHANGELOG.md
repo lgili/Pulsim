@@ -8,6 +8,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **A step the solver cannot take is re-taken at a smaller one**
+  (audit finding B.4). A failed inner solve used to end the run and
+  discard everything computed before it. Now the step is rolled back
+  and re-taken as 2 sub-steps of dt/2, then 4 of dt/4, up to
+  `2^max_dt_halvings` (default 6), and the run continues at the
+  nominal dt.
+
+  Unlike the fallback rungs Phase 2 B.2 had to repair, this one is a
+  genuinely different problem: the trapezoidal companion's `2C/dt`
+  grows as dt shrinks, improving the Jacobian's diagonal dominance
+  and putting the previous state closer to the answer. A 170 V mains
+  half-wave rectifier at `dt = 1e-4` — about 170 samples per cycle,
+  a perfectly reasonable thing to type — fails one step and needs
+  exactly **one** halving; the peak lands at 169.25 V either way.
+
+  * **The output grid does not move.** Sub-steps are internal, so
+    `times[k]` stays exactly `t_start + k·dt` and an FFT of the
+    result stays valid — the property Phase 1e made `store_every` a
+    pure stride to protect. A test walks every sample to confirm it.
+  * **The easy run pays nothing.** With the ladder enabled and
+    disabled, a run that needs no retry produces bit-identical
+    output; a test compares every sample of every row exactly.
+  * **Nothing is silent.** Every reduction lands in
+    `result.dt_retries` with the time, the number of halvings, and
+    what the nominal attempt reported — integrating an interval more
+    finely than asked is a change in accuracy the user is entitled
+    to know about. `max_dt_halvings=0` restores the hard failure.
+  * **A topology defect fails fast instead.** Reachability to ground
+    is a property of the graph, not of dt, so an isolated subnet is
+    singular at every step size. Retrying one burned the whole
+    ladder and buried Phase 1's named diagnostic under a "could not
+    be taken, even split into 64 sub-steps" wrapper — the dead-rung
+    defect again, this time in my own new code, caught by this
+    project's own hostile-circuit suite. The check now runs once,
+    before the loop.
+  * No retry on the static path (no capacitors or inductors), where
+    dt does not enter the matrix at all and a smaller step would
+    re-run the byte-identical computation.
+  * `PwlStateSpaceCache::solve_at`'s three singular-matrix messages
+    gained the same `explain_singular` node naming its sibling
+    `solve` has had since Phase 1 — the retry routes through
+    `solve_at`, which made the gap visible.
+  * Internal tidy this made necessary and worth having: the step's
+    right-hand side accumulator was written out three times, and the
+    ORDER of its terms is what keeps results bit-identical, so one
+    copy is the only way to keep that promise honest.
+
 * **A mains rectifier can be simulated** (v2.0 Phase 2). Every smooth
   device model blends its regions with a logistic, written the
   textbook way:

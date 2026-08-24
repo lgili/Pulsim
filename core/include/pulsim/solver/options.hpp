@@ -101,6 +101,32 @@ struct SimulationOptions {
     /// line search when both are enabled.
     bool enable_newton_lm = false;
 
+    /// v2.0 Phase 2 (B.4) — local time-step reduction on a failed
+    /// step.
+    ///
+    /// When the inner solve of a step throws — Newton will not
+    /// converge, or the mask's matrix will not factorize — the run
+    /// used to end there, discarding everything computed so far. A
+    /// smaller step is the standard answer and a genuinely different
+    /// problem: the trapezoidal companion's `2C/dt` grows as dt
+    /// shrinks, which both improves the Jacobian's diagonal
+    /// dominance and puts the previous state closer to the answer.
+    ///
+    /// So the step is rolled back and re-taken as 2 sub-steps of
+    /// dt/2, then 4 of dt/4, up to `2^max_dt_halvings`. The run then
+    /// continues at the nominal dt.
+    ///
+    /// THE OUTPUT GRID IS UNCHANGED. Sub-steps are internal; samples
+    /// are still recorded only at nominal grid points, so
+    /// `times[k] = t_start + k·dt` continues to hold exactly and an
+    /// FFT of the result stays valid. Every reduction is recorded in
+    /// `result.dt_retries`, because integrating an interval more
+    /// finely than the user asked for is a change in accuracy they
+    /// are entitled to know about.
+    ///
+    /// 0 disables the retry and restores the pre-v2.0 hard failure.
+    Size max_dt_halvings = Size{6};   // dt/64 floor
+
     /// Layer 5 V3 — sub-step state correction.
     ///
     /// When `true` AND `cache.dt() > 0` (dynamic path), each
