@@ -35,6 +35,14 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from ._pulsim import (  # type: ignore[import-not-found]
+    # v2.0 Phase 2 — raised when a transient cannot continue. Unlike
+    # a bare RuntimeError it carries `.partial` (everything computed
+    # before the failure) and `.t_failed` (the step it could not
+    # take), so a run that dies at 90 % is not a total loss. Still a
+    # subclass of RuntimeError: returning a truncated result as if it
+    # were whole would be the silent wrong answer this API exists to
+    # avoid, so the partial trace has to be asked for.
+    SimulationAborted,
     # Builder API (Layer 6).
     CircuitBuilder,
     # Topology / device handles (opaque — produced by the
@@ -429,6 +437,7 @@ __all__ = [
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
     "Cancelled",
+    "SimulationAborted",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
     "ClosedLoop",
@@ -656,6 +665,7 @@ if _HAS_SCOPE:
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
+
 
 
 class NameNotFoundError(KeyError):

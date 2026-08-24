@@ -97,6 +97,34 @@ void init_module(py::module_& m) {
     static py::object cancelled_exc = py::register_exception<
         analysis::Cancelled>(m, "_CxxCancelled", PyExc_RuntimeError);
 
+    // v2.0 Phase 2: a transient that dies part-way brings the run
+    // with it. `py::register_exception` can only carry a message, so
+    // the payload needs a translator that builds the Python
+    // exception object and attaches the partial result to it.
+    //
+    // The type is created here rather than in Python because the
+    // translator has to name it at throw time, and the result object
+    // it carries is a pybind-bound C++ type.
+    static py::object aborted_exc = py::exception<void>(
+        m, "SimulationAborted", PyExc_RuntimeError);
+    py::register_exception_translator(
+        [](std::exception_ptr pe) {
+            if (!pe) {
+                return;
+            }
+            try {
+                std::rethrow_exception(pe);
+            } catch (const solver::SimulationAborted& e) {
+                py::object inst = aborted_exc(e.what());
+                // `partial` is a COPY: the C++ exception is destroyed
+                // as the translator returns, so a reference would
+                // dangle the moment the caller touched it.
+                inst.attr("partial") = py::cast(e.partial());
+                inst.attr("t_failed") = py::cast(e.t_failed());
+                PyErr_SetObject(aborted_exc.ptr(), inst.ptr());
+            }
+        });
+
     // ---- SwitchStateMask -------------------------------------------------
     py::class_<topology::SwitchStateMask>(m, "SwitchStateMask",
         "Bit-vector identifying the on/off state of every "

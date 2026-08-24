@@ -569,6 +569,14 @@ inline SimulationResult run_transient(
         }
     };
 
+    // v2.0 Phase 2: a run that dies part-way keeps what it computed.
+    // The step loops below can throw from a dozen places; whichever
+    // one it is, the samples already recorded are worth more than the
+    // stack they would otherwise unwind with. `t_reached` tracks the
+    // step being attempted so the exception can say where it stopped.
+    Real t_reached = opts.t_start;
+    try {
+
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
         //
@@ -600,6 +608,7 @@ inline SimulationResult run_transient(
             }
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
+            t_reached = t;
             const Real t_prev = opts.t_start +
                                  static_cast<Real>(k - 1) * opts.dt;
 
@@ -1178,6 +1187,7 @@ inline SimulationResult run_transient(
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
+            t_reached = t;
             const Real t_prev = k > 0
                 ? (opts.t_start +
                     static_cast<Real>(k - 1) * opts.dt)
@@ -1375,6 +1385,21 @@ inline SimulationResult run_transient(
                 result.event_iteration_count.push_back(iters - 1);
             }
         }
+    }
+
+    }  // try
+    catch (const analysis::Cancelled&) {
+        // A deliberate stop, not a failure. It already leaves the
+        // partial trace in `result` by unwinding no further than the
+        // caller, so let it through unchanged.
+        throw;
+    }
+    catch (const SimulationAborted&) {
+        throw;                       // already carries its payload
+    }
+    catch (const std::exception& e) {
+        throw SimulationAborted(e.what(), std::move(result),
+                                 t_reached);
     }
 
     return result;
