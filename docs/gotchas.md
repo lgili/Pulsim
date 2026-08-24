@@ -41,13 +41,47 @@ Some op-amp / feedback circuits have a non-trivial DC operating point that `x = 
 res = p.simulate(b, ..., start_from_dc_op=True)
 ```
 
-This calls `compute_dc_op(graph, pool, mask, opts.t_start)` first and feeds the result into `HistoryState`.
+Since v2.0 this is not a single solve that either works or aborts the run. It is a cascade, tried in order until one rung answers:
+
+| Rung | What it varies | What it fixes |
+|---|---|---|
+| naive | nothing | the common case; costs one solve |
+| gmin stepping | a conductance from every node to ground, 1e-2 S down to 1e-12 S by decades | a badly-pivoted matrix, and a Newton with no basin to start from |
+| source stepping | every independent source amplitude, 0 → nominal | a Newton basin problem |
+| pseudo-transient | an artificial `dx/dt = -F` | resistive-nonlinear problems with no constraint rows |
+
+Both homotopies bisect when a step is too wide, and each rung warm-starts from the last. If all four fail you get one message naming every rung and why it stopped — and a pointer to `strategy="settle"`, which runs an actual transient and is the only route to a *switching* steady state.
+
+You can drive the same cascade directly:
+
+```python
+report = []
+x = p.compute_dc_op(b, report=report)     # strategy="auto" by default
+print(report[0].summary())                # which rung answered
+```
+
+**`compute_dc_op` stamps nonlinear devices.** Before v2.0 it did not: a diode fed from 5 V through 1 kΩ was reported at 5.000 V instead of 0.700 V, because `dc_assemble` treats `BranchKind::Nonlinear` as an open circuit and nothing put it back. If you want the linear system, ask for it with `enable_nonlinear_refresh=False`.
+
+#### (c2) gmin, and what it will not do for you
+
+Every DC solve stamps a 1e-12 S conductance from each node to ground — SPICE's `GMIN`. On a 12 V node that is 12 pA, three decades below the 1 GΩ reference ties the topology preflight inserts, so the two never compete. Pass `gmin=0` to reproduce the un-augmented system exactly.
+
+What it deliberately will **not** do is give a *floating* node an equation. A conductance on every node would make an unreferenced node solvable and report a confident 0 V for a node whose voltage is undefined — so every DC entry point checks the un-augmented system for structural rank deficiency first, and the named error wins:
+
+```
+compute_dc_op: DC matrix structurally singular for mask 0b0 N=0
+  — node 's1' is in a 2-node subnet with no connection to ground
+  through any device, so its voltage is undefined rather than merely
+  hard to compute...
+```
+
+gmin conditions matrices; the preflight repairs topology. Neither covers for the other.
 
 #### (d) Sharp sigmoid (`kappa` too high)
 
 MOSFETs / IGBTs use sigmoid blending between regions; `kappa` controls how sharp. A `kappa = 50` is more accurate at the boundary but makes the Jacobian condition number worse.
 
-**Fix:** dial `kappa` down to 10–15.
+**Fix:** dial `kappa` down to 10–15. Since v2.0 the DC cascade recovers a 12-diode chain at `kappa = 50` on its own (gmin stepping gets it), but `kappa = 5000` defeats every rung — at that sharpness you are asking a smooth model to be an ideal switch, and `add_diode()` (the PWL switch diode) is the right device instead.
 
 ### Symptom: residual oscillates but doesn't shrink
 

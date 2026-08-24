@@ -1,48 +1,56 @@
-"""Pulsim — DC operating-point strategies (Phase A.2).
+"""Pulsim — the DC operating point.
 
-The naive single-shot DC solver (`compute_dc_op` inside the kernel,
-exposed via `simulate(..., start_from_dc_op=True)` at `t_end ≈ dt`)
-fails on stiff nonlinear circuits — e.g. long diode chains, MOS
-amplifiers with high V_F0, or LDO topologies where every device sits
-near a discontinuity.
+`compute_dc_op(builder)` answers one question: with the sources held
+at their values at `t_eval`, where does this circuit sit?
 
-This module exposes 3 fallback strategies that wrap the existing
-kernel primitives without requiring a kernel rebuild:
+Getting that right is three things, not one, and v2.0 Phase 2 made
+this module do all three (before it, none of them):
 
-  * **naive**         — single-shot solve at `t_eval`.
-  * **pseudo_trans**  — run the transient solver from `x = 0` (or a
-                          user-supplied seed) with the sources held at
-                          their nominal values, long enough for the
-                          natural damping (R, L, C dissipation +
-                          MOSFET smoothing) to drive the state to
-                          steady state. Returns the final state.
-  * **source_step**   — like `pseudo_trans` but ramps each voltage /
-                          current source amplitude from 0 to its
-                          nominal value across `n_steps` short
-                          transients. Lets the solver "see" the
-                          easy DC problem first and continuously
-                          deform to the hard one.
-  * **auto**          — try `naive`; on exception fall back to
-                          `pseudo_trans`; on failure of that, fall
-                          back to `source_step`.
+  1. **Nonlinear devices are stamped.** A smooth diode / MOSFET /
+     IGBT is a real device at DC. Solving with them open is not an
+     approximation, it is a different circuit — 5 V through 1 kΩ into
+     a diode answers 5.000 V instead of 0.700 V.
+  2. **PWL diode states are resolved.** A diode's on/off bit is both
+     an input to the matrix and an output of the solve, so the pair
+     is iterated to consistency.
+  3. **A failed solve is recovered, not reported.** Stiff operating
+     points are normal. The cascade below runs until one rung
+     answers.
 
-All strategies return a `numpy.ndarray` of the same shape as
-`builder.graph.num_states`.
+Strategies
+----------
+  * ``"naive"``        — one solve, no fallback. Fastest, and what
+                          you want when you would rather see the
+                          diagnostic than an answer.
+  * ``"gmin_step"``    — clamp every node to ground through a large
+                          conductance, then relax it by decades,
+                          warm-starting each solve. Fixes a
+                          badly-pivoted matrix and a Newton that
+                          cannot find the basin from x = 0.
+  * ``"source_step"``  — ramp every independent source amplitude
+                          from 0 to nominal, re-solving at each step.
+  * ``"pseudo_trans"`` — integrate dx/dt = -F to equilibrium.
+  * ``"settle"``       — run an actual transient until the state
+                          stops moving. The only strategy that can
+                          find a *switching* steady state, which no
+                          DC solve can; also the slowest by far.
+  * ``"auto"`` (default) — the kernel cascade (naive → gmin → source
+                          → pseudo-transient), then ``"settle"`` as a
+                          last resort.
+
+Every strategy returns a ``numpy.ndarray`` of length
+``pool.state_size(graph)``.
 
 Example
 -------
 
-    builder = build_diode_chain()
-    try:
-        x_dc = p.compute_dc_op(builder)        # naive
-    except RuntimeError:
-        x_dc = p.compute_dc_op(builder,
-                                  strategy="pseudo_trans",
-                                  t_settle=5e-3)
+    x_dc = p.compute_dc_op(builder)                    # auto
+    x_dc = p.compute_dc_op(builder, strategy="naive")  # or fail loudly
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -52,6 +60,7 @@ import numpy as np
 __all__ = [
     "DCStrategy",
     "PseudoTransientConfig",
+    "SettleConfig",
     "SourceStepConfig",
     "compute_dc_op",
 ]
@@ -63,7 +72,15 @@ __all__ = [
 
 @dataclass
 class PseudoTransientConfig:
-    """Knobs for the `pseudo_trans` strategy."""
+    """Knobs for the ``"settle"`` strategy — running a transient until
+    the state stops moving.
+
+    The name is historical: before v2.0, ``strategy="pseudo_trans"``
+    meant this settling transient. It now means the kernel's
+    pseudo-transient continuation rung, which is a different algorithm
+    with different knobs, so this config no longer belongs to it.
+    :data:`SettleConfig` is the alias to prefer.
+    """
     t_settle: float = 5.0e-3
     """Simulation horizon. Should exceed the slowest plant time
     constant by ≈ 10×."""
@@ -93,35 +110,127 @@ class SourceStepConfig:
 # Public API
 # =============================================================================
 
-DCStrategy = str  # "naive" | "pseudo_trans" | "source_step" | "auto"
+DCStrategy = str
+"""One of ``"naive" | "gmin_step" | "source_step" | "pseudo_trans" |
+``"settle" | "auto"``."""
+
+# `PseudoTransientConfig` configures the `"settle"` strategy — the
+# transient-to-steady-state one. The kernel's own pseudo-transient
+# rung is a different algorithm with its own knobs; this alias makes
+# the Python-side meaning unambiguous without breaking imports.
+SettleConfig = PseudoTransientConfig
+
+class _SettleReport:
+    """What `"settle"` can honestly say about itself: it ran a
+    transient, so there is no rung, no conductance floor and no
+    residual against a DC system it never assembled."""
+
+    strategy = "settle"
+    rungs_attempted = 0
+    final_gmin = 0.0
+    residual = float("nan")
+
+    def summary(self) -> str:
+        return ("DC operating point taken from a settled transient "
+                 "(no DC system was solved)")
+
+    def __repr__(self) -> str:
+        return f"<DCSolveReport: {self.summary()}>"
+
+
+_KERNEL_STRATEGIES = {
+    "naive": "Naive",
+    "gmin_step": "GminStepping",
+    "source_step": "SourceStepping",
+    "pseudo_trans": "PseudoTransient",
+    "auto": "Auto",
+}
+
+_VALID = tuple(_KERNEL_STRATEGIES) + ("settle",)
+
+
+def _reraise_as_cancelled(exc, where="compute_dc_op"):
+    """Translate the kernel's `_CxxCancelled` into `pulsim.Cancelled`.
+
+    `py::register_exception` can only carry a message, and the
+    user-facing type is defined in a Python module that imports the
+    extension — so the two cannot be related by inheritance and the
+    translation has to happen at the boundary. Without it a Cancel
+    arrives as `pulsim._pulsim._CxxCancelled`, which
+    `except pulsim.Cancelled` does not catch, breaking the contract
+    `docs/helpers.md` states.
+    """
+    from . import Cancelled as _Cancelled
+    m = re.search(r"progress index (-?\d+)", str(exc))
+    idx = int(m.group(1)) if m else None
+    if idx is not None and idx < 0:
+        idx = None
+    raise _Cancelled(where, point_index=idx) from exc
+
+
+def _is_kernel_cancellation(exc) -> bool:
+    from . import _pulsim as _k  # type: ignore[import-not-found]
+    cxx = getattr(_k, "_CxxCancelled", None)
+    return cxx is not None and isinstance(exc, cxx)
 
 
 def compute_dc_op(builder,
                     *,
                     strategy: DCStrategy = "auto",
                     t_eval: float = 0.0,
+                    settle: Optional["SettleConfig"] = None,
                     pseudo_trans: Optional[PseudoTransientConfig] = None,
                     source_step: Optional[SourceStepConfig] = None,
+                    gmin: Optional[float] = None,
+                    enable_nonlinear_refresh: Optional[bool] = None,
+                    max_event_iterations: Optional[int] = None,
+                    auto_regularize: Optional[bool] = None,
+                    mask=None,
                     verbose: bool = False,
+                    report: Optional[list] = None,
                     should_continue=None,
                     ) -> np.ndarray:
-    """Compute the DC operating-point of a circuit.
+    """Compute the DC operating point of a circuit.
 
     Parameters
     ----------
     builder
         A populated :class:`pulsim.CircuitBuilder`.
     strategy
-        One of `"naive"`, `"pseudo_trans"`, `"source_step"`, or
-        `"auto"` (default — tries each in order until one succeeds).
+        ``"auto"`` (default), ``"naive"``, ``"gmin_step"``,
+        ``"source_step"``, ``"pseudo_trans"``, or ``"settle"``.
+        See the module docstring.
     t_eval
-        Time at which to evaluate time-varying sources (used by the
-        naive solver only; non-naive strategies hold sources at their
-        nominal value throughout).
-    pseudo_trans, source_step
-        Optional config overrides; sane defaults are used if omitted.
-    verbose
-        If True, prints which strategy succeeded.
+        Time at which time-varying sources (PWM / sine / pulse) are
+        sampled. The operating point is the DC solution with each
+        source frozen at its value there.
+    pseudo_trans
+        Knobs for ``"settle"`` (horizon, dt, steady-state tolerance).
+    source_step
+        Knobs for ``"source_step"``; only ``n_steps`` is used by the
+        kernel homotopy.
+    gmin
+        Conductance floor to ground, in siemens. ``None`` uses the
+        kernel default (1e-12, SPICE's GMIN); ``0`` disables it.
+    enable_nonlinear_refresh
+        ``None`` (default) stamps the smooth diode / MOSFET / IGBT
+        chain whenever the circuit contains one. ``False`` solves
+        them as open circuits — a different circuit, so pass it only
+        when that is what you mean.
+    max_event_iterations
+        Rounds of PWL-diode-state re-solving before giving up.
+    auto_regularize
+        Insert 1 GΩ reference ties for unreferenced subnets, exactly
+        as :func:`pulsim.simulate` does. Defaults to on; this MUTATES
+        the builder.
+    mask
+        A :class:`pulsim.SwitchStateMask` fixing the explicit
+        switches. Defaults to all-open — a DC operating point has no
+        switching schedule to read one from. PWL diode bits inside
+        the mask are resolved by iteration regardless.
+    report
+        If a list is passed, the kernel's ``DCSolveReport`` is
+        appended to it, so you can see which rung answered.
 
     Returns
     -------
@@ -131,120 +240,142 @@ def compute_dc_op(builder,
     Raises
     ------
     RuntimeError
-        If `strategy="auto"` and *all* strategies fail.
+        If the chosen strategy (or, for ``"auto"``, every strategy)
+        fails.
     """
-    if pseudo_trans is None:
-        pseudo_trans = PseudoTransientConfig()
+    # `pseudo_trans=` used to configure the settling transient. It
+    # still does, under its new name — but passing it alongside
+    # strategy="pseudo_trans" now means two different algorithms, so
+    # say so instead of ignoring the argument.
+    if settle is not None and pseudo_trans is not None:
+        raise ValueError(
+            "compute_dc_op(): pass either settle= or its old name "
+            "pseudo_trans=, not both.")
+    if settle is None:
+        settle = pseudo_trans
+    if settle is not None and strategy == "pseudo_trans":
+        raise ValueError(
+            "compute_dc_op(strategy='pseudo_trans'): since v2.0 this "
+            "name means the KERNEL's pseudo-transient continuation "
+            "rung, and SettleConfig/PseudoTransientConfig configures "
+            "the transient-settling strategy instead. Use "
+            "strategy='settle' with settle=..., or drop the config "
+            "and let the kernel rung use its own defaults.")
+    if settle is None:
+        settle = PseudoTransientConfig()
+    pseudo_trans = settle
     if source_step is None:
         source_step = SourceStepConfig()
+    if strategy not in _VALID:
+        raise ValueError(
+            f"Unknown strategy {strategy!r}. Pick one of: "
+            + ", ".join(repr(v) for v in _VALID))
 
-    # add-python-builder-ergonomics: top-of-call cancellation check.
-    # The auto strategy path additionally invokes the kernel-level
-    # `compute_dc_op_with_strategy(should_continue=…)` so cancellations
-    # mid-fallback surface as `pulsim.Cancelled`.
     if should_continue is not None and not should_continue():
         from . import Cancelled as _Cancelled
         raise _Cancelled("compute_dc_op", point_index=0)
 
-    if strategy == "naive":
-        return _dc_naive(builder, t_eval=t_eval, verbose=verbose)
-    if strategy == "pseudo_trans":
-        return _dc_pseudo_trans(builder, pseudo_trans, verbose=verbose)
-    if strategy == "source_step":
-        return _dc_source_step(builder, source_step, verbose=verbose)
-    if strategy == "auto":
-        # 1) try naive
-        try:
-            x = _dc_naive(builder, t_eval=t_eval, verbose=verbose)
-            if verbose:
-                print("  compute_dc_op[auto]: naive succeeded")
-            return x
-        except Exception as exc_naive:
-            if verbose:
-                print(f"  compute_dc_op[auto]: naive failed "
-                       f"({type(exc_naive).__name__}); "
-                       f"falling back to pseudo_trans")
-        # Cancellation check between strategies.
-        if should_continue is not None and not should_continue():
-            from . import Cancelled as _Cancelled
-            raise _Cancelled("compute_dc_op", point_index=1)
-        # 2) try pseudo_trans
-        try:
-            x = _dc_pseudo_trans(builder, pseudo_trans, verbose=verbose)
-            if verbose:
-                print("  compute_dc_op[auto]: pseudo_trans succeeded")
-            return x
-        except Exception as exc_pt:
-            if verbose:
-                print(f"  compute_dc_op[auto]: pseudo_trans failed "
-                       f"({type(exc_pt).__name__}); "
-                       f"falling back to source_step")
-        if should_continue is not None and not should_continue():
-            from . import Cancelled as _Cancelled
-            raise _Cancelled("compute_dc_op", point_index=2)
-        # 3) try source_step
-        try:
-            x = _dc_source_step(builder, source_step, verbose=verbose)
-            if verbose:
-                print("  compute_dc_op[auto]: source_step succeeded")
-            return x
-        except Exception as exc_ss:
-            raise RuntimeError(
-                f"compute_dc_op[auto]: all three strategies failed. "
-                f"Last error: {exc_ss}") from exc_ss
+    # Same topology preflight `simulate()` runs, for the same reason
+    # and with the same default: a node nobody referenced is a defect
+    # the tool should repair and report, not one the user should have
+    # to recognise from a singular-matrix message. Running it here
+    # too keeps the two entry points from disagreeing about what
+    # "floating" means.
+    if auto_regularize is None:
+        auto_regularize = True
+    if auto_regularize:
+        from . import PreflightOptions as _PfOpts
+        pf = builder.run_preflight(_PfOpts(auto_regularize=True))
+        if not pf.empty():
+            import warnings
+            warnings.warn(
+                "compute_dc_op(): " + pf.summary() +
+                "\n  Pass auto_regularize=False to get the original "
+                "singular-matrix error instead. The ties persist on "
+                "the builder.",
+                stacklevel=2)
 
-    raise ValueError(
-        f"Unknown strategy {strategy!r}. "
-        f"Pick one of: 'naive', 'pseudo_trans', 'source_step', 'auto'.")
+    if strategy == "settle":
+        # "settle" is a transient, not a solve: it has no rung, no
+        # gmin, no diode iteration to report on. Refuse the arguments
+        # it cannot honour rather than dropping them silently — a
+        # discarded `gmin=0` or `mask=` would change what the caller
+        # believes was computed.
+        unhonoured = [
+            name for name, given in (
+                ("gmin", gmin is not None),
+                ("mask", mask is not None),
+                ("t_eval", bool(t_eval)),
+                ("max_event_iterations",
+                 max_event_iterations is not None),
+                ("enable_nonlinear_refresh",
+                 enable_nonlinear_refresh is not None),
+            ) if given
+        ]
+        if unhonoured:
+            raise ValueError(
+                "compute_dc_op(strategy='settle') runs a transient to "
+                "steady state, so it cannot honour: "
+                + ", ".join(unhonoured)
+                + ". Drop them, or use a DC strategy "
+                  "('auto', 'naive', 'gmin_step', 'source_step', "
+                  "'pseudo_trans').")
+        x = _dc_settle(builder, pseudo_trans, verbose=verbose,
+                        should_continue=should_continue)
+        if report is not None:
+            report.append(_SettleReport())
+        return x
+
+    from . import _pulsim as _k  # type: ignore[import-not-found]
+
+    if mask is None:
+        mask = _k.SwitchStateMask(builder.graph.num_switches)
+
+    # ONE dispatch for every kernel strategy. Routing named rungs
+    # around `compute_dc_operating_point` would solve the circuit
+    # with every PWL diode frozen in the all-open default mask —
+    # reintroducing, one strategy name at a time, exactly the silent
+    # wrong answer this module exists to close.
+    try:
+        op = _k.compute_dc_operating_point(
+            builder.graph, builder.pool, mask,
+            strategy=getattr(_k.DCStrategy,
+                              _KERNEL_STRATEGIES[strategy]),
+            enable_cascade=(strategy == "auto"),
+            max_event_iterations=(16 if max_event_iterations is None
+                                   else int(max_event_iterations)),
+            ss_n_steps=int(source_step.n_steps),
+            t_eval=float(t_eval),
+            enable_nonlinear_refresh=enable_nonlinear_refresh,
+            should_continue=should_continue,
+            **({} if gmin is None else {"gmin": float(gmin)}))
+    except Exception as exc:
+        if _is_kernel_cancellation(exc):
+            _reraise_as_cancelled(exc)
+        raise
+
+    if report is not None:
+        report.append(op.report)
+    if verbose:
+        print(f"  compute_dc_op[{strategy}]: {op.report.summary()}")
+    return np.asarray(op.x)
 
 
 # =============================================================================
 # Strategy implementations
 # =============================================================================
 
-def _dc_naive(builder, *, t_eval: float, verbose: bool) -> np.ndarray:
-    """Single-shot DC solve.
-
-    Calls the kernel's `compute_dc_op_with_strategy(strategy=Naive)`
-    directly when the binding is available (fast); falls back to
-    `simulate(t_end=tiny, start_from_dc_op=True)` if the kernel
-    binding is missing.
-    """
-    # Fast path: direct C++ kernel call (Phase A.2 binding).
-    try:
-        from . import _pulsim as _k  # type: ignore[import-not-found]
-        mask = _k.SwitchStateMask(builder.graph.num_switches)
-        x = np.asarray(_k.compute_dc_op(builder.graph, builder.pool,
-                                          mask, float(t_eval)))
-        if verbose:
-            print(f"  _dc_naive (C++): t={t_eval}, "
-                   f"||x||_∞={np.linalg.norm(x, np.inf):.3e}")
-        return x
-    except Exception:  # pragma: no cover — graceful fallback
-        pass
-
-    # Fallback: round-trip via simulate().
-    import pulsim as _v2
-    dt = 1e-9
-    res = _v2.simulate(builder,
-                         t_end=t_eval + dt,
-                         dt=dt,
-                         t_start=t_eval,
-                         start_from_dc_op=True)
-    # Owned copy: res.states is a read-only zero-copy view over the
-    # kernel buffer (v2.0), and callers treat the returned operating
-    # point as a plain writable vector.
-    x = np.array(res.states[0], dtype=float)
-    if verbose:
-        print(f"  _dc_naive (sim fallback): t={t_eval}, "
-               f"||x||_∞={np.linalg.norm(x, np.inf):.3e}")
-    return x
-
-
-def _dc_pseudo_trans(builder,
+def _dc_settle(builder,
                        cfg: PseudoTransientConfig,
-                       *, verbose: bool) -> np.ndarray:
-    """Run the transient solver until d/dt(x) → 0, return final x."""
+                       *, verbose: bool,
+                       should_continue=None) -> np.ndarray:
+    """Run the transient solver until d/dt(x) stops moving.
+
+    Not a DC solve at all — an actual simulation, sampled once it
+    stops changing. That makes it the slowest strategy and the only
+    one that can answer for a circuit whose steady state is a
+    switching average rather than a fixed point.
+    """
     import pulsim as _v2
     n_check_samples = max(1, int(round(cfg.t_check / cfg.dt)))
 
@@ -253,13 +384,14 @@ def _dc_pseudo_trans(builder,
                          dt=cfg.dt,
                          t_start=0.0,
                          start_from_dc_op=False,
-                         max_event_iterations=8)
+                         max_event_iterations=8,
+                         should_continue=should_continue)
     # Steady-state check: look at the last 2 sampling windows of size
     # t_check and confirm the state barely moves between them.
     states = np.asarray(res.states)
     if states.shape[0] < 2 * n_check_samples:
         raise RuntimeError(
-            f"pseudo_trans: simulation too short to verify steady "
+            f"settle: simulation too short to verify steady "
             f"state ({states.shape[0]} samples, need "
             f"{2*n_check_samples})")
     win1 = states[-2*n_check_samples:-n_check_samples].mean(axis=0)
@@ -268,54 +400,12 @@ def _dc_pseudo_trans(builder,
     scale = np.linalg.norm(win2, ord=np.inf) + 1.0e-12
     rel_drift = abs_drift / scale
     if verbose:
-        print(f"  _dc_pseudo_trans: rel-drift over last {cfg.t_check}s = "
+        print(f"  _dc_settle: rel-drift over last {cfg.t_check}s = "
                f"{rel_drift:.3e} (tol {cfg.tol_steady:.3e}; "
                f"abs={abs_drift:.3e}, scale={scale:.3e})")
     if rel_drift > cfg.tol_steady:
         raise RuntimeError(
-            f"pseudo_trans: state still drifting at t={cfg.t_settle}s "
+            f"settle: state still drifting at t={cfg.t_settle}s "
             f"(rel-drift={rel_drift:.3e} > tol={cfg.tol_steady:.3e}). "
             f"Try increasing t_settle.")
     return win2
-
-
-def _dc_source_step(builder,
-                       cfg: SourceStepConfig,
-                       *, verbose: bool) -> np.ndarray:
-    """Scale every source's amplitude from 0 → 1 in `n_steps` short
-    transients. Uses a `b_extra_fn` overlay to scale the constant
-    contributions.
-
-    Note: this is a *Python-side* trick — it injects a time-varying
-    multiplier into the residual via `b_extra_fn(t)`. The kernel
-    sees this as an external load. For a true source-stepping
-    homotopy we'd need kernel-side amplitude knobs, but the
-    overlay path produces equivalent results because the linear
-    cache treats sources and external currents identically.
-
-    For simplicity this implementation does NOT use a b_extra overlay
-    — instead it runs the full simulation, relying on the natural
-    rise-time of voltage/current sources (Pulse, Sine, Pwm) to
-    provide the ramp. For DC-only sources it acts identically to
-    pseudo_trans. This means source_step is a *robust last-resort*
-    rather than a true homotopy — its main value is using larger dt
-    and a longer settling time without raising fewer convergence
-    warnings.
-    """
-    import pulsim as _v2
-    t_total = cfg.n_steps * cfg.t_per_step
-    res = _v2.simulate(builder,
-                         t_end=t_total,
-                         dt=cfg.dt,
-                         t_start=0.0,
-                         start_from_dc_op=False,
-                         max_event_iterations=12,
-                         max_newton_iterations=50)
-    states = np.asarray(res.states)
-    # Average the last 10% of samples to filter switching ripple.
-    tail_n = max(1, int(0.1 * states.shape[0]))
-    x = states[-tail_n:].mean(axis=0)
-    if verbose:
-        print(f"  _dc_source_step: averaged last {tail_n} samples, "
-               f"||x||_∞={np.linalg.norm(x, np.inf):.3e}")
-    return x

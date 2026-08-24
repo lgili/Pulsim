@@ -1,0 +1,243 @@
+#pragma once
+
+// =============================================================================
+// Pulsim — Layer 4: the DC operating point, resolved
+// =============================================================================
+//
+// v2.0 Phase 2 (B.2).
+//
+// "The DC operating point" is not one solve. Getting it right means
+// three things at once, and until now only `run_transient` did all
+// three — every other entry point did a subset and reported the
+// answer with the same confidence:
+//
+//   1. NONLINEAR DEVICES MUST BE STAMPED. `dc_assemble` skips
+//      `BranchKind::Nonlinear` as an open circuit, so a bare
+//      `compute_dc_op` on a 5 V source through 1 kΩ into a diode
+//      answers 5.000 V at the anode. The truth is 0.700 V.
+//   2. PWL DIODE STATES MUST BE RESOLVED. A diode's on/off bit is an
+//      input to the matrix and an output of the solve, so the pair
+//      has to be iterated to consistency. Solving once with every
+//      diode assumed OFF answers the question for a different
+//      circuit.
+//   3. THE SOLVE MUST BE ALLOWED TO FAIL AND RECOVER. A stiff
+//      operating point is normal, not exceptional; the cascade in
+//      `dc_strategy.hpp` is what turns it into an answer.
+//
+// This header is those three, once, for everyone: `run_transient`'s
+// pre-charge, the BDF1 bootstrap, and the public Python entry point
+// all route through `compute_dc_operating_point`.
+
+#include "pulsim/analysis/cancellation.hpp"
+#include "pulsim/numeric/dense.hpp"
+#include "pulsim/numeric/types.hpp"
+#include "pulsim/pwl/dc_strategy.hpp"
+#include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/pwl/gmin.hpp"
+#include "pulsim/pwl/nonlinear_solve.hpp"
+#include "pulsim/topology/graph.hpp"
+#include "pulsim/topology/switch_state.hpp"
+
+#include <format>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace pulsim::pwl {
+
+/// Knobs for a full operating-point resolution.
+struct DCOperatingPointOptions {
+    Real t_eval = Real{0};
+
+    /// Diode-consistency rounds. Each round re-solves with the diode
+    /// bits the previous round implied; zero or one means "trust the
+    /// mask you were given".
+    Size max_event_iterations = Size{16};
+
+    Size max_newton_iters = Size{50};
+    Real tol_dx  = Real{1e-9};
+    Real tol_res = Real{1e-9};
+    bool enable_line_search = false;
+    bool enable_lm = false;
+
+    /// Which rung to run. `Auto` is the cascade; a named rung runs
+    /// exactly that one. Whichever you pick, the diode-consistency
+    /// loop below wraps it — resolving diode states is part of what
+    /// "the DC operating point" MEANS, not a feature of one rung.
+    DCStrategy strategy = DCStrategy::Auto;
+
+    /// Knobs for the conductance floor and the gmin ramp. The Newton
+    /// fields above win over the ones in here, so a caller sets
+    /// tolerances once.
+    GminConfig gmin{};
+
+    /// Knobs for the other two homotopy rungs. Carried here rather
+    /// than defaulted at the call site so a caller that asks for a
+    /// named rung actually gets the configuration it passed.
+    SourceSteppingConfig source_stepping{};
+    PseudoTransientConfig pseudo_transient{};
+
+    /// When the direct solve fails, walk rungs 2-4 of the cascade
+    /// (gmin stepping → source stepping → pseudo-transient) instead
+    /// of giving up. Turning this off is how you ask for the raw
+    /// diagnostic rather than an answer.
+    bool enable_cascade = true;
+
+    /// Checked between diode-consistency rounds and between cascade
+    /// rungs. A cascade can take seconds on a hostile circuit, and a
+    /// Cancel button that only responds before the work starts is
+    /// not a Cancel button.
+    analysis::ShouldContinueFn should_continue{};
+};
+
+/// The resolved operating point, plus what it took to get there.
+struct DCOperatingPoint {
+    Vector x;
+    topology::SwitchStateMask mask{0};  //!< switch + diode state solved at
+    DCSolveReport report;
+    Size event_iterations = Size{0};
+};
+
+/// Solve the DC operating point of `graph`, honouring nonlinear
+/// devices, iterating PWL diode states to consistency, and falling
+/// through the DC cascade when the direct solve fails.
+///
+/// `diodes` may be null for a circuit with no PWL diodes. When it is
+/// supplied, it is UPDATED IN PLACE to the resolved state — callers
+/// that go on to run a transient want exactly that, so the run starts
+/// from the same diode configuration the operating point implies.
+///
+/// `refresh` is the nonlinear stamping chain. Pass the RAW static
+/// device chain (diodes / MOSFET / IGBT) and not a trap-companion
+/// wrapper: companion stamps carry a 1/dt, which has no meaning in a
+/// DC system.
+[[nodiscard]] inline DCOperatingPoint compute_dc_operating_point(
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const topology::SwitchStateMask& user_mask,
+    const NonlinearRefreshFn& refresh = {},
+    const DCOperatingPointOptions& opts = {},
+    DiodeEventState* diodes = nullptr,
+    const char* who = "compute_dc_operating_point") {
+
+    const bool has_diodes =
+        diodes != nullptr && diodes->num_diodes() > 0;
+    const topology::SwitchStateMask diode_owned =
+        has_diodes ? diodes->diode_owned_bits()
+                    : topology::SwitchStateMask(0);
+
+    DCOperatingPoint out;
+    out.mask = user_mask;
+
+    const Size max_rounds =
+        opts.max_event_iterations > 0 ? opts.max_event_iterations
+                                       : Size{1};
+    bool flipped = false;
+    Size iters = 0;
+
+    // One source of truth for the Newton knobs: whatever the caller
+    // set on the options wins over GminConfig's own defaults.
+    GminConfig gcfg = opts.gmin;
+    gcfg.max_newton_iters   = opts.max_newton_iters;
+    gcfg.tol_dx             = opts.tol_dx;
+    gcfg.tol_res            = opts.tol_res;
+    gcfg.enable_line_search = opts.enable_line_search;
+    gcfg.enable_lm          = opts.enable_lm;
+
+    const bool want_direct = opts.strategy == DCStrategy::Naive ||
+                              opts.strategy == DCStrategy::Auto;
+    const bool may_fall_through =
+        opts.strategy == DCStrategy::Auto && opts.enable_cascade;
+
+    do {
+        analysis::check_cancellation(opts.should_continue, who,
+                                      static_cast<long>(iters));
+        topology::SwitchStateMask mask = user_mask;
+        if (has_diodes) {
+            mask = mask.overlay(diodes->current_diode_mask(),
+                                 diode_owned);
+        }
+        out.mask = mask;
+
+        // A named rung runs alone — but INSIDE this loop, at the
+        // mask the diode iteration has reached. Running it outside
+        // would solve the circuit with every PWL diode frozen open,
+        // which is the silent wrong answer this header exists to
+        // close, reintroduced one strategy name at a time.
+        if (!want_direct) {
+            out.x = compute_dc_op_with_strategy(
+                graph, pool, mask, opts.strategy, opts.t_eval,
+                opts.pseudo_transient, opts.source_stepping,
+                opts.should_continue, refresh, gcfg, &out.report);
+        } else {
+            try {
+                out.x = refresh
+                    ? compute_dc_op_newton(
+                          graph, pool, mask, refresh, opts.t_eval,
+                          opts.max_newton_iters, opts.tol_dx,
+                          opts.tol_res, opts.enable_line_search,
+                          opts.enable_lm, opts.gmin.floor)
+                    : compute_dc_op(graph, pool, mask, opts.t_eval,
+                                     opts.gmin.floor);
+                out.report.strategy = DCStrategy::Naive;
+                out.report.rungs_attempted = Size{1};
+                out.report.final_gmin = opts.gmin.floor;
+                // Measure it. Reporting a default-constructed 0 for
+                // the field the API documents as "the residual of the
+                // ORIGINAL circuit" is worse than reporting nothing,
+                // and this is the rung the default path takes.
+                out.report.residual = detail::dc_residual(
+                    graph, pool, mask, refresh, out.x,
+                    opts.t_eval).norm;
+            } catch (const analysis::Cancelled&) {
+                throw;
+            } catch (const std::exception& direct_failed) {
+                if (!may_fall_through) {
+                    throw;
+                }
+                // The direct solve is rung 1. A stiff operating point
+                // is exactly what the rest of the cascade exists for,
+                // so walk it before handing the user an error.
+                try {
+                    out.x = compute_dc_op_with_strategy(
+                        graph, pool, mask, DCStrategy::Auto,
+                        opts.t_eval, opts.pseudo_transient,
+                        opts.source_stepping, opts.should_continue,
+                        refresh, gcfg, &out.report);
+                } catch (const analysis::Cancelled&) {
+                    // A user pressing Cancel is not a convergence
+                    // failure. Let the typed exception through
+                    // instead of burying it in a "no DC operating
+                    // point" message.
+                    throw;
+                } catch (const std::exception& cascade_failed) {
+                    throw std::runtime_error(std::format(
+                        "{}: no DC operating point. The direct solve "
+                        "failed with: {}\nThe fallback cascade then "
+                        "reported: {}",
+                        who, direct_failed.what(),
+                        cascade_failed.what()));
+                }
+            }
+        }
+
+        flipped = has_diodes && diodes->update_from_state(out.x);
+        ++iters;
+    } while (flipped && iters < max_rounds);
+
+    out.event_iterations = iters;
+    if (flipped) {
+        throw std::runtime_error(std::format(
+            "{}: the PWL diode states never settled — {} rounds of "
+            "re-solving still flip at least one diode. The circuit "
+            "has no consistent DC diode configuration (a latch, or "
+            "two diodes fighting over the same node); raise "
+            "max_event_iterations, or start the run from zero "
+            "instead of from a DC operating point.",
+            who, max_rounds));
+    }
+    return out;
+}
+
+}  // namespace pulsim::pwl

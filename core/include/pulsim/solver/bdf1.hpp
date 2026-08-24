@@ -42,6 +42,8 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
+#include "pulsim/pwl/dc_strategy.hpp"
+#include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
@@ -51,6 +53,7 @@
 #include "pulsim/stamping/stamp_companion.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <format>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -283,6 +286,42 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
 
     const auto& graph = builder.graph();
     const auto& pool  = builder.pool();
+
+    // v2.0 Phase 2 (B.2). This driver has no Newton loop and no
+    // NonlinearRefreshFn — `dc_assemble` skips BranchKind::Nonlinear
+    // as an open circuit, and nothing here ever stamps it back. A
+    // circuit with a smooth diode / MOSFET / IGBT would therefore run
+    // to completion and report the waveforms of a DIFFERENT circuit.
+    // Refuse instead: a clear "use the trapezoidal engine" beats a
+    // plausible wrong answer.
+    if (pool.has_nonlinear_devices()) {
+        throw std::invalid_argument(
+            "run_transient_bdf1: this circuit has nonlinear devices "
+            "(smooth diode / MOSFET / IGBT / saturable inductor) and "
+            "the BDF1 driver has no Newton iteration, so it would "
+            "silently simulate them as open circuits. Use the "
+            "trapezoidal engine (the default) instead.");
+    }
+    // Same refusal for the PWL switch diode. It is a Switch branch,
+    // not a Nonlinear one, so `has_nonlinear_devices()` does not see
+    // it — but this driver has no DiodeEventState and no event
+    // iteration either, so a diode's bit is frozen at whatever
+    // `switch_fn` happens to return for it, which for every caller
+    // that does not know to drive it by hand means permanently OFF.
+    // A rectifier would run with no rectification and report it as
+    // fact.
+    {
+        pwl::DiodeEventState probe{graph, pool};
+        if (probe.num_diodes() > 0) {
+            throw std::invalid_argument(std::format(
+                "run_transient_bdf1: this circuit has {} PWL diode(s) "
+                "and the BDF1 driver has no diode event iteration, so "
+                "their on/off state would be frozen at whatever "
+                "switch_fn returns — normally OFF for the whole run. "
+                "Use the trapezoidal engine (the default), which "
+                "commutates them.", probe.num_diodes()));
+        }
+    }
     const Size state_size = pool.state_size(graph);
     const Size n_steps = opts.expected_step_count();
 
@@ -294,9 +333,19 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     Bdf1HistoryState history{graph, pool};
     history.reset();
 
-    // DC OP bootstrap.
+    // DC OP bootstrap. Rung 1 is the direct solve; a stiff or
+    // badly-pivoted operating point falls through to the cascade
+    // rather than aborting the run (v2.0 Phase 2, B.2).
     if (start_from_dc_op) {
         auto mask = switch_fn(opts.t_start);
+        // No cascade here, deliberately. Both refusals above mean
+        // this driver only ever sees LINEAR circuits, and for those
+        // every rung of the cascade degenerates to the same solve:
+        // gmin stepping skips the ramp (a direct solve has no basin
+        // to miss) and lands on the floor `compute_dc_op` already
+        // stamped, and source stepping cannot change a matrix. A
+        // fallback that re-solves the byte-identical system is the
+        // very defect this branch fixed in `pseudo_transient_dc`.
         x = pwl::compute_dc_op(graph, pool, mask, opts.t_start);
         history.seed_from_dc_op(x);
     }

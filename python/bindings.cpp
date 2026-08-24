@@ -29,6 +29,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <optional>
+
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/analysis/mna_sweep.hpp"
 #include "pulsim/blockchain/blocks.hpp"
@@ -49,7 +51,9 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
+#include "pulsim/pwl/dc_operating_point.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
+#include "pulsim/pwl/gmin.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/options.hpp"
@@ -1798,13 +1802,78 @@ void init_module(py::module_& m) {
     py::enum_<pwl::DCStrategy>(m, "DCStrategy",
         "DC operating-point strategy selector.")
         .value("Naive",            pwl::DCStrategy::Naive,
-                "Single-shot compute_dc_op — fastest, fails on stiff problems.")
-        .value("PseudoTransient",  pwl::DCStrategy::PseudoTransient,
-                "Modified Newton with dt regularisation — globally convergent.")
+                "Single-shot solve — fastest; the common case never "
+                "leaves this rung.")
+        .value("GminStepping",     pwl::DCStrategy::GminStepping,
+                "Conductance homotopy: clamp every node to ground, "
+                "then relax by decades. Fixes a badly-pivoted matrix "
+                "AND a Newton that cannot find the basin.")
         .value("SourceStepping",   pwl::DCStrategy::SourceStepping,
-                "Source-amplitude homotopy from α=0 to α=1 in n_steps.")
+                "Source-amplitude homotopy from α=0 to α=1. Fixes a "
+                "Newton basin problem; cannot fix a singular matrix.")
+        .value("PseudoTransient",  pwl::DCStrategy::PseudoTransient,
+                "Integrate dx/dt = -F to equilibrium. Last resort: "
+                "unstable on MNA voltage-source constraint rows.")
         .value("Auto",             pwl::DCStrategy::Auto,
-                "Try naive → pseudo-trans → source-stepping in order.");
+                "naive → gmin stepping → source stepping → "
+                "pseudo-transient, first one that answers wins.");
+
+    py::class_<pwl::DCSolveReport>(m, "DCSolveReport",
+        "Which rung of the DC cascade produced the answer.")
+        .def_property_readonly("strategy",
+            [](const pwl::DCSolveReport& r) -> std::string {
+                // Return the same vocabulary `compute_dc_op(
+                // strategy=...)` accepts. One name per concept beats
+                // a str argument and an enum result that look alike
+                // and do not compare equal.
+                switch (r.strategy) {
+                case pwl::DCStrategy::Naive:           return "naive";
+                case pwl::DCStrategy::GminStepping:    return "gmin_step";
+                case pwl::DCStrategy::SourceStepping:  return "source_step";
+                case pwl::DCStrategy::PseudoTransient: return "pseudo_trans";
+                case pwl::DCStrategy::Auto:            return "auto";
+                }
+                return "unknown";
+            },
+            "The rung that succeeded, as one of the strategy names "
+            "`compute_dc_op()` accepts.")
+        .def_readonly("rungs_attempted",
+                       &pwl::DCSolveReport::rungs_attempted,
+                       "Homotopy rungs solved, including retries "
+                       "inserted when a decade was too wide.")
+        .def_readonly("final_gmin", &pwl::DCSolveReport::final_gmin,
+                       "Conductance-to-ground (S) still present in "
+                       "the returned answer.")
+        .def_readonly("residual", &pwl::DCSolveReport::residual,
+                       "||f(x)||_inf of the ORIGINAL circuit — not "
+                       "the regularized one that was solved.")
+        .def("summary", &pwl::DCSolveReport::summary)
+        .def("__repr__", [](const pwl::DCSolveReport& r) {
+            return "<DCSolveReport: " + r.summary() + ">";
+        });
+
+    py::class_<pwl::DCOperatingPoint>(m, "DCOperatingPoint",
+        "A resolved DC operating point: the state vector, the switch "
+        "and diode configuration it was solved at, and how it was "
+        "obtained.")
+        .def_property_readonly("x",
+            [](const pwl::DCOperatingPoint& op) {
+                // An owned, writable copy. `def_readonly` on an Eigen
+                // member hands back a READ-ONLY view that also pins
+                // the C++ object alive — the same leak Phase 1's
+                // review caught in res.v()/res.i(). An operating
+                // point is a plain vector users subtract, scale and
+                // index into.
+                return Vector(op.x);
+            },
+            "The DC state vector (an owned, writable copy).")
+        .def_readonly("mask", &pwl::DCOperatingPoint::mask,
+                       "Switch mask with the resolved PWL diode bits "
+                       "overlaid.")
+        .def_readonly("report", &pwl::DCOperatingPoint::report)
+        .def_readonly("event_iterations",
+                       &pwl::DCOperatingPoint::event_iterations,
+                       "Diode-consistency rounds it took to settle.");
 
     // ---- Adaptive RK (Phase 2.4) ----
     m.def("dopri5_solve",
@@ -1947,8 +2016,25 @@ void init_module(py::module_& m) {
         "L-stable, order 3 — designed for stiff ODEs. 2-stage Newton "
         "block per step + step-doubling error estimate.");
 
+    // Build the standard static-device nonlinear chain when the
+    // caller wants one. `std::nullopt` means "decide from the pool" —
+    // a bool default here could not distinguish "the user asked for
+    // no refresh" from "the user said nothing", and getting that
+    // wrong is the difference between 0.7 V and 5.0 V at a diode.
+    auto resolve_refresh =
+        [](const pwl::DevicePool& pool,
+            std::optional<bool> enable) -> pwl::NonlinearRefreshFn {
+            const bool want =
+                enable.has_value() ? *enable
+                                    : pool.has_nonlinear_devices();
+            if (!want) {
+                return {};
+            }
+            return pwl::make_combined_diode_mosfet_refresh();
+        };
+
     m.def("compute_dc_op_with_strategy",
-        [](const topology::Graph& graph,
+        [resolve_refresh](const topology::Graph& graph,
             const pwl::DevicePool& pool,
             const topology::SwitchStateMask& mask,
             pwl::DCStrategy strategy,
@@ -1958,7 +2044,11 @@ void init_module(py::module_& m) {
             Size pt_max_iters,
             Real pt_tol_res,
             Size ss_n_steps,
-            analysis::ShouldContinueFn should_continue) {
+            analysis::ShouldContinueFn should_continue,
+            std::optional<bool> enable_nonlinear_refresh,
+            Real gmin,
+            Real gmin_start,
+            Size gmin_steps) {
             pwl::PseudoTransientConfig pt;
             pt.dt_init = pt_dt_init;
             pt.dt_max  = pt_dt_max;
@@ -1966,9 +2056,17 @@ void init_module(py::module_& m) {
             pt.tol_res = pt_tol_res;
             pwl::SourceSteppingConfig ss;
             ss.n_steps = ss_n_steps;
-            return pwl::compute_dc_op_with_strategy(
+            pwl::GminConfig g;
+            g.floor = gmin;
+            g.start = gmin_start;
+            g.steps = gmin_steps;
+            pwl::DCSolveReport report;
+            auto refresh =
+                resolve_refresh(pool, enable_nonlinear_refresh);
+            Vector x = pwl::compute_dc_op_with_strategy(
                 graph, pool, mask, strategy, t_eval, pt, ss,
-                std::move(should_continue));
+                std::move(should_continue), refresh, g, &report);
+            return py::make_tuple(std::move(x), report);
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
         py::arg("strategy") = pwl::DCStrategy::Auto,
@@ -1979,26 +2077,109 @@ void init_module(py::module_& m) {
         py::arg("pt_tol_res") = Real{1e-7},
         py::arg("ss_n_steps") = Size{10},
         py::arg("should_continue") = analysis::ShouldContinueFn{},
-        "Compute the DC operating-point state vector with strategy "
-        "selection. Returns a numpy array of length "
-        "pool.state_size(graph).\n"
+        py::arg("enable_nonlinear_refresh") = py::none(),
+        py::arg("gmin") = pwl::kDefaultGmin,
+        py::arg("gmin_start") = Real{1e-2},
+        py::arg("gmin_steps") = Size{10},
+        "Compute the DC operating point with strategy selection. "
+        "Returns `(x, DCSolveReport)`.\n"
+        "`enable_nonlinear_refresh=None` (the default) stamps the "
+        "smooth diode / MOSFET / IGBT chain when the pool contains "
+        "any; pass False to deliberately solve them as open "
+        "circuits.\n"
         "Optional `should_continue` is invoked between fallback\n"
         "strategies in Auto mode; raises pulsim.Cancelled when it\n"
         "returns False.");
 
-    // ---- Naive DC entry point (matches the Python wrapper's `naive`) ----
+    m.def("compute_dc_operating_point",
+        [resolve_refresh](const topology::Graph& graph,
+            const pwl::DevicePool& pool,
+            const topology::SwitchStateMask& mask,
+            pwl::DCStrategy strategy,
+            Real t_eval,
+            std::optional<bool> enable_nonlinear_refresh,
+            Size max_event_iterations,
+            Size max_newton_iters,
+            Real tol_dx,
+            Real tol_res,
+            bool enable_cascade,
+            Real gmin,
+            Real gmin_start,
+            Size gmin_steps,
+            Size ss_n_steps,
+            Real pt_tol_res,
+            Size pt_max_iters,
+            analysis::ShouldContinueFn should_continue) {
+            pwl::DCOperatingPointOptions o;
+            o.should_continue = std::move(should_continue);
+            o.strategy = strategy;
+            o.t_eval = t_eval;
+            o.max_event_iterations = max_event_iterations;
+            o.max_newton_iters = max_newton_iters;
+            o.tol_dx = tol_dx;
+            o.tol_res = tol_res;
+            o.enable_cascade = enable_cascade;
+            o.gmin.floor = gmin;
+            o.gmin.start = gmin_start;
+            o.gmin.steps = gmin_steps;
+            o.source_stepping.n_steps = ss_n_steps;
+            o.pseudo_transient.tol_res = pt_tol_res;
+            o.pseudo_transient.max_iters = pt_max_iters;
+            auto refresh =
+                resolve_refresh(pool, enable_nonlinear_refresh);
+            pwl::DiodeEventState diodes{graph, pool};
+            diodes.reset();
+            return pwl::compute_dc_operating_point(
+                graph, pool, mask, refresh, o,
+                diodes.num_diodes() > 0 ? &diodes : nullptr,
+                "compute_dc_operating_point");
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("mask"),
+        py::arg("strategy") = pwl::DCStrategy::Auto,
+        py::arg("t_eval") = Real{0},
+        py::arg("enable_nonlinear_refresh") = py::none(),
+        py::arg("max_event_iterations") = Size{16},
+        py::arg("max_newton_iters") = Size{50},
+        py::arg("tol_dx") = Real{1e-9},
+        py::arg("tol_res") = Real{1e-9},
+        py::arg("enable_cascade") = true,
+        py::arg("gmin") = pwl::kDefaultGmin,
+        py::arg("gmin_start") = Real{1e-2},
+        py::arg("gmin_steps") = Size{10},
+        py::arg("ss_n_steps") = Size{10},
+        py::arg("pt_tol_res") = Real{1e-7},
+        py::arg("pt_max_iters") = Size{500},
+        py::arg("should_continue") = analysis::ShouldContinueFn{},
+        "THE DC operating point: nonlinear devices stamped, PWL "
+        "diode states iterated to consistency, and the DC cascade "
+        "walked if the direct solve fails. Returns a "
+        "`DCOperatingPoint`.\n"
+        "This is what `simulate(start_from_dc_op=True)` uses "
+        "internally; prefer it over `compute_dc_op`, which is the "
+        "raw linear primitive and treats every nonlinear device as "
+        "an open circuit.");
+
+    // ---- Raw linear DC primitive ---------------------------------------
     m.def("compute_dc_op",
         [](const topology::Graph& graph,
             const pwl::DevicePool& pool,
             const topology::SwitchStateMask& mask,
-            Real t_eval) {
-            return pwl::compute_dc_op(graph, pool, mask, t_eval);
+            Real t_eval,
+            Real gmin) {
+            return pwl::compute_dc_op(graph, pool, mask, t_eval,
+                                        gmin);
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
         py::arg("t_eval") = Real{0},
-        "Naive single-shot DC operating-point solve. Returns a numpy "
-        "array of length pool.state_size(graph). Use "
-        "compute_dc_op_with_strategy(...) for stiff circuits.");
+        py::arg("gmin") = pwl::kDefaultGmin,
+        "Raw single-shot LINEAR DC solve. Nonlinear devices (smooth "
+        "diode / MOSFET / IGBT) are stamped as OPEN CIRCUITS and PWL "
+        "diode states are taken from `mask` as given — so on a "
+        "circuit with any of those this answers a different "
+        "question. Use compute_dc_operating_point(...) unless you "
+        "specifically want the linear system.\n"
+        "`gmin` is the conductance floor to ground (S); 0 disables "
+        "it.");
 
     // ---- MNA-linearised AC sweep (Phase A.3) ----------------------------
     //

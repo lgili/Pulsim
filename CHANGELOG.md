@@ -8,6 +8,114 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **The DC operating point tells the truth** — and recovers by
+  itself (audit finding `no-gmin-infrastructure`, plus a
+  silent-wrong-answer this work uncovered).
+
+  **BREAKING / correctness.** `pulsim.compute_dc_op(builder)` answered
+  **5.000 V** for the anode of a diode fed from 5 V through 1 kΩ. The
+  truth is 0.700 V. `dc_assemble` skips `BranchKind::Nonlinear` as an
+  open circuit, so every route into the standalone entry point solved
+  a *different circuit* and reported it with full confidence.
+  `simulate(start_from_dc_op=True)` had been correct since Phase 0;
+  the two entry points simply disagreed by 700% and nothing said so.
+  A test now pins them to each other. Pass
+  `enable_nonlinear_refresh=False` if you specifically want the linear
+  system.
+
+  * **`gmin`, both halves.** A conductance floor (1e-12 S, SPICE's
+    GMIN) node-to-ground in every DC solve, to keep pivots meaningful
+    when a node is reachable only through near-open devices — a bridge
+    of reverse-biased diodes, a sub-threshold MOSFET. And **gmin
+    stepping**: start at 1e-2 S, walk down by decades warm-starting
+    each solve, so Newton crosses one decade of nonlinearity at a
+    time. A 12-diode chain that the direct solve cannot converge now
+    solves, and lands within 1e-6 of where source stepping
+    independently lands.
+  * **gmin never covers for topology.** A conductance on every node
+    would also make an *unreferenced* node solvable — and hand the
+    user a confident 0 V for a node with no defined voltage, which is
+    exactly the failure Phase 1 taught the kernel to name and B.1
+    taught the builder to repair. So every DC entry point runs a
+    structural check on the UN-augmented system first, and the named
+    error still wins. The check is careful in both directions: it
+    unions every branch for reachability (a diode is a galvanic
+    connection even though it does not conduct at DC) and probes
+    emptiness on the linear stamps unioned with the nonlinear ones, so
+    it never libels an interior node of a diode chain.
+  * **The fallback cascade now actually cascades.** In `Auto` mode it
+    could not rescue anything: `pseudo_transient_dc` pre-factorised
+    the raw matrix and threw if it was singular — rejecting exactly
+    the inputs rung 1 had just failed on — and `source_stepping_dc`
+    factorised once and re-solved the same system with a scaled
+    right-hand side, which returns the naive answer after `n_steps`
+    redundant solves. Both passed a no-op refresh, so reaching either
+    directly on a circuit with diodes returned the operating point of
+    that circuit with the diodes open. All three are fixed:
+    `dc_assemble` gained a `source_scale` homotopy parameter (scaling
+    independent sources only — a VCVS gain is circuit structure, not
+    excitation), each rung re-assembles and warm-starts, and every
+    rung takes the real refresh.
+  * **Reordered:** naive → gmin stepping → source stepping →
+    pseudo-transient. PTC is last on its own header's evidence: MNA
+    voltage-source constraint rows give the artificial dynamics
+    mixed-sign eigenvalues, so it is unstable on exactly the systems
+    Pulsim builds. Both homotopy rungs bisect on failure rather than
+    giving up on a too-wide step.
+  * **One implementation of "the DC operating point."**
+    `pwl/dc_operating_point.hpp` does the three things that make it
+    right — nonlinear devices stamped, PWL diode states iterated to
+    consistency, cascade walked on failure — and `run_transient`'s
+    pre-charge, the BDF1 bootstrap and the Python entry point all
+    route through it. Previously only `run_transient` did all three.
+  * **`run_transient_bdf1` refuses a circuit it would silently open.**
+    It has no Newton loop at all, so a smooth diode / MOSFET / IGBT
+    was an open circuit for the *whole run*, not just at DC. It now
+    raises and points at the trapezoidal engine.
+  * `compute_dc_op()` runs the same topology preflight `simulate()`
+    does, so the two stop disagreeing about what "floating" means.
+  * **`strategy="auto"` no longer falls through to a settling
+    transient.** A transient answers a different question, and on a
+    node with no DC equation it answers it confidently — it would
+    report whatever the initial condition decayed to. `"settle"` is
+    still available explicitly, and the failure message points at it.
+  * **Adversarial review (39 agents) caught two more silent wrong
+    answers**, both in the guard rails this change added:
+    - the structural check tested *emptiness*, not *rank*, so a
+      subnet reachable only through a coupling capacitor or an ideal
+      current source passed both probes — every column populated by
+      its own resistors, galvanically connected to ground — and the
+      floor then supplied the missing rank and reported 0 V (or
+      I/2gmin volts) as an operating point. There is now a third
+      probe: DC reachability, with nonlinear branches counted as
+      conducting exactly when a refresh will stamp them.
+    - a named rung (`strategy="gmin_step"` and friends) bypassed the
+      PWL diode-state iteration, so it answered for a circuit with
+      every switched diode frozen open — reintroducing this change's
+      own headline bug, one strategy name at a time. Every strategy
+      now runs inside the diode loop; resolving diode states is part
+      of what "the DC operating point" means, not a feature of one
+      rung.
+    Also from the review: `DCSolveReport.residual` was reported as a
+    default-constructed 0 on the default path rather than measured;
+    the DC vector came back as a read-only view pinning the kernel
+    object (the leak Phase 1's review caught in `res.v()`);
+    `run_transient_bdf1`'s guard missed PWL diodes, which it also
+    cannot commutate, and its gmin fallback re-solved the identical
+    system; `"settle"` silently dropped arguments it cannot honour;
+    and `gmin_ramp` produced an all-NaN ramp for a non-finite start,
+    which the stepping loop could not advance past.
+    Declined, with the reason recorded in the code: carrying a
+    homotopy's bisected step width forward. A shrink-only controller
+    turns one hard rung into a step so small the budget runs out
+    before the ramp ends — it failed two tests when tried.
+  * New Python surface: `strategy="gmin_step"`, `gmin=`,
+    `enable_nonlinear_refresh=`, `report=[]` (a `DCSolveReport` saying
+    which rung answered), `SettleConfig`. `"pseudo_trans"` now means
+    the kernel's PTC rung; the old transient-settling behaviour is
+    `"settle"`. `"source_step"` is now a real homotopy rather than a
+    long transient.
+
 * **Topology preflight + auto-regularization** (audit finding
   `no-topology-preflight-or-auto-shunt`, CRITICAL). A node nobody gave
   a voltage reference — an isolated transformer secondary, a divider

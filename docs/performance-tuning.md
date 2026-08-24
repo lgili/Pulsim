@@ -113,23 +113,30 @@ its DC OP. Two ways to ask:
 # 1) p.simulate(...) flag
 res = p.simulate(b, t_end=..., dt=..., start_from_dc_op=True)
 
-# 2) Explicit compute_dc_op with a strategy
-from pulsim import compute_dc_op, PseudoTransientConfig
-x0 = compute_dc_op(
-    b, t_eval=0.0,
-    config=PseudoTransientConfig(num_steps=50, dt_initial=1e-6),
-)
+# 2) Explicit, and ask which rung answered
+from pulsim import compute_dc_op
+report = []
+x0 = compute_dc_op(b, t_eval=0.0, report=report)
+print(report[0].summary())
 ```
 
-The strategies (`compute_dc_op` calls them under the hood):
+Since v2.0 you rarely pick a strategy: `"auto"` walks the cascade
+until one rung answers, and the common case never leaves rung 1.
 
-- **`SourceStepConfig`** — ramp sources from 0 → final value over N
-  steps. Robust for stiff non-linear circuits.
-- **`PseudoTransientConfig`** — Newton iteration with an added
-  pseudo-time damping term that vanishes at convergence; good for
-  systems with multiple Newton basins.
+| `strategy=` | What it varies | Reach for it when |
+|---|---|---|
+| `"naive"` | nothing | you want the diagnostic, not an answer |
+| `"gmin_step"` | a conductance from every node to ground, 1e-2 S → 1e-12 S by decades | the matrix pivots badly, or Newton has no basin from `x = 0` |
+| `"source_step"` | every independent source amplitude, 0 → nominal (`SourceStepConfig.n_steps`) | multiple Newton basins |
+| `"pseudo_trans"` | an artificial `dx/dt = -F` | resistive-nonlinear problems with no MNA constraint rows |
+| `"settle"` | nothing — it runs a real transient (`SettleConfig`) | the steady state is a *switching average*, which no DC solve can find |
+| `"auto"` (default) | the first four, in order | always |
 
-See [gotchas.md](gotchas.md) for which one to reach for first.
+Both homotopy rungs warm-start from the previous solve and bisect
+when a step turns out to be too wide. `gmin=0` disables the 1e-12 S
+conductance floor if you need the un-augmented system exactly.
+
+See [gotchas.md](gotchas.md) for the failure modes each one addresses.
 
 ## Profiling
 

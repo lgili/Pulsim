@@ -33,6 +33,8 @@
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
+#include "pulsim/pwl/dc_operating_point.hpp"
+#include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
@@ -448,51 +450,33 @@ inline SimulationResult run_transient(
     // HistoryState + DiodeEventState from the DC solution.
     // Sample 0 becomes the DC state vector instead of zero.
     if (start_from_dc_op) {
-        const Size dc_max_iters =
-            opts.max_event_iterations > 0
-                ? opts.max_event_iterations
-                : Size{16};
-        Size iters = 0;
-        bool flipped = false;
-        do {
-            auto mask = switch_fn(opts.t_start);
-            if (has_diodes) {
-                mask = combine_masks(mask,
-                                      diodes.current_diode_mask(),
-                                      diode_owned);
-            }
-            // Phase-0 fix #2: honour the Newton devices. The
-            // plain compute_dc_op stamps Nonlinear branches as
-            // OPEN, silently seeding the run from the operating
-            // point of a different circuit.
-            // Adversarial-review finding P0-R2: pass the RAW
-            // static-device refresh (diodes / MOSFET / IGBT), NOT
-            // nl_refresh_effective — the saturable-inductor wrapper
-            // stamps trap-companion physics (2·L_eff/dt series
-            // resistance), which is time-step-dependent and wrong
-            // at DC. Saturable inductors still lack a DC stamp in
-            // dc_assemble (pre-existing; tracked for Phase 2).
-            if (nl_refresh) {
-                x = pwl::compute_dc_op_newton(
-                    graph, pool, mask, nl_refresh,
-                    opts.t_start,
-                    opts.max_newton_iterations,
-                    opts.tol_newton_dx,
-                    opts.tol_newton_res,
-                    opts.enable_newton_line_search,
-                    opts.enable_newton_lm);
-            } else {
-                x = pwl::compute_dc_op(graph, pool, mask,
-                                        opts.t_start);
-            }
-            flipped = has_diodes && diodes.update_from_state(x);
-            ++iters;
-        } while (flipped && iters < dc_max_iters);
-        if (flipped) {
-            throw std::runtime_error(
-                "run_transient: DC operating-point event "
-                "iteration did not converge at t_start");
-        }
+        // v2.0 Phase 2 (B.2): one shared implementation of "the DC
+        // operating point" (pwl/dc_operating_point.hpp) — nonlinear
+        // devices stamped, PWL diode states iterated to consistency,
+        // and the DC cascade walked when the direct solve fails.
+        //
+        // Adversarial-review finding P0-R2 still governs which
+        // refresh goes in: the RAW static-device chain (diodes /
+        // MOSFET / IGBT), NOT nl_refresh_effective. The saturable-
+        // inductor wrapper stamps trap-companion physics (a
+        // 2·L_eff/dt series resistance), which is time-step dependent
+        // and meaningless at DC.
+        pwl::DCOperatingPointOptions dc_opts;
+        dc_opts.t_eval = opts.t_start;
+        dc_opts.max_event_iterations =
+            opts.max_event_iterations > 0 ? opts.max_event_iterations
+                                           : Size{16};
+        dc_opts.max_newton_iters   = opts.max_newton_iterations;
+        dc_opts.tol_dx             = opts.tol_newton_dx;
+        dc_opts.tol_res            = opts.tol_newton_res;
+        dc_opts.enable_line_search = opts.enable_newton_line_search;
+        dc_opts.enable_lm          = opts.enable_newton_lm;
+
+        auto dc = pwl::compute_dc_operating_point(
+            graph, pool, switch_fn(opts.t_start), nl_refresh,
+            dc_opts, has_diodes ? &diodes : nullptr,
+            "run_transient(start_from_dc_op)");
+        x = std::move(dc.x);
         history.seed_from_dc_op(x);
     }
 
