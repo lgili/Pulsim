@@ -479,6 +479,22 @@ inline SimulationResult run_transient(
 
     Vector b_extra(static_cast<Index>(state_size));
 
+    // ---- v2.0 Phase 1: per-step workspace, allocated ONCE ----------------
+    // (audit finding `per-step-heap-allocations`). Every buffer below was
+    // previously constructed fresh inside the step loop — 6-10 allocator
+    // round-trips per step. Hoisted here, per-step use is assignment /
+    // clear() into retained capacity: on the LINEAR trapezoidal path the
+    // steady-state loop performs zero heap allocations outside sample
+    // recording. (The Newton nonlinear-refresh solve and the deliberately
+    // uncached BDF1 comparison path still allocate per call — out of the
+    // Phase-1 zero-alloc scope.)
+    Vector x_prev;                                  // pre-step state snapshot
+    std::vector<pwl::HistoryEntry> history_snap;    // V3 rollback snapshot
+    std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
+    std::vector<bool> last_solved_bits;             // breach re-sync bits
+    std::vector<CommutationEvent> step_events;      // per-step event scratch
+    std::vector<bool> post_event_bits;              // substep-correction scratch
+
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
     const Size max_iters = opts.max_event_iterations;
@@ -542,8 +558,9 @@ inline SimulationResult run_transient(
 
             // Snapshot the state at t_prev for sub-step
             // commutation timing (Layer 5 V2.2) and state
-            // correction (Layer 5 V3).
-            const Vector x_prev = x;
+            // correction (Layer 5 V3). Assignment into the hoisted
+            // buffer — no per-step allocation.
+            x_prev = x;
 
             // State-aware observer fires BEFORE `switch_fn(t)`
             // so the user can update a Python-side PI / sampler /
@@ -557,10 +574,12 @@ inline SimulationResult run_transient(
             // dynamic-branch). Restored only if a commutation
             // event is detected AND
             // enable_substep_state_correction is true.
-            const auto history_snap = history.snapshot();
-            const std::vector<bool> diodes_snap =
-                has_diodes ? diodes.snapshot_on_bits()
-                            : std::vector<bool>{};
+            history.snapshot_into(history_snap);
+            if (has_diodes) {
+                diodes.snapshot_on_bits_into(diodes_snap);
+            } else {
+                diodes_snap.clear();
+            }
             // Pre-event mask: what mask we'd use BEFORE any
             // diode flip during this step. Captured before
             // event iteration runs.
@@ -578,7 +597,7 @@ inline SimulationResult run_transient(
             // absent source kinds contribute (and cost) nothing instead of
             // allocating + adding a zero vector every step.
             // 1. History from the previous step.
-            b_extra = history.compute_b_extra(opts.dt);
+            history.compute_b_extra(opts.dt, b_extra);
             // 2. Optional user-supplied b_extra(t).
             if (b_extra_fn) {
                 b_extra += b_extra_fn(t);
@@ -616,7 +635,7 @@ inline SimulationResult run_transient(
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
-            std::vector<bool> last_solved_bits;
+            last_solved_bits.clear();
             do {
                 auto mask = switch_fn(t);
                 if (has_diodes) {
@@ -662,7 +681,7 @@ inline SimulationResult run_transient(
                     cache.solve(mask, b_extra, x);
                 }
                 if (has_diodes) {
-                    last_solved_bits = diodes.snapshot_on_bits();
+                    diodes.snapshot_on_bits_into(last_solved_bits);
                 }
                 flipped = has_diodes &&
                           diodes.update_from_state(x);
@@ -702,7 +721,7 @@ inline SimulationResult run_transient(
             // and (if enabled) retroactively split the step
             // into two sub-steps at the first detected
             // event's t_est.
-            std::vector<CommutationEvent> step_events;
+            step_events.clear();
             if (has_diodes) {
                 for (const auto& e : diodes.entries()) {
                     const Real v_a_prev =
@@ -780,7 +799,7 @@ inline SimulationResult run_transient(
                         // — so the result is bit-identical. The outer
                         // `b_extra` is free here: the main event-iteration
                         // solve already consumed it this step.
-                        b_extra = history.compute_b_extra(dt1);
+                        history.compute_b_extra(dt1, b_extra);
                         if (b_extra_fn) {
                             b_extra += b_extra_fn(t_est);
                         }
@@ -815,8 +834,7 @@ inline SimulationResult run_transient(
                     // SwitchedDiode decision may keep the
                     // pre-event state).
                     if (has_diodes) {
-                        std::vector<bool> post_event_bits =
-                            diodes_snap;
+                        post_event_bits = diodes_snap;
                         const auto entries = diodes.entries();
                         for (const auto& ev : step_events) {
                             for (Size i = 0;
@@ -845,7 +863,7 @@ inline SimulationResult run_transient(
                         }
                         // Same reused-buffer accumulation as sub-step 1
                         // (audit #16), at time t with dt2.
-                        b_extra = history.compute_b_extra(dt2);
+                        history.compute_b_extra(dt2, b_extra);
                         if (b_extra_fn) {
                             b_extra += b_extra_fn(t);
                         }
@@ -965,7 +983,7 @@ inline SimulationResult run_transient(
             // k=0 we don't have a prev step; just use the
             // current x as a degenerate snapshot — the
             // sign-change check will exclude it from events.
-            const Vector x_prev = x;
+            x_prev = x;
 
             // State-aware observer fires before switch_fn(t) so
             // discrete-time controllers can update.
@@ -1008,7 +1026,7 @@ inline SimulationResult run_transient(
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
-            std::vector<bool> last_solved_bits;
+            last_solved_bits.clear();
             do {
                 auto mask = switch_fn(t);
                 if (has_diodes) {
@@ -1054,7 +1072,7 @@ inline SimulationResult run_transient(
                     cache.solve(mask, b_extra_user, x);
                 }
                 if (has_diodes) {
-                    last_solved_bits = diodes.snapshot_on_bits();
+                    diodes.snapshot_on_bits_into(last_solved_bits);
                 }
                 flipped = has_diodes &&
                           diodes.update_from_state(x);
