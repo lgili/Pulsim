@@ -8,6 +8,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **The inductor guards now confess.** The audit's item B.3 was
+  "delete `inductor_freeze_di_max` and `inductor_abs_clamp`" — the
+  post-solve guards that overwrite an inductor's branch current, and
+  which the audit calls confessions rather than features. Deleting
+  them turned out to be wrong, and finding that out is the result:
+
+  * Across 13 configurations of the failures their own documentation
+    names — a buck in deep DCM over five decades of load, an inductor
+    with no freewheel path at all, `g_off` down to literally zero,
+    10 ms runs at `dt = 1e-8` — the kiloamp runaway does **not**
+    reproduce. Switches always stamp `g_off`, so the loop never truly
+    opens.
+  * But it reproduces on the circuit they were written for. Running
+    `projects/inverters/pfc_vsi_drive` with the guards removed, the
+    line current peaks at **544 A** and the boost stage starves.
+    They are still load-bearing, so they stay.
+  * And with them on, that run's reported line current peaks at
+    **exactly 100.000 A** — which is the configured
+    `inductor_abs_clamp`. The clamp fires on **30 878 steps** of a
+    20 ms run. The plotted current is the limit, and nothing said so.
+
+  So instead of deleting them: every firing is recorded, per
+  inductor, in `result.inductor_guard_actions` (branch, freeze and
+  clamp counts, first time, peak raw solve, limit reported), and
+  `simulate()` warns once naming the device and the step count. The
+  option docs now open by saying the guard does not solve anything.
+  Recording changes no numbers — a test requires two guarded runs to
+  be bit-identical.
+
+  The real fix remains open and is now precisely stated: an inductor
+  whose conduction path opens needs a snubber, and Pulsim should
+  insert one and report it the way the topology preflight reports a
+  reference tie — not substitute a limit for a current.
+
 * **A step the solver cannot take is re-taken at a smaller one**
   (audit finding B.4). A failed inner solve used to end the run and
   discard everything computed before it. Now the step is rolled back

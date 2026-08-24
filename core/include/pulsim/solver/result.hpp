@@ -81,6 +81,33 @@ struct DtRetry {
     std::string reason; ///< what the nominal-dt attempt reported
 };
 
+/// v2.0 Phase 2 — a post-solve guard OVERWROTE the solver's answer
+/// for an inductor's branch current.
+///
+/// `inductor_freeze_di_max` and `inductor_abs_clamp` do not solve
+/// anything: they replace a number the solver produced with one the
+/// user configured. That is sometimes the only way to get a run to
+/// finish, but it means the current being plotted is the LIMIT, not
+/// the circuit — on the drive this was written for, the reported
+/// line current peaks at exactly 100.000 A because the clamp is
+/// 100 A. A guard that fires is evidence the model is missing
+/// something (usually a snubber across a path that opens), and the
+/// user has to be told, or they will read the limit as physics.
+///
+/// One record per inductor that fired, not per step.
+struct InductorGuardAction {
+    Index branch_id = kInvalidIndex;
+    Size freeze_count = Size{0};   ///< steps snapped back to i_prev
+    Size clamp_count  = Size{0};   ///< steps hard-limited
+    Real t_first = Real{0};        ///< when it first fired
+    Real worst_solved = Real{0};   ///< largest |i| the solver produced
+    Real reported_limit = Real{0}; ///< the |i| the user sees instead
+
+    [[nodiscard]] Size total() const noexcept {
+        return freeze_count + clamp_count;
+    }
+};
+
 struct SimulationResult {
     std::vector<Real> times;
 
@@ -91,6 +118,11 @@ struct SimulationResult {
     /// v2.0 Phase 2 — steps re-taken at a reduced dt. Empty on a run
     /// that never needed one.
     std::vector<DtRetry> dt_retries;
+
+    /// v2.0 Phase 2 — inductors whose current a post-solve guard
+    /// overwrote. Empty unless `inductor_freeze_di_max` or
+    /// `inductor_abs_clamp` was set AND actually fired.
+    std::vector<InductorGuardAction> inductor_guard_actions;
 
     /// Phase-0 fix #9 — steps where diode event iteration hit a
     /// cycle or the budget. Empty on a fully-converged run.

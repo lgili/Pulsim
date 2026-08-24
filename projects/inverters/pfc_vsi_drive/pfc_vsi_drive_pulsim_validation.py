@@ -863,6 +863,15 @@ def simulate_frontend(sp: DriveSimParams,
         b, t_end=t_end, dt=dt, switch_fn=sw_fn,
         initial_state=init_state, step_observer=observer,
         max_event_iterations=12,
+        # Post-solve kernel guards (see solver/options.hpp). NOTE
+        # (v2.0 Phase 2): these do not solve anything — they replace
+        # the solver's i_L with a limit configured here, and the run
+        # below genuinely depends on them: without them i_in peaks at
+        # ~544 A and the boost stage starves. That dependence is a
+        # MODELLING gap (the L001 loop opens when the bridge enters
+        # DCM and only the diode leakage is left), not a solver
+        # setting, and simulate() now warns whenever a guard fires so
+        # the clamped value is not mistaken for a measurement.
         # Layer 5 V5 kernel guards (post-solve, see solver/options.hpp):
         #   * freeze_di_max = 50 A catches sudden kiloamp jumps in
         #     the inductor's branch current.

@@ -145,6 +145,21 @@ struct SimulationOptions {
 
     /// Floating-inductor freeze (post-solve guard).
     ///
+    /// THIS DOES NOT SOLVE ANYTHING. It replaces a current the
+    /// solver computed with a limit you configured, so on any step
+    /// where it fires the trace shows YOUR NUMBER, not the circuit's.
+    /// A guard that fires is evidence the model is missing something
+    /// — usually a snubber across a path that opens when a bridge
+    /// enters DCM — and every firing is now recorded in
+    /// `result.inductor_guard_actions`, which the Python layer
+    /// surfaces as a warning naming the device and the step count.
+    /// The audit calls these confessions rather than features; they
+    /// are kept because the 1 kW drive in `projects/inverters/
+    /// pfc_vsi_drive` genuinely still needs them (without the clamp
+    /// its line current peaks at ~544 A and the boost stage
+    /// starves), but a run that depends on one is a run whose model
+    /// is incomplete.
+    ///
     /// When `> 0`, after each `cache.solve` the solver checks every
     /// tracked inductor's branch-current change against this bound
     /// (`|i_new − i_prev| > inductor_freeze_di_max`) and, if exceeded,
@@ -164,6 +179,10 @@ struct SimulationOptions {
     Real inductor_freeze_di_max = Real{0};
 
     /// Absolute inductor-current clamp (post-solve guard).
+    ///
+    /// Same caveat as `inductor_freeze_di_max` above: this
+    /// substitutes a limit for a computed current, and every firing
+    /// lands in `result.inductor_guard_actions`.
     ///
     /// When `> 0`, after each solve every tracked inductor's branch
     /// current is hard-clamped to ``[-inductor_abs_clamp, +clamp]``.

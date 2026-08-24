@@ -1088,6 +1088,9 @@ inline SimulationResult run_transient(
                     const Real i_prev_step =
                         x_prev[e.inductor_branch_var_id];
                     Real i_new = x[e.inductor_branch_var_id];
+                    const Real i_solved = i_new;
+                    bool froze = false;
+                    bool clamped = false;
                     // Step-to-step jump guard: snap back to the pre-step
                     // current when the solver emits an unphysical kilo-amp
                     // delta (rectifier in DCM, etc.).
@@ -1096,6 +1099,7 @@ inline SimulationResult run_transient(
                         const Real adi = di < Real{0} ? -di : di;
                         if (adi > opts.inductor_freeze_di_max) {
                             i_new = i_prev_step;
+                            froze = true;
                         }
                     }
                     // Absolute clamp: catches the *slow drift* form
@@ -1105,8 +1109,39 @@ inline SimulationResult run_transient(
                     // line cycles.
                     if (opts.inductor_abs_clamp > Real{0}) {
                         const Real lim = opts.inductor_abs_clamp;
-                        if (i_new >  lim) i_new =  lim;
-                        if (i_new < -lim) i_new = -lim;
+                        if (i_new >  lim) { i_new =  lim; clamped = true; }
+                        if (i_new < -lim) { i_new = -lim; clamped = true; }
+                    }
+                    // v2.0 Phase 2: a guard that fires REPLACES the
+                    // solver's answer with a number the user
+                    // configured. Say so. Silently reporting the
+                    // limit as a current is how a 1 kW drive comes to
+                    // show a line current peaking at exactly 100.000
+                    // A — the clamp value — and nobody notices.
+                    if (froze || clamped) {
+                        InductorGuardAction* rec = nullptr;
+                        for (auto& g : result.inductor_guard_actions) {
+                            if (g.branch_id == e.branch_id) {
+                                rec = &g;
+                                break;
+                            }
+                        }
+                        if (rec == nullptr) {
+                            result.inductor_guard_actions.push_back(
+                                InductorGuardAction{
+                                    .branch_id = e.branch_id,
+                                    .t_first = t});
+                            rec = &result.inductor_guard_actions
+                                       .back();
+                        }
+                        rec->freeze_count += froze ? Size{1} : Size{0};
+                        rec->clamp_count  += clamped ? Size{1} : Size{0};
+                        const Real a_solved =
+                            i_solved < Real{0} ? -i_solved : i_solved;
+                        rec->worst_solved =
+                            std::max(rec->worst_solved, a_solved);
+                        rec->reported_limit =
+                            i_new < Real{0} ? -i_new : i_new;
                     }
                     x[e.inductor_branch_var_id] = i_new;
                 }
