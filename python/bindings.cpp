@@ -1305,6 +1305,37 @@ void init_module(py::module_& m) {
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);
 
+    py::class_<solver::InductorGuardAction>(m, "InductorGuardAction",
+        "A post-solve guard OVERWROTE the solver's answer for an "
+        "inductor current. `inductor_freeze_di_max` and "
+        "`inductor_abs_clamp` do not solve anything — they replace a "
+        "number the solver produced with one you configured — so a "
+        "guard that fires means the plotted current is the LIMIT, "
+        "not the circuit, and the model is missing something "
+        "(usually a snubber across a path that opens).")
+        .def_readonly("branch_id",
+                       &solver::InductorGuardAction::branch_id)
+        .def_readonly("freeze_count",
+                       &solver::InductorGuardAction::freeze_count,
+                       "Steps snapped back to the previous current.")
+        .def_readonly("clamp_count",
+                       &solver::InductorGuardAction::clamp_count,
+                       "Steps hard-limited to the absolute bound.")
+        .def_readonly("t_first",
+                       &solver::InductorGuardAction::t_first)
+        .def_readonly("worst_solved",
+                       &solver::InductorGuardAction::worst_solved,
+                       "The largest |i| the solver actually produced.")
+        .def_readonly("reported_limit",
+                       &solver::InductorGuardAction::reported_limit,
+                       "The |i| you see in the trace instead.")
+        .def("total", &solver::InductorGuardAction::total)
+        .def("__repr__", [](const solver::InductorGuardAction& g) {
+            return "<InductorGuardAction branch=" +
+                    std::to_string(g.branch_id) + " fired=" +
+                    std::to_string(g.total()) + ">";
+        });
+
     py::class_<solver::DtRetry>(m, "DtRetry",
         "A step the solver could not take at the nominal dt and "
         "re-took as 2^halvings sub-steps. The sampling grid is "
@@ -1395,6 +1426,11 @@ void init_module(py::module_& m) {
                        &SimulationResult::event_iteration_count)
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
+        .def_readonly("inductor_guard_actions",
+                       &SimulationResult::inductor_guard_actions,
+                       "Inductors whose current a post-solve guard "
+                       "overwrote. Empty unless a guard was enabled "
+                       "AND fired.")
         .def_readonly("dt_retries", &SimulationResult::dt_retries,
                        "Steps that had to be re-taken at a reduced "
                        "dt. Empty on a run that never needed one.")

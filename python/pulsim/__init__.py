@@ -2087,6 +2087,43 @@ def simulate(
     except AttributeError:  # pragma: no cover
         pass
 
+    # A post-solve inductor guard that FIRED replaced the solver's
+    # answer with a number the caller configured. Reading that limit
+    # off a plot as if it were current is the failure this warning
+    # exists to prevent: on the drive these guards were written for,
+    # the reported line current peaks at exactly 100.000 A because
+    # the clamp is 100 A.
+    _guards = list(getattr(res, "inductor_guard_actions", []) or [])
+    if _guards:
+        import warnings
+        lines = []
+        for g in _guards:
+            name = builder.graph.branch_name(g.branch_id) or \
+                f"branch #{g.branch_id}"
+            lines.append(
+                f"  * {name}: the guard replaced the solver's "
+                f"current on {g.total()} step(s), first at "
+                f"t = {g.t_first:.6g} s. Peak raw solve "
+                f"{g.worst_solved:.4g} A; limit reported "
+                f"{g.reported_limit:.4g} A. A guard that stays "
+                f"engaged over many steps is HOLDING the trajectory "
+                f"there, not trimming an outlier.")
+        warnings.warn(
+            "simulate(): a post-solve inductor guard replaced the "
+            "solver's answer.\n" + "\n".join(lines) +
+            "\n  These guards do not solve anything — they substitute "
+            "a limit you configured for a current the solver "
+            "computed, so what you plot for these inductors is the "
+            "limit. Before trusting the trace, find out WHY the "
+            "underlying current went there: re-run with the guard "
+            "off and with a smaller dt. If the value is unchanged by "
+            "dt, it is your model's own trajectory (an unbounded "
+            "open-loop stage, a missing snubber, a missing inrush "
+            "limiter), not solver noise — and clipping it is hiding "
+            "a modelling result, not a numerical one. Inspect "
+            "result.inductor_guard_actions.",
+            stacklevel=2)
+
     # T2.2: auto-attach motor observer traces so
     # `res.signal('M1.omega')` works without manual wiring. We walk
     # the step_observer / b_extra_fn / closed_loops the user passed
