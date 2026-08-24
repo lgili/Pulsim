@@ -8,6 +8,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 1 — kernel foundation (v2.0 audit follow-up)
 
+* **Kernel diagnostics now name the node or device** (audit findings
+  `kernel-has-no-name-context-for-errors` and
+  `singular-errors-dont-name-the-node`). Every solver failure used to
+  report a mask bitstring and a norm — `numerically singular for mask
+  0010111…1 (dt=1e-7)` — which on a 200-switch MMC is unactionable.
+  Now:
+  ```
+  PwlStateSpaceCache: numerically singular for mask 0b0 N=0 (dt=0)
+    — nothing connects node vfloat: its column in the MNA matrix is
+    empty, i.e. no device ties it to the rest of the circuit (a node
+    reachable only through a capacitor has no DC path; add a
+    bleeder/parallel resistance or tie it to ground)
+  ```
+  * `topology::Graph` gained an optional branch name table
+    (`add_branch(..., name)`, `set_branch_name`, `branch_name`),
+    populated by `CircuitBuilder` at its single branch-creation
+    choke point. Nodes already carried names; branches did not, so
+    names never crossed into the kernel. Unnamed branches (raw-kernel
+    users, hand-built graphs) stay empty and every message falls back
+    to the id. Branch names are deliberately excluded from the
+    structural hash, so PWL cache identity is unchanged.
+  * New `pwl/row_names.hpp` resolves an MNA row to its owner using
+    the documented layout `[v_0…v_{N-1} | i_src | i_L]` —
+    `describe_row`, `row_label`, `branch_label`,
+    `top_entries_by_name`, and `explain_singular`.
+  * Two independent localisation sources, because one is not enough:
+    a structural empty-column/row probe (`sparse::first_empty_column`
+    / `first_empty_row`, O(n), works on BOTH backends — the Eigen
+    backend used by the DC and Newton paths exposes no pivot index at
+    all), plus the new `DirectSolver::singular_index()` implemented by
+    the in-house LU, which catches what structure cannot (a node
+    behind an OPEN switch is not empty — `g_off` is always stamped —
+    it just pivots to ~0).
+  * The phrasing branches on WHAT the empty row belongs to. Some
+    unknowns are reserved by `state_size` but deliberately not
+    stamped by the current assembly mode (every inductor at
+    `dt == 0`; saturable inductors in the DC assembly), so their row
+    is empty *by construction*, not because the device is
+    disconnected — telling that user to "add a bleeder resistor to
+    L1" would send them to debug a correctly wired part. A node gets
+    the wiring advice; a device branch-current gets the truth about
+    the assembly mode and the real fix (`build with dt > 0`).
+  * Wired into: `compute_dc_op`, `pseudo_transient_dc`,
+    `source_stepping_dc`, `pseudo_transient_solve` (both the
+    singular and the non-convergence exits), the Newton
+    structurally-singular and LM no-improving-step throws, the
+    non-finite-residual guard, the inductor-cycle error (which now
+    names the device closing the loop), the PWL cache (`CacheError` gained a
+    structured `failing_row` + `detail` for C++ consumers of the
+    non-throwing `try_*` API — Python still receives the message as
+    the exception string; surfacing the structured fields through
+    pybind is a follow-up), Newton non-convergence
+    (`lpNorm<Infinity>()` discarded the argmax; now reports *where*
+    the worst residual and step live), and the strict diode
+    event-iteration throw on BOTH the dynamic and static paths
+    (names the devices still flipping). The Newton residual is
+    phrased as an EQUATION (`the KCL balance at node vout`) and the
+    step as an UNKNOWN (`current through inductor L1`), which is
+    what each actually is.
+
 * **Contiguous zero-copy waveform storage + output decimation**
   (audit finding `waveform-storage-vector-of-vectors`, BREAKING).
   `SimulationResult::states` was a `std::vector<Vector>` — one heap
@@ -98,7 +158,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     solved masks are evicted and transparently rebuilt on re-visit;
     eager `build()` never evicts. New telemetry:
     `CacheMetrics.segment_evictions`, `segment_cache_bytes()`,
-    `DirectSolver::factor_bytes()`.
+    `DirectSolver::factor_bytes()`. `CacheMetrics` is now bound to
+    Python (`cache.metrics()`), so eviction and event-solver
+    behaviour is observable — and therefore testable — from there;
+    `SimulationResult.total_bytes` exposes the whole result's
+    footprint alongside `states_bytes`. The recency tick is atomic
+    and is only written in lazy mode, where eviction can actually
+    fire.
   * *`alt-dt-cache-unbounded-factorization`* — `solve_at` no longer
     keeps a map keyed by *exact Real dt* of fully analyzed +
     factorized segments (one per commutation, forever). Each
@@ -112,7 +178,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     inductor diagonals, −2·M transformer cross terms; mask-
     invariant) and the dt-independent b; `assemble_segment`
     recombines `J = G + (1/dt)·C` through the same single stamping
-    loop. `compute_lti_state_space` now uses the split EXACTLY,
+    loop. Note for anyone holding v1.x golden traces: companion
+    entries are now `fl(fl(1/dt)·2C)` instead of `fl(2C/dt)`, a
+    shift of at most ~2 ulp (far below trapezoidal LTE), so
+    bit-identical baselines recorded on v1.x will differ in the last
+    bit. `compute_lti_state_space` now uses the split EXACTLY,
     replacing the two-assembly finite-difference recovery — which
     had been burying *physically real zero eigenvalues* (series-cap
     midpoint imbalance modes in NPC/MMC stacks) under cancellation

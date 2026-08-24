@@ -940,6 +940,42 @@ void init_module(py::module_& m) {
           "user mask by combine_masks); only the controlled indices "
           "need a switch_fn/driver.");
 
+    // v2.0 Phase 1 — cache telemetry. Was C++-only, which made the
+    // eviction and event-solver behaviour unobservable (and so
+    // untestable) from Python (adversarial-review finding F10).
+    py::class_<pwl::CacheMetrics>(m, "CacheMetrics",
+        "Snapshot of PwlStateSpaceCache counters. Monotonic across "
+        "the cache's lifetime.")
+        .def_readonly("rank1_hits", &pwl::CacheMetrics::rank1_hits)
+        .def_readonly("multi_bit_rank1_hits",
+                       &pwl::CacheMetrics::multi_bit_rank1_hits)
+        .def_readonly("full_refactor_hits",
+                       &pwl::CacheMetrics::full_refactor_hits)
+        .def_readonly("fallbacks", &pwl::CacheMetrics::fallbacks)
+        .def_readonly("segment_evictions",
+                       &pwl::CacheMetrics::segment_evictions,
+                       "Lazy-mode segments dropped by the byte-budget "
+                       "LRU.")
+        .def_readonly("event_hits", &pwl::CacheMetrics::event_hits,
+                       "solve_at calls served by a resident factor at "
+                       "the same dt.")
+        .def_readonly("event_refactors",
+                       &pwl::CacheMetrics::event_refactors,
+                       "solve_at calls that re-factored a resident "
+                       "entry at a new dt (no re-analysis).")
+        .def_readonly("event_builds", &pwl::CacheMetrics::event_builds,
+                       "solve_at calls that had to build a fresh "
+                       "event solver.")
+        .def("__repr__", [](const pwl::CacheMetrics& x) {
+            return std::string("CacheMetrics(evictions=") +
+                   std::to_string(x.segment_evictions) +
+                   ", event_hits=" + std::to_string(x.event_hits) +
+                   ", event_refactors=" +
+                   std::to_string(x.event_refactors) +
+                   ", event_builds=" +
+                   std::to_string(x.event_builds) + ")";
+        });
+
     py::class_<pwl::PwlStateSpaceCache>(m, "PwlStateSpaceCache",
         "PWL state-space cache. Pre-factors the MNA matrix "
         "for every reachable switch combination + dt.")
@@ -990,7 +1026,14 @@ void init_module(py::module_& m) {
         .def("segment_cache_bytes",
               &pwl::PwlStateSpaceCache::segment_cache_bytes,
               "Estimated resident bytes of the per-mask segment "
-              "cache (assembled matrices + LU factors).")
+              "cache (assembled matrices + LU factors). Sample it "
+              "BETWEEN runs: it walks the segment map, which lazy "
+              "builds and evictions mutate, and run_transient "
+              "releases the GIL — `metrics()` is the thread-safe "
+              "counter set.")
+        .def("metrics", &pwl::PwlStateSpaceCache::metrics,
+              "Snapshot the cache counters (evictions, event-solver "
+              "hits/refactors/builds, rank-1 telemetry).")
         .def("num_event_entries",
               &pwl::PwlStateSpaceCache::num_event_entries,
               "Number of resident event-dt solver entries used by "
@@ -1055,8 +1098,17 @@ void init_module(py::module_& m) {
               py::arg("h_a") = Real{1e-6},
               py::arg("h_b") = Real{5e-7},
               "Extract continuous-time LTI state-space (A, b) for "
-              "the given switch mask via MNA finite-difference "
-              "recovery. Returns a tuple "
+              "the given switch mask from the assembler's exact "
+              "(G, C, b) split (v2.0 — this replaced the earlier "
+              "finite-difference recovery; `h_a`/`h_b` are accepted "
+              "for backwards compatibility and ignored). "
+              "Raises RuntimeError for MAGNETICALLY COUPLED "
+              "inductors (a transformer with k != 0): the "
+              "extraction applies a diagonal inverse mass matrix "
+              "and cannot represent the mutual terms — use "
+              "engine='pwl' there. A k=0 transformer models two "
+              "independent windings and extracts normally. "
+              "Returns a tuple "
               "(A_ndarray, b_ndarray, state_row_indices, "
               "state_is_cap, b_projection). "
               "Used by pulsim.dsed.PEDSimulatorAuto through the "
@@ -1197,6 +1249,11 @@ void init_module(py::module_& m) {
             "(num_steps, state_size) numpy view — zero-copy over "
             "the kernel's contiguous buffer. Use `.copy()` for a "
             "mutable array.")
+        .def_property_readonly("total_bytes",
+            [](const SimulationResult& r) { return r.approx_bytes(); },
+            "Estimated bytes held by the whole result: the "
+            "contiguous sample buffer plus the parallel times and "
+            "diagnostic vectors.")
         .def_property_readonly("states_bytes",
             [](const SimulationResult& r) { return r.states.bytes(); },
             "Bytes held by the contiguous sample buffer.")

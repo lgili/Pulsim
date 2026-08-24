@@ -24,6 +24,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -105,7 +106,14 @@ struct CacheMetrics {
 ///
 /// * `masks_processed`     — total number of cached masks the call
 ///                           visited. For `Mode::AllActive` this is
-///                           `segments_.size()`; for
+///                           `segments_.size()` — i.e. the RESIDENT
+///                           masks. Under a byte budget that is
+///                           fewer than the masks the run has
+///                           visited: an evicted mask is not
+///                           refactored, it is rebuilt from the
+///                           updated pool on its next solve, which
+///                           is equally correct but does not show
+///                           up in this count. For
 ///                           `Mode::CurrentOnly` it is at most 1 (the
 ///                           rank-1 sliding solver's current mask
 ///                           if rank-1 has been used).
@@ -177,14 +185,23 @@ struct CacheError {
     topology::SwitchStateMask  mask;
     Real                       dt = Real{0};   // 0 for static-only
 
+    /// Where the failure was localised, when it could be (v2.0
+    /// Phase 1, audit finding `singular-errors-dont-name-the-node`).
+    /// `detail` is a ready-to-append human sentence naming the node
+    /// or device; empty when the failure could not be attributed.
+    /// Structured so the Python frontend / GUI can highlight the
+    /// element instead of parsing `what()`.
+    Index                      failing_row = kInvalidIndex;
+    std::string                detail;
+
     [[nodiscard]] std::string what() const {
         const char* k =
             kind == Kind::StructurallySingular ? "structurally singular"
           : kind == Kind::NumericallySingular  ? "numerically singular"
                                                 : "no segment built";
         return std::format(
-            "PwlStateSpaceCache: {} for mask {} (dt={})",
-            k, mask.to_string(), dt);
+            "PwlStateSpaceCache: {} for mask {} (dt={}){}",
+            k, mask.to_string(), dt, detail);
     }
 };
 
@@ -283,9 +300,15 @@ public:
         if (it != segments_.end()) {
             // LRU touch (v2.0 Phase 1) — mutable tick, no
             // structural mutation: outstanding references stay
-            // valid across cache HITS.
-            it->second.lru_tick =
-                lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
+            // valid across cache HITS. Skipped in eager mode, where
+            // eviction can never fire, so the hot lookup does no
+            // shared write at all there.
+            if (lazy_mode_) {
+                it->second.touch(
+                    lru_clock_.fetch_add(
+                        std::uint64_t{1},
+                        std::memory_order_relaxed) + 1);
+            }
             return &it->second;
         }
         if (lazy_mode_) {
@@ -367,9 +390,10 @@ public:
     ///
     /// v2.0 Phase 1: uses the assembler's EXACT (G, C, b) split —
     ///   1. `assemble_segment_split` → G_static, C (1/dt coeffs), b
-    ///   2. `M_dyn = C / 2` (J(h) = G + (2/h)·M_dyn — algebraic,
-    ///      replacing the two-assembly finite-difference recovery
-    ///      of ``notes/DSED_BRIDGE_DESIGN.md`` §2)
+    ///   2. the mass matrix is applied analytically in Step 7
+    ///      (per-row 1/C and -1/L), replacing the two-assembly
+    ///      finite-difference recovery of
+    ///      ``notes/DSED_BRIDGE_DESIGN.md`` §2
     ///   4. Identify state rows via `pool.kind_of` + `branch_var_id_for_inductor`
     ///   5. Schur-complement the algebraic vars out → dense `A, b`
     ///
@@ -411,8 +435,15 @@ public:
 
         const int n_mna = static_cast<int>(G_split.rows());
 
-        DenseMatrix G_st  = DenseMatrix(G_split);  // sparse → dense
-        DenseMatrix M_dyn = DenseMatrix(C_split) * Real{0.5};
+        DenseMatrix G_st = DenseMatrix(G_split);   // sparse → dense
+        // NOTE: the mass matrix would be M_dyn = C_split / 2 (from
+        // J(h) = G + (2/h)·M_dyn). It is NOT materialised: Step 7
+        // applies M_ss^{-1} analytically as per-row 1/C and -1/L
+        // scaling, and the coupled case that would need the real
+        // matrix is rejected before it (see the guard there). The
+        // previous code built it and congruence-transformed it with
+        // an O(n^3) dense triple product whose result nothing read
+        // (adversarial-review finding MDYN-DEAD).
 
         // ---------------------------------------------------------
         // Step 3: walk pool to identify caps + inductors. Caps may
@@ -503,9 +534,10 @@ public:
                 Index a = find_root_ind(map_idx_ind(l.from));
                 Index b = find_root_ind(map_idx_ind(l.to));
                 if (a == b) {
-                    throw std::runtime_error(
+                    throw std::runtime_error(std::format(
                         "compute_lti_state_space: inductors form a "
-                        "cycle (parallel inductors or longer all-"
+                        "cycle closed by {} (parallel "
+                        "inductors or longer all-"
                         "inductor loops). The KVL around the loop "
                         "creates a linear dependency on di_L/dt that "
                         "makes the LTI state-space singular. Merge "
@@ -513,7 +545,8 @@ public:
                         "inductor upstream (parallel inductors: "
                         "L_eq = (L1·L2)/(L1+L2); series in the same "
                         "loop with mutual coupling: use Pulsim's "
-                        "transformer/coupled-inductor API).");
+                        "transformer/coupled-inductor API).",
+                        row_label(graph_, pool_, l.branch_var)));
                 }
                 uf_ind[a] = b;
             }
@@ -661,9 +694,10 @@ public:
             // -----------------------------------------------------
             // Step 3c: build T (sparse), apply congruence transform.
             //
-            //   M_new = T^T · M_dyn · T
-            //   G_new = T^T · G_st  · T
+            //   G_new = T^T · G_st · T
             //   b_new = T^T · b_a
+            // (The mass matrix would transform the same way; it is
+            // never materialised — see the note at Step 2.)
             //
             // T is constructed by processing tree edges in *reverse*
             // BFS order and doing T.col(neg) += T.col(pos). After
@@ -688,10 +722,8 @@ public:
             t_is_identity = T.isIdentity();
             if (!t_is_identity) {
                 DenseMatrix Tt = T.transpose();
-                DenseMatrix M_tmp = Tt * M_dyn * T;
-                DenseMatrix G_tmp = Tt * G_st  * T;
+                DenseMatrix G_tmp = Tt * G_st * T;
                 Vector      b_tmp = Tt * b_a;
-                M_dyn = std::move(M_tmp);
                 G_st  = std::move(G_tmp);
                 b_a   = std::move(b_tmp);
             }
@@ -817,9 +849,50 @@ public:
         }
 
         // ---------------------------------------------------------
-        // Step 7: apply M_ss^{-1}. M_ss is diagonal: +C for caps,
-        // -L for inductors. Apply per-row scaling to A, b_reduced,
-        // AND B (since b_reduced and B both go through M_ss^{-1}).
+        // Step 7: apply M_ss^{-1}. M_ss is DIAGONAL: +C for caps,
+        // -L for inductors — which is exactly why coupled windings
+        // must be rejected first.
+        //
+        // A transformer contributes OFF-DIAGONAL -M terms between
+        // the two winding rows of M_ss. The per-row scaling below
+        // cannot represent them, so it would silently return
+        // dynamics computed as if M = 0: a flyback's LTI poles
+        // would come back mutual-free, plausible and wrong, and the
+        // DSED bridge consumes this result without any signal.
+        // Reject loudly instead — the same stance as the inductor-
+        // cycle guard above (audit finding MDYN-DEAD / F5, raised by
+        // the Phase-1 review). Supporting coupled windings needs a
+        // real M_ss solve rather than row scaling, which is Phase-2
+        // work, not something to fake here.
+        // Gate on ACTUAL mutual inductance, not on the mere
+        // presence of a registered coupling: `add_transformer(...,
+        // k = 0)` is a documented way to model two independent
+        // windings, and there M really is 0, the mass matrix really
+        // is diagonal, and the extraction is exact. Rejecting it
+        // would be a false positive whose message ("would silently
+        // return dynamics computed as if the coupling were absent")
+        // is itself untrue for that circuit.
+        Size coupled_pairs = 0;
+        for (const auto& tc : pool_.transformer_couplings()) {
+            if (models::TwoWindingTransformer::mutual_inductance(
+                    tc.params) != Real{0}) {
+                ++coupled_pairs;
+            }
+        }
+        if (coupled_pairs > 0) {
+            throw std::runtime_error(std::format(
+                "compute_lti_state_space: this circuit has {} "
+                "magnetically coupled inductor pair(s) (k != 0 on the "
+                "transformer / coupled-inductor API). The "
+                "continuous-time LTI extraction applies a DIAGONAL "
+                "inverse mass matrix, so it cannot represent the "
+                "mutual-inductance off-diagonal terms and would "
+                "silently return dynamics computed as if the coupling "
+                "were absent. Use the fixed-step PWL engine "
+                "(engine='pwl'), which stamps the mutual terms "
+                "exactly, for magnetically coupled circuits.",
+                coupled_pairs));
+        }
         // ---------------------------------------------------------
         DenseMatrix A = Schur_G;
         Vector b_reduced = Schur_b;
@@ -848,6 +921,10 @@ public:
     /// Number of segments currently cached. In eager mode this
     /// is `2^N` after `build()`; in lazy mode it grows as
     /// `solve(mask, ...)` calls populate the cache.
+    ///
+    /// Like `segment_cache_bytes()`, this reads a container that
+    /// lazy builds and budget evictions mutate; sample it BETWEEN
+    /// runs, not from a monitor thread during a GIL-released run.
     [[nodiscard]] Size num_built_segments() const noexcept {
         return segments_.size();
     }
@@ -888,15 +965,22 @@ public:
         const std::uint64_t tick =
             lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
         auto it = event_entries_.find(mask);
+        if (it != event_entries_.end() &&
+            it->second.analyzed_dynamic != (dt > Real{0})) {
+            // Regime change (dynamic <-> static): different sparsity
+            // pattern, so the cached symbolic analysis no longer
+            // applies. Drop the entry and rebuild rather than
+            // refactorizing onto a mismatched analysis.
+            event_entries_.erase(it);
+            it = event_entries_.end();
+        }
         if (it == event_entries_.end()) {
-            // Fresh mask: make room first (erase invalidates
-            // references, but so does the emplace below — callers
-            // may not hold entry references across solve_at calls,
-            // same contract as the primary flat_map).
-            if (event_entries_.size() >=
-                static_cast<std::size_t>(kMaxEventEntries)) {
-                evict_lru_event_entry_();
-            }
+            // Fresh mask. NOTE the ordering: eviction happens just
+            // before the emplace, AFTER every step that can throw.
+            // Evicting first would sacrifice a healthy, analyzed and
+            // factorized event solver and then throw on a singular
+            // new mask, leaving the table one entry poorer for
+            // nothing (adversarial-review finding F6-c).
             EventEntry e;
             assemble_segment_split(graph_, pool_, mask,
                                     e.G, e.C, e.b_constant);
@@ -915,8 +999,14 @@ public:
                     "(numerically singular) for mask {} (dt={})",
                     mask.to_string(), dt));
             }
-            e.current_dt = dt;
-            e.lru_tick   = tick;
+            e.current_dt       = dt;
+            e.touch(tick);
+            e.analyzed_dynamic = (dt > Real{0});
+            // Everything that can throw is behind us; NOW make room.
+            if (event_entries_.size() >=
+                static_cast<std::size_t>(kMaxEventEntries)) {
+                evict_lru_event_entry_();
+            }
             it = event_entries_.emplace(mask, std::move(e)).first;
             event_builds_.fetch_add(1, std::memory_order_relaxed);
         } else if (it->second.current_dt != dt) {
@@ -939,10 +1029,10 @@ public:
                     "(dt={})", mask.to_string(), dt));
             }
             e.current_dt = dt;
-            e.lru_tick   = tick;
+            e.touch(tick);
             event_refactors_.fetch_add(1, std::memory_order_relaxed);
         } else {
-            it->second.lru_tick = tick;
+            it->second.touch(tick);
             event_hits_.fetch_add(1, std::memory_order_relaxed);
         }
         const EventEntry& e = it->second;
@@ -958,7 +1048,8 @@ public:
     static constexpr Size kMaxEventEntries = 8;
 
     /// Number of event-solver entries currently resident
-    /// (≤ `kMaxEventEntries`).
+    /// (≤ `kMaxEventEntries`). Same sampling caveat as
+    /// `num_built_segments()` — `solve_at` mutates this container.
     [[nodiscard]] Size num_event_entries() const noexcept {
         return event_entries_.size();
     }
@@ -1249,6 +1340,16 @@ public:
     /// Estimated resident bytes of the per-mask segment cache
     /// (assembled J + b + numeric LU factors per segment). An
     /// ESTIMATE for budget arithmetic, not an allocator audit.
+    ///
+    /// NOT SAFE to call while a simulation is running on this same
+    /// cache from another thread: it walks `segments_`, which lazy
+    /// builds and budget evictions mutate (the Dictionary is a
+    /// flat_map, so an erase shifts the underlying vector and
+    /// invalidates iterators). Sample it between runs. The
+    /// `metrics()` counters are individually atomic and MAY be
+    /// sampled live — though the fields are loaded independently,
+    /// so a mid-run sample is not a consistent snapshot and the
+    /// documented sum invariants can appear violated in flight.
     [[nodiscard]] std::size_t segment_cache_bytes() const noexcept {
         std::size_t total = 0;
         for (const auto& [mask, seg] : segments_) {
@@ -1295,19 +1396,22 @@ public:
         ParametricRefactorResult result;
         const auto t0 = std::chrono::steady_clock::now();
 
-        // v2.0 Phase 1: parameter updates invalidate the event
-        // entries' (G, C, b) snapshots. Drop them — the next
-        // solve_at rebuilds from the updated pool. (The v1.x aux
-        // cache silently kept STALE factors here.)
-        event_entries_.clear();
-
         if (updates.empty()) {
-            // No-op. Still report wall_time for telemetry callers.
+            // No-op: change nothing, including the event entries —
+            // dropping them here would make a documented no-op cost
+            // 8 re-analyses on the next commutation
+            // (adversarial-review finding F3-tests).
             const auto t1 = std::chrono::steady_clock::now();
             result.wall_time_us =
                 std::chrono::duration<double, std::micro>(t1 - t0).count();
             return result;
         }
+
+        // v2.0 Phase 1: parameter updates invalidate the event
+        // entries' (G, C, b) snapshots. Drop them — the next
+        // solve_at rebuilds from the updated pool. (The v1.x aux
+        // cache silently kept STALE factors here.)
+        event_entries_.clear();
 
         // 1. Push the updates into the pool. Each `update_*` mutator
         //    dispatches on the stored device kind; mismatched kinds
@@ -1390,6 +1494,29 @@ public:
     }
 
 private:
+    /// Build a CacheError with the failure LOCALISED where possible
+    /// (v2.0 Phase 1). The cache runs on the Pulsim LU backend, so
+    /// `singular_index()` is a real column here; the structural
+    /// probe covers the rest.
+    [[nodiscard]] CacheError make_cache_error_(
+        CacheError::Kind kind,
+        const topology::SwitchStateMask& mask,
+        Real dt,
+        const sparse::Matrix& J,
+        const sparse::DirectSolver* solver) const {
+        CacheError e{.kind = kind, .mask = mask, .dt = dt};
+        // ONE resolution feeds both fields (adversarial-review
+        // finding cache-error-detail-and-failing-row-use-inverted-
+        // precedence): computing them independently let the human
+        // sentence and the machine-readable row name DIFFERENT
+        // devices, which is the one thing a GUI highlight must never
+        // do.
+        const auto diag = diagnose_singular(graph_, pool_, J, solver);
+        e.detail      = diag.text;
+        e.failing_row = diag.row;
+        return e;
+    }
+
     /// Non-throwing build of a single segment. Returns the
     /// segment by move on success, or a `CacheError` carrying
     /// the singularity kind + mask + dt on failure.
@@ -1413,18 +1540,14 @@ private:
         auto solver = sparse::make_default_solver(
             pool_.state_size(graph_), sparse::Backend::Auto);
         if (!solver->analyze(J)) {
-            return std::unexpected(CacheError{
-                .kind = CacheError::Kind::StructurallySingular,
-                .mask = mask,
-                .dt   = dt,
-            });
+            return std::unexpected(make_cache_error_(
+                CacheError::Kind::StructurallySingular, mask, dt, J,
+                solver.get()));
         }
         if (!solver->factorize(J)) {
-            return std::unexpected(CacheError{
-                .kind = CacheError::Kind::NumericallySingular,
-                .mask = mask,
-                .dt   = dt,
-            });
+            return std::unexpected(make_cache_error_(
+                CacheError::Kind::NumericallySingular, mask, dt, J,
+                solver.get()));
         }
 
         PwlSegment seg;
@@ -1475,8 +1598,7 @@ private:
                 auto victim = segments_.begin();
                 for (auto it = segments_.begin();
                      it != segments_.end(); ++it) {
-                    if (it->second.lru_tick <
-                        victim->second.lru_tick) {
+                    if (it->second.tick() < victim->second.tick()) {
                         victim = it;
                     }
                 }
@@ -1486,8 +1608,8 @@ private:
                     1, std::memory_order_relaxed);
             }
         }
-        seg->lru_tick =
-            lru_clock_.fetch_add(1, std::memory_order_relaxed) + 1;
+        seg->touch(lru_clock_.fetch_add(
+            std::uint64_t{1}, std::memory_order_relaxed) + 1);
         segments_.emplace(mask, std::move(*seg));
         return {};
     }
@@ -1565,6 +1687,13 @@ private:
                 it->second.J, it->second.b_constant,
                 new_J, new_b, affected_cols);
             any_path_succeeded = any_path_succeeded || ok;
+            // Just re-stamped and re-factored: this segment is the
+            // freshest thing in the cache, not the stalest. Without
+            // the touch it stays first in line for eviction and a
+            // path-aware sweep pays to rebuild what it just paid to
+            // refactor (adversarial-review finding F6-b).
+            it->second.touch(lru_clock_.fetch_add(
+                std::uint64_t{1}, std::memory_order_relaxed) + 1);
         }
         if (rank1_initialized_ && mask == rank1_mask_) {
             any_target_existed = true;
@@ -1712,11 +1841,55 @@ private:
         Vector b_constant;          // dt-independent source stamps
         std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
         Real current_dt = Real{-1};
-        std::uint64_t lru_tick = 0;
+        /// Atomic for the same reason PwlSegment's is: the solve_at
+        /// HIT branch writes this from a const method that the
+        /// Python bindings reach with the GIL released, and a hit
+        /// performs NO structural mutation — so it is a plain data
+        /// race, not a container-mutation hazard. (An earlier
+        /// comment here argued the opposite from "solve_at always
+        /// mutates"; that is true of MISSES only, i.e. exactly the
+        /// path where the race is NOT.) Relaxed: the LRU needs
+        /// approximate recency, nothing more.
+        mutable std::atomic<std::uint64_t> lru_tick{0};
+        /// Which assembly REGIME the entry's symbolic analysis was
+        /// taken under. `J(dt)` for dt > 0 is the dynamic pattern
+        /// (capacitor blocks, inductor rows, transformer cross
+        /// terms); at dt <= 0 those stamps are absent entirely, so
+        /// the two are DIFFERENT sparsity patterns. Reusing one
+        /// analysis across the boundary would violate the solver
+        /// contract ("factorize on a matrix with matching pattern")
+        /// — it happens to work on the in-house LU, which rebuilds
+        /// the pattern inside factorize, but is unsound in general
+        /// and would silently corrupt `partial_refactor`. Track it
+        /// and re-analyze on a regime change (Phase-1 audit F6).
+        bool analyzed_dynamic = false;
 
         EventEntry() = default;
-        EventEntry(EventEntry&&) noexcept = default;
-        EventEntry& operator=(EventEntry&&) noexcept = default;
+        EventEntry(EventEntry&& o) noexcept
+            : G{std::move(o.G)}, C{std::move(o.C)},
+              b_constant{std::move(o.b_constant)},
+              solver{std::move(o.solver)},
+              current_dt{o.current_dt},
+              lru_tick{o.tick()},
+              analyzed_dynamic{o.analyzed_dynamic} {}
+        EventEntry& operator=(EventEntry&& o) noexcept {
+            if (this != &o) {
+                G                = std::move(o.G);
+                C                = std::move(o.C);
+                b_constant       = std::move(o.b_constant);
+                solver           = std::move(o.solver);
+                current_dt       = o.current_dt;
+                analyzed_dynamic = o.analyzed_dynamic;
+                touch(o.tick());
+            }
+            return *this;
+        }
+        [[nodiscard]] std::uint64_t tick() const noexcept {
+            return lru_tick.load(std::memory_order_relaxed);
+        }
+        void touch(std::uint64_t t) const noexcept {
+            lru_tick.store(t, std::memory_order_relaxed);
+        }
         EventEntry(const EventEntry&) = delete;
         EventEntry& operator=(const EventEntry&) = delete;
     };
@@ -1747,7 +1920,7 @@ private:
         auto victim = event_entries_.begin();
         for (auto it = event_entries_.begin();
              it != event_entries_.end(); ++it) {
-            if (it->second.lru_tick < victim->second.lru_tick) {
+            if (it->second.tick() < victim->second.tick()) {
                 victim = it;
             }
         }

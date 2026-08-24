@@ -287,11 +287,19 @@ TEST_CASE("Lazy cache evicts LRU segments under a byte budget",
     for (int m = 0; m < 16; ++m) {
         Vector xi;
         solve_mask(m, xi);
-        REQUIRE(cache.num_built_segments() <= 4);
         REQUIRE(cache.segment_cache_bytes() <=
                 cache.segment_budget_bytes());
     }
-    REQUIRE(cache.metrics().segment_evictions >= 12);
+    // Deterministic for this fixture, so assert it EXACTLY rather
+    // than with slack that would hide an off-by-one in the eviction
+    // while-condition or the `resident + incoming` arithmetic
+    // (adversarial-review finding F9). Every segment here has the
+    // same footprint, the budget holds 3, mask 0 was already
+    // resident from the probe, so masks 1..15 are 15 inserts and
+    // 15 - 3 = 12 of them evict... plus the probe's own segment,
+    // giving 13 evictions and 3 resident at the end.
+    REQUIRE(cache.num_built_segments() == 3);
+    REQUIRE(cache.metrics().segment_evictions == 13);
 
     // Re-visit mask 1 (long evicted): rebuild must give the same
     // answer as an unbounded fresh cache. k=1 switch closed →
@@ -408,5 +416,129 @@ TEST_CASE("run_transient under a tiny segment budget matches unbounded",
             REQUIRE(res_tiny.states[k][i] ==
                     Approx(res_ref.states[k][i]).margin(1e-12));
         }
+    }
+}
+
+TEST_CASE("Evicted masks rebuild from the UPDATED pool after "
+          "refactor_parametric",
+          "[v2][layer4_v6][lazy_cache][lru][parametric]") {
+    // Adversarial-review finding F4: refactor_parametric only walks
+    // the masks that are still RESIDENT. Any mask the byte budget
+    // already evicted is simply not refactored — correctness then
+    // rests entirely on the unpinned assumption that rebuilding an
+    // evicted mask re-reads the CURRENT pool rather than a stale
+    // snapshot. Pin it.
+    Graph g;
+    DevicePool pool;
+    g.add_node("vin");
+    g.add_node("vout");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    pool.add_voltage_source(0, {.V = 12.0});
+    for (int i = 0; i < 3; ++i) {
+        g.add_branch(0, 1, BranchKind::Switch);
+        pool.add_switch(1 + i, /*g_on=*/1.0, /*g_off=*/1e-9);
+    }
+    g.add_branch(1, g.ground(), BranchKind::PassiveLinear);
+    const Index r_branch = 4;
+    pool.add_resistor(r_branch, {.G = 0.1});
+
+    PwlStateSpaceCache cache{g, pool};
+    cache.build_lazy(Real{0});
+
+    auto mask_of = [](int m) {
+        SwitchStateMask s(3);
+        for (int b = 0; b < 3; ++b) {
+            s.set(static_cast<Size>(b), ((m >> b) & 1) != 0);
+        }
+        return s;
+    };
+    Vector b_extra = Vector::Zero(3);
+    Vector x;
+
+    // Size the budget for ~2 segments, then visit A,B,C,D so A is
+    // long gone.
+    cache.solve(mask_of(0), b_extra, x);
+    cache.set_segment_budget_bytes(2 * cache.segment_cache_bytes());
+    for (int m = 0; m < 4; ++m) cache.solve(mask_of(m), b_extra, x);
+    REQUIRE(cache.metrics().segment_evictions > 0);
+
+    // Change R while mask 0 is NOT resident.
+    auto r = cache.refactor_parametric(r_branch, /*new R=*/2.0);
+    REQUIRE(r.masks_processed <= 2);   // only what was resident
+
+    // Re-visiting the evicted mask must give the UPDATED answer.
+    Vector x_after;
+    cache.solve(mask_of(0), b_extra, x_after);
+
+    PwlStateSpaceCache fresh{g, pool};
+    fresh.build_lazy(Real{0});
+    Vector x_fresh;
+    fresh.solve(mask_of(0), b_extra, x_fresh);
+    for (Eigen::Index i = 0; i < x_after.size(); ++i) {
+        REQUIRE(x_after[i] == Approx(x_fresh[i]).margin(1e-12));
+    }
+
+    // A resident mask must agree too — both routes (refactored and
+    // rebuilt) land on the same updated circuit.
+    Vector x_res, x_res_fresh;
+    cache.solve(mask_of(3), b_extra, x_res);
+    fresh.solve(mask_of(3), b_extra, x_res_fresh);
+    for (Eigen::Index i = 0; i < x_res.size(); ++i) {
+        REQUIRE(x_res[i] == Approx(x_res_fresh[i]).margin(1e-10));
+    }
+}
+
+TEST_CASE("A no-op refactor_parametric changes nothing",
+          "[v2][layer4_v6][lazy_cache][parametric]") {
+    // Adversarial-review finding F3-tests: the event-entry clear
+    // used to run BEFORE the empty-updates early return, so a
+    // documented no-op silently cost a full rebuild of every event
+    // solver on the next commutation.
+    ChopperFixture f;
+    f.cache->build_lazy(Real{0});
+    Vector zero_b = Vector::Zero(3);
+    Vector x;
+    SwitchStateMask m_on(1);
+    m_on.set(0, true);
+    f.cache->solve(m_on, zero_b, x);
+    f.cache->solve_at(m_on, 1e-6, zero_b, x);
+    REQUIRE(f.cache->num_event_entries() == 1);
+    const auto built_before = f.cache->metrics().event_builds;
+
+    auto r = f.cache->refactor_parametric(
+        std::span<const ParametricUpdate>{}, 
+        ParametricRefactorMode::AllActive);
+    REQUIRE(r.masks_processed == 0);
+    REQUIRE(f.cache->num_event_entries() == 1);   // untouched
+
+    f.cache->solve_at(m_on, 1e-6, zero_b, x);
+    REQUIRE(f.cache->metrics().event_builds == built_before);
+}
+
+TEST_CASE("A budget smaller than one segment still stores it",
+          "[v2][layer4_v6][lazy_cache][lru]") {
+    // Refusing to build would turn a memory knob into a
+    // wrong-answer knob, so the incoming segment is always
+    // inserted even when it alone exceeds the budget.
+    ChopperFixture f;
+    f.cache->build_lazy(Real{0});
+    f.cache->set_segment_budget_bytes(1);
+    Vector zero_b = Vector::Zero(3);
+    Vector x_on, x_off;
+    SwitchStateMask m_on(1), m_off(1);
+    m_on.set(0, true);
+    f.cache->solve(m_on, zero_b, x_on);
+    REQUIRE(f.cache->num_built_segments() == 1);
+    f.cache->solve(m_off, zero_b, x_off);
+    // Second insert evicted the first, but is itself resident and
+    // correct.
+    REQUIRE(f.cache->num_built_segments() == 1);
+    REQUIRE(f.cache->metrics().segment_evictions >= 1);
+    PwlStateSpaceCache ref{f.g, f.pool};
+    ref.build_lazy(Real{0});
+    Vector want;
+    ref.solve(m_off, zero_b, want);
+    for (Eigen::Index i = 0; i < x_off.size(); ++i) {
+        REQUIRE(x_off[i] == Approx(want[i]).margin(1e-12));
     }
 }

@@ -27,6 +27,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -100,6 +101,10 @@ using NonlinearRefreshFn = std::function<
 
     Real last_dx_norm  = std::numeric_limits<Real>::infinity();
     Real last_res_norm = std::numeric_limits<Real>::infinity();
+    // Argmax companions to the two norms above (v2.0 Phase 1) —
+    // the MNA row where each is worst, for the failure message.
+    Index worst_dx_row  = kInvalidIndex;
+    Index worst_res_row = kInvalidIndex;
 
     // ----- Auto-LM detection state (GUI integration findings T1.2) -----
     // Two failure modes promote `enable_lm` to true mid-solve:
@@ -164,11 +169,20 @@ using NonlinearRefreshFn = std::function<
         // refresh (f_nl) or b_extra even when x itself is still finite —
         // otherwise it silently corrupts the convergence/LM/line-search tests.
         if (!f_combined.allFinite()) {
+            // Name WHERE the NaN entered — on a big converter the
+            // first non-finite row is usually the offending device
+            // itself (v2.0 Phase 1 diagnostics parity).
+            Index bad = kInvalidIndex;
+            for (Index i = 0; i < static_cast<Index>(f_combined.size());
+                 ++i) {
+                if (!std::isfinite(f_combined[i])) { bad = i; break; }
+            }
             throw std::runtime_error(std::format(
-                "solve_with_newton: non-finite residual at iter {} — the "
-                "nonlinear refresh or b_extra produced a NaN/Inf (check "
-                "device parameters and matrix conditioning)",
-                iter));
+                "solve_with_newton: non-finite residual at iter {}, "
+                "first at {} — the nonlinear refresh or b_extra "
+                "produced a NaN/Inf (check device parameters and "
+                "matrix conditioning)",
+                iter, row_equation_label(graph, pool, bad)));
         }
 
         (void)nl_residual_norm;   // diagnostic only
@@ -257,9 +271,10 @@ using NonlinearRefreshFn = std::function<
             }
             if (!accepted) {
                 throw std::runtime_error(std::format(
-                    "solve_with_newton (LM): "
-                    "no improving step at iter {}",
-                    iter));
+                    "solve_with_newton (LM): no improving step at "
+                    "iter {} — worst residuals: {}",
+                    iter,
+                    top_entries_by_name(graph, pool, f_combined)));
             }
         } else {
             // Plain Newton + optional line search.
@@ -267,8 +282,10 @@ using NonlinearRefreshFn = std::function<
             if (!solver->analyze(J_combined)) {
                 throw std::runtime_error(std::format(
                     "solve_with_newton: combined matrix is "
-                    "structurally singular at iter {}",
-                    iter));
+                    "structurally singular at iter {}{}",
+                    iter,
+                    explain_singular(graph, pool, J_combined,
+                                      solver.get())));
             }
             if (!solver->factorize(J_combined)) {
                 // Auto-LM promotion (GUI integration findings T1.2):
@@ -317,8 +334,33 @@ using NonlinearRefreshFn = std::function<
         //    (returned by the refresh) is the magnitude of the
         //    device CURRENTS, not a residual, and at convergence
         //    the currents are typically O(mA-A), not zero.
-        last_dx_norm  = (alpha * dx).lpNorm<Eigen::Infinity>();
-        last_res_norm = f_combined.lpNorm<Eigen::Infinity>();
+        // v2.0 Phase 1 (audit finding
+        // `singular-errors-dont-name-the-node`): keep the ARGMAX, not
+        // just the magnitude. `lpNorm<Infinity>()` throws away the
+        // one piece of information a stuck user actually needs —
+        // WHERE the residual lives. maxCoeff(&idx) costs the same
+        // pass and yields an original MNA row index (no permutation
+        // is involved: f_combined and dx are in state-vector space),
+        // which `pwl::row_label` turns into "node sw3_e".
+        //
+        // Eigen defines lpNorm<Infinity>() as exactly
+        // `cwiseAbs().maxCoeff()` (Core/Dot.h) — with ONE extra
+        // guard: it short-circuits a size-0 vector to 0 instead of
+        // calling maxCoeff, which asserts on an empty input. Keep
+        // that guard so this stays a strictly value-preserving
+        // change for every input the old code accepted.
+        Eigen::Index dx_at = 0;
+        Eigen::Index res_at = 0;
+        last_dx_norm  = dx.size() == 0
+            ? Real{0}
+            : (alpha * dx).cwiseAbs().maxCoeff(&dx_at);
+        last_res_norm = f_combined.size() == 0
+            ? Real{0}
+            : f_combined.cwiseAbs().maxCoeff(&res_at);
+        worst_dx_row  = dx.size() == 0
+            ? kInvalidIndex : static_cast<Index>(dx_at);
+        worst_res_row = f_combined.size() == 0
+            ? kInvalidIndex : static_cast<Index>(res_at);
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;
         }
@@ -345,8 +387,12 @@ using NonlinearRefreshFn = std::function<
 
     throw std::runtime_error(std::format(
         "solve_with_newton: failed to converge after {} iterations "
-        "(||dx||_inf = {}, ||residual||_inf = {})",
-        max_iters, last_dx_norm, last_res_norm));
+        "(||dx||_inf = {:.3e} worst at {}, ||residual||_inf = {:.3e} "
+        "worst at {})",
+        max_iters,
+        last_dx_norm, row_label(graph, pool, worst_dx_row),
+        last_res_norm,
+        row_equation_label(graph, pool, worst_res_row)));
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

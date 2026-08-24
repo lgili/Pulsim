@@ -90,7 +90,19 @@ LRU-bounded to a byte budget (default 1 GiB) — least-recently
 solved masks are evicted and transparently rebuilt on re-visit.
 Profile with `cache.num_built_segments()` and
 `cache.segment_cache_bytes()`; tune with
-`cache.set_segment_budget_bytes(n)` (`0` disables eviction).
+`cache.set_segment_budget_bytes(n)` (`0` disables eviction), and read
+`cache.metrics().segment_evictions` to see whether the budget is
+actually binding.
+
+> **Sample these between runs, not during one.** `num_built_segments`
+> and `segment_cache_bytes` walk the segment map, which lazy builds
+> and evictions mutate — and `run_transient` releases the GIL, so a
+> monitor thread polling them mid-run races with that mutation. The
+> `metrics()` counters are atomic and are safe to read live.
+
+Bounding output memory is usually the bigger lever on a long run:
+`simulate(..., store_every=m)` records every m-th step on a uniform
+`m·dt` grid, cutting the result buffer by m.
 
 ## DC operating-point seeding
 

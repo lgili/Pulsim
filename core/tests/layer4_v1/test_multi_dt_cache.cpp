@@ -345,3 +345,58 @@ TEST_CASE("solve_at dt<=0 falls back to static assembly",
         REQUIRE(x_evt[i] == Approx(x_ref[i]).margin(1e-12));
     }
 }
+
+TEST_CASE("solve_at re-analyzes across a dynamic<->static dt regime change",
+          "[v2][layer4_v7][multi_dt][regime]") {
+    // Phase-1 audit finding F6: an event entry analyzed at dt > 0
+    // holds the DYNAMIC sparsity pattern (capacitor blocks,
+    // inductor rows). At dt <= 0 those stamps vanish entirely, so
+    // the matrix has a DIFFERENT pattern — refactorizing onto the
+    // old analysis violates the solver's "matching pattern"
+    // contract. It happened to work only because the in-house LU
+    // rebuilds the pattern inside factorize(); it is unsound in
+    // general and would corrupt partial_refactor.
+    //
+    // The entry must be rebuilt, and BOTH regimes must give the
+    // same answers as freshly-built caches.
+    Graph g;
+    DevicePool pool;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);   // R
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);   // C
+    pool.add_voltage_source(0, {.V = 9.0});
+    pool.add_resistor(1, {.G = 0.5});
+    pool.add_capacitor(2, {.C = 2e-6});
+
+    PwlStateSpaceCache cache{g, pool};
+    cache.build_lazy(Real{1e-6});
+    SwitchStateMask m(0);
+    const auto n = static_cast<Index>(pool.state_size(g));
+    Vector b_extra = Vector::Zero(n);
+
+    auto reference = [&](Real dt) {
+        PwlStateSpaceCache ref{g, pool};
+        ref.build_lazy(dt);
+        Vector xr;
+        ref.solve(m, b_extra, xr);
+        return xr;
+    };
+
+    // Walk dynamic -> static -> dynamic on the SAME entry.
+    for (Real dt : {2e-6, 0.0, 5e-7, 0.0, 2e-6}) {
+        Vector x;
+        cache.solve_at(m, dt, b_extra, x);
+        const Vector want = reference(dt);
+        REQUIRE(x.size() == want.size());
+        for (Eigen::Index i = 0; i < x.size(); ++i) {
+            INFO("dt=" << dt << " row " << i);
+            REQUIRE(x[i] == Approx(want[i]).margin(1e-12));
+        }
+        // Never more than one entry for one mask.
+        REQUIRE(cache.num_event_entries() == 1);
+    }
+    // Each regime flip rebuilt (4 flips across the 5 dts above),
+    // rather than silently refactorizing a mismatched analysis.
+    REQUIRE(cache.metrics().event_builds >= 4);
+}

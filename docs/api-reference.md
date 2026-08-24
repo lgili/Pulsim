@@ -83,7 +83,9 @@ Returns a `SimulationResult` with parallel arrays:
 - `result.num_steps()` — convenience accessor.
 - `result.states_bytes` — bytes held by the sample buffer.
 
-Set `SimulationOptions.store_every = m` to record only every m-th
+Pass `simulate(..., store_every=m)` — or set it on a
+`SolverOptions` bundle, on a raw `SimulationOptions`, or as
+`simulation.store_every` in YAML — to record only every m-th
 step. The solver still integrates at `dt`; the recorded grid stays
 strictly uniform at `m · dt` (so FFT / harmonic analysis on the
 result remains valid), and memory drops by the same factor.

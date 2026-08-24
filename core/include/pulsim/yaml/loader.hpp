@@ -424,6 +424,17 @@ inline void load_simulation_options(
     opts.t_start = real_or(sim, "t_start", Real{0});
     opts.t_end   = real_or(sim, "t_end",   Real{0});
     opts.dt      = real_or(sim, "dt",      Real{0});
+    // v2.0 Phase 1: output decimation. Parsed here so a YAML that
+    // sets it is honoured instead of silently producing a full-rate
+    // trace (the loader accepts unknown keys, so an unparsed option
+    // would just vanish — the exact silent-drop pattern Phase 0
+    // eliminated elsewhere).
+    opts.store_every = size_or(sim, "store_every", Size{1});
+    if (opts.store_every == 0) {
+        throw std::invalid_argument(
+            "simulation.store_every must be >= 1 "
+            "(1 = record every step); 0 would record nothing.");
+    }
     opts.enable_newton_line_search =
         bool_or(sim, "enable_newton_line_search", false);
     opts.enable_newton_lm =

@@ -29,6 +29,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/sparse/matrix.hpp"
@@ -42,6 +43,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <format>
 #include <stdexcept>
 
 namespace pulsim::pwl {
@@ -248,14 +250,23 @@ inline Vector compute_dc_op(const topology::Graph& graph,
 
     auto solver = sparse::make_default_solver();
     if (!solver->analyze(J)) {
-        throw std::runtime_error(
+        throw std::runtime_error(std::format(
             "compute_dc_op: DC matrix structurally singular for "
-            "mask " + mask.to_string());
+            "mask {}{}",
+            mask.to_string(),
+            explain_singular(graph, pool, J, solver.get())));
     }
     if (!solver->factorize(J)) {
-        throw std::runtime_error(
+        // v2.0 Phase 1 (audit finding
+        // `singular-errors-dont-name-the-node`): say WHERE, not just
+        // that it failed. Capacitors are open at DC, so a node hung
+        // off nothing but a capacitor produces a genuinely empty
+        // column here — by far the most common cause, and now named.
+        throw std::runtime_error(std::format(
             "compute_dc_op: DC matrix numerically singular for "
-            "mask " + mask.to_string());
+            "mask {}{}",
+            mask.to_string(),
+            explain_singular(graph, pool, J, solver.get())));
     }
 
     Vector x;
