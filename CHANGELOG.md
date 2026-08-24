@@ -18,6 +18,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `lu-quadratic-inner-loops`). `partial_refactor()` is reach-based
   and keyed by the *current* changed-column set. New scaling
   regression tests lock the complexity law in CI.
+* **LRU-bounded lazy cache + exact (G, C, b) split.** Three audit
+  findings closed in one coherent rework of the PWL cache:
+  * *`no-mode-cache-eviction`* — the lazy per-mask segment cache is
+    now bounded by a byte budget (default 1 GiB,
+    `set_segment_budget_bytes`, 0 = unbounded): least-recently
+    solved masks are evicted and transparently rebuilt on re-visit;
+    eager `build()` never evicts. New telemetry:
+    `CacheMetrics.segment_evictions`, `segment_cache_bytes()`,
+    `DirectSolver::factor_bytes()`.
+  * *`alt-dt-cache-unbounded-factorization`* — `solve_at` no longer
+    keeps a map keyed by *exact Real dt* of fully analyzed +
+    factorized segments (one per commutation, forever). Each
+    recently-evented mask now owns ONE event solver (LRU ≤ 8):
+    a dt change is `J = G + (1/dt)·C` + numeric `factorize()` on
+    the entry's shared symbolic analysis — no re-analysis, no
+    dt-keyed storage, and `refactor_parametric` now invalidates
+    event entries (the old aux cache silently kept stale factors).
+  * *(G, C, b) split* — `assemble_segment_split` emits the static
+    matrix G, the 1/dt-coefficient matrix C (2·C_cap caps, −2·L
+    inductor diagonals, −2·M transformer cross terms; mask-
+    invariant) and the dt-independent b; `assemble_segment`
+    recombines `J = G + (1/dt)·C` through the same single stamping
+    loop. `compute_lti_state_space` now uses the split EXACTLY,
+    replacing the two-assembly finite-difference recovery — which
+    had been burying *physically real zero eigenvalues* (series-cap
+    midpoint imbalance modes in NPC/MMC stacks) under cancellation
+    noise; the LTI tests now assert the analytic pole and the exact
+    marginal modes.
 * **Dynamic `SwitchStateMask` — the 64-switch ceiling is gone.**
   The mask is now a small-buffer word array (≤ 128 switches inline
   with zero heap allocation, wider masks spill to one vector), so

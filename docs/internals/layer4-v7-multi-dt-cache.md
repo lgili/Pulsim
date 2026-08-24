@@ -38,10 +38,23 @@ public:
 ```
 
 When `dt == this->dt()` (the primary dt), `solve_at` delegates
-to `solve` — same fast path. When `dt` is different, `solve_at`
-uses an auxiliary `unordered_map<dt, unordered_map<mask,
-segment>>` keyed first by dt. Lazy build on demand per `(mask,
-dt)` pair.
+to `solve` — same fast path.
+
+**v2.0 Phase 1 rework** (audit finding
+`alt-dt-cache-unbounded-factorization`): the original V7 kept an
+auxiliary map keyed by *exact Real dt* of per-mask segments — one
+fully analyzed + factorized segment per `(mask, dt)` pair,
+forever. Sub-step event correction produces an essentially unique
+dt per commutation, so that map grew without bound. Now each
+recently-evented mask owns ONE **event solver** (small LRU,
+`kMaxEventEntries = 8`) storing the mask's `(G, C, b)` split; a dt
+change recombines `J = G + (1/dt)·C` and runs a numeric
+`factorize()` on the entry's single symbolic analysis (the
+sparsity pattern is dt-invariant). No dt-keyed storage exists.
+`num_alt_dt_values()` / `num_alt_segments_at(dt)` keep their
+signatures but now report over the ≤ 8 resident entries' *current*
+dt values. `refactor_parametric` drops the entries (their split is
+a snapshot of the pool's parameters).
 
 ## Why not Sherman-Morrison
 
@@ -59,11 +72,20 @@ different angle:
 
 - `solve_at(mask, primary_dt, ...)` matches `solve(mask, ...)`
   bit-identical.
-- Distinct auxiliary dt values populate separate sub-caches;
-  `num_alt_dt_values()` reports the count.
-- Repeat calls reuse cached segments (no rebuild).
-- Multi-dt chopper solve at switch-ON gives the expected
-  voltage divider answer regardless of the auxiliary dt.
+- A dt change on a known mask is an in-place refactor
+  (`metrics().event_refactors`), not a new entry; same `(mask,
+  dt)` is pure factor reuse (`event_hits`).
+- The commutation pattern (pre/post masks at fresh dts every
+  event) holds steady at 2 entries with zero growth.
+- Entries are LRU-bounded at `kMaxEventEntries`; evicted masks
+  rebuild transparently and match a fresh cache at 1e-12.
+- The refactor path matches a from-scratch build at the same dt
+  on a dynamic RLC circuit (1e-12).
+- A numerically singular refactorize ERASES the entry (a stale
+  entry would poison later solves at the previously working dt).
+- `refactor_parametric` invalidates entries; post-update
+  `solve_at` agrees with a fresh cache built from the updated
+  pool.
 
 ## Sub-step state correction (future)
 
@@ -92,9 +114,11 @@ the auxiliary cache stays bounded:
   segment ≈ M·K·10 KB.
 - For typical M = 4, K = 10: 400 KB. Acceptable.
 
-For pathological cases (every commutation has a unique
-partial-dt to many decimal places), the cache could grow
-unbounded. Future tuning can add LRU eviction.
+v2.0 Phase 1: the pathological case is gone by construction —
+memory is `min(visited_masks, 8) × (split + one factor)`,
+independent of how many distinct dt values the run produces. The
+primary lazy segment cache is separately bounded by a byte budget
+(`set_segment_budget_bytes`, default 1 GiB).
 
 ## Status
 
