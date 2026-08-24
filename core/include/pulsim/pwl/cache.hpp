@@ -990,14 +990,18 @@ public:
             if (!e.solver->analyze(J)) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: analyze failed "
-                    "(structurally singular) for mask {} (dt={})",
-                    mask.to_string(), dt));
+                    "(structurally singular) for mask {} (dt={}){}",
+                    mask.to_string(), dt,
+                    explain_singular(graph_, pool_, J,
+                                      e.solver.get())));
             }
             if (!e.solver->factorize(J)) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: factorize failed "
-                    "(numerically singular) for mask {} (dt={})",
-                    mask.to_string(), dt));
+                    "(numerically singular) for mask {} (dt={}){}",
+                    mask.to_string(), dt,
+                    explain_singular(graph_, pool_, J,
+                                      e.solver.get())));
             }
             e.current_dt       = dt;
             e.touch(tick);
@@ -1026,7 +1030,8 @@ public:
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: refactorize "
                     "failed (numerically singular) for mask {} "
-                    "(dt={})", mask.to_string(), dt));
+                    "(dt={}){}", mask.to_string(), dt,
+                    explain_singular(graph_, pool_, J, nullptr)));
             }
             e.current_dt = dt;
             e.touch(tick);

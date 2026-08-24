@@ -247,6 +247,7 @@ if(PULSIM_BUILD_TESTS)
     # layers (0/1/2/3/4).
     add_executable(pulsim_core_layer5_tests
         tests/layer5/test_main.cpp
+        tests/layer5/test_dt_retry.cpp     # v2.0 Phase 2 — local dt reduction
         tests/layer5/test_options.cpp
         tests/layer5/test_result.cpp
         tests/layer5/test_state_trajectory.cpp  # v2.0 Phase 1 — contiguous storage

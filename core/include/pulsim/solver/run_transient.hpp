@@ -34,6 +34,7 @@
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/dc_assemble.hpp"
 #include "pulsim/pwl/dc_operating_point.hpp"
+#include "pulsim/pwl/preflight.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
@@ -526,6 +527,21 @@ inline SimulationResult run_transient(
     }
     Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
 
+    // Is a smaller step even capable of helping? Reachability to
+    // ground is a property of the GRAPH, not of dt, so a circuit
+    // with a galvanically isolated subnet is singular at every step
+    // size. Retrying one would burn the whole ladder and then bury
+    // the named diagnostic Phase 1 built for exactly that failure
+    // under a "could not be taken, even split into 64 sub-steps"
+    // wrapper — which is the dead-rung defect Phase 2 B.2 removed
+    // from the DC cascade, reintroduced here. Decide once, before
+    // the loop, and let those circuits fail fast and legibly.
+    const bool dt_retry_can_help =
+        opts.max_dt_halvings > 0 &&
+        pwl::detail::components_without_ground(
+            graph, [](const topology::Branch&) { return true; })
+            .empty();
+
     // v2.0 Phase 2: one accumulator for the step's right-hand side,
     // used by the nominal step, by both halves of the sub-step
     // commutation correction, and by the dt-retry path. It was
@@ -763,7 +779,7 @@ inline SimulationResult run_transient(
             } catch (const analysis::Cancelled&) {
                 throw;
             } catch (const std::exception& nominal_failed) {
-                if (opts.max_dt_halvings == 0) {
+                if (!dt_retry_can_help) {
                     throw;
                 }
                 std::string why = nominal_failed.what();
