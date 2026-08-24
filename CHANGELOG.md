@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Phase 1 — kernel foundation (v2.0 audit follow-up)
+
+* **True Gilbert–Peierls sparse LU** — `factorize()` rewritten as a
+  left-looking GP factorization (DFS reach, topological sparse
+  elimination, cs_lu-style O(1) pivoting via `pinv`, O(nnz) final
+  relabel) with COLAMD column ordering by default (RCM kept via
+  `set_ordering`). Kills the O(n²) dense inner loops: banded factor
+  time now scales ~linearly and an n=5000 circuit-like MNA factors in
+  ~1 ms (audit findings `lu-effectively-dense` /
+  `lu-quadratic-inner-loops`). `partial_refactor()` is reach-based
+  and keyed by the *current* changed-column set. New scaling
+  regression tests lock the complexity law in CI.
+* **Dynamic `SwitchStateMask` — the 64-switch ceiling is gone.**
+  The mask is now a small-buffer word array (≤ 128 switches inline
+  with zero heap allocation, wider masks spill to one vector), so
+  >64-switch topologies — 120-switch MMC phases, large CHB stacks —
+  are representable end-to-end (audit finding `switch-mask-64-cap`).
+  The bit-indexed API (`get`/`set`/`flip`/`count`/hash/equality) is
+  unchanged; new word-level APIs (`num_words`/`word`/
+  `hamming_distance`/`overlay`) replace the raw-uint64 hot paths in
+  the PWL cache delta detection and the diode overlay merge. The
+  legacy `bits()`/`set_bits()` shortcuts now throw `std::logic_error`
+  beyond 64 switches instead of silently truncating. Eager
+  `cache.build()` still fails loudly for ≥ 64 switches (2^N
+  enumeration); the lazy cache (`build_lazy`) is the supported route
+  and is covered by new 70-switch integration tests.
+
 ### Phase 0 — silent-wrong-answer fixes (v2.0 audit follow-up)
 
 Nine fixes from the 2026-08 full-kernel audit, all targeting paths
