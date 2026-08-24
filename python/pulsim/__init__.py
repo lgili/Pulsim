@@ -2103,6 +2103,26 @@ def simulate(
     # exists to prevent: on the drive these guards were written for,
     # the reported line current peaks at exactly 100.000 A because
     # the clamp is 100 A.
+    # An inductor whose conduction path opens produces an unbounded
+    # voltage in an idealized model, and Pulsim reports it finitely
+    # and without comment — 2.9 MV on a 48 V circuit, `isfinite` true
+    # throughout. The current guards cannot see it: they watch i_L,
+    # which stays believable. Check the voltage against what the
+    # circuit's own sources can account for.
+    try:
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _volt = _k.find_implausible_voltage(builder.graph,
+                                             builder.pool, res)
+        if _volt.node >= 0:
+            import warnings
+            warnings.warn(
+                "simulate(): " + _k.describe_implausible_voltage(
+                    builder.graph, builder.pool, _volt),
+                stacklevel=2)
+            res._implausible_voltage = _volt
+    except Exception:  # pragma: no cover — never break a good run
+        pass
+
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
         import warnings

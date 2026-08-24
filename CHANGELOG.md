@@ -8,6 +8,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
+* **2.9 megavolts on a 48 V circuit, reported in silence** — and now
+  named. This closes audit item B.3, though not the way it was
+  written.
+
+  ```
+  Vin(48 V) — L(1 mH) — S ——| gnd,   S opening at 10 kHz
+  max |v(sw)| = 2.9e+06 V,  isfinite everywhere, no warning
+  ```
+
+  An inductor whose conduction path opens produces, in an idealized
+  model, an unbounded voltage: `v = L·di/dt` with `di/dt` forced to
+  `-i/dt` in one step. Nothing caught it — the inductor freeze and
+  clamp guards watch the **current**, and the current here stays at a
+  believable 14 A. It is the voltage that leaves physics.
+
+  `solver/voltage_sanity.hpp` compares the largest node voltage a run
+  produced against the largest voltage any *independent* source in
+  the circuit can produce (dependent sources are excluded: a VCVS's
+  output is a function of the circuit, so folding its gain in would
+  define the bound in terms of the thing being checked). A node past
+  100× that is named:
+
+  ```
+  simulate(): node 'sw' reached 2.860e+06 V at t = 0.00075001 s, but the
+  largest voltage any source in this circuit can produce is 48 V — a factor
+  of 59592. …an inductor whose conduction path opens really does produce an
+  unbounded voltage in an idealized model. No real circuit does, because the
+  switch avalanches or its parasitic capacitance rings or the designer fitted
+  a snubber. Add whichever of those your design has…
+  ```
+
+  **It names and stops there.** The audit's B.3 asked for an
+  auto-inserted snubber; inserting one means choosing its value,
+  which is a modelling decision belonging to whoever knows the
+  design's stand-off voltage. Substituting one silently is the
+  failure this entire phase has been removing — and the 1 kW drive
+  already showed how that ends, with a reported line current that is
+  exactly the clamp. Naming the node is the part a simulator can do
+  honestly.
+
+  The scan is read-only, one pass over the recorded node block, and a
+  test pins that a boost converter — which legitimately exceeds its
+  input — says nothing.
+
 * **Newton promotes line search when it diverges** — the last named
   Phase-2 globalization item, and the one that measures the rest.
 
