@@ -20,10 +20,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     10 ms runs at `dt = 1e-8` — the kiloamp runaway does **not**
     reproduce. Switches always stamp `g_off`, so the loop never truly
     opens.
-  * But it reproduces on the circuit they were written for. Running
-    `projects/inverters/pfc_vsi_drive` with the guards removed, the
-    line current peaks at **544 A** and the boost stage starves.
-    They are still load-bearing, so they stay.
+  * But the circuit they were written for genuinely depends on them.
+    Running `projects/inverters/pfc_vsi_drive` with the guards
+    removed, the line current runs away and the boost stage starves.
+    They stay.
+  * **And that dependence is not what the guards claim it is.** With
+    the guard off, that run's peak line current is **294.51 A at
+    `dt` = 2e-7, 5e-8 *and* 1e-8** — dt-independent to five figures
+    across a 20× range. It is not solver garbage; it is the model's
+    own trajectory, diverging exactly as that script's docstring
+    already predicts ("the L001-C006-bridge tank rings unbounded …
+    there's no PFC current controller"). `v_rect` decays 172 → 67 V
+    over the run while the current grows, and the peak sits on the
+    final sample. The clamp is substituting a limit for a missing
+    control loop.
   * And with them on, that run's reported line current peaks at
     **exactly 100.000 A** — which is the configured
     `inductor_abs_clamp`. The clamp fires on **30 878 steps** of a
@@ -37,10 +47,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Recording changes no numbers — a test requires two guarded runs to
   be bit-identical.
 
-  The real fix remains open and is now precisely stated: an inductor
-  whose conduction path opens needs a snubber, and Pulsim should
-  insert one and report it the way the topology preflight reports a
-  reference tie — not substitute a limit for a current.
+  The warning deliberately does NOT name a cause. The first draft
+  said "usually a snubber across a path that opens", which is the
+  guards' original story and is wrong on the only circuit that can
+  be tested — there the cause is an unbounded open-loop stage. What
+  it says instead is the check that settles it: re-run with the
+  guard off and a smaller dt, and if the current does not move, the
+  clamp is hiding a modelling result rather than a numerical one.
 
 * **A step the solver cannot take is re-taken at a smaller one**
   (audit finding B.4). A failed inner solve used to end the run and

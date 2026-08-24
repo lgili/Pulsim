@@ -2114,9 +2114,13 @@ def simulate(
             "\n  These guards do not solve anything — they substitute "
             "a limit you configured for a current the solver "
             "computed, so what you plot for these inductors is the "
-            "limit. A guard that fires means the model is missing "
-            "something, usually a snubber across a path that opens "
-            "when a bridge enters DCM. Inspect "
+            "limit. Before trusting the trace, find out WHY the "
+            "underlying current went there: re-run with the guard "
+            "off and with a smaller dt. If the value is unchanged by "
+            "dt, it is your model's own trajectory (an unbounded "
+            "open-loop stage, a missing snubber, a missing inrush "
+            "limiter), not solver noise — and clipping it is hiding "
+            "a modelling result, not a numerical one. Inspect "
             "result.inductor_guard_actions.",
             stacklevel=2)
 

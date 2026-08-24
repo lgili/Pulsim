@@ -148,17 +148,23 @@ struct SimulationOptions {
     /// THIS DOES NOT SOLVE ANYTHING. It replaces a current the
     /// solver computed with a limit you configured, so on any step
     /// where it fires the trace shows YOUR NUMBER, not the circuit's.
-    /// A guard that fires is evidence the model is missing something
-    /// — usually a snubber across a path that opens when a bridge
-    /// enters DCM — and every firing is now recorded in
+    /// A guard that fires is evidence about the MODEL, and which
+    /// evidence depends on the circuit: re-run with the guard off
+    /// and a smaller dt, and if the current is unchanged it is the
+    /// model's own trajectory rather than solver noise. Every firing
+    /// is recorded in
     /// `result.inductor_guard_actions`, which the Python layer
     /// surfaces as a warning naming the device and the step count.
-    /// The audit calls these confessions rather than features; they
+    /// The audit calls these confessions rather than features. They
     /// are kept because the 1 kW drive in `projects/inverters/
-    /// pfc_vsi_drive` genuinely still needs them (without the clamp
-    /// its line current peaks at ~544 A and the boost stage
-    /// starves), but a run that depends on one is a run whose model
-    /// is incomplete.
+    /// pfc_vsi_drive` still depends on them — but note what that
+    /// dependence turned out to BE: with the guard off, that run's
+    /// line current is 294.51 A at dt = 2e-7, 5e-8 AND 1e-8, i.e.
+    /// dt-independent to five figures. It is not solver garbage; it
+    /// is the model diverging, exactly as that script's own
+    /// docstring predicts ("the L001-C006-bridge tank rings
+    /// unbounded ... there's no PFC current controller"). The clamp
+    /// is substituting a limit for a missing control loop.
     ///
     /// When `> 0`, after each `cache.solve` the solver checks every
     /// tracked inductor's branch-current change against this bound
