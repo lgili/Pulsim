@@ -493,6 +493,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v3/test_main.cpp
         tests/layer4_v3/test_nonlinear_solve.cpp
         tests/layer4_v3/test_diode_load_line.cpp
+        tests/layer4_v3/test_lti_recovery.cpp
         tests/layer4_v3/test_lti_state_space.cpp   # Bridge.3 — DSED bridge
     )
     target_link_libraries(pulsim_core_layer4_v3_tests
