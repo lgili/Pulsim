@@ -8,6 +8,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **Sine-driven modes step exactly too** (Phase-3 item 3, reshaped by
+  measurement). Item 2 covered DC-driven modes; the RK45 fallback
+  still owned anything with a time-varying source, and an ordinary
+  sine rectifier with an RC snubber ground it down — 157k steps at
+  τ = 1e-6, 1.9M steps and 8.3 s at τ = 1e-8, refused outright at
+  τ = 1e-10. The audit prescribed a Radau stiff member here; the
+  stronger move came first: a sine-driven LTI mode is autonomous
+  once the state is augmented with the source's own oscillator pair
+  (u = (sin ωt, cos ωt), u̇ = [[0,ω],[−ω,−0]]·u — amplitudes and
+  phases folded into the coupling columns, one pair per distinct
+  frequency, v_dc into the constant term). The augmented system
+  steps EXACTLY: all three snubber cases now run in ~0.1 s, and a
+  C++ test lands a sine-driven RC on its closed-form response to
+  1e-9 across composed steps.
+
+  The arbitration that validated it: the exact path, the dsed RK45
+  path and the pwl engine at dt = 1e-8 all agree on 5.9262 V — the
+  outlier was the pwl engine at dt = 1e-7, off by 3.2% from its own
+  commutation resolution. The event-driven answer is again the
+  sharper one.
+
+  Deliberately still numeric: PWM/pulse sources (a stepped b(t) is
+  not a finite oscillator sum — a test pins that the adapter
+  declines) and user `b_extra_fn` callbacks. A stiff circuit in
+  those classes is Radau's remaining subject, and per this
+  project's standing rule the code waits for a repro. Oscillator
+  phase never drifts: the pair is rebuilt from absolute time at
+  every step, and driving a circuit exactly at its own resonance
+  degrades safely (defective eigenbasis → numeric fallback).
+
 * **Consistent reinitialization + exact LTI stepping** (Phase-3
   item 2, the audit's "obra №3") — and the measurement that reshaped
   it. The DCM buck that item 1 refused now runs the full 5 ms in

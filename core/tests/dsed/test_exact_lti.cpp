@@ -111,3 +111,74 @@ TEST_CASE("Exact: h = 0 is the identity",
     REQUIRE(out[0] == Approx(4.0).margin(1e-13));
     REQUIRE(out[1] == Approx(9.0).margin(1e-13));
 }
+
+// -----------------------------------------------------------------
+// v2.0 Phase 3 item 3 — the SINE-augmented stepper, end to end
+// through the builder adapter. A series RC driven by a sine has a
+// closed-form response; one exact step across many time constants
+// must land on it, DC offset and phase included.
+// -----------------------------------------------------------------
+
+#include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/dsed/builder_adapter.hpp"
+#include "pulsim/pwl/cache.hpp"
+
+TEST_CASE("Exact: sine-driven RC steps to the analytic response",
+          "[v2][dsed][exact_lti][augmented]") {
+    const Real R = 1e3, C = 1e-6;                 // tau = 1 ms
+    const Real A_amp = 5.0, f = 60.0, phase = 0.7, v_dc = 2.0;
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "in", "gnd",
+                                v_dc, A_amp, f, phase);
+    b.add_resistor("R1", "in", "n1", R);
+    b.add_capacitor("C1", "n1", "gnd", C);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(),
+                                             cache};
+    topology::SwitchStateMask m(0);
+    ad.set_mask(m);
+    REQUIRE(ad.has_exact_step());       // sine-only drive qualifies
+
+    // Analytic v_C for v_C(0) = 0 under
+    // V(t) = v_dc + A·sin(wt + phase):
+    //   steady state: v_dc + Vp·sin(wt + phase − theta),
+    //   Vp = A/sqrt(1+(wRC)^2), theta = atan(wRC);
+    //   transient sized to cancel it at t = 0.
+    const Real w = 2.0 * std::numbers::pi_v<Real> * f;
+    const Real tau = R * C;
+    const Real theta = std::atan(w * tau);
+    const Real Vp = A_amp / std::sqrt(1.0 + w * tau * w * tau);
+    auto v_ref = [&](Real t) {
+        const Real ss = v_dc + Vp * std::sin(w * t + phase - theta);
+        const Real ss0 = v_dc + Vp * std::sin(phase - theta);
+        return ss - ss0 * std::exp(-t / tau);
+    };
+
+    Vector x0(1);
+    x0 << 0.0;
+    // ONE step of 5 ms (five taus, a third of a mains cycle), then
+    // a second from there — exactness must compose across steps.
+    const Vector x1 = ad.exact_advance_state(0.0, x0, 5e-3);
+    REQUIRE(x1[0] == Approx(v_ref(5e-3)).margin(1e-9));
+    const Vector x2 = ad.exact_advance_state(5e-3, x1, 7e-3);
+    REQUIRE(x2[0] == Approx(v_ref(12e-3)).margin(1e-9));
+}
+
+TEST_CASE("Exact: PWM or pulse sources decline the exact path",
+          "[v2][dsed][exact_lti][augmented]") {
+    // b(t) with steps is not a finite oscillator sum — the numeric
+    // path owns it, and claiming otherwise would be a wrong answer,
+    // not a slow one.
+    builder::CircuitBuilder b;
+    b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1e5, 0.5);
+    b.add_resistor("R1", "in", "n1", 1e3);
+    b.add_capacitor("C1", "n1", "gnd", 1e-6);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(),
+                                             cache};
+    topology::SwitchStateMask m(0);
+    ad.set_mask(m);
+    REQUIRE_FALSE(ad.has_exact_step());
+}
