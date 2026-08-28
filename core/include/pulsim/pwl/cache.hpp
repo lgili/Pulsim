@@ -462,7 +462,15 @@ public:
 
         const int n_mna = static_cast<int>(G_split.rows());
 
-        DenseMatrix G_st = DenseMatrix(G_split);   // sparse → dense
+        // v2.0 Phase 3 item 4 (audit E.4): the matrix STAYS SPARSE.
+        // The old path densified the full MNA here and later fed a
+        // dense FullPivLU — O(n³) with full pivoting's constant —
+        // per visited mode. Measured on an RC ladder: 0.9 ms at 50
+        // states, 267 ms at 400, a clean ×8 per doubling. Every
+        // block below now partitions by triplet routing and factors
+        // G_aa with the kernel's sparse LU.
+        sparse::Matrix G_st_sp = G_split;
+        sparse::compress_in_place(G_st_sp);
         // NOTE: the mass matrix would be M_dyn = C_split / 2 (from
         // J(h) = G + (2/h)·M_dyn). It is NOT materialised: Step 7
         // applies M_ss^{-1} analytically as per-row 1/C and -1/L
@@ -748,11 +756,15 @@ public:
             // This is the buck-CCM regression fast path.
             t_is_identity = T.isIdentity();
             if (!t_is_identity) {
-                DenseMatrix Tt = T.transpose();
-                DenseMatrix G_tmp = Tt * G_st * T;
-                Vector      b_tmp = Tt * b_a;
-                G_st  = std::move(G_tmp);
-                b_a   = std::move(b_tmp);
+                // Congruence applied SPARSELY: T is near-identity
+                // (one extra entry per floating cap), so Tᵀ·G·T
+                // keeps the sparsity the dense product destroyed.
+                const sparse::Matrix Ts = T.sparseView();
+                sparse::Matrix G_tmp =
+                    (Ts.transpose() * G_st_sp * Ts).pruned();
+                sparse::compress_in_place(G_tmp);
+                G_st_sp = std::move(G_tmp);
+                b_a = T.transpose() * b_a;
             }
         }
 
@@ -786,117 +798,145 @@ public:
         const int n_alg = static_cast<int>(alg_rows.size());
 
         // ---------------------------------------------------------
-        // Step 5: partition G_st and b_a into [SS, SA, AS, AA]
+        // Step 5: partition into [SS, SA, AS, AA] by TRIPLET
+        // ROUTING — one pass over the nonzeros, no dense scans.
         // ---------------------------------------------------------
-        DenseMatrix G_ss(n_state, n_state);
-        DenseMatrix G_sa(n_state, n_alg);
-        DenseMatrix G_as(n_alg,   n_state);
-        DenseMatrix G_aa(n_alg,   n_alg);
+        std::vector<int> state_pos(n_mna, -1), alg_pos(n_mna, -1);
+        for (int i = 0; i < n_state; ++i) {
+            state_pos[state_rows[i]] = i;
+        }
+        for (int i = 0; i < n_alg; ++i) {
+            alg_pos[alg_rows[i]] = i;
+        }
+        std::vector<sparse::Triplet> t_ss, t_sa, t_as, t_aa;
+        for (int col = 0; col < G_st_sp.outerSize(); ++col) {
+            for (sparse::Matrix::InnerIterator it(G_st_sp, col); it;
+                 ++it) {
+                const int r = static_cast<int>(it.row());
+                const int c = static_cast<int>(it.col());
+                const Real v = it.value();
+                if (state_pos[r] >= 0 && state_pos[c] >= 0) {
+                    t_ss.emplace_back(state_pos[r], state_pos[c], v);
+                } else if (state_pos[r] >= 0) {
+                    t_sa.emplace_back(state_pos[r], alg_pos[c], v);
+                } else if (state_pos[c] >= 0) {
+                    t_as.emplace_back(alg_pos[r], state_pos[c], v);
+                } else {
+                    t_aa.emplace_back(alg_pos[r], alg_pos[c], v);
+                }
+            }
+        }
+        auto build_sp = [](int rows, int cols,
+                            std::vector<sparse::Triplet>& ts) {
+            sparse::Matrix m(rows, cols);
+            m.setFromTriplets(ts.begin(), ts.end());
+            m.makeCompressed();
+            return m;
+        };
+        sparse::Matrix Gss_sp = build_sp(n_state, n_state, t_ss);
+        sparse::Matrix Gsa_sp = build_sp(n_state, n_alg, t_sa);
+        sparse::Matrix Gas_sp = build_sp(n_alg, n_state, t_as);
+        sparse::Matrix Gaa_sp = build_sp(n_alg, n_alg, t_aa);
         Vector b_s(n_state);
         Vector b_a_v(n_alg);
         for (int i = 0; i < n_state; ++i) {
-            for (int j = 0; j < n_state; ++j) {
-                G_ss(i, j) = G_st(state_rows[i], state_rows[j]);
-            }
-            for (int j = 0; j < n_alg; ++j) {
-                G_sa(i, j) = G_st(state_rows[i], alg_rows[j]);
-            }
             b_s(i) = b_a(state_rows[i]);
         }
         for (int i = 0; i < n_alg; ++i) {
-            for (int j = 0; j < n_state; ++j) {
-                G_as(i, j) = G_st(alg_rows[i], state_rows[j]);
-            }
-            for (int j = 0; j < n_alg; ++j) {
-                G_aa(i, j) = G_st(alg_rows[i], alg_rows[j]);
-            }
             b_a_v(i) = b_a(alg_rows[i]);
         }
 
         // ---------------------------------------------------------
-        // Step 6: Schur-complement out the algebraic vars.
-        //   M_ss · dx_s/dt = -G_ss · x_s - G_sa · x_a - b_s
+        // Step 6: Schur-complement out the algebraic vars — same
+        // algebra as ever:
         //   G_aa · x_a = -G_as · x_s - b_a_v
-        //   → x_a = -G_aa^{-1} · (G_as · x_s + b_a_v)
-        //   → M_ss · dx_s/dt = (G_sa · G_aa^{-1} · G_as - G_ss) · x_s
-        //                     + (G_sa · G_aa^{-1} · b_a_v - b_s)
-        //
-        // We also build the projection matrix B (n_state × n_mna)
-        // such that for any time-varying b_extra in original MNA
-        // coords, b_reduced(t) = B · b_extra(t). This lets the
-        // Python adapter overlay sine/PWM/pulse contributions per
-        // PED step without re-stamping (Phase 5.2 / Bridge.6).
-        //
-        //   B = M_ss^{-1} · (G_sa · G_aa^{-1} · S_alg - S_state) · T^T
-        //
-        // where S_state (n_state × n_mna) and S_alg (n_alg × n_mna)
-        // are selector matrices picking the state and algebraic rows.
+        //   Schur_G = G_sa · G_aa⁻¹ · G_as - G_ss
+        //   B       = G_sa · G_aa⁻¹ · S_alg - S_state
+        // but G_aa is factored ONCE by the kernel's sparse LU
+        // (Gilbert-Peierls + COLAMD, v2.0 Phase 1a) and every
+        // product keeps its sparse factor on the left. The scatter
+        // matrices E_s/E_a and selectors S_state/S_alg are gone —
+        // one 1 per row/column is an index write, not a matrix.
         // ---------------------------------------------------------
         DenseMatrix Schur_G(n_state, n_state);
         Vector Schur_b(n_state);
-
-        // Build selector matrices (sparse-ish: one 1 per row)
-        DenseMatrix S_state = DenseMatrix::Zero(n_state, n_mna);
+        DenseMatrix B = DenseMatrix::Zero(n_state, n_mna);
+        DenseMatrix rec_state =
+            DenseMatrix::Zero(n_mna, n_state);
+        Vector rec_const = Vector::Zero(n_mna);
+        DenseMatrix rec_b = DenseMatrix::Zero(n_mna, n_mna);
         for (int i = 0; i < n_state; ++i) {
-            S_state(i, state_rows[i]) = Real{1};
+            rec_state(state_rows[i], i) = Real{1};   // the scatter
         }
-        DenseMatrix S_alg = DenseMatrix::Zero(n_alg, n_mna);
-        for (int i = 0; i < n_alg; ++i) {
-            S_alg(i, alg_rows[i]) = Real{1};
-        }
-        DenseMatrix B(n_state, n_mna);
-
-        // Scatter matrices for the recovery map: E_s places state
-        // i at transformed row state_rows[i]; E_a places algebraic
-        // j at alg_rows[j]. One 1 per column.
-        DenseMatrix E_s = DenseMatrix::Zero(n_mna, n_state);
-        for (int i = 0; i < n_state; ++i) {
-            E_s(state_rows[i], i) = Real{1};
-        }
-        DenseMatrix E_a = DenseMatrix::Zero(n_mna, n_alg);
-        for (int i = 0; i < n_alg; ++i) {
-            E_a(alg_rows[i], i) = Real{1};
-        }
-
-        DenseMatrix rec_state;   // n_mna × n_state, transformed coords
-        Vector rec_const;        // n_mna
-        DenseMatrix rec_b;       // n_mna × n_mna
 
         if (n_alg > 0) {
-            Eigen::FullPivLU<DenseMatrix> lu_aa(G_aa);
-            if (!lu_aa.isInvertible()) {
+            auto solver = sparse::make_default_solver();
+            if (!solver->analyze(Gaa_sp) ||
+                !solver->factorize(Gaa_sp)) {
                 throw std::runtime_error(
                     "compute_lti_state_space: algebraic block "
                     "G_aa is singular; circuit topology does "
                     "not have a unique algebraic solution for "
                     "this switch mask.");
             }
-            DenseMatrix Ginv_Gas = lu_aa.solve(G_as);
-            Vector      Ginv_ba  = lu_aa.solve(b_a_v);
-            Schur_G = G_sa * Ginv_Gas - G_ss;
-            Schur_b = G_sa * Ginv_ba  - b_s;
+            // G_aa⁻¹·G_as, one sparse solve per state column.
+            DenseMatrix Ginv_Gas(n_alg, n_state);
+            {
+                Vector rhs(n_alg), sol;
+                for (int j = 0; j < n_state; ++j) {
+                    rhs.setZero();
+                    for (sparse::Matrix::InnerIterator it(Gas_sp, j);
+                         it; ++it) {
+                        rhs[it.row()] = it.value();
+                    }
+                    solver->solve(rhs, sol);
+                    Ginv_Gas.col(j) = sol;
+                }
+            }
+            Vector Ginv_ba;
+            solver->solve(b_a_v, Ginv_ba);
+            Schur_G = Gsa_sp * Ginv_Gas - DenseMatrix(Gss_sp);
+            Schur_b = Gsa_sp * Ginv_ba - b_s;
 
-            // B uses the SAME factorisation: G_aa^{-1} · S_alg.
-            DenseMatrix Ginv_Salg = lu_aa.solve(S_alg);
-            B = G_sa * Ginv_Salg - S_state;
+            // G_aa⁻¹ itself (dense n_alg×n_alg), one unit solve per
+            // column — B and the recovery map both need it, at the
+            // ALGEBRAIC columns of the full-width operators.
+            DenseMatrix Ginv(n_alg, n_alg);
+            {
+                Vector rhs = Vector::Zero(n_alg), sol;
+                for (int j = 0; j < n_alg; ++j) {
+                    rhs[j] = Real{1};
+                    solver->solve(rhs, sol);
+                    Ginv.col(j) = sol;
+                    rhs[j] = Real{0};
+                }
+            }
+            const DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            for (int j = 0; j < n_alg; ++j) {
+                B.col(alg_rows[j]) = Gsa_Ginv.col(j);
+            }
+            for (int i = 0; i < n_state; ++i) {
+                B(i, state_rows[i]) -= Real{1};      // − S_state
+            }
 
-            // The recovery map, from the SAME solves (v2.0 Phase 3):
-            //   y = E_s·x_s + E_a·y_a,
-            //   y_a = -Ginv_Gas·x_s - Ginv_ba - Ginv_Salg·Tᵀ·b_extra
-            // (Tᵀ because b_extra arrives in original coordinates,
-            // matching B's convention below.)
-            rec_state = E_s - E_a * Ginv_Gas;
-            rec_const = -(E_a * Ginv_ba);
-            rec_b     = -(E_a * Ginv_Salg);
+            // Recovery (v2.0 Phase 3): the algebraic rows of the
+            // full-width operators are −G_aa⁻¹·(…); the state rows
+            // are the plain scatter already written above.
+            for (int i = 0; i < n_alg; ++i) {
+                rec_state.row(alg_rows[i]) = -Ginv_Gas.row(i);
+                rec_const[alg_rows[i]] = -Ginv_ba[i];
+                for (int j = 0; j < n_alg; ++j) {
+                    rec_b(alg_rows[i], alg_rows[j]) = -Ginv(i, j);
+                }
+            }
         } else {
-            Schur_G = -G_ss;
+            Schur_G = -DenseMatrix(Gss_sp);
             Schur_b = -b_s;
-            B = -S_state;
+            for (int i = 0; i < n_state; ++i) {
+                B(i, state_rows[i]) = Real{-1};
+            }
             // No algebraic block: the full vector IS the scattered
             // state, and sources have nothing left to influence.
-            rec_state = E_s;
-            rec_const = Vector::Zero(n_mna);
-            rec_b     = DenseMatrix::Zero(n_mna, n_mna);
         }
 
         // Apply T^T on the right (the input b is in ORIGINAL coords;

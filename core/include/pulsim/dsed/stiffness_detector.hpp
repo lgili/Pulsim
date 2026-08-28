@@ -50,15 +50,66 @@ public:
         if (it != cache_.end()) {
             return it->second;
         }
-        Eigen::EigenSolver<DenseMatrix> es(A);
-        const auto eigs = es.eigenvalues();
-        Real lam_max = Real{0};
-        for (Eigen::Index i = 0; i < eigs.size(); ++i) {
-            const Real m = std::abs(eigs(i));
-            if (m > lam_max) lam_max = m;
-        }
-        cache_[mode_id] = lam_max;
+        const Real lam_max = estimate_lambda_max_(A);
+        cache_.emplace(mode_id, lam_max);
         return lam_max;
+    }
+
+    /// |λ|max estimate. Small systems keep the exact dense
+    /// eigensolve; larger ones use POWER ITERATION (v2.0 Phase 3
+    /// item 4 / audit E.4) — the dispatch decision only needs the
+    /// magnitude to within a few percent against a threshold, and
+    /// the full O(n³) Schur factorization was costing more than the
+    /// steps it was routing. Two-step norm ratios converge on the
+    /// dominant MODULUS even when the dominant eigenvalue is a
+    /// complex pair (the single-step ratio oscillates; the
+    /// two-step one is the pair's |λ|² up to phase, so its square
+    /// root settles).
+    [[nodiscard]] static Real estimate_lambda_max_(
+        const DenseMatrix& A) {
+        const auto n = A.rows();
+        if (n == 0) {
+            return Real{0};
+        }
+        if (n <= 64) {
+            Eigen::EigenSolver<DenseMatrix> es(A);
+            const auto eigs = es.eigenvalues();
+            Real lam = Real{0};
+            for (Eigen::Index i = 0; i < eigs.size(); ++i) {
+                lam = std::max(lam, std::abs(eigs[i]));
+            }
+            return lam;
+        }
+        // Deterministic quasi-random start (no Date/random in the
+        // kernel): a fixed mixing of index bits, then normalise.
+        Vector v(n);
+        for (Eigen::Index i = 0; i < n; ++i) {
+            v[i] = Real{1} + Real{0.37} *
+                   static_cast<Real>((i * 2654435761u) & 0xFFFF) /
+                   Real{65536};
+        }
+        v.normalize();
+        Real est = Real{0};
+        Vector w1, w2;
+        for (int iter = 0; iter < 40; ++iter) {
+            w1 = A * v;
+            w2 = A * w1;
+            const Real n2 = w2.norm();
+            const Real n0 = v.norm();
+            if (!(n2 > Real{0}) || !std::isfinite(n2)) {
+                return est;      // nilpotent-ish or overflow: best so far
+            }
+            const Real next = std::sqrt(n2 / n0);
+            const bool settled =
+                iter > 4 && std::abs(next - est) <=
+                                Real{0.02} * std::abs(next);
+            est = next;
+            v = w2 / n2;
+            if (settled) {
+                break;
+            }
+        }
+        return est;
     }
 
     /// Return DOPRI5 or BDF2 for the given (mode, h).

@@ -133,8 +133,13 @@ public:
                 continue;
             }
 
-            // 3. Pull current A from the system (set by current mask)
-            const DenseMatrix A_cur = system_.A_matrix();
+            // 3. Pull current A from the system (set by current mask).
+            // By REFERENCE (v2.0 Phase 3 item 4 / audit E.4): this
+            // sat inside the step loop copying the full dense matrix
+            // every step — 1.3 MB per step at 400 states. The
+            // adapter's entry pointer is stable until set_mask, and
+            // no set_mask happens within a step.
+            const DenseMatrix& A_cur = system_.A_matrix();
 
             // 4. Take BDF2 step
             auto [x_new, _err] = bdf2_step(A_cur, b_fn, t, x, h_use, bdf2_state);

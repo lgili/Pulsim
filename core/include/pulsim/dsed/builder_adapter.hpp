@@ -98,6 +98,7 @@ public:
         ExactLTI exact;
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
+        bool exact_built = false;       // lazy — see item 4 note
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -235,9 +236,11 @@ public:
     /// defective eigenbasis for this mask). The scheduler treats
     /// nullptr as "integrate numerically", so falling back is
     /// always safe.
-    /// Whether the CURRENT mask can be stepped exactly.
+    /// Whether the CURRENT mask can be stepped exactly. Builds the
+    /// stepper on first ask (cheap flag check afterwards).
     [[nodiscard]] bool has_exact_step() const {
         ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
         return current_entry_->exact.valid;
     }
 
@@ -248,6 +251,7 @@ public:
     [[nodiscard]] Vector exact_advance_state(Real t, const Vector& x,
                                                Real h) const {
         ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
         const LTIEntry& e = *current_entry_;
         const auto n = x.size();
         const auto k =
@@ -322,6 +326,25 @@ private:
             }
         }
         return false;
+    }
+
+    /// Build the exact stepper on demand (v2.0 Phase 3 item 4).
+    /// `exact.valid` stays false — with the flag set — when the
+    /// circuit's sources rule it out or the eigenbasis is
+    /// defective; callers fall back to the numeric path either way.
+    void ensure_exact_built_(LTIEntry& entry) const {
+        if (entry.exact_built) {
+            return;
+        }
+        entry.exact_built = true;
+        if (!has_dynamic_sources_) {
+            entry.exact = make_exact_lti(entry.A);
+            entry.exact_b = entry.b_constant;
+        } else if (sine_only_sources_) {
+            build_augmented_exact_(entry);
+        }
+        // PWM/pulse sources or a user b_extra_fn: b(t) is not a
+        // finite sum of oscillators — the numeric path owns those.
     }
 
     /// True iff every time-varying contribution is a
@@ -495,17 +518,12 @@ private:
                 std::move(lti.recover_const),
                 std::move(lti.recover_from_b),
             };
-            if (!has_dynamic_sources_) {
-                // One eigendecomposition per VISITED mask, amortised
-                // over every step taken in it.
-                entry.exact = make_exact_lti(entry.A);
-                entry.exact_b = entry.b_constant;
-            } else if (sine_only_sources_) {
-                build_augmented_exact_(entry);
-            }
-            // PWM/pulse sources or a user b_extra_fn: b(t) is not a
-            // finite sum of oscillators — the numeric path handles
-            // those correctly.
+            // The exact stepper's eigendecomposition is built
+            // LAZILY, on the first exact_advance_state call —
+            // measured at N = 400 states it is 252 ms of the
+            // 254 ms mask-resolve cost, and the Auto scheduler
+            // resolves masks without ever stepping exactly.
+            // (v2.0 Phase 3 item 4.)
             auto [iter, inserted] = mask_cache_.emplace(
                 current_mask_, std::move(entry));
             current_entry_ = &iter->second;
@@ -532,7 +550,7 @@ private:
     // Phase-0 fix #5: exact-mask → dense sequential mode id intern
     // table backing mode_id(). Grows by #visited modes only.
     mutable std::unordered_map<MaskT, int> mode_ids_;
-    mutable const LTIEntry* current_entry_ = nullptr;
+    mutable LTIEntry* current_entry_ = nullptr;
 };
 
 }  // namespace pulsim::dsed

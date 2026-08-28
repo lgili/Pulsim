@@ -137,3 +137,61 @@ TEST_CASE("Projection: complex fast pair projects to a real state",
     REQUIRE(out[1] == Approx(0.0).margin(1e-9));
     REQUIRE(out[2] == Approx(5.0).margin(1e-12));
 }
+
+// -----------------------------------------------------------------
+// v2.0 Phase 3 item 4 — the stiffness detector's power iteration.
+// The dispatch decision needs |λ|max to within a few percent of a
+// threshold; the full O(n³) eigensolve was costing more than the
+// steps it routed.
+// -----------------------------------------------------------------
+
+#include "pulsim/dsed/stiffness_detector.hpp"
+
+TEST_CASE("Power iteration finds |λ|max within a few percent",
+          "[v2][dsed][stiffness]") {
+    // n > 64 forces the power path. Diagonal-dominant construction
+    // with a known dominant REAL eigenvalue.
+    const int n = 100;
+    DenseMatrix A = DenseMatrix::Zero(n, n);
+    for (int i = 0; i < n; ++i) {
+        A(i, i) = -Real{10} * (i + 1);          // λ up to -1000
+        if (i + 1 < n) {
+            A(i, i + 1) = Real{3};
+            A(i + 1, i) = -Real{2};
+        }
+    }
+    dsed::StiffnessDetector det(10.0);
+    const Real est = det.lambda_max(/*mode_id=*/0, A);
+    // Reference from the dense solver.
+    Eigen::EigenSolver<DenseMatrix> es(A);
+    Real ref = 0.0;
+    for (Eigen::Index i = 0; i < n; ++i) {
+        ref = std::max(ref, std::abs(es.eigenvalues()[i]));
+    }
+    REQUIRE(est == Approx(ref).epsilon(0.05));
+}
+
+TEST_CASE("Power iteration handles a dominant COMPLEX pair",
+          "[v2][dsed][stiffness]") {
+    // Dominant eigenvalue is ±j·1e6 (an LC ring): the single-step
+    // norm ratio oscillates; the two-step ratio settles on the
+    // modulus. n > 64 to force the power path.
+    const int n = 80;
+    DenseMatrix A = DenseMatrix::Zero(n, n);
+    A(0, 1) = 1e6;
+    A(1, 0) = -1e6;
+    for (int i = 2; i < n; ++i) {
+        A(i, i) = -Real{100} * (i + 1);         // all ≪ 1e6
+    }
+    dsed::StiffnessDetector det(10.0);
+    const Real est = det.lambda_max(/*mode_id=*/1, A);
+    REQUIRE(est == Approx(1e6).epsilon(0.05));
+}
+
+TEST_CASE("Small systems keep the exact dense eigensolve",
+          "[v2][dsed][stiffness]") {
+    DenseMatrix A(2, 2);
+    A << 0.0, 1e4, -1e4, 0.0;
+    dsed::StiffnessDetector det(10.0);
+    REQUIRE(det.lambda_max(2, A) == Approx(1e4).margin(1e-6));
+}
