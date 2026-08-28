@@ -87,6 +87,12 @@ template <class MaskT>
 struct PEDResult {
     std::vector<Real> times;
     std::vector<Vector> states;
+    // v2.0 Phase 3 item 5 — the mask each sample was recorded
+    // under. What lets a post-pass reconstruct the FULL MNA vector
+    // (node voltages, source and inductor currents) from the
+    // reduced states through the per-mask recovery map — including
+    // solver-owned diode bits no timeline replay could recover.
+    std::vector<MaskT> sample_masks;
     std::vector<EventRecord<MaskT>> event_log;
     std::size_t n_accept = 0;
     std::size_t n_reject = 0;
@@ -237,6 +243,7 @@ public:
         PEDResult<MaskT> result;
         result.times.push_back(t);
         result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
         std::size_t step_idx = 0;
 
         constexpr std::size_t kMaxSteps = 10'000'000;
@@ -315,6 +322,8 @@ public:
                     if (step_idx % store_every_ == 0) {
                         result.times.push_back(t);
                         result.states.push_back(x);
+                        result.sample_masks.push_back(
+                            system_.current_mask());
                     }
                     continue;
                 }
@@ -486,6 +495,7 @@ public:
             if (step_idx % store_every_ == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
+                result.sample_masks.push_back(system_.current_mask());
             }
         }
 
@@ -493,6 +503,7 @@ public:
         if (result.times.back() != t) {
             result.times.push_back(t);
             result.states.push_back(x);
+            result.sample_masks.push_back(system_.current_mask());
         }
 
         const auto t1_wall = clock::now();

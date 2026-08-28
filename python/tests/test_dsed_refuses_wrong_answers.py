@@ -54,7 +54,7 @@ def test_dsed_now_commutates_pwl_diodes():
         warnings.simplefilter("ignore")
         r = p.simulate(_pwl_diode_rectifier(), t_end=1e-3,
                         engine="dsed")
-    assert abs(np.asarray(r.states)[-1][0]) < 1e-3   # blocks
+    assert abs(np.asarray(r.v("vout"))[-1]) < 1e-3   # blocks
 
 
 def test_dsed_refuses_nonlinear_devices():

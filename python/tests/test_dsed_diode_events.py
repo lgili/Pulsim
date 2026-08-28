@@ -58,12 +58,12 @@ def test_the_backwards_conduction_is_gone():
     """THE bug: reverse-biased, the diode must block. It conducted
     backwards (−10.909 V) for as long as the dsed engine existed."""
     rd = _run_dsed(_series_diode(-12.0), 2e-3)
-    assert abs(np.asarray(rd.states)[-1][0]) < 1e-3
+    assert abs(np.asarray(rd.v("vout"))[-1]) < 1e-3
 
     # And forward it still conducts — no choice of frozen bit ever
     # satisfied both polarities.
     rd2 = _run_dsed(_series_diode(+12.0), 2e-3)
-    assert np.asarray(rd2.states)[-1][0] == pytest.approx(10.909,
+    assert np.asarray(rd2.v("vout"))[-1] == pytest.approx(10.909,
                                                            abs=0.05)
 
 
@@ -81,7 +81,7 @@ def test_halfwave_rectifier_commutates_and_is_sharper_than_pwl():
     b.add_resistor("Rl", "vout", "gnd", 200.0)
 
     rd = _run_dsed(b, 5e-2)
-    v = np.asarray(rd.states)[:, 0]
+    v = np.asarray(rd.v("vout"))
     assert rd.n_events >= 6            # ≥ 2 commutations × 3 cycles
     assert v.max() == pytest.approx(10.0, abs=1e-2)
     assert v.max() <= 10.0 + 1e-6      # no commutation overshoot
@@ -106,7 +106,7 @@ def test_fullwave_bridge_cascade_matches_pwl():
 
     rd = _run_dsed(bridge(), 5e-2)
     rp = _run_pwl(bridge(), 5e-2, 1e-7)
-    avg_d = _time_avg(rd.times, np.asarray(rd.states)[:, 0])
+    avg_d = _time_avg(rd.times, np.asarray(rd.v("p")))
     avg_p = _time_avg(rp.times, rp.v("p"))
     assert avg_d == pytest.approx(avg_p, rel=1e-3)
 
@@ -125,10 +125,10 @@ def test_buck_ccm_with_a_real_diode():
         return m
 
     rd = _run_dsed(b, 5e-3, switch_fn=pwm)
-    sd = np.asarray(rd.states)
-    tail = sd[int(0.9 * len(sd)):]
-    assert float(np.mean(tail[:, 0])) == pytest.approx(12.0, rel=0.02)
-    assert float(np.mean(tail[:, 1])) == pytest.approx(6.0, rel=0.05)
+    vo = np.asarray(rd.v("vout"))
+    il = np.asarray(rd.i("buck__L"))
+    assert float(np.mean(vo[int(0.9 * len(vo)):])) == pytest.approx(12.0, rel=0.02)
+    assert float(np.mean(il[int(0.9 * len(il)):])) == pytest.approx(6.0, rel=0.05)
     assert rd.n_events > 500           # gate edges + commutations
 
 
@@ -169,9 +169,9 @@ def test_dcm_runs_exactly_and_matches_pwl():
     assert elapsed < 5.0, elapsed          # was a 10M-step grind
 
     td = np.asarray(rd.times)
-    sd = np.asarray(rd.states)
+    vo = np.asarray(rd.v("vout"))
     i0 = int(np.searchsorted(td, 4e-3))
-    vo_d = float(np.trapezoid(sd[i0:, 0], td[i0:])
+    vo_d = float(np.trapezoid(vo[i0:], td[i0:])
                  / (td[-1] - td[i0]))
 
     b2 = mk()
@@ -187,7 +187,7 @@ def test_dcm_runs_exactly_and_matches_pwl():
     assert vo_d == pytest.approx(vo_p, rel=1e-3)
     # And the current stays at the physical g_off leakage level when
     # the diode is off — never ampere-scale negative.
-    assert sd[:, 1].min() > -1e-3
+    assert np.asarray(rd.i("buck__L")).min() > -1e-3
 
 
 def test_explicit_bdf2_with_diodes_is_refused():

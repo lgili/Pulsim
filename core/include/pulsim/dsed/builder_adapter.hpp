@@ -269,6 +269,23 @@ public:
         return exact_advance(e.exact, y, e.exact_b, h).head(n);
     }
 
+    /// v2.0 Phase 3 item 5 — the FULL MNA vector at time `t`,
+    /// reconstructed from the reduced state under the CURRENT mask:
+    /// node voltages first, then source and inductor branch
+    /// currents, in exactly the pwl engine's row layout. This is
+    /// what makes `result.v('sw_node')` — the most-probed waveform
+    /// in power electronics — recoverable from a dsed run.
+    [[nodiscard]] Vector recover_full(Real t, const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Vector full = e.recover_from_state * x + e.recover_const;
+        if (has_dynamic_sources_) {
+            full += e.recover_from_b *
+                    build_time_varying_b_extra_(t);
+        }
+        return full;
+    }
+
     /// The graph / pool this adapter was built over — the diode
     /// predicate derivation (v2.0 Phase 3) runs its census on the
     /// same objects so the two engines cannot drift.

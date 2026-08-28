@@ -152,14 +152,14 @@ def test_simulate_dsed_runs_on_buck_ccm_without_scipy() -> None:
 
     # Sanity: produced a trajectory.
     assert res.num_steps() > 0
-    final_state = np.asarray(res.states[-1])
+    final_state = np.asarray(res.states_reduced[-1])
     assert final_state.size > 0
     assert np.all(np.isfinite(final_state)), final_state
     # THE NUMBER, not just finiteness. The reduced state is
     # [v_C, i_L]; at D = 0.5 from 24 V the output must settle near
     # 12 V and the load current near 6 A. The previous fixture's
     # 0.59 V passed the old finiteness-only checks for months.
-    states = np.asarray(res.states)
+    states = np.asarray(res.states_reduced)
     tail = states[int(0.9 * len(states)):]
     v_out = float(np.mean(tail[:, 0]))
     i_l = float(np.mean(tail[:, 1]))

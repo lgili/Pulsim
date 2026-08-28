@@ -153,7 +153,7 @@ def test_dsed_clean_rc_still_runs():
     import numpy as np
     b = _build_rc()
     res = p.simulate(b, t_end=1e-3, dt=1e-5, engine="dsed")
-    states = np.asarray(res.states)
+    states = np.asarray(res.states_reduced)
     assert states.shape[0] > 10, f"expected >10 samples, got {states.shape}"
     # No NaN/Inf snuck through.
     assert np.all(np.isfinite(states)), (

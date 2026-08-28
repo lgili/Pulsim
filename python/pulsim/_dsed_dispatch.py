@@ -309,6 +309,7 @@ class _PEDSimulationResult:
         times: list,
         states: list,
         *,
+        states_full=None,
         n_accept: int = 0,
         n_reject: int = 0,
         n_events: int = 0,
@@ -317,17 +318,30 @@ class _PEDSimulationResult:
         cpu_time_seconds: float = 0.0,
     ) -> None:
         self.times = times
-        # v2.0: the PWL engine's `states` is a 2-D (n_samples,
-        # state_size) numpy array. Match that here so the public
-        # contract does not depend on which engine ran — code like
-        # `res.states[:, node_id]` (which the docs recommend) works
-        # for engine='dsed' too. Read-only for the same reason the
-        # kernel view is: a result is an output, not a scratch pad.
+        # v2.0 Phase 3 item 5 — THE UNIFIED RESULT. When the kernel
+        # hands back the reconstructed full-MNA trajectory (node
+        # voltages, then source and inductor branch currents — the
+        # pwl engine's exact row layout), `.states` IS that, so
+        # `res.states[:, node_id]`, `res.v('name')` and
+        # `res.i('name')` mean the same thing on both engines. The
+        # reduced integrator state stays available as
+        # `.states_reduced` for anyone studying the modes
+        # themselves. Read-only either way: a result is an output,
+        # not a scratch pad.
         arr = _np.asarray(states, dtype=float)
         if arr.ndim == 1:
             arr = arr.reshape(len(times), -1) if times else arr.reshape(0, 0)
         arr.setflags(write=False)
-        self.states = arr
+        full = None
+        if states_full is not None:
+            full = _np.asarray(states_full, dtype=float)
+            if full.size == 0 or full.ndim != 2                     or full.shape[0] != len(times):
+                full = None
+            else:
+                full.setflags(write=False)
+        self.states_reduced = arr
+        self.states = full if full is not None else arr
+        self.has_full_states = full is not None
         self.n_accept = n_accept
         self.n_reject = n_reject
         self.n_events = n_events
@@ -636,6 +650,7 @@ def run_dsed_from_builder(
             return _PEDSimulationResult(
                 times=times,
                 states=states,
+                states_full=native_res.get("states_full"),
                 n_accept=native_res.get("n_accept", 0),
                 n_reject=native_res.get("n_reject", 0),
                 n_events=native_res.get("n_events", 0),
