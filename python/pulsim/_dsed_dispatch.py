@@ -406,6 +406,50 @@ def run_dsed_from_builder(
     """
     import numpy as np
 
+    # ------------------------------------------------------------------
+    # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
+    #
+    # The LTI extraction has no representation for either device
+    # class below, and neither failure is loud:
+    #
+    #   * A PWL switched diode's bit is frozen at whatever switch_fn
+    #     returns — measured: a reverse-biased series diode CONDUCTS
+    #     BACKWARDS (vout = -10.909 V where the pwl engine correctly
+    #     blocks at -1e-06 V). A rectifier run under dsed simulates a
+    #     circuit with no rectification and reports it as fact.
+    #   * A Nonlinear device (smooth diode / MOSFET / IGBT /
+    #     saturable inductor) is skipped by the assembler entirely —
+    #     measured: a 5 V source through 1 kΩ into a nonlinear diode
+    #     just charges the cap toward 5 V as if the diode were absent.
+    #
+    # The fallback message further down claims the C++ extractor
+    # rejects nonlinear devices; it does not — extraction SUCCEEDS on
+    # the wrong circuit, which is why this check must be structural
+    # rather than an exception handler. Same stance as
+    # run_transient_bdf1's PWL-diode refusal (v2.0 Phase 2).
+    # ------------------------------------------------------------------
+    from . import _pulsim as _kern
+    _n_sw, _n_diodes, _controlled = _kern._switch_census(
+        builder.graph, builder.pool)
+    if _n_diodes > 0:
+        raise ValueError(
+            f"simulate(engine='dsed'): this circuit has {_n_diodes} "
+            f"PWL diode(s), and the dsed engine has no diode "
+            f"commutation yet — their on/off state would be frozen "
+            f"at whatever switch_fn returns, so a rectifier would "
+            f"run with no rectification and report plausible "
+            f"waveforms. Use the default engine (engine='pwl'), "
+            f"which commutates them. Diode events on the dsed "
+            f"engine are v2.0 Phase 3 work in progress.")
+    if builder.pool.has_nonlinear_devices():
+        raise ValueError(
+            "simulate(engine='dsed'): this circuit has nonlinear "
+            "devices (smooth diode / MOSFET / IGBT / saturable "
+            "inductor), which the dsed engine's LTI extraction "
+            "silently treats as ABSENT — the run would simulate a "
+            "different circuit. Use the default engine "
+            "(engine='pwl'), which Newton-iterates them.")
+
     opts = _resolve_dsed_options(
         dt=dt,
         rtol=rtol, atol=atol, dt_init=dt_init,
