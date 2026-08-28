@@ -384,6 +384,33 @@ public:
         DenseMatrix b_projection;               // n_state × n_mna
                                                 // Linear projection from
                                                 // full-MNA b to state b
+
+        // -------------------------------------------------------------
+        // v2.0 Phase 3 — the ALGEBRAIC RECOVERY MAP.
+        //
+        // The reduction eliminates every non-state unknown: node
+        // voltages, source currents. Until now they were simply
+        // GONE — `result.v('sw_node')`, the most-probed waveform in
+        // power electronics, was unrecoverable from a DSED run, and
+        // a diode event predicate (which needs v_D across two nodes)
+        // had nothing to read. Yet the elimination itself computes
+        // the map: `x_a = -G_aa^{-1}(G_as·x_s + b_a)` — this exports
+        // what Step 6 was already solving for and then discarding.
+        //
+        // For a reduced state x_s and full-MNA extra sources
+        // b_extra(t) (original coordinates, zero when none):
+        //
+        //   x_full = recover_from_state · x_s
+        //          + recover_const
+        //          + recover_from_b · b_extra(t)
+        //
+        // x_full is the ORIGINAL full-MNA vector — the floating-cap
+        // congruence transform T is already folded in — so
+        // x_full[i] for i < num_nodes is node i's voltage, verbatim.
+        // -------------------------------------------------------------
+        DenseMatrix recover_from_state;         // n_mna × n_state
+        Vector recover_const;                   // n_mna
+        DenseMatrix recover_from_b;             // n_mna × n_mna
     };
 
     /// Extract continuous-time `(A, b)` for the given switch mask.
@@ -819,6 +846,22 @@ public:
         }
         DenseMatrix B(n_state, n_mna);
 
+        // Scatter matrices for the recovery map: E_s places state
+        // i at transformed row state_rows[i]; E_a places algebraic
+        // j at alg_rows[j]. One 1 per column.
+        DenseMatrix E_s = DenseMatrix::Zero(n_mna, n_state);
+        for (int i = 0; i < n_state; ++i) {
+            E_s(state_rows[i], i) = Real{1};
+        }
+        DenseMatrix E_a = DenseMatrix::Zero(n_mna, n_alg);
+        for (int i = 0; i < n_alg; ++i) {
+            E_a(alg_rows[i], i) = Real{1};
+        }
+
+        DenseMatrix rec_state;   // n_mna × n_state, transformed coords
+        Vector rec_const;        // n_mna
+        DenseMatrix rec_b;       // n_mna × n_mna
+
         if (n_alg > 0) {
             Eigen::FullPivLU<DenseMatrix> lu_aa(G_aa);
             if (!lu_aa.isInvertible()) {
@@ -836,16 +879,36 @@ public:
             // B uses the SAME factorisation: G_aa^{-1} · S_alg.
             DenseMatrix Ginv_Salg = lu_aa.solve(S_alg);
             B = G_sa * Ginv_Salg - S_state;
+
+            // The recovery map, from the SAME solves (v2.0 Phase 3):
+            //   y = E_s·x_s + E_a·y_a,
+            //   y_a = -Ginv_Gas·x_s - Ginv_ba - Ginv_Salg·Tᵀ·b_extra
+            // (Tᵀ because b_extra arrives in original coordinates,
+            // matching B's convention below.)
+            rec_state = E_s - E_a * Ginv_Gas;
+            rec_const = -(E_a * Ginv_ba);
+            rec_b     = -(E_a * Ginv_Salg);
         } else {
             Schur_G = -G_ss;
             Schur_b = -b_s;
             B = -S_state;
+            // No algebraic block: the full vector IS the scattered
+            // state, and sources have nothing left to influence.
+            rec_state = E_s;
+            rec_const = Vector::Zero(n_mna);
+            rec_b     = DenseMatrix::Zero(n_mna, n_mna);
         }
 
         // Apply T^T on the right (the input b is in ORIGINAL coords;
         // the extractor internally transformed b_a via T^T already).
+        // The recovery map needs T on BOTH sides: Tᵀ folds b_extra
+        // into transformed coordinates, T folds the reconstructed
+        // vector back out — x_original = T·y.
         if (!t_is_identity) {
             B = B * T.transpose();
+            rec_state = T * rec_state;
+            rec_const = T * rec_const;
+            rec_b     = T * rec_b * T.transpose();
         }
 
         // ---------------------------------------------------------
@@ -915,6 +978,9 @@ public:
             std::move(state_rows),
             std::move(state_is_cap),
             std::move(B),
+            std::move(rec_state),
+            std::move(rec_const),
+            std::move(rec_b),
         };
     }
 

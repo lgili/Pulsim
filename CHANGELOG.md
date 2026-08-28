@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Phase 3 — the unified engine
+
+* **The dsed engine commutates PWL diodes** (Phase-3 item 1). It
+  never had a diode before — only a resistor whose state the user
+  pinned through `switch_fn`: a reverse-biased series diode conducted
+  backwards (−10.909 V where the pwl engine blocks at −1e-06 V), and
+  a buck's frozen freewheel diode settled v_out at **0.59 V where
+  12 V is correct** — an error the buck benchmarks never caught
+  because they asserted speed and finiteness, not the number.
+
+  Every PWL diode now gets two auto-derived event predicates on its
+  branch voltage, reconstructed from the reduced state through the
+  new algebraic recovery map (`ContinuousLTI.recover_from_state` /
+  `recover_const` / `recover_from_b` — the map Step 6 of the
+  extraction was already solving for and discarding). Predicates are
+  armed by the diode's own bit — turn-ON (`v_D − V_th`) while OFF,
+  turn-OFF (the `i_D` zero-cross) while ON — which is also the
+  hysteresis: firing flips the bit, disarming the predicate that
+  fired and arming its counterpart. The bit flip happens INSIDE the
+  scheduler (`fire_event_` no longer asks `switch_fn`, a pure
+  function of time, what a diode should do), and a zero-time cascade
+  settles diodes the mask change instantaneously forward-biases —
+  the freewheel diode at gate-off, where integrating even one step
+  of the intermediate mode would put ±i/g_off volts on the switch
+  node. The census and decision rule are the same code the pwl
+  engine uses (`DiodeEventState`, `SwitchedDiode::decide_next_state`),
+  so the engines cannot drift on what "conducting" means.
+
+  Measured: the reverse rectifier blocks; the real-diode buck lands
+  at 11.994 V / 5.997 A; a full-wave bridge matches the pwl engine's
+  time-average to 0.00%; and the half-wave rectifier's peak is
+  **exactly** the source peak, where the pwl engine at dt = 1e-6
+  overshoots to 10.46 V from trapezoidal commutation ringing — the
+  event-driven answer is the sharper one, which is the entire
+  argument for the engine.
+
+  What is refused, loudly and by name: **discontinuous conduction**
+  (the idle mode's L·g_off ≈ 1e-13 s grinds an explicit integrator —
+  a new progress guard converts a 7-second silent burn of the
+  10M-step cap into a 0.07 s error naming the mechanism and pointing
+  at `engine='pwl'`; the fix is Phase-3 item 2's consistent
+  reinitialization), an **explicit `integrator='bdf2'`** with diodes
+  (predicates live on the RK45 scheduler; 'auto' routes there), and
+  **nonlinear devices** (unchanged). The diode-circuit fallback to
+  the predicate-less Bridge.10 path is also closed — it would have
+  silently reintroduced the frozen bits.
+
 ### Phase 2 — automatic robustness (v2.0 audit follow-up)
 
 * **Adversarial review of the Phase-2 tail** (44 agents over

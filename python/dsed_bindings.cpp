@@ -38,6 +38,8 @@
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/dsed/builder_adapter.hpp"
+#include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/pwl/row_names.hpp"
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
@@ -591,9 +593,84 @@ void init_module(py::module_& m) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
+
+            // ---- v2.0 Phase 3: auto-derive diode predicates ------
+            //
+            // The census is the SAME walk run_transient does
+            // (DiodeEventState), so the two engines cannot disagree
+            // about which switches are diodes. For each diode, two
+            // predicates on v_D reconstructed through the recovery
+            // map: turn-ON armed while the bit is OFF
+            // (g = v_D − V_th), turn-OFF armed while ON
+            // (g = v_D — the i_D = g_on·v_D zero-cross). Firing
+            // flips the bit inside the scheduler; the zero-time
+            // cascade settles instantaneous consequences (a buck's
+            // freewheel diode at gate-off).
+            std::vector<pulsim::dsed::SchedulerDiode> sched_diodes;
+            pulsim::topology::SwitchStateMask diode_owned{0};
+            {
+                pulsim::pwl::DiodeEventState census(
+                    adapter.graph(), adapter.pool());
+                if (census.num_diodes() > 0) {
+                    diode_owned = census.diode_owned_bits();
+                    for (const auto& d : census.entries()) {
+                        std::string label =
+                            pulsim::pwl::branch_label(
+                                adapter.graph(), d.branch_id);
+                        const NativeAdapter* ad = &adapter;
+                        const pulsim::Index from = d.from;
+                        const pulsim::Index to = d.to;
+                        const Real vth = d.V_th;
+                        pred.add_predicate(pulsim::dsed::EventPredicate{
+                            .name = label + " turns ON",
+                            .fn = [ad, from, to, vth](
+                                      Real t, const Vector& x) {
+                                return ad->node_pair_voltage(
+                                           from, to, t, x) - vth;
+                            },
+                            .type = pulsim::dsed::PredicateType::DiodeOn,
+                            .priority = pulsim::dsed::
+                                default_priority(
+                                    pulsim::dsed::PredicateType::DiodeOn),
+                            .aux_index =
+                                static_cast<int>(d.switch_idx),
+                            .required_bit = 0,
+                        });
+                        pred.add_predicate(pulsim::dsed::EventPredicate{
+                            .name = label + " turns OFF",
+                            .fn = [ad, from, to](
+                                      Real t, const Vector& x) {
+                                return ad->node_pair_voltage(
+                                           from, to, t, x);
+                            },
+                            .type = pulsim::dsed::PredicateType::DiodeOff,
+                            .priority = pulsim::dsed::
+                                default_priority(
+                                    pulsim::dsed::PredicateType::DiodeOff),
+                            .aux_index =
+                                static_cast<int>(d.switch_idx),
+                            .required_bit = 1,
+                        });
+                        sched_diodes.push_back(
+                            pulsim::dsed::SchedulerDiode{
+                                d.switch_idx, d.from, d.to,
+                                d.g_on, d.g_off, d.V_th,
+                                std::move(label)});
+                    }
+                }
+            }
+
             PEDSimulator<NativeAdapter, PySwitchFnSSM> sim(
                 adapter, std::move(sf), std::move(ctrl),
                 std::move(pred), dt_init, dt_max, store_every);
+            if (!sched_diodes.empty()) {
+                const auto n_sw = static_cast<pulsim::Size>(
+                    adapter.graph().num_switches());
+                sim.enable_diode_commutation(
+                    diode_owned,
+                    pulsim::topology::SwitchStateMask(n_sw),
+                    std::move(sched_diodes));
+            }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
@@ -613,7 +690,9 @@ void init_module(py::module_& m) {
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
-        "callback is `switch_fn` at gate edges (rare).");
+        "callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: "
+        "PWL diodes are commutated by auto-derived event predicates "
+        "on the reconstructed branch voltage.");
 
     m.def("run_bdf2_native_builder",
         [](NativeAdapter& adapter,

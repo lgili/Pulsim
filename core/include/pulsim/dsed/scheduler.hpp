@@ -61,6 +61,7 @@
 #include <vector>
 
 #include "pulsim/dsed/event_predictor.hpp"
+#include "pulsim/models/switched_diode.hpp"
 #include "pulsim/dsed/rk45_dormand_prince.hpp"
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/time_eps.hpp"
@@ -89,6 +90,35 @@ struct PEDResult {
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
     Real cpu_time_seconds = Real{0};
+};
+
+/// v2.0 Phase 3 — diode commutation support.
+///
+/// A System that can reconstruct a node-pair voltage from the
+/// reduced state (via the algebraic recovery map) enables the
+/// scheduler to own PWL diode bits: predicates locate the crossing,
+/// `fire_event_` flips the bit directly, and a zero-time cascade
+/// settles diodes that the mask change instantaneously
+/// forward-biases (a buck's freewheel diode at gate-off). Systems
+/// without it — the hand-rolled demo models — compile exactly as
+/// before; every diode path below is `if constexpr`-guarded.
+template <class S>
+concept HasNodePairVoltage = requires(const S& sys, Real t,
+                                        const Vector& x) {
+    { sys.node_pair_voltage(Index{0}, Index{0}, t, x) }
+        -> std::convertible_to<Real>;
+};
+
+/// One PWL diode under scheduler ownership. Mirrors the pwl
+/// engine's DiodeEntry census so the two engines cannot drift.
+struct SchedulerDiode {
+    Size switch_idx;
+    Index from;               // anode
+    Index to;                 // cathode
+    Real g_on;
+    Real g_off;
+    Real V_th;
+    std::string label;        // named, Phase-1 style
 };
 
 /// Whether ``SwitchFn`` has a ``next_edge_after`` fast path.
@@ -162,8 +192,16 @@ public:
         Vector x = x0;
         Real t = Real{0};
         Real h = dt_init_;
-        MaskT mask = switch_fn_(t);
+        MaskT mask = effective_mask_(switch_fn_(t));
         system_.set_mask(mask);
+        // A diode may be forward-biased already at t = 0 (a
+        // rectifier powered on mid-cycle). Settle before the first
+        // step rather than integrating an inconsistent mode.
+        if constexpr (HasNodePairVoltage<System>) {
+            if (has_diodes_) {
+                settle_diode_cascade_(t, x);
+            }
+        }
 
         RK45State rk_state;
         PEDResult<MaskT> result;
@@ -256,12 +294,63 @@ public:
                 continue;
             }
 
+// v2.0 Phase 3 — progress guard. An explicit RK45 whose
+            // average step has collapsed a thousandfold below dt_max
+            // is resolving a time constant it will never finish —
+            // the canonical case is a PWL diode turning off into
+            // discontinuous conduction, where the idle mode's
+            // L·g_off time constant is ~1e-13 s. Burning the
+            // 10M-step cap in silence tells the user nothing, so
+            // check the CLOCK, not the step size: every 100k steps,
+            // simulated time must have advanced by at least
+            // 100·dt_max (or a tenth of the run, whichever is
+            // smaller).
+            if (result.n_accept + result.n_reject
+                >= progress_next_check_) {
+                const Real need = std::min(dt_max_ * Real{100},
+                                            t_end / Real{10});
+                if (t - progress_t_mark_ < need) {
+                    std::string hint;
+                    if constexpr (HasNodePairVoltage<System>) {
+                        if (has_diodes_) {
+                            hint =
+                                " The usual cause with PWL diodes "
+                                "is DISCONTINUOUS CONDUCTION: at "
+                                "turn-off the circuit enters an "
+                                "idle mode whose time constant is "
+                                "L*g_off (~1e-13 s), which an "
+                                "explicit integrator must resolve "
+                                "step by step. Holding that mode "
+                                "needs the consistent-"
+                                "reinitialization projection "
+                                "(Phase-3 item 2); until then use "
+                                "the default engine "
+                                "(engine='pwl'), whose implicit "
+                                "solver holds DCM correctly.";
+                        }
+                    }
+                    throw std::runtime_error(
+                        "PEDSimulator: no meaningful progress — "
+                        "100000 steps advanced simulated time by "
+                        "only " + std::to_string(t
+                            - progress_t_mark_)
+                        + " s (t = " + std::to_string(t)
+                        + "). The integrator is grinding on a "
+                        "time constant far below dt_max and will "
+                        "not recover." + hint);
+                }
+                progress_t_mark_ = t;
+                progress_next_check_ =
+                    result.n_accept + result.n_reject + Size{100000};
+            }
+
             // 6. Post-step predicate scan for diode/ZCD events.
             // rk_state.k1 now holds k7 of the just-taken step (FSAL).
             std::optional<Real> t_pred;
             std::string p_name;
             PredicateType p_type = PredicateType::Custom;
             Vector x_pred;
+            int p_aux = -1;
             if (need_pred_scan) {
                 const Vector& k7 = *rk_state.k1;
                 auto evt = locate_event_in_step_(t, x, t + h_use, x_new,
@@ -271,6 +360,7 @@ public:
                     p_name = std::move(evt->name);
                     p_type = evt->type;
                     x_pred = std::move(evt->x_at_event);
+                    p_aux = evt->aux_index;
                 }
             }
 
@@ -285,7 +375,8 @@ public:
                 // Predicate fired strictly inside the step — backtrack.
                 t = *t_pred;
                 x = std::move(x_pred);
-                fire_event_(t, p_name, p_type, x, rk_state, result);
+                fire_event_(t, p_name, p_type, x, rk_state, result,
+                             p_aux);
                 // After event: PI is reset, FSAL invalid. Pick a small h
                 // to restart the new mask's dynamics safely.
                 h = std::max(dt_init_, std::min(h_next, h_use));
@@ -325,12 +416,31 @@ public:
         return result;
     }
 
+// ----- v2.0 Phase 3: diode commutation (builder path) ----------
+    //
+    // Hands the scheduler ownership of the PWL diode bits. Only
+    // meaningful when System satisfies HasNodePairVoltage (the
+    // native builder adapter with the recovery map); the demo
+    // systems never call this and compile unchanged.
+    void enable_diode_commutation(MaskT diode_owned,
+                                    MaskT initial_bits,
+                                    std::vector<SchedulerDiode> ds)
+        requires HasNodePairVoltage<System> {
+        diode_owned_ = std::move(diode_owned);
+        diode_bits_ = std::move(initial_bits);
+        diodes_ = std::move(ds);
+        has_diodes_ = !diodes_.empty();
+        diode_burst_count_.assign(diodes_.size(), Size{0});
+        diode_burst_t0_.assign(diodes_.size(), Real{0});
+    }
+
 private:
     struct PredicateEvent {
         Real t_event;
         std::string name;
         PredicateType type;
         Vector x_at_event;
+        int aux_index = -1;   // fired diode's switch index, or -1
     };
 
     [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end) const {
@@ -372,6 +482,18 @@ private:
         int best_priority = std::numeric_limits<int>::max();
 
         for (const auto& p : predictor_.predicates()) {
+            // v2.0 Phase 3 — state-dependent arming. A diode's
+            // DiodeOn predicate is only meaningful while its bit is
+            // OFF (and vice versa); evaluating the other one would
+            // fire spurious events off a signal that has no physical
+            // reading in the current mode. This bit-match IS the
+            // hysteresis: firing flips the bit, which disarms the
+            // predicate that just fired and arms its counterpart.
+            if (p.required_bit >= 0 &&
+                diode_bit_(p.aux_index) !=
+                    (p.required_bit != 0)) {
+                continue;
+            }
             const Real g0 = p.value(t0, x0);
             const Real g1 = p.value(t1, x1);
 
@@ -404,6 +526,7 @@ private:
                     .name = p.name,
                     .type = p.type,
                     .x_at_event = std::move(x_root),
+                    .aux_index = p.aux_index,
                 };
             };
 
@@ -426,7 +549,8 @@ private:
                        PredicateType ptype,
                        Vector& x,
                        RK45State& rk_state,
-                       PEDResult<MaskT>& result) {
+                       PEDResult<MaskT>& result,
+                       int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
 
         // Notify switch_fn of non-gate (diode/ZCD) events so it can
@@ -444,7 +568,23 @@ private:
             x = state_projection_(t_event, x, ptype);
         }
 
-        const MaskT new_mask = switch_fn_(advance_past(t_event));
+        // v2.0 Phase 3 — a diode predicate's firing flips the bit
+        // DIRECTLY. Until now the new mask was re-sampled from
+        // switch_fn(t), a pure function of time that knows nothing
+        // about diodes — which is exactly why the dsed engine had no
+        // diode, only a resistor whose state the user pinned.
+        if constexpr (HasNodePairVoltage<System>) {
+            if (has_diodes_ && aux_index >= 0 &&
+                (ptype == PredicateType::DiodeOn ||
+                 ptype == PredicateType::DiodeOff)) {
+                diode_bits_.set(static_cast<Size>(aux_index),
+                                 ptype == PredicateType::DiodeOn);
+                note_diode_fire_(aux_index, t_event);
+            }
+        }
+
+        const MaskT new_mask =
+            effective_mask_(switch_fn_(advance_past(t_event)));
 
         // Drop spurious same-mask gate edges silently.
         if (ptype == PredicateType::GateEdge && new_mask == old_mask) {
@@ -455,6 +595,24 @@ private:
             system_.set_mask(new_mask);
         }
 
+        // Zero-time cascade. The mask change reconfigures the
+        // algebraic sub-circuit INSTANTLY, so another diode can be
+        // past its threshold at this very instant — a buck's
+        // freewheel diode at gate-off is the canonical case: with
+        // the switch open and the diode still off, the inductor
+        // current forced through g_off puts the switch node at
+        // ±i/g_off volts, and integrating even one step of that
+        // mode would be nonsense. Settle to a consistent diode
+        // configuration before integration resumes — the same
+        // fixed-point iteration run_transient does per step, done
+        // here only at events.
+        MaskT final_mask = new_mask;
+        if constexpr (HasNodePairVoltage<System>) {
+            if (has_diodes_) {
+                final_mask = settle_diode_cascade_(t_event, x);
+            }
+        }
+
         rk_state.invalidate();      // f discontinues at event
         controller_.reset();        // avoid PI wind-up across mode change
 
@@ -463,9 +621,120 @@ private:
             .name = name,
             .type = ptype,
             .old_mask = old_mask,
-            .new_mask = new_mask,
+            .new_mask = final_mask,
         });
         ++result.n_events;
+    }
+
+    // ----- v2.0 Phase 3: diode-commutation machinery -----------------
+
+    /// Overlay the solver-owned diode bits onto a switch_fn mask.
+    /// The pwl engine's combine_masks, done at the same seam.
+    [[nodiscard]] MaskT effective_mask_(MaskT gate_mask) const {
+        if constexpr (HasNodePairVoltage<System>) {
+            if (has_diodes_) {
+                return gate_mask.overlay(diode_bits_, diode_owned_);
+            }
+        }
+        return gate_mask;
+    }
+
+    /// Chatter detection — see the member comment. A burst is fires
+    /// of one diode inside a window of dt_max_/100; 32 of them means
+    /// the configuration is oscillating, not commutating.
+    void note_diode_fire_(int aux_index, Real t) {
+        Size di = Size{0};
+        for (Size i = 0; i < diodes_.size(); ++i) {
+            if (static_cast<int>(diodes_[i].switch_idx)
+                == aux_index) {
+                di = i;
+                break;
+            }
+        }
+        const Real window = dt_max_ / Real{100};
+        if (t - diode_burst_t0_[di] > window) {
+            diode_burst_t0_[di] = t;
+            diode_burst_count_[di] = Size{0};
+        }
+        if (++diode_burst_count_[di] > Size{32}) {
+            throw std::runtime_error(
+                "PEDSimulator: " + diodes_[di].label
+                + " is chattering at t = " + std::to_string(t)
+                + " — it commutated 32 times inside "
+                + std::to_string(window) + " s, which is a zero-"
+                "current oscillation (discontinuous conduction), "
+                "not switching. The dsed engine cannot yet hold a "
+                "DCM idle mode: turning the diode off leaves a "
+                "microamp interpolation residual that g_off "
+                "reconstructs as kilovolts of forward bias, and "
+                "the consistent-reinitialization projection that "
+                "removes it is Phase-3 item 2. Use the default "
+                "engine (engine='pwl'), whose implicit fixed-step "
+                "solver holds DCM correctly.");
+        }
+    }
+
+    [[nodiscard]] bool diode_bit_(int switch_idx) const {
+        if constexpr (HasNodePairVoltage<System>) {
+            return diode_bits_.get(static_cast<Size>(switch_idx));
+        } else {
+            (void)switch_idx;
+            return false;
+        }
+    }
+
+    /// Iterate the diode configuration to a fixed point at one
+    /// instant. Returns the settled mask (already set on the
+    /// system). Budget-bounded; on exhaustion, throws NAMING the
+    /// devices still flipping — the Phase-1 standard.
+    MaskT settle_diode_cascade_(Real t, const Vector& x)
+        requires HasNodePairVoltage<System> {
+        MaskT mask = system_.current_mask();
+        constexpr int kMaxRounds = 64;
+        for (int round = 0; round < kMaxRounds; ++round) {
+            bool flipped = false;
+            for (const auto& d : diodes_) {
+                const bool on =
+                    diode_bits_.get(d.switch_idx);
+                const Real v_d = system_.node_pair_voltage(
+                    d.from, d.to, t, x);
+                const Real g = on ? d.g_on : d.g_off;
+                const models::SwitchedDiode::Params params{
+                    d.g_on, d.g_off, d.V_th};
+                // The pwl engine's exact decision rule — the two
+                // engines must not drift on what "conducting" means.
+                const bool next =
+                    models::SwitchedDiode::decide_next_state(
+                        on, v_d, g * v_d, params);
+                if (next != on) {
+                    diode_bits_.set(d.switch_idx, next);
+                    flipped = true;
+                }
+            }
+            if (!flipped) {
+                break;
+            }
+            if (round == kMaxRounds - 1) {
+                std::string culprits;
+                for (const auto& d : diodes_) {
+                    if (!culprits.empty()) culprits += ", ";
+                    culprits += d.label;
+                }
+                throw std::runtime_error(
+                    "PEDSimulator: diode configuration did not "
+                    "settle after 64 rounds at t = "
+                    + std::to_string(t) + " (diodes: " + culprits
+                    + ") — a pair is fighting over the same node; "
+                    "add a small hysteresis band or an RC snubber");
+            }
+            const MaskT candidate =
+                mask.overlay(diode_bits_, diode_owned_);
+            if (candidate != mask) {
+                mask = candidate;
+                system_.set_mask(mask);
+            }
+        }
+        return mask;
     }
 
     /// Whether every entry of `v` is finite (not NaN, not Inf).
@@ -512,6 +781,25 @@ private:
     SwitchFn switch_fn_;
     PIController controller_;
     EventPredictor predictor_;
+    // v2.0 Phase 3 — diode commutation state. Empty unless
+    // enable_diode_commutation() was called (builder path only).
+    // `diode_bits_` is the solver-owned latch, overlaid onto every
+    // mask the switch_fn produces — the same combine the pwl
+    // engine's run_transient does with DiodeEventState.
+    MaskT diode_owned_{};
+    MaskT diode_bits_{};
+    std::vector<SchedulerDiode> diodes_;
+    bool has_diodes_ = false;
+    // Chatter guard: per-diode burst counter. A diode that fires
+    // repeatedly with essentially no time progress is oscillating at
+    // a zero crossing — DCM's i ≈ 0 idle, where the root-location
+    // residual (~µA) through g_off (~nS) reconstructs as kilovolts
+    // of v_D and re-arms the diode instantly. Detect and NAME it
+    // rather than burn the 10M-step cap in silence.
+    std::vector<Size> diode_burst_count_;
+    std::vector<Real> diode_burst_t0_;
+    Real progress_t_mark_ = Real{0};
+    Size progress_next_check_ = Size{100000};
     Real dt_init_;
     Real dt_max_;
     std::size_t store_every_;

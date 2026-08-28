@@ -406,6 +406,60 @@ def run_dsed_from_builder(
     """
     import numpy as np
 
+    # ------------------------------------------------------------------
+    # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
+    #
+    # The LTI extraction has no representation for either device
+    # class below, and neither failure is loud:
+    #
+    #   * A PWL switched diode's bit is frozen at whatever switch_fn
+    #     returns — measured: a reverse-biased series diode CONDUCTS
+    #     BACKWARDS (vout = -10.909 V where the pwl engine correctly
+    #     blocks at -1e-06 V). A rectifier run under dsed simulates a
+    #     circuit with no rectification and reports it as fact.
+    #   * A Nonlinear device (smooth diode / MOSFET / IGBT /
+    #     saturable inductor) is skipped by the assembler entirely —
+    #     measured: a 5 V source through 1 kΩ into a nonlinear diode
+    #     just charges the cap toward 5 V as if the diode were absent.
+    #
+    # The fallback message further down claims the C++ extractor
+    # rejects nonlinear devices; it does not — extraction SUCCEEDS on
+    # the wrong circuit, which is why this check must be structural
+    # rather than an exception handler. Same stance as
+    # run_transient_bdf1's PWL-diode refusal (v2.0 Phase 2).
+    # ------------------------------------------------------------------
+    from . import _pulsim as _kern
+    _n_sw, _n_diodes, _controlled = _kern._switch_census(
+        builder.graph, builder.pool)
+    if _n_diodes > 0:
+        # v2.0 Phase 3 — PWL diodes are commutated by auto-derived
+        # event predicates, which live on the RK45 scheduler
+        # (PEDSimulator). The BDF2 and auto schedulers have no
+        # predicate scan, so a diode circuit routed there would
+        # freeze the diode bits — the silent wrong answer this
+        # dispatch used to refuse outright. Route accordingly:
+        # 'auto' quietly becomes 'rk45'; an EXPLICIT 'bdf2' request
+        # is refused rather than silently downgraded.
+        if integrator == "bdf2":
+            raise ValueError(
+                f"simulate(engine='dsed', integrator='bdf2'): this "
+                f"circuit has {_n_diodes} PWL diode(s), and diode "
+                f"commutation is only implemented on the RK45 "
+                f"scheduler — under bdf2 the diode bits would be "
+                f"frozen at whatever switch_fn returns and a "
+                f"rectifier would run with no rectification. Drop "
+                f"integrator='bdf2' (the default routes correctly) "
+                f"or use engine='pwl'.")
+        integrator = "rk45"
+    if builder.pool.has_nonlinear_devices():
+        raise ValueError(
+            "simulate(engine='dsed'): this circuit has nonlinear "
+            "devices (smooth diode / MOSFET / IGBT / saturable "
+            "inductor), which the dsed engine's LTI extraction "
+            "silently treats as ABSENT — the run would simulate a "
+            "different circuit. Use the default engine "
+            "(engine='pwl'), which Newton-iterates them.")
+
     opts = _resolve_dsed_options(
         dt=dt,
         rtol=rtol, atol=atol, dt_init=dt_init,
@@ -594,6 +648,13 @@ def run_dsed_from_builder(
             # device that the C++ extractor can't handle). Silently fall
             # through to Bridge.10 — the Python adapter has identical
             # semantics + the same error path on the same circuits.
+            #
+            # EXCEPT for diode circuits (v2.0 Phase 3): only the
+            # Bridge.11 path carries the auto-derived predicates, so
+            # falling through would freeze the diode bits and
+            # reintroduce the silent wrong answer. Re-raise instead.
+            if _n_diodes > 0:
+                raise
             pass
 
     # Bridge.10 path — Python adapter + native scheduler.
