@@ -8,6 +8,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **The DSED cost model at scale** (Phase-3 item 4, audit E.4) — and
+  a measurement that corrected the audit's own attribution. Per-mode
+  mask resolve on a 400-state RC ladder: **267 ms → 1.75 ms (152×)**;
+  800 states resolve in 9.9 ms; a switched 200-state ladder runs 5 ms
+  of simulation in 0.25 s on the default path.
+
+  Where the time actually was: the audit blamed the dense Schur
+  (`FullPivLU`, O(n³)) — real, but only ~15 ms of the 267. The other
+  ~252 ms was the **exact stepper's eigendecomposition from item 2**,
+  built eagerly on every mask resolve, including on the `auto` path
+  that never steps exactly. Three fixes:
+
+  * The extraction now stays SPARSE end to end: partition by triplet
+    routing, `G_aa` factored once by the kernel's own sparse LU
+    (Gilbert–Peierls + COLAMD, Phase 1a), sparse factors kept on the
+    left of every product, and the floating-cap congruence applied
+    through `T.sparseView()`. The scatter/selector matrices are gone
+    — one 1 per row is an index write, not a matrix. Extraction
+    alone: ~7× at 400 states, and every consumer (AC sweep, DSED
+    bridge, recovery map) inherits it.
+  * The exact stepper is built **lazily**, on the first
+    `exact_advance_state` call — paths that never step exactly no
+    longer pay O(n³) per visited mode.
+  * `PEDSimulatorBDF2` pulled `A_matrix()` **by value inside the
+    step loop** — a 1.3 MB dense copy per step at 400 states. By
+    reference now. And the stiffness detector's full eigensolve is
+    replaced above n = 64 by two-step **power iteration** (the
+    dispatch decision needs |λ|max to a few percent against a
+    threshold; the two-step norm ratio settles on the modulus even
+    for a dominant complex pair — tested against the dense solver on
+    both a real-dominant and an LC-pair-dominant 80–100-state
+    system).
+
 * **Sine-driven modes step exactly too** (Phase-3 item 3, reshaped by
   measurement). Item 2 covered DC-driven modes; the RK45 fallback
   still owned anything with a time-varying source, and an ordinary
