@@ -206,6 +206,42 @@ private:
 // already handles arbitrary attribute access.
 // ---------------------------------------------------------------------------
 
+/// v2.0 Phase 3 item 5 — reconstruct the FULL MNA trajectory from
+/// the reduced samples through the adapter's per-mask recovery map.
+/// Samples are grouped by mask so a run that visits M modes pays M
+/// mask resolutions, not one per sample. Returns an empty array if
+/// the result carries no per-sample masks (a non-builder path).
+template <class AdapterT, class ResultT>
+py::array_t<double> reconstruct_full_states(
+    AdapterT& adapter, const ResultT& res) {
+    const auto n = res.times.size();
+    if (n == 0 || res.sample_masks.size() != n) {
+        return py::array_t<double>(py::ssize_t{0});
+    }
+    // Probe the width from the first sample.
+    adapter.set_mask(res.sample_masks[0]);
+    const pulsim::Vector first =
+        adapter.recover_full(res.times[0], res.states[0]);
+    const auto n_mna = static_cast<py::ssize_t>(first.size());
+    py::array_t<double> out(
+        {static_cast<py::ssize_t>(n), n_mna});
+    auto* ptr = out.mutable_data();
+    for (py::ssize_t j = 0; j < n_mna; ++j) {
+        ptr[j] = first[j];
+    }
+    for (std::size_t i = 1; i < n; ++i) {
+        if (!(res.sample_masks[i] == res.sample_masks[i - 1])) {
+            adapter.set_mask(res.sample_masks[i]);
+        }
+        const pulsim::Vector full =
+            adapter.recover_full(res.times[i], res.states[i]);
+        for (py::ssize_t j = 0; j < n_mna; ++j) {
+            ptr[static_cast<py::ssize_t>(i) * n_mna + j] = full[j];
+        }
+    }
+    return out;
+}
+
 template <class MaskT>
 py::dict ped_result_to_dict(
     const pulsim::dsed::PEDResult<MaskT>& res) {
@@ -678,7 +714,11 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            return ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res);
+            // v2.0 Phase 3 item 5 — the unified result: full MNA
+            // trajectory reconstructed per recorded sample.
+            d["states_full"] = reconstruct_full_states(adapter, res);
+            return d;
         },
         py::arg("adapter"),
         py::arg("switch_fn"),
@@ -714,7 +754,9 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            return ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res);
+            d["states_full"] = reconstruct_full_states(adapter, res);
+            return d;
         },
         py::arg("adapter"),
         py::arg("switch_fn"),
@@ -747,7 +789,9 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            return ped_result_auto_to_dict(res);
+            auto d = ped_result_auto_to_dict(res);
+            d["states_full"] = reconstruct_full_states(adapter, res);
+            return d;
         },
         py::arg("adapter"),
         py::arg("switch_fn"),

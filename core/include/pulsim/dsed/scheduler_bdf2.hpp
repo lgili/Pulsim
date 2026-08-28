@@ -104,6 +104,7 @@ public:
         PEDResult<MaskT> result;
         result.times.push_back(t);
         result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
         std::size_t step_idx = 0;
 
         constexpr std::size_t kMaxSteps = 10'000'000;
@@ -196,12 +197,14 @@ public:
             if (step_idx % store_every_ == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
             }
         }
 
         if (result.times.back() != t) {
             result.times.push_back(t);
             result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
         }
 
         const auto t1_wall = clock::now();

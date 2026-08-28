@@ -72,7 +72,7 @@ def test_stiff_sine_rectifier_is_fast_and_matches_pwl(Rs, Cs):
     # State order [v_Cs, v_C]: compare the output cap's time average
     # against the pwl engine at a dt fine enough to be converged
     # (dt = 1e-7 is 3.2% off — the fixture that exposed it).
-    avg_d = _tavg(rd.times, np.asarray(rd.states)[:, 1])
+    avg_d = _tavg(rd.times, np.asarray(rd.v("vout")))
     avg_p = _tavg(rp.times, rp.v("vout"))
     assert avg_d == pytest.approx(avg_p, rel=2e-3)
     assert rd.n_events >= 6           # it commutates, still
@@ -100,5 +100,5 @@ def test_the_diodeless_sine_path_is_exact_too():
     ss = 2.0 + Vp * np.sin(w * t + 0.7 - th)
     ss0 = 2.0 + Vp * np.sin(0.7 - th)
     ref = ss - ss0 * np.exp(-t / tau)
-    v = np.asarray(r.states)[:, 0]
+    v = np.asarray(r.v("n1"))
     np.testing.assert_allclose(v, ref, rtol=0, atol=1e-8)

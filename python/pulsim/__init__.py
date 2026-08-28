@@ -1174,7 +1174,18 @@ def _result_currents(self, *, skip_unsupported: bool = True
 # concrete C++ type, but the type itself accepts attribute injection
 # (py::dynamic_attr() on the binding).
 SimulationResult.v = _result_v          # type: ignore[attr-defined]
-SimulationResult.i = _result_i          # type: ignore[attr-defined]
+# v2.0 Phase 3 item 5 — one result surface for both engines. The
+# dsed wrapper's `.states` is the reconstructed full-MNA trajectory
+# (same row layout), so the same accessors bind verbatim. On a
+# result without full states (a non-builder path) they fail with
+# the shape mismatch naming the limitation rather than silently
+# indexing reduced states as if they were node voltages.
+from ._dsed_dispatch import (  # noqa: E402 — must follow the
+    _PEDSimulationResult as _PEDRes,  # accessor definitions above
+)
+_PEDRes.v = _result_v                   # type: ignore[attr-defined]
+SimulationResult.i = _result_i
+_PEDRes.i = _result_i       # type: ignore[attr-defined]          # type: ignore[attr-defined]
 SimulationResult.power = _result_power  # type: ignore[attr-defined]
 SimulationResult.signal = _result_signal      # type: ignore[attr-defined]
 SimulationResult.signals = _result_signals    # type: ignore[attr-defined]
@@ -1664,6 +1675,11 @@ def simulate(
         )
         try:
             _dsed_res._preflight = _preflight_report
+            # v2.0 Phase 3 item 5 — the unified result: with the
+            # full-MNA trajectory reconstructed, the same name-based
+            # accessors the pwl engine gets now mean the same thing
+            # here. `_builder` is what they resolve names against.
+            _dsed_res._builder = builder
         except AttributeError:  # pragma: no cover
             pass
         return _dsed_res

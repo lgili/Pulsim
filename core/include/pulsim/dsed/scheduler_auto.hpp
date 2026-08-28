@@ -84,6 +84,8 @@ template <class MaskT>
 struct PEDResultAuto {
     std::vector<Real> times;
     std::vector<Vector> states;
+    // v2.0 Phase 3 item 5 — see PEDResult::sample_masks.
+    std::vector<MaskT> sample_masks;
     std::vector<AutoDispatchEventRecord<MaskT>> event_log;
     std::size_t n_accept = 0;
     std::size_t n_reject = 0;
@@ -173,6 +175,7 @@ public:
         PEDResultAuto<MaskT> result;
         result.times.push_back(t);
         result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
         std::size_t step_idx = 0;
 
         constexpr std::size_t kMaxSteps = 10'000'000;
@@ -359,12 +362,14 @@ public:
             if (step_idx % store_every_ == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
             }
         }
 
         if (result.times.back() != t) {
             result.times.push_back(t);
             result.states.push_back(x);
+        result.sample_masks.push_back(system_.current_mask());
         }
 
         const auto t1_wall = clock::now();

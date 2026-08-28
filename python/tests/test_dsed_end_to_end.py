@@ -103,7 +103,7 @@ def test_dsed_runs_end_to_end_on_buck_ccm():
     assert res.n_accept > 0
     assert res.n_events > 0     # gate edges fired
     # state vector size = 2 (i_L + v_C)
-    assert len(res.states[0]) == 2
+    assert res.states_reduced.shape[1] == 2
 
 
 def test_dsed_buck_ccm_matches_pwl_baseline():
@@ -126,19 +126,20 @@ def test_dsed_buck_ccm_matches_pwl_baseline():
         b, t_end=t_end, dt=100e-9, switch_fn=sf,
     )
 
-    # Last sample's v_C — state[0] is the cap (per the extractor's
-    # convention: caps first, then inductors)
-    v_out_dsed_final = float(res_dsed.states[-1][0])
-    # PWL uses the full MNA layout; the v_C is at a specific node index
-    # in res_pwl.states[-1] — we can't easily match it without poking
-    # at builder.graph internals. Instead just confirm both engines
-    # produce non-NaN finite states.
-    v_out_pwl_final = float(res_pwl.states[-1][0])
+    # v2.0 Phase 3 item 5 — the unified result retired this test's
+    # old excuse ("we can't easily match [the pwl layout] without
+    # poking at builder.graph internals ... just confirm both
+    # engines produce non-NaN finite states"). Both engines now
+    # answer the SAME question by name.
+    v_out_dsed_final = float(np.asarray(res_dsed.v("out"))[-1])
+    v_out_pwl_final = float(np.asarray(res_pwl.v("out"))[-1])
 
     assert np.isfinite(v_out_dsed_final)
     assert np.isfinite(v_out_pwl_final)
-    # DSED should converge to ~V_out_expected after 500 cycles
+    # DSED should converge to ~V_out_expected after 500 cycles…
     assert abs(v_out_dsed_final - V_out_expected) / V_in < 0.05
+    # …and the two engines must agree with each other, ripple-scale.
+    assert abs(v_out_dsed_final - v_out_pwl_final) / V_in < 0.02
 
     print(f"  DSED final v_C : {v_out_dsed_final:.4f} V")
     print(f"  PWL  final x[0]: {v_out_pwl_final:.4f} V  (different state layout)")
@@ -188,7 +189,7 @@ def test_dsed_integrator_bdf2_runs_end_to_end():
     assert res.num_steps() > 0
     assert res.n_events > 0
     # Buck CCM is non-stiff; BDF2 at h=1µs gives modest error vs RK45
-    final_vc = float(res.states[-1][0])
+    final_vc = float(res.states_reduced[-1][0])
     assert np.isfinite(final_vc)
     # Should converge to within 10% of D·V_in = 12V (BDF2 fixed h has
     # more error than RK45 adaptive on this scenario)
@@ -214,7 +215,7 @@ def test_dsed_integrator_auto_picks_rk45_on_non_stiff_buck():
     # Buck CCM at standard params is NOT stiff → BDF2 should never fire
     assert res.n_bdf2_steps == 0
     # Should match the RK45-only result (V_out = D·V_in = 12V exactly)
-    final_vc = float(res.states[-1][0])
+    final_vc = float(res.states_reduced[-1][0])
     assert abs(final_vc - 12.0) / 24.0 < 0.05    # within 5% of V_out_expected
     print(f"  Auto final v_C: {final_vc:.4f} V, "
           f"rk45={res.n_rk45_steps}, bdf2={res.n_bdf2_steps}, "
@@ -262,9 +263,9 @@ def test_dsed_simulate_handles_floating_cap_rc():
         rtol=1e-7, atol=1e-12,
     )
     assert not res.empty()
-    assert len(res.states[0]) == 1  # one cap state
+    assert res.states_reduced.shape[1] == 1  # one cap state
 
-    final_vc = float(res.states[-1][0])
+    final_vc = float(res.states_reduced[-1][0])
     # State is ±v_C depending on BFS orientation; the magnitude
     # must approach V (charged to full).
     assert np.isfinite(final_vc)
@@ -314,12 +315,12 @@ def test_dsed_simulate_handles_npc_split_bus():
         rtol=1e-7, atol=1e-12,
     )
     assert not res.empty()
-    assert len(res.states[0]) == 2
+    assert res.states_reduced.shape[1] == 2
 
     # In the BFS-orientation convention, each state is ±v_C_k. Their
     # magnitudes should converge to V_dc/2 each (balanced split).
-    v1 = float(res.states[-1][0])
-    v2 = float(res.states[-1][1])
+    v1 = float(res.states_reduced[-1][0])
+    v2 = float(res.states_reduced[-1][1])
     print(f"  NPC split-bus: τ={tau*1e6:.2f}µs, t_end={t_end*1e6:.0f}µs, "
           f"v[0]={v1:.4f} V, v[1]={v2:.4f} V")
     assert np.isfinite(v1)
@@ -383,7 +384,7 @@ def test_dsed_sine_source_drives_rc_filter():
     assert not res.empty()
     # Sample states from last 2 periods to measure steady-state amplitude
     t_arr = np.asarray(res.times)
-    x_arr = np.asarray(res.states)[:, 0]
+    x_arr = np.asarray(res.states_reduced)[:, 0]
     mask = t_arr > (t_end - 2.0 / f)
     v_c_settled = x_arr[mask]
     amp_measured = (v_c_settled.max() - v_c_settled.min()) / 2.0
@@ -431,7 +432,7 @@ def test_dsed_user_b_extra_fn_callback():
         b, t_end=10e-3, engine='dsed', integrator='rk45',
         rtol=1e-7, atol=1e-10, b_extra_fn=b_extra,
     )
-    final_vc = float(res.states[-1][0])
+    final_vc = float(res.states_reduced[-1][0])
     # State magnitude should be ~7V (5V DC + 2V from b_extra_fn).
     # Sign depends on BFS orientation (grounded cap → state = +v_C).
     print(f"  User b_extra_fn: final v_C = {final_vc:.4f} V "
@@ -506,7 +507,7 @@ def test_dsed_boost_ccm_runs_end_to_end():
         rtol=1e-6, switch_fn=sf,
     )
     assert not res.empty()
-    final_vc = float(res.states[-1][0])
+    final_vc = float(res.states_reduced[-1][0])
     print(f"  Boost CCM: final v_C = {final_vc:.4f} V "
           f"(expected ~{V_out_expected:.2f} V), "
           f"events={res.n_events}, steps={res.num_steps()}")
@@ -543,8 +544,8 @@ def test_dsed_native_pwm_matches_python_pwm():
 
     # Bit-for-bit agreement: same algorithm, just different switch_fn
     # binding. Final v_C must match to numerical precision.
-    final_native = float(res_native.states[-1][0])
-    final_python = float(res_python.states[-1][0])
+    final_native = float(res_native.states_reduced[-1][0])
+    final_python = float(res_python.states_reduced[-1][0])
     print(f"  NativePwm2Switch: v_C={final_native:.6f} V, "
           f"{res_native.num_steps()} steps")
     print(f"  Python PWM:       v_C={final_python:.6f} V, "
@@ -620,7 +621,7 @@ def test_dsed_half_bridge_with_sine_input():
         rtol=1e-6, switch_fn=sf,
     )
     assert not res.empty()
-    final_vc = float(res.states[-1][0])
+    final_vc = float(res.states_reduced[-1][0])
     # Expected: V_out at D=0.5 = V_in/2 ≈ 12V (the AC component
     # passes through at 1kHz because RC=500µs gives corner ~318Hz)
     print(f"  Half-bridge + sine: final v_C = {final_vc:.4f} V "

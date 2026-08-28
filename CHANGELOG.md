@@ -8,6 +8,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **One result surface for both engines** (Phase-3 item 5).
+  `result.v('sw_node')` — the most-probed waveform in power
+  electronics — was unrecoverable from a dsed run: the reduction
+  eliminates every non-state unknown, and an existing test confessed
+  the gap in a comment ("we can't easily match [the pwl layout]
+  without poking at builder.graph internals … just confirm both
+  engines produce non-NaN finite states").
+
+  Every recorded sample now carries the mask it was recorded under
+  (`sample_masks`, in all three schedulers — authoritative even for
+  solver-owned diode bits that no event-log replay could recover),
+  and a kernel post-pass reconstructs the FULL MNA vector through
+  the per-mask recovery map, grouped by mask so a run visiting M
+  modes pays M resolutions, not one per sample. The dsed result's
+  `.states` is now that trajectory — node voltages first, then
+  source and inductor branch currents, the pwl engine's exact row
+  layout — so `res.states[:, id]`, `res.v(name)` and `res.i(name)`
+  mean the same thing on both engines; the reduced integrator state
+  stays available as `.states_reduced`.
+
+  Measured on the half-wave rectifier: `v('vout')` matches the pwl
+  engine at dt = 1e-8 to 0.000%; `v('ac')` — a node the reduction
+  had ELIMINATED — reconstructs onto the source sine to 1e-6 across
+  six commutations (each side of a commutation uses a different
+  recovery map, so this also pins the per-mask bookkeeping);
+  `i('Rl')` is Ohm's-law-exact against the reconstructed node
+  voltages. The old "can't match the layouts" buck test now asserts
+  real cross-engine parity instead of finiteness.
+
 * **The DSED cost model at scale** (Phase-3 item 4, audit E.4) — and
   a measurement that corrected the audit's own attribution. Per-mode
   mask resolve on a 400-state RC ladder: **267 ms → 1.75 ms (152×)**;

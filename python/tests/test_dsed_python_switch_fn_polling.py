@@ -109,7 +109,7 @@ def test_python_pwm_switch_fn_produces_correct_trajectory() -> None:
     # `[V_C, i_L]` for this circuit's per-mask state-space (the
     # extractor walks dynamic devices in branch order: capacitor
     # first, then inductor).
-    states = np.asarray(res_dsed.states)
+    states = np.asarray(res_dsed.states_reduced)
     v_dsed_tail = states[-100:, 0]
     i_dsed_tail = states[-100:, 1]
     v_dsed_mean = float(v_dsed_tail.mean())
