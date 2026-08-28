@@ -79,6 +79,21 @@ def test_pulsim_dsed_imports_without_scipy_in_subprocess() -> None:
     assert "OK " in result.stdout, result.stdout
 
 
+def _synchronous_buck():
+    """Two controlled switches, complementary drive, no diode — the
+    converter the dsed engine can genuinely simulate. (Its PWL-diode
+    sibling is now refused: the diode bit froze at whatever switch_fn
+    returned, and v_out came out 0.59 V where 12 V is correct.)"""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S_hi", "vin", "sw", 1e3, 1e-9)
+    b.add_switch("S_lo", "sw", "gnd", 1e3, 1e-9)
+    b.add_inductor("L1", "sw", "out", 100e-6)
+    b.add_capacitor("C1", "out", "gnd", 100e-6)
+    b.add_resistor("R1", "out", "gnd", 2.0)
+    return b
+
+
 def test_simulate_dsed_runs_on_buck_ccm_without_scipy() -> None:
     """The canonical buck CCM benchmark must succeed on
     engine='dsed' even when scipy is missing — the C++ native
@@ -108,16 +123,25 @@ def test_simulate_dsed_runs_on_buck_ccm_without_scipy() -> None:
         if "pulsim.dsed.bdf2_integrator" in sys.modules:
             importlib.reload(sys.modules["pulsim.dsed.bdf2_integrator"])
 
-        b = p.CircuitBuilder()
-        p.add_buck(b, V_in=24.0, L=100e-6, C=100e-6,
-                    R_load=2.0, f_sw=100e3)
+        # SYNCHRONOUS buck: two controlled switches, complementary
+        # drive, NO diode. The original fixture used p.add_buck,
+        # whose freewheel diode the dsed engine cannot commutate —
+        # its bit stayed frozen OFF and v_out came out 0.59 V where
+        # 12 V is correct, a 20x error these tests never caught
+        # because they only asserted finiteness and speed (the
+        # docstring promised "v_out ~ 12 V"; no assertion checked
+        # it). engine='dsed' now REFUSES diode circuits; this
+        # fixture is what it can genuinely simulate.
+        b = _synchronous_buck()
         F_SW = 100e3
         T_SW = 1.0 / F_SW
         DUTY = 0.5
 
         def pwm(t):
+            hi = (t % T_SW) < (DUTY * T_SW)
             m = p.SwitchStateMask(b.graph.num_switches)
-            m.set(0, (t % T_SW) < (DUTY * T_SW))
+            m.set(0, hi)
+            m.set(1, not hi)
             return m
 
         t0 = time.perf_counter()
@@ -128,14 +152,19 @@ def test_simulate_dsed_runs_on_buck_ccm_without_scipy() -> None:
 
     # Sanity: produced a trajectory.
     assert res.num_steps() > 0
-    # Sanity: final state finite (no NaN/Inf — would indicate the
-    # solver diverged or fell into a stub path). DSED returns
-    # `_PEDSimulationResult` whose `.states` is a list of state
-    # vectors, not the MNA-augmented one — so we just check the
-    # final vector is well-formed.
     final_state = np.asarray(res.states[-1])
     assert final_state.size > 0
     assert np.all(np.isfinite(final_state)), final_state
+    # THE NUMBER, not just finiteness. The reduced state is
+    # [v_C, i_L]; at D = 0.5 from 24 V the output must settle near
+    # 12 V and the load current near 6 A. The previous fixture's
+    # 0.59 V passed the old finiteness-only checks for months.
+    states = np.asarray(res.states)
+    tail = states[int(0.9 * len(states)):]
+    v_out = float(np.mean(tail[:, 0]))
+    i_l = float(np.mean(tail[:, 1]))
+    assert v_out == pytest.approx(12.0, rel=0.05), v_out
+    assert i_l == pytest.approx(6.0, rel=0.10), i_l
     # Sanity: well under 1s on the native C++ path. The Python
     # fallback (had it triggered) would take 30+ seconds because
     # `pulsim.dsed.PEDSimulatorAuto` walks per-event in pure Python.
@@ -158,16 +187,19 @@ def test_simulate_dsed_faster_than_pwl_on_buck_ccm() -> None:
     pytest.importorskip("scipy", reason="speedup measurement requires "
                        "scipy installed so PWL has no warm-cache bias")
 
-    b = p.CircuitBuilder()
-    p.add_buck(b, V_in=24.0, L=100e-6, C=100e-6,
-                R_load=2.0, f_sw=100e3)
+    # Synchronous buck — see _synchronous_buck: the old add_buck
+    # fixture's diode froze OFF under dsed and this benchmark spent
+    # months comparing the speed of a 20x-wrong answer.
+    b = _synchronous_buck()
     F_SW = 100e3
     T_SW = 1.0 / F_SW
     DUTY = 0.5
 
     def pwm(t):
+        hi = (t % T_SW) < (DUTY * T_SW)
         m = p.SwitchStateMask(b.graph.num_switches)
-        m.set(0, (t % T_SW) < (DUTY * T_SW))
+        m.set(0, hi)
+        m.set(1, not hi)
         return m
 
     # Warm-up — PWL cache build cost.
