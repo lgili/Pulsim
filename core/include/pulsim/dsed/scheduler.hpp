@@ -62,6 +62,8 @@
 
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/models/switched_diode.hpp"
+#include "pulsim/dsed/event_projection.hpp"
+#include "pulsim/dsed/exact_lti.hpp"
 #include "pulsim/dsed/rk45_dormand_prince.hpp"
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/time_eps.hpp"
@@ -102,6 +104,21 @@ struct PEDResult {
 /// forward-biases (a buck's freewheel diode at gate-off). Systems
 /// without it — the hand-rolled demo models — compile exactly as
 /// before; every diode path below is `if constexpr`-guarded.
+/// Whether the System can hand out an exact per-mode stepper.
+template <class S>
+concept HasExactStep = requires(const S& sys) {
+    { sys.exact_stepper() }
+        -> std::convertible_to<const ExactLTI*>;
+};
+
+/// Whether the System exposes the dense LTI pair (A, b) — the
+/// builder adapters do; the hand-rolled demo models need not.
+template <class S>
+concept HasABInterface = requires(const S& sys, Real t) {
+    { sys.A_matrix() } -> std::convertible_to<const DenseMatrix&>;
+    { sys.b_vector(t) } -> std::convertible_to<Vector>;
+};
+
 template <class S>
 concept HasNodePairVoltage = requires(const S& sys, Real t,
                                         const Vector& x) {
@@ -202,6 +219,13 @@ public:
                 settle_diode_cascade_(t, x);
             }
         }
+        if constexpr (HasABInterface<System>) {
+            if (enable_event_projection_) {
+                x = project_onto_slow_manifold(
+                    system_.A_matrix(), system_.b_vector(t), x,
+                    Real{100} / dt_max_);
+            }
+        }
 
         RK45State rk_state;
         PEDResult<MaskT> result;
@@ -235,6 +259,62 @@ public:
                     t = t_gate;
                 }
                 continue;
+            }
+
+            // 2b. v2.0 Phase 3 item 2 — EXACT segment stepping.
+            //
+            // Between events a PWL circuit with DC sources is
+            // autonomous LTI, and its trajectory has a closed form
+            // valid for ANY h. This is what removes the stability
+            // limit that ground the DCM buck to h ≈ 2e-10 even with
+            // the state sitting exactly at the idle mode's
+            // equilibrium — no error controller fixes a stability
+            // bound. Steps are still capped at dt_max so the
+            // recorded waveform keeps its resolution, and predicates
+            // are located on the ANALYTIC trajectory (sharper than
+            // the RK45 path's Hermite interpolant). nullptr —
+            // time-varying sources, or a defective eigenbasis for
+            // this mask — falls through to the numeric path below,
+            // which remains correct everywhere.
+            if constexpr (HasExactStep<System>) {
+                if (const ExactLTI* ex = system_.exact_stepper();
+                    ex != nullptr) {
+                    const Real h_ex =
+                        std::min(dt_max_, t_target - t);
+                    const Vector b_now = system_.b_vector(t);
+                    Vector x_new =
+                        exact_advance(*ex, x, b_now, h_ex);
+
+                    std::optional<PredicateEvent> evt;
+                    if (predictor_.size() > 0) {
+                        evt = locate_event_exact_(*ex, b_now, t, x,
+                                                    h_ex);
+                    }
+                    if (evt.has_value()
+                        && evt->t_event < t + h_ex - Real{1e-15}) {
+                        t = evt->t_event;
+                        x = std::move(evt->x_at_event);
+                        fire_event_(t, evt->name, evt->type, x,
+                                     rk_state, result,
+                                     evt->aux_index);
+                    } else {
+                        t += h_ex;
+                        x = std::move(x_new);
+                        if (t_gate < t_end && near_time(t, t_gate)) {
+                            fire_event_(t_gate, "gate_edge",
+                                          PredicateType::GateEdge,
+                                          x, rk_state, result);
+                        }
+                    }
+                    rk_state.invalidate();
+                    ++result.n_accept;
+                    ++step_idx;
+                    if (step_idx % store_every_ == 0) {
+                        result.times.push_back(t);
+                        result.states.push_back(x);
+                    }
+                    continue;
+                }
             }
 
             // 3. Snapshot k1 BEFORE step (needed for Hermite backtrack
@@ -320,13 +400,15 @@ public:
                                 "idle mode whose time constant is "
                                 "L*g_off (~1e-13 s), which an "
                                 "explicit integrator must resolve "
-                                "step by step. Holding that mode "
-                                "needs the consistent-"
-                                "reinitialization projection "
-                                "(Phase-3 item 2); until then use "
-                                "the default engine "
-                                "(engine='pwl'), whose implicit "
-                                "solver holds DCM correctly.";
+                                "step by step. The event "
+                                "projection (Phase-3 item 2) "
+                                "normally removes that mode at the "
+                                "commutation; seeing this error "
+                                "means it is disabled or declined "
+                                "(defective eigenbasis). Use the "
+                                "default engine (engine='pwl'), "
+                                "whose implicit solver holds DCM "
+                                "regardless.";
                         }
                     }
                     throw std::runtime_error(
@@ -434,6 +516,13 @@ public:
         diode_burst_t0_.assign(diodes_.size(), Real{0});
     }
 
+    /// v2.0 Phase 3 item 2 — see event_projection.hpp. Safe to leave
+    /// on: with no fast stable mode in the new mode's A, the
+    /// projection is exactly the identity.
+    void set_event_projection(bool on) noexcept {
+        enable_event_projection_ = on;
+    }
+
 private:
     struct PredicateEvent {
         Real t_event;
@@ -467,6 +556,63 @@ private:
         } else {
             return t_end;
         }
+    }
+
+    /// The exact-branch twin of `locate_event_in_step_`: the same
+    /// arming and priority rules, with g evaluated on the ANALYTIC
+    /// trajectory instead of the Hermite interpolant.
+    [[nodiscard]] std::optional<PredicateEvent> locate_event_exact_(
+        const ExactLTI& ex, const Vector& b_now,
+        Real t0, const Vector& x0, Real h) {
+        std::optional<PredicateEvent> best;
+        int best_priority = std::numeric_limits<int>::max();
+        const Real t1 = t0 + h;
+        const Vector x1 = exact_advance(ex, x0, b_now, h);
+
+        for (const auto& p : predictor_.predicates()) {
+            if (p.required_bit >= 0 &&
+                diode_bit_(p.aux_index) != (p.required_bit != 0)) {
+                continue;
+            }
+            const Real g0 = p.value(t0, x0);
+            const Real g1 = p.value(t1, x1);
+            if (g0 == Real{0}) continue;
+            if (g0 * g1 >= Real{0}) continue;
+
+            auto g_at = [&](Real tau) -> Real {
+                if (tau <= t0) return g0;
+                if (tau >= t1) return g1;
+                return p.value(tau,
+                    exact_advance(ex, x0, b_now, tau - t0));
+            };
+            Real t_root;
+            try {
+                t_root = illinois(g_at, t0, t1, g0, g1);
+            } catch (const std::runtime_error&) {
+                predictor_.note_illinois_failure();
+                t_root = bisect_fallback(g_at, t0, t1);
+            }
+            const auto make_event = [&]() -> PredicateEvent {
+                return PredicateEvent{
+                    .t_event = t_root,
+                    .name = p.name,
+                    .type = p.type,
+                    .x_at_event =
+                        exact_advance(ex, x0, b_now, t_root - t0),
+                    .aux_index = p.aux_index,
+                };
+            };
+            if (!best.has_value()
+                || t_root < best->t_event - Real{1e-15}) {
+                best = make_event();
+                best_priority = p.priority;
+            } else if (std::abs(t_root - best->t_event) <= Real{1e-15}
+                       && p.priority < best_priority) {
+                best = make_event();
+                best_priority = p.priority;
+            }
+        }
+        return best;
     }
 
     /// Scan all armed predicates over (t0, t1). Return the earliest
@@ -610,6 +756,22 @@ private:
         if constexpr (HasNodePairVoltage<System>) {
             if (has_diodes_) {
                 final_mask = settle_diode_cascade_(t_event, x);
+            }
+        }
+
+        // Consistent reinitialization (Phase-3 item 2). The event
+        // deposits x off the new mode's slow manifold — a µA of
+        // root-location residual in a DCM inductor, volts of
+        // difference across caps a switch just paralleled — and the
+        // excited decay modes sit ~1e6 below any step the
+        // integrator will take. Project them to quasi-static; slow
+        // components (the conserved charges/fluxes) pass through
+        // exactly. Identity whenever no fast stable mode exists.
+        if constexpr (HasABInterface<System>) {
+            if (enable_event_projection_) {
+                x = project_onto_slow_manifold(
+                    system_.A_matrix(), system_.b_vector(t_event), x,
+                    /*fast_threshold=*/Real{100} / dt_max_);
             }
         }
 
@@ -800,6 +962,12 @@ private:
     std::vector<Real> diode_burst_t0_;
     Real progress_t_mark_ = Real{0};
     Size progress_next_check_ = Size{100000};
+    // v2.0 Phase 3 item 2 — consistent reinitialization. When on,
+    // every event projects the carried-over state onto the NEW
+    // mode's slow manifold (see event_projection.hpp). Off by
+    // default so the demo systems and raw-LTI paths are untouched;
+    // the builder runners enable it.
+    bool enable_event_projection_ = false;
     Real dt_init_;
     Real dt_max_;
     std::size_t store_every_;

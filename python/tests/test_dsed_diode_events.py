@@ -132,32 +132,62 @@ def test_buck_ccm_with_a_real_diode():
     assert rd.n_events > 500           # gate edges + commutations
 
 
-def test_dcm_fails_fast_and_names_the_cause():
-    """Discontinuous conduction is NOT yet supported: the idle mode's
-    L·g_off time constant (~1e-13 s) grinds an explicit integrator to
-    a halt. That used to burn the 10M-step cap for 7 seconds and die
-    with a generic message; it must now fail in well under a second
-    naming the mechanism and the engine that handles it."""
+def test_dcm_runs_exactly_and_matches_pwl():
+    """Phase-3 item 2's gate, and the history matters: this test
+    REFUSED discontinuous conduction when item 1 landed — the idle
+    mode's L·g_off time constant (~1e-13 s) pinned the explicit
+    integrator at h ≈ 2e-10 s and 10M steps covered 0.3 ms in
+    7 seconds. The consistent-reinitialization projection alone did
+    NOT fix it (measured: the state sat exactly at the idle
+    equilibrium and still ground — an explicit method is STABILITY-
+    limited, not accuracy-limited). What fixes it is the pairing:
+    projection puts the state on the slow manifold, and exact LTI
+    stepping (closed-form e^{At} per mode) removes the stability
+    limit entirely. The whole 5 ms run now takes ~0.02 s and lands
+    within 0.1% of the pwl engine at dt = 1e-8."""
     import time
 
-    b = p.CircuitBuilder()
-    p.add_buck(b, V_in=24.0, L=100e-6, C=100e-6, R_load=50.0,
-                f_sw=100e3)
+    def mk():
+        b = p.CircuitBuilder()
+        p.add_buck(b, V_in=24.0, L=100e-6, C=100e-6, R_load=50.0,
+                    f_sw=100e3)
+        return b
+
     T = 1e-5
 
-    def pwm(t):
-        m = p.SwitchStateMask(b.graph.num_switches)
-        m.set(0, (t % T) < 0.3 * T)
-        return m
+    def pwm_for(b):
+        def pwm(t):
+            m = p.SwitchStateMask(b.graph.num_switches)
+            m.set(0, (t % T) < 0.3 * T)
+            return m
+        return pwm
 
+    b = mk()
     t0 = time.perf_counter()
-    with pytest.raises(RuntimeError) as exc:
-        _run_dsed(b, 5e-3, switch_fn=pwm)
+    rd = _run_dsed(b, 5e-3, switch_fn=pwm_for(b))
     elapsed = time.perf_counter() - t0
-    msg = str(exc.value)
-    assert "DISCONTINUOUS" in msg
-    assert "engine='pwl'" in msg
-    assert elapsed < 2.0, elapsed
+    assert elapsed < 5.0, elapsed          # was a 10M-step grind
+
+    td = np.asarray(rd.times)
+    sd = np.asarray(rd.states)
+    i0 = int(np.searchsorted(td, 4e-3))
+    vo_d = float(np.trapezoid(sd[i0:, 0], td[i0:])
+                 / (td[-1] - td[i0]))
+
+    b2 = mk()
+    rp = _run_pwl(b2, 5e-3, 1e-8, switch_fn=pwm_for(b2))
+    tp = np.asarray(rp.times)
+    vp = np.asarray(rp.v("vout"))
+    j0 = int(np.searchsorted(tp, 4e-3))
+    vo_p = float(np.trapezoid(vp[j0:], tp[j0:]) / (tp[-1] - tp[j0]))
+
+    # DCM raises the output above CCM's D·V_in = 7.2 V; both engines
+    # must agree on where it lands.
+    assert vo_p > 8.0
+    assert vo_d == pytest.approx(vo_p, rel=1e-3)
+    # And the current stays at the physical g_off leakage level when
+    # the diode is off — never ampere-scale negative.
+    assert sd[:, 1].min() > -1e-3
 
 
 def test_explicit_bdf2_with_diodes_is_refused():

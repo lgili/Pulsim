@@ -36,6 +36,7 @@
 
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/dsed/exact_lti.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
@@ -83,6 +84,11 @@ public:
         DenseMatrix recover_from_state;         // n_mna × n_state
         Vector recover_const;                   // n_mna
         DenseMatrix recover_from_b;             // n_mna × n_mna
+        // v2.0 Phase 3 item 2 — the mode's exact stepper (see
+        // exact_lti.hpp). `valid == false` when A is defective;
+        // consulted only when the circuit has no time-varying
+        // sources (b must be constant within the mode).
+        ExactLTI exact;
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -214,6 +220,20 @@ public:
         return node_v(from) - node_v(to);
     }
 
+    /// v2.0 Phase 3 item 2 — the current mode's exact stepper, or
+    /// nullptr when it does not apply (time-varying sources, or a
+    /// defective eigenbasis for this mask). The scheduler treats
+    /// nullptr as "integrate numerically", so falling back is
+    /// always safe.
+    [[nodiscard]] const ExactLTI* exact_stepper() const {
+        if (has_dynamic_sources_) {
+            return nullptr;
+        }
+        ensure_current_resolved_();
+        return current_entry_->exact.valid ? &current_entry_->exact
+                                            : nullptr;
+    }
+
     /// The graph / pool this adapter was built over — the diode
     /// predicate derivation (v2.0 Phase 3) runs its census on the
     /// same objects so the two engines cannot drift.
@@ -308,6 +328,13 @@ private:
                 std::move(lti.recover_const),
                 std::move(lti.recover_from_b),
             };
+            if (!has_dynamic_sources_) {
+                // One eigendecomposition per VISITED mask, amortised
+                // over every step taken in it. With time-varying
+                // sources the mode is not autonomous and the exact
+                // form does not apply — skip the cost entirely.
+                entry.exact = make_exact_lti(entry.A);
+            }
             auto [iter, inserted] = mask_cache_.emplace(
                 current_mask_, std::move(entry));
             current_entry_ = &iter->second;
