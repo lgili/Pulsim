@@ -589,7 +589,8 @@ void init_module(py::module_& m) {
            Real atol,
            Real dt_init,
            Real dt_max,
-           std::size_t store_every) {
+           std::size_t store_every,
+           bool enable_event_projection) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
@@ -671,6 +672,7 @@ void init_module(py::module_& m) {
                     pulsim::topology::SwitchStateMask(n_sw),
                     std::move(sched_diodes));
             }
+            sim.set_event_projection(enable_event_projection);
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
@@ -687,12 +689,17 @@ void init_module(py::module_& m) {
         py::arg("dt_init")     = Real{1e-9},
         py::arg("dt_max")      = Real{1e-5},
         py::arg("store_every") = std::size_t{1},
+        py::arg("enable_event_projection") = true,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
         "callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: "
         "PWL diodes are commutated by auto-derived event predicates "
-        "on the reconstructed branch voltage.");
+        "on the reconstructed branch voltage, and every event "
+        "projects the state onto the new mode's slow manifold "
+        "(consistent reinitialization; pass "
+        "enable_event_projection=False for the raw pre-projection "
+        "behaviour).");
 
     m.def("run_bdf2_native_builder",
         [](NativeAdapter& adapter,

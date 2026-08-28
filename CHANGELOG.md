@@ -8,6 +8,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **Consistent reinitialization + exact LTI stepping** (Phase-3
+  item 2, the audit's "obra №3") — and the measurement that reshaped
+  it. The DCM buck that item 1 refused now runs the full 5 ms in
+  **0.02 s** and lands within **0.024%** of the pwl engine at
+  dt = 1e-8.
+
+  The projection (`dsed/event_projection.hpp`): at every event the
+  carried-over state is projected onto the NEW mode's slow manifold —
+  fast stable modal components move to their quasi-static values,
+  everything else passes through exactly. In the ideal-switch limit
+  this **is** the audit's `argmin‖x⁺−x⁻‖_M` charge/flux-conserving
+  projection: for two capacitors a switch just paralleled, the
+  preserved coordinate is (C₁v₁+C₂v₂)/(C₁+C₂) — charge conservation —
+  and a test pins that the equalization lands there to machine
+  precision. Resonant modes (Re λ ≈ 0, any |Im|) are physics and are
+  never touched; with no fast stable mode the projection is the exact
+  identity.
+
+  **The projection alone did not fix DCM, and the measurement is the
+  story**: with the state sitting *exactly* at the idle mode's
+  equilibrium (i_L frozen at −14 µA, its true g_off leakage level),
+  the integrator still ground at h ≈ 2e-10 s. An explicit method is
+  **stability**-limited, not accuracy-limited — DOPRI5's region ends
+  near |hλ| ≈ 3.3, and no state and no error controller move that
+  bound. What removes it is `dsed/exact_lti.hpp`: between events a
+  PWL circuit with DC sources is autonomous LTI, so the trajectory
+  has a closed form (`x(t+h) = V·e^{Λh}·V⁻¹x + h·φ₁(Λh)·V⁻¹b`, the
+  φ₁ form keeping λ = 0 integrator modes exact) valid for ANY h —
+  a C++ test crosses the 5e9-rad/s idle mode in ONE 10 µs step,
+  fifteen thousand stability limits at once. One eigendecomposition
+  per visited mask, cached in the adapter; predicates are located on
+  the **analytic** trajectory rather than the Hermite interpolant;
+  time-varying sources or a defective eigenbasis fall back to the
+  numeric path, which remains correct everywhere.
+
 * **The dsed engine commutates PWL diodes** (Phase-3 item 1). It
   never had a diode before — only a resistor whose state the user
   pinned through `switch_fn`: a reverse-biased series diode conducted
