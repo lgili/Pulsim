@@ -46,6 +46,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
+#include <numbers>
 #include <functional>
 #include <stdexcept>
 #include <unordered_map>
@@ -84,11 +85,19 @@ public:
         DenseMatrix recover_from_state;         // n_mna × n_state
         Vector recover_const;                   // n_mna
         DenseMatrix recover_from_b;             // n_mna × n_mna
-        // v2.0 Phase 3 item 2 — the mode's exact stepper (see
-        // exact_lti.hpp). `valid == false` when A is defective;
-        // consulted only when the circuit has no time-varying
-        // sources (b must be constant within the mode).
+        // v2.0 Phase 3 items 2-3 — the mode's exact stepper (see
+        // exact_lti.hpp). For a DC-driven circuit it decomposes A
+        // itself. For a SINE-driven one (item 3) it decomposes the
+        // AUGMENTED system: each distinct source frequency ω adds an
+        // oscillator pair u = (sin ωt, cos ωt) with
+        // u̇ = [[0,ω],[−ω,0]]·u, phases and amplitudes folded into
+        // the coupling columns — the augmented system is autonomous
+        // LTI, so a rectifier under mains drive steps exactly too.
+        // `valid == false` (defective basis, e.g. driven exactly at
+        // a circuit resonance) falls back to the numeric path.
         ExactLTI exact;
+        Vector exact_b;                 // reduced, augmented-const b
+        std::vector<Real> aug_omegas;   // one per oscillator pair
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -106,7 +115,8 @@ public:
           pool_{pool},
           cache_{cache},
           b_extra_fn_{std::move(b_extra_fn)},
-          has_dynamic_sources_{detect_dynamic_sources_()} {}
+          has_dynamic_sources_{detect_dynamic_sources_()},
+          sine_only_sources_{detect_sine_only_()} {}
 
     // ----- HasLTIPerMode contract --------------------------------
 
@@ -225,13 +235,34 @@ public:
     /// defective eigenbasis for this mask). The scheduler treats
     /// nullptr as "integrate numerically", so falling back is
     /// always safe.
-    [[nodiscard]] const ExactLTI* exact_stepper() const {
-        if (has_dynamic_sources_) {
-            return nullptr;
-        }
+    /// Whether the CURRENT mask can be stepped exactly.
+    [[nodiscard]] bool has_exact_step() const {
         ensure_current_resolved_();
-        return current_entry_->exact.valid ? &current_entry_->exact
-                                            : nullptr;
+        return current_entry_->exact.valid;
+    }
+
+    /// Advance the reduced state from absolute time `t` by `h`,
+    /// exactly. For a sine-driven circuit the oscillator sub-state
+    /// is rebuilt from `t` analytically on every call, so phase
+    /// never drifts however many steps are taken.
+    [[nodiscard]] Vector exact_advance_state(Real t, const Vector& x,
+                                               Real h) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const auto n = x.size();
+        const auto k =
+            static_cast<Index>(e.aug_omegas.size());
+        if (k == 0) {
+            return exact_advance(e.exact, x, e.exact_b, h);
+        }
+        Vector y(n + 2 * k);
+        y.head(n) = x;
+        for (Index j = 0; j < k; ++j) {
+            const Real w = e.aug_omegas[static_cast<Size>(j)];
+            y[n + 2 * j]     = std::sin(w * t);
+            y[n + 2 * j + 1] = std::cos(w * t);
+        }
+        return exact_advance(e.exact, y, e.exact_b, h).head(n);
     }
 
     /// The graph / pool this adapter was built over — the diode
@@ -293,6 +324,142 @@ private:
         return false;
     }
 
+    /// True iff every time-varying contribution is a
+    /// SineVoltageSource (no PWM, no pulse, no user callback) —
+    /// the class the augmented-oscillator exact stepper covers.
+    [[nodiscard]] bool detect_sine_only_() const {
+        if (!has_dynamic_sources_ || b_extra_fn_) {
+            return false;
+        }
+        using K = pwl::DevicePool::StoredKind;
+        bool any_sine = false;
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            K kind;
+            try {
+                kind = pool_.kind_of(b_id);
+            } catch (const std::out_of_range&) {
+                continue;
+            }
+            if (kind == K::PWMVoltageSource ||
+                kind == K::PulseVoltageSource) {
+                return false;
+            }
+            if (kind == K::SineVoltageSource) {
+                any_sine = true;
+            }
+        }
+        return any_sine;
+    }
+
+    /// Build the augmented exact stepper for a sine-driven mode.
+    ///
+    ///   y = [x; u₁; …; u_k],  u_j = (sin ω_j t, cos ω_j t)
+    ///   ẏ = [[A, Q],[0, blkdiag(S_j)]]·y + [b̃₀; 0]
+    ///
+    /// where Q folds every source's amplitude AND phase into the
+    /// (sin, cos) pair of its frequency:
+    ///   amp·sin(ωt+φ) = amp·cosφ·sin(ωt) + amp·sinφ·cos(ωt),
+    /// and b̃₀ carries the reduced DC part (b_constant plus each
+    /// sine source's v_dc through its −1 branch-row stamp, matching
+    /// compute_sine_b_extra's sign convention exactly).
+    void build_augmented_exact_(LTIEntry& entry) const {
+        using K = pwl::DevicePool::StoredKind;
+        struct SineInfo {
+            Index src_var;
+            Real omega, amp, phase, v_dc;
+        };
+        std::vector<SineInfo> sines;
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            const auto& branch = graph_.branch(b_id);
+            if (branch.kind != topology::BranchKind::Source ||
+                !pool_.is_registered(b_id)) {
+                continue;
+            }
+            if (pool_.kind_of(b_id) != K::SineVoltageSource) {
+                continue;
+            }
+            const auto& p = pool_.sine_voltage_source_params(b_id);
+            if (p.frequency <= Real{0}) {
+                continue;    // value_at degenerates to v_dc: DC-only
+            }
+            sines.push_back({
+                pool_.branch_var_id_for_source(b_id, graph_),
+                Real{2} * std::numbers::pi_v<Real> * p.frequency,
+                p.v_amplitude, p.phase, p.v_dc});
+        }
+
+        const auto n = entry.A.rows();
+        const auto n_mna =
+            static_cast<Index>(entry.b_projection.cols());
+
+        // DC part: v_dc of every sine source (frequency > 0 or not)
+        // arrives through the same −1 stamp the overlay uses.
+        Vector b_dc_mna = Vector::Zero(n_mna);
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            const auto& branch = graph_.branch(b_id);
+            if (branch.kind != topology::BranchKind::Source ||
+                !pool_.is_registered(b_id)) {
+                continue;
+            }
+            if (pool_.kind_of(b_id) != K::SineVoltageSource) {
+                continue;
+            }
+            const auto& p = pool_.sine_voltage_source_params(b_id);
+            b_dc_mna[pool_.branch_var_id_for_source(b_id, graph_)]
+                += -p.v_dc;
+        }
+
+        // Distinct frequencies, amplitude+phase folded per source.
+        std::vector<Real> omegas;
+        std::vector<Vector> q_sin, q_cos;    // reduced coupling cols
+        for (const auto& sn : sines) {
+            Index j = kInvalidIndex;
+            for (Size m = 0; m < omegas.size(); ++m) {
+                if (omegas[m] == sn.omega) {
+                    j = static_cast<Index>(m);
+                    break;
+                }
+            }
+            if (j == kInvalidIndex) {
+                omegas.push_back(sn.omega);
+                q_sin.push_back(Vector::Zero(n));
+                q_cos.push_back(Vector::Zero(n));
+                j = static_cast<Index>(omegas.size() - 1);
+            }
+            // −amp·sin(ωt+φ) on the source row, reduced through
+            // b_projection.
+            Vector stamp = Vector::Zero(n_mna);
+            stamp[sn.src_var] = Real{-1};
+            const Vector col = entry.b_projection * stamp;
+            q_sin[static_cast<Size>(j)]
+                += col * (sn.amp * std::cos(sn.phase));
+            q_cos[static_cast<Size>(j)]
+                += col * (sn.amp * std::sin(sn.phase));
+        }
+
+        const auto k = static_cast<Index>(omegas.size());
+        DenseMatrix A_aug =
+            DenseMatrix::Zero(n + 2 * k, n + 2 * k);
+        A_aug.topLeftCorner(n, n) = entry.A;
+        for (Index j = 0; j < k; ++j) {
+            const Real w = omegas[static_cast<Size>(j)];
+            A_aug.block(0, n + 2 * j, n, 1) =
+                q_sin[static_cast<Size>(j)];
+            A_aug.block(0, n + 2 * j + 1, n, 1) =
+                q_cos[static_cast<Size>(j)];
+            A_aug(n + 2 * j,     n + 2 * j + 1) =  w;   // ṡ =  w·c
+            A_aug(n + 2 * j + 1, n + 2 * j)     = -w;   // ċ = −w·s
+        }
+
+        Vector b_aug = Vector::Zero(n + 2 * k);
+        b_aug.head(n) =
+            entry.b_constant + entry.b_projection * b_dc_mna;
+
+        entry.exact = make_exact_lti(A_aug);
+        entry.exact_b = std::move(b_aug);
+        entry.aug_omegas = std::move(omegas);
+    }
+
     /// Sum sine + PWM + pulse + user-supplied contributions at time t.
     /// Always returns a full-MNA-size vector even when no dynamic
     /// sources are present (the caller decides whether to short-
@@ -330,11 +497,15 @@ private:
             };
             if (!has_dynamic_sources_) {
                 // One eigendecomposition per VISITED mask, amortised
-                // over every step taken in it. With time-varying
-                // sources the mode is not autonomous and the exact
-                // form does not apply — skip the cost entirely.
+                // over every step taken in it.
                 entry.exact = make_exact_lti(entry.A);
+                entry.exact_b = entry.b_constant;
+            } else if (sine_only_sources_) {
+                build_augmented_exact_(entry);
             }
+            // PWM/pulse sources or a user b_extra_fn: b(t) is not a
+            // finite sum of oscillators — the numeric path handles
+            // those correctly.
             auto [iter, inserted] = mask_cache_.emplace(
                 current_mask_, std::move(entry));
             current_entry_ = &iter->second;
@@ -350,6 +521,7 @@ private:
     pwl::PwlStateSpaceCache&  cache_;
     std::function<Vector(Real)> b_extra_fn_;
     bool                       has_dynamic_sources_;
+    bool                       sine_only_sources_;
 
     MaskT  current_mask_{};
     bool   current_mask_set_ = false;

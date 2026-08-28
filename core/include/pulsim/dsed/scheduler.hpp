@@ -104,11 +104,17 @@ struct PEDResult {
 /// forward-biases (a buck's freewheel diode at gate-off). Systems
 /// without it — the hand-rolled demo models — compile exactly as
 /// before; every diode path below is `if constexpr`-guarded.
-/// Whether the System can hand out an exact per-mode stepper.
+/// Whether the System can step the current mode exactly. The
+/// adapter encapsulates HOW (plain e^{At} for DC drive, an
+/// augmented oscillator system for sine drive — v2.0 Phase 3
+/// item 3), so the scheduler only ever asks for "the state h
+/// later".
 template <class S>
-concept HasExactStep = requires(const S& sys) {
-    { sys.exact_stepper() }
-        -> std::convertible_to<const ExactLTI*>;
+concept HasExactStep = requires(const S& sys, Real t,
+                                  const Vector& x, Real h) {
+    { sys.has_exact_step() } -> std::convertible_to<bool>;
+    { sys.exact_advance_state(t, x, h) }
+        -> std::convertible_to<Vector>;
 };
 
 /// Whether the System exposes the dense LTI pair (A, b) — the
@@ -277,18 +283,15 @@ public:
             // this mask — falls through to the numeric path below,
             // which remains correct everywhere.
             if constexpr (HasExactStep<System>) {
-                if (const ExactLTI* ex = system_.exact_stepper();
-                    ex != nullptr) {
+                if (system_.has_exact_step()) {
                     const Real h_ex =
                         std::min(dt_max_, t_target - t);
-                    const Vector b_now = system_.b_vector(t);
                     Vector x_new =
-                        exact_advance(*ex, x, b_now, h_ex);
+                        system_.exact_advance_state(t, x, h_ex);
 
                     std::optional<PredicateEvent> evt;
                     if (predictor_.size() > 0) {
-                        evt = locate_event_exact_(*ex, b_now, t, x,
-                                                    h_ex);
+                        evt = locate_event_exact_(t, x, h_ex);
                     }
                     if (evt.has_value()
                         && evt->t_event < t + h_ex - Real{1e-15}) {
@@ -562,12 +565,12 @@ private:
     /// arming and priority rules, with g evaluated on the ANALYTIC
     /// trajectory instead of the Hermite interpolant.
     [[nodiscard]] std::optional<PredicateEvent> locate_event_exact_(
-        const ExactLTI& ex, const Vector& b_now,
-        Real t0, const Vector& x0, Real h) {
+        Real t0, const Vector& x0, Real h)
+        requires HasExactStep<System> {
         std::optional<PredicateEvent> best;
         int best_priority = std::numeric_limits<int>::max();
         const Real t1 = t0 + h;
-        const Vector x1 = exact_advance(ex, x0, b_now, h);
+        const Vector x1 = system_.exact_advance_state(t0, x0, h);
 
         for (const auto& p : predictor_.predicates()) {
             if (p.required_bit >= 0 &&
@@ -583,7 +586,7 @@ private:
                 if (tau <= t0) return g0;
                 if (tau >= t1) return g1;
                 return p.value(tau,
-                    exact_advance(ex, x0, b_now, tau - t0));
+                    system_.exact_advance_state(t0, x0, tau - t0));
             };
             Real t_root;
             try {
@@ -597,8 +600,8 @@ private:
                     .t_event = t_root,
                     .name = p.name,
                     .type = p.type,
-                    .x_at_event =
-                        exact_advance(ex, x0, b_now, t_root - t0),
+                    .x_at_event = system_.exact_advance_state(
+                        t0, x0, t_root - t0),
                     .aux_index = p.aux_index,
                 };
             };
