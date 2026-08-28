@@ -75,6 +75,14 @@ public:
         DenseMatrix  b_projection;               // n_state × n_mna
         std::vector<Index> state_row_indices;
         std::vector<bool>  state_is_cap;
+        // v2.0 Phase 3 — the algebraic recovery map (see
+        // ContinuousLTI): x_full = recover_from_state·x_s
+        // + recover_const + recover_from_b·b_extra(t), original
+        // MNA coordinates. What lets a diode predicate read v_D
+        // out of the reduced state.
+        DenseMatrix recover_from_state;         // n_mna × n_state
+        Vector recover_const;                   // n_mna
+        DenseMatrix recover_from_b;             // n_mna × n_mna
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -171,6 +179,51 @@ public:
         return mask_cache_.size();
     }
 
+    /// v2.0 Phase 3 — v(from) − v(to) reconstructed from the reduced
+    /// state under the CURRENT mask, via the algebraic recovery map.
+    ///
+    /// This is what a diode event predicate evaluates: the branch
+    /// voltage of a device the reduction eliminated. Either node may
+    /// be ground (kGround = −1), contributing exactly 0.
+    ///
+    /// Cost: two dense dot products of length n_state, plus — only
+    /// when the circuit has time-varying sources — one b_extra build
+    /// and two more of length n_mna. Illinois calls this ~30 times
+    /// per located event; events are sparse, so correctness beats
+    /// caching here.
+    [[nodiscard]] Real node_pair_voltage(Index from, Index to,
+                                           Real t,
+                                           const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Vector b_extra;
+        if (has_dynamic_sources_) {
+            b_extra = build_time_varying_b_extra_(t);
+        }
+        auto node_v = [&](Index n) -> Real {
+            if (n < 0) {
+                return Real{0};
+            }
+            Real v = e.recover_from_state.row(n).dot(x)
+                     + e.recover_const[n];
+            if (has_dynamic_sources_) {
+                v += e.recover_from_b.row(n).dot(b_extra);
+            }
+            return v;
+        };
+        return node_v(from) - node_v(to);
+    }
+
+    /// The graph / pool this adapter was built over — the diode
+    /// predicate derivation (v2.0 Phase 3) runs its census on the
+    /// same objects so the two engines cannot drift.
+    [[nodiscard]] const topology::Graph& graph() const noexcept {
+        return graph_;
+    }
+    [[nodiscard]] const pwl::DevicePool& pool() const noexcept {
+        return pool_;
+    }
+
     /// Injective, dense mode id for `mask` (Phase-0 fix #5).
     ///
     /// First-seen masks get sequential ids (0, 1, 2, …), interned in
@@ -251,6 +304,9 @@ private:
                 std::move(lti.b_projection),
                 std::move(lti.state_row_indices),
                 std::move(lti.state_is_cap),
+                std::move(lti.recover_from_state),
+                std::move(lti.recover_const),
+                std::move(lti.recover_from_b),
             };
             auto [iter, inserted] = mask_cache_.emplace(
                 current_mask_, std::move(entry));

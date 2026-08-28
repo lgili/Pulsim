@@ -4,9 +4,9 @@ Both refusals below replace a measured SILENT WRONG ANSWER:
 
 * A PWL diode's bit was frozen at whatever ``switch_fn`` returned —
   a reverse-biased series diode conducted BACKWARDS (vout = −10.909 V
-  where the pwl engine correctly blocks at −1e-06 V). No choice of
-  switch_fn made it right in both polarities: the dsed engine simply
-  had no diode, only a resistor whose state the user pinned.
+  where the pwl engine correctly blocks at −1e-06 V). RESOLVED by
+  Phase-3 item 1: diodes are now commutated by auto-derived event
+  predicates; the refusal survives only for integrator='bdf2'.
 * A Nonlinear device was skipped by the assembler entirely — a 5 V
   source through 1 kΩ into a nonlinear diode charged the cap toward
   5·(1−e^{-t/τ}) as if the diode were absent.
@@ -45,9 +45,16 @@ def _nonlinear_diode_circuit():
     return b
 
 
-def test_dsed_refuses_pwl_diodes():
-    with pytest.raises(ValueError, match="PWL diode"):
-        p.simulate(_pwl_diode_rectifier(), t_end=1e-3, engine="dsed")
+def test_dsed_now_commutates_pwl_diodes():
+    """This test REFUSED diode circuits when the stop-gap landed.
+    Phase-3 item 1 relaxed it: the reverse-biased rectifier that
+    conducted backwards must now block, matching the pwl engine.
+    (The full behaviour suite lives in test_dsed_diode_events.py.)"""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(_pwl_diode_rectifier(), t_end=1e-3,
+                        engine="dsed")
+    assert abs(np.asarray(r.states)[-1][0]) < 1e-3   # blocks
 
 
 def test_dsed_refuses_nonlinear_devices():

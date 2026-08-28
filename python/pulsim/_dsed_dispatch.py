@@ -432,15 +432,25 @@ def run_dsed_from_builder(
     _n_sw, _n_diodes, _controlled = _kern._switch_census(
         builder.graph, builder.pool)
     if _n_diodes > 0:
-        raise ValueError(
-            f"simulate(engine='dsed'): this circuit has {_n_diodes} "
-            f"PWL diode(s), and the dsed engine has no diode "
-            f"commutation yet — their on/off state would be frozen "
-            f"at whatever switch_fn returns, so a rectifier would "
-            f"run with no rectification and report plausible "
-            f"waveforms. Use the default engine (engine='pwl'), "
-            f"which commutates them. Diode events on the dsed "
-            f"engine are v2.0 Phase 3 work in progress.")
+        # v2.0 Phase 3 — PWL diodes are commutated by auto-derived
+        # event predicates, which live on the RK45 scheduler
+        # (PEDSimulator). The BDF2 and auto schedulers have no
+        # predicate scan, so a diode circuit routed there would
+        # freeze the diode bits — the silent wrong answer this
+        # dispatch used to refuse outright. Route accordingly:
+        # 'auto' quietly becomes 'rk45'; an EXPLICIT 'bdf2' request
+        # is refused rather than silently downgraded.
+        if integrator == "bdf2":
+            raise ValueError(
+                f"simulate(engine='dsed', integrator='bdf2'): this "
+                f"circuit has {_n_diodes} PWL diode(s), and diode "
+                f"commutation is only implemented on the RK45 "
+                f"scheduler — under bdf2 the diode bits would be "
+                f"frozen at whatever switch_fn returns and a "
+                f"rectifier would run with no rectification. Drop "
+                f"integrator='bdf2' (the default routes correctly) "
+                f"or use engine='pwl'.")
+        integrator = "rk45"
     if builder.pool.has_nonlinear_devices():
         raise ValueError(
             "simulate(engine='dsed'): this circuit has nonlinear "
@@ -638,6 +648,13 @@ def run_dsed_from_builder(
             # device that the C++ extractor can't handle). Silently fall
             # through to Bridge.10 — the Python adapter has identical
             # semantics + the same error path on the same circuits.
+            #
+            # EXCEPT for diode circuits (v2.0 Phase 3): only the
+            # Bridge.11 path carries the auto-derived predicates, so
+            # falling through would freeze the diode bits and
+            # reintroduce the silent wrong answer. Re-raise instead.
+            if _n_diodes > 0:
+                raise
             pass
 
     # Bridge.10 path — Python adapter + native scheduler.

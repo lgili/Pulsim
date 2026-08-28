@@ -80,6 +80,17 @@ struct EventPredicate {
     PredicateType type = PredicateType::Custom;
     int priority = 5;
 
+    // v2.0 Phase 3 — diode commutation. A diode predicate is only
+    // MEANINGFUL in one of the diode's two states: the DiodeOn
+    // predicate (g = v_D − V_th) while the bit is OFF, the DiodeOff
+    // predicate (g = v_D) while it is ON. `aux_index` is the diode's
+    // switch index; `required_bit` is the bit value the predicate is
+    // armed for (-1 = always armed — every pre-existing predicate).
+    // The scheduler consults these; the predicate itself stays a
+    // pure function of (t, x).
+    int aux_index = -1;
+    int required_bit = -1;
+
     [[nodiscard]] Real value(Real t, const Vector& x) const {
         return fn(t, x);
     }
@@ -187,6 +198,12 @@ public:
             .type = type,
             .priority = default_priority(type),
         });
+    }
+
+    /// Register a fully-specified predicate (v2.0 Phase 3 — the
+    /// diode derivation needs aux_index / required_bit).
+    void add_predicate(EventPredicate p) {
+        predicates_.push_back(std::move(p));
     }
 
     /// Register with custom priority override.
