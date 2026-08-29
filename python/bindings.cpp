@@ -61,6 +61,7 @@
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
@@ -3199,6 +3200,101 @@ void init_module(py::module_& m) {
     // Skips the pybind11 std::function wrap on the step_observer.
     // For small chains the saving is modest; for large chains (FOC
     // with 13+ blocks) it's substantial.
+    // ------------------------------------------------------------------
+    // v2.0 Phase 3 — variable-step TR-BDF2 on the sparse MNA kernel
+    // (engine='auto'). Returns (SimulationResult, stats_dict); the
+    // result's time grid is the ACCEPTED (irregular) one.
+    // ------------------------------------------------------------------
+    m.def("run_transient_trbdf2",
+        [](pwl::PwlStateSpaceCache& cache,
+           const topology::Graph& graph,
+           const pwl::DevicePool& pool,
+           Real t_start, Real t_end, Real rtol, Real atol,
+           Real h_init, Real h_max,
+           py::object switch_fn_obj,
+           solver::BExtraFn b_extra_fn,
+           py::object initial_state,
+           Size max_event_iterations,
+           solver::ShouldContinueFn should_continue) {
+            solver::TrBdf2Options o;
+            o.t_start = t_start;
+            o.t_end   = t_end;
+            o.rtol    = rtol;
+            o.atol    = atol;
+            o.h_init  = h_init;
+            o.h_max   = h_max;
+            if (max_event_iterations > 0) {
+                o.max_event_iterations = max_event_iterations;
+            }
+            std::optional<Vector> x0;
+            if (!initial_state.is_none()) {
+                x0 = initial_state.cast<Vector>();
+            }
+            // Bridge.13 pattern: a native PWM schedule runs the
+            // mask function in pure C++ AND hands the stepper its
+            // analytic next_edge_after — edge landing then costs
+            // zero Python round-trips and no bisection.
+            solver::SwitchScheduleFn switch_fn;
+            std::function<Real(Real)> next_edge_fn;
+            {
+                sources::NativePwm2Switch* native = nullptr;
+                try {
+                    native = switch_fn_obj.cast<
+                        sources::NativePwm2Switch*>();
+                } catch (const py::cast_error&) {}
+                if (native) {
+                    switch_fn = [native](Real t) {
+                        return (*native)(t);
+                    };
+                    next_edge_fn = [native](Real t) {
+                        return native->next_edge_after(t);
+                    };
+                } else {
+                    switch_fn = switch_fn_obj.cast<
+                        solver::SwitchScheduleFn>();
+                }
+            }
+            solver::TrBdf2Stats st;
+            SimulationResult res;
+            {
+                // Release the GIL for the run like every sibling
+                // engine binding does: with a native PWM schedule
+                // the hot loop makes zero Python calls, and a
+                // Python switch_fn/b_extra_fn re-acquires per call
+                // through pybind's functional caster. Without this
+                // an engine='auto' run froze every other Python
+                // thread — including Ctrl-C — for its full
+                // wall-clock (measured: a background thread ran at
+                // 0.6% of baseline).
+                py::gil_scoped_release release;
+                res = solver::run_transient_trbdf2(
+                    cache, graph, pool, o, switch_fn, b_extra_fn,
+                    x0, &st, next_edge_fn, should_continue);
+            }
+            py::dict d;
+            d["n_accept"]       = st.n_accept;
+            d["n_reject"]       = st.n_reject;
+            d["n_gate_events"]  = st.n_gate_events;
+            d["n_diode_events"] = st.n_diode_events;
+            d["n_solves"]       = st.n_solves;
+            d["n_chatter_breaks"] = st.n_chatter_breaks;
+            d["n_forced_accepts"] = st.n_forced_accepts;
+            return py::make_tuple(std::move(res), std::move(d));
+        },
+        py::arg("cache"), py::arg("graph"), py::arg("pool"),
+        py::arg("t_start"), py::arg("t_end"),
+        py::arg("rtol"), py::arg("atol"),
+        py::arg("h_init"), py::arg("h_max"),
+        py::arg("switch_fn"),
+        py::arg("b_extra_fn") = solver::BExtraFn{},
+        py::arg("initial_state") = py::none(),
+        py::arg("max_event_iterations") = Size{0},
+        py::arg("should_continue") = solver::ShouldContinueFn{},
+        "Variable-step TR-BDF2 transient (engine='auto'): "
+        "L-stable, 2nd order, LTE-controlled step, gate edges "
+        "landed by bisection, diode crossings localized by "
+        "Illinois. Returns (SimulationResult, stats dict).");
+
     m.def("run_transient_with_chain",
         [](const pwl::PwlStateSpaceCache& cache,
            const topology::Graph& graph,
