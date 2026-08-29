@@ -55,6 +55,7 @@
 #include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/gmin.hpp"
 #include "pulsim/solver/voltage_sanity.hpp"
+#include "pulsim/mmc/thevenin_arm.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/options.hpp"
@@ -1333,6 +1334,66 @@ void init_module(py::module_& m) {
         .def("valid", &SimulationOptions::valid)
         .def("expected_step_count",
               &SimulationOptions::expected_step_count);
+
+    // ---- MMC Thevenin arm (v2.0 Phase 3, "obra No.2") ---------------
+    py::class_<mmc::ThevArmParams>(m, "ThevArmParams",
+        "GGJ Thevenin-aggregated MMC arm parameters.")
+        .def(py::init([](Size n_sm, Real c_sm, Real r_on, Real dt,
+                          Real v_c_init) {
+                 mmc::ThevArmParams p;
+                 p.n_sm = n_sm;
+                 p.c_sm = c_sm;
+                 p.r_on = r_on;
+                 p.dt = dt;
+                 p.v_c_init = v_c_init;
+                 return p;
+             }),
+             py::arg("n_sm"), py::arg("c_sm"),
+             py::arg("r_on") = Real{1e-3}, py::arg("dt") = Real{0},
+             py::arg("v_c_init") = Real{0})
+        .def_readwrite("n_sm", &mmc::ThevArmParams::n_sm)
+        .def_readwrite("c_sm", &mmc::ThevArmParams::c_sm)
+        .def_readwrite("r_on", &mmc::ThevArmParams::r_on)
+        .def_readwrite("dt", &mmc::ThevArmParams::dt)
+        .def_readwrite("v_c_init", &mmc::ThevArmParams::v_c_init);
+
+    py::class_<mmc::ThevArm>(m, "ThevArm",
+        "One half-bridge MMC arm under GGJ (PSCAD-style) Thevenin "
+        "aggregation: the network sees a single (R_eq, V_eq) branch "
+        "that costs the mode cache ZERO bits; capacitor voltages are "
+        "back-solved after each network solve with the same "
+        "trapezoidal rule the rest of the circuit uses.")
+        .def(py::init<const mmc::ThevArmParams&>(), py::arg("params"))
+        .def("pre_step",
+             [](mmc::ThevArm& a, Real i_arm_prev, Size n_on) {
+                 const auto st = a.pre_step(i_arm_prev, n_on);
+                 return py::make_tuple(st.r_eq, st.v_eq,
+                                        st.r_changed);
+             },
+             py::arg("i_arm_prev"), py::arg("n_on"),
+             "Finalise the previous step's capacitor voltages and "
+             "return (r_eq, v_eq, r_changed) for the coming step.")
+        .def("finalize_step", &mmc::ThevArm::finalize_step,
+             py::arg("i_arm_prev"),
+             "Fold the LAST solved step into v_c without "
+             "re-selecting — end-of-run bookkeeping (pre_step's "
+             "re-selection would hand phantom trailing half-steps "
+             "to capacitors 'leaving' a step that never runs).")
+        .def("set_v_c", &mmc::ThevArm::set_v_c,
+             py::arg("i"), py::arg("v"))
+        .def_property_readonly("v_c",
+             [](const mmc::ThevArm& a) {
+                 return std::vector<Real>(a.v_c());
+             })
+        .def_property_readonly("inserted",
+             [](const mmc::ThevArm& a) {
+                 std::vector<int> out(a.inserted().begin(),
+                                       a.inserted().end());
+                 return out;
+             })
+        .def_property_readonly("r_c", &mmc::ThevArm::r_c)
+        .def_property_readonly("total_stored_voltage",
+             &mmc::ThevArm::total_stored_voltage);
 
     py::class_<solver::ImplausibleVoltage>(m, "ImplausibleVoltage",
         "A node whose voltage left the range the circuit's own "

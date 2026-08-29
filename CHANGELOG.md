@@ -8,6 +8,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **MMC arms as exact Thevenin equivalents** (Phase-3 "obra №2",
+  audit A.6). The L3 arm path coupled its submodule capacitors
+  through a `b_extra` stash read one step late — a delayed
+  co-simulation whose comment admitted it ("The b_extra_fn
+  convention reads this stash one step later"), with forward-Euler
+  caps living outside the solver entirely.
+
+  The new `add_mmc_thevenin_arm` / `simulate(mmc_arms=[...])` path
+  implements the Gnanarathna–Gole–Jayasinghe aggregation (IEEE TPD
+  2011 — the model PSCAD ships) on top of three things the kernel
+  already had: per-SM trapezoidal companions eliminated analytically
+  into a per-step Thevenin pair (`pulsim/mmc/thevenin_arm.hpp`,
+  O(N) per step); ONE resistor branch per arm — zero switch-mask
+  bits for any N — whose gating-driven R_eq changes are absorbed by
+  `refactor_parametric` in O(etree path); and the pwl engine's own
+  pre-solve observer/b_extra hooks driving the coupling, so the
+  stamp the network solves is the stamp the balancer just chose.
+  Nothing is read late: the only previous-step quantity is the
+  companion's own history term, like every capacitor in the engine.
+
+  Two conventions were decided by measurement, not taste. The
+  commutation convention follows THIS engine's trapezoidal network
+  (a capacitor leaving the inserted set takes the trailing
+  half-step `R_c·i_C` its explicit twin gets on the first bypassed
+  step) rather than PSCAD's hard reset — the two differ by O(dt)
+  per edge, and matching our own discretisation is what makes the
+  aggregation an algebraic identity. And end-of-run bookkeeping
+  uses a dedicated `finalize_step` (back-solve only): re-running
+  selection for a step that never executes handed phantom
+  half-steps to "leaving" capacitors (~14 mV/cap, caught by the
+  parity test).
+
+  The crown test (`python/tests/test_mmc_thevenin.py`) pins the
+  algebraic-identity claim end to end: a 4-SM arm built from REAL
+  switches and capacitors, gated identically (including replaying
+  the balancer's own sort-and-select choices), matches the
+  aggregated arm through the full engine to 5e-8 V on
+  hundreds-of-volts waveforms — the explicit chain's g_off leak
+  floor, asserted at 1e-6 — plus a two-floating-arm leg (all four
+  arm terminals internal) and a from-ground orientation. Scale: a
+  3-phase 6×100-SM MMC (600 submodules; the explicit equivalent is
+  1200 switches with a 2^1200 mask space) runs 60 ms in 0.13 s —
+  45,000 steps/s, 22 µs per step — with textbook waveforms (AC
+  amplitude within 0.3% of m·Vdc/2, capacitor mean at Vdc/N).
+
+  An adversarial review (36 agents, 25 confirmed findings, each
+  demonstrated end to end before being believed) then hardened the
+  coupling. Fixed: a zero-solve run (sub-dt horizon or immediate
+  should_continue cancel) "finalised" a phantom step and discharged
+  every capacitor by −V_eq/R_eq (48 V → 13.7 V, now guarded);
+  `n_on` gating is now sampled at every step's END — including the
+  first — matching the engine's `switch_fn` convention exactly.
+  Refused with the mechanism named, because each silently corrupts
+  the capacitor bookkeeping: `store_every>1` (decimation can drop
+  the final state the end-of-run back-solve needs),
+  `start_from_dc_op` (the DC solve ran with the placeholder R and
+  no V_eq — a pre-charged arm seeded 150 kA of phantom current),
+  `max_dt_halvings>0` / `enable_substep_state_correction` (sub-dt
+  re-solves against the arm's full-dt companion; the ladder is
+  auto-disabled so a failed step FAILS loudly), continuation via
+  `initial_state` without an explicit `v_c_preset` (the network
+  would continue while the capacitors silently reset), duplicate
+  arm handles, cross-builder handles, out-of-range `n_on`, and a
+  composed `b_extra_fn` returning the wrong length (it would
+  broadcast into every row).
+
 * **One result surface for both engines** (Phase-3 item 5).
   `result.v('sw_node')` — the most-probed waveform in power
   electronics — was unrecoverable from a dsed run: the reduction
