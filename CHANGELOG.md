@@ -8,6 +8,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **Closed-loop control on the variable-step engine** (Phase-3
+  "observers no DSED — cadência sincronizada a eventos").
+  `engine='auto'` accepts `closed_loops=[...]` and
+  `step_observer=` + `controller_period=`; the tick instants are
+  SCHEDULED and landed exactly, like gate edges, instead of
+  throttling an every-step observer.
+
+  Why that is not a detail. A digital controller samples at
+  k·T_ctrl and commands a PWM edge at duty·T. On a fixed grid both
+  land on the nearest grid point, and what the circuit actually
+  SEES is the quantized version. Measured on a 10 kHz PI buck over
+  20 ms — realized duty versus commanded duty:
+
+  | run | steps | wall | duty error |
+  |---|---|---|---|
+  | `dt=2e-6` | 10k | 30 ms | **12386 ppm** |
+  | `dt=1e-7` | 200k | 524 ms | 1157 ppm |
+  | `dt=2e-8` | 1M | 2.6 s | 157 ppm |
+  | `engine='auto'` | 9.4k | 62 ms | **0.4 ppm** |
+
+  400× more accurate than the 1-million-step fixed run at 1/42 the
+  cost — and the fixed engine's own output voltage swings ±1%
+  NON-monotonically across that dt ladder (4.985 / 4.933 / 4.986 /
+  4.973 V), which is the quantization, not convergence. `auto`
+  lands at 4.968 V, 0.09% from the ladder's finest point.
+
+  The cadence itself is now exact too: the fixed engine's throttle
+  re-anchors `last_tick` to the grid, so its phase drifts and it
+  lost 2 of 200 ticks; `auto` fires exactly 200 with zero spacing
+  deviation, which also makes `pi.update(dt=T_PWM)` true rather
+  than nominal.
+
+  Two mechanisms this required, both found by measuring: the
+  loop's own throttle rejects exactly-scheduled ticks (the
+  difference of two exact multiples of T is a floating-point hair
+  BELOW T — 129 PI updates survived of 200 scheduled), so the
+  binders expose an unthrottled `.tick` the scheduling engine
+  calls instead; and a controller that moves its duty changes
+  `switch_fn`'s SHAPE, invalidating any bisected edge time — a
+  closed-loop run was missing a quarter of its PWM edges (307 of
+  400) until the tick invalidates the edge cache. `ClosedLoop`
+  gained a `period` field so a handle carries its own cadence.
+
 * **`engine='auto'` — variable-step TR-BDF2 on the sparse MNA
   kernel** (Phase-3 "TR-BDF2 variável default + restart pós-evento";
   audit findings #38 `no-lte-variable-step-mna`, #39

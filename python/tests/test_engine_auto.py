@@ -422,9 +422,10 @@ def test_every_refusal_key_fires():
         b.add_capacitor("C", "n1", "gnd", 1e-6)
         return b
 
+    # step_observer and closed_loops are SUPPORTED here now (with
+    # a scheduled cadence — see test_engine_auto_closed_loop.py);
+    # an observer with no cadence still refuses, pinned there.
     cases = [
-        (dict(step_observer=lambda t, x: None), "step_observer"),
-        (dict(closed_loops=[object()]), "closed_loops"),
         (dict(live_stream=object()), "live_stream"),
         (dict(start_from_dc_op=True), "start_from_dc_op"),
         (dict(strict_event_iterations=True),

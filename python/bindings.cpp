@@ -3215,7 +3215,9 @@ void init_module(py::module_& m) {
            solver::BExtraFn b_extra_fn,
            py::object initial_state,
            Size max_event_iterations,
-           solver::ShouldContinueFn should_continue) {
+           solver::ShouldContinueFn should_continue,
+           Real observer_period,
+           py::object observer_obj) {
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -3226,6 +3228,7 @@ void init_module(py::module_& m) {
             if (max_event_iterations > 0) {
                 o.max_event_iterations = max_event_iterations;
             }
+            o.observer_period = observer_period;
             std::optional<Vector> x0;
             if (!initial_state.is_none()) {
                 x0 = initial_state.cast<Vector>();
@@ -3254,6 +3257,14 @@ void init_module(py::module_& m) {
                         solver::SwitchScheduleFn>();
                 }
             }
+            std::function<void(Real, const Vector&)> observer_fn;
+            if (!observer_obj.is_none()) {
+                // Re-acquires the GIL per call through pybind's
+                // functional caster, like every other Python
+                // callback the released-GIL engines invoke.
+                observer_fn = observer_obj.cast<
+                    std::function<void(Real, const Vector&)>>();
+            }
             solver::TrBdf2Stats st;
             SimulationResult res;
             {
@@ -3269,7 +3280,8 @@ void init_module(py::module_& m) {
                 py::gil_scoped_release release;
                 res = solver::run_transient_trbdf2(
                     cache, graph, pool, o, switch_fn, b_extra_fn,
-                    x0, &st, next_edge_fn, should_continue);
+                    x0, &st, next_edge_fn, should_continue,
+                    observer_fn);
             }
             py::dict d;
             d["n_accept"]       = st.n_accept;
@@ -3279,6 +3291,7 @@ void init_module(py::module_& m) {
             d["n_solves"]       = st.n_solves;
             d["n_chatter_breaks"] = st.n_chatter_breaks;
             d["n_forced_accepts"] = st.n_forced_accepts;
+            d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
@@ -3290,6 +3303,8 @@ void init_module(py::module_& m) {
         py::arg("initial_state") = py::none(),
         py::arg("max_event_iterations") = Size{0},
         py::arg("should_continue") = solver::ShouldContinueFn{},
+        py::arg("observer_period") = Real{0},
+        py::arg("step_observer") = py::none(),
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

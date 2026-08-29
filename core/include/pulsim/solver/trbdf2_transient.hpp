@@ -105,6 +105,12 @@ struct TrBdf2Options {
     Real h_min   = Real{0};
     Size max_steps = Size{10'000'000};
     Size max_event_iterations = Size{16};
+    /// Digital-controller sample period. When positive, the run
+    /// LANDS a step boundary on every k·T_ctrl and fires the
+    /// observer there — the cadence a discrete controller actually
+    /// samples on, instead of "whichever step happened to cross
+    /// the boundary". 0 = no controller ticks.
+    Real observer_period = Real{0};
 };
 
 struct TrBdf2Stats {
@@ -122,6 +128,11 @@ struct TrBdf2Stats {
     /// h_min (typically the sliver between two events). Zero on a
     /// healthy run; the Python layer warns when it is not.
     Size n_forced_accepts = 0;
+    /// Controller ticks fired (should be exactly
+    /// floor(span / T_ctrl) + 1 — the fixed engine's throttled
+    /// observer DRIFTS and loses ticks: measured 198 of 200 on a
+    /// 10 kHz loop at dt = 2 µs).
+    Size n_ctrl_ticks = 0;
 };
 
 namespace detail_trbdf2 {
@@ -163,7 +174,14 @@ inline SimulationResult run_transient_trbdf2(
     /// Cancellation hook, polled once per step attempt. Returning
     /// false ends the run early and KEEPS the partial trace (the
     /// pwl engine's contract).
-    const std::function<bool()>& should_continue = {}) {
+    const std::function<bool()>& should_continue = {},
+    /// Fired at every k·T_ctrl with the state at that instant,
+    /// BEFORE the mask for the coming step is sampled — so a
+    /// controller can set a new duty and have this step see it
+    /// (the fixed engine's step_observer contract, on an exact
+    /// cadence).
+    const std::function<void(Real, const Vector&)>& observer_fn =
+        {}) {
     using topology::SwitchStateMask;
 
     if (!(opts.t_end > opts.t_start)) {
@@ -414,6 +432,13 @@ inline SimulationResult run_transient_trbdf2(
     // ~30 switch_fn calls (Python round-trips in the common case).
     Real cached_edge_t = opts.t_start - span;
     bool edge_cache_valid = false;
+    // Controller-tick schedule. Absolute k·T from t_start (never
+    // accumulated) so the cadence cannot drift — the whole point
+    // of scheduling it instead of throttling on elapsed time.
+    const Real t_ctrl = opts.observer_period;
+    const bool has_ticks = observer_fn && t_ctrl > Real{0};
+    Size tick_k = 0;
+    Real t_next_tick = opts.t_start;
     TrBdf2Stats local_stats;
     TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
 
@@ -423,7 +448,29 @@ inline SimulationResult run_transient_trbdf2(
                 break;   // partial trace preserved
             }
             ++steps;
+
+            // ---- controller tick: fire AT the scheduled instant,
+            //      before this step's mask is sampled ----
+            if (has_ticks && t >= t_next_tick - h_min) {
+                observer_fn(t, x);
+                ++st.n_ctrl_ticks;
+                ++tick_k;
+                t_next_tick = opts.t_start
+                              + static_cast<Real>(tick_k) * t_ctrl;
+                // A controller just moved its duty, so switch_fn
+                // has a DIFFERENT shape from here on and any
+                // bisected edge time is stale. Closed-loop runs
+                // missed a quarter of their PWM edges (307 of 400
+                // over 200 periods) before this.
+                edge_cache_valid = false;
+            }
+
             h = std::clamp(h, h_min, std::min(h_max, opts.t_end - t));
+            // Land the next tick exactly, like a gate edge.
+            if (has_ticks && t_next_tick > t
+                && t_next_tick - t < h) {
+                h = std::max(t_next_tick - t, h_min);
+            }
 
             // ---- gate-edge landing ----
             bool landed_on_edge = false;

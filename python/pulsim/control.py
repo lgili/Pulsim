@@ -1189,6 +1189,15 @@ class ClosedLoop:
     step_observer: "Callable[[float, object], None]"
     duty_history: "list[tuple[float, float]]"
     error_history: "list[tuple[float, float]]"
+    #: Controller sample period T_ctrl = 1/freq [s]. The fixed-step
+    #: engine only THROTTLES on it (the tick lands on whichever
+    #: step first crosses the boundary, and the phase drifts with
+    #: the grid — measured 198 ticks instead of 200 over 20 ms at
+    #: 10 kHz). `engine='auto'` reads this and SCHEDULES a step
+    #: boundary on every k·T_ctrl, which is the cadence a digital
+    #: controller actually samples on — and makes `pi.update(
+    #: dt=T_PWM)` true rather than nominal.
+    period: float = 0.0
 
 
 def bind_pi_to_switch(
@@ -1296,11 +1305,18 @@ def bind_pi_to_switch(
     # ramping commands).
     _sp_is_callable = callable(setpoint)
 
-    def step_observer(t: float, x) -> None:
-        # Throttle: skip until at least one T_PWM has elapsed since
-        # the last update. Prevents the loop from chasing PWM ripple.
-        if t - last_tick[0] < T_PWM:
-            return
+    def _tick(t: float, x) -> None:
+        """One controller update, UNCONDITIONALLY.
+
+        `step_observer` below throttles this for engines that call
+        an observer every step and need the loop itself to decide
+        when a period has elapsed. An engine that SCHEDULES the
+        cadence — `engine='auto'` lands a step boundary on every
+        k·T_ctrl — must call this instead: the difference of two
+        exact multiples of T is a floating-point hair BELOW T, so
+        the throttle rejects a third of the scheduled ticks
+        (measured: 129 PI updates for 200 scheduled ticks).
+        """
         last_tick[0] = t
         m = float(measured(x))
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
@@ -1310,11 +1326,22 @@ def bind_pi_to_switch(
         duty_history.append((t, duty_state[0]))
         error_history.append((t, error))
 
+    def step_observer(t: float, x) -> None:
+        # Throttle: skip until at least one T_PWM has elapsed since
+        # the last update. Prevents the loop from chasing PWM ripple.
+        if t - last_tick[0] < T_PWM:
+            return
+        _tick(t, x)
+
+    # How a scheduling engine reaches past the throttle.
+    step_observer.tick = _tick  # type: ignore[attr-defined]
+
     return ClosedLoop(
         switch_fn=switch_fn,
         step_observer=step_observer,
         duty_history=duty_history,
         error_history=error_history,
+        period=T_PWM,
     )
 
 
@@ -1370,9 +1397,18 @@ def bind_pi_to_duty_callable(
 
     _sp_is_callable = callable(setpoint)
 
-    def step_observer(t: float, x) -> None:
-        if t - last_tick[0] < T_PWM:
-            return
+    def _tick(t: float, x) -> None:
+        """One controller update, UNCONDITIONALLY.
+
+        `step_observer` below throttles this for engines that call
+        an observer every step and need the loop itself to decide
+        when a period has elapsed. An engine that SCHEDULES the
+        cadence — `engine='auto'` lands a step boundary on every
+        k·T_ctrl — must call this instead: the difference of two
+        exact multiples of T is a floating-point hair BELOW T, so
+        the throttle rejects a third of the scheduled ticks
+        (measured: 129 PI updates for 200 scheduled ticks).
+        """
         last_tick[0] = t
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         new_duty = pi.update(
@@ -1382,5 +1418,13 @@ def bind_pi_to_duty_callable(
         )
         duty_state[0] = float(new_duty)
         duty_history.append((t, duty_state[0]))
+
+    def step_observer(t: float, x) -> None:
+        if t - last_tick[0] < T_PWM:
+            return
+        _tick(t, x)
+
+    step_observer.tick = _tick  # type: ignore[attr-defined]
+    step_observer.period = T_PWM  # type: ignore[attr-defined]
 
     return duty_get, step_observer, duty_history
