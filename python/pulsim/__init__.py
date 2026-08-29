@@ -388,6 +388,13 @@ from .mmc import (
     make_mmc_arm_detailed_observers,  # noqa: F401
 )
 
+# v2.0 Phase 3 — GGJ Thevenin arm (exact aggregation; supersedes the
+# delayed co-simulation L3 path for fixed-step pwl runs).
+from .mmc_thevenin import (
+    MmcThevArm,  # noqa: F401
+    add_mmc_thevenin_arm,  # noqa: F401
+)
+
 # Schematic renderer — optional, gated behind `[schematic]` extras
 # (schemdraw + networkx + cairosvg + anthropic). Importing the
 # submodule does NOT require the heavy deps; render/layout calls
@@ -1384,6 +1391,7 @@ def simulate(
     should_continue=None,
     closed_loops=None,
     live_stream=None,
+    mmc_arms=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
 ) -> SimulationResult:
@@ -1639,6 +1647,11 @@ def simulate(
             # returning a full-rate trace the caller did not ask for.
             "store_every": store_every is not None
                             and int(store_every) != 1,
+            # v2.0 Phase 3 "obra №2": the Thevenin arm's exact
+            # coupling is driven by the pwl engine's per-step
+            # observer/b_extra pair and the parametric refactor of
+            # its cache — none of which exist in the DSED path.
+            "mmc_arms": bool(mmc_arms),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -1838,6 +1851,101 @@ def simulate(
     # behaviour.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build_lazy(dt)
+
+    # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver
+    # needs THIS cache (its observer refactors these factors in
+    # place on gating events) and the run's dt, which is why the
+    # wiring happens here and not in add_mmc_thevenin_arm. Compose
+    # AROUND whatever hooks are already in place: the MMC observer
+    # runs first (it mutates pool/cache before the solve), and the
+    # b_extra vectors sum.
+    _mmc_finalize = None
+    if mmc_arms:
+        # Combinations the arm bookkeeping cannot honour yet — each
+        # would return plausible-looking wrong capacitor voltages
+        # (all four demonstrated by the adversarial review), so they
+        # refuse with the mechanism named instead.
+        if store_every is not None and int(store_every) != 1:
+            raise ValueError(
+                "simulate(mmc_arms=..., store_every>1): decimation "
+                "can drop the run's FINAL state, and the end-of-run "
+                "capacitor back-solve would then fold the last "
+                "step's stamp with a state up to store_every-1 "
+                "steps old — volts-scale v_c error in a switching "
+                "arm. Record at full rate and decimate afterwards.")
+        if start_from_dc_op:
+            raise ValueError(
+                "simulate(mmc_arms=..., start_from_dc_op=True): the "
+                "DC operating point is computed BEFORE the arm's "
+                "first stamp and without its V_eq back-EMF, so a "
+                "pre-charged arm appears as a milliohm short and "
+                "the DC solve seeds kA-scale phantom currents. "
+                "Start from t=0 state (the default) or pass "
+                "initial_state= explicitly.")
+        if max_dt_halvings is not None and int(max_dt_halvings) > 0:
+            raise ValueError(
+                "simulate(mmc_arms=..., max_dt_halvings>0): the "
+                "dt-halving retry re-solves a failed step at sub-dt "
+                "with the arm's FULL-dt companion (R_c = dt/2C and "
+                "V_eq are baked per step, and the observer does not "
+                "re-fire), silently corrupting the capacitor "
+                "bookkeeping. The ladder is disabled automatically "
+                "when mmc_arms is set; do not request it.")
+        if enable_substep_state_correction:
+            raise ValueError(
+                "simulate(mmc_arms=..., "
+                "enable_substep_state_correction=True): the "
+                "commutation sub-split re-solves at dt1/dt2 with "
+                "the arm's full-dt Thevenin stamp — same corruption "
+                "mechanism as the dt-halving retry.")
+        if initial_state is not None:
+            _unset = [a.name for a in mmc_arms
+                       if a.v_c_preset is None]
+            if _unset:
+                raise ValueError(
+                    "simulate(mmc_arms=..., initial_state=...): "
+                    f"arm(s) {_unset} have no v_c_preset. A "
+                    "continuation restarts every arm from "
+                    "v_c_init, which silently resets the submodule "
+                    "capacitors while the network continues — an "
+                    "unphysical energy jump. Recipe: re-register "
+                    "the arm with v_c_preset=old_arm.v_c alongside "
+                    "initial_state=res.states[-1].")
+        # A failed step must FAIL (SimulationAborted carries the
+        # partial trace), not silently retry with a wrong-dt arm.
+        max_dt_halvings = 0
+        from .mmc_thevenin import make_mmc_thevenin_driver
+        _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
+            mmc_arms, builder, cache, dt,
+            builder.pool.state_size(builder.graph))
+        if step_observer is None:
+            step_observer = _mmc_obs
+        else:
+            _prev_obs = step_observer
+
+            def _obs_with_mmc(t, x, _mmc=_mmc_obs, _u=_prev_obs):
+                _mmc(t, x)
+                _u(t, x)
+            step_observer = _obs_with_mmc
+        if b_extra_fn is None:
+            b_extra_fn = _mmc_b
+        else:
+            _prev_b = b_extra_fn
+            _mmc_state_size = builder.pool.state_size(builder.graph)
+
+            def _b_with_mmc(t, _mmc=_mmc_b, _u=_prev_b,
+                             _n=_mmc_state_size):
+                import numpy as _np
+                u = _np.asarray(_u(t), dtype=float)
+                if u.shape != (_n,):
+                    # A scalar or short vector would BROADCAST over
+                    # the sum and inject current into every row.
+                    raise ValueError(
+                        f"b_extra_fn returned shape {u.shape}, "
+                        f"expected ({_n},) when composed with "
+                        "mmc_arms")
+                return _np.asarray(_mmc(t)) + u
+            b_extra_fn = _b_with_mmc
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
@@ -2228,6 +2336,12 @@ def simulate(
         b_extra_fn=_b_extra_fn_user,
         closed_loops=_closed_loops_user,
     )
+    # v2.0 Phase 3: fold the last step's charge transfer into the
+    # Thevenin arms — the per-step observer only fires BEFORE
+    # solves, so without this `arm.v_c` would be one step behind
+    # the trace it was solved against.
+    if _mmc_finalize is not None and len(res.states) > 0:
+        _mmc_finalize(res.times[-1], res.states[-1])
     return res
 
 
