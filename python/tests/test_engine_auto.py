@@ -325,8 +325,6 @@ def test_fft_and_rms_survive_the_irregular_grid():
     axis was stretched into nonsense; and a sample-mean RMS
     over-weights the event clusters where ripple peaks.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     from pulsim._result_views import (grid_is_uniform,
                                        time_weighted_rms)
 
@@ -348,12 +346,35 @@ def test_fft_and_rms_survive_the_irregular_grid():
                           engine="auto")
     assert not grid_is_uniform(np.asarray(res.times))
 
-    _fig, freqs, mag = p.scope_fft(b, res, signal="out",
-                                    f_fundamental=100e3, show=False)
-    freqs = np.asarray(freqs)
-    mag = np.asarray(mag)
-    k = int(np.argmax(mag[1:])) + 1
-    assert freqs[k] == pytest.approx(100e3, rel=1e-3)
+    # The FFT half needs the plotting stack, which is an optional
+    # extra; the resampling it relies on is exercised directly
+    # below either way.
+    try:
+        import matplotlib
+    except ImportError:
+        matplotlib = None
+    if matplotlib is not None:
+        matplotlib.use("Agg")
+        _fig, freqs, mag = p.scope_fft(b, res, signal="out",
+                                        f_fundamental=100e3,
+                                        show=False)
+        freqs = np.asarray(freqs)
+        mag = np.asarray(mag)
+        k = int(np.argmax(mag[1:])) + 1
+        assert freqs[k] == pytest.approx(100e3, rel=1e-3)
+
+    # The resampling the FFT relies on, checked without the
+    # plotting stack: a uniform regrid must preserve the ripple.
+    from pulsim._result_views import resample_uniform
+    t_raw = np.asarray(res.times)
+    v_raw = np.asarray(res.v("out"))
+    t_u, v_u, dt_u = resample_uniform(t_raw, v_raw)
+    assert grid_is_uniform(t_u)
+    sel_r = t_raw > 4e-3
+    sel_u = t_u > 4e-3
+    p2p_raw = v_raw[sel_r].max() - v_raw[sel_r].min()
+    p2p_u = v_u[sel_u].max() - v_u[sel_u].min()
+    assert p2p_u == pytest.approx(p2p_raw, rel=5e-3)
 
     # Time-weighted RMS matches the fixed-dt reference; the
     # sample mean does not have to.
