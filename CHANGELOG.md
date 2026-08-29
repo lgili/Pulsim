@@ -8,6 +8,92 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **`engine='auto'` — variable-step TR-BDF2 on the sparse MNA
+  kernel** (Phase-3 "TR-BDF2 variável default + restart pós-evento";
+  audit findings #38 `no-lte-variable-step-mna`, #39
+  `trap-damping-and-commutation-restart`). `simulate(b, t_end,
+  engine='auto')` — **no dt to guess**: an L-stable, second-order,
+  one-step composite (trapezoidal stage over γh, BDF2 stage over the
+  rest, γ = 2−√2) with an embedded LTE estimate driving the step
+  controller, running DIRECTLY on the production kernel: γ = 2−√2
+  makes the BDF2 stage matrix identical to the trap matrix at
+  dt = γh, so both stages share one `solve_at(mask, γh)` factor and
+  the whole (G,C,b)-split/companion machinery is reused (the
+  algebra was validated against the dense matrix form to 1e-14
+  before any C++ was written; variable h is legal by construction
+  because companion state is physical (v, i) — the dt-retry
+  sub-steps already relied on that).
+
+  Events: gate edges are LANDED exactly (analytic `next_edge_after`
+  for native PWM schedules — zero Python round-trips — or cached
+  bisection on `switch_fn`), followed by a zero-time diode cascade
+  AT the edge (without it, a gate opening an inductor's only path
+  integrated one GV-scale no-path step and committed it into the
+  companion history: 9 A of flux vanished per commutation,
+  measured); diode crossings use per-direction signals (turn-off
+  watches v_D whose zero IS the current zero — the fixed engine's
+  single-signal watcher biases turn-off by V_th) localized by
+  Illinois on trial trap solves with a conditioning floor
+  (femtosecond-scale landings poisoned the charge bookkeeping);
+  post-event restart is trivial (one-step method) with per-parity
+  gate-corner h memory (4 rejects/period → 30 per 1000 periods).
+
+  Gates, measured: **buck 100 kHz / 5 ms in 14.6 ms wall** (audit
+  gate < 50 ms; the fixed reference needs 500k steps / 1.1 s for
+  the same 0.5 mV answer) with 999 landed edges + 1009 localized
+  commutations in 8.5k accepted steps; **flyback + RC snubber:
+  ⟨vout⟩ within 0.1 mV and the 1225.6 V leakage spike within
+  0.2 V of the dt→0 fixed-trap limit** at default tolerance, and
+  with the diode's physical V_th the answer converges monotonically
+  as rtol tightens. An un-hysteresed V_th=0 diode in DCM is a
+  SLIDING-MODE model (the fixed reference chatters ~630 flips per
+  period on it); the engine averages the slide — correct at default
+  tolerance, biased if rtol partially resolves it — and now WARNS
+  with that mechanism instead of staying silent
+  (`n_chatter_breaks` in `result._trbdf2_stats`).
+
+  Scope v1: linear PWL circuits (R, L, C, transformers, switches,
+  switched diodes, all source kinds, user `b_extra_fn`,
+  `initial_state`, `should_continue`). Nonlinear devices,
+  observers/closed loops, C blocks, `store_every`,
+  `start_from_dc_op`, `progress`, the PWL inductor guards and
+  `mmc_arms` refuse with the mechanism named; Newton-family kwargs
+  warn. Results ride the ACCEPTED (irregular) grid.
+
+  An adversarial review (30 agents, 18 confirmed findings, each
+  demonstrated end to end) then closed the gaps the irregular grid
+  opened downstream — several of which were **pre-existing** and
+  merely exposed by it:
+
+  * **Any analysis that infers a sample rate now resamples first.**
+    `scope_fft` read `times[1]-times[0]`, which on the accepted
+    grid is the first event landing — measured **6.6e6× off** the
+    mean spacing, stretching the frequency axis into nonsense with
+    no error. It (and `losses._estimate_dominant_frequency`, and
+    `thermal.compute_temperature`'s IIR) now resample onto a
+    uniform grid, exactly as a scope's ADC does and a no-op on a
+    fixed grid. `scope_fft`'s `t_window` also indexes by time
+    instead of `t/dt` (which silently ignored `t_start`).
+  * **RMS is time-weighted, not sample-averaged.** The accepted
+    grid clusters at commutations where ripple peaks, so the
+    unweighted mean read **+4.6%** high on a buck diode at
+    rtol=1e-6 — a bias that GREW as the tolerance tightened.
+  * **The step ceiling respects the circuit's fastest source.**
+    `span/1000` alone stepped straight over a 500 ns pulse train
+    on a 10 ms run: a peak detector read **0.0000 V** instead of
+    9.9 V, silently, with zero diode events. The kernel now caps
+    the default at 20 steps per source period / a third of the
+    narrowest pulse.
+  * **Silently-ignored kwargs closed**: `should_continue` is now
+    honoured (the run was uncancellable), `max_event_iterations`
+    reaches the engine, the implausible-voltage detector runs here
+    too (this engine's all-OPEN default gate makes the
+    inductor-open case it exists for MORE likely), forced accepts
+    at the step floor are counted and warned instead of passing as
+    converged, and the binding **releases the GIL** like every
+    sibling engine (a background Python thread ran at 0.6% of
+    baseline during an `auto` run; now 77%).
+
 * **MMC arms as exact Thevenin equivalents** (Phase-3 "obra №2",
   audit A.6). The L3 arm path coupled its submodule capacitors
   through a `b_extra` stash read one step late — a delayed

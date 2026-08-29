@@ -212,6 +212,138 @@ public:
         }
     }
 
+    // ------------------------------------------------------------------
+    // TR-BDF2 (v2.0 Phase 3 — the variable-step mode). One composite
+    // step over h: a trapezoidal stage to t + γh, then a BDF2 stage
+    // to t + h using the stage point and the step start. γ = 2 − √2
+    // is what makes the TWO stage matrices identical to the TRAP
+    // matrix at dt = γh (the BDF2 derivative coefficient c1 equals
+    // 2/γ), so the caller reuses `cache.solve_at(mask, γ·h)` for
+    // both stages — one factor per (mask, h).
+    //
+    // Divided-difference coefficients of the stage-2 derivative
+    //   x'(t+h) = (c1·x_1 + c2·x_γ + c3·x_n) / h,
+    // with ρ = (1−γ)/γ = 1/√2:
+    //   c1 = (1+2ρ)/((1+ρ)(1−γ)) = 2/γ = 2+√2
+    //   c2 = −(1+ρ)/(1−γ)        = −(2+3/√2 …) ≈ −4.1213
+    //   c3 = ρ²/((1+ρ)(1−γ))     = 1/√2
+    // Validated against the dense matrix form to 1e-14 before this
+    // was written (scratchpad trbdf2_companion.py).
+    // ------------------------------------------------------------------
+    static Real trbdf2_gamma() noexcept {
+        return Real{2} - std::sqrt(Real{2});
+    }
+    static Real trbdf2_c1() noexcept {
+        return Real{2} + std::sqrt(Real{2});
+    }
+    static Real trbdf2_c2() noexcept {
+        const Real g = trbdf2_gamma();
+        const Real rho = (Real{1} - g) / g;
+        return -(Real{1} + rho) / (Real{1} - g);
+    }
+    static Real trbdf2_c3() noexcept {
+        return Real{1} / std::sqrt(Real{2});
+    }
+    /// LTE constant of the composite method (Bank et al.):
+    /// err ≈ C·h·(f_n/γ − f_γ/(γ(1−γ)) + f_1/(1−γ)).
+    static Real trbdf2_lte_const() noexcept {
+        const Real g = trbdf2_gamma();
+        return (-Real{3} * g * g + Real{4} * g - Real{2})
+               / (Real{12} * (Real{2} - g));
+    }
+
+    /// Stage-2 (BDF2) history contribution for the step [t, t+h],
+    /// given the stage-1 solution `x_gamma` at t + γh and this
+    /// object's stored state at t. The caller solves with the SAME
+    /// factor as stage 1 (`solve_at(mask, γ·h)`).
+    ///
+    /// Capacitor: i_1 = (C/h)(c1·v_1 + c2·v_γ + c3·v_n)
+    ///   → companion I_hist2 = −(C/h)(c2·v_γ + c3·v_n), injected
+    ///     with the same ± node pattern as the trap history.
+    /// Inductor row: v_1 − (L·c1/h)·i_1 + b_row = 0 with
+    ///   b_row = −(L/h)(c2·i_γ + c3·i_n); transformer couplings add
+    ///   the mutual −(M/h)(c2·i_other,γ + c3·i_other,n).
+    void compute_b_extra_trbdf2_stage2(Real h, const Vector& x_gamma,
+                                        Vector& out) const {
+        out.setZero(static_cast<Index>(state_size_));
+        if (entries_.empty() || h <= Real{0}) {
+            return;
+        }
+        const Real c2 = trbdf2_c2();
+        const Real c3 = trbdf2_c3();
+        for (const auto& e : entries_) {
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                const Real vg =
+                    stamping::read_node_voltage(x_gamma, e.from)
+                    - stamping::read_node_voltage(x_gamma, e.to);
+                const Real i_hist2 =
+                    -(e.C_or_L / h) * (c2 * vg + c3 * e.v_prev);
+                if (stamping::node_is_active(e.from)) {
+                    out[e.from] -= i_hist2;
+                }
+                if (stamping::node_is_active(e.to)) {
+                    out[e.to]   += i_hist2;
+                }
+            } else {
+                const Real ig = x_gamma[e.inductor_branch_var_id];
+                out[e.inductor_branch_var_id] +=
+                    -(e.C_or_L / h) * (c2 * ig + c3 * e.i_prev);
+            }
+        }
+        for (const auto& tcr : transformer_couplings_resolved_) {
+            if (tcr.p_entry_idx >= entries_.size() ||
+                tcr.s_entry_idx >= entries_.size()) {
+                continue;
+            }
+            const Real M =
+                models::TwoWindingTransformer::mutual_inductance(
+                    tcr.params);
+            const Real ig_p = x_gamma[tcr.p_row];
+            const Real ig_s = x_gamma[tcr.s_row];
+            const Real in_p = entries_[tcr.p_entry_idx].i_prev;
+            const Real in_s = entries_[tcr.s_entry_idx].i_prev;
+            out[tcr.p_row] += -(M / h) * (c2 * ig_s + c3 * in_s);
+            out[tcr.s_row] += -(M / h) * (c2 * ig_p + c3 * in_p);
+        }
+    }
+
+    /// Commit an ACCEPTED TR-BDF2 step: store (v, i) at t+h. The
+    /// capacitor current comes from the stage-2 BDF2 derivative —
+    /// NOT the trap reconstruction `update_from_state` uses, which
+    /// would silently mix discretisations.
+    void commit_trbdf2(const Vector& x_final, Real h,
+                        const Vector& x_gamma) {
+        if (entries_.empty() || h <= Real{0}) {
+            return;
+        }
+        const Real c1 = trbdf2_c1();
+        const Real c2 = trbdf2_c2();
+        const Real c3 = trbdf2_c3();
+        for (auto& e : entries_) {
+            const Real v1 =
+                stamping::read_node_voltage(x_final, e.from)
+                - stamping::read_node_voltage(x_final, e.to);
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                const Real vg =
+                    stamping::read_node_voltage(x_gamma, e.from)
+                    - stamping::read_node_voltage(x_gamma, e.to);
+                e.i_prev = (e.C_or_L / h)
+                           * (c1 * v1 + c2 * vg + c3 * e.v_prev);
+                e.v_prev = v1;
+            } else {
+                e.i_prev = x_final[e.inductor_branch_var_id];
+                e.v_prev = v1;
+            }
+        }
+    }
+
+    /// Read-only view of the transformer couplings (the TR-BDF2
+    /// stepper's LTE needs coupling-aware di/dt).
+    [[nodiscard]] const std::vector<TransformerCouplingResolved>&
+    transformer_couplings() const noexcept {
+        return transformer_couplings_resolved_;
+    }
+
     /// Reads (v_{n+1}, i_{n+1}) per dynamic device from x and
     /// stores them as the new (v_prev, i_prev). Called by Layer 5
     /// AFTER each cache.solve.

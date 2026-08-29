@@ -62,6 +62,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # Phase-0 fix #4 helper (private): controlled-vs-diode census.
     _switch_census,
     run_transient,
+    run_transient_trbdf2,
     # Smooth-blend nonlinear diode params (Layer 4 V3).
     IdealDiodeParams,
     # YAML loader (Layer 8).
@@ -1697,6 +1698,183 @@ def simulate(
             pass
         return _dsed_res
 
+    if engine == "auto":
+        # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
+        #      MNA kernel. L-stable, LTE-controlled — no dt to
+        #      guess; `dt` (optional) is the step CEILING h_max,
+        #      which is also the gate-edge sampling resolution
+        #      (a gate pulse narrower than h_max can be missed,
+        #      exactly like dsed's dt_max). ----
+        _auto_unsupported = {
+            "step_observer": step_observer is not None,
+            "closed_loops": bool(closed_loops),
+            "live_stream": live_stream is not None,
+            "start_from_dc_op": bool(start_from_dc_op),
+            "strict_event_iterations":
+                bool(strict_event_iterations),
+            "max_dt_halvings": max_dt_halvings is not None,
+            "store_every": store_every is not None
+                            and int(store_every) != 1,
+            "mmc_arms": bool(mmc_arms),
+            "enable_substep_state_correction":
+                bool(enable_substep_state_correction),
+            # These configure PWL post-solve guards that have no
+            # counterpart here (the variable-step engine has no
+            # per-step clamp stage). Accepting them silently would
+            # hand a user who set a clamp an UNCLAMPED run.
+            "inductor_freeze_di_max":
+                inductor_freeze_di_max is not None,
+            "inductor_abs_clamp": inductor_abs_clamp is not None,
+            # No per-step user hook exists on this engine yet, so a
+            # progress bar would simply never tick.
+            "progress": bool(progress),
+        }
+        _offending = [k for k, hit in _auto_unsupported.items()
+                       if hit]
+        if _offending:
+            raise ValueError(
+                f"simulate(engine='auto'): {', '.join(_offending)} "
+                "is/are not supported by the variable-step engine "
+                "yet — each assumes the fixed-dt step cadence "
+                "(observers/controllers) or fixed-grid recording. "
+                "Use engine='pwl' for these, or drop the kwarg(s).")
+        if getattr(builder, "_c_blocks", None):
+            raise ValueError(
+                "simulate(engine='auto'): C blocks sample on a "
+                "fixed dt grid; use engine='pwl'.")
+        _auto_ignored = {
+            k: v for k, v in (
+                ("max_newton_iterations",
+                 max_newton_iterations or None),
+                ("tol_newton_dx", tol_newton_dx),
+                ("tol_newton_res", tol_newton_res),
+                ("enable_newton_line_search",
+                 enable_newton_line_search),
+                ("enable_newton_lm", enable_newton_lm),
+                ("enable_nonlinear_refresh", enable_nonlinear_refresh),
+                ("integrator", integrator),
+            ) if v is not None
+        }
+        if _auto_ignored:
+            import warnings
+            warnings.warn(
+                "simulate(engine='auto'): "
+                f"{sorted(_auto_ignored)} configure the Newton "
+                "loop, which this engine's linear stages do not "
+                "run (nonlinear devices are refused outright). "
+                "They are ignored here.",
+                stacklevel=2)
+        _span = float(t_end) - float(t_start)
+        # 0 = let the kernel pick: it knows the circuit's fastest
+        # periodic source and caps the ceiling at 20 steps per
+        # period / a third of the narrowest pulse. Computing
+        # span/1000 here instead would step straight over a narrow
+        # pulse train on a long run (measured: a peak detector read
+        # 0 V instead of 9.87).
+        _h_max = float(dt) if dt is not None else 0.0
+        _h_init = float(dt_init) if dt_init else 0.0
+        _rtol = float(rtol) if rtol is not None else 1e-5
+        _atol = float(atol) if atol is not None else 1e-8
+        _n_sw = builder.graph.num_switches
+        if switch_fn is None:
+            # v2.0 semantics: default is all-OPEN; a controlled
+            # switch without a driver is an error, not a silent
+            # short (diode bits are solver-owned and unaffected).
+            try:
+                _, _nd, _controlled = _switch_census(
+                    builder.graph, builder.pool)
+            except Exception:  # noqa: BLE001
+                _controlled = []
+            if _controlled:
+                raise ValueError(
+                    "simulate(engine='auto'): the circuit has "
+                    f"{len(_controlled)} controlled switch(es) "
+                    "but no switch_fn. Pass the gate schedule — "
+                    "the all-CLOSED legacy default is not carried "
+                    "into the new engine.")
+            switch_fn = (lambda _n=_n_sw:
+                          (lambda t: SwitchStateMask(_n)))()
+        cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        # Lazy build only needs a positive dt to mark the cache
+        # dynamic; the stepper solves at its own per-step dt via
+        # solve_at, never at this value.
+        cache.build_lazy(_h_max if _h_max > 0.0 else _span / 1000.0)
+        try:
+            res, _stats = run_transient_trbdf2(
+                cache, builder.graph, builder.pool,
+                t_start=float(t_start), t_end=float(t_end),
+                rtol=_rtol, atol=_atol,
+                h_init=_h_init, h_max=_h_max,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                initial_state=initial_state,
+                max_event_iterations=(
+                    0 if max_event_iterations is None
+                    else int(max_event_iterations)),
+                should_continue=should_continue,
+            )
+        except SimulationAborted as _aborted:
+            try:
+                _partial = _aborted.partial
+                _partial._builder = builder
+                _partial._preflight = _preflight_report
+                _partial._switch_fn = switch_fn
+                # The wreckage gets the same handles the survivors
+                # get — including an empty-but-present stats dict,
+                # so post-mortem code can read it unconditionally.
+                _partial._trbdf2_stats = {}
+            except AttributeError:  # pragma: no cover
+                pass
+            raise
+        res._builder = builder
+        res._preflight = _preflight_report
+        res._switch_fn = switch_fn
+        res._trbdf2_stats = _stats
+        # The implausible-voltage detector is engine-independent
+        # (it reads the trace, not the stepper) and this engine's
+        # new all-OPEN default mask makes the inductor-open case it
+        # exists for MORE likely, not less. Run it here too — the
+        # pwl tail that normally does it is 500 lines below the
+        # auto return.
+        _auto_check_voltage_sanity(res, builder,
+                                    voltage_sanity_factor)
+        if _stats.get("n_forced_accepts", 0) > 0:
+            import warnings
+            warnings.warn(
+                f"simulate(engine='auto'): "
+                f"{_stats['n_forced_accepts']} step(s) were "
+                "accepted with the error estimate above tolerance "
+                "because h had already reached its floor (usually "
+                "the sliver between two events). The trace is "
+                "still finite, but those steps carry more error "
+                "than rtol promises — inspect "
+                "result._trbdf2_stats and the event times if the "
+                "waveform matters there.",
+                stacklevel=2)
+        # Threshold 3: a single boundary graze at startup is normal
+        # (measured 1 on the hysteresis-banded flyback); a sliding
+        # model produces them every few cycles (5 per 5 ms on the
+        # V_th=0 buck, hundreds on tightened tolerances).
+        if _stats.get("n_chatter_breaks", 0) > 3:
+            import warnings
+            warnings.warn(
+                f"simulate(engine='auto'): a diode rode its "
+                f"conduction boundary on "
+                f"{_stats['n_chatter_breaks']} step(s) — the "
+                "signature of an un-hysteresed ideal diode "
+                "(V_th=0) in DCM, which is a SLIDING-MODE model: "
+                "the reference engine chatters ~600 flips per "
+                "period on it. This engine AVERAGES the slide; at "
+                "the default rtol the average is correct (checked "
+                "at 0.1 mV on the flyback), but tightening rtol "
+                "partially resolves the slide and can BIAS the "
+                "mean by ~0.5%. Give the diode its physical V_th "
+                "(that IS the hysteresis band) for "
+                "tolerance-proportional convergence, or use "
+                "engine='pwl'.",
+                stacklevel=2)
+        return res
+
     # ---- engine='pwl' from here on ----
     # mypy/pyright: narrow Optional[float] → float.
     assert dt is not None and dt > 0
@@ -2343,6 +2521,32 @@ def simulate(
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
     return res
+
+
+def _auto_check_voltage_sanity(res, builder, factor):
+    """Run the implausible-voltage detector on any result.
+
+    Extracted so `engine='auto'` gets the same guard the pwl tail
+    applies: the detector reads the recorded trace, not the
+    stepper, so it is engine-independent — and the variable-step
+    engine's all-OPEN default gate mask makes the inductor-open
+    case it exists for (2.9 MV on a 48 V circuit, isfinite
+    throughout) MORE likely, not less.
+    """
+    try:
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        volt = _k.find_implausible_voltage(
+            builder.graph, builder.pool, res,
+            100.0 if factor is None else float(factor))
+    except Exception:  # pragma: no cover — never break a good run
+        return
+    if volt is not None and volt.node >= 0:
+        import warnings
+        res._implausible_voltage = volt
+        warnings.warn(
+            "simulate(): " + _k.describe_implausible_voltage(
+                builder.graph, builder.pool, volt),
+            stacklevel=3)
 
 
 def _auto_attach_motor_traces(

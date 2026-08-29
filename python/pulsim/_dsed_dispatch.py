@@ -86,7 +86,7 @@ class DSEDOptions:
 # =============================================================================
 
 
-_VALID_ENGINES = ("pwl", "dsed")
+_VALID_ENGINES = ("pwl", "dsed", "auto")
 _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 
 # (The dsed-only kwargs that get the leak-warning if user passes
@@ -145,6 +145,43 @@ def _validate_engine_kwargs(
                 f"ignored by the fixed-step engine: "
                 f"{sorted(leaked.keys())}. Either remove them or "
                 f"switch to engine='dsed'.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return
+
+    # --- engine='auto' branch (variable-step TR-BDF2 on the
+    #     sparse MNA kernel; dt is optional and acts as h_max) ---
+    if engine == "auto":
+        if dt is not None and dt <= 0:
+            raise ValueError(
+                "simulate(engine='auto'): dt (used as the step "
+                f"ceiling h_max here) must be positive, got {dt!r}")
+        if rtol is not None and rtol <= 0:
+            raise ValueError(
+                "simulate(engine='auto'): rtol must be positive, "
+                f"got {rtol!r}")
+        if atol is not None and atol <= 0:
+            raise ValueError(
+                "simulate(engine='auto'): atol must be positive, "
+                f"got {atol!r}")
+        if dt_init is not None and dt_init <= 0:
+            raise ValueError(
+                "simulate(engine='auto'): dt_init must be positive, "
+                f"got {dt_init!r}")
+        leaked = {
+            name: val for name, val in (
+                ("integrator", integrator),
+                ("stiffness_threshold", stiffness_threshold),
+                ("h_bdf2", h_bdf2),
+            )
+            if val is not None
+        }
+        if leaked:
+            warnings.warn(
+                "simulate(engine='auto'): the following kwargs "
+                "belong to the dsed engine and are ignored here: "
+                f"{sorted(leaked.keys())}.",
                 UserWarning,
                 stacklevel=3,
             )

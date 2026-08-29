@@ -42,6 +42,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 import numpy as np
 
 from . import _result_views as _views
+from ._result_views import time_weighted_rms as _time_weighted_rms
 from . import magnetic as _magnetic
 
 
@@ -279,7 +280,12 @@ def _conduction_stats(v: np.ndarray,
     return {
         "i_avg": float(np.trapezoid(i, times) / T) if times.size > 1
                    else float(i.mean()),
-        "i_rms": float(np.sqrt(np.mean(i ** 2))),
+        # Time-weighted, not sample-averaged: on a variable-step
+        # grid the samples cluster at commutations (where ripple
+        # peaks), and an unweighted mean read +4.6% high on a buck
+        # diode at rtol=1e-6 — a bias that GREW as the tolerance
+        # tightened. Identical to the sample RMS on a fixed grid.
+        "i_rms": _time_weighted_rms(i, times),
         "i_peak": float(np.abs(i).max()) if i.size else 0.0,
         "P_avg": float(np.trapezoid(p, times) / T) if times.size > 1
                    else float(p.mean()),
@@ -639,7 +645,13 @@ def _estimate_dominant_frequency(B: np.ndarray,
     the DC bin. Returns 0 if the trace is too short or flat."""
     if times.size < 4 or B.size < 4:
         return 0.0
-    dt = float(np.mean(np.diff(times)))
+    # A variable-step grid has no single sample rate; resample
+    # before inferring one (no-op on a fixed grid).
+    from ._result_views import grid_is_uniform, resample_uniform
+    if not grid_is_uniform(times):
+        times, B, dt = resample_uniform(times, B)
+    else:
+        dt = float(np.mean(np.diff(times)))
     if dt <= 0:
         return 0.0
     # Subtract mean to suppress DC.
@@ -869,7 +881,7 @@ def device_loss_summary(
                 "name": name,
                 "i_avg": (float(np.trapezoid(i_arr, times) / T)
                           if T > 0 else float(i_arr.mean())),
-                "i_rms": float(np.sqrt(np.mean(i_arr ** 2))),
+                "i_rms": _time_weighted_rms(i_arr, times),
                 "i_peak": float(np.abs(i_arr).max()),
             }
             # Optional Steinmetz / iGSE core loss.

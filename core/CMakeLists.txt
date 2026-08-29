@@ -44,6 +44,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_bdf2.cpp            # Gate 4 — BDF2 + stiffness detector
         tests/dsed/test_bdf2_scheduler.cpp  # Gate 4.C — end-to-end BDF2 PED scheduler
         tests/dsed/test_mmc_thevenin_arm.cpp
+        tests/dsed/test_trbdf2_transient.cpp
         tests/dsed/test_exact_lti.cpp
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode

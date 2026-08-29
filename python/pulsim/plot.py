@@ -381,21 +381,37 @@ def scope_fft(builder, result, *,
     n = len(times)
     if n < 4:
         raise ValueError("scope_fft: need at least 4 samples")
-    dt = float(times[1] - times[0])
-    fs = 1.0 / dt
 
     idx = _resolve_signal_idx(builder, signal)
     if idx is None:
         raise ValueError(f"scope_fft: unknown signal '{signal}'")
     y = np.array([s[idx] for s in result.states])
 
+    # An FFT needs a SAMPLE RATE. A variable-step result
+    # (engine='auto') has none: its grid clusters at events and
+    # strides through smooth stretches, so `times[1]-times[0]`
+    # is whatever the first step happened to be — measured 6.6e6x
+    # off the mean on a buck. Resample onto a uniform grid first,
+    # exactly as a scope's ADC does; a no-op on a fixed-dt result.
+    from ._result_views import grid_is_uniform, resample_uniform
+    if not grid_is_uniform(times):
+        times, y, dt = resample_uniform(times, y)
+        n = len(times)
+    else:
+        dt = float(times[1] - times[0])
+    fs = 1.0 / dt
+
     # Default: skip the first 30 % of samples (settling transient).
     if t_window is None:
         k0 = int(0.3 * n)
         k1 = n
     else:
-        k0 = max(0, int(t_window[0] / dt))
-        k1 = min(n, int(t_window[1] / dt))
+        # Index by TIME, not by t/dt — the latter silently ignores
+        # t_start and breaks on any resampled/offset grid.
+        k0 = int(np.searchsorted(times, t_window[0], side="left"))
+        k1 = int(np.searchsorted(times, t_window[1], side="right"))
+        k0 = max(0, k0)
+        k1 = min(n, k1)
     if k1 - k0 < 4:
         raise ValueError("scope_fft: window too small")
     y_w = y[k0:k1]

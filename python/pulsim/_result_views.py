@@ -217,3 +217,78 @@ def resolve_switch_closed_trace(result: Any,
             return arr[:, switch_idx].astype(bool)
     closed = evaluate_switch_mask_trace(switch_fn, times, switch_idx)
     return _voltage_consistency_guard(closed, v_branch, name=name)
+
+
+# ---------------------------------------------------------------
+# v2.0 Phase 3 — irregular time grids
+#
+# `engine='auto'` (variable-step TR-BDF2) returns samples on the
+# ACCEPTED grid: dense clusters at every gate edge and diode
+# commutation, long strides through smooth stretches. Pointwise
+# accessors (v(), i(), plot) consume `times` as data and are
+# already correct there. Two families of analysis are NOT:
+#
+#   * anything that infers a sample rate — an FFT's `d=dt`, a
+#     window index computed as t/dt. Feeding a clustered grid to
+#     rfftfreq stretches the frequency axis by the ratio of the
+#     first spacing to the mean (measured 6.6e6x on a buck, whose
+#     first accepted step is an event landing) and smears every
+#     harmonic. The fix is to RESAMPLE onto a uniform grid first —
+#     which is exactly what a real scope's ADC does, and a no-op
+#     on an already-uniform grid.
+#   * anything that averages SAMPLES rather than integrating over
+#     TIME — an unweighted mean over-weights the clusters, which
+#     sit at commutation instants where ripple peaks. Measured
+#     +4.6% on a buck diode's RMS at rtol=1e-6, growing tighter
+#     with tolerance (denser clusters) rather than converging.
+# ---------------------------------------------------------------
+
+def grid_is_uniform(times: np.ndarray, rtol: float = 1e-6) -> bool:
+    """True when `times` is a uniform grid to within `rtol`."""
+    t = np.asarray(times, dtype=float)
+    if t.size < 3:
+        return True
+    d = np.diff(t)
+    if not np.all(np.isfinite(d)) or np.any(d <= 0):
+        return False
+    return bool(np.max(np.abs(d - d.mean())) <= rtol * d.mean())
+
+
+def resample_uniform(times: np.ndarray, y: np.ndarray,
+                     n_out: "int | None" = None):
+    """Linear-interpolate `(times, y)` onto a uniform grid.
+
+    Returns `(t_u, y_u, dt)`. The default sample count preserves
+    the input's finest resolution without exploding: the span
+    divided by the MEDIAN spacing (the median ignores both the
+    event clusters and the long smooth strides), clamped to
+    [len(times), 4 * len(times)].
+    """
+    t = np.asarray(times, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if n_out is None:
+        d = np.diff(t)
+        med = float(np.median(d)) if d.size else 0.0
+        span = float(t[-1] - t[0])
+        est = int(span / med) + 1 if med > 0 else t.size
+        n_out = int(np.clip(est, t.size, 4 * t.size))
+    t_u = np.linspace(t[0], t[-1], n_out)
+    return t_u, np.interp(t_u, t, y), float(t_u[1] - t_u[0])
+
+
+def time_weighted_rms(y: np.ndarray, times: np.ndarray) -> float:
+    """RMS over TIME, not over samples: sqrt(∫y² dt / T).
+
+    Identical to the sample RMS on a uniform grid (to trapezoid
+    error) and the only correct form on an irregular one.
+    """
+    y = np.asarray(y, dtype=float)
+    t = np.asarray(times, dtype=float)
+    if y.size == 0:
+        return 0.0
+    if t.size != y.size or t.size < 2:
+        return float(np.sqrt(np.mean(y ** 2)))
+    span = float(t[-1] - t[0])
+    if not (span > 0):
+        return float(np.sqrt(np.mean(y ** 2)))
+    return float(np.sqrt(np.trapezoid(y ** 2, t) / span))

@@ -244,7 +244,17 @@ def compute_temperature(t: np.ndarray,
         raise ValueError("t and p_loss must have the same shape")
     if len(t) < 2:
         raise ValueError("need at least 2 samples")
-    dt = float(t[1] - t[0])
+    # The IIR below advances on a FIXED dt. A variable-step trace
+    # (engine='auto') has none — its spacing swings by orders of
+    # magnitude between event clusters and smooth strides, so
+    # t[1]-t[0] would set the whole thermal integration from
+    # whatever the first step happened to be. Resample first
+    # (no-op on a fixed grid).
+    from ._result_views import grid_is_uniform, resample_uniform
+    if not grid_is_uniform(t):
+        t, p, dt = resample_uniform(t, p)
+    else:
+        dt = float(t[1] - t[0])
     # Per-pole IIR state.
     state = np.zeros(len(stages))
     T_out = np.zeros_like(p)
