@@ -1163,6 +1163,32 @@ private:
     Index add_branch_(std::string_view component_name,
                       Index from, Index to,
                       topology::BranchKind kind) {
+        // v2.0 (audit A.7): a DUPLICATE component name is an
+        // error, not a shrug. It used to be accepted silently and
+        // `branch_id_of` returned the FIRST match, so the second
+        // device was unreachable by name for the rest of the run —
+        // no error, no warning, and every name-based accessor,
+        // trace and diagnostic pointed at the wrong branch.
+        // Subsystem instancing makes this urgent: one typo'd path
+        // would collide a hundred devices in silence.
+        if (!component_name.empty()) {
+            for (const auto& [existing_id, existing] :
+                 branch_names_) {
+                if (existing == component_name) {
+                    throw std::invalid_argument(std::format(
+                        "CircuitBuilder: component name \"{}\" is "
+                        "already used by branch {}. Names must be "
+                        "unique — `branch_id_of` and every "
+                        "name-based accessor, trace and diagnostic "
+                        "resolve by name, so a second device with "
+                        "this one would be unreachable and the "
+                        "first would answer for it. (Building "
+                        "repeated cells? `define_subsystem` scopes "
+                        "names for you: leg_a/sm17/D2.)",
+                        component_name, existing_id));
+                }
+            }
+        }
         const Index b_id = graph_.add_branch(from, to, kind);
         if (!component_name.empty()) {
             branch_names_.emplace(b_id, std::string{component_name});
