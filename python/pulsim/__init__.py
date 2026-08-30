@@ -1393,6 +1393,7 @@ def simulate(
     closed_loops=None,
     live_stream=None,
     mmc_arms=None,
+    controller_period: Optional[float] = None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
 ) -> SimulationResult:
@@ -1706,8 +1707,6 @@ def simulate(
         #      (a gate pulse narrower than h_max can be missed,
         #      exactly like dsed's dt_max). ----
         _auto_unsupported = {
-            "step_observer": step_observer is not None,
-            "closed_loops": bool(closed_loops),
             "live_stream": live_stream is not None,
             "start_from_dc_op": bool(start_from_dc_op),
             "strict_event_iterations":
@@ -1764,6 +1763,75 @@ def simulate(
                 "run (nonlinear devices are refused outright). "
                 "They are ignored here.",
                 stacklevel=2)
+        # ---- controllers on an EXACT cadence ----
+        # A digital controller samples at k·T_ctrl. The fixed
+        # engine only THROTTLES an every-step observer on that
+        # period, so the tick lands on whichever step first crosses
+        # the boundary and the error accumulates (measured: 198
+        # ticks instead of 200 over 20 ms at 10 kHz). Here the tick
+        # instants are SCHEDULED like gate edges — landed exactly,
+        # observer fired there, and the duty it sets is what the
+        # coming step's mask is built from.
+        _cl_list = list(closed_loops) if closed_loops else []
+        _auto_obs_list = []
+        _auto_periods = []
+        for _cl in _cl_list:
+            # `.tick` is the loop's UNTHROTTLED update. Calling the
+            # throttled `step_observer` on an exactly-scheduled
+            # cadence loses ticks to floating point (measured 129
+            # of 200), which quietly changes the loop gain.
+            _auto_obs_list.append(
+                getattr(_cl.step_observer, "tick", _cl.step_observer))
+            _p = float(getattr(_cl, "period", 0.0) or 0.0)
+            if _p > 0.0:
+                _auto_periods.append(_p)
+        if step_observer is not None:
+            _auto_obs_list.append(
+                getattr(step_observer, "tick", step_observer))
+            _p_obs = controller_period
+            if _p_obs is None:
+                _p_obs = getattr(step_observer, "period", None)
+            if _p_obs is not None:
+                _auto_periods.append(float(_p_obs))
+        if _auto_obs_list and not _auto_periods:
+            raise ValueError(
+                "simulate(engine='auto'): a step_observer needs a "
+                "cadence. This engine has no fixed grid to ride, "
+                "so pass controller_period=<T_ctrl seconds> (the "
+                "rate your controller samples at) and the tick "
+                "instants are scheduled exactly. A ClosedLoop from "
+                "bind_pi_to_switch carries its own period.")
+        _auto_period = min(_auto_periods) if _auto_periods else 0.0
+        if len(set(_auto_periods)) > 1:
+            # Different rates: tick every observer on the fastest
+            # schedule and let each one's own throttle decide (the
+            # binder's observers already throttle on their period).
+            pass
+        if len(_auto_obs_list) == 1:
+            _auto_observer = _auto_obs_list[0]
+        elif _auto_obs_list:
+            def _auto_observer(t, x, _obs=tuple(_auto_obs_list)):
+                for _o in _obs:
+                    _o(t, x)
+        else:
+            _auto_observer = None
+        if _cl_list:
+            _cl_switch_fns = [c.switch_fn for c in _cl_list]
+            if switch_fn is None and len(_cl_switch_fns) == 1:
+                switch_fn = _cl_switch_fns[0]
+            elif _cl_switch_fns:
+                _n_sw_cl = builder.graph.num_switches
+                _user_sf = switch_fn
+
+                def switch_fn(t, _fns=tuple(_cl_switch_fns),
+                               _u=_user_sf, _n=_n_sw_cl):
+                    m = SwitchStateMask(_n)
+                    if _u is not None:
+                        m = _u(t)
+                    for _f in _fns:
+                        m = m | _f(t)
+                    return m
+
         _span = float(t_end) - float(t_start)
         # 0 = let the kernel pick: it knows the circuit's fastest
         # periodic source and caps the ceiling at 20 steps per
@@ -1812,6 +1880,8 @@ def simulate(
                     0 if max_event_iterations is None
                     else int(max_event_iterations)),
                 should_continue=should_continue,
+                observer_period=_auto_period,
+                step_observer=_auto_observer,
             )
         except SimulationAborted as _aborted:
             try:
