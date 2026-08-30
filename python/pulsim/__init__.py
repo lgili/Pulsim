@@ -389,6 +389,12 @@ from .mmc import (
     make_mmc_arm_detailed_observers,  # noqa: F401
 )
 
+# v2.0 Phase 4 — sampled-data frequency response (audit F.2).
+from .sampled_ac import (
+    frequency_response,  # noqa: F401
+    FrequencyResponse,  # noqa: F401
+)
+
 # v2.0 Phase 4 — periodic steady state by shooting on the
 # monodromy map (audit F.2).
 from .steady_state import (

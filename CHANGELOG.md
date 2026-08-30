@@ -8,6 +8,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **`frequency_response()` — the whole Bode from the monodromy**
+  (audit F.2, the half that pays the daily bill).
+
+  Around the periodic orbit the SAMPLED dynamics are linear, and
+  `Phi` is already computed by `steady_state`. `B`, `C` and `D`
+  are one one-period run each, so the entire sweep is
+  `H(z) = C(zI − Φ)⁻¹B + D` — a handful of period runs TOTAL, and
+  **the cost stops depending on how many points you ask for**.
+
+  | | 100 kHz buck, control-to-output |
+  |---|---|
+  | `run_fra`, 20 points | **57.7 s** (2.9 s/point) |
+  | this, 100 points | **36 ms** (0.36 ms/point) |
+
+  The audit's gate was < 10 s for a closed-loop Bode; this is
+  270× inside it. Validated against the analytic
+  `Vin/(1 + sL/R + s²LC)`: **0.70% max error below 5 kHz**,
+  straight through a Q = 8 resonance, with the peak landing on the
+  LC frequency and the DC gain on `Vin`. Above about a fifth of
+  the switching frequency the two part company — correctly, since
+  the sampled model carries the sampling and hold the continuous
+  formula omits.
+
+  Two refusals rather than plausible numbers: **frequencies at or
+  above the sampling Nyquist** (a sampled model aliases there), and
+  **a perturbation that does not move the gate**. The second is
+  subtler than it sounds — on a fixed grid the edge only lands on
+  whole steps, so a `du` below `dt/period` leaves `B` not zero but
+  *worse*: the steady state's own residual divided by a tiny `du`,
+  i.e. noise wearing the shape of a response (measured |B| = 0.76
+  out of a 7.6e-10 residual at du = 1e-9). The guard compares the
+  two gate schedules directly, so there is no threshold to tune.
+
+* **`SwitchStateMask` compares by value.** `__eq__` was never
+  bound, so Python fell back to IDENTITY and two masks with the
+  same bits compared `False` — silently, for anyone diffing
+  schedules. Found because the guard above never fired. `__ne__`
+  and a consistent `__hash__` come with it.
+
 * **`steady_state()` — the periodic operating point by shooting on
   the monodromy map** (audit F.2).
 
