@@ -148,6 +148,30 @@ void init_module(py::module_& m) {
         .def_property_readonly("size",
               &topology::SwitchStateMask::size,
               "Number of switches in this mask.")
+        // v2.0 — value equality. Without it Python falls back to
+        // IDENTITY, so two masks with the same bits compared
+        // False: a silent wrong answer for anyone diffing
+        // schedules (which is how it was found — a guard that
+        // compared two gate schedules never fired).
+        .def("__eq__",
+              [](const topology::SwitchStateMask& a,
+                  const topology::SwitchStateMask& b) {
+                  return a == b;
+              }, py::is_operator())
+        .def("__ne__",
+              [](const topology::SwitchStateMask& a,
+                  const topology::SwitchStateMask& b) {
+                  return !(a == b);
+              }, py::is_operator())
+        .def("__hash__",
+              [](const topology::SwitchStateMask& m) {
+                  std::size_t h = std::hash<std::size_t>{}(
+                      static_cast<std::size_t>(m.size()));
+                  for (Size i = 0; i < m.size(); ++i) {
+                      h = h * 131 + (m.get(i) ? 1u : 0u);
+                  }
+                  return h;
+              })
         .def("to_string",
               &topology::SwitchStateMask::to_string)
         .def("__repr__",
