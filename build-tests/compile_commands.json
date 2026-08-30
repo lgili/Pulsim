@@ -871,6 +871,18 @@
 },
 {
   "directory": "/Users/lgili/pulsim_phase2/build-tests",
+  "command": "/usr/bin/c++ -DYAML_CPP_STATIC_DEFINE -I/Users/lgili/pulsim_phase2/core/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/yaml-cpp-src/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-src/src/catch2/.. -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/generated-includes -isystem /opt/homebrew/include/eigen3 -O3 -DNDEBUG -std=c++2b -arch arm64 -ffp-contract=off -Wall -Wextra -Wpedantic -Werror=return-type -Wno-c++98-compat -Wno-c++98-compat-pedantic -O3 -DNDEBUG -o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_mmc_thevenin_arm.cpp.o -c /Users/lgili/pulsim_phase2/core/tests/dsed/test_mmc_thevenin_arm.cpp",
+  "file": "/Users/lgili/pulsim_phase2/core/tests/dsed/test_mmc_thevenin_arm.cpp",
+  "output": "/Users/lgili/pulsim_phase2/build-tests/core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_mmc_thevenin_arm.cpp.o"
+},
+{
+  "directory": "/Users/lgili/pulsim_phase2/build-tests",
+  "command": "/usr/bin/c++ -DYAML_CPP_STATIC_DEFINE -I/Users/lgili/pulsim_phase2/core/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/yaml-cpp-src/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-src/src/catch2/.. -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/generated-includes -isystem /opt/homebrew/include/eigen3 -O3 -DNDEBUG -std=c++2b -arch arm64 -ffp-contract=off -Wall -Wextra -Wpedantic -Werror=return-type -Wno-c++98-compat -Wno-c++98-compat-pedantic -O3 -DNDEBUG -o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_trbdf2_transient.cpp.o -c /Users/lgili/pulsim_phase2/core/tests/dsed/test_trbdf2_transient.cpp",
+  "file": "/Users/lgili/pulsim_phase2/core/tests/dsed/test_trbdf2_transient.cpp",
+  "output": "/Users/lgili/pulsim_phase2/build-tests/core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_trbdf2_transient.cpp.o"
+},
+{
+  "directory": "/Users/lgili/pulsim_phase2/build-tests",
   "command": "/usr/bin/c++ -DYAML_CPP_STATIC_DEFINE -I/Users/lgili/pulsim_phase2/core/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/yaml-cpp-src/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-src/src/catch2/.. -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/generated-includes -isystem /opt/homebrew/include/eigen3 -O3 -DNDEBUG -std=c++2b -arch arm64 -ffp-contract=off -Wall -Wextra -Wpedantic -Werror=return-type -Wno-c++98-compat -Wno-c++98-compat-pedantic -O3 -DNDEBUG -o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_exact_lti.cpp.o -c /Users/lgili/pulsim_phase2/core/tests/dsed/test_exact_lti.cpp",
   "file": "/Users/lgili/pulsim_phase2/core/tests/dsed/test_exact_lti.cpp",
   "output": "/Users/lgili/pulsim_phase2/build-tests/core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_exact_lti.cpp.o"

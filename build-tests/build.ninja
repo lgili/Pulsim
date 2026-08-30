@@ -2060,6 +2060,26 @@ build core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_bdf2_scheduler.
   OBJECT_FILE_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed
   TARGET_SUPPORT_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir
 
+build core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_mmc_thevenin_arm.cpp.o: CXX_COMPILER__pulsim_core_dsed_tests_unscanned_Release /Users/lgili/pulsim_phase2/core/tests/dsed/test_mmc_thevenin_arm.cpp || cmake_object_order_depends_target_pulsim_core_dsed_tests
+  CONFIG = Release
+  DEFINES = -DYAML_CPP_STATIC_DEFINE
+  DEP_FILE = core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_mmc_thevenin_arm.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++2b -arch arm64 -ffp-contract=off -Wall -Wextra -Wpedantic -Werror=return-type -Wno-c++98-compat -Wno-c++98-compat-pedantic -O3 -DNDEBUG
+  INCLUDES = -I/Users/lgili/pulsim_phase2/core/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/yaml-cpp-src/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-src/src/catch2/.. -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/generated-includes -isystem /opt/homebrew/include/eigen3
+  OBJECT_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir
+  OBJECT_FILE_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed
+  TARGET_SUPPORT_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir
+
+build core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_trbdf2_transient.cpp.o: CXX_COMPILER__pulsim_core_dsed_tests_unscanned_Release /Users/lgili/pulsim_phase2/core/tests/dsed/test_trbdf2_transient.cpp || cmake_object_order_depends_target_pulsim_core_dsed_tests
+  CONFIG = Release
+  DEFINES = -DYAML_CPP_STATIC_DEFINE
+  DEP_FILE = core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_trbdf2_transient.cpp.o.d
+  FLAGS = -O3 -DNDEBUG -std=c++2b -arch arm64 -ffp-contract=off -Wall -Wextra -Wpedantic -Werror=return-type -Wno-c++98-compat -Wno-c++98-compat-pedantic -O3 -DNDEBUG
+  INCLUDES = -I/Users/lgili/pulsim_phase2/core/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/yaml-cpp-src/include -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-src/src/catch2/.. -I/Users/lgili/pulsim_phase2/build-tests/_deps/catch2-build/generated-includes -isystem /opt/homebrew/include/eigen3
+  OBJECT_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir
+  OBJECT_FILE_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed
+  TARGET_SUPPORT_DIR = core/CMakeFiles/pulsim_core_dsed_tests.dir
+
 build core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_exact_lti.cpp.o: CXX_COMPILER__pulsim_core_dsed_tests_unscanned_Release /Users/lgili/pulsim_phase2/core/tests/dsed/test_exact_lti.cpp || cmake_object_order_depends_target_pulsim_core_dsed_tests
   CONFIG = Release
   DEFINES = -DYAML_CPP_STATIC_DEFINE
@@ -2098,7 +2118,7 @@ build core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_scheduler_auto.
 #############################################
 # Link the executable core/pulsim_core_dsed_tests
 
-build core/pulsim_core_dsed_tests core/pulsim_core_dsed_tests-b12d07c_tests.cmake | ${cmake_ninja_workdir}core/pulsim_core_dsed_tests-b12d07c_tests.cmake: CXX_EXECUTABLE_LINKER__pulsim_core_dsed_tests_Release core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_main.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_step_controller.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_event_predictor.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_rk45.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_buck_ccm.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_diode_events.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_bdf2.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_bdf2_scheduler.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_exact_lti.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_event_projection.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_scheduler_auto.cpp.o | _deps/catch2-build/src/libCatch2Main.a _deps/yaml-cpp-build/libyaml-cpp.a _deps/catch2-build/src/libCatch2.a || _deps/catch2-build/src/libCatch2.a _deps/catch2-build/src/libCatch2Main.a _deps/yaml-cpp-build/libyaml-cpp.a
+build core/pulsim_core_dsed_tests core/pulsim_core_dsed_tests-b12d07c_tests.cmake | ${cmake_ninja_workdir}core/pulsim_core_dsed_tests-b12d07c_tests.cmake: CXX_EXECUTABLE_LINKER__pulsim_core_dsed_tests_Release core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_main.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_step_controller.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_event_predictor.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_rk45.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_buck_ccm.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_diode_events.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_bdf2.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_bdf2_scheduler.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_mmc_thevenin_arm.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_trbdf2_transient.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_exact_lti.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_event_projection.cpp.o core/CMakeFiles/pulsim_core_dsed_tests.dir/tests/dsed/test_scheduler_auto.cpp.o | _deps/catch2-build/src/libCatch2Main.a _deps/yaml-cpp-build/libyaml-cpp.a _deps/catch2-build/src/libCatch2.a || _deps/catch2-build/src/libCatch2.a _deps/catch2-build/src/libCatch2Main.a _deps/yaml-cpp-build/libyaml-cpp.a
   CONFIG = Release
   FLAGS = -O3 -DNDEBUG -arch arm64
   LINK_FLAGS = -Wl,-search_paths_first -Wl,-headerpad_max_install_names

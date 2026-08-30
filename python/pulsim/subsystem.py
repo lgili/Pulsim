@@ -50,7 +50,13 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 #: away from anyone).
 SEP = "/"
 
-_GROUND_ALIASES = frozenset({"gnd", "GND", "0", "ground"})
+#: Ground is whatever the KERNEL says it is. Hard-coding a set
+#: here drifts: the first version of this file listed "ground",
+#: which the C++ builder does NOT treat as ground — so every
+#: instance's "ground" collapsed onto one ordinary floating node,
+#: silently shorting the instances together. `net()` asks the
+#: builder instead, and cannot disagree with it.
+_GROUND_INDEX = -1
 
 
 class _Params:
@@ -129,8 +135,11 @@ class ScopedBuilder:
         """
         if local_name in self._ports:
             return self._ports[local_name]
-        if local_name in _GROUND_ALIASES:
-            return local_name
+        try:
+            if self._b.node_id_of(local_name) == _GROUND_INDEX:
+                return local_name          # a ground alias
+        except Exception:  # noqa: BLE001 — not a known net
+            pass
         return self.scoped(local_name)
 
     def _rewrite(self, method: str, args: tuple, kwargs: dict):

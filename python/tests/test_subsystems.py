@@ -235,3 +235,65 @@ def test_scoped_builder_exposes_net_resolution():
     sm.instantiate(b, "u1", a="vin")
     assert seen == {"port": "vin", "internal": "u1/mid",
                      "gnd": "gnd", "path": "u1"}
+
+
+def test_ground_is_whatever_the_kernel_says_it_is():
+    """The first version of this module hard-coded a ground-alias
+    set that included "ground" — which the C++ builder does NOT
+    treat as ground. Every instance's "ground" then collapsed onto
+    one ordinary floating node, silently shorting the instances
+    together. `net()` asks the builder instead of guessing.
+    """
+    sm = p.define_subsystem("G", ports=("a",), params={})
+
+    @sm.body
+    def _(s):
+        s.add_resistor("R", "a", "ground", 1.0)   # NOT ground
+        s.add_resistor("R2", "a", "gnd", 1.0)     # IS ground
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 5.0)
+    sm.instantiate(b, "u1", a="vin")
+    sm.instantiate(b, "u2", a="vin")
+
+    # "ground" is an ordinary internal net -> scoped per instance
+    assert b.node_id_of("u1/ground") != b.node_id_of("u2/ground")
+    # "gnd" is the real thing -> untouched, shared, never scoped
+    with pytest.raises(Exception):
+        b.node_id_of("u1/gnd")
+
+
+def test_building_many_cells_stays_linear():
+    """"Circuits of any size" is the point, so the duplicate-name
+    check must not make the build quadratic. It did at first (a
+    scan per add: 4x the cells cost 7x the time); a name index
+    fixes both that and `branch_id_of`, which was itself an
+    O(num_branches) scan.
+    """
+    import time
+
+    def build(n):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "p", "gnd", 1.0)
+        t0 = time.perf_counter()
+        prev = "p"
+        for i in range(n):
+            node = f"n{i}"
+            b.add_switch(f"sm{i}__Sb", prev, node, 1e3, 1e-9)
+            b.add_switch(f"sm{i}__Si", prev, f"sm{i}__m", 1e3,
+                          1e-9)
+            b.add_capacitor(f"sm{i}__C", f"sm{i}__m", node, 2e-3)
+            prev = node
+        return time.perf_counter() - t0, b
+
+    t_small, _ = build(200)
+    t_big, big = build(1600)
+    # 8x the cells in well under 8^2 the time. Generous bound so a
+    # loaded CI box cannot make this flaky; quadratic would be ~64x
+    # and shows up immediately.
+    assert t_big < t_small * 24, (t_small, t_big)
+    # And name lookup does not degrade with size.
+    t0 = time.perf_counter()
+    for i in range(0, 1600, 32):
+        big.branch_id_of(f"sm{i}__C")
+    assert (time.perf_counter() - t0) < 0.05

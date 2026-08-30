@@ -51,8 +51,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was unreachable by name for the rest of the run and the first
   answered for it in every accessor, trace and diagnostic.
   Instancing makes that a hundred devices per typo'd path. No
-  existing test depended on the old behaviour (ctest 667/667,
-  pytest unchanged).
+  existing test depended on the old behaviour.
+
+  Two things a terrain survey caught after the first cut, both
+  now fixed and pinned:
+
+  * **Ground is whatever the kernel says it is.** The first
+    version hard-coded an alias set including `"ground"`, which
+    the C++ builder does NOT treat as ground — so every
+    instance's `"ground"` collapsed onto one ordinary floating
+    node, silently shorting the instances together. `net()` asks
+    the builder now, and cannot drift from it.
+  * **The build stays linear.** A scan-per-`add` duplicate check
+    made construction quadratic (4× the cells cost 7× the time;
+    8.6 ms for 2401 branches). A name index fixes that *and*
+    `branch_id_of`, which was itself an O(num_branches) scan:
+    build is now proportional (0.3 / 1.2 / 2.3 / 4.5 ms for
+    301 / 1201 / 2401 / 4801 branches) and name lookup is flat at
+    0.5 µs regardless of circuit size. "Circuits of any size" is
+    the point, so this is part of the feature, not a footnote.
 
 * **Nonlinear devices on the variable-step engine.** Each TR-BDF2
   stage becomes a Newton solve on the same assembled companion,
