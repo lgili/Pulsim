@@ -30,7 +30,10 @@ def test_rc_analytic_and_tolerance_proportionality():
         b.add_voltage_source("V", "in", "gnd", 5.0)
         b.add_resistor("R", "in", "n1", 1e3)
         b.add_capacitor("C", "n1", "gnd", 1e-6)
-        res = p.simulate(b, t_end=5e-3, engine="auto", rtol=rtol,
+        # engine='trbdf2' names the variable-step engine
+        # explicitly: under engine='auto' an explicit dt requests a
+        # FIXED step, and here dt is the step CEILING.
+        res = p.simulate(b, t_end=5e-3, engine="trbdf2", rtol=rtol,
                           atol=rtol * 1e-3, dt=2e-4)
         t = np.asarray(res.times)
         v = np.asarray(res.v("n1"))
@@ -216,7 +219,12 @@ def test_refusals_name_the_mechanism():
     from pulsim import _pulsim as _k
     b = fresh()
     b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
-    with pytest.raises(ValueError, match="NONLINEAR"):
+    # 'auto' would ROUTE this to the fixed engine; asking for the
+    # variable one by name gets the reason instead.
+    with pytest.raises(ValueError, match="nonlinear device"):
+        p.simulate(b, t_end=1e-3, engine="trbdf2")
+    # And 'auto' with no dt says what to do about it.
+    with pytest.raises(ValueError, match="pass dt="):
         p.simulate(b, t_end=1e-3, engine="auto")
 
     for kwargs, match in (
@@ -226,7 +234,7 @@ def test_refusals_name_the_mechanism():
         (dict(max_dt_halvings=3), "max_dt_halvings"),
     ):
         with pytest.raises(ValueError, match=match):
-            p.simulate(fresh(), t_end=1e-3, engine="auto",
+            p.simulate(fresh(), t_end=1e-3, engine="trbdf2",
                         **kwargs)
 
     # A controlled switch with no driver is an ERROR here, not a
@@ -440,7 +448,7 @@ def test_every_refusal_key_fires():
     ]
     for kwargs, match in cases:
         with pytest.raises(ValueError, match=match):
-            p.simulate(fresh(), t_end=1e-3, engine="auto",
+            p.simulate(fresh(), t_end=1e-3, engine="trbdf2",
                         **kwargs)
 
 

@@ -8,6 +8,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **`engine='auto'` is the default, and it ROUTES** (breaking).
+  The one rule a user has to hold:
+
+  ```
+  dt given  ->  fixed step, exactly as before
+  no dt     ->  the engine picks, and takes the variable-step
+                path whenever the circuit qualifies
+  ```
+
+  An explicit `dt` is a REQUEST for a fixed step, not a hint —
+  reading it as the variable engine's step ceiling silently moved
+  a closed-loop buck from 4.985 V to 4.968 V. So the modern engine
+  is opt-in by **omission**, and every existing script keeps its
+  answer bit-for-bit.
+
+  This shape was chosen by measurement, not taste. Flipping the
+  default to the variable engine outright broke **190** of the
+  suite's tests — 66 observers with no cadence, 51
+  `start_from_dc_op`, 15 nonlinear circuits, 13 MMC arms, and a
+  tail of `store_every` / dt-retry / inductor-guard runs. With
+  routing: **zero**. `auto` therefore does not mean "the TR-BDF2
+  engine"; it means "pick the engine".
+
+  The engine names are now honest about this:
+
+  | `engine=` | behaviour |
+  |---|---|
+  | `'auto'` *(default)* | routes; raises naming the blocker **and asking for a `dt`** when neither engine can serve |
+  | `'trbdf2'` | the variable-step engine by name — **refuses** instead of routing, which is what a caller who asked for it wants to know; `dt` is the step ceiling |
+  | `'pwl'` | fixed-step trapezoidal, unchanged |
+  | `'dsed'` | event-driven scheduler, unchanged |
+
+  `result.engine_used` says which one ran, and
+  `result.engine_route_reason` says why `auto` did not pick the
+  variable-step one — a router that cannot be interrogated is a
+  router that surprises people. Kwargs the destination engine
+  ignores are re-checked after routing, so the leak warning still
+  fires (validation had run against the engine the caller *asked*
+  for). The undriven-controlled-switch default stays a routing
+  reason rather than an error: the two engines disagree (fixed:
+  all-CLOSED + warning, the v1 legacy; variable: all-OPEN), and
+  flipping the legacy default is its own breaking change.
+
 * **Closed-loop control on the variable-step engine** (Phase-3
   "observers no DSED — cadência sincronizada a eventos").
   `engine='auto'` accepts `closed_loops=[...]` and
