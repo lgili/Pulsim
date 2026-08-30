@@ -33,6 +33,8 @@
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -424,6 +426,45 @@ public:
     // two sub-steps.
     //
     // Round-trip invariant: `restore(snapshot())` is a no-op.
+    // ---- v2.0 Phase 4: the COMPLETE companion state, flat ----
+    //
+    // `initial_state=` restores the MNA vector x and then INVENTS
+    // the companion history from it (`seed_from_dc_op`: a
+    // capacitor gets i_prev = 0, an inductor v_prev = 0). Those
+    // are not the state — each dynamic device carries an
+    // independent (v, i) pair — so resuming a run from x alone
+    // does not reproduce it. Demonstrated on a minimal RLC: a
+    // continuous 2T run and a T-then-resume differ by 2.3e-4
+    // where a true resume is ~1e-15.
+    //
+    // These two carry the real thing: 2 reals per dynamic device,
+    // in `entries()` order.
+    [[nodiscard]] std::vector<Real> to_flat() const {
+        std::vector<Real> out;
+        out.reserve(entries_.size() * 2);
+        for (const auto& e : entries_) {
+            out.push_back(e.v_prev);
+            out.push_back(e.i_prev);
+        }
+        return out;
+    }
+
+    void from_flat(const std::vector<Real>& flat) {
+        if (flat.size() != entries_.size() * 2) {
+            throw std::invalid_argument(
+                "HistoryState::from_flat: expected "
+                + std::to_string(entries_.size() * 2)
+                + " values (2 per dynamic device) but got "
+                + std::to_string(flat.size())
+                + " — this snapshot belongs to a different "
+                  "circuit.");
+        }
+        for (Size i = 0; i < entries_.size(); ++i) {
+            entries_[i].v_prev = flat[2 * i];
+            entries_[i].i_prev = flat[2 * i + 1];
+        }
+    }
+
     [[nodiscard]] std::vector<HistoryEntry> snapshot() const {
         return entries_;
     }

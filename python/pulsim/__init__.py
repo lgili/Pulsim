@@ -1404,6 +1404,7 @@ def simulate(
     live_stream=None,
     mmc_arms=None,
     controller_period: Optional[float] = None,
+    resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
 ) -> SimulationResult:
@@ -1734,6 +1735,17 @@ def simulate(
         except AttributeError:  # pragma: no cover
             pass
         return _dsed_res
+
+    if resume_from is not None and t_start == 0.0:
+        # Resuming means TIME continues too: a sine source
+        # restarted from phase zero makes the second segment see a
+        # different waveform than the run it claims to continue
+        # (caught by a rectifier whose resumed half disagreed with
+        # the continuous run). An explicit t_start still wins.
+        try:
+            t_start = float(resume_from.t)
+        except AttributeError:  # pragma: no cover — duck-typed
+            pass
 
     _engine_asked = engine
     _route_reasons: "list[str]" = []
@@ -2472,6 +2484,8 @@ def simulate(
             kwargs["should_continue"] = should_continue
         if live_ring is not None:
             kwargs["live_ring"] = live_ring
+        if resume_from is not None:
+            kwargs["resume_from"] = resume_from
         try:
             res = run_transient(
                 cache, builder.graph, builder.pool, opts, **kwargs,

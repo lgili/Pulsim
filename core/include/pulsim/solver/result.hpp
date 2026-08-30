@@ -110,8 +110,34 @@ struct InductorGuardAction {
     }
 };
 
+/// v2.0 Phase 4 — the COMPLETE state of a run at one instant.
+///
+/// `initial_state=` restores only the MNA vector and then INVENTS
+/// the companion history from it (a capacitor gets i_prev = 0, an
+/// inductor v_prev = 0), so resuming from it does not reproduce
+/// the run: a continuous 2T RLC and a T-then-resume differ by
+/// 2.3e-4 where a true resume is ~1e-15. A snapshot carries the
+/// parts that were missing, so `resume_from=` is exact.
+struct SolverSnapshot {
+    Real t = Real{0};
+    /// MNA unknowns at `t`.
+    Vector x;
+    /// Trapezoidal companion history: 2 reals (v_prev, i_prev)
+    /// per dynamic device, in HistoryState::entries() order.
+    std::vector<Real> history;
+    /// Which switched diodes were conducting. Solver-owned bits
+    /// that a mask alone cannot reconstruct.
+    std::vector<bool> diode_on;
+    /// True once populated by a run.
+    bool valid = false;
+};
+
 struct SimulationResult {
     std::vector<Real> times;
+
+    /// v2.0 Phase 4 — the run's final state, complete enough to
+    /// resume from exactly (`simulate(resume_from=...)`).
+    SolverSnapshot final_snapshot;
 
     /// Recorded state samples, contiguous (v2.0 Phase 1).
     /// `states[k]` is the state at `times[k]`.

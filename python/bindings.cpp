@@ -1493,6 +1493,11 @@ void init_module(py::module_& m) {
         "`states` arrays, plus event diagnostics.",
         py::dynamic_attr())  // allow `result._builder = b` from Python
         .def_readonly("times", &SimulationResult::times)
+        .def_readonly("final_snapshot",
+                       &SimulationResult::final_snapshot,
+                       "Complete state at the end of the run. Pass "
+                       "it to simulate(resume_from=...) to continue "
+                       "EXACTLY where this left off.")
         // v2.0 Phase 1 (audit finding
         // `waveform-storage-vector-of-vectors`): `states` is ONE
         // contiguous (n_samples x n_state) buffer in C++, handed
@@ -1837,6 +1842,29 @@ void init_module(py::module_& m) {
             "``(capacity, state_size)``. Zero-copy; aliases the "
             "C++ memory.");
 
+    py::class_<SolverSnapshot>(m, "SolverSnapshot",
+        "The COMPLETE state of a run at one instant.\n\n"
+        "`initial_state=` restores only the MNA vector and then "
+        "INVENTS the companion history from it (a capacitor gets "
+        "i_prev = 0, an inductor v_prev = 0), so resuming from it "
+        "does NOT reproduce the run — a continuous 2T RLC and a "
+        "T-then-resume differ by 2.3e-4 where a true resume is "
+        "~1e-15. A snapshot carries what was missing: the "
+        "trapezoidal companion history and the solver-owned diode "
+        "bits. Pass it as simulate(resume_from=...).")
+        .def(py::init<>())
+        .def_readwrite("t", &SolverSnapshot::t)
+        .def_readwrite("x", &SolverSnapshot::x)
+        .def_readwrite("history", &SolverSnapshot::history)
+        .def_readwrite("diode_on", &SolverSnapshot::diode_on)
+        .def_readwrite("valid", &SolverSnapshot::valid)
+        .def("__repr__", [](const SolverSnapshot& s) {
+            return "<SolverSnapshot t=" + std::to_string(s.t)
+                   + " n=" + std::to_string(s.x.size())
+                   + " history=" + std::to_string(s.history.size())
+                   + (s.valid ? " valid>" : " EMPTY>");
+        });
+
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
            const topology::Graph& graph,
@@ -1849,7 +1877,8 @@ void init_module(py::module_& m) {
            StepObserverFn step_observer,
            py::object initial_state,
            ShouldContinueFn should_continue,
-           std::shared_ptr<streaming::LiveRing> live_ring) {
+           std::shared_ptr<streaming::LiveRing> live_ring,
+           py::object resume_from_obj) {
             // Bridge.13 — detect native PWM switch_fn (NativePwm2Switch
             // / NativeMultiMaskPwm) and build a std::function lambda
             // that calls the C++ method directly, no Python __call__.
@@ -1937,6 +1966,12 @@ void init_module(py::module_& m) {
             // the std::function args are destroyed so dec_ref runs
             // with the GIL held.
             SimulationResult result;
+            SolverSnapshot resume_snap;
+            const SolverSnapshot* resume_ptr = nullptr;
+            if (!resume_from_obj.is_none()) {
+                resume_snap = resume_from_obj.cast<SolverSnapshot>();
+                resume_ptr = &resume_snap;
+            }
             {
                 py::gil_scoped_release rel;
                 result = run_transient(cache, graph, pool, opts,
@@ -1945,7 +1980,8 @@ void init_module(py::module_& m) {
                                           nl_refresh,
                                           observer_eff,
                                           x_init_ptr,
-                                          continue_eff);
+                                          continue_eff,
+                                          resume_ptr);
             }
             return result;
         },
@@ -1958,6 +1994,7 @@ void init_module(py::module_& m) {
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
+        py::arg("resume_from") = py::none(),
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
