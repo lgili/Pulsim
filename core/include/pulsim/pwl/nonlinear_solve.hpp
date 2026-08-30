@@ -394,6 +394,39 @@ using NonlinearRefreshFn = std::function<
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;
         }
+        // SCALE-RELATIVE residual acceptance. `tol_res` is
+        // ABSOLUTE, and a residual is a current: on a converter
+        // with kV nodes and kA branch currents, machine epsilon
+        // alone puts it near 1e-9, so an absolute 1e-9 can be
+        // unreachable no matter how good the answer is. Measured:
+        // an ideal-Shockley flyback with a kV leakage spike where
+        // ||dx|| had converged to 6.8e-14 — the iterate was exact
+        // to fourteen digits — while ||residual|| plateaued at
+        // 7.5e-9, which is 6e-12 RELATIVE to the equations' own
+        // scale. The fixed engine aborted that circuit even split
+        // into 64 sub-steps.
+        //
+        // So: accept when dx has converged AND the residual is at
+        // the noise floor of the system's own magnitudes. The
+        // scale is the largest |entry| of the iterate and of the
+        // assembled RHS terms, which is what the residual is a
+        // difference OF. This can only make runs that used to abort succeed;
+        // it never loosens the dx criterion, which is the one that
+        // says the ANSWER stopped moving.
+        if (last_dx_norm < tol_dx) {
+            const Real scale = std::max({
+                Real{1},
+                x.size() == 0 ? Real{0} : x.cwiseAbs().maxCoeff(),
+                seg.b_constant.size() == 0
+                    ? Real{0}
+                    : seg.b_constant.cwiseAbs().maxCoeff(),
+                b_extra.size() == 0
+                    ? Real{0}
+                    : b_extra.cwiseAbs().maxCoeff()});
+            if (last_res_norm < tol_res * scale) {
+                return x;
+            }
+        }
         // Auto-LM promotion #2: near-miss stall (GUI T1.2).
         // Residual is essentially zero (we're at a fixed point of f)
         // but `dx` plateaus above `tol_dx` — Newton's full step

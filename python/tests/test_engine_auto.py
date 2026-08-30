@@ -219,11 +219,13 @@ def test_refusals_name_the_mechanism():
     from pulsim import _pulsim as _k
     b = fresh()
     b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
-    # 'auto' would ROUTE this to the fixed engine; asking for the
-    # variable one by name gets the reason instead.
-    with pytest.raises(ValueError, match="nonlinear device"):
+    # A nonlinear diode is SERVED now (Newton per stage), so the
+    # refusal case is the one device whose companion is dt-bound.
+    b = fresh()
+    b.add_saturable_inductor("Lsat", "n1", "gnd", L_0=1e-3,
+                              I_sat=2.0, L_residual=1e-4)
+    with pytest.raises(ValueError, match="saturable"):
         p.simulate(b, t_end=1e-3, engine="trbdf2")
-    # And 'auto' with no dt says what to do about it.
     with pytest.raises(ValueError, match="pass dt="):
         p.simulate(b, t_end=1e-3, engine="auto")
 
@@ -452,14 +454,20 @@ def test_every_refusal_key_fires():
                         **kwargs)
 
 
-def test_newton_kwargs_warn_instead_of_silently_dropping():
+def test_newton_kwargs_reach_the_variable_engine():
+    """They configure the per-stage Newton loop now, so they are
+    honoured rather than warned about."""
+    from pulsim import _pulsim as _k
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "in", "gnd", 5.0)
     b.add_resistor("R", "in", "n1", 1e3)
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
     b.add_capacitor("C", "n1", "gnd", 1e-6)
-    with pytest.warns(UserWarning, match="Newton"):
-        p.simulate(b, t_end=1e-3, engine="auto",
-                    max_newton_iterations=5)
+    res = p.simulate(b, t_end=1e-3, engine="auto",
+                      max_newton_iterations=80,
+                      enable_newton_line_search=True)
+    assert res.engine_used == "trbdf2"
+    assert np.isfinite(res.v("n1")).all()
 
 
 def test_voltage_sanity_detector_runs_under_auto():
@@ -478,3 +486,102 @@ def test_voltage_sanity_detector_runs_under_auto():
 
     with pytest.warns(UserWarning, match="largest voltage"):
         p.simulate(b, t_end=3e-4, switch_fn=sf, engine="auto")
+
+
+# ---------------------------------------------------------------
+# Nonlinear devices: each stage becomes a Newton solve on the same
+# assembled companion, using the fixed engine's own refresh. They
+# are memoryless resistive I-V elements — no dt appears in their
+# re-stamp — so nothing about them cares that h varies.
+# ---------------------------------------------------------------
+
+def test_real_diode_rectifier_matches_the_fixed_reference():
+    """A Shockley-blend diode, no dt chosen, against 600k steps."""
+    from pulsim import _pulsim as _k
+
+    def build():
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("Vac", "ac", "gnd",
+                                   0.0, 10.0, 50.0, 0.0)
+        b.add_nonlinear_diode("D", "ac", "out",
+                               _k.IdealDiodeParams())
+        b.add_capacitor("Co", "out", "gnd", 100e-6)
+        b.add_resistor("Rl", "out", "gnd", 100.0)
+        return b
+
+    res = p.simulate(build(), t_end=60e-3)          # default, no dt
+    ref = p.simulate(build(), t_end=60e-3, dt=1e-7, engine="pwl")
+    assert res.engine_used == "trbdf2"
+    assert float(np.asarray(res.v("out"))[-1]) == pytest.approx(
+        float(np.asarray(ref.v("out"))[-1]), abs=1e-3)
+    # and it got there in a fraction of the steps
+    assert len(res.times) < len(ref.times) / 50
+
+
+def test_real_diode_and_mosfet_buck_matches_the_reference():
+    from pulsim import _pulsim as _k
+
+    def build():
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "in", "gnd", 48.0)
+        b.add_mosfet_with_body_diode("Q1", "in", "sw",
+                                      R_on=1e-3, R_off=1e9,
+                                      V_F=0.7)
+        b.add_nonlinear_diode("DFW", "gnd", "sw",
+                               _k.IdealDiodeParams())
+        b.add_inductor("L", "sw", "out", 22e-6)
+        b.add_capacitor("C", "out", "gnd", 100e-6)
+        b.add_resistor("R", "out", "gnd", 1.0)
+        return b
+
+    b = build()
+    pwm = p.NativePwm2Switch(10e-6, 0.5, b.graph.num_switches, True)
+    res = p.simulate(b, t_end=2e-3, switch_fn=pwm)   # no dt
+    b2 = build()
+    pwm2 = p.NativePwm2Switch(10e-6, 0.5, b2.graph.num_switches,
+                               True)
+    ref = p.simulate(b2, t_end=2e-3, dt=1e-8, switch_fn=pwm2,
+                      engine="pwl")
+    assert res.engine_used == "trbdf2"
+    assert _mean_tail(res, "out") == pytest.approx(
+        _mean_tail(ref, "out"), abs=5e-3)
+
+
+def test_saturable_inductor_is_the_one_refusal():
+    """Its Newton stamp divides by the step and its flux has no
+    snapshot/restore, so a rejected step could not be rolled
+    back."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 5.0)
+    b.add_resistor("R", "in", "n1", 1e3)
+    b.add_saturable_inductor("Lsat", "n1", "gnd", L_0=1e-3,
+                              I_sat=2.0, L_residual=1e-4)
+    with pytest.raises(ValueError, match="saturable"):
+        p.simulate(b, t_end=1e-3, engine="trbdf2")
+
+
+def test_newton_failure_shrinks_the_step_instead_of_aborting():
+    """The variable-step answer to a hard nonlinear step, which the
+    fixed engine does not have. `n_newton_retries` records it."""
+    from pulsim import _pulsim as _k
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "in", "gnd", 48.0)
+    b.add_switch("Q1", "in", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "m", 1e-3)
+    b.add_nonlinear_diode("D", "m", "out", _k.IdealDiodeParams())
+    b.add_capacitor("Co", "out", "gnd", 10e-6)
+    b.add_resistor("Ro", "out", "gnd", 20.0)
+    b.add_resistor("Rsn", "sw", "sn", 100.0)
+    b.add_capacitor("Csn", "sn", "gnd", 10e-9)
+    n = b.graph.num_switches
+    q = b.switch_index_of("Q1")
+
+    def sf(t):
+        m = p.SwitchStateMask(n)
+        m.set(q, (t % 20e-6) / 20e-6 < 0.4)
+        return m
+
+    res = p.simulate(b, t_end=5e-4, switch_fn=sf)
+    assert res.engine_used == "trbdf2"
+    assert np.isfinite(np.asarray(res.v("out"))).all()
+    assert "n_newton_retries" in res._trbdf2_stats

@@ -8,6 +8,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **Nonlinear devices on the variable-step engine.** Each TR-BDF2
+  stage becomes a Newton solve on the same assembled companion,
+  using the fixed engine's own refresh callback — which works
+  because Shockley-blend diodes and MOSFET/IGBT level-1 models are
+  memoryless resistive I-V elements: no `dt` appears in their
+  re-stamp, so nothing about them cares that `h` varies. Both
+  stages of a step share one assembly (they solve at the same
+  `dt = γh`), and Newton refactorizes `J_lin + J_nl` every
+  iteration anyway, so no factor is wasted.
+
+  Measured against the fixed engine:
+
+  | circuit (default engine, **no dt chosen**) | steps | wall | vs fixed reference |
+  |---|---|---|---|
+  | half-wave rectifier, real diode | 1 135 | 27 ms | exact to 4 digits vs 600 000 steps |
+  | buck, real diode + real MOSFET | 3 587 | 86 ms | 2.8 mV (0.012%) vs 200 000 steps |
+
+  **A Newton failure is now a step rejection**, not an abort — the
+  variable-step answer to a hard nonlinear step, which the fixed
+  engine does not have (it can only split into sub-steps and give
+  up). Recorded as `n_newton_retries`.
+
+  Saturable inductors remain the one refusal: their Newton stamp
+  divides by the step size and their flux history has no
+  snapshot/restore, so a rejected step could not be rolled back
+  and a mixed-dt answer would be committed as good.
+
+* **Newton accepts a scale-relative residual.** `tol_res` is
+  ABSOLUTE and a residual is a current, so on a converter with kV
+  nodes machine epsilon alone puts it near 1e-9 and the absolute
+  tolerance can be unreachable no matter how good the answer is.
+  Measured: an iterate exact to fourteen digits (‖dx‖ = 6.8e-14)
+  rejected over a residual of 7.5e-9, which is 6e-12 RELATIVE to
+  the equations' own scale — a circuit the FIXED engine also
+  aborted on, even split into 64 sub-steps. Convergence now also
+  accepts "dx converged AND the residual is at the noise floor of
+  the system's own magnitudes". This can only turn aborts into
+  answers; the `dx` criterion — the one that says the answer
+  stopped moving — is untouched.
+
+* **The variable engine's step floor is measured, not assumed**
+  (`span·1e-11`). Below it, shrinking makes a hard step *harder*:
+  the trap companion stamps `2C/h`, so 1e-15 s on a 47 µF cap is
+  1e11 S. A buck's freewheel commutation needs landings under
+  ~5e-13 s to stay accurate (span·1e-10 cost 1.2 mV on a 24 V
+  output; span·1e-11 and span·1e-12 are identical at 0.48 mV).
+  Diode PROBES keep their own, much smaller floor — nothing they
+  compute is committed, so they want to advance as little time as
+  possible; conflating the two cost 100× the chatter.
+
 * **`engine='auto'` is the default, and it ROUTES** (breaking).
   The one rule a user has to hold:
 

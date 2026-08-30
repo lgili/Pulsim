@@ -59,17 +59,27 @@
 //     controller restarts small — the one-step method needs
 //     nothing else.
 //
-// SCOPE (v1). Linear PWL circuits: R, L, C, transformers, switches,
-// switched diodes, every source kind (DC/PWM/sine/pulse via the
-// same b_extra overlays run_transient uses) plus a user b_extra_fn.
-// Nonlinear branches (Shockley diodes, MOSFET/IGBT L1, saturable
-// inductors) REFUSE with the mechanism named — each stage needs a
-// Newton loop those devices' companions aren't wired for yet.
+// SCOPE. R, L, C, transformers, switches, switched diodes, every
+// source kind (DC/PWM/sine/pulse via the same b_extra overlays
+// run_transient uses), a user b_extra_fn, scheduled controller
+// ticks, and NONLINEAR devices (Shockley diodes, MOSFET/IGBT L1):
+// each stage then becomes a Newton solve on the same assembled
+// companion, using the fixed engine's own refresh callback. That
+// works because those devices are memoryless resistive I-V
+// elements — no dt appears in their re-stamp, so nothing about
+// them cares that h varies.
+//
+// SATURABLE inductors are the one refusal: their Newton stamp
+// divides by the step size and their flux history has no
+// snapshot/restore, so a rejected step could not be rolled back
+// and a mixed-dt answer would be committed as good.
 
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
+#include "pulsim/pwl/nonlinear_solve.hpp"
+#include "pulsim/pwl/assemble.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/solver/result.hpp"
@@ -101,7 +111,17 @@ struct TrBdf2Options {
     /// missed entirely, exactly like dsed's dt_max. 0 = auto
     /// (span / 1000).
     Real h_max   = Real{0};
-    /// 0 = auto (span · 1e-12).
+    /// Accepted-step floor. 0 = auto (span · 1e-11).
+    ///
+    /// The value is measured, not chosen: a buck's freewheel
+    /// commutation needs landings below ~5e-13 s to stay accurate
+    /// (span·1e-10 cost 1.2 mV on a 24 V output; span·1e-11 and
+    /// span·1e-12 are identical at 0.48 mV), while going far below
+    /// that only degrades conditioning — the trap companion stamps
+    /// 2C/h, so 1e-15 s on a 47 µF capacitor is 1e11 S and the
+    /// solve stops meaning anything. Note this is the floor for a
+    /// COMMITTED step; diode PROBES have their own, much smaller,
+    /// because nothing they compute is kept.
     Real h_min   = Real{0};
     Size max_steps = Size{10'000'000};
     Size max_event_iterations = Size{16};
@@ -111,6 +131,13 @@ struct TrBdf2Options {
     /// samples on, instead of "whichever step happened to cross
     /// the boundary". 0 = no controller ticks.
     Real observer_period = Real{0};
+    /// Newton settings, used only when the circuit has nonlinear
+    /// devices. Same knobs and defaults as the fixed engine.
+    Size max_newton_iterations = Size{50};
+    Real tol_newton_dx  = Real{1e-9};
+    Real tol_newton_res = Real{1e-9};
+    bool enable_newton_line_search = false;
+    bool enable_newton_lm = false;
 };
 
 struct TrBdf2Stats {
@@ -133,6 +160,10 @@ struct TrBdf2Stats {
     /// observer DRIFTS and loses ticks: measured 198 of 200 on a
     /// 10 kHz loop at dt = 2 µs).
     Size n_ctrl_ticks = 0;
+    /// Steps retaken at a smaller h because Newton did not
+    /// converge — the variable-step engine's answer to a hard
+    /// nonlinear step, where the fixed one can only abort.
+    Size n_newton_retries = 0;
 };
 
 namespace detail_trbdf2 {
@@ -181,7 +212,11 @@ inline SimulationResult run_transient_trbdf2(
     /// (the fixed engine's step_observer contract, on an exact
     /// cadence).
     const std::function<void(Real, const Vector&)>& observer_fn =
-        {}) {
+        {},
+    /// Per-Newton-iteration re-stamp of the nonlinear devices —
+    /// the SAME callback the fixed-step engine uses. When present
+    /// every stage solve becomes a Newton solve.
+    const pwl::NonlinearRefreshFn& nl_refresh = {}) {
     using topology::SwitchStateMask;
 
     if (!(opts.t_end > opts.t_start)) {
@@ -194,17 +229,39 @@ inline SimulationResult run_transient_trbdf2(
             "all-open mask function for uncontrolled circuits)");
     }
 
-    // ---- scope census: refuse what the stages cannot integrate ----
+    // ---- scope census ----
+    // Nonlinear devices are fine: each stage becomes a Newton
+    // solve on the same companion matrix (they are memoryless
+    // resistive I-V elements — no dt appears in their refresh, so
+    // nothing about them cares that h varies). A SATURABLE
+    // inductor is the exception: its Newton stamp divides by the
+    // step and its flux history has no snapshot/restore, so it
+    // cannot be rolled back when a step is rejected.
+    bool has_nonlinear = false;
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
         if (graph.branch(b_id).kind
-            == topology::BranchKind::Nonlinear) {
-            throw std::invalid_argument(
-                "run_transient_trbdf2: branch " + std::to_string(b_id)
-                + " is a NONLINEAR device. The TR-BDF2 stages are "
-                  "linear solves; a nonlinear companion needs a "
-                  "Newton loop per stage that is not wired yet. Use "
-                  "engine='pwl' (fixed dt) for this circuit.");
+            != topology::BranchKind::Nonlinear) {
+            continue;
         }
+        has_nonlinear = true;
+        if (pool.kind_of(b_id)
+            == pwl::DevicePool::StoredKind::SaturableInductor) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2: branch "
+                + std::to_string(b_id)
+                + " is a SATURABLE inductor. Its Newton stamp "
+                  "divides by the step size and its flux history "
+                  "cannot be rolled back when a step is rejected, "
+                  "so a variable step would commit a mixed-dt "
+                  "answer. Use engine='pwl' (fixed dt).");
+        }
+    }
+    if (has_nonlinear && !nl_refresh) {
+        throw std::invalid_argument(
+            "run_transient_trbdf2: the circuit has nonlinear "
+            "devices but no nonlinear-refresh callback was "
+            "supplied — the stages would solve the linear "
+            "skeleton and silently return the wrong answer.");
     }
 
     const Real span  = opts.t_end - opts.t_start;
@@ -257,7 +314,16 @@ inline SimulationResult run_transient_trbdf2(
     const Real h_max = opts.h_max > Real{0} ? opts.h_max
                                              : h_default;
     const Real h_min = opts.h_min > Real{0} ? opts.h_min
-                                             : span * Real{1e-12};
+                                             : span * Real{1e-11};
+    // Probe steps are a DIFFERENT quantity from the step floor.
+    // A probe is a throwaway solve whose only job is to pin (v, i)
+    // and ask the diodes which way they conduct — nothing is
+    // committed, so it wants to advance as little time as
+    // possible. The accepted-step floor wants the opposite (a
+    // committed step at 2C/h = 1e11 S is meaningless). Conflating
+    // them cost 1.2 mV and 100x the chatter on a buck when the
+    // step floor was raised.
+    const Real h_probe_floor = std::min(h_min, span * Real{1e-12});
     const Real gamma = pwl::HistoryState::trbdf2_gamma();
     const Real c1    = pwl::HistoryState::trbdf2_c1();
     const Real c2    = pwl::HistoryState::trbdf2_c2();
@@ -325,6 +391,57 @@ inline SimulationResult run_transient_trbdf2(
         }
     };
 
+    // ---- the single solve point ----
+    // Linear circuits go through the cache (one numeric factor per
+    // (mask, dt), symbolic analysis retained). With nonlinear
+    // devices each solve becomes a Newton loop on an assembled
+    // companion — no factor is wasted, because Newton refactorizes
+    // J_lin + J_nl every iteration anyway, so the segment is only
+    // a carrier for (J, b). Both TR-BDF2 stages of a step use the
+    // SAME dt = γh, so the assembly is reused between them.
+    std::string newton_last_error;
+    pwl::PwlSegment nl_seg;
+    Real nl_seg_dt = Real{-1};
+    topology::SwitchStateMask nl_seg_mask(
+        static_cast<std::size_t>(graph.num_switches()));
+    bool nl_seg_valid = false;
+    // Returns false when Newton did not converge. The caller
+    // REJECTS the step and shrinks h — which is a thing only a
+    // variable-step engine can do, and it is why this engine
+    // finishes circuits the fixed one aborts on (measured: an
+    // ideal-Shockley flyback with a kV leakage spike, which the
+    // fixed engine cannot take even split into 64 sub-steps).
+    auto solve_dispatch = [&](const topology::SwitchStateMask& m,
+                               Real dt_use, const Vector& b_ex,
+                               Vector& out_x) -> bool {
+        if (!nl_refresh) {
+            cache.solve_at(m, dt_use, b_ex, out_x);
+            return true;
+        }
+        if (!nl_seg_valid || nl_seg_dt != dt_use
+            || !(nl_seg_mask == m)) {
+            pwl::assemble_segment(graph, pool, m, dt_use,
+                                   nl_seg.J, nl_seg.b_constant);
+            sparse::compress_in_place(nl_seg.J);
+            nl_seg.state_size = state_size;
+            nl_seg_dt = dt_use;
+            nl_seg_mask = m;
+            nl_seg_valid = true;
+        }
+        try {
+            out_x = pwl::solve_with_newton_b_extra(
+                nl_seg, nl_refresh, graph, pool, /*x_init=*/out_x,
+                b_ex, opts.max_newton_iterations,
+                opts.tol_newton_dx, opts.tol_newton_res,
+                opts.enable_newton_line_search,
+                opts.enable_newton_lm);
+        } catch (const std::runtime_error& e) {
+            newton_last_error = e.what();
+            return false;
+        }
+        return true;
+    };
+
     auto mask_at = [&](Real at_t) {
         SwitchStateMask m = switch_fn(at_t);
         if (has_diodes) {
@@ -338,12 +455,13 @@ inline SimulationResult run_transient_trbdf2(
     // used for event localization trials, the event-landing
     // sub-step, and the zero-time initial-bit settle.
     auto trap_solve = [&](const SwitchStateMask& m, Real t0, Real dt,
-                           Vector& out_x) {
+                           Vector& out_x) -> bool {
         history.compute_b_extra(dt, b_stage);
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;
-        cache.solve_at(m, dt, b_stage, out_x);
+        const bool ok = solve_dispatch(m, dt, b_stage, out_x);
         if (stats_out) { ++stats_out->n_solves; }
+        return ok;
     };
 
     // ---- consistent initial diode bits (zero-time settle) ----
@@ -351,7 +469,7 @@ inline SimulationResult run_transient_trbdf2(
     // the network which diodes conduct; iterate to a fixed point,
     // exactly run_transient's per-step event iteration at t_start.
     if (has_diodes) {
-        const Real h_probe = std::max(h_min, span * Real{1e-9});
+        const Real h_probe = h_probe_floor;
         for (Size it = 0; it < opts.max_event_iterations; ++it) {
             trap_solve(mask_at(opts.t_start), opts.t_start, h_probe,
                         x_trial);
@@ -523,15 +641,37 @@ inline SimulationResult run_transient_trbdf2(
             history.compute_b_extra(hg, b_stage);
             accumulate_sources(t + hg, b_src);
             b_stage += b_src;
-            cache.solve_at(mask_step, hg, b_stage, x_g);
+            x_g = x;                 // Newton warm start
+            bool stage_ok =
+                solve_dispatch(mask_step, hg, b_stage, x_g);
             ++st.n_solves;
 
             // ---- stage 2: BDF2 over the remainder, SAME factor ----
             history.compute_b_extra_trbdf2_stage2(h, x_g, b_stage);
             accumulate_sources(t + h, b_src);
             b_stage += b_src;
-            cache.solve_at(mask_step, hg, b_stage, x_1);
-            ++st.n_solves;
+            if (stage_ok) {
+                x_1 = x_g;           // Newton warm start
+                stage_ok =
+                    solve_dispatch(mask_step, hg, b_stage, x_1);
+                ++st.n_solves;
+            }
+            if (!stage_ok) {
+                // Newton did not converge at this h. Shrink and
+                // retake — the variable-step answer to a hard
+                // nonlinear step.
+                ++st.n_reject;
+                ++st.n_newton_retries;
+                if (h <= h_min * Real{1.0001}) {
+                    throw std::runtime_error(
+                        "run_transient_trbdf2: Newton failed at t = "
+                        + std::to_string(t)
+                        + " with h already at h_min — "
+                        + newton_last_error);
+                }
+                h = std::max(h * Real{0.25}, h_min);
+                continue;
+            }
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
@@ -687,7 +827,9 @@ inline SimulationResult run_transient_trbdf2(
                             for (Size it2 = 0;
                                  it2 < opts.max_event_iterations;
                                  ++it2) {
-                                trap_solve(mask_at(t), t, dt_floor,
+                                // Probe, not a committed step.
+                                trap_solve(mask_at(t), t,
+                                            h_probe_floor,
                                             x_trial);
                                 if (!diodes.update_from_state(
                                         x_trial)) {
@@ -789,7 +931,8 @@ inline SimulationResult run_transient_trbdf2(
                     // remaining diodes, tiny-dt trap pins state).
                     if (flipped) {
                         const Real h_zero =
-                            std::max(h_min, dt_land * Real{1e-6});
+                            std::max(h_probe_floor,
+                                      dt_land * Real{1e-6});
                         for (Size it2 = 0;
                              it2 < opts.max_event_iterations;
                              ++it2) {
@@ -865,7 +1008,7 @@ inline SimulationResult run_transient_trbdf2(
                     // mask; nothing is committed.
                     if (has_diodes) {
                         const Real h_probe =
-                            std::max(h_min, h * Real{1e-6});
+                            std::max(h_probe_floor, h * Real{1e-6});
                         for (Size it = 0;
                              it < opts.max_event_iterations;
                              ++it) {
