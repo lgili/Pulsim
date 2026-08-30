@@ -1801,27 +1801,13 @@ def simulate(
         # Every unsupported combination was already caught by
         # _trbdf2_blockers above (which is also what routes
         # engine='auto' away from here).
-        _auto_ignored = {
-            k: v for k, v in (
-                ("max_newton_iterations",
-                 max_newton_iterations or None),
-                ("tol_newton_dx", tol_newton_dx),
-                ("tol_newton_res", tol_newton_res),
-                ("enable_newton_line_search",
-                 enable_newton_line_search),
-                ("enable_newton_lm", enable_newton_lm),
-                ("enable_nonlinear_refresh", enable_nonlinear_refresh),
-                ("integrator", integrator),
-            ) if v is not None
-        }
-        if _auto_ignored:
+        if integrator is not None:
             import warnings
             warnings.warn(
-                "simulate(engine='auto'): "
-                f"{sorted(_auto_ignored)} configure the Newton "
-                "loop, which this engine's linear stages do not "
-                "run (nonlinear devices are refused outright). "
-                "They are ignored here.",
+                f"simulate(engine={_engine_asked!r}): integrator= "
+                "selects a dsed integrator and is ignored by the "
+                "variable-step engine, which is TR-BDF2 by "
+                "construction.",
                 stacklevel=2)
         # ---- controllers on an EXACT cadence ----
         # A digital controller samples at k·T_ctrl. The fixed
@@ -1892,6 +1878,9 @@ def simulate(
                         m = m | _f(t)
                     return m
 
+        _auto_nl = (enable_nonlinear_refresh
+                     if enable_nonlinear_refresh is not None
+                     else builder.pool.has_nonlinear_devices())
         _span = float(t_end) - float(t_start)
         # 0 = let the kernel pick: it knows the circuit's fastest
         # periodic source and caps the ceiling at 20 steps per
@@ -1931,6 +1920,13 @@ def simulate(
                 should_continue=should_continue,
                 observer_period=_auto_period,
                 step_observer=_auto_observer,
+                enable_nonlinear_refresh=_auto_nl,
+                max_newton_iterations=int(max_newton_iterations or 0),
+                tol_newton_dx=float(tol_newton_dx or 0.0),
+                tol_newton_res=float(tol_newton_res or 0.0),
+                enable_newton_line_search=bool(
+                    enable_newton_line_search),
+                enable_newton_lm=bool(enable_newton_lm),
             )
         except SimulationAborted as _aborted:
             try:
@@ -2674,13 +2670,24 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     why = []
     try:
         from ._pulsim import BranchKind as _BK  # type: ignore
-        n_nl = sum(1 for br in builder.graph.branches
-                    if br.get("kind") == _BK.Nonlinear)
-        if n_nl:
+        n_sat = 0
+        for br in builder.graph.branches:
+            if br.get("kind") != _BK.Nonlinear:
+                continue
+            # Nonlinear diodes / MOSFETs / IGBTs are fine — each
+            # stage becomes a Newton solve on the same companion,
+            # and their re-stamp has no dt in it. A SATURABLE
+            # inductor's does, and its flux cannot be rolled back
+            # when a step is rejected.
+            if str(builder.pool.kind_of(br["id"])).endswith(
+                    "SaturableInductor"):
+                n_sat += 1
+        if n_sat:
             why.append(
-                f"{n_nl} nonlinear device(s) — the TR-BDF2 stages "
-                "are linear solves; a Newton loop per stage is not "
-                "wired yet")
+                f"{n_sat} saturable inductor(s) — their Newton "
+                "stamp divides by the step size and their flux "
+                "history cannot be rolled back when a step is "
+                "rejected")
     except Exception:  # pragma: no cover — never block on a probe
         pass
     if getattr(builder, "_c_blocks", None):

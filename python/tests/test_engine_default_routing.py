@@ -32,10 +32,19 @@ def _rc():
     return b
 
 
-def _rc_nonlinear():
+def _rc_unsupported():
+    """A circuit the variable-step engine genuinely cannot serve.
+
+    Nonlinear diodes and MOSFETs ARE served (each stage becomes a
+    Newton solve). A saturable inductor is the real blocker: its
+    Newton stamp divides by the step size and its flux history has
+    no snapshot/restore, so a rejected step could not be rolled
+    back.
+    """
     b = _rc()
-    from pulsim import _pulsim as _k
-    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    b.add_saturable_inductor("Lsat", "n1", "gnd",
+                              L_0=1e-3, I_sat=2.0,
+                              L_residual=1e-4)
     return b
 
 
@@ -70,24 +79,34 @@ def test_explicit_dt_still_means_fixed_step():
                            np.asarray(ref.states))
 
 
+def test_nonlinear_devices_are_served_not_routed_away():
+    """Newton per stage: a real diode no longer sends a run to the
+    fixed engine."""
+    from pulsim import _pulsim as _k
+    b = _rc()
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    res = p.simulate(b, t_end=1e-3)          # no dt
+    assert res.engine_used == "trbdf2"
+
+
 def test_unsupported_circuit_routes_and_says_why():
-    res = p.simulate(_rc_nonlinear(), t_end=1e-3, dt=1e-6)
+    res = p.simulate(_rc_unsupported(), t_end=1e-3, dt=1e-6)
     assert res.engine_used == "pwl"
-    assert "nonlinear" in res.engine_route_reason
+    assert "saturable" in res.engine_route_reason
 
 
 def test_unsupported_and_no_dt_asks_for_one():
     with pytest.raises(ValueError) as e:
-        p.simulate(_rc_nonlinear(), t_end=1e-3)
+        p.simulate(_rc_unsupported(), t_end=1e-3)
     msg = str(e.value)
-    assert "nonlinear" in msg          # the blocker, named
+    assert "saturable" in msg          # the blocker, named
     assert "pass dt=" in msg           # and what to do about it
 
 
 def test_trbdf2_refuses_where_auto_routes():
     """Naming the engine means you want to KNOW."""
-    with pytest.raises(ValueError, match="nonlinear"):
-        p.simulate(_rc_nonlinear(), t_end=1e-3, dt=1e-6,
+    with pytest.raises(ValueError, match="saturable"):
+        p.simulate(_rc_unsupported(), t_end=1e-3, dt=1e-6,
                     engine="trbdf2")
 
 

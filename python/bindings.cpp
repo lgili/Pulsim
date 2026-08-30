@@ -3217,7 +3217,11 @@ void init_module(py::module_& m) {
            Size max_event_iterations,
            solver::ShouldContinueFn should_continue,
            Real observer_period,
-           py::object observer_obj) {
+           py::object observer_obj,
+           bool enable_nonlinear_refresh,
+           Size max_newton_iterations,
+           Real tol_newton_dx, Real tol_newton_res,
+           bool enable_newton_line_search, bool enable_newton_lm) {
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -3229,6 +3233,22 @@ void init_module(py::module_& m) {
                 o.max_event_iterations = max_event_iterations;
             }
             o.observer_period = observer_period;
+            if (max_newton_iterations > 0) {
+                o.max_newton_iterations = max_newton_iterations;
+            }
+            if (tol_newton_dx > Real{0}) {
+                o.tol_newton_dx = tol_newton_dx;
+            }
+            if (tol_newton_res > Real{0}) {
+                o.tol_newton_res = tol_newton_res;
+            }
+            o.enable_newton_line_search = enable_newton_line_search;
+            o.enable_newton_lm = enable_newton_lm;
+            pwl::NonlinearRefreshFn nl_refresh{};
+            if (enable_nonlinear_refresh) {
+                nl_refresh =
+                    pwl::make_combined_diode_mosfet_refresh();
+            }
             std::optional<Vector> x0;
             if (!initial_state.is_none()) {
                 x0 = initial_state.cast<Vector>();
@@ -3281,7 +3301,7 @@ void init_module(py::module_& m) {
                 res = solver::run_transient_trbdf2(
                     cache, graph, pool, o, switch_fn, b_extra_fn,
                     x0, &st, next_edge_fn, should_continue,
-                    observer_fn);
+                    observer_fn, nl_refresh);
             }
             py::dict d;
             d["n_accept"]       = st.n_accept;
@@ -3292,6 +3312,7 @@ void init_module(py::module_& m) {
             d["n_chatter_breaks"] = st.n_chatter_breaks;
             d["n_forced_accepts"] = st.n_forced_accepts;
             d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
+            d["n_newton_retries"] = st.n_newton_retries;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
@@ -3305,6 +3326,12 @@ void init_module(py::module_& m) {
         py::arg("should_continue") = solver::ShouldContinueFn{},
         py::arg("observer_period") = Real{0},
         py::arg("step_observer") = py::none(),
+        py::arg("enable_nonlinear_refresh") = false,
+        py::arg("max_newton_iterations") = Size{0},
+        py::arg("tol_newton_dx") = Real{0},
+        py::arg("tol_newton_res") = Real{0},
+        py::arg("enable_newton_line_search") = false,
+        py::arg("enable_newton_lm") = false,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
