@@ -389,6 +389,13 @@ from .mmc import (
     make_mmc_arm_detailed_observers,  # noqa: F401
 )
 
+# v2.0 Phase 4 — periodic steady state by shooting on the
+# monodromy map (audit F.2).
+from .steady_state import (
+    steady_state,  # noqa: F401
+    SteadyStateResult,  # noqa: F401
+)
+
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
 # scoped names (audit A.7). Pure builder-level; the kernel never
 # learns about hierarchy because instantiation FLATTENS.
