@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Phase 4 — fidelity and product
+
+* **A run's complete state, and `resume_from=` that is exact**
+  (audit F.3) — and the latent defect it exposes.
+
+  `initial_state=` restores the MNA vector and then **invents**
+  the companion history from it (`seed_from_dc_op` gives a
+  capacitor `i_prev = 0` and an inductor `v_prev = 0`). Those are
+  not the state: each dynamic device carries an *independent*
+  `(v, i)` pair. So resuming from `x` alone does not reproduce
+  the run — silently. Measured on a minimal RLC, continuous 2T
+  versus T-then-resume:
+
+  | | max ‖Δx‖ vs the continuous run |
+  |---|---|
+  | `initial_state=x(T)` | **2.3e-4** |
+  | `resume_from=snapshot` | **0** (bit-identical) |
+
+  `result.final_snapshot` now carries what was missing — the
+  trapezoidal companion history (2 reals per dynamic device) and
+  the solver-owned diode on-bits, which a mask cannot rebuild —
+  and `simulate(resume_from=...)` restores it. Resuming continues
+  TIME as well: `t_start` defaults to the snapshot's `t`, without
+  which a sine source restarts from phase zero and the "resumed"
+  segment silently sees a different waveform (that is how the
+  rectifier test caught it).
+
+  This makes the "run 1 s, save the point, start every study
+  there" workflow correct for the first time, and it is the
+  prerequisite for shooting-based steady state (F.2): the
+  one-period map is a function of the FULL state, so a monodromy
+  built on `x` alone converges to the fixed point of a *different*
+  dynamical system — one that resets its companion history every
+  period. That was found by iterating the map: its fixed point
+  was stable to 1e-15 across six periods and still disagreed with
+  the converged brute-force answer by 0.14%.
+
 ### Phase 3 — the unified engine
 
 * **Subsystems: define once, instantiate many, scoped names**

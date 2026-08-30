@@ -273,7 +273,12 @@ inline SimulationResult run_transient(
     const pwl::NonlinearRefreshFn& nl_refresh = {},
     const StepObserverFn& step_observer = {},
     const Vector* initial_state = nullptr,
-    const ShouldContinueFn& should_continue = {}) {
+    const ShouldContinueFn& should_continue = {},
+    /// v2.0 Phase 4 — resume EXACTLY from a previous run's
+    /// `final_snapshot`. Unlike `initial_state`, which restores x
+    /// and INVENTS the companion history from it, this restores
+    /// the history and the solver-owned diode bits too.
+    const SolverSnapshot* resume_from = nullptr) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -334,6 +339,23 @@ inline SimulationResult run_transient(
     // V17: saturable inductors carry their own (i_L, V_L)_old
     // history, since they need it in the Newton refresh (not
     // just as a pre-computed b_extra). Initialise to zero.
+    const SolverSnapshot* resume_snap =
+        (resume_from != nullptr && resume_from->valid)
+            ? resume_from : nullptr;
+    if (resume_snap != nullptr) {
+        if (resume_from->x.size() != static_cast<Index>(state_size)) {
+            throw std::invalid_argument(
+                "run_transient(resume_from=...): the snapshot's "
+                "state vector has " +
+                std::to_string(resume_from->x.size()) +
+                " entries but this circuit has " +
+                std::to_string(state_size)
+                + " — it belongs to a different circuit.");
+        }
+        x = resume_from->x;
+        history.from_flat(resume_from->history);
+    }
+
     pwl::SaturableInductorHistory sat_history;
     sat_history.init(graph, pool);
     // Warm-start: seed the saturable-inductor (i_L_old, V_L_old) from
@@ -1461,6 +1483,17 @@ inline SimulationResult run_transient(
         throw SimulationAborted(e.what(), std::move(result),
                                  t_reached);
     }
+
+    // v2.0 Phase 4 — the complete state at the end, so a follow-up
+    // run can resume EXACTLY rather than re-deriving the companion
+    // history from x (which is not the state and does not
+    // reproduce the run).
+    result.final_snapshot.t = t_reached;
+    result.final_snapshot.x = x;
+    result.final_snapshot.history = history.to_flat();
+    result.final_snapshot.diode_on =
+        has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
+    result.final_snapshot.valid = true;
 
     return result;
 }
