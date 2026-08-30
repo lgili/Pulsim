@@ -79,6 +79,8 @@
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
+#include "pulsim/pwl/nonlinear_capacitor_history.hpp"
+#include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
@@ -245,21 +247,6 @@ inline SimulationResult run_transient_trbdf2(
         }
         has_nonlinear = true;
         if (pool.kind_of(b_id)
-            == pwl::DevicePool::StoredKind::NonlinearCapacitor) {
-            throw std::invalid_argument(
-                "run_transient_trbdf2: branch "
-                + std::to_string(b_id)
-                + " is a charge-based nonlinear capacitor. Its "
-                  "conductance carries over to the BDF2 stage "
-                  "unchanged (c1/h = 2/gamma*h is the identity "
-                  "this method rests on), but the CHARGE history "
-                  "term there is (c1*Q(v) + c2*Q_gamma + "
-                  "c3*Q_n)/h, not the trapezoidal one — stamping "
-                  "the trap rule in a BDF2 stage would look "
-                  "plausible and be wrong. Use engine='pwl' "
-                  "(fixed dt), which is exact for it.");
-        }
-        if (pool.kind_of(b_id)
             == pwl::DevicePool::StoredKind::SaturableInductor) {
             throw std::invalid_argument(
                 "run_transient_trbdf2: branch "
@@ -271,7 +258,20 @@ inline SimulationResult run_transient_trbdf2(
                   "answer. Use engine='pwl' (fixed dt).");
         }
     }
-    if (has_nonlinear && !nl_refresh) {
+    // A charge-based Coss brings its own refresh (wired below), so
+    // it does not need one from the caller; every other nonlinear
+    // device does.
+    bool has_only_coss = has_nonlinear;
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        if (graph.branch(b_id).kind
+                == topology::BranchKind::Nonlinear
+            && pool.kind_of(b_id)
+                != pwl::DevicePool::StoredKind::NonlinearCapacitor) {
+            has_only_coss = false;
+            break;
+        }
+    }
+    if (has_nonlinear && !nl_refresh && !has_only_coss) {
         throw std::invalid_argument(
             "run_transient_trbdf2: the circuit has nonlinear "
             "devices but no nonlinear-refresh callback was "
@@ -414,6 +414,70 @@ inline SimulationResult run_transient_trbdf2(
     // J_lin + J_nl every iteration anyway, so the segment is only
     // a carrier for (J, b). Both TR-BDF2 stages of a step use the
     // SAME dt = γh, so the assembly is reused between them.
+    // ---- charge-based Coss across the two stages ----
+    // Stage 1 is trapezoidal at gamma*h; stage 2 needs the BDF2
+    // CHARGE history term. The conductance is identical in both
+    // (c1/h = 2/(gamma*h)), which is why one factor still serves
+    // the pair — but the history term is not, and stamping the
+    // trapezoidal one in a BDF2 stage would converge to the wrong
+    // answer with every outward sign of health.
+    pwl::NonlinearCapacitorHistory coss;
+    coss.init(graph, pool);
+    if (initial_state.has_value()) {
+        coss.seed_from_dc_op(x);
+    }
+    const bool has_coss = !coss.empty();
+    std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
+    std::vector<Real> q_gamma(coss.entries().size(), Real{0});
+    auto coss_stage = pwl::CossStage::Trapezoidal;
+    Real coss_h = Real{0};
+    // Commit a Coss step under the BDF2 rule the stage actually
+    // used — never re-derived from C(v)dv/dt, which would not
+    // conserve charge.
+    auto commit_coss = [&](const Vector& x_end, Real h_full) {
+        const Real c1 = Real{2} + std::sqrt(Real{2});
+        const Real gam = Real{2} - std::sqrt(Real{2});
+        const Real rho = (Real{1} - gam) / gam;
+        const Real c2 = -(Real{1} + rho) / (Real{1} - gam);
+        const Real c3 = Real{1} / std::sqrt(Real{2});
+        Size qi = 0;
+        auto snap = coss.snapshot();
+        for (auto& e : snap) {
+            const Real v =
+                stamping::read_node_voltage(x_end, e.from)
+                - stamping::read_node_voltage(x_end, e.to);
+            const Real q =
+                models::NonlinearCapacitor::charge(e.params, v);
+            e.i_prev = (c1 * q + c2 * q_gamma[qi] + c3 * e.q_prev)
+                       / h_full;
+            e.v_prev = v;
+            e.q_prev = q;
+            ++qi;
+        }
+        coss.restore(snap);
+    };
+
+    pwl::NonlinearRefreshFn nl_effective = nl_refresh;
+    if (has_coss) {
+        nl_effective =
+            [user = nl_refresh, &coss, &q_gamma, &coss_stage,
+             &coss_h](const Vector& xx, sparse::Matrix& J_nl,
+                        Vector& f_nl, const topology::Graph& g,
+                        const pwl::DevicePool& pp) -> Real {
+                Real m = Real{0};
+                if (user) {
+                    m = user(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(
+                    m, pwl::refresh_nonlinear_capacitors(
+                           xx, J_nl, f_nl, coss, coss_h,
+                           coss_stage, &q_gamma));
+            };
+    }
+
     std::string newton_last_error;
     pwl::PwlSegment nl_seg;
     Real nl_seg_dt = Real{-1};
@@ -429,7 +493,7 @@ inline SimulationResult run_transient_trbdf2(
     auto solve_dispatch = [&](const topology::SwitchStateMask& m,
                                Real dt_use, const Vector& b_ex,
                                Vector& out_x) -> bool {
-        if (!nl_refresh) {
+        if (!nl_effective) {
             cache.solve_at(m, dt_use, b_ex, out_x);
             return true;
         }
@@ -445,7 +509,7 @@ inline SimulationResult run_transient_trbdf2(
         }
         try {
             out_x = pwl::solve_with_newton_b_extra(
-                nl_seg, nl_refresh, graph, pool, /*x_init=*/out_x,
+                nl_seg, nl_effective, graph, pool, /*x_init=*/out_x,
                 b_ex, opts.max_newton_iterations,
                 opts.tol_newton_dx, opts.tol_newton_res,
                 opts.enable_newton_line_search,
@@ -657,6 +721,8 @@ inline SimulationResult run_transient_trbdf2(
             accumulate_sources(t + hg, b_src);
             b_stage += b_src;
             x_g = x;                 // Newton warm start
+            coss_stage = pwl::CossStage::Trapezoidal;
+            coss_h = hg;
             bool stage_ok =
                 solve_dispatch(mask_step, hg, b_stage, x_g);
             ++st.n_solves;
@@ -666,6 +732,22 @@ inline SimulationResult run_transient_trbdf2(
             accumulate_sources(t + h, b_src);
             b_stage += b_src;
             if (stage_ok) {
+                if (has_coss) {
+                    // Q at the stage point feeds the BDF2 history
+                    // term; h is the FULL step there, while the
+                    // matrix is still the one factored at gamma*h.
+                    Size qi = 0;
+                    for (const auto& e : coss.entries()) {
+                        const Real vg =
+                            stamping::read_node_voltage(x_g, e.from)
+                            - stamping::read_node_voltage(x_g, e.to);
+                        q_gamma[qi++] =
+                            models::NonlinearCapacitor::charge(
+                                e.params, vg);
+                    }
+                    coss_stage = pwl::CossStage::Bdf2Stage2;
+                    coss_h = h;
+                }
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
@@ -990,6 +1072,9 @@ inline SimulationResult run_transient_trbdf2(
             if (!commutated) {
                 // ---- accept ----
                 history.commit_trbdf2(x_1, h, x_g);
+                if (has_coss) {
+                    commit_coss(x_1, h);
+                }
                 x = x_1;
                 t += h;
                 result.times.push_back(t);
