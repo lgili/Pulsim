@@ -389,6 +389,16 @@ from .mmc import (
     make_mmc_arm_detailed_observers,  # noqa: F401
 )
 
+# v2.0 Phase 3 — subsystems: define once, instantiate many, with
+# scoped names (audit A.7). Pure builder-level; the kernel never
+# learns about hierarchy because instantiation FLATTENS.
+from .subsystem import (
+    Subsystem,  # noqa: F401
+    SubsystemInstance,  # noqa: F401
+    ScopedBuilder,  # noqa: F401
+    define_subsystem,  # noqa: F401
+)
+
 # v2.0 Phase 3 — GGJ Thevenin arm (exact aggregation; supersedes the
 # delayed co-simulation L3 path for fixed-step pwl runs).
 from .mmc_thevenin import (

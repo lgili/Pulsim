@@ -8,6 +8,69 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 3 — the unified engine
 
+* **Subsystems: define once, instantiate many, scoped names**
+  (audit A.7) — and **duplicate device names are now refused**
+  (breaking).
+
+  ```python
+  sm = p.define_subsystem("HalfBridgeSM", ports=("top", "bot"),
+                           params={"C": 2e-3, "r_on": 1e-3})
+
+  @sm.body
+  def _(s):
+      s.add_switch("Sb", "top", "bot", 1 / s.p.r_on, 1e-9)
+      s.add_switch("Si", "top", "m",   1 / s.p.r_on, 1e-9)
+      s.add_capacitor("C", "m", "bot", s.p.C)
+
+  for i in range(100):
+      sm.instantiate(b, f"leg_a/sm{i}", top=prev, bot=node)
+  ```
+
+  Ports BIND to the caller's nets (no node is created); anything
+  else in the body is internal and gets scoped, so `m` becomes
+  `leg_a/sm17/m` and the capacitor becomes `leg_a/sm17/C`.
+  Instances nest: a `Leg` whose body instantiates `SM` composes
+  paths automatically.
+
+  **Instantiation flattens, so the kernel never learns about
+  hierarchy** — the scoped string simply IS the device's name.
+  That is why nothing downstream had to change: `res.v(
+  "leg_a/sm1/m")`, `res.i("leg_a/sm1/C")`, `switch_index_of` and
+  every named diagnostic already speak the path. The audit's
+  "diagnóstico não diz 'dentro do SM17'" is answered for free —
+  a run now reports *"node **block7/mid** reached 1.412e+05 V"*.
+
+  The rewrite rule is one sentence, and it is safe because every
+  circuit-level `add_*` has the shape `(name, node…, numeric
+  values…)`: the first string is the device name and gets the
+  path; every other string is a net, resolved as port → caller's
+  net, ground alias → unchanged, otherwise → scoped.
+
+  **Duplicate names now raise.** They were accepted silently:
+  `branch_id_of` returned the FIRST match, so the second device
+  was unreachable by name for the rest of the run and the first
+  answered for it in every accessor, trace and diagnostic.
+  Instancing makes that a hundred devices per typo'd path. No
+  existing test depended on the old behaviour.
+
+  Two things a terrain survey caught after the first cut, both
+  now fixed and pinned:
+
+  * **Ground is whatever the kernel says it is.** The first
+    version hard-coded an alias set including `"ground"`, which
+    the C++ builder does NOT treat as ground — so every
+    instance's `"ground"` collapsed onto one ordinary floating
+    node, silently shorting the instances together. `net()` asks
+    the builder now, and cannot drift from it.
+  * **The build stays linear.** A scan-per-`add` duplicate check
+    made construction quadratic (4× the cells cost 7× the time;
+    8.6 ms for 2401 branches). A name index fixes that *and*
+    `branch_id_of`, which was itself an O(num_branches) scan:
+    build is now proportional (0.3 / 1.2 / 2.3 / 4.5 ms for
+    301 / 1201 / 2401 / 4801 branches) and name lookup is flat at
+    0.5 µs regardless of circuit size. "Circuits of any size" is
+    the point, so this is part of the feature, not a footnote.
+
 * **Nonlinear devices on the variable-step engine.** Each TR-BDF2
   stage becomes a Newton solve on the same assembled companion,
   using the fixed engine's own refresh callback — which works
