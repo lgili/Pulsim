@@ -8,6 +8,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **`steady_state()` — the periodic operating point by shooting on
+  the monodromy map** (audit F.2).
+
+  The one-period map is AFFINE while the switching pattern holds,
+  so the periodic orbit is one linear solve, `(I − Φ) h* = c`,
+  with no shooting iteration at all. Measured on a 100 kHz buck:
+  **16 ms and 7 one-period runs**, against **9.5 s** of
+  brute-force settling — 595× — with a one-period residual of
+  8e-10, and 100 periods from the answer move it by 1.7e-10.
+
+  `result.snapshot` plugs straight into `simulate(resume_from=…)`,
+  so a study starts IN steady state instead of paying for the
+  transient. `floquet_radius` comes out for free: the buck's is
+  0.997, i.e. a 350-period settling time constant — which is why
+  the brute force is still 0.1% out after 2000 periods and the
+  shooting answer is the *more* accurate one, not just the faster.
+
+  Three things it refuses rather than answers, each found by
+  measuring rather than reasoning:
+
+  * **The map's state is the companion history, not `x`.** A
+    monodromy built on the MNA vector converges to the fixed point
+    of a *different* dynamical system — one that resets its
+    history every period. It was stable to 1e-15 across six
+    periods and 0.14% wrong; internal consistency is exactly what
+    makes that mistake invisible. (This is why `resume_from` had
+    to come first.)
+  * **A gate schedule that is not exactly T-periodic on the step
+    grid.** `(t / T) % 1.0 < D` lands the duty edge on a different
+    step in different periods, so every period is a slightly
+    different circuit and no exact orbit exists — 3.7e-5 of drift
+    per period, against 1.7e-10 over a HUNDRED periods once the
+    edge is pinned to a step index. The one-period residual cannot
+    see this (that period is self-consistent); the multi-period
+    drift can, and it is now named. Worse, the same idiom can
+    invert a whole period: `fmod(5e-5, 1e-5) / 1e-5` is ~1.0, not
+    0, so the gate reads OFF at a boundary where it should be ON.
+    (`NativePwm2Switch` divides first and is correct at all twelve
+    boundaries checked.)
+  * **A circuit with no affine orbit at all** — a diode whose
+    conduction window moves under the probe. The residual backstop
+    catches it even where the commutation-event list comes back
+    empty, which it does for circuits that plainly commutate.
+
 * **A run's complete state, and `resume_from=` that is exact**
   (audit F.3) — and the latent defect it exposes.
 
