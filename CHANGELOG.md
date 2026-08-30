@@ -8,6 +8,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **A charge-based nonlinear capacitor — a MOSFET's Coss** (audit
+  C.1, *crítico*). A grep for `coss|qrr|tail|miller` over the
+  kernel returned nothing: every device was static I-V, so the
+  resonant transition did not exist in the waveforms and ZVS of an
+  LLC, DAB or PSFB was unsimulable.
+
+  `add_nonlinear_capacitor(name, a, b, C0, V0, m)` gives the
+  junction law `C(v) = C0/(1 + v/V0)^m`, stamped as a Newton
+  device whose companion is written on **charge**:
+
+      i(v) = (2/h)·(Q(v) − Q_n) − i_n,   ∂i/∂v = (2/h)·C(v)
+
+  with `Q(v)` and `C(v)` both in closed form (validated against
+  numeric integration to 1e-11, and `m = 0` reduces to an ordinary
+  linear capacitor exactly). Writing it on `Q` rather than on
+  `C·v` is the point: charge is conserved however sharply `C(v)`
+  varies, and charge is what decides a dead time.
+
+  **Why a linear capacitor is not a substitute**, simulated end to
+  end (6 A into a 400 V node, C0 = 2 nF, V0 = 25 V, m = 0.5):
+
+  | | time to reach 400 V |
+  |---|---|
+  | linear cap at the datasheet's Coss(400 V) = 485 pF | **32.4 ns** |
+  | charge-based Coss(v) | **52.1 ns** (1.61×) |
+
+  Size the dead time from the linear model and the node is still
+  **209 V below the rail** when the switch turns on: hard
+  switching, ~21 µJ per edge, **4.3 W at 100 kHz** that the
+  simulator previously reported as zero.
+
+  Two things this device has that the saturable inductor does not,
+  and they are exactly why that one must refuse a variable step:
+  the step size is passed **in per solve** (`refresh_dt` is now
+  assigned at the single point every solve passes through,
+  including the dt-retry sub-steps and the commutation split), and
+  its history has **snapshot/restore**, so a step that is thrown
+  away rolls back.
+
+  The variable-step engine **refuses it for now, naming the piece
+  that is missing**: TR-BDF2's second stage needs the BDF2 charge
+  history term `(c1·Q(v) + c2·Q_γ + c3·Q_n)/h`, not the
+  trapezoidal one. The conductance carries over unchanged
+  (`c1/h = 2/γh` is the identity the whole method rests on), so
+  stamping the trap rule in a BDF2 stage would look plausible and
+  be wrong. `engine='auto'` routes such a circuit to the fixed
+  engine, which is exact for it.
+
 * **`frequency_response()` — the whole Bode from the monodromy**
   (audit F.2, the half that pays the daily bill).
 

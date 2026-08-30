@@ -787,6 +787,38 @@ public:
     ///   * History is automatically initialized + updated by
     ///     the solver when the circuit contains saturable
     ///     inductors.
+    /// Phase 4 C.1 — a charge-based nonlinear capacitor, i.e. a
+    /// MOSFET's Coss: C(v) = C0 / (1 + v/V0)^m.
+    ///
+    /// What decides ZVS is the CHARGE Q(V) = int C dv, not the
+    /// small-signal C the datasheet quotes at the operating
+    /// point. For C0 = 2 nF, V0 = 25 V, m = 0.5 at 400 V those
+    /// differ by 1.61x, which is the difference between a dead
+    /// time that reads as clean ZVS and one that leaves the node
+    /// at 209 V when the switch turns on.
+    CircuitBuilder& add_nonlinear_capacitor(
+        std::string_view name,
+        std::string_view from, std::string_view to,
+        Real C0, Real V0, Real m = Real{0.5},
+        Real v_floor = Real{-0.9}) {
+        models::NonlinearCapacitor::Params params{
+            .C0 = C0, .V0 = V0, .m = m, .v_floor = v_floor};
+        try {
+            models::NonlinearCapacitor::validate(params);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_nonlinear_capacitor(\"{}\"): {}", name,
+                e.what()));
+        }
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
+            topology::BranchKind::Nonlinear);
+        pool_.add_nonlinear_capacitor(b_id, params);
+        return *this;
+    }
+
     CircuitBuilder& add_saturable_inductor(
         std::string_view name,
         std::string_view from, std::string_view to,

@@ -245,6 +245,21 @@ inline SimulationResult run_transient_trbdf2(
         }
         has_nonlinear = true;
         if (pool.kind_of(b_id)
+            == pwl::DevicePool::StoredKind::NonlinearCapacitor) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2: branch "
+                + std::to_string(b_id)
+                + " is a charge-based nonlinear capacitor. Its "
+                  "conductance carries over to the BDF2 stage "
+                  "unchanged (c1/h = 2/gamma*h is the identity "
+                  "this method rests on), but the CHARGE history "
+                  "term there is (c1*Q(v) + c2*Q_gamma + "
+                  "c3*Q_n)/h, not the trapezoidal one — stamping "
+                  "the trap rule in a BDF2 stage would look "
+                  "plausible and be wrong. Use engine='pwl' "
+                  "(fixed dt), which is exact for it.");
+        }
+        if (pool.kind_of(b_id)
             == pwl::DevicePool::StoredKind::SaturableInductor) {
             throw std::invalid_argument(
                 "run_transient_trbdf2: branch "

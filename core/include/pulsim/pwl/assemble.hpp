@@ -248,6 +248,21 @@ inline void assemble_impl(const topology::Graph& graph,
                         branch.id, graph);
                 S.coeffRef(branch_var_id, branch_var_id) +=
                     Real{1e-12};
+            } else if (src_kind ==
+                    DevicePool::StoredKind::NonlinearCapacitor) {
+                // Phase 4 C.1 — same reasoning, node rows: a Coss
+                // has no branch-current unknown and no linear
+                // contribution at all, so without a G_min its
+                // nodes can be structurally empty and the
+                // factorisation fails before Newton ever stamps.
+                if (stamping::node_is_active(branch.from)) {
+                    S.coeffRef(branch.from, branch.from) +=
+                        Real{1e-12};
+                }
+                if (stamping::node_is_active(branch.to)) {
+                    S.coeffRef(branch.to, branch.to) +=
+                        Real{1e-12};
+                }
             }
             break;
         }
