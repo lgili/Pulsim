@@ -551,6 +551,23 @@ void init_module(py::module_& m) {
               "label channels without the caller having to recompute\n"
               "the layout themselves. ``simulate(live_stream=…)``\n"
               "auto-fills the names into the stream when attaching.")
+        .def("add_nonlinear_capacitor",
+              &builder::CircuitBuilder::add_nonlinear_capacitor,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("C0"), py::arg("V0"),
+              py::arg("m") = 0.5, py::arg("v_floor") = -0.9,
+              py::return_value_policy::reference,
+              "Charge-based nonlinear capacitor — a MOSFET's Coss: "
+              "C(v) = C0 / (1 + v/V0)^m.\n\n"
+              "What decides ZVS is the CHARGE Q(V) = int C dv, not "
+              "the small-signal C a datasheet quotes at the "
+              "operating point: for C0 = 2 nF, V0 = 25 V, m = 0.5 "
+              "at 400 V those differ by 1.61x, which is the "
+              "difference between a dead time that reads as clean "
+              "ZVS and one that leaves the node at 209 V when the "
+              "switch turns on (17 uJ per edge). m = 0 gives an "
+              "ordinary linear capacitor, exactly — useful for the "
+              "A/B.")
         .def("add_saturable_inductor",
               &builder::CircuitBuilder::add_saturable_inductor,
               py::arg("name"), py::arg("n_pos"),

@@ -21,6 +21,7 @@
 #include "pulsim/models/inductor.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/multi_winding_transformer.hpp"
+#include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/current_source.hpp"
@@ -66,6 +67,7 @@ public:
         IgbtLevel1        = 12, // Layer 2 V14 (linear-conduction IGBT)
         VCVS              = 13, // Layer 2 V15 (voltage-controlled voltage source)
         SaturableInductor = 14, // Layer 2 V17 (nonlinear L(i) inductor)
+        NonlinearCapacitor = 15, // Phase 4 C.1 (charge-based Coss)
     };
 
     struct SwitchParams {
@@ -412,6 +414,32 @@ public:
             "a SaturableInductor");
     }
 
+    /// Phase 4 C.1 — a charge-based Coss. Unlike an ordinary
+    /// capacitor it has NO branch-current unknown and no linear
+    /// companion: everything is stamped per Newton iteration by
+    /// `refresh_nonlinear_capacitors`, which needs the step size
+    /// and the previous (v, Q, i) — see
+    /// `NonlinearCapacitorHistory`.
+    void add_nonlinear_capacitor(
+        Index branch_id,
+        models::NonlinearCapacitor::Params p) {
+        models::NonlinearCapacitor::validate(p);
+        entries_[branch_id] = Entry{p};
+        nonlinear_capacitor_branches_.push_back(branch_id);
+    }
+
+    [[nodiscard]] const models::NonlinearCapacitor::Params&
+    nonlinear_capacitor_params(Index branch_id) const {
+        return require_params_<models::NonlinearCapacitor::Params>(
+            branch_id, "nonlinear_capacitor_params",
+            "a NonlinearCapacitor");
+    }
+
+    [[nodiscard]] const std::vector<Index>&
+    nonlinear_capacitor_branches() const noexcept {
+        return nonlinear_capacitor_branches_;
+    }
+
     [[nodiscard]] const models::VCVS::Params&
     vcvs_params(Index branch_id) const {
         return require_params_<models::VCVS::Params>(
@@ -748,7 +776,8 @@ private:
                                 models::MosfetLevel1::Params,
                                 models::IgbtLevel1::Params,
                                 models::VCVS::Params,
-                                models::SaturableInductor::Params>;
+                                models::SaturableInductor::Params,
+                                models::NonlinearCapacitor::Params>;
 
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
@@ -760,8 +789,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 15,
-        "StoredKind has 15 values; Entry must list 15 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 16,
+        "StoredKind has 16 values; Entry must list 16 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -778,6 +807,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::IgbtLevel1,         models::IgbtLevel1::Params>);
     static_assert(kind_maps_to_<StoredKind::VCVS,               models::VCVS::Params>);
     static_assert(kind_maps_to_<StoredKind::SaturableInductor,  models::SaturableInductor::Params>);
+    static_assert(kind_maps_to_<StoredKind::NonlinearCapacitor, models::NonlinearCapacitor::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -868,6 +898,7 @@ private:
     // iterate just the saturable inductors without scanning
     // every Nonlinear branch.
     std::vector<Index> saturable_inductor_branches_;
+    std::vector<Index> nonlinear_capacitor_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the

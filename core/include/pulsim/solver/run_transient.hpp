@@ -40,6 +40,8 @@
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
+#include "pulsim/pwl/nonlinear_capacitor_history.hpp"
+#include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
 #include "pulsim/solver/options.hpp"
@@ -384,7 +386,43 @@ inline SimulationResult run_transient(
     // stamping. The user-supplied refresh runs first (it
     // zero-clears + stamps diodes/MOSFETs/IGBTs); we then
     // ADD the saturable inductor contributions on top.
+    // Phase 4 C.1 — charge-based Coss. Unlike the saturable
+    // inductor below, this one is handed the ACTUAL step size each
+    // solve (`refresh_dt` is assigned before every solve on every
+    // path, including the sub-step and retry ones) and its history
+    // has snapshot/restore, so a step that is thrown away rolls
+    // back. Those two omissions are exactly why the saturable
+    // inductor has to refuse a variable step.
+    pwl::NonlinearCapacitorHistory coss_history;
+    coss_history.init(graph, pool);
+    if (initial_state != nullptr) {
+        coss_history.seed_from_dc_op(x);
+    }
+    const bool has_coss = !coss_history.empty();
+
     pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
+    if (has_coss) {
+        nl_refresh_effective =
+            [user_refresh = nl_refresh_effective, &coss_history,
+             &refresh_dt](const Vector& xx,
+                            sparse::Matrix& J_nl,
+                            Vector& f_nl,
+                            const topology::Graph& g,
+                            const pwl::DevicePool& pp) -> Real {
+                Real max_i = Real{0};
+                if (user_refresh) {
+                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(
+                    max_i,
+                    pwl::refresh_nonlinear_capacitors(
+                        xx, J_nl, f_nl, coss_history,
+                        refresh_dt));
+            };
+    }
     if (has_saturable) {
         nl_refresh_effective =
             [user_refresh = nl_refresh, &sat_history,
@@ -523,6 +561,11 @@ inline SimulationResult run_transient(
     Vector x_prev;                                  // pre-step state snapshot
     pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
     std::vector<pwl::HistoryEntry> history_snap;    // V3 rollback snapshot
+    // Phase 4 C.1 — the Coss rolls back with everything else. The
+    // saturable inductor cannot, which is the second reason it
+    // refuses a variable step; this device was given the
+    // capability up front rather than as a follow-up.
+    std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     std::vector<CommutationEvent> step_events;      // per-step event scratch
@@ -674,6 +717,7 @@ inline SimulationResult run_transient(
             // event is detected AND
             // enable_substep_state_correction is true.
             history.snapshot_into(history_snap);
+            coss_snap = coss_history.snapshot();
             if (has_diodes) {
                 diodes.snapshot_on_bits_into(diodes_snap);
             } else {
@@ -721,6 +765,16 @@ inline SimulationResult run_transient(
             // call still takes the cached factorization and is
             // bit-identical to before.
             auto run_event_iteration = [&](Real at_t, Real for_dt) {
+            // Phase 4 C.1 — EVERY solve tells the nonlinear
+            // refresh which step it is taking. This is the single
+            // point all of them pass through, including the
+            // dt-retry sub-steps and the commutation split, so a
+            // Coss always stamps 2C(v)/h with the h actually being
+            // used. (The saturable inductor reads the same
+            // variable but was written when it never moved; it
+            // still refuses a variable step for the OTHER reason,
+            // no rollback of its flux.)
+            refresh_dt = for_dt;
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a
@@ -871,6 +925,7 @@ inline SimulationResult run_transient(
                     // the circuit rather than of the run.
                     x = x_prev;
                     history.restore(history_snap);
+                    coss_history.restore(coss_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -913,6 +968,8 @@ inline SimulationResult run_transient(
                         // once, at the end, from the final x.
                         if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
+                            coss_history.update_from_state(x,
+                                                            sub_dt);
                         } else {
                             committed_dt = sub_dt;
                         }
@@ -1064,6 +1121,7 @@ inline SimulationResult run_transient(
                     // Roll back to pre-step state.
                     x = x_prev;
                     history.restore(history_snap);
+                    coss_history.restore(coss_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -1080,6 +1138,7 @@ inline SimulationResult run_transient(
                         cache.solve_at(
                             mask_pre, dt1, b_extra, x);
                         history.update_from_state(x, dt1);
+                        coss_history.update_from_state(x, dt1);
                         if (has_saturable) {
                             sat_history.update_from_state(x);
                         }
@@ -1239,6 +1298,7 @@ inline SimulationResult run_transient(
             //    path and dt2 when sub-step correction split the step (whose
             //    sub-step 1 already committed the dt1 half above).
             history.update_from_state(x, committed_dt);
+            coss_history.update_from_state(x, committed_dt);
             if (has_saturable) {
                 sat_history.update_from_state(x);
             }
