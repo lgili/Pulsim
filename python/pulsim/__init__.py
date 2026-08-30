@@ -2708,7 +2708,6 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     try:
         from ._pulsim import BranchKind as _BK  # type: ignore
         n_sat = 0
-        n_coss = 0
         for br in builder.graph.branches:
             if br.get("kind") != _BK.Nonlinear:
                 continue
@@ -2720,14 +2719,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
             k = str(builder.pool.kind_of(br["id"]))
             if k.endswith("SaturableInductor"):
                 n_sat += 1
-            elif k.endswith("NonlinearCapacitor"):
-                n_coss += 1
-        if n_coss:
-            why.append(
-                f"{n_coss} charge-based nonlinear capacitor(s) — "
-                "the TR-BDF2 second stage needs the BDF2 charge "
-                "history term, which is not wired yet (the fixed "
-                "engine is exact for them)")
+
         if n_sat:
             why.append(
                 f"{n_sat} saturable inductor(s) — their Newton "

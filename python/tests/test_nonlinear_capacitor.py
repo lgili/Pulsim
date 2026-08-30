@@ -126,30 +126,44 @@ def test_m_zero_is_exactly_a_linear_capacitor():
                    - np.asarray(lin.v("n"))).max() < 1e-9
 
 
-def test_the_variable_step_engine_refuses_it_for_now():
-    """Named, not silent.
+def test_it_runs_on_the_variable_step_engine():
+    """The resonant transition is exactly what wants an adaptive
+    step, so the Coss carries the BDF2 CHARGE history term through
+    TR-BDF2's second stage: `(c1·Q(v) + c2·Q_γ + c3·Q_n)/h`, not
+    the trapezoidal one. The conductance is shared — `c1/h = 2/γh`
+    is the identity the whole method rests on — which is exactly
+    what makes the wrong version look healthy: same matrix, same
+    sparsity, converging Newton, wrong answer.
 
-    The device already has what the variable-step engine needs
-    from a stateful nonlinear element — a per-step `h` and a
-    rollback, the two things the saturable inductor lacks. What is
-    missing is on the engine's side: TR-BDF2's second stage uses a
-    different derivative rule, so the charge history term there is
-    `(c1·Q(v) + c2·Q_γ + c3·Q_n)/h`, not the trapezoidal one. The
-    conductance is the same (`c1/h = 2/γh` is the identity the
-    whole method rests on), so stamping the trap rule in a BDF2
-    stage would look plausible and be wrong. Refusing says which
-    piece is absent.
+    Charge conservation is the check that can tell them apart.
     """
     b = p.CircuitBuilder()
     b.add_current_source("I", "n", "gnd", 6.0)
     b.add_nonlinear_capacitor("Coss", "n", "gnd", C0, V0, M)
     b.add_resistor("R", "n", "gnd", 1e12)
-    with pytest.raises(ValueError, match="charge"):
-        p.simulate(b, t_end=60e-9, engine="trbdf2")
-    # And engine='auto' ROUTES it to the fixed engine instead of
-    # failing, given a dt.
-    res = p.simulate(b, t_end=60e-9, dt=2e-11)
-    assert res.engine_used == "pwl"
+    res = p.simulate(b, t_end=60e-9, engine="trbdf2")
+    assert res.engine_used == "trbdf2"
+    t = np.asarray(res.times)
+    v = np.asarray(res.v("n"))
+    ok = t > t[-1] * 0.2
+    err = np.abs(_q_closed(v[ok]) - 6.0 * t[ok]) / (6.0 * t[ok])
+    assert err.max() < 5e-3, err.max()
+
+
+def test_no_dt_needed_for_a_resonant_transition():
+    """The payoff: `engine='auto'` picks the variable engine for a
+    Coss circuit now, so nobody has to guess a step fine enough
+    for a 50 ns transition."""
+    b = p.CircuitBuilder()
+    b.add_current_source("I", "n", "gnd", 6.0)
+    b.add_nonlinear_capacitor("Coss", "n", "gnd", C0, V0, M)
+    b.add_resistor("R", "n", "gnd", 1e12)
+    res = p.simulate(b, t_end=60e-9)          # no dt, no engine
+    assert res.engine_used == "trbdf2"
+    v = np.asarray(res.v("n"))
+    # 6 A for 60 ns is 360 nC; Q(400 V) is 312 nC, so it clears
+    # the rail inside the window.
+    assert v.max() > 400.0
 
 
 def test_degenerate_parameters_are_refused():

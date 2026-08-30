@@ -47,14 +47,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its history has **snapshot/restore**, so a step that is thrown
   away rolls back.
 
-  The variable-step engine **refuses it for now, naming the piece
-  that is missing**: TR-BDF2's second stage needs the BDF2 charge
-  history term `(c1·Q(v) + c2·Q_γ + c3·Q_n)/h`, not the
-  trapezoidal one. The conductance carries over unchanged
-  (`c1/h = 2/γh` is the identity the whole method rests on), so
-  stamping the trap rule in a BDF2 stage would look plausible and
-  be wrong. `engine='auto'` routes such a circuit to the fixed
-  engine, which is exact for it.
+  **It runs on the variable-step engine too**, which is where a
+  resonant transition belongs: TR-BDF2's second stage carries the
+  BDF2 **charge** history term `(c1·Q(v) + c2·Q_γ + c3·Q_n)/h`
+  rather than the trapezoidal one. The conductance is shared —
+  `c1/h = 2/γh` is the identity the whole method rests on — and
+  that shared conductance is exactly what makes the wrong version
+  look healthy: same matrix, same sparsity, converging Newton,
+  wrong answer. Charge conservation is the check that separates
+  them, and it holds to 5e-3 across the transition. So
+  `simulate(b, t_end)` with **no dt at all** now resolves a 50 ns
+  ZVS transition.
 
 * **`frequency_response()` — the whole Bode from the monodromy**
   (audit F.2, the half that pays the daily bill).
