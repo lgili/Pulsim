@@ -1358,7 +1358,7 @@ def simulate(
     dt: Optional[float] = None,
     *,
     # --- engine selector ---
-    engine: str = "pwl",
+    engine: str = "auto",
     # --- DSED variable-step kwargs (only used when engine='dsed') ---
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
@@ -1399,27 +1399,51 @@ def simulate(
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
-    Two simulation paradigms, selected by the ``engine`` keyword:
+    **The one rule** (``engine='auto'``, the v2.0 default)::
 
-    * ``engine='pwl'`` (default, v1.0–v1.4 compatibility) — fixed-step
-      trapezoidal companion + PWL state-space cache. **Requires a
-      positive `dt`.** Bit-exact reproducibility; matches v1.4.0
-      output to machine precision.
+        dt given  ->  fixed step, exactly as before
+        no dt     ->  the engine picks, and takes the
+                      variable-step path whenever it can
 
-    * ``engine='dsed'`` (variable-step, opt-in) — Path-Based
-      Event-Driven scheduler with automatic RK45 / BDF2 dispatch.
-      Tolerance ``rtol`` controls accuracy; the kernel handles
-      integrator selection, step sizing, event prediction, and
-      LU caching transparently. ``dt`` (if supplied) acts as
-      the maximum-step cap ``dt_max``.
+    An explicit ``dt`` is a REQUEST for a fixed step, not a hint —
+    reading it as the variable engine's step ceiling would silently
+    change the answer of every script that already passes one. So
+    the modern engine is opt-in by OMISSION, and
+    ``result.engine_used`` always says which one ran (with
+    ``result.engine_route_reason`` when ``auto`` did not pick the
+    variable-step one).
 
-    Two simple decision trees for users:
+    The engines:
 
-    * **"Não sei qual escolher"** → ``engine='pwl'`` with the
-      smallest ``dt`` you can afford. Always works; matches every
-      legacy script.
-    * **"Quero performance e meu circuito tem PWM/DCM/eventos"** →
-      ``engine='dsed', rtol=1e-6``. Kernel does the rest.
+    * ``engine='auto'`` (default) — routes. Variable-step TR-BDF2
+      when the circuit and kwargs qualify, fixed-step otherwise.
+      Raises, naming the blocker and asking for a ``dt``, when
+      neither can serve.
+
+    * ``engine='trbdf2'`` — the variable-step engine by name:
+      L-stable second-order composite (TR + BDF2), LTE-controlled
+      step, gate edges and controller ticks landed exactly, diode
+      crossings localized between steps. ``dt`` (if given) is the
+      step CEILING. REFUSES rather than routing, which is what a
+      caller who asked for it by name wants to know. Scope: linear
+      PWL circuits (nonlinear devices need a Newton loop per stage,
+      not wired yet).
+
+    * ``engine='pwl'`` — fixed-step trapezoidal companion + PWL
+      state-space cache. **Requires a positive `dt`.** Bit-exact
+      reproducibility; matches v1.4.0 output to machine precision.
+      Everything the other engines refuse runs here.
+
+    * ``engine='dsed'`` — Path-Based Event-Driven scheduler with
+      automatic RK45 / BDF2 dispatch and exact LTI stepping.
+      ``dt`` (if supplied) acts as the maximum-step cap ``dt_max``.
+
+    Decision tree, short version:
+
+    * **"Não sei qual escolher"** → pass nothing. That is what
+      ``auto`` is for.
+    * **"Preciso do grid fixo / reprodutibilidade bit-exata"** →
+      pass ``dt``.
 
     Examples
     --------
@@ -1690,6 +1714,8 @@ def simulate(
         )
         try:
             _dsed_res._preflight = _preflight_report
+            _dsed_res.engine_used = "dsed"
+            _dsed_res.engine_route_reason = None
             # v2.0 Phase 3 item 5 — the unified result: with the
             # full-MNA trajectory reconstructed, the same name-based
             # accessors the pwl engine gets now mean the same thing
@@ -1699,48 +1725,82 @@ def simulate(
             pass
         return _dsed_res
 
-    if engine == "auto":
+    _engine_asked = engine
+    _route_reasons: "list[str]" = []
+    if engine in ("auto", "trbdf2"):
+        _route_reasons = _trbdf2_blockers(
+            builder, dt=dt, step_observer=step_observer,
+            closed_loops=closed_loops,
+            controller_period=controller_period,
+            live_stream=live_stream, progress=progress,
+            start_from_dc_op=start_from_dc_op,
+            strict_event_iterations=strict_event_iterations,
+            max_dt_halvings=max_dt_halvings,
+            store_every=store_every, mmc_arms=mmc_arms,
+            enable_substep_state_correction=(
+                enable_substep_state_correction),
+            inductor_freeze_di_max=inductor_freeze_di_max,
+            inductor_abs_clamp=inductor_abs_clamp,
+            switch_fn=switch_fn)
+        if engine == "auto":
+            # ROUTE, don't refuse: 'auto' means "pick the engine",
+            # and a script written against the fixed-step API must
+            # keep working when it becomes the default.
+            #
+            # AN EXPLICIT dt IS A REQUEST FOR A FIXED STEP. Reading
+            # it as the variable engine's step CEILING instead
+            # would silently change the answer of every script that
+            # already passes one (measured: a closed-loop buck
+            # moved 4.985 -> 4.968 V). So the rule is simply:
+            #   dt given      -> fixed step, as before
+            #   no dt         -> the engine picks, and uses the
+            #                    variable-step path when it can
+            # which makes the new engine opt-in by OMISSION.
+            if dt is not None and dt > 0:
+                _route_reasons = _route_reasons or [
+                    "an explicit dt was given, which requests a "
+                    "fixed step"]
+            if _route_reasons:
+                if dt is None or dt <= 0:
+                    raise ValueError(
+                        "simulate(): this circuit cannot use the "
+                        "variable-step engine — "
+                        + "; ".join(_route_reasons)
+                        + ". The fixed-step engine can run it, but "
+                        "needs a step: pass dt=<seconds> (or "
+                        "engine='dsed' for the event-driven "
+                        "path).")
+                engine = "pwl"
+                # Validation ran against the engine the caller
+                # ASKED for, so kwargs the fixed engine ignores
+                # (rtol/atol/dt_init/integrator) passed silently.
+                # Re-check now that we know where the run lands —
+                # a dropped kwarg the user believed in is exactly
+                # the failure mode the leak warning exists for.
+                _dsed._validate_engine_kwargs(
+                    engine="pwl", dt=dt, rtol=rtol, atol=atol,
+                    dt_init=dt_init, integrator=integrator,
+                    stiffness_threshold=stiffness_threshold,
+                    h_bdf2=h_bdf2)
+            else:
+                engine = "trbdf2"
+        elif _route_reasons:
+            raise ValueError(
+                "simulate(engine='trbdf2'): "
+                + "; ".join(_route_reasons)
+                + ". Use engine='auto' to route to the fixed-step "
+                "engine automatically, or engine='pwl' explicitly.")
+
+    if engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
         #      which is also the gate-edge sampling resolution
         #      (a gate pulse narrower than h_max can be missed,
         #      exactly like dsed's dt_max). ----
-        _auto_unsupported = {
-            "live_stream": live_stream is not None,
-            "start_from_dc_op": bool(start_from_dc_op),
-            "strict_event_iterations":
-                bool(strict_event_iterations),
-            "max_dt_halvings": max_dt_halvings is not None,
-            "store_every": store_every is not None
-                            and int(store_every) != 1,
-            "mmc_arms": bool(mmc_arms),
-            "enable_substep_state_correction":
-                bool(enable_substep_state_correction),
-            # These configure PWL post-solve guards that have no
-            # counterpart here (the variable-step engine has no
-            # per-step clamp stage). Accepting them silently would
-            # hand a user who set a clamp an UNCLAMPED run.
-            "inductor_freeze_di_max":
-                inductor_freeze_di_max is not None,
-            "inductor_abs_clamp": inductor_abs_clamp is not None,
-            # No per-step user hook exists on this engine yet, so a
-            # progress bar would simply never tick.
-            "progress": bool(progress),
-        }
-        _offending = [k for k, hit in _auto_unsupported.items()
-                       if hit]
-        if _offending:
-            raise ValueError(
-                f"simulate(engine='auto'): {', '.join(_offending)} "
-                "is/are not supported by the variable-step engine "
-                "yet — each assumes the fixed-dt step cadence "
-                "(observers/controllers) or fixed-grid recording. "
-                "Use engine='pwl' for these, or drop the kwarg(s).")
-        if getattr(builder, "_c_blocks", None):
-            raise ValueError(
-                "simulate(engine='auto'): C blocks sample on a "
-                "fixed dt grid; use engine='pwl'.")
+        # Every unsupported combination was already caught by
+        # _trbdf2_blockers above (which is also what routes
+        # engine='auto' away from here).
         _auto_ignored = {
             k: v for k, v in (
                 ("max_newton_iterations",
@@ -1845,21 +1905,10 @@ def simulate(
         _atol = float(atol) if atol is not None else 1e-8
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
-            # v2.0 semantics: default is all-OPEN; a controlled
-            # switch without a driver is an error, not a silent
-            # short (diode bits are solver-owned and unaffected).
-            try:
-                _, _nd, _controlled = _switch_census(
-                    builder.graph, builder.pool)
-            except Exception:  # noqa: BLE001
-                _controlled = []
-            if _controlled:
-                raise ValueError(
-                    "simulate(engine='auto'): the circuit has "
-                    f"{len(_controlled)} controlled switch(es) "
-                    "but no switch_fn. Pass the gate schedule — "
-                    "the all-CLOSED legacy default is not carried "
-                    "into the new engine.")
+            # No driver: all-OPEN here (the v2.0 semantics; the
+            # fixed engine's all-CLOSED legacy default is what the
+            # router sends this case to instead — flipping THAT is
+            # its own breaking change, not this one).
             switch_fn = (lambda _n=_n_sw:
                           (lambda t: SwitchStateMask(_n)))()
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
@@ -1900,6 +1949,8 @@ def simulate(
         res._preflight = _preflight_report
         res._switch_fn = switch_fn
         res._trbdf2_stats = _stats
+        res.engine_used = "trbdf2"
+        res.engine_route_reason = None
         # The implausible-voltage detector is engine-independent
         # (it reads the trace, not the stepper) and this engine's
         # new all-OPEN default mask makes the inductor-open case it
@@ -2483,6 +2534,16 @@ def simulate(
     except AttributeError:  # pragma: no cover
         pass
     try:
+        # Which engine actually ran, and — when the caller said
+        # 'auto' and did not get the variable-step one — why. A
+        # router that cannot be interrogated is a router that
+        # surprises people.
+        res.engine_used = "pwl"
+        res.engine_route_reason = (
+            "; ".join(_route_reasons) if _route_reasons else None)
+    except AttributeError:  # pragma: no cover
+        pass
+    try:
         res._switch_fn = switch_fn
     except AttributeError:  # pragma: no cover
         pass
@@ -2591,6 +2652,100 @@ def simulate(
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
     return res
+
+
+def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
+                      controller_period, live_stream, progress,
+                      start_from_dc_op, strict_event_iterations,
+                      max_dt_halvings, store_every, mmc_arms,
+                      enable_substep_state_correction,
+                      inductor_freeze_di_max, inductor_abs_clamp,
+                      switch_fn):
+    """Why the variable-step engine cannot serve this run.
+
+    Returns a list of human-readable reasons — empty means it can.
+    `engine='auto'` routes on this: no blockers → TR-BDF2, else the
+    fixed-step engine, so a script written for `simulate(b, t_end,
+    dt=...)` keeps working while a dt-less one gets the variable
+    engine whenever the circuit qualifies. `engine='trbdf2'` uses
+    the same list to REFUSE, which is what a caller who explicitly
+    asked for it wants to know.
+    """
+    why = []
+    try:
+        from ._pulsim import BranchKind as _BK  # type: ignore
+        n_nl = sum(1 for br in builder.graph.branches
+                    if br.get("kind") == _BK.Nonlinear)
+        if n_nl:
+            why.append(
+                f"{n_nl} nonlinear device(s) — the TR-BDF2 stages "
+                "are linear solves; a Newton loop per stage is not "
+                "wired yet")
+    except Exception:  # pragma: no cover — never block on a probe
+        pass
+    if getattr(builder, "_c_blocks", None):
+        why.append("C blocks sample on a fixed dt grid")
+    if live_stream is not None:
+        why.append("live_stream needs the fixed-step kernel's "
+                    "per-step ring push")
+    if progress:
+        why.append("progress has no per-step hook here")
+    if start_from_dc_op:
+        why.append("start_from_dc_op is a fixed-step entry point")
+    if strict_event_iterations:
+        why.append("strict_event_iterations belongs to the "
+                    "fixed-step diode iteration")
+    if max_dt_halvings is not None and int(max_dt_halvings) > 0:
+        why.append("max_dt_halvings re-solves at sub-dt against a "
+                    "full-dt companion")
+    if enable_substep_state_correction:
+        why.append("enable_substep_state_correction is the "
+                    "fixed-step commutation split")
+    if store_every is not None and int(store_every) != 1:
+        why.append("store_every decimates a uniform grid")
+    if mmc_arms:
+        why.append("mmc_arms drives the fixed-step observer/"
+                    "b_extra pair")
+    if inductor_freeze_di_max is not None:
+        why.append("inductor_freeze_di_max is a fixed-step "
+                    "post-solve guard")
+    if inductor_abs_clamp is not None:
+        why.append("inductor_abs_clamp is a fixed-step post-solve "
+                    "guard")
+    # An observer needs a CADENCE here — there is no grid to ride.
+    _has_cadence = controller_period is not None
+    if closed_loops:
+        for _cl in closed_loops:
+            if float(getattr(_cl, "period", 0.0) or 0.0) > 0.0:
+                _has_cadence = True
+    if step_observer is not None and not _has_cadence:
+        if getattr(step_observer, "period", None) is None:
+            why.append(
+                "a step_observer with no cadence (pass "
+                "controller_period=<T_ctrl>, or use a ClosedLoop, "
+                "which carries its own)")
+    if closed_loops and not _has_cadence:
+        why.append("closed_loops whose handles carry no period")
+    if switch_fn is None and not closed_loops:
+        # (A ClosedLoop brings its own switch_fn, so the circuit is
+        # driven even when the caller passed none.)
+        # The two engines disagree on what an undriven controlled
+        # switch means (fixed: all-CLOSED + warning, the v1 legacy;
+        # variable: all-OPEN). Route to the one whose answer the
+        # caller's script was written against; flipping the legacy
+        # default is its own breaking change.
+        try:
+            _, _nd, _ctl = _switch_census(builder.graph,
+                                           builder.pool)
+        except Exception:  # noqa: BLE001 — test doubles
+            _ctl = []
+        if _ctl:
+            why.append(
+                f"{len(_ctl)} controlled switch(es) with no "
+                "switch_fn (the two engines' undriven-switch "
+                "defaults differ)")
+    del dt
+    return why
 
 
 def _auto_check_voltage_sanity(res, builder, factor):

@@ -226,10 +226,13 @@ def test_simulate_dsed_runs_end_to_end_on_minimal_rc():
 
 
 def test_simulate_pwl_without_dt_raises_actionable_error():
-    """engine='pwl' (default) requires a positive `dt`.
+    """engine='pwl' requires a positive `dt`.
 
     The error message tells the user EXACTLY what to do:
-    either pass dt, or switch to engine='dsed'.
+    either pass dt, or switch to engine='dsed'. (Since v2.0 the
+    DEFAULT is engine='auto', which for a dt-less linear circuit
+    picks the variable-step engine instead of erroring — this test
+    names the fixed engine to pin its own contract.)
     """
     import pulsim as p
     b = p.CircuitBuilder()
@@ -238,7 +241,7 @@ def test_simulate_pwl_without_dt_raises_actionable_error():
     with pytest.raises(ValueError) as exc_info:
         # No dt — this should be a CLEAR error, not an obscure
         # TypeError from a missing required argument.
-        p.simulate(b, t_end=1e-3)
+        p.simulate(b, t_end=1e-3, engine="pwl")
     msg = str(exc_info.value)
     assert "engine='pwl'" in msg
     assert "positive `dt`" in msg

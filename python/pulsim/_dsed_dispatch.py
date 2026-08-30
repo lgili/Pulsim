@@ -86,7 +86,7 @@ class DSEDOptions:
 # =============================================================================
 
 
-_VALID_ENGINES = ("pwl", "dsed", "auto")
+_VALID_ENGINES = ("auto", "pwl", "dsed", "trbdf2")
 _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 
 # (The dsed-only kwargs that get the leak-warning if user passes
@@ -150,24 +150,31 @@ def _validate_engine_kwargs(
             )
         return
 
-    # --- engine='auto' branch (variable-step TR-BDF2 on the
-    #     sparse MNA kernel; dt is optional and acts as h_max) ---
-    if engine == "auto":
+    # --- engine='auto' / 'trbdf2' branch. 'auto' ROUTES (to the
+    #     variable-step engine when the circuit qualifies, to the
+    #     fixed-step one otherwise); 'trbdf2' names the
+    #     variable-step engine explicitly and refuses instead of
+    #     routing. dt is optional in both and acts as the step
+    #     ceiling h_max. ---
+    if engine in ("auto", "trbdf2"):
         if dt is not None and dt <= 0:
             raise ValueError(
-                "simulate(engine='auto'): dt (used as the step "
+                f"simulate(engine={engine!r}): dt (used as the step "
                 f"ceiling h_max here) must be positive, got {dt!r}")
         if rtol is not None and rtol <= 0:
             raise ValueError(
-                "simulate(engine='auto'): rtol must be positive, "
+                f"simulate(engine={engine!r}): rtol must be "
+                f"positive, "
                 f"got {rtol!r}")
         if atol is not None and atol <= 0:
             raise ValueError(
-                "simulate(engine='auto'): atol must be positive, "
+                f"simulate(engine={engine!r}): atol must be "
+                f"positive, "
                 f"got {atol!r}")
         if dt_init is not None and dt_init <= 0:
             raise ValueError(
-                "simulate(engine='auto'): dt_init must be positive, "
+                f"simulate(engine={engine!r}): dt_init must be "
+                f"positive, "
                 f"got {dt_init!r}")
         leaked = {
             name: val for name, val in (
@@ -179,7 +186,7 @@ def _validate_engine_kwargs(
         }
         if leaked:
             warnings.warn(
-                "simulate(engine='auto'): the following kwargs "
+                f"simulate(engine={engine!r}): the following kwargs "
                 "belong to the dsed engine and are ignored here: "
                 f"{sorted(leaked.keys())}.",
                 UserWarning,
