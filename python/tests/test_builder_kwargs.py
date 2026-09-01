@@ -92,4 +92,6 @@ def test_semantic_named_terminals_unchanged() -> None:
                       s_from="s1", s_to="s2",
                       L_p=1e-3, L_s=1e-3, k=0.99)
     # diode + mosfet + igbt + 2 transformer windings = 5.
-    assert b.graph.num_branches == 5
+    # 6, not 5, since v2.0: the MOSFET carries its intrinsic
+    # body diode (audit C.1).
+    assert b.graph.num_branches == 6

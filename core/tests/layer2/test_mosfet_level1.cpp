@@ -194,8 +194,8 @@ TEST_CASE("MosfetLevel1 — Newton solves common-source amplifier",
     SimulationOptions opts{
         .t_start = 0.0, .t_end = 0.1, .dt = 0.01,
         .max_newton_iterations = 100};
-    auto switch_fn = [](Real) {
-        return SwitchStateMask(0);
+    auto switch_fn = [&b](Real) {
+        return SwitchStateMask(b.graph().num_switches());
     };
     auto refresh = &refresh_mosfets_level1;
 
@@ -232,7 +232,9 @@ TEST_CASE("DevicePool stores MosfetLevel1 params + gate node id",
         /*K=*/2e-3, /*V_T=*/1.5,
         /*lambda=*/0.03, /*kappa=*/20.0);
 
-    REQUIRE(b.num_branches() == 1);
+    // v2.0 (audit C.1): the MOSFET carries its intrinsic
+    // body diode, so the device is two branches.
+    REQUIRE(b.num_branches() == 2);
     REQUIRE(b.pool().kind_of(0) ==
             DevicePool::StoredKind::MosfetLevel1);
     REQUIRE(b.pool().mosfet_level1_params(0).K ==
@@ -282,13 +284,32 @@ TEST_CASE("add_mosfet_level1 with_body_diode=true adds anti-parallel diode",
               DevicePool::StoredKind::Diode);
 }
 
-TEST_CASE("add_mosfet_level1 default (no body diode) still adds 1 branch",
+TEST_CASE("add_mosfet_level1 adds the body diode BY DEFAULT",
           "[v2][layer2_v13][mosfet_level1][body_diode]"
           "[ergonomics][quickwins]") {
+    // v2.0, audit C.1. Every vertical power MOSFET has a body
+    // diode; it is part of the device, so it is no longer opt-in.
     CircuitBuilder b;
     b.add_mosfet_level1(
         "M1", "drain", "source", "gate",
         /*K=*/1e-3, /*V_T=*/2.0);
+    REQUIRE(b.num_branches() == 2);
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::MosfetLevel1);
+    REQUIRE(b.pool().kind_of(1) ==
+              DevicePool::StoredKind::Diode);
+    REQUIRE(b.branch_id_of("M1_body") == 1);
+}
+
+TEST_CASE("add_mosfet_level1 with_body_diode=false is the bare device",
+          "[v2][layer2_v13][mosfet_level1][body_diode]") {
+    // The opt-out that an eGaN HEMT needs — it conducts in
+    // reverse through the channel, not a p-n junction.
+    CircuitBuilder b;
+    b.add_mosfet_level1(
+        "M1", "drain", "source", "gate",
+        /*K=*/1e-3, /*V_T=*/2.0, /*lambda=*/0.02,
+        /*kappa=*/15.0, /*with_body_diode=*/false);
     REQUIRE(b.num_branches() == 1);
     REQUIRE(b.pool().kind_of(0) ==
               DevicePool::StoredKind::MosfetLevel1);

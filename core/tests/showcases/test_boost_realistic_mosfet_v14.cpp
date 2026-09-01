@@ -70,7 +70,9 @@ TEST_CASE("Showcase: real boost converter with SH1 MOSFET + ramped gate",
     cache.build(loaded.options.dt);
 
     const Size n_sw = loaded.builder.graph().num_switches();
-    REQUIRE(n_sw == 1);   // D_boost
+    // 2, not 1, since v2.0: D_boost plus the SH1 MOSFET's
+    // intrinsic body diode (audit C.1).
+    REQUIRE(n_sw == 2);
 
     auto switch_fn = [n_sw](Real) {
         return SwitchStateMask(n_sw);
