@@ -246,12 +246,21 @@ public:
         Real V_CE_sat = Real{1.5},
         Real R_CE_sat = Real{0.05},
         Real V_T      = Real{5.0},
-        Real kappa    = Real{10.0}) {
+        Real kappa    = Real{10.0},
+        Real v_knee   = Real{0.01},
+        bool with_fwd = false) {
         if (!(R_CE_sat > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_igbt_level1(\"{}\"): R_CE_sat must be > 0 (got {}); a "
                 "zero/negative on-state resistance divides by zero in the "
                 "IGBT current law and yields NaN.", name, R_CE_sat));
+        }
+        if (!(v_knee > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_igbt_level1(\"{}\"): v_knee must be > 0 (got {}); it is "
+                "the width of the collector knee that enforces I_C >= 0, and "
+                "at zero the model conducts in reverse — which a "
+                "minority-carrier device cannot do.", name, v_knee));
         }
         const Index c_idx = resolve_node_(collector);
         const Index e_idx = resolve_node_(emitter);
@@ -266,7 +275,25 @@ public:
                 .R_CE_sat = R_CE_sat,
                 .V_T      = V_T,
                 .kappa    = kappa,
+                .v_knee   = v_knee,
             });
+        // Anti-parallel freewheeling diode, co-packaged in every
+        // real IGBT module. Now that the transistor correctly
+        // refuses reverse current, an inductive load has NO path
+        // during freewheeling without this — the solve fails
+        // rather than quietly running the current backwards
+        // through the transistor, which is the trade this model
+        // makes on purpose.
+        if (with_fwd) {
+            const std::string fwd_name = std::string{name} + "_fwd";
+            const Index fwd_b = add_branch_(
+                fwd_name, e_idx, c_idx,
+                topology::BranchKind::Switch);
+            pool_.add_diode(fwd_b,
+                /*g_on=*/Real{1e3},
+                /*g_off=*/Real{1e-9},
+                /*V_th=*/Real{0.5});
+        }
         return *this;
     }
 

@@ -8,6 +8,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **The MOSFET's third quadrant is symmetric — synchronous
+  rectification** (audit C.1). `MosfetLevel1::current` evaluated
+  the forward triode/saturation polynomial at negative `V_DS`.
+  That was not merely inaccurate, it was **non-monotone**: on
+  `K = 50, V_T = 3, V_GS = 10` the current rose to ~21 kA near
+  −30 V, **crossed zero at −50 V** and dived after.
+
+  So an inductor freewheeling through a gated-on device —
+  ordinary synchronous rectification, the commonest thing a
+  MOSFET does in a modern converter — had several operating
+  points, and Newton settled on a far one:
+
+      v(sw) = −62 987 mV   →   544 W of "loss"
+
+  where the channel's own 1.43 mΩ gives −14 mV. Reported with no
+  warning of any kind. The header used to prescribe an
+  anti-parallel body diode as the fix; it does not work (with the
+  diode that circuit landed at −63 V, without it at −50 V).
+
+  A MOSFET has no built-in drain and source: for `V_DS < 0` the
+  terminals swap roles, so
+
+      i(V_DS < 0) = −i_forward(V_OV − V_DS, −V_DS)
+
+  with the overdrive measured from the terminal now acting as the
+  source. Monotone everywhere, and `V_DS = −I·R_on` in the third
+  quadrant. Two consequences the tests pin down: the law is *not*
+  exactly odd (swapping terminals moves the gate's reference, so
+  magnitudes differ by ≈ `|V_DS|/V_OV` — real devices are
+  asymmetric in exactly that way), and cutoff is measured against
+  the **lower** terminal, which reproduces false turn-on.
+
+* **An IGBT can no longer conduct in reverse** (audit C.1). It is
+  a minority-carrier device — there is no channel to run
+  backwards and the collector junction blocks — but the level-1
+  law went negative below the knee at the full on-state slope:
+
+      V_CE (V)     I_C (A), gate 15 V, V_CE_sat 1.5, R 50 mΩ
+       −10          −230      230 A backwards through a device
+         0           −30      shorted terminals, sourcing 30 A
+        +5          +70       the only correct row
+
+  The model's own header waved the region off as "in normal
+  operation V_CE ≫ V_CE_sat during conduction" — but during
+  freewheeling `V_CE` is *negative*, which is exactly when it was
+  wrong, and freewheeling an inductive load is what the low-side
+  device does every cycle in every voltage-source inverter.
+
+  `I_C` is now clamped by a smooth max,
+  `(x + √(x² + v_knee²))/2`, which is C^∞, strictly monotone and
+  strictly positive. `v_knee` defaults to **0.01 V**, chosen from
+  the accuracy side: it turns 30 A of reverse conduction into
+  0.33 mA while costing 0.2 % at 0.112 V above the knee and
+  0.0002 % at 3.5 V. (0.1 V would have moved an existing 2.24 A
+  operating point by 17 %.)
+
+  **Breaking:** a circuit that was silently freewheeling through
+  the transistor now has no path for that current and fails to
+  converge instead of reporting a wrong answer. Pass
+  `with_fwd=True` for the anti-parallel freewheeling diode that
+  every real IGBT module has co-packaged.
+
 * **A charge-based nonlinear capacitor — a MOSFET's Coss** (audit
   C.1, *crítico*). A grep for `coss|qrr|tail|miller` over the
   kernel returned nothing: every device was static I-V, so the

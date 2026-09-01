@@ -420,15 +420,23 @@ void init_module(py::module_& m) {
               py::arg("R_CE_sat") = 0.05,
               py::arg("V_T")      = 5.0,
               py::arg("kappa")    = 10.0,
+              py::arg("v_knee")   = 0.01,
+              py::arg("with_fwd") = false,
               py::return_value_policy::reference,
               "Add a 3-terminal IGBT Level 1 (linear-"
               "conduction model with cutoff sigmoid). "
               "Collector-emitter is a Nonlinear branch; "
               "gate is an ideal voltage reference (no gate "
               "current). On-state I_C = (V_CE-V_CE_sat) / "
-              "R_CE_sat. Use `run_transient(..., enable_"
-              "nonlinear_refresh=True)` to stamp the "
-              "device per Newton iteration.")
+              "R_CE_sat, clamped to I_C >= 0 with a knee of "
+              "width `v_knee` — an IGBT is a minority-carrier "
+              "device and cannot conduct in reverse. Pass "
+              "`with_fwd=True` for the co-packaged anti-"
+              "parallel freewheeling diode, which an inductive "
+              "load needs: without it there is no path for the "
+              "freewheeling current and the solve fails. Use "
+              "`run_transient(..., enable_nonlinear_refresh="
+              "True)` to stamp the device per Newton iteration.")
         .def("add_mosfet_level1",
               &builder::CircuitBuilder::add_mosfet_level1,
               py::arg("name"),
