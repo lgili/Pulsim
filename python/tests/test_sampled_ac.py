@@ -85,26 +85,43 @@ def test_matches_the_analytic_buck_through_resonance():
 
 def test_cost_does_not_grow_with_the_number_of_points():
     """The property that makes this usable: the period runs are
-    spent once, and each extra frequency is a small linear
-    solve."""
+    spent once, and each extra frequency is a small linear solve.
+
+    ASSERT THE MECHANISM, NOT THE STOPWATCH. `n_period_runs`
+    being equal is the exact statement — it is what "the cost
+    stops depending on how many points you ask for" MEANS, and it
+    is deterministic. An earlier version of this test also
+    demanded `t_big < t_small * 2.0`, which measured the CI
+    runner's noise rather than this code: it came back 2.2x on a
+    shared macOS box and failed a PR that had not touched this
+    module. Wall clock is kept only as a coarse shape check — 40x the points
+    must not cost anything like 40x the time — with best-of-3
+    timing and a margin wide enough that only a real complexity
+    regression can trip it.
+    """
     b = _buck()
     of = _gate_of(b)
-    t0 = time.perf_counter()
-    small = p.frequency_response(b, period=T, dt=DT,
-                                  switch_fn_of=of, output="vout",
-                                  frequencies=np.logspace(2, 4, 10),
-                                  u0=D0)
-    t_small = time.perf_counter() - t0
-    t0 = time.perf_counter()
-    big = p.frequency_response(b, period=T, dt=DT,
-                                switch_fn_of=of, output="vout",
-                                frequencies=np.logspace(2, 4, 400),
-                                u0=D0)
-    t_big = time.perf_counter() - t0
+
+    def timed(n_points):
+        best = float("inf")
+        out = None
+        for _ in range(3):
+            t0 = time.perf_counter()
+            out = p.frequency_response(
+                b, period=T, dt=DT, switch_fn_of=of,
+                output="vout",
+                frequencies=np.logspace(2, 4, n_points), u0=D0)
+            best = min(best, time.perf_counter() - t0)
+        return out, best
+
+    small, t_small = timed(10)
+    big, t_big = timed(400)
+
+    # The mechanism, exactly.
     assert small.n_period_runs == big.n_period_runs
-    # 40x the points for well under 2x the time.
-    assert t_big < t_small * 2.0
-    assert t_big < 5.0
+
+    # The shape: 40x the points, nowhere near 40x the cost.
+    assert t_big < t_small * 8.0, (t_small, t_big)
 
 
 def test_reuses_a_steady_state_when_given_one():
