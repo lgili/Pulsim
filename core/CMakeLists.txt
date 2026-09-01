@@ -128,6 +128,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_sine_voltage_source.cpp # Layer 2 V11
         tests/layer2/test_pulse_voltage_source.cpp # Layer 2 V12
         tests/layer2/test_mosfet_level1.cpp        # Layer 2 V13
+        tests/layer2/test_shockley_diode.cpp       # Phase 4 C.1
         tests/layer2/test_igbt_level1.cpp          # Layer 2 V14
         tests/layer2/test_vcvs.cpp                 # Layer 2 V15
         tests/layer2/test_saturable_inductor.cpp   # Layer 2 V16

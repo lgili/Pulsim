@@ -8,6 +8,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **An exponential (Shockley) diode** (audit C.1). Pulsim had two
+  diodes and neither was exponential: `add_diode` is binary PWL,
+  and the smooth-blend nonlinear diode is a sigmoid blended onto a
+  *straight line*, `i = (v − V_F0)/R_d` above the knee. Both fix
+  the forward drop by construction.
+
+  A real junction does not. `V_F` rises ~60 mV per decade of
+  current, so the same device drops 0.53 V at 1 mA and 0.77 V at
+  10 A — and a fixed-`V_F0` model is wrong in **opposite
+  directions** at the two ends of a converter's load range, which
+  no single fitted value can remove.
+
+      add_shockley_diode(name, anode, cathode,
+                         I_S=1e-12, n=1.0, V_T=0.025852,
+                         G_min=1e-12, BV=0.0)
+
+  `BV` is a positive breakdown magnitude (0 disables it), so a
+  5.1 V Zener is `BV=5.1`.
+
+  **Keeping the exponent finite.** Newton's first trial step on a
+  rectifier easily proposes 50 V across a junction, and
+  `exp(50/0.02585) = e^1934` is `+inf`. SPICE handles this with
+  `pnjlim`, which limits the per-iteration voltage *step* — the
+  converged answer still sits on the true curve. Pulsim's Newton
+  loop is device-agnostic, so the protection lives in the law:
+  above `v_lim` the curve is continued by its own tangent, C¹ and
+  monotone.
+
+  Where `v_lim` goes is the whole design, and getting it wrong is
+  silent. SPICE's `vcrit` is **not** usable for a static
+  continuation: it sits at only ~18 mA for `I_S = 1e-12`, and a
+  tangent from there is a 1.41 Ω resistor that reports **14.7 V at
+  10 A** instead of 0.77 V — while converging happily. `v_lim` is
+  therefore set from a current ceiling (`i_lim`, default 1e6 A),
+  four orders past any real converter, so no converged solution
+  can reach it. Both C++ and Python suites pin the physical range
+  against the closed form to keep it that way.
+
+  **No series-resistance parameter, on purpose.** It cannot be
+  folded into a two-terminal law without an internal node or an
+  inner iteration, and the obvious iteration is not a contraction
+  where it matters (at 10 A the junction's own dynamic resistance
+  is 2.6 mΩ, so `R_S/r_j ≈ 4` and it diverges). Put a resistor in
+  series — exact, and the existing machinery already solves it.
+
+  **Temperature, stated correctly.** `thermal_voltage(T)` and
+  `shockley_saturation_current_at(I_S, T)` are both exported, and
+  the docs now say why you need both: raising `kT/q` *alone*
+  RAISES the forward drop (0.710 V at 25 °C becomes 0.948 V at
+  125 °C at fixed `I_S`). The familiar −2 mV/K comes from `I_S`,
+  which roughly doubles every 10 °C and overwhelms the `kT/q`
+  term.
+
 * **The body diode is part of the device, not an accessory**
   (audit C.1, *"diodo de corpo intrínseco por padrão"*). Every
   vertical power MOSFET has one — it is formed by the same p-n
