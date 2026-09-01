@@ -91,7 +91,7 @@ def test_vdc_resistor_dc_solve() -> None:
 
     opts = p.SimulationOptions(t_start=0.0, t_end=1e-3, dt=1e-4)
 
-    mask = p.SwitchStateMask(0)
+    mask = p.SwitchStateMask(b.graph.num_switches)
     res = p.run_transient(
         cache, b.graph, b.pool, opts,
         switch_fn=lambda t: mask,
@@ -260,7 +260,12 @@ def test_graph_accessor() -> None:
 def test_add_mosfet_from_python() -> None:
     b = p.CircuitBuilder()
     b.add_mosfet("Q1", "drain", "source")    # all defaults
-    assert b.num_branches == 1
+    # v2.0 (audit C.1): the intrinsic body diode is on by
+    # default, so a MOSFET is two branches.
+    assert b.num_branches == 2
+    b2 = p.CircuitBuilder()
+    b2.add_mosfet("Q1", "drain", "source", body_diode=False)
+    assert b2.num_branches == 1
 
 
 def test_add_mosfet_with_body_diode_from_python() -> None:
@@ -275,8 +280,9 @@ def test_add_mosfet_custom_R_on() -> None:
                   R_on=2e-3, R_off=1e9)
     # We can't trivially reach pool.switch_g_on from Python
     # in V0 (DevicePool is opaque), but we can verify the
-    # branch count + the call succeeded.
-    assert b.num_branches == 1
+    # branch count + the call succeeded. Two branches since
+    # v2.0: the switch plus its intrinsic body diode.
+    assert b.num_branches == 2
 
 
 def test_add_igbt_from_python() -> None:
@@ -307,7 +313,7 @@ def test_add_pwm_voltage_source_mean_matches_duty() -> None:
 
     opts = p.SimulationOptions(
         t_start=0.0, t_end=5.0 * T, dt=dt)
-    mask = p.SwitchStateMask(0)
+    mask = p.SwitchStateMask(b.graph.num_switches)
     res = p.run_transient(
         cache, b.graph, b.pool, opts,
         switch_fn=lambda t: mask)
@@ -332,7 +338,7 @@ def test_add_current_source_from_python() -> None:
 
     opts = p.SimulationOptions(t_start=0.0,
                                 t_end=1e-4, dt=1e-5)
-    mask = p.SwitchStateMask(0)
+    mask = p.SwitchStateMask(b.graph.num_switches)
     res = p.run_transient(
         cache, b.graph, b.pool, opts,
         switch_fn=lambda t: mask)
@@ -359,7 +365,7 @@ def test_add_mosfet_level1_common_source_dc() -> None:
     opts = p.SimulationOptions(
         t_start=0.0, t_end=0.1, dt=0.01)
     opts.max_newton_iterations = 100
-    mask = p.SwitchStateMask(0)
+    mask = p.SwitchStateMask(b.graph.num_switches)
 
     res = p.run_transient(
         cache, b.graph, b.pool, opts,
@@ -395,7 +401,7 @@ def test_add_pulse_voltage_source_step_charges_rc() -> None:
     cache.build(dt)
     opts = p.SimulationOptions(
         t_start=0.0, t_end=5.0 * tau, dt=dt)
-    mask = p.SwitchStateMask(0)
+    mask = p.SwitchStateMask(b.graph.num_switches)
     res = p.run_transient(
         cache, b.graph, b.pool, opts,
         switch_fn=lambda t: mask)
@@ -430,7 +436,7 @@ def test_add_sine_voltage_source_drives_resistor() -> None:
 
     opts = p.SimulationOptions(
         t_start=0.0, t_end=3.0 * T_ac, dt=dt)
-    mask = p.SwitchStateMask(0)
+    mask = p.SwitchStateMask(b.graph.num_switches)
     res = p.run_transient(
         cache, b.graph, b.pool, opts,
         switch_fn=lambda t: mask)

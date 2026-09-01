@@ -8,6 +8,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **The body diode is part of the device, not an accessory**
+  (audit C.1, *"diodo de corpo intrínseco por padrão"*). Every
+  vertical power MOSFET has one — it is formed by the same p-n
+  junction that makes the transistor — and `add_mosfet` /
+  `add_mosfet_level1` now add it **by default**, named
+  `<name>_body`.
+
+  Opt-in was wrong twice over. **Physically:** a gate-off MOSFET
+  in an inductive path is `R_off = 1 GΩ`, so the freewheeling
+  current has nowhere to go. Measured on 50 A through a gate-off
+  device — the normal state of the low-side switch during dead
+  time — the node hit **−4.76 MV** on the first step and the
+  inductor's current was gone within a microsecond; with the body
+  diode it freewheels at −50 mV with all 50 A intact. **By
+  revealed preference:** this repository's own call sites voted
+  54 to 17 for `add_mosfet_with_body_diode` over bare
+  `add_mosfet`. A default overridden three times out of four is
+  the wrong default.
+
+  The cost is nil. The PWL cache factors only the switch states a
+  run actually visits, so a branch that never changes state is
+  one more stamp rather than another power of two — measured on
+  chains of 2–8 MOSFETs, 1.00x. And switch masks are addressed by
+  name through `switch_index_of`, so the extra branch does not
+  shift anything a caller wrote by hand.
+
+  **Breaking:** circuits gain a `<name>_body` device and one more
+  entry in `graph.num_switches`. Pass `body_diode=False`
+  (`with_body_diode=False` on the level-1 model) for a device
+  that genuinely has none — an eGaN HEMT is the real case, since
+  it conducts in reverse through the channel rather than through
+  a p-n junction — or when modelling a bare switch.
+
 * **The MOSFET's third quadrant is symmetric — synchronous
   rectification** (audit C.1). `MosfetLevel1::current` evaluated
   the forward triode/saturation polynomial at negative `V_DS`.

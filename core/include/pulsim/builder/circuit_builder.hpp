@@ -163,7 +163,7 @@ public:
         Real K, Real V_T,
         Real lambda = Real{0.02},
         Real kappa  = Real{15.0},
-        bool with_body_diode = false) {
+        bool with_body_diode = true) {
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         const Index gate_idx   = resolve_node_(gate);
@@ -176,12 +176,16 @@ public:
                 .K = K, .V_T = V_T,
                 .lambda = lambda, .kappa = kappa,
             });
-        // V18 ergonomics: optional anti-parallel body diode
-        // (real MOSFETs have one physically). Conducts when
-        // V_drain < V_source − V_F, clamping V_DS to ~−0.5V.
-        // Required to keep Newton out of the spurious-V_DS<0
-        // root of the SH1 triode polynomial during transient
-        // events (e.g. inductive loads during dead-time).
+        // The intrinsic anti-parallel body diode, ON BY DEFAULT
+        // (v2.0, audit C.1) — see `add_mosfet` for why. It is no
+        // longer a numerical crutch: since the third quadrant was
+        // symmetrized there is no spurious V_DS < 0 root for
+        // Newton to fall into. It is here because it is part of
+        // the device, and because it is what carries the current
+        // when the GATE IS OFF, where the channel correctly
+        // blocks and an inductive load would otherwise have no
+        // path at all. Pass `with_body_diode = false` for an
+        // eGaN HEMT, which has no p-n body diode.
         if (with_body_diode) {
             const std::string body_name = std::string{name} + "_body";
             const Index body_b = add_branch_(
@@ -678,20 +682,54 @@ public:
     // defaults so a buck/boost/flyback prototype works
     // without parameter tuning.
 
-    /// Add an n-channel power MOSFET as a single
-    /// controlled switch (drain → source). No body diode.
-    /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ (typical for
-    /// modern Si MOSFETs in SMPS applications).
+    /// Add an n-channel power MOSFET: a controlled switch
+    /// (drain → source) plus its INTRINSIC anti-parallel body
+    /// diode (source → drain), which is on by DEFAULT.
+    ///
+    /// v2.0 (audit C.1, "diodo de corpo intrínseco por padrão").
+    /// The body diode is not an accessory — it is part of the
+    /// device, formed by the same p-n junction that makes the
+    /// transistor, and no vertical power MOSFET exists without
+    /// one. Leaving it out by default was wrong twice over:
+    ///
+    ///  * PHYSICALLY. A gate-off MOSFET in an inductive path is
+    ///    R_off = 1 GΩ, so the freewheeling current has nowhere
+    ///    to go and the node runs away. That is not a modelling
+    ///    subtlety, it is the normal state of the low-side
+    ///    device in every synchronous converter during dead
+    ///    time.
+    ///  * BY REVEALED PREFERENCE. This repository's own call
+    ///    sites voted 54 to 17 for
+    ///    `add_mosfet_with_body_diode` over bare `add_mosfet`.
+    ///    A default that is overridden three times out of four
+    ///    is the wrong default.
+    ///
+    /// The cost is nil: the PWL cache factors only the switch
+    /// states a run actually visits, so an extra branch that
+    /// never changes state is one more stamp, not another power
+    /// of two. Measured on chains of 2–8 MOSFETs: 1.00x.
+    ///
+    /// Pass `body_diode = false` for a device that genuinely has
+    /// none — an eGaN HEMT is the real case, since it conducts
+    /// in reverse through the channel rather than through a p-n
+    /// junction — or when you are modelling a bare switch.
+    ///
+    /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ, body V_F = 0.7 V
+    /// (typical for modern Si MOSFETs in SMPS applications).
     CircuitBuilder& add_mosfet(
         std::string_view name, std::string_view drain,
         std::string_view source,
         Real R_on  = Real{1e-3},
-        Real R_off = Real{1e9}) {
-        return add_switch(std::move(name),
-                            std::move(drain),
-                            std::move(source),
-                            Real{1} / R_on,
-                            Real{1} / R_off);
+        Real R_off = Real{1e9},
+        bool body_diode = true,
+        Real V_F        = Real{0.7}) {
+        if (!body_diode) {
+            return add_switch(name, drain, source,
+                                Real{1} / R_on,
+                                Real{1} / R_off);
+        }
+        return add_mosfet_with_body_diode(
+            name, drain, source, R_on, R_off, V_F);
     }
 
     /// Add an n-channel power MOSFET WITH its intrinsic

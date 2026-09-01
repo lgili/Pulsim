@@ -266,18 +266,32 @@ TEST_CASE("Half-wave rectifier: builder ≡ manual setup",
 // Layer 2 V1 — power-device convenience helpers
 // -----------------------------------------------------------------------------
 
-TEST_CASE("add_mosfet adds one branch with correct conductance",
+TEST_CASE("add_mosfet adds switch + body diode with correct conductance",
           "[v2][layer2_v1][mosfet]") {
+    // v2.0, audit C.1: the body diode is on by default.
     CircuitBuilder b;
     b.add_mosfet("Q1", "drain", "source", 2e-3, 1e9);
 
-    REQUIRE(b.num_branches() == 1);
+    REQUIRE(b.num_branches() == 2);
+    REQUIRE(b.pool().kind_of(1) ==
+              DevicePool::StoredKind::Diode);
+    REQUIRE(b.branch_id_of("Q1_body") == 1);
     REQUIRE(b.pool().kind_of(0) ==
               DevicePool::StoredKind::Switch);
     REQUIRE(b.pool().switch_g_on(0) ==
               Approx(1.0 / 2e-3));
     REQUIRE(b.pool().switch_g_off(0) ==
               Approx(1.0 / 1e9));
+}
+
+TEST_CASE("add_mosfet body_diode=false is the bare switch",
+          "[v2][layer2_v1][mosfet]") {
+    CircuitBuilder b;
+    b.add_mosfet("Q1", "drain", "source", 1e-3, 1e9,
+                  /*body_diode=*/false);
+    REQUIRE(b.num_branches() == 1);
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::Switch);
 }
 
 TEST_CASE("add_mosfet uses MOSFET defaults when omitted",

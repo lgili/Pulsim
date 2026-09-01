@@ -37,7 +37,12 @@ def _i_at(vds):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vd", "d", "gnd", vds)
     b.add_voltage_source("Vg", "g", "gnd", VG)
-    b.add_mosfet_level1("M1", "d", "gnd", "g", K, VT)
+    # with_body_diode=False on purpose: these tests characterise
+    # the CHANNEL. Since v2.0 the body diode is on by default
+    # (audit C.1), and in the third quadrant it would carry the
+    # current the channel is being measured for.
+    b.add_mosfet_level1("M1", "d", "gnd", "g", K, VT,
+                         with_body_diode=False)
     res = p.simulate(b, t_end=1e-8, dt=1e-8, engine="pwl")
     return float(np.asarray(res.i("Vd"))[-1])
 
@@ -107,7 +112,8 @@ def _i_gate(vds, vg):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vd", "d", "gnd", vds)
     b.add_voltage_source("Vg", "g", "gnd", vg)
-    b.add_mosfet_level1("M1", "d", "gnd", "g", K, VT)
+    b.add_mosfet_level1("M1", "d", "gnd", "g", K, VT,
+                         with_body_diode=False)
     res = p.simulate(b, t_end=1e-8, dt=1e-8, engine="pwl")
     return float(np.asarray(res.i("Vd"))[-1])
 

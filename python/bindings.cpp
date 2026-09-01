@@ -445,7 +445,7 @@ void init_module(py::module_& m) {
               py::arg("K"), py::arg("V_T"),
               py::arg("lambda_") = 0.02,
               py::arg("kappa")   = 15.0,
-              py::arg("with_body_diode") = false,
+              py::arg("with_body_diode") = true,
               py::return_value_policy::reference,
               "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
               "Level 1). Cutoff/triode/saturation regions "
@@ -454,11 +454,13 @@ void init_module(py::module_& m) {
               "channel-length modulation, kappa [1/V] sigmoid "
               "sharpness. Drain → source is a Nonlinear "
               "branch; gate is a node reference (no gate "
-              "current — ideal gate). Set "
-              "`with_body_diode=True` (proposal #3.1) to "
-              "also add an anti-parallel SwitchedDiode "
-              "(source→drain) — needed for inductive-load "
-              "switching to keep V_DS bounded. Call "
+              "current — ideal gate). The intrinsic "
+              "anti-parallel body diode (source→drain, named "
+              "`<name>_body`) is added BY DEFAULT — it is what "
+              "carries the current when the gate is off and an "
+              "inductive load would otherwise have no path. "
+              "Set `with_body_diode=False` for an eGaN HEMT, "
+              "which has no p-n body diode. Call "
               "`run_transient` with "
               "`enable_nonlinear_refresh=True` so the Newton "
               "loop stamps the MOSFET each iteration.")
@@ -619,10 +621,20 @@ void init_module(py::module_& m) {
               py::arg("source"),
               py::arg("R_on") = 1e-3,
               py::arg("R_off") = 1e9,
+              py::arg("body_diode") = true,
+              py::arg("V_F") = 0.7,
               py::return_value_policy::reference,
-              "Add an n-channel power MOSFET as a "
-              "controlled switch (drain → source). "
-              "Defaults: R_on=1mΩ, R_off=1GΩ.")
+              "Add an n-channel power MOSFET: a controlled "
+              "switch (drain → source) PLUS its intrinsic "
+              "anti-parallel body diode (source → drain), "
+              "named `<name>_body`, which is on by DEFAULT. "
+              "No vertical power MOSFET exists without one, "
+              "and a gate-off device in an inductive path has "
+              "no freewheeling route without it. Pass "
+              "`body_diode=False` for an eGaN HEMT (which "
+              "conducts in reverse through the channel, not a "
+              "p-n junction) or for a bare switch. Defaults: "
+              "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V.")
         .def("add_mosfet_with_body_diode",
               &builder::CircuitBuilder::add_mosfet_with_body_diode,
               py::arg("name"), py::arg("drain"),

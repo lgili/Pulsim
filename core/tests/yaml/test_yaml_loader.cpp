@@ -111,7 +111,9 @@ circuit:
       kappa: 25.0
 )YAML";
     auto loaded = yaml::load_string(yaml);
-    REQUIRE(loaded.builder.num_branches() == 1);
+    // v2.0 (audit C.1): the MOSFET carries its intrinsic
+    // body diode, so the device is two branches.
+    REQUIRE(loaded.builder.num_branches() == 2);
     REQUIRE(loaded.builder.pool().kind_of(0) ==
               DevicePool::StoredKind::MosfetLevel1);
     const auto& p =
@@ -281,7 +283,9 @@ circuit:
       R_on: 2e-3
 )YAML";
     auto loaded = yaml::load_string(yaml);
-    REQUIRE(loaded.builder.num_branches() == 1);
+    // v2.0 (audit C.1): the MOSFET carries its intrinsic
+    // body diode, so the device is two branches.
+    REQUIRE(loaded.builder.num_branches() == 2);
     REQUIRE(loaded.builder.pool().kind_of(0) ==
               DevicePool::StoredKind::Switch);
     REQUIRE(loaded.builder.pool().switch_g_on(0) ==

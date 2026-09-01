@@ -90,9 +90,11 @@ TEST_CASE("Showcase: PWM chopper with realistic SH1 MOSFET",
     // No switches: M1 is Nonlinear, no SwitchedDiode in the
     // chopper variant.
     const Size n_sw = loaded.builder.graph().num_switches();
-    REQUIRE(n_sw == 0);
+    // 1, not 0, since v2.0: the MOSFET carries its intrinsic
+    // body diode, which is a Switch branch (audit C.1).
+    REQUIRE(n_sw == 1);
 
-    auto switch_fn = [](Real) { return SwitchStateMask(0); };
+    auto switch_fn = [n_sw](Real) { return SwitchStateMask(n_sw); };
     auto nl_refresh = make_combined_diode_mosfet_refresh();
 
     SimulationOptions opts = loaded.options;
