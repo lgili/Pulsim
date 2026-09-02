@@ -40,6 +40,7 @@
 #include "pulsim/pwl/preflight.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <array>
 #include <cmath>
 #include <format>
 #include <functional>
@@ -419,6 +420,81 @@ public:
             name, a_idx, c_idx,
             topology::BranchKind::Nonlinear);
         pool_.add_lauritzen_diode(b_id, p);
+        return *this;
+    }
+
+    /// Add an MNA-native PMSM (Phase 4, audit C.3).
+    ///
+    /// Three stator branches `name_a/_b/_c` from the phase nodes to
+    /// `neutral`, each with a branch-current unknown, stamped per
+    /// Newton iteration with the FULL θ-dependent inductance matrix
+    /// L(θ) = T⁻¹·diag(L_d, L_q, L_0)·T and the PM flux — so an
+    /// IPM's d- and q-axis dynamics are exact (the observer-based
+    /// `add_pmsm` uses one average L and gets τ_d wrong by +100 %,
+    /// τ_q by −33 % on a 1/3 mH machine), and there is no one-step
+    /// lag anywhere (the observer's costs −0.37 % of speed at
+    /// dt = 5e-5 and −8 % at 5e-4).
+    ///
+    /// Mechanics are NODES: `omega_node` carries a capacitor J (so
+    /// J·dω/dt is trapezoidal, in the same solve) and a resistor
+    /// 1/B; `theta_node` carries a 1 F capacitor fed by ω. T_em from
+    /// the co-energy of the same L(θ) — the reluctance torque
+    /// appears because L(θ) is in the matrix, not by being added on.
+    /// A speed-dependent load is simply another element on
+    /// `omega_node`; `T_load` here is the constant part.
+    ///
+    ///   R_s, L_d, L_q [Ω, H]   psi_pm [Wb]   pole_pairs
+    ///   J [kg·m²]   B [N·m·s/rad]   T_load [N·m]
+    ///   L_0 [H] zero-sequence (0 → dq average; only conditioning)
+    ///   omega0 [rad/s], theta0 [rad] initial mechanical state
+    CircuitBuilder& add_pmsm_mna(
+        std::string_view name,
+        std::string_view phase_a, std::string_view phase_b,
+        std::string_view phase_c, std::string_view neutral,
+        std::string_view omega_node, std::string_view theta_node,
+        Real R_s, Real L_d, Real L_q, Real psi_pm, Real pole_pairs,
+        Real J, Real B = Real{0}, Real T_load = Real{0},
+        Real L_0 = Real{0},
+        Real omega0 = Real{0}, Real theta0 = Real{0}) {
+        if (!(J > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_pmsm_mna(\"{}\"): J must be > 0 (got {}); it is the "
+                "capacitor on the omega node, and a zero inertia leaves "
+                "that node with no dynamic and no pivot.", name, J));
+        }
+        if (B < Real{0}) {
+            throw std::invalid_argument(std::format(
+                "add_pmsm_mna(\"{}\"): B must be >= 0 (got {}).", name, B));
+        }
+        const models::PmsmMna::Params p{
+            .R_s = R_s, .L_d = L_d, .L_q = L_q, .L_0 = L_0,
+            .psi_pm = psi_pm, .pole_pairs = pole_pairs,
+            .T_load = T_load,
+        };
+        models::PmsmMna::validate(p);
+        const Index n_idx = resolve_node_(neutral);
+        const std::array<std::string_view, 3> ph{phase_a, phase_b,
+                                                 phase_c};
+        std::array<Index, 3> ids{};
+        for (Size k = 0; k < 3; ++k) {
+            const std::string bname =
+                std::string{name} + "_" + "abc"[k];
+            ids[k] = add_branch_(bname, resolve_node_(ph[k]), n_idx,
+                                 topology::BranchKind::Nonlinear);
+        }
+        const Index om_idx = resolve_node_(omega_node);
+        const Index th_idx = resolve_node_(theta_node);
+        pool_.add_pmsm_mna(ids, om_idx, th_idx, p);
+        // Mechanical circuit: ordinary linear elements, so the
+        // mechanics inherit the trapezoidal companion.
+        add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
+                      omega0);
+        if (B > Real{0}) {
+            add_resistor(std::string{name} + "_B", omega_node, "gnd",
+                         Real{1} / B);
+        }
+        add_capacitor(std::string{name} + "_theta", theta_node, "gnd",
+                      Real{1}, theta0);
         return *this;
     }
 

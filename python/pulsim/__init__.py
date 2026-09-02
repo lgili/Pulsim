@@ -2734,6 +2734,7 @@ def simulate(
         step_observer=_step_observer_user,
         b_extra_fn=_b_extra_fn_user,
         closed_loops=_closed_loops_user,
+        builder=builder,
     )
     # v2.0 Phase 3: fold the last step's charge transfer into the
     # Thevenin arms — the per-step observer only fires BEFORE
@@ -2767,6 +2768,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
         from ._pulsim import BranchKind as _BK  # type: ignore
         n_sat = 0
         n_laur = 0
+        n_pmsm = 0
         n_tail = 0
         for br in builder.graph.branches:
             if br.get("kind") != _BK.Nonlinear:
@@ -2781,6 +2783,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 n_sat += 1
             elif k.endswith("LauritzenDiode"):
                 n_laur += 1
+            elif k.endswith("PmsmMna"):
+                n_pmsm += 1
             elif k.endswith("IgbtLevel1"):
                 # Only the ones that actually model a tail; a
                 # plain IGBT is static and perfectly fine here.
@@ -2800,6 +2804,13 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 "never fire and whatever it was closing (an "
                 "electro-thermal loop, usually) would silently stay "
                 "open")
+        if n_pmsm:
+            # Three phase branches per machine; report machines.
+            why.append(
+                f"{n_pmsm // 3} MNA-native PMSM(s) — their flux-linkage "
+                "history is only wired for the trapezoidal companion, "
+                "so a BDF2 second stage would integrate the wrong rule "
+                "and report a speed and torque that never happened")
         if n_laur:
             # The charge-based Coss IS handled here (its two-stage
             # history is wired through trbdf2_transient), so this
@@ -2914,12 +2925,71 @@ def _auto_check_voltage_sanity(res, builder, factor):
             stacklevel=3)
 
 
+def _attach_native_machine_traces(result, builder) -> None:
+    """Traces for `add_pmsm_mna` machines: `<name>.t/omega/theta/T_em/
+    i_d/i_q`, with i_d/i_q by the FOC chain's amplitude-invariant
+    Clarke–Park (d on the PM flux, q leading) and T_em from the same
+    co-energy law the stamp uses."""
+    import numpy as _np
+    if builder is None:
+        return
+    pool = getattr(builder, "pool", None)
+    machines = getattr(pool, "pmsm_mna_machines", None)
+    if machines is None:
+        return
+    machines = machines()
+    if not machines:
+        return
+    states = _np.asarray(result.states, dtype=float)
+    times = _np.asarray(result.times, dtype=float)
+    if states.ndim != 2 or states.shape[0] != times.shape[0]:
+        return
+    traces = getattr(result, "_motor_traces", None)
+    if traces is None:
+        traces = {}
+        result._motor_traces = traces
+    graph = builder.graph
+    for m in machines:
+        bids = [int(b) for b in m["branch_ids"]]
+        name = builder.name_of(bids[0])
+        if name.endswith("_a"):
+            name = name[:-2]
+        pp = float(m["params"]["pole_pairs"])
+        psi = float(m["params"]["psi_pm"])
+        L_d = float(m["params"]["L_d"])
+        L_q = float(m["params"]["L_q"])
+        omega = states[:, int(m["omega_node"])]
+        theta = states[:, int(m["theta_node"])]
+        cur = [states[:, int(pool.branch_var_id_for_inductor(b, graph))]
+               for b in bids]
+        i_a, i_b, i_c = cur
+        th_e = pp * theta
+        # Amplitude-invariant Clarke (i_a + i_b + i_c = 0 by KCL at the
+        # star point) and the chain's Park matrix.
+        i_alpha = i_a
+        i_beta = (i_b - i_c) / _np.sqrt(3.0)
+        c, sn = _np.cos(th_e), _np.sin(th_e)
+        i_d = i_alpha * c + i_beta * sn
+        i_q = -i_alpha * sn + i_beta * c
+        # dq torque, identical to the abc co-energy expression.
+        t_em = 1.5 * pp * (psi * i_q + (L_d - L_q) * i_d * i_q)
+        traces[f"{name}.t"] = times
+        traces[f"{name}.omega"] = omega
+        traces[f"{name}.theta"] = theta
+        traces[f"{name}.T_em"] = t_em
+        traces[f"{name}.i_d"] = i_d
+        traces[f"{name}.i_q"] = i_q
+
+
 def _auto_attach_motor_traces(
     result,
     *,
     step_observer=None,
     b_extra_fn=None,
+    builder=None,
     closed_loops=None,
+
+
 ) -> None:
     """Find every :class:`MotorObserverBundle` reachable from the
     caller's `simulate(...)` arguments and stash its traces on
@@ -2964,6 +3034,16 @@ def _auto_attach_motor_traces(
                 _visit(getattr(loop, "switch_fn", None))
         except TypeError:  # not iterable
             pass
+
+    # v2.0 Phase 4 C.3 — MNA-native machines have no observer; their
+    # speed and angle are NODE voltages and their phase currents are
+    # branch unknowns, so the traces are read straight from the state
+    # vector and attached under the same names the observer path
+    # uses, keeping `res.signal("M1.omega")` uniform across the two.
+    try:
+        _attach_native_machine_traces(result, builder)
+    except Exception:  # noqa: BLE001 — never break a finished result
+        pass
 
 
 # Note: SineVoltageSource (Layer 2 V11) is exposed as a

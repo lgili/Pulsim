@@ -465,6 +465,39 @@ void init_module(py::module_& m) {
               "tau/(tau + T_M). A Schottky stores no charge at "
               "all — use `add_shockley_diode` for one rather than "
               "driving `tau` toward zero here.")
+        .def("add_pmsm_mna",
+              &builder::CircuitBuilder::add_pmsm_mna,
+              py::arg("name"),
+              py::arg("phase_a"), py::arg("phase_b"), py::arg("phase_c"),
+              py::arg("neutral"),
+              py::arg("omega_node"), py::arg("theta_node"),
+              py::arg("R_s"), py::arg("L_d"), py::arg("L_q"),
+              py::arg("psi_pm"), py::arg("pole_pairs"),
+              py::arg("J"),
+              py::arg("B")      = 0.0,
+              py::arg("T_load") = 0.0,
+              py::arg("L_0")    = 0.0,
+              py::arg("omega0") = 0.0,
+              py::arg("theta0") = 0.0,
+              py::return_value_policy::reference,
+              "Add an MNA-NATIVE PMSM (audit C.3): three stator "
+              "branches `<name>_a/_b/_c` (phase -> neutral) stamped "
+              "per Newton iteration with the FULL theta-dependent "
+              "inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T "
+              "and the PM flux, so an IPM's d/q dynamics are exact and "
+              "there is no one-step lag; mechanics are NODES "
+              "(`omega_node` carries a capacitor J and a resistor 1/B, "
+              "`theta_node` a 1 F capacitor fed by omega), so they get "
+              "the same trapezoidal companion in the same solve. T_em "
+              "comes from the co-energy of the same L(theta) — the "
+              "reluctance torque appears because L(theta) is in the "
+              "matrix. A speed-dependent load is just another element "
+              "on `omega_node`. Read speed with res.v(omega_node), angle "
+              "with res.v(theta_node), phase currents with "
+              "res.i('<name>_a'). Compare with the observer-based "
+              "`add_pmsm` + `make_pmsm_observer`, which uses one "
+              "average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) "
+              "and a first-order lag (-0.37 % of speed at dt=5e-5).")
         .def("add_igbt_level1",
               &builder::CircuitBuilder::add_igbt_level1,
               py::arg("name"),
@@ -964,6 +997,8 @@ void init_module(py::module_& m) {
                               kind_str = "shockley_diode"; break;
                           case K::LauritzenDiode:
                               kind_str = "lauritzen_diode"; break;
+                          case K::PmsmMna:
+                              kind_str = "pmsm_mna"; break;
                           }
                       } catch (const std::exception&) {
                           // Branch present in graph but not registered
@@ -1144,6 +1179,34 @@ void init_module(py::module_& m) {
         // branch_id alone. The returned StoredKind enum is bound
         // below as a sibling type so `.name` gives the canonical
         // string ("Resistor", "Inductor", …).
+        .def("pmsm_mna_machines",
+              [](const pwl::DevicePool& self) {
+                  py::list out;
+                  for (const auto& m : self.pmsm_mna_machines()) {
+                      py::dict d;
+                      d["branch_ids"] = py::make_tuple(
+                          static_cast<int>(m.branch_id[0]),
+                          static_cast<int>(m.branch_id[1]),
+                          static_cast<int>(m.branch_id[2]));
+                      d["omega_node"] = static_cast<int>(m.omega_node);
+                      d["theta_node"] = static_cast<int>(m.theta_node);
+                      py::dict pr;
+                      pr["R_s"] = m.params.R_s;
+                      pr["L_d"] = m.params.L_d;
+                      pr["L_q"] = m.params.L_q;
+                      pr["L_0"] = models::PmsmMna::L_zero(m.params);
+                      pr["psi_pm"] = m.params.psi_pm;
+                      pr["pole_pairs"] = m.params.pole_pairs;
+                      pr["T_load"] = m.params.T_load;
+                      d["params"] = pr;
+                      out.append(d);
+                  }
+                  return out;
+              },
+              "MNA-native PMSMs registered on this pool, one dict per "
+              "machine: branch_ids (a, b, c), omega_node, theta_node "
+              "(state-vector indices) and params. `simulate` reads this "
+              "to attach the `<name>.omega/theta/T_em/i_d/i_q` traces.")
         .def("igbt_has_tail",
               &pwl::DevicePool::igbt_has_tail,
               py::arg("branch_id"),
@@ -1187,7 +1250,8 @@ void init_module(py::module_& m) {
         .value("SaturableInductor",   pwl::DevicePool::StoredKind::SaturableInductor)
         .value("NonlinearCapacitor",  pwl::DevicePool::StoredKind::NonlinearCapacitor)
         .value("ShockleyDiode",       pwl::DevicePool::StoredKind::ShockleyDiode)
-        .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode);
+        .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode)
+        .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna);
 
     // ---- ParametricRefactorResult (v1.4.0) -------------------------------
     py::class_<pwl::ParametricRefactorResult>(m,
