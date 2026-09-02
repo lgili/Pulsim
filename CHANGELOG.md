@@ -8,6 +8,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **PLECS-style 3-D switching-loss tables `E(v, i, Tj)`** (audit
+  C.1). Loss annotation was PSIM-style: one energy curve `E(I)` at
+  a reference bus voltage, scaled linearly by the actual blocking
+  voltage. That model has **no temperature axis**, and switching
+  energy is strongly temperature-dependent.
+
+  Measured against a 600 V / 100 A Si IGBT's own datasheet,
+  reading the 25 °C / 300 V curve and asking for a 600 V bus at a
+  125 °C junction:
+
+      I (A)    what it gives    datasheet    error
+        25        2.60 mJ        4.40 mJ    −40.9 %
+       100       11.00 mJ       18.00 mJ    −38.9 %
+       200       24.00 mJ       38.60 mJ    −37.8 %
+
+  About **40 % of the switching loss missing** — and it separates
+  cleanly:
+
+      voltage       linear 300 → 600 V scaling      −5.2 %
+      temperature   25 °C table read at 125 °C     −35.6 %
+
+  So the linear voltage scaling was a decent approximation all
+  along; what was missing was the junction temperature.
+  `pulsim.LossTable` adds it as a **real axis** rather than a
+  correction factor, which is what PLECS does and what a
+  datasheet's own tables are shaped like.
+
+      tbl = p.LossTable.from_curves({
+          (300., 25.): [(25, 1.3e-3), (100, 5.5e-3), ...],
+          (300., 125.): [...], (600., 25.): [...], (600., 125.): [...],
+      })
+      switch_specs = {"S1": {"E_on_table": tbl, "Tj": 125.0}}
+
+  `from_curves` takes the shape a datasheet actually publishes —
+  `E(I)` curves per `(V, Tj)` pair, which need not share sample
+  points. Reading is trilinear with **linear extrapolation** past
+  the edges, the same choice the existing 1-D curve makes: a
+  converter run past its datasheet should not read as if it were
+  sitting on the last tabulated point.
+
+  `Tj` is required alongside a table and accepts a scalar, an
+  array on the result's time grid (the shape a thermal simulation
+  delivers), or a callable. Omitting it is refused — picking a
+  temperature silently would hide exactly the error the table
+  exists to fix. A table needs **no `V_ref`**, since voltage is
+  one of its own axes; the curve and single-point forms still
+  require it, unchanged.
+
+  Mistranscriptions are refused by name rather than absorbed: a
+  transposed table (datasheets are usually written current-major),
+  an unsorted axis, negative energy, and an incomplete `(V, Tj)`
+  grid — filling a missing corner would invent a datasheet number.
 * **The IGBT turn-off tail** (audit C.1). An IGBT is a PNP
   transistor driven by a MOSFET. When the gate falls below
   threshold the MOS channel cuts off in nanoseconds, but the
