@@ -40,7 +40,9 @@
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
+#include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
+#include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
@@ -400,6 +402,16 @@ inline SimulationResult run_transient(
     }
     const bool has_coss = !coss_history.empty();
 
+    // The Lauritzen diode's stored charge, same shape as the Coss
+    // history above: state that the Newton stamp reads and the
+    // step commits, snapshot/restored on rejection.
+    pwl::LauritzenDiodeHistory laur_history;
+    laur_history.init(graph, pool);
+    if (initial_state != nullptr) {
+        laur_history.seed_from_dc_op(x);
+    }
+    const bool has_lauritzen = !laur_history.empty();
+
     pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
     if (has_coss) {
         nl_refresh_effective =
@@ -420,6 +432,28 @@ inline SimulationResult run_transient(
                     max_i,
                     pwl::refresh_nonlinear_capacitors(
                         xx, J_nl, f_nl, coss_history,
+                        refresh_dt));
+            };
+    }
+    if (has_lauritzen) {
+        nl_refresh_effective =
+            [user_refresh = nl_refresh_effective, &laur_history,
+             &refresh_dt](const Vector& xx,
+                            sparse::Matrix& J_nl,
+                            Vector& f_nl,
+                            const topology::Graph& g,
+                            const pwl::DevicePool& pp) -> Real {
+                Real max_i = Real{0};
+                if (user_refresh) {
+                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(
+                    max_i,
+                    pwl::refresh_lauritzen_diodes(
+                        xx, J_nl, f_nl, laur_history,
                         refresh_dt));
             };
     }
@@ -566,6 +600,7 @@ inline SimulationResult run_transient(
     // refuses a variable step; this device was given the
     // capability up front rather than as a follow-up.
     std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
+    std::vector<pwl::LauritzenDiodeHistory::Entry> laur_snap;
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     std::vector<CommutationEvent> step_events;      // per-step event scratch
@@ -718,6 +753,7 @@ inline SimulationResult run_transient(
             // enable_substep_state_correction is true.
             history.snapshot_into(history_snap);
             coss_snap = coss_history.snapshot();
+            laur_snap = laur_history.snapshot();
             if (has_diodes) {
                 diodes.snapshot_on_bits_into(diodes_snap);
             } else {
@@ -926,6 +962,7 @@ inline SimulationResult run_transient(
                     x = x_prev;
                     history.restore(history_snap);
                     coss_history.restore(coss_snap);
+                    laur_history.restore(laur_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -969,6 +1006,8 @@ inline SimulationResult run_transient(
                         if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
                             coss_history.update_from_state(x,
+                                                            sub_dt);
+                            laur_history.update_from_state(x,
                                                             sub_dt);
                         } else {
                             committed_dt = sub_dt;
@@ -1122,6 +1161,7 @@ inline SimulationResult run_transient(
                     x = x_prev;
                     history.restore(history_snap);
                     coss_history.restore(coss_snap);
+                    laur_history.restore(laur_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -1139,6 +1179,7 @@ inline SimulationResult run_transient(
                             mask_pre, dt1, b_extra, x);
                         history.update_from_state(x, dt1);
                         coss_history.update_from_state(x, dt1);
+                        laur_history.update_from_state(x, dt1);
                         if (has_saturable) {
                             sat_history.update_from_state(x);
                         }
@@ -1299,6 +1340,7 @@ inline SimulationResult run_transient(
             //    sub-step 1 already committed the dt1 half above).
             history.update_from_state(x, committed_dt);
             coss_history.update_from_state(x, committed_dt);
+            laur_history.update_from_state(x, committed_dt);
             if (has_saturable) {
                 sat_history.update_from_state(x);
             }

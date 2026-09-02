@@ -22,6 +22,7 @@
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/multi_winding_transformer.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
+#include "pulsim/models/lauritzen_diode.hpp"
 #include "pulsim/models/shockley_diode.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
@@ -70,6 +71,7 @@ public:
         SaturableInductor = 14, // Layer 2 V17 (nonlinear L(i) inductor)
         NonlinearCapacitor = 15, // Phase 4 C.1 (charge-based Coss)
         ShockleyDiode      = 16, // Phase 4 C.1 (exponential junction)
+        LauritzenDiode     = 17, // Phase 4 C.1 (reverse recovery)
     };
 
     struct SwitchParams {
@@ -141,6 +143,29 @@ public:
     void add_shockley_diode(Index branch_id,
                              models::ShockleyDiode::Params p) {
         entries_[branch_id] = Entry{p};
+    }
+
+    /// Register a Lauritzen-Mattsson diode — Phase 4 C.1. Unlike
+    /// every other diode it carries STATE (the stored charge), so
+    /// it needs `LauritzenDiodeHistory` alongside the pool, and
+    /// the branch list below is what that history iterates.
+    void add_lauritzen_diode(Index branch_id,
+                              models::LauritzenDiode::Params p) {
+        models::LauritzenDiode::validate(p);
+        entries_[branch_id] = Entry{p};
+        lauritzen_diode_branches_.push_back(branch_id);
+    }
+
+    [[nodiscard]] const models::LauritzenDiode::Params&
+    lauritzen_diode_params(Index branch_id) const {
+        return require_params_<models::LauritzenDiode::Params>(
+            branch_id, "lauritzen_diode_params",
+            "a LauritzenDiode");
+    }
+
+    [[nodiscard]] const std::vector<Index>&
+    lauritzen_diode_branches() const noexcept {
+        return lauritzen_diode_branches_;
     }
 
     /// Register a constant DC current source (Layer 2 V3).
@@ -344,6 +369,7 @@ public:
             const auto k = static_cast<StoredKind>(entry.index());
             if (k == StoredKind::NonlinearDiode ||
                 k == StoredKind::ShockleyDiode  ||
+                k == StoredKind::LauritzenDiode ||
                 k == StoredKind::MosfetLevel1   ||
                 k == StoredKind::IgbtLevel1     ||
                 k == StoredKind::SaturableInductor) {
@@ -793,7 +819,8 @@ private:
                                 models::VCVS::Params,
                                 models::SaturableInductor::Params,
                                 models::NonlinearCapacitor::Params,
-                                models::ShockleyDiode::Params>;
+                                models::ShockleyDiode::Params,
+                                models::LauritzenDiode::Params>;
 
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
@@ -805,8 +832,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 17,
-        "StoredKind has 17 values; Entry must list 17 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 18,
+        "StoredKind has 18 values; Entry must list 18 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -825,6 +852,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::SaturableInductor,  models::SaturableInductor::Params>);
     static_assert(kind_maps_to_<StoredKind::NonlinearCapacitor, models::NonlinearCapacitor::Params>);
     static_assert(kind_maps_to_<StoredKind::ShockleyDiode,      models::ShockleyDiode::Params>);
+    static_assert(kind_maps_to_<StoredKind::LauritzenDiode,     models::LauritzenDiode::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -916,6 +944,7 @@ private:
     // every Nonlinear branch.
     std::vector<Index> saturable_inductor_branches_;
     std::vector<Index> nonlinear_capacitor_branches_;
+    std::vector<Index> lauritzen_diode_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the
