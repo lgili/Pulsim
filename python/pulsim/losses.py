@@ -41,6 +41,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
 import numpy as np
 
+
+from .loss_tables import (
+    as_loss_table as _as_loss_table,
+    resolve_tj as _resolve_tj,
+)
 from . import _result_views as _views
 from ._result_views import time_weighted_rms as _time_weighted_rms
 from . import magnetic as _magnetic
@@ -477,6 +482,23 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     E_off_ref = float(spec.get("E_off_ref", 0.0))
     E_on_curve = spec.get("E_on_curve")
     E_off_curve = spec.get("E_off_curve")
+    # PLECS-style 3-D tables E(v, i, Tj). They take precedence over
+    # the curve and the single-point form, because they carry
+    # strictly more information — see `pulsim.loss_tables` for the
+    # 40 % that the temperature-free model was leaving out.
+    E_on_table = spec.get("E_on_table")
+    E_off_table = spec.get("E_off_table")
+    tj_spec = spec.get("Tj")
+    if (E_on_table is not None or E_off_table is not None) \
+            and tj_spec is None:
+        raise ValueError(
+            "switch_specs: a 3-D loss table is indexed by junction "
+            "temperature, so `Tj` must be given alongside it — a "
+            "scalar for a fixed junction temperature, an array on "
+            "the result's time grid, or a callable t -> Tj. Without "
+            "it there is no defensible temperature to read the "
+            "table at, and picking one silently would hide exactly "
+            "the error the table exists to fix.")
     V_ref = float(spec.get("V_ref", 0.0))
     I_ref = float(spec.get("I_ref", 0.0))
     T = (times[-1] - times[0]) if times.size > 1 else 0.0
@@ -493,8 +515,10 @@ def _switch_switching_loss(closed_trace: np.ndarray,
         "f_sw_estimate": (float(n_on + n_off) / (2.0 * T)) if T > 0
                                 else 0.0,
     }
-    has_on = (E_on_ref > 0) or (E_on_curve is not None)
-    has_off = (E_off_ref > 0) or (E_off_curve is not None)
+    has_on = ((E_on_ref > 0) or (E_on_curve is not None)
+              or (E_on_table is not None))
+    has_off = ((E_off_ref > 0) or (E_off_curve is not None)
+               or (E_off_table is not None))
     if (n_on == 0 and n_off == 0) or (not has_on and not has_off):
         return {
             "E_sw_on_total": 0.0,
@@ -503,10 +527,18 @@ def _switch_switching_loss(closed_trace: np.ndarray,
             "P_sw_avg": 0.0,
             **bookkeeping,
         }
-    if V_ref <= 0:
+    # V_ref anchors the CURVE and single-point forms only. A 3-D
+    # table carries voltage as one of its own axes, so demanding a
+    # reference voltage there would be asking for a number that has
+    # nowhere to go.
+    needs_v_ref = ((has_on and E_on_table is None)
+                   or (has_off and E_off_table is None))
+    if needs_v_ref and V_ref <= 0:
         raise ValueError(
             "switch_specs: V_ref must be positive — it anchors the "
-            "datasheet E_on/E_off reference bus voltage.")
+            "datasheet E_on/E_off reference bus voltage. (A 3-D "
+            "E_on_table / E_off_table needs no V_ref: voltage is one "
+            "of the table's axes.)")
 
     # Blocking voltage = the OFF-state v_SW (across the open switch).
     # That's the sample BEFORE a turn-on edge and the sample AFTER a
@@ -517,8 +549,10 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     # opening).
     def _edge_loss(idxs: np.ndarray, E_ref: float, curve,
                     *, blocking_at_post_edge: bool,
-                    load_at_post_edge: bool) -> float:
-        if idxs.size == 0 or (E_ref <= 0 and curve is None):
+                    load_at_post_edge: bool,
+                    table=None) -> float:
+        if idxs.size == 0 or (E_ref <= 0 and curve is None
+                               and table is None):
             return 0.0
         blk_k  = idxs if blocking_at_post_edge \
                        else np.clip(idxs - 1, 0, v_SW.size - 1)
@@ -526,6 +560,12 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                        else np.clip(idxs - 1, 0, v_SW.size - 1)
         V_blk = np.abs(v_SW[blk_k])
         I_load = np.abs(i_SW[load_k])
+        if table is not None:
+            # The 3-D table needs no V_ref scaling: the voltage IS
+            # one of its axes.
+            tab = _as_loss_table(table)
+            tj_arr = _resolve_tj(tj_spec, times)
+            return float(np.sum(tab(V_blk, I_load, tj_arr[load_k])))
         if curve is not None:
             # Nonlinear E(I) from the datasheet curve (at V_ref), scaled
             # linearly by the actual blocking voltage.
@@ -542,10 +582,12 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     # Turn-off: V_blk = post-edge (now open), I_load = pre-edge (was closed).
     E_on_total = _edge_loss(turn_on_k,  E_on_ref, E_on_curve,
                               blocking_at_post_edge=False,
-                              load_at_post_edge=True)
+                              load_at_post_edge=True,
+                              table=E_on_table)
     E_off_total = _edge_loss(turn_off_k, E_off_ref, E_off_curve,
                               blocking_at_post_edge=True,
-                              load_at_post_edge=False)
+                              load_at_post_edge=False,
+                              table=E_off_table)
     E_total = E_on_total + E_off_total
     return {
         "E_sw_on_total": E_on_total,

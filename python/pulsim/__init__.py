@@ -323,6 +323,7 @@ from .spice_import import (
     spice_to_builder,
 )
 from .stream import LiveStream, NativeLiveStream
+from .loss_tables import LossTable
 from .losses import (
     LossAccumulator,
     EfficiencyCalculator,
@@ -669,6 +670,7 @@ __all__ = [
     "NativeLiveStream",
     # Post-hoc loss + efficiency helpers (parity with v1 surface).
     "LossAccumulator",
+    "LossTable",
     "EfficiencyCalculator",
     "device_loss_summary",
     "average_power_at_node",
