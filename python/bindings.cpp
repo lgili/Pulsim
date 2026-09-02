@@ -476,6 +476,8 @@ void init_module(py::module_& m) {
               py::arg("kappa")    = 10.0,
               py::arg("v_knee")   = 0.01,
               py::arg("with_fwd") = false,
+              py::arg("tau_tail") = 0.0,
+              py::arg("k_tail")   = 0.0,
               py::return_value_policy::reference,
               "Add a 3-terminal IGBT Level 1 (linear-"
               "conduction model with cutoff sigmoid). "
@@ -490,7 +492,21 @@ void init_module(py::module_& m) {
               "load needs: without it there is no path for the "
               "freewheeling current and the solve fails. Use "
               "`run_transient(..., enable_nonlinear_refresh="
-              "True)` to stamp the device per Newton iteration.")
+              "True)` to stamp the device per Newton iteration. "
+              "`tau_tail`/`k_tail` add the TURN-OFF TAIL: when the "
+              "gate falls below threshold the MOS channel cuts off "
+              "in nanoseconds, but the carriers stored in the n- "
+              "drift region can only recombine, and that tail is "
+              "40-70% of an IGBT's turn-off energy. `k_tail` is "
+              "the fraction of on-state current still flowing just "
+              "after cutoff and `tau_tail` its decay constant "
+              "(0.1-10 us) — both read straight off a datasheet "
+              "turn-off waveform, and they must be given together. "
+              "They default to OFF, unlike the MOSFET's body "
+              "diode, because NPT/PT/trench/field-stop parts "
+              "differ by orders of magnitude, so any default would "
+              "put a fabricated number in your loss report. The DC "
+              "curve is unchanged either way.")
         .def("add_mosfet_level1",
               &builder::CircuitBuilder::add_mosfet_level1,
               py::arg("name"),
@@ -1128,6 +1144,13 @@ void init_module(py::module_& m) {
         // branch_id alone. The returned StoredKind enum is bound
         // below as a sibling type so `.name` gives the canonical
         // string ("Resistor", "Inductor", …).
+        .def("igbt_has_tail",
+              &pwl::DevicePool::igbt_has_tail,
+              py::arg("branch_id"),
+              "True when this branch is an IGBT with a "
+              "turn-off tail (tau_tail and k_tail both set). "
+              "The engine router uses it to decide whether "
+              "TR-BDF2 has to refuse the circuit.")
         .def("kind_of",
               &pwl::DevicePool::kind_of,
               py::arg("branch_id"),

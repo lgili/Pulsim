@@ -314,6 +314,28 @@ public:
         models::IgbtLevel1::Params p) {
         entries_[branch_id] = Entry{p};
         igbt_level1_gate_node_id_[branch_id] = gate_node_id;
+        igbt_level1_branches_.push_back(branch_id);
+    }
+
+    /// True when this branch is an IGBT carrying a turn-off
+    /// tail. The Python engine router reads this to decide
+    /// whether TR-BDF2 must refuse the circuit, so it is a
+    /// predicate rather than an exposed params struct.
+    [[nodiscard]] bool igbt_has_tail(Index branch_id) const {
+        const auto it = entries_.find(branch_id);
+        if (it == entries_.end()) {
+            return false;
+        }
+        const auto* p = std::get_if<models::IgbtLevel1::Params>(
+            &it->second);
+        return p != nullptr && models::IgbtLevel1::has_tail(*p);
+    }
+
+    /// IGBT branch ids in insertion order. `IgbtTailHistory`
+    /// walks this and keeps only the ones with a tail.
+    [[nodiscard]] const std::vector<Index>&
+    igbt_level1_branches() const noexcept {
+        return igbt_level1_branches_;
     }
 
     [[nodiscard]] Index
@@ -945,6 +967,7 @@ private:
     std::vector<Index> saturable_inductor_branches_;
     std::vector<Index> nonlinear_capacitor_branches_;
     std::vector<Index> lauritzen_diode_branches_;
+    std::vector<Index> igbt_level1_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the

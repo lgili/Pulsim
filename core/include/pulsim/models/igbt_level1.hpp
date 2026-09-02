@@ -104,6 +104,41 @@ struct IgbtLevel1 {
         /// the model's only non-monotone-free knob: it must stay
         /// positive, and 0 would restore reverse conduction.
         Real v_knee   = Real{0.01};
+
+        // ---- Turn-off tail (v2.0, audit C.1) ----------------
+        //
+        // An IGBT is a PNP transistor driven by a MOSFET. When
+        // the gate goes below threshold the MOS channel cuts off
+        // in nanoseconds, but the minority carriers stored in the
+        // n- drift region can only RECOMBINE — a tail current
+        // that keeps flowing with the full rail already across
+        // the device. It is 40-70 % of an IGBT's turn-off energy.
+        //
+        // Measured on this model before the tail existed
+        // (600 V, 100 A, clamped inductive turn-off): I_C went
+        // from 102 A to EXACTLY 0.00000 A within one step, and
+        // E_off came out 44 uJ against a datasheet 5-15 mJ —
+        // understated by more than two orders of magnitude.
+        //
+        // WHY THESE DEFAULT TO OFF, unlike the MOSFET's body
+        // diode. Every vertical power MOSFET has a body diode and
+        // it behaves much the same way in all of them, so
+        // defaulting it ON is defaulting to the physics. An IGBT
+        // tail is not like that: NPT, PT, trench and field-stop
+        // parts differ by orders of magnitude in both magnitude
+        // and time constant, so any default here would be a
+        // FABRICATED number appearing in the user's loss report.
+        // Zero is honest — no tail modelled — and the datasheet
+        // gives both numbers directly.
+
+        /// Tail time constant [s], the effective carrier
+        /// lifetime. Typical 0.1-10 us. 0 disables the tail.
+        Real tau_tail = Real{0};
+        /// Fraction of the on-state current that continues as
+        /// tail after the channel cuts off, in [0, 1). This is
+        /// I_tail(0+)/I_C, read straight off a datasheet
+        /// turn-off waveform.
+        Real k_tail   = Real{0};
     };
 
     static constexpr topology::BranchKind kind =
@@ -115,8 +150,12 @@ struct IgbtLevel1 {
     ///   v[0] = V(collector)
     ///   v[1] = V(emitter)
     ///   v[2] = V(gate)
+    /// The device's STEADY-STATE law: what `current` returns
+    /// when nothing is changing. The tail stamp drives its charge
+    /// state from this, so the two can never disagree about the
+    /// DC curve.
     template <numeric::FloatingPoint S>
-    [[nodiscard]] static S current(
+    [[nodiscard]] static S steady_state_current(
         const S* v, const Params& p) noexcept {
         using std::exp;
         // Branch voltages.
@@ -139,6 +178,23 @@ struct IgbtLevel1 {
                        / (Real{2} * p.R_CE_sat);
 
         return alpha_on * i_on;
+    }
+
+    /// Instantaneous collector current with NO tail state — the
+    /// steady-state law. A circuit whose IGBTs have `tau_tail`
+    /// set is stamped by `refresh_igbt_tails` instead, which
+    /// carries the stored charge; this stays the law for every
+    /// IGBT without one, and is what that stamp reduces to when
+    /// the charge is in equilibrium.
+    template <numeric::FloatingPoint S>
+    [[nodiscard]] static S current(
+        const S* v, const Params& p) noexcept {
+        return steady_state_current<S>(v, p);
+    }
+
+    /// True when this IGBT carries a turn-off tail.
+    [[nodiscard]] static bool has_tail(const Params& p) noexcept {
+        return p.tau_tail > Real{0} && p.k_tail > Real{0};
     }
 };
 
