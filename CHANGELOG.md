@@ -8,6 +8,74 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **Bidirectional electro-thermal coupling** (audit C.2). Pulsim
+  already closed half the loop: the transient electro-thermal
+  observer recomputed each device's injected power from its
+  current junction temperature, so loss followed temperature.
+  But the electrical side never saw the temperature — the `R_on`
+  in the MNA matrix stayed whatever it was when the circuit was
+  built.
+
+      electrical → lumped power → thermal → lumped power   (closed)
+      thermal → device parameters in the matrix            (OPEN)
+
+  **What that costs, measured honestly.** On a well-designed buck:
+  almost nothing. Doubling a 5 mΩ MOSFET's `R_on` from 25 °C to
+  125 °C moves `v_out` by −0.22 %, because the device drop is tiny
+  next to the load. That is *not* the motivation.
+
+  The motivation is the case where the answer **is** the coupling.
+  Two identical MOSFETs in parallel sharing 100 A, one mounted
+  worse (R_th 2.0 vs 1.2 K/W), `Rds_on` doubling by 125 °C:
+
+                              frozen        coupled
+      current imbalance         0.0 %         6.9 %
+      hottest junction         65.0 °C       72.1 °C
+
+  The frozen model reports the imbalance as **exactly zero** —
+  structural blindness, not a small error: current sharing between
+  paralleled devices is entirely a temperature effect. It also
+  under-reads the hottest junction by 7 °C, against a 125 °C limit.
+
+  `TempCoResistance` names a resistor branch that follows a
+  junction temperature; `make_bidirectional_observer` closes the
+  second half of the loop. Loss is read as `i²·R` straight from the
+  state vector with `R` whatever the last temperature write put in
+  the matrix — there is no `TempCoLoss` proxy in the middle, because
+  once the resistance is genuinely in the matrix a hand-fitted
+  second model of the same physics can only disagree with the
+  first. Temperature is written back through
+  `cache.refactor_parametric`, the path `mmc_thevenin` already
+  drives mid-run.
+
+  **`simulate(on_cache=...)`** is the hook that makes it possible:
+  `simulate` builds the PWL cache itself, so instead of taking one
+  in it hands the cache *out* to a hook returning an
+  `(observer, b_extra)` pair — the same shape as the MMC Thevenin
+  driver. The two internal-hook merges are now one helper.
+
+  **Why the coupling is affordable.** Refactorising the cache every
+  step would be ruinous; thermal time constants run milliseconds to
+  seconds while the switching period runs microseconds, so the
+  parameters move slowly by orders of magnitude. `update_every_s`
+  exploits that separation explicitly and is **required, with no
+  default** — the right cadence follows from the thermal network
+  the user built, and guessing it silently is how a coupling
+  becomes wrong. `runaway_margin` reports the loop gain
+  `G = I²·R_ref·a·R_th`; at `G ≥ 1` there is no fixed point and a
+  transient would just climb, an artefact rather than an answer.
+
+  Refusals, all by name: `on_cache` on `engine='dsed'` (no PWL
+  cache there — the hook would never fire and the loop would
+  silently stay open; also a TR-BDF2 router blocker);
+  `add_shared_heatsink(R_th_sink_to_amb_K_per_W=0)`, which was
+  stamped as a 0 Ω resistor and failed later as *"numerically
+  singular at node T_sink"* — named at build time now.
+
+  The coupled transient is pinned against the analytic fixed point
+  of the parallel pair to 2 %, and the frozen baseline is pinned at
+  exactly zero imbalance.
+
 * **PLECS-style 3-D switching-loss tables `E(v, i, Tj)`** (audit
   C.1). Loss annotation was PSIM-style: one energy curve `E(I)` at
   a reference bus voltage, scaled linearly by the actual blocking

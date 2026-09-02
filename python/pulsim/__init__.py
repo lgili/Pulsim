@@ -323,6 +323,11 @@ from .spice_import import (
     spice_to_builder,
 )
 from .stream import LiveStream, NativeLiveStream
+from .electrothermal import (
+    TempCoResistance,
+    make_bidirectional_observer,
+    runaway_margin,
+)
 from .loss_tables import LossTable
 from .losses import (
     LossAccumulator,
@@ -671,6 +676,9 @@ __all__ = [
     # Post-hoc loss + efficiency helpers (parity with v1 surface).
     "LossAccumulator",
     "LossTable",
+    "TempCoResistance",
+    "make_bidirectional_observer",
+    "runaway_margin",
     "EfficiencyCalculator",
     "device_loss_summary",
     "average_power_at_node",
@@ -1384,6 +1392,44 @@ class SolverOptions:
     dt_init: Optional[float] = None
 
 
+def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
+                        label):
+    """Compose an internal (observer, b_extra) pair with the user's.
+
+    The internal one runs FIRST, so a hook that refactors the cache
+    or reads state does so before the user's observer sees the
+    step. `b_extra` vectors are summed, with the user's checked for
+    shape: a scalar or short vector would BROADCAST over the sum and
+    inject current into every row.
+    """
+    if obs is not None:
+        if step_observer is None:
+            step_observer = obs
+        else:
+            _u_obs = step_observer
+
+            def _obs(t, x, _i=obs, _u=_u_obs):
+                _i(t, x)
+                _u(t, x)
+            step_observer = _obs
+    if b is not None:
+        if b_extra_fn is None:
+            b_extra_fn = b
+        else:
+            _u_b = b_extra_fn
+
+            def _b(t, _i=b, _u=_u_b, _n=state_size, _lbl=label):
+                import numpy as _np
+                u = _np.asarray(_u(t), dtype=float)
+                if u.shape != (_n,):
+                    raise ValueError(
+                        f"b_extra_fn returned shape {u.shape}, "
+                        f"expected ({_n},) when composed with {_lbl}")
+                return _np.asarray(_i(t)) + u
+            b_extra_fn = _b
+    return step_observer, b_extra_fn
+
+
 def simulate(
     builder: CircuitBuilder,
     t_end: float,
@@ -1425,6 +1471,7 @@ def simulate(
     closed_loops=None,
     live_stream=None,
     mmc_arms=None,
+    on_cache=None,
     controller_period: Optional[float] = None,
     resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
@@ -1711,6 +1758,11 @@ def simulate(
             # observer/b_extra pair and the parametric refactor of
             # its cache — none of which exist in the DSED path.
             "mmc_arms": bool(mmc_arms),
+            # v2.0 Phase 4 C.2: `on_cache` hands the caller the PWL
+            # cache so it can refactor parameters mid-run. DSED has
+            # no such cache, so the hook would never be called and
+            # the coupling it was meant to close would stay open.
+            "on_cache": on_cache is not None,
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -1781,6 +1833,7 @@ def simulate(
             strict_event_iterations=strict_event_iterations,
             max_dt_halvings=max_dt_halvings,
             store_every=store_every, mmc_arms=mmc_arms,
+            on_cache=on_cache,
             enable_substep_state_correction=(
                 enable_substep_state_correction),
             inductor_freeze_di_max=inductor_freeze_di_max,
@@ -2257,34 +2310,29 @@ def simulate(
         _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
             mmc_arms, builder, cache, dt,
             builder.pool.state_size(builder.graph))
-        if step_observer is None:
-            step_observer = _mmc_obs
-        else:
-            _prev_obs = step_observer
+        step_observer, b_extra_fn = _compose_step_hooks(
+            step_observer, b_extra_fn, _mmc_obs, _mmc_b,
+            builder.pool.state_size(builder.graph), "mmc_arms")
 
-            def _obs_with_mmc(t, x, _mmc=_mmc_obs, _u=_prev_obs):
-                _mmc(t, x)
-                _u(t, x)
-            step_observer = _obs_with_mmc
-        if b_extra_fn is None:
-            b_extra_fn = _mmc_b
-        else:
-            _prev_b = b_extra_fn
-            _mmc_state_size = builder.pool.state_size(builder.graph)
-
-            def _b_with_mmc(t, _mmc=_mmc_b, _u=_prev_b,
-                             _n=_mmc_state_size):
-                import numpy as _np
-                u = _np.asarray(_u(t), dtype=float)
-                if u.shape != (_n,):
-                    # A scalar or short vector would BROADCAST over
-                    # the sum and inject current into every row.
-                    raise ValueError(
-                        f"b_extra_fn returned shape {u.shape}, "
-                        f"expected ({_n},) when composed with "
-                        "mmc_arms")
-                return _np.asarray(_mmc(t)) + u
-            b_extra_fn = _b_with_mmc
+    # v2.0 Phase 4 C.2 — hand the caller the cache the run will use,
+    # so a hook can refactor parameters mid-run (the bidirectional
+    # electro-thermal observer does this for temperature-dependent
+    # resistances). Same shape as the MMC driver above: the hook
+    # returns an (observer, b_extra) pair that composes with the
+    # user's own.
+    if on_cache is not None:
+        _hooked = on_cache(cache)
+        if _hooked is not None:
+            try:
+                _hk_obs, _hk_b = _hooked
+            except (TypeError, ValueError):
+                raise TypeError(
+                    "simulate(on_cache=...): the hook must return "
+                    "(step_observer, b_extra_fn) or None, got "
+                    f"{type(_hooked).__name__}") from None
+            step_observer, b_extra_fn = _compose_step_hooks(
+                step_observer, b_extra_fn, _hk_obs, _hk_b,
+                builder.pool.state_size(builder.graph), "on_cache")
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
@@ -2697,6 +2745,7 @@ def simulate(
 
 
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
+                     on_cache=None,
                       controller_period, live_stream, progress,
                       start_from_dc_op, strict_event_iterations,
                       max_dt_halvings, store_every, mmc_arms,
@@ -2744,6 +2793,13 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 "stamp divides by the step size and their flux "
                 "history cannot be rolled back when a step is "
                 "rejected")
+        if on_cache is not None:
+            why.append(
+                "on_cache refactors the fixed-step engine's PWL cache "
+                "mid-run; TR-BDF2 has no such cache, so the hook would "
+                "never fire and whatever it was closing (an "
+                "electro-thermal loop, usually) would silently stay "
+                "open")
         if n_laur:
             # The charge-based Coss IS handled here (its two-stage
             # history is wired through trbdf2_transient), so this

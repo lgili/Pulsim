@@ -1045,6 +1045,20 @@ def add_shared_heatsink(
         raise ValueError("add_shared_heatsink: at least one device required")
     if R_th_sink_to_amb_K_per_W < 0:
         raise ValueError("R_th_sink_to_amb_K_per_W must be >= 0")
+    if R_th_sink_to_amb_K_per_W == 0:
+        # Stamped literally, a 0 K/W sink-to-ambient resistance is a
+        # 0-ohm resistor, and that leaves T_sink with no pivot: the
+        # run fails later as "numerically singular at node T_sink",
+        # which says nothing about where the 0 came from. Name it
+        # here instead. (shared_heatsink_steady_state accepts 0 —
+        # it is closed-form and never builds a matrix.)
+        raise ValueError(
+            "add_shared_heatsink: R_th_sink_to_amb_K_per_W must be > 0 "
+            "for a transient run — 0 is stamped as a 0-ohm resistor "
+            "and leaves the sink node unconstrained (the run would "
+            "fail as 'numerically singular at node T_sink'). For a "
+            "sink bonded straight to ambient use a small positive "
+            "value such as 1e-6 K/W, which is thermally invisible.")
 
     names = [d.name for d in devices]
     if len(set(names)) != len(names):
