@@ -434,6 +434,37 @@ void init_module(py::module_& m) {
               "for a 5.1 V Zener. No series-resistance "
               "parameter on purpose: put a resistor in series, "
               "which is exact.")
+        .def("add_lauritzen_diode",
+              &builder::CircuitBuilder::add_lauritzen_diode,
+              py::arg("name"),
+              py::arg("anode"), py::arg("cathode"),
+              py::arg("I_S")   = 1e-12,
+              py::arg("n")     = 1.0,
+              py::arg("V_T")   = 0.025852,
+              py::arg("tau")   = 1e-7,
+              py::arg("T_M")   = 1e-8,
+              py::arg("G_min") = 1e-12,
+              py::return_value_policy::reference,
+              "Add a Lauritzen-Mattsson diode: an exponential "
+              "junction that also STORES CHARGE, so it RECOVERS. "
+              "Every other diode here is static I-V, and a static "
+              "law cannot recover, because recovery is stored "
+              "charge leaving the device — on a double-pulse test "
+              "(400 V, 20 A, 50 nH loop) `add_diode` and "
+              "`add_shockley_diode` both commutate 20 A straight "
+              "to zero with a reverse peak of exactly 0 A, while "
+              "a real fast-recovery Si part peaks 15-30 A "
+              "NEGATIVE through the turning-on switch, where it "
+              "usually dominates turn-on loss. `tau` (carrier "
+              "lifetime) sets HOW LONG recovery lasts — 10-100 ns "
+              "for fast-recovery Si, microseconds for a standard "
+              "rectifier; `T_M` (transit time) sets HOW HARD the "
+              "reverse peak is and must stay well below `tau`. "
+              "The DC curve is unchanged: in steady state this is "
+              "an ordinary Shockley junction with I_S scaled by "
+              "tau/(tau + T_M). A Schottky stores no charge at "
+              "all — use `add_shockley_diode` for one rather than "
+              "driving `tau` toward zero here.")
         .def("add_igbt_level1",
               &builder::CircuitBuilder::add_igbt_level1,
               py::arg("name"),
@@ -911,6 +942,12 @@ void init_module(py::module_& m) {
                               kind_str = "vcvs"; break;
                           case K::SaturableInductor:
                               kind_str = "saturable_inductor"; break;
+                          case K::NonlinearCapacitor:
+                              kind_str = "nonlinear_capacitor"; break;
+                          case K::ShockleyDiode:
+                              kind_str = "shockley_diode"; break;
+                          case K::LauritzenDiode:
+                              kind_str = "lauritzen_diode"; break;
                           }
                       } catch (const std::exception&) {
                           // Branch present in graph but not registered
@@ -1124,7 +1161,10 @@ void init_module(py::module_& m) {
         .value("MosfetLevel1",        pwl::DevicePool::StoredKind::MosfetLevel1)
         .value("IgbtLevel1",          pwl::DevicePool::StoredKind::IgbtLevel1)
         .value("VCVS",                pwl::DevicePool::StoredKind::VCVS)
-        .value("SaturableInductor",   pwl::DevicePool::StoredKind::SaturableInductor);
+        .value("SaturableInductor",   pwl::DevicePool::StoredKind::SaturableInductor)
+        .value("NonlinearCapacitor",  pwl::DevicePool::StoredKind::NonlinearCapacitor)
+        .value("ShockleyDiode",       pwl::DevicePool::StoredKind::ShockleyDiode)
+        .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode);
 
     // ---- ParametricRefactorResult (v1.4.0) -------------------------------
     py::class_<pwl::ParametricRefactorResult>(m,

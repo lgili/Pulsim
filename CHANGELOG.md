@@ -8,6 +8,71 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **A diode that actually recovers** (audit C.1, *crítico*).
+  Every diode was static I-V — the PWL `add_diode`, the
+  smooth-blend nonlinear one, and the new `add_shockley_diode` all
+  compute current from the present voltage alone. A static law
+  **cannot** recover, because recovery is stored charge leaving
+  the device, and a static law stores nothing. On a double-pulse
+  test (400 V, 20 A clamped inductive load, 50 nH loop):
+
+      diode                reverse peak
+      add_diode (PWL)        0.00000 A
+      add_shockley_diode     0.00000 A
+
+  The 20 A commutates straight to zero. That current is not
+  missing from the diode alone — it flows through the turning-on
+  **switch**, where it usually dominates turn-on loss, so the
+  simulator was silent about the largest term in hard-switched
+  efficiency.
+
+  `add_lauritzen_diode(name, anode, cathode, I_S, n, V_T, tau,
+  T_M, G_min)` makes charge the state:
+
+      i    = (q_E − q_M) / T_M
+      dq_M = (q_E − q_M) / T_M − q_M / tau
+      dt
+
+  `tau` (carrier lifetime) sets how long recovery lasts, `T_M`
+  (transit time) how hard the peak is. The **DC curve is
+  unchanged** — in steady state this is an ordinary Shockley
+  junction with `I_S` scaled by `tau/(tau + T_M)`, pinned against
+  `add_shockley_diode` to 0.1 %.
+
+  **The stamp stays cheap.** Trapezoidal on `q_M` closes in
+  explicit form, `q_M = K0 + K1·q_E(v)`, so the branch remains an
+  ordinary two-terminal nonlinearity — no internal node, no extra
+  unknown, no inner iteration. `K0`/`K1` embed the step, and a
+  variable-step engine retries rejected steps at a different one,
+  so the stamp recomputes them itself every Newton iteration
+  rather than trusting a prior call: the stale-coefficient bug is
+  not expressible.
+
+  Validated on the classical scaling rather than on "it is
+  non-zero": sweeping the commutation loop sweeps `di/dt` over two
+  decades, and the reverse peak follows `sqrt(2·Q·di/dt)`.
+
+      L_loop   di/dt        I_rrm    sqrt(2·Q·di/dt)   ratio
+        50 nH  8000 A/µs   106 A         179 A         0.59
+       400 nH  1000 A/µs    42 A          63 A         0.66
+         4 µH   100 A/µs   8.6 A          20 A         0.43
+
+  The ratio sits near a constant because charge also leaves by
+  **recombination**, which the idealised formula ignores, and it
+  falls at low `di/dt` because a slower recovery gives
+  recombination longer to work — the same effect that makes
+  `Q_rr < I_F·tau`. (It also settled a scare: 106 A on a 20 A
+  commutation looked absurd until the sweep showed it was the
+  *fixture* — a 50 nH loop across 400 V is 8000 A/µs, far past any
+  real gate drive.)
+
+  A Schottky stores no charge at all; `tau = 0` is refused **by
+  name**, pointing at `add_shockley_diode` instead.
+
+  Also: `nonlinear_capacitor`, `shockley_diode` and
+  `lauritzen_diode` now report their real device kind instead of
+  `unknown`, so `result.i()`'s refusal names what it is looking at.
+
 * **An exponential (Shockley) diode** (audit C.1). Pulsim had two
   diodes and neither was exponential: `add_diode` is binary PWL,
   and the smooth-blend nonlinear diode is a sigmoid blended onto a

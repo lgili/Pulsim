@@ -1072,7 +1072,8 @@ def _result_i(self, name: str, t=None):
         f"supported: inductor, voltage_source (incl. pwm / sine / "
         f"pulse variants), resistor, capacitor, current_source, "
         f"diode, switch. For mosfet_level1 / igbt_level1 / "
-        f"nonlinear_diode / vcvs / saturable_inductor, the per-step "
+        f"nonlinear_diode / shockley_diode / lauritzen_diode / "
+        f"nonlinear_capacitor / vcvs / saturable_inductor, the per-step "
         f"nonlinear stamp evaluation lives in "
         f"`pulsim.losses.device_loss_summary` — use that for now. "
         f"Lifting these into `result.i()` is tracked as a follow-up.")
@@ -2714,6 +2715,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     try:
         from ._pulsim import BranchKind as _BK  # type: ignore
         n_sat = 0
+        n_laur = 0
         for br in builder.graph.branches:
             if br.get("kind") != _BK.Nonlinear:
                 continue
@@ -2725,6 +2727,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
             k = str(builder.pool.kind_of(br["id"]))
             if k.endswith("SaturableInductor"):
                 n_sat += 1
+            elif k.endswith("LauritzenDiode"):
+                n_laur += 1
 
         if n_sat:
             why.append(
@@ -2732,6 +2736,20 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 "stamp divides by the step size and their flux "
                 "history cannot be rolled back when a step is "
                 "rejected")
+        if n_laur:
+            # The charge-based Coss IS handled here (its two-stage
+            # history is wired through trbdf2_transient), so this
+            # is not a blanket ban on stateful devices — only on
+            # the one whose second-stage form has not been derived
+            # yet. Routing it anyway would converge and be wrong,
+            # which is exactly the failure this list exists to
+            # prevent.
+            why.append(
+                f"{n_laur} Lauritzen diode(s) — their stored-charge "
+                "history is only wired for the trapezoidal "
+                "companion, so a BDF2 second stage would integrate "
+                "the wrong rule and report recovery that never "
+                "happened")
     except Exception:  # pragma: no cover — never block on a probe
         pass
     if getattr(builder, "_c_blocks", None):

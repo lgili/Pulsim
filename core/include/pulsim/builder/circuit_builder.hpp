@@ -347,6 +347,56 @@ public:
         return *this;
     }
 
+    /// Add a Lauritzen-Mattsson diode: an exponential junction
+    /// that also STORES CHARGE, so it recovers.
+    ///
+    /// v2.0 Phase 4, audit C.1. Every other diode here is static
+    /// I-V, and a static law cannot recover, because recovery is
+    /// stored charge leaving the device. On a double-pulse test
+    /// (400 V, 20 A, 50 nH loop) the PWL and Shockley diodes both
+    /// commutate 20 A straight to zero with a reverse peak of
+    /// exactly 0.00000 A; a real fast-recovery Si part peaks
+    /// 15-30 A negative, and that current flows through the
+    /// turning-on switch, where it usually dominates turn-on loss.
+    ///
+    ///   I_S   [A] saturation current
+    ///   n     [-] emission coefficient, 1 to 2
+    ///   V_T   [V] thermal voltage kT/q
+    ///   tau   [s] carrier lifetime — HOW LONG recovery lasts.
+    ///             Fast-recovery Si: 10-100 ns. Standard
+    ///             rectifier: microseconds.
+    ///   T_M   [s] transit time — HOW HARD the reverse peak is.
+    ///             Must stay well below `tau`.
+    ///   G_min [S] parallel conductance
+    ///
+    /// The DC curve is unchanged: in steady state this is an
+    /// ordinary Shockley junction with I_S scaled by
+    /// tau/(tau + T_M). Only the dynamics are new. A Schottky
+    /// stores no charge at all — use `add_shockley_diode` for
+    /// one rather than driving `tau` toward zero here.
+    CircuitBuilder& add_lauritzen_diode(
+        std::string_view name,
+        std::string_view anode, std::string_view cathode,
+        Real I_S   = Real{1e-12},
+        Real n     = Real{1.0},
+        Real V_T   = Real{0.025852},
+        Real tau   = Real{1e-7},
+        Real T_M   = Real{1e-8},
+        Real G_min = Real{1e-12}) {
+        const models::LauritzenDiode::Params p{
+            .I_S = I_S, .n = n, .V_T = V_T,
+            .tau = tau, .T_M = T_M, .G_min = G_min,
+        };
+        models::LauritzenDiode::validate(p);
+        const Index a_idx = resolve_node_(anode);
+        const Index c_idx = resolve_node_(cathode);
+        const Index b_id = add_branch_(
+            name, a_idx, c_idx,
+            topology::BranchKind::Nonlinear);
+        pool_.add_lauritzen_diode(b_id, p);
+        return *this;
+    }
+
     /// Add a pulse / step voltage source (Layer 2 V12).
     ///   v_initial    [V] baseline (before & between pulses)
     ///   v_pulsed     [V] level during the pulse window
