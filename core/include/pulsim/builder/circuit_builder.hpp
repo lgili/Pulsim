@@ -252,12 +252,35 @@ public:
         Real V_T      = Real{5.0},
         Real kappa    = Real{10.0},
         Real v_knee   = Real{0.01},
-        bool with_fwd = false) {
+        bool with_fwd = false,
+        Real tau_tail = Real{0},
+        Real k_tail   = Real{0}) {
         if (!(R_CE_sat > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_igbt_level1(\"{}\"): R_CE_sat must be > 0 (got {}); a "
                 "zero/negative on-state resistance divides by zero in the "
                 "IGBT current law and yields NaN.", name, R_CE_sat));
+        }
+        if (tau_tail < Real{0}) {
+            throw std::invalid_argument(std::format(
+                "add_igbt_level1(\"{}\"): tau_tail must be >= 0 (got {}); "
+                "it is the turn-off tail's time constant, and 0 disables "
+                "the tail.", name, tau_tail));
+        }
+        if (k_tail < Real{0} || k_tail >= Real{1}) {
+            throw std::invalid_argument(std::format(
+                "add_igbt_level1(\"{}\"): k_tail must be in [0, 1) (got "
+                "{}); it is the FRACTION of on-state current that "
+                "continues as tail after the channel cuts off, so 1 would "
+                "mean the channel carries nothing at all.", name, k_tail));
+        }
+        if ((tau_tail > Real{0}) != (k_tail > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_igbt_level1(\"{}\"): tau_tail and k_tail must be set "
+                "together (got tau_tail={}, k_tail={}). A tail needs both "
+                "how long it lasts and how big it starts; setting one "
+                "alone models no tail at all, silently.",
+                name, tau_tail, k_tail));
         }
         if (!(v_knee > Real{0})) {
             throw std::invalid_argument(std::format(
@@ -280,6 +303,8 @@ public:
                 .V_T      = V_T,
                 .kappa    = kappa,
                 .v_knee   = v_knee,
+                .tau_tail = tau_tail,
+                .k_tail   = k_tail,
             });
         // Anti-parallel freewheeling diode, co-packaged in every
         // real IGBT module. Now that the transistor correctly

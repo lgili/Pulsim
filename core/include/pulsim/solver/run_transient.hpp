@@ -40,8 +40,10 @@
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
+#include "pulsim/pwl/igbt_tail_history.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
+#include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
@@ -412,6 +414,16 @@ inline SimulationResult run_transient(
     }
     const bool has_lauritzen = !laur_history.empty();
 
+    // The IGBT turn-off tail's stored charge. Same shape again,
+    // except this pass stamps a DELTA on top of the ordinary IGBT
+    // stamp rather than replacing it — see the refresh header.
+    pwl::IgbtTailHistory tail_history;
+    tail_history.init(graph, pool);
+    if (initial_state != nullptr) {
+        tail_history.seed_from_dc_op(x);
+    }
+    const bool has_igbt_tail = !tail_history.empty();
+
     pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
     if (has_coss) {
         nl_refresh_effective =
@@ -454,6 +466,28 @@ inline SimulationResult run_transient(
                     max_i,
                     pwl::refresh_lauritzen_diodes(
                         xx, J_nl, f_nl, laur_history,
+                        refresh_dt));
+            };
+    }
+    if (has_igbt_tail) {
+        nl_refresh_effective =
+            [user_refresh = nl_refresh_effective, &tail_history,
+             &refresh_dt](const Vector& xx,
+                            sparse::Matrix& J_nl,
+                            Vector& f_nl,
+                            const topology::Graph& g,
+                            const pwl::DevicePool& pp) -> Real {
+                Real max_i = Real{0};
+                if (user_refresh) {
+                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(
+                    max_i,
+                    pwl::refresh_igbt_tails(
+                        xx, J_nl, f_nl, tail_history,
                         refresh_dt));
             };
     }
@@ -601,6 +635,7 @@ inline SimulationResult run_transient(
     // capability up front rather than as a follow-up.
     std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
     std::vector<pwl::LauritzenDiodeHistory::Entry> laur_snap;
+    std::vector<pwl::IgbtTailHistory::Entry> tail_snap;
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     std::vector<CommutationEvent> step_events;      // per-step event scratch
@@ -754,6 +789,7 @@ inline SimulationResult run_transient(
             history.snapshot_into(history_snap);
             coss_snap = coss_history.snapshot();
             laur_snap = laur_history.snapshot();
+            tail_snap = tail_history.snapshot();
             if (has_diodes) {
                 diodes.snapshot_on_bits_into(diodes_snap);
             } else {
@@ -963,6 +999,7 @@ inline SimulationResult run_transient(
                     history.restore(history_snap);
                     coss_history.restore(coss_snap);
                     laur_history.restore(laur_snap);
+                    tail_history.restore(tail_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -1008,6 +1045,8 @@ inline SimulationResult run_transient(
                             coss_history.update_from_state(x,
                                                             sub_dt);
                             laur_history.update_from_state(x,
+                                                            sub_dt);
+                            tail_history.update_from_state(x,
                                                             sub_dt);
                         } else {
                             committed_dt = sub_dt;
@@ -1162,6 +1201,7 @@ inline SimulationResult run_transient(
                     history.restore(history_snap);
                     coss_history.restore(coss_snap);
                     laur_history.restore(laur_snap);
+                    tail_history.restore(tail_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -1180,6 +1220,7 @@ inline SimulationResult run_transient(
                         history.update_from_state(x, dt1);
                         coss_history.update_from_state(x, dt1);
                         laur_history.update_from_state(x, dt1);
+                        tail_history.update_from_state(x, dt1);
                         if (has_saturable) {
                             sat_history.update_from_state(x);
                         }
@@ -1341,6 +1382,7 @@ inline SimulationResult run_transient(
             history.update_from_state(x, committed_dt);
             coss_history.update_from_state(x, committed_dt);
             laur_history.update_from_state(x, committed_dt);
+            tail_history.update_from_state(x, committed_dt);
             if (has_saturable) {
                 sat_history.update_from_state(x);
             }

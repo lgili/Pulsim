@@ -8,6 +8,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **The IGBT turn-off tail** (audit C.1). An IGBT is a PNP
+  transistor driven by a MOSFET. When the gate falls below
+  threshold the MOS channel cuts off in nanoseconds, but the
+  minority carriers stored in the n- drift region can only
+  **recombine** — a tail current that keeps flowing with the full
+  rail already across the device. It is 40–70 % of an IGBT's
+  turn-off energy, and on a hard-switched inverter that is most
+  of the switching loss.
+
+  Measured on a clamped inductive turn-off (600 V, 100 A):
+
+      t (µs)   v(c) V    I_C (A)
+       1.90       6.6   102.254
+       2.00       6.6   102.372    gate falls here
+       2.02     160.2     0.00000
+       3.00     600.1     0.00000
+
+      E_off = 44 µJ
+
+  `I_C` went to **exactly zero within one step**. A real
+  600 V / 100 A part's datasheet `E_off` is 5–15 mJ, so turn-off
+  loss was understated by more than two orders of magnitude, with
+  no warning.
+
+  `add_igbt_level1(..., tau_tail=..., k_tail=...)` splits the
+  collector current:
+
+      i_C  = (1 − k)·i_ss(v) + Q/tau
+      dQ/dt = k·i_ss(v) − Q/tau
+
+  In equilibrium `Q = k·i_ss·tau`, so the two terms add back to
+  `i_ss` **exactly** — the DC curve is untouched by construction,
+  which means enabling a tail cannot move a conduction-loss
+  number that was already validated. At turn-off `i_ss` collapses
+  and `i_C = Q/tau` decays from `k·I_C` with time constant `tau`.
+  Both are read straight off a datasheet turn-off waveform, and
+  they must be given together — setting one alone is refused,
+  because it would model no tail at all, silently.
+
+  **They default to OFF, unlike the MOSFET's body diode**
+  ([#124](https://github.com/lgili/Pulsim/pull/124)). Every
+  vertical power MOSFET has a body diode that behaves much the
+  same way, so defaulting it on is defaulting to the physics. An
+  IGBT tail is not like that: NPT, PT, trench and field-stop
+  parts differ by orders of magnitude in both magnitude and time
+  constant, so a default here would put a **fabricated** number
+  in the user's loss report.
+
+  The stamp is a *delta* on the ordinary IGBT pass rather than a
+  replacement, so it composes with the existing refresh instead
+  of needing branches excluded from it — and it is self-checking,
+  since the delta collapses to exactly zero in equilibrium.
+
+  As with the Lauritzen diode, `engine='auto'` lists a tailed
+  IGBT as a TR-BDF2 router blocker: the stored-charge history is
+  only wired for the trapezoidal companion.
+
 * **A diode that actually recovers** (audit C.1, *crítico*).
   Every diode was static I-V — the PWL `add_diode`, the
   smooth-blend nonlinear one, and the new `add_shockley_diode` all

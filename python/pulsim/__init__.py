@@ -2716,6 +2716,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
         from ._pulsim import BranchKind as _BK  # type: ignore
         n_sat = 0
         n_laur = 0
+        n_tail = 0
         for br in builder.graph.branches:
             if br.get("kind") != _BK.Nonlinear:
                 continue
@@ -2729,6 +2730,11 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 n_sat += 1
             elif k.endswith("LauritzenDiode"):
                 n_laur += 1
+            elif k.endswith("IgbtLevel1"):
+                # Only the ones that actually model a tail; a
+                # plain IGBT is static and perfectly fine here.
+                if builder.pool.igbt_has_tail(br["id"]):
+                    n_tail += 1
 
         if n_sat:
             why.append(
@@ -2750,6 +2756,13 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 "companion, so a BDF2 second stage would integrate "
                 "the wrong rule and report recovery that never "
                 "happened")
+        if n_tail:
+            why.append(
+                f"{n_tail} IGBT(s) with a turn-off tail — their "
+                "stored-charge history is only wired for the "
+                "trapezoidal companion, so a BDF2 second stage "
+                "would integrate the wrong rule and report a tail "
+                "of the wrong size")
     except Exception:  # pragma: no cover — never block on a probe
         pass
     if getattr(builder, "_c_blocks", None):
