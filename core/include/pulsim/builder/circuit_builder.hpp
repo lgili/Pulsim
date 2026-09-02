@@ -301,6 +301,52 @@ public:
         return *this;
     }
 
+    /// Add an EXPONENTIAL (Shockley) diode — Phase 4, audit C.1.
+    ///
+    ///     i = I_S·(exp(v/(n·V_T)) − 1) + v·G_min
+    ///
+    /// Unlike `add_diode` (binary PWL) and the smooth-blend
+    /// `IdealDiode`, this one does not fix the forward drop. A
+    /// real junction's V_F rises ~60 mV per decade of current, so
+    /// the same device drops 0.53 V at 1 mA and 0.77 V at 10 A —
+    /// and a fixed-V_F model is wrong in OPPOSITE directions at
+    /// the two ends, which no single fitted value can remove.
+    ///
+    ///   I_S    [A] saturation current (1e-12 typical Si)
+    ///   n      [-] emission coefficient, 1 to 2
+    ///   V_T    [V] thermal voltage kT/q; use
+    ///              `ShockleyDiode::thermal_voltage(T)` for a
+    ///              junction temperature other than ~300 K
+    ///   G_min  [S] parallel conductance, keeps a reverse-biased
+    ///              junction's node non-singular
+    ///   BV     [V] reverse breakdown magnitude; 0 disables it
+    ///
+    /// There is deliberately no series-resistance parameter: put
+    /// an ordinary resistor in series, which is exact. See the
+    /// model header for why the inner iteration that would be
+    /// needed here diverges.
+    CircuitBuilder& add_shockley_diode(
+        std::string_view name,
+        std::string_view anode, std::string_view cathode,
+        Real I_S   = Real{1e-12},
+        Real n     = Real{1.0},
+        Real V_T   = Real{0.025852},
+        Real G_min = Real{1e-12},
+        Real BV    = Real{0}) {
+        const models::ShockleyDiode::Params p{
+            .I_S = I_S, .n = n, .V_T = V_T,
+            .G_min = G_min, .BV = BV,
+        };
+        models::ShockleyDiode::validate(p);
+        const Index a_idx = resolve_node_(anode);
+        const Index c_idx = resolve_node_(cathode);
+        const Index b_id = add_branch_(
+            name, a_idx, c_idx,
+            topology::BranchKind::Nonlinear);
+        pool_.add_shockley_diode(b_id, p);
+        return *this;
+    }
+
     /// Add a pulse / step voltage source (Layer 2 V12).
     ///   v_initial    [V] baseline (before & between pulses)
     ///   v_pulsed     [V] level during the pulse window

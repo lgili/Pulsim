@@ -411,6 +411,29 @@ void init_module(py::module_& m) {
               "Add an ideal op-amp (single-ended output to "
               "gnd, high gain). Combine with negative "
               "feedback to enforce V_in_pos ≈ V_in_neg.")
+        .def("add_shockley_diode",
+              &builder::CircuitBuilder::add_shockley_diode,
+              py::arg("name"),
+              py::arg("anode"), py::arg("cathode"),
+              py::arg("I_S")   = 1e-12,
+              py::arg("n")     = 1.0,
+              py::arg("V_T")   = 0.025852,
+              py::arg("G_min") = 1e-12,
+              py::arg("BV")    = 0.0,
+              py::return_value_policy::reference,
+              "Add an EXPONENTIAL (Shockley) diode: "
+              "i = I_S*(exp(v/(n*V_T)) - 1) + v*G_min. Unlike "
+              "`add_diode` (binary PWL) and the smooth-blend "
+              "nonlinear diode, the forward drop is not fixed: a "
+              "real junction's V_F rises ~60 mV per decade of "
+              "current, so the same device drops 0.53 V at 1 mA "
+              "and 0.77 V at 10 A. Use "
+              "`thermal_voltage(T_kelvin)` for a junction "
+              "temperature other than ~300 K. `BV` is a POSITIVE "
+              "breakdown magnitude (0 disables it) — give 5.1 "
+              "for a 5.1 V Zener. No series-resistance "
+              "parameter on purpose: put a resistor in series, "
+              "which is exact.")
         .def("add_igbt_level1",
               &builder::CircuitBuilder::add_igbt_level1,
               py::arg("name"),
@@ -3581,6 +3604,44 @@ void init_module(py::module_& m) {
           "C++ hotpath: L0 forward-Euler step. Returns `(v_C_next, "
           "v_b)`. Pass `r_p_inv = 1.0 / r_p` for the lossy variant; "
           "default 0.0 disables the leak term.");
+
+    m.def("thermal_voltage",
+           &models::ShockleyDiode::thermal_voltage,
+           py::arg("T_kelvin"),
+           "Thermal voltage kT/q [V] at a junction temperature "
+           "[K]. 25.85 mV at 300 K. NOTE, because it is the "
+           "opposite of what everyone remembers: raising V_T "
+           "ALONE RAISES the forward drop (V_F = n*V_T*ln(i/I_S) "
+           "at fixed I_S, so 0.710 V at 25 C becomes 0.948 V at "
+           "125 C). A real diode's negative temperature "
+           "coefficient comes from I_S, which roughly doubles "
+           "every 10 C. A temperature sweep must scale BOTH — "
+           "pair this with `shockley_saturation_current_at`.");
+
+    m.def("shockley_saturation_current_at",
+           &models::ShockleyDiode::saturation_current_at,
+           py::arg("I_S_ref"), py::arg("T_kelvin"),
+           py::arg("T_ref_kelvin") = 300.15,
+           py::arg("n") = 1.0,
+           py::arg("E_g_eV") = 1.11,
+           py::arg("XTI") = 3.0,
+           "Saturation current at temperature `T_kelvin`, given "
+           "its value at `T_ref_kelvin` — SPICE's law. This is "
+           "the term that makes a hot diode drop LESS; see "
+           "`thermal_voltage`.");
+
+    m.def("shockley_voltage_for_current",
+           [](Real i, Real I_S, Real n, Real V_T) {
+               const models::ShockleyDiode::Params p{
+                   .I_S = I_S, .n = n, .V_T = V_T};
+               return models::ShockleyDiode::voltage_for_current(
+                   p, i);
+           },
+           py::arg("i"), py::arg("I_S") = 1e-12,
+           py::arg("n") = 1.0, py::arg("V_T") = 0.025852,
+           "Closed-form inverse of the Shockley law: the forward "
+           "voltage that carries `i` amps. Useful for sizing and "
+           "for checking a simulation against the model.");
 
     m.def("_cpp_mmc_arm_multilevel_step",
           [](Real v_C, Real m_ref, Real i_b, Real dt, Real t,

@@ -126,6 +126,18 @@ make_combined_diode_mosfet_refresh() {
             },
             detail::igbt_level1_terminals);
 
+        const Real i_shockley =
+            stamp_nonlinear_branches<models::ShockleyDiode>(
+                x, J_nl, f_nl, graph, pool,
+                DevicePool::StoredKind::ShockleyDiode,
+                [](const DevicePool& p, Index b) {
+                    return p.shockley_diode_params(b);
+                },
+                [](const DevicePool&, const auto& branch) {
+                    return std::array<Index, 2>{branch.from,
+                                                 branch.to};
+                });
+
         const Real i_mosfet = stamp_nonlinear_branches<models::MosfetLevel1>(
             x, J_nl, f_nl, graph, pool,
             DevicePool::StoredKind::MosfetLevel1,
@@ -134,7 +146,7 @@ make_combined_diode_mosfet_refresh() {
             },
             detail::mosfet_level1_terminals);
 
-        return std::max({i_diode, i_igbt, i_mosfet});
+        return std::max({i_diode, i_shockley, i_igbt, i_mosfet});
     };
 }
 

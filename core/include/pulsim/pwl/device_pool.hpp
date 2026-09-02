@@ -22,6 +22,7 @@
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/multi_winding_transformer.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
+#include "pulsim/models/shockley_diode.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/current_source.hpp"
@@ -68,6 +69,7 @@ public:
         VCVS              = 13, // Layer 2 V15 (voltage-controlled voltage source)
         SaturableInductor = 14, // Layer 2 V17 (nonlinear L(i) inductor)
         NonlinearCapacitor = 15, // Phase 4 C.1 (charge-based Coss)
+        ShockleyDiode      = 16, // Phase 4 C.1 (exponential junction)
     };
 
     struct SwitchParams {
@@ -132,6 +134,12 @@ public:
     /// loop stamps it per iteration via `refresh_smooth_diodes`.
     void add_nonlinear_diode(Index branch_id,
                               models::IdealDiode::Params p) {
+        entries_[branch_id] = Entry{p};
+    }
+
+    /// Register an exponential (Shockley) junction — Phase 4 C.1.
+    void add_shockley_diode(Index branch_id,
+                             models::ShockleyDiode::Params p) {
         entries_[branch_id] = Entry{p};
     }
 
@@ -335,6 +343,7 @@ public:
         for (const auto& [branch_id, entry] : entries_) {
             const auto k = static_cast<StoredKind>(entry.index());
             if (k == StoredKind::NonlinearDiode ||
+                k == StoredKind::ShockleyDiode  ||
                 k == StoredKind::MosfetLevel1   ||
                 k == StoredKind::IgbtLevel1     ||
                 k == StoredKind::SaturableInductor) {
@@ -481,6 +490,12 @@ public:
     nonlinear_diode_params(Index branch_id) const {
         return require_params_<models::IdealDiode::Params>(
             branch_id, "nonlinear_diode_params", "a NonlinearDiode");
+    }
+
+    [[nodiscard]] const models::ShockleyDiode::Params&
+    shockley_diode_params(Index branch_id) const {
+        return require_params_<models::ShockleyDiode::Params>(
+            branch_id, "shockley_diode_params", "a ShockleyDiode");
     }
 
     /// Iterate diode branch ids in insertion (= branch) order.
@@ -777,7 +792,8 @@ private:
                                 models::IgbtLevel1::Params,
                                 models::VCVS::Params,
                                 models::SaturableInductor::Params,
-                                models::NonlinearCapacitor::Params>;
+                                models::NonlinearCapacitor::Params,
+                                models::ShockleyDiode::Params>;
 
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
@@ -789,8 +805,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 16,
-        "StoredKind has 16 values; Entry must list 16 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 17,
+        "StoredKind has 17 values; Entry must list 17 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -808,6 +824,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::VCVS,               models::VCVS::Params>);
     static_assert(kind_maps_to_<StoredKind::SaturableInductor,  models::SaturableInductor::Params>);
     static_assert(kind_maps_to_<StoredKind::NonlinearCapacitor, models::NonlinearCapacitor::Params>);
+    static_assert(kind_maps_to_<StoredKind::ShockleyDiode,      models::ShockleyDiode::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);

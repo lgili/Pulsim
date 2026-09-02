@@ -50,6 +50,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
     Graph,
     DevicePool,
     SwitchStateMask,
+    shockley_saturation_current_at,
+    shockley_voltage_for_current,
+    thermal_voltage,
     # Cache + simulation.
     PwlStateSpaceCache,
     SimulationOptions,
@@ -338,7 +341,7 @@ from ._result_views import SwitchMaskRecorder
 # `from pulsim import *` stay focused on the everyday surface.
 # MMC users either name them explicitly (`from pulsim import
 # MmcArmAverage`) or qualify via the submodule
-# (`from pulsim.mmc import ...`). The `# noqa: F401` quiets the
+# (`from pulsim.mmc import ...`). A `noqa: F401` comment quiets the
 # linter on these intentional unused imports.
 from .mmc import (
     MmcArmAverageParams,  # noqa: F401
@@ -439,6 +442,9 @@ __all__ = [
     "Graph",
     "DevicePool",
     "SwitchStateMask",
+    "shockley_saturation_current_at",
+    "shockley_voltage_for_current",
+    "thermal_voltage",
     "PwlStateSpaceCache",
     "SimulationOptions",
     "SimulationResult",
