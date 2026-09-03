@@ -50,6 +50,8 @@ def _one_of_everything():
     b.add_nonlinear_capacitor("C2", "m", "gnd", 2e-9, 25.0, 0.5)
     b.add_shockley_diode("D3", "n", "gnd")
     b.add_lauritzen_diode("D4", "o", "gnd")
+    b.add_pmsm_mna("M2", "p1", "p2", "p3", "nn2", "w2", "th2",
+                   0.5, 1e-3, 3e-3, 0.05, 4, 1e-3)
     return b
 
 
@@ -72,3 +74,4 @@ def test_the_new_level_two_devices_are_named():
     assert kind("C2") == "StoredKind.NonlinearCapacitor"
     assert kind("D3") == "StoredKind.ShockleyDiode"
     assert kind("D4") == "StoredKind.LauritzenDiode"
+    assert kind("M2_a") == "StoredKind.PmsmMna"

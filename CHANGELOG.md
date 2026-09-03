@@ -8,6 +8,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **MNA-native PMSM** (audit C.3, *alto, breaking*). The Python
+  PMSM/BLDC/IM are observers: back-EMF from the previous step's
+  (θ, ω) injected through `b_extra_fn`, forward-Euler mechanics,
+  and three stator inductors carrying **one average L**. Three
+  consequences, each measured first:
+
+  * the one-step lag is first order in dt — open-loop PMSM,
+    settled speed against a dt = 2e-6 reference:
+
+        dt       observer     native
+        5e-5     −0.372 %     −0.0005 %     ← the tests' own dt
+        2e-4     −1.983 %     −0.0010 %
+        5e-4     −7.877 %     +0.0030 %
+
+  * the average L erases saliency from the electrical dynamics.
+    Locked rotor, Rs = 0.5 Ω, Ld = 1 mH, Lq = 3 mH:
+
+        axis   physical   observer         native
+        d       2.00 ms   4.00 (+100 %)    2.001 ms
+        q       6.00 ms   4.00 (−33 %)     5.93 ms
+
+    so an IPM's phase currents were simply wrong, with no L(θ)
+    harmonics and no HFI possible;
+  * a machine living in a Python closure is invisible to
+    `steady_state`, `sampled_ac` and the engine router.
+
+  `add_pmsm_mna(name, a, b, c, neutral, omega_node, theta_node,
+  R_s, L_d, L_q, psi_pm, pole_pairs, J, B, T_load, ...)` puts the
+  machine **in the matrix**: flux linkage as the state, the full
+  `L(θ) = T⁻¹·diag(L_d, L_q, L_0)·T` stamped per Newton iteration
+  (derivatives in θ from the rotation block's P′ and P″ — closed
+  form, no hand-derived cos 2θ table to get a sign wrong in), and
+  **ω and θ as nodes** carrying capacitors J and 1 F, so the
+  mechanics inherit the trapezoidal companion in the same solve.
+  This is the same trick the thermal network uses to live in the
+  MNA, and it means a speed-dependent load is just another element
+  on the ω node. Torque is the co-energy of the same L(θ); the
+  reluctance term appears because L(θ) is in the matrix, not by
+  being added on. Native and observer agree to 0.014 % where the
+  lag is negligible — the same conventions, the same torque sign.
+
+  Phase currents piggy-back on the inductor numbering, so
+  `res.i("M1_a")` works with no special case; speed and angle are
+  `res.v(omega_node)` / `res.v(theta_node)`, and the observer's
+  trace names `M1.omega/theta/T_em/i_d/i_q` are attached from the
+  state vector so the two paths read alike.
+
+  Cost, honestly: ~33 µs/step against ~3 µs for the observer — a
+  Newton solve per step instead of a closure — with ~100× the step
+  for the same accuracy. The flux history has snapshot/restore, so
+  unlike the saturable inductor it does not have to refuse
+  dt-halving; it *does* block the TR-BDF2 router by name, since the
+  second-stage form is not derived yet. Still to come from the
+  audit's list: saturation maps ψ(i_d, i_q), iron-loss conductance,
+  SRM and wound-field synchronous.
+
 * **Bidirectional electro-thermal coupling** (audit C.2). Pulsim
   already closed half the loop: the transient electro-thermal
   observer recomputed each device's injected power from its

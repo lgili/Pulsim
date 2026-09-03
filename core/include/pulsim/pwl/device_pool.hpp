@@ -23,6 +23,7 @@
 #include "pulsim/models/multi_winding_transformer.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
+#include "pulsim/models/pmsm_mna.hpp"
 #include "pulsim/models/shockley_diode.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
@@ -38,6 +39,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <array>
 #include <format>
 #include <span>
 #include <stdexcept>
@@ -72,6 +74,7 @@ public:
         NonlinearCapacitor = 15, // Phase 4 C.1 (charge-based Coss)
         ShockleyDiode      = 16, // Phase 4 C.1 (exponential junction)
         LauritzenDiode     = 17, // Phase 4 C.1 (reverse recovery)
+        PmsmMna            = 18, // Phase 4 C.3 (MNA-native PMSM)
     };
 
     struct SwitchParams {
@@ -166,6 +169,46 @@ public:
     [[nodiscard]] const std::vector<Index>&
     lauritzen_diode_branches() const noexcept {
         return lauritzen_diode_branches_;
+    }
+
+    /// One MNA-native PMSM: three stator branches (a, b, c → neutral)
+    /// plus the two mechanical nodes. Phase 4 C.3.
+    struct PmsmMnaMachine {
+        std::array<Index, 3> branch_id{};
+        Index omega_node = -1;
+        Index theta_node = -1;
+        models::PmsmMna::Params params;
+    };
+
+    /// Register an MNA-native PMSM. Each phase branch MUST be
+    /// `BranchKind::Nonlinear` in the graph (assemble skips it) and
+    /// gets a branch-current unknown in the inductor numbering,
+    /// exactly like the saturable inductor, so `result.i()` and
+    /// every current-reading helper find it without special cases.
+    /// The stamp lives in `refresh_pmsm_mna`; the state in
+    /// `PmsmMnaHistory`.
+    void add_pmsm_mna(const std::array<Index, 3>& branch_ids,
+                      Index omega_node, Index theta_node,
+                      models::PmsmMna::Params p) {
+        models::PmsmMna::validate(p);
+        for (const Index b : branch_ids) {
+            entries_[b] = Entry{p};
+            inductor_branch_var_id_[b] =
+                static_cast<Index>(num_inductors_++);
+        }
+        pmsm_mna_machines_.push_back(
+            PmsmMnaMachine{branch_ids, omega_node, theta_node, p});
+    }
+
+    [[nodiscard]] const std::vector<PmsmMnaMachine>&
+    pmsm_mna_machines() const noexcept {
+        return pmsm_mna_machines_;
+    }
+
+    [[nodiscard]] const models::PmsmMna::Params&
+    pmsm_mna_params(Index branch_id) const {
+        return require_params_<models::PmsmMna::Params>(
+            branch_id, "pmsm_mna_params", "a PmsmMna phase branch");
     }
 
     /// Register a constant DC current source (Layer 2 V3).
@@ -392,6 +435,7 @@ public:
             if (k == StoredKind::NonlinearDiode ||
                 k == StoredKind::ShockleyDiode  ||
                 k == StoredKind::LauritzenDiode ||
+                k == StoredKind::PmsmMna        ||
                 k == StoredKind::MosfetLevel1   ||
                 k == StoredKind::IgbtLevel1     ||
                 k == StoredKind::SaturableInductor) {
@@ -842,7 +886,8 @@ private:
                                 models::SaturableInductor::Params,
                                 models::NonlinearCapacitor::Params,
                                 models::ShockleyDiode::Params,
-                                models::LauritzenDiode::Params>;
+                                models::LauritzenDiode::Params,
+                                models::PmsmMna::Params>;
 
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
@@ -854,8 +899,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 18,
-        "StoredKind has 18 values; Entry must list 18 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 19,
+        "StoredKind has 19 values; Entry must list 19 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -875,6 +920,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::NonlinearCapacitor, models::NonlinearCapacitor::Params>);
     static_assert(kind_maps_to_<StoredKind::ShockleyDiode,      models::ShockleyDiode::Params>);
     static_assert(kind_maps_to_<StoredKind::LauritzenDiode,     models::LauritzenDiode::Params>);
+    static_assert(kind_maps_to_<StoredKind::PmsmMna,            models::PmsmMna::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -967,6 +1013,7 @@ private:
     std::vector<Index> saturable_inductor_branches_;
     std::vector<Index> nonlinear_capacitor_branches_;
     std::vector<Index> lauritzen_diode_branches_;
+    std::vector<PmsmMnaMachine> pmsm_mna_machines_;
     std::vector<Index> igbt_level1_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
