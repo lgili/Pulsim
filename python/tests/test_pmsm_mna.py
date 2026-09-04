@@ -263,9 +263,13 @@ def test_bad_parameters_are_refused_by_name(kw, frag):
         b.add_pmsm_mna("M1", "ua", "ub", "uc", "nn", "w", "th", **base)
 
 
-def test_it_blocks_the_trbdf2_router():
-    """The flux history is wired for the trapezoidal companion only;
-    routing onto a BDF2 second stage would converge and be wrong."""
+def test_it_no_longer_blocks_the_trbdf2_router():
+    """The flux history was wired for the trapezoidal companion only,
+    so the router used to refuse the variable-step engine outright.
+    With the BDF2 second stage derived (lambda_gamma + the one-sided
+    history), the refusal is gone — and its absence is worth a test,
+    because a stale blocker would silently cost every PMSM user the
+    adaptive engine."""
     b = p.CircuitBuilder()
     _sources(b)
     b.add_pmsm_mna("M1", "ua", "ub", "uc", "nn", "w", "th",
@@ -278,4 +282,4 @@ def test_it_blocks_the_trbdf2_router():
         controller_period=None, max_dt_halvings=None, store_every=None,
         mmc_arms=None, enable_substep_state_correction=None,
         inductor_freeze_di_max=None, inductor_abs_clamp=None)
-    assert any("PMSM" in w for w in why), why
+    assert not any("PMSM" in w for w in why), why

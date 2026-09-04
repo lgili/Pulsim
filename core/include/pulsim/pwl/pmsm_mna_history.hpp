@@ -18,10 +18,28 @@
 // halved step can roll the flux back — the saturable inductor's
 // history lacks that and therefore has to refuse dt-halving; this
 // one does not have to.
+//
+// TR-BDF2 SECOND STAGE. Unlike the two charge-state devices, where
+// only a coefficient moves, here the two stages have DIFFERENT
+// SHAPES. Trapezoidal carries the previous derivative:
+//
+//     (v − R i) + (dλ/dt)_n − (2/h)·(λ − λ_n) = 0
+//
+// BDF2 is one-sided and carries none of it:
+//
+//     (v − R i) − (c1·λ + c2·λ_γ + c3·λ_n)/h = 0
+//
+// so the previous-derivative term is not merely rescaled, it is
+// ABSENT. That is why the derivative is now stored explicitly as
+// `dlam_old` rather than reconstructed from (v_old, i_old) at the
+// stamp: the two stages read one committed quantity instead of each
+// deriving its own, and cannot disagree about what the last step
+// did.
 
 #include "pulsim/models/pmsm_mna.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -43,6 +61,11 @@ public:
         std::array<Real, 3> lambda_old{};
         std::array<Real, 3> i_old{};
         std::array<Real, 3> v_old{};          //!< v_phase − v_neutral
+        //! dλ/dt at the last committed point (= v_old − R·i_old).
+        //! The trapezoidal residual reads it; the BDF2 one does not.
+        std::array<Real, 3> dlam_old{};
+        //! λ at the γ stage point, for the BDF2 stage.
+        std::array<Real, 3> lambda_gamma{};
     };
 
     void init(const topology::Graph& graph, const DevicePool& pool) {
@@ -83,9 +106,35 @@ public:
                * stamping::read_node_voltage(x, e.theta_node);
     }
 
+    /// λ at the terminal voltages in `x`, from the model's own law.
+    [[nodiscard]] static std::array<Real, 3> lambda_at(
+        const Entry& e, const Vector& x) {
+        const Real th = theta_e_of(e, x);
+        const auto ind = models::PmsmMna::inductance(e.params, th);
+        const auto lpm = models::PmsmMna::lambda_pm(e.params, th, 0);
+        std::array<Real, 3> lam{};
+        for (Size k = 0; k < 3; ++k) {
+            lam[k] = lpm[k];
+            for (Size j = 0; j < 3; ++j) {
+                lam[k] += ind.L[k][j] * x[e.cur_row[j]];
+            }
+        }
+        return lam;
+    }
+
+    /// Snapshot λ at the γ stage point; the BDF2 history term reads
+    /// it. Must run between the two stages.
+    void capture_gamma(const Vector& x_gamma) {
+        for (auto& e : entries_) {
+            e.lambda_gamma = lambda_at(e, x_gamma);
+        }
+    }
+
     /// Commit the converged step: (λ, i, v) at x, with λ from the
     /// model's own law at this θ.
-    void update_from_state(const Vector& x, Real /*h*/) {
+    void update_from_state(
+        const Vector& x, Real /*h*/,
+        TrBdf2Stage /*stage*/ = TrBdf2Stage::Trapezoidal) {
         for (auto& e : entries_) {
             const Real th = theta_e_of(e, x);
             const auto ind = models::PmsmMna::inductance(e.params, th);
@@ -100,6 +149,9 @@ public:
                 e.i_old[k] = i[k];
                 e.v_old[k] =
                     stamping::read_node_voltage(x, e.phase_node[k]) - v_n;
+                // dλ/dt from the device equation itself, exact at
+                // the converged point under either stage.
+                e.dlam_old[k] = e.v_old[k] - e.params.R_s * i[k];
             }
         }
     }
@@ -111,7 +163,10 @@ public:
     [[nodiscard]] std::vector<Entry> snapshot() const { return entries_; }
     void restore(const std::vector<Entry>& snap) { entries_ = snap; }
 
-    /// Flat (λ_a, λ_b, λ_c, i_a, i_b, i_c, v_a, v_b, v_c) per machine.
+    /// Flat (λ, i, v) triples per machine. `dlam_old` is not
+    /// carried — it is a function of the (v, i) that are — and
+    /// `lambda_gamma` lives only between the two stages of one step,
+    /// while a snapshot is always taken at a step boundary.
     [[nodiscard]] std::vector<Real> to_flat() const {
         std::vector<Real> out;
         out.reserve(entries_.size() * 9);
@@ -129,6 +184,9 @@ public:
             for (Size k = 0; k < 3; ++k) e.lambda_old[k] = flat[p++];
             for (Size k = 0; k < 3; ++k) e.i_old[k] = flat[p++];
             for (Size k = 0; k < 3; ++k) e.v_old[k] = flat[p++];
+            for (Size k = 0; k < 3; ++k) {
+                e.dlam_old[k] = e.v_old[k] - e.params.R_s * e.i_old[k];
+            }
         }
     }
 

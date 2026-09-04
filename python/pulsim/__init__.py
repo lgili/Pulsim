@@ -1713,6 +1713,39 @@ def simulate(
                 "rebuild the circuit for that.",
                 stacklevel=2)
 
+    # add-python-builder-ergonomics: if the caller didn't pass an
+    # explicit initial_state, ask the builder for its recorded ICs.
+    # The C++ `initial_state()` synthesises from `c0=` / `i0=` /
+    # `set_initial` calls. Returns an all-zero vector when no ICs
+    # were set; we only override the simulate path when there's at
+    # least one non-zero entry to avoid forcing a needless copy.
+    #
+    # This runs BEFORE the engine dispatch, and it has to. It used
+    # to sit ~200 lines further down, past both early-return
+    # branches, so `engine='dsed'` and `engine='trbdf2'` never saw
+    # the builder's ICs at all: an inductor declared `i0=5.0` began
+    # its run at 0 A. Nothing raised — the run converged and
+    # produced a perfectly plausible exponential from the WRONG
+    # state, and the same circuit gave two different answers
+    # depending on which engine the router picked.
+    #
+    # It must also stay AFTER the preflight above, which may add
+    # regularizing ties and therefore change the state vector's
+    # length; asking the builder before that would size the vector
+    # for a different circuit. Nothing between here and the PWL
+    # cache mutates the graph, so one placement serves all three
+    # engines.
+    _ic_from_builder = False
+    if initial_state is None:
+        try:
+            import numpy as _np_check
+            candidate = builder.initial_state()
+            if _np_check.any(_np_check.asarray(candidate) != 0.0):
+                initial_state = candidate
+                _ic_from_builder = True
+        except Exception:  # noqa: BLE001 — test mocks etc.
+            pass
+
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
     # The DSED dispatcher owns its own validation; main's Phase 2.4
@@ -1775,6 +1808,37 @@ def simulate(
                 "kwarg(s) if the open-loop behaviour is intended. "
                 "Observer/closed-loop support inside DSED is tracked "
                 "for v2.0 (event-synchronised controller cadence)."
+            )
+        if _ic_from_builder:
+            # The builder recorded `c0=` / `i0=` initial conditions
+            # and DSED cannot apply them. It used to START AT ZERO
+            # in silence: an inductor declared `i0=100` began its
+            # run at 0 A, the solve converged, and the trace looked
+            # like a perfectly ordinary energisation transient —
+            # the same circuit answering differently depending on
+            # which engine the router happened to pick.
+            #
+            # It is not a matter of forwarding the vector. DSED
+            # solves a REDUCED state (one entry per reactive
+            # element) while `builder.initial_state()` is a
+            # full-MNA vector, and for a FLOATING capacitor the
+            # reduced state is the congruence-transformed
+            # difference v_pos − v_neg, not the row the gather
+            # would pick up. A naive gather would therefore be
+            # right for inductors and grounded caps and quietly
+            # wrong for floating ones — which is the failure this
+            # message exists to stop. Refuse by name until the
+            # projection is built and tested.
+            raise ValueError(
+                "simulate(engine='dsed'): this circuit declares "
+                "initial conditions (c0= / i0= / set_initial), and "
+                "the DSED engine cannot apply them yet — it would "
+                "start every state at ZERO and return a plausible "
+                "but wrong transient. Use engine='pwl' (or "
+                "'trbdf2'), which honour them, or pass "
+                "initial_state=<reduced state vector> explicitly if "
+                "you know DSED's state ordering "
+                "([v_C..., i_L...])."
             )
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
@@ -2216,21 +2280,6 @@ def simulate(
 
         step_observer = _cblock_observer
         b_extra_fn = _cblock_b_extra
-
-    # add-python-builder-ergonomics: if the caller didn't pass an
-    # explicit initial_state, ask the builder for its recorded ICs.
-    # The C++ `initial_state()` synthesises from `c0=` / `i0=` /
-    # `set_initial` calls. Returns an all-zero vector when no ICs
-    # were set; we only override the simulate path when there's at
-    # least one non-zero entry to avoid forcing a needless copy.
-    if initial_state is None:
-        try:
-            import numpy as _np_check
-            candidate = builder.initial_state()
-            if _np_check.any(_np_check.asarray(candidate) != 0.0):
-                initial_state = candidate
-        except Exception:  # noqa: BLE001 — test mocks etc.
-            pass
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -2767,9 +2816,6 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     try:
         from ._pulsim import BranchKind as _BK  # type: ignore
         n_sat = 0
-        n_laur = 0
-        n_pmsm = 0
-        n_tail = 0
         for br in builder.graph.branches:
             if br.get("kind") != _BK.Nonlinear:
                 continue
@@ -2778,18 +2824,16 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
             # and their re-stamp has no dt in it. A SATURABLE
             # inductor's does, and its flux cannot be rolled back
             # when a step is rejected.
+            #
+            # The Lauritzen diode, the IGBT turn-off tail and the
+            # MNA-native PMSM used to be listed here too. Their BDF2
+            # second stages are derived and wired now (see
+            # `pwl/trbdf2_stage.hpp`), so they route like any other
+            # nonlinear device. The saturable inductor stays because
+            # its history still has no snapshot/restore.
             k = str(builder.pool.kind_of(br["id"]))
             if k.endswith("SaturableInductor"):
                 n_sat += 1
-            elif k.endswith("LauritzenDiode"):
-                n_laur += 1
-            elif k.endswith("PmsmMna"):
-                n_pmsm += 1
-            elif k.endswith("IgbtLevel1"):
-                # Only the ones that actually model a tail; a
-                # plain IGBT is static and perfectly fine here.
-                if builder.pool.igbt_has_tail(br["id"]):
-                    n_tail += 1
 
         if n_sat:
             why.append(
@@ -2804,34 +2848,6 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 "never fire and whatever it was closing (an "
                 "electro-thermal loop, usually) would silently stay "
                 "open")
-        if n_pmsm:
-            # Three phase branches per machine; report machines.
-            why.append(
-                f"{n_pmsm // 3} MNA-native PMSM(s) — their flux-linkage "
-                "history is only wired for the trapezoidal companion, "
-                "so a BDF2 second stage would integrate the wrong rule "
-                "and report a speed and torque that never happened")
-        if n_laur:
-            # The charge-based Coss IS handled here (its two-stage
-            # history is wired through trbdf2_transient), so this
-            # is not a blanket ban on stateful devices — only on
-            # the one whose second-stage form has not been derived
-            # yet. Routing it anyway would converge and be wrong,
-            # which is exactly the failure this list exists to
-            # prevent.
-            why.append(
-                f"{n_laur} Lauritzen diode(s) — their stored-charge "
-                "history is only wired for the trapezoidal "
-                "companion, so a BDF2 second stage would integrate "
-                "the wrong rule and report recovery that never "
-                "happened")
-        if n_tail:
-            why.append(
-                f"{n_tail} IGBT(s) with a turn-off tail — their "
-                "stored-charge history is only wired for the "
-                "trapezoidal companion, so a BDF2 second stage "
-                "would integrate the wrong rule and report a tail "
-                "of the wrong size")
     except Exception:  # pragma: no cover — never block on a probe
         pass
     if getattr(builder, "_c_blocks", None):
