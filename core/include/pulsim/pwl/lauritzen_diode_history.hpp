@@ -25,10 +25,27 @@
 // Both depend only on committed history and the step, so the
 // branch stamp stays an ordinary two-terminal nonlinearity — no
 // inner iteration, no internal node, no extra unknown.
+//
+// TR-BDF2 SECOND STAGE. The affine relation survives the composite
+// method; only the two coefficients change. With
+// dq_M/dt = (c1 q_M + c2 q_gamma + c3 q_n)/h,
+//
+//     q_M (c1/h + A) = q_E/T_M - (c2 q_gamma + c3 q_n)/h
+//
+// so
+//
+//     K1 = (1/T_M) / (c1/h + A)
+//     K0 = -(c2 q_gamma + c3 q_n) / h / (c1/h + A)
+//
+// against the trapezoidal K1 = (1/T_M)/(2/h + A) and
+// K0 = (q_n + (h/2) f_n)/(1 + hA/2). The conductance is unchanged
+// (c1/h == 2/(gamma h)); only the history term moves — which is
+// exactly why stamping the wrong one converges and lies.
 
 #include "pulsim/models/lauritzen_diode.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -45,6 +62,8 @@ public:
         models::LauritzenDiode::Params params;
         Real q_m_prev = Real{0};   //!< stored charge [C]
         Real f_prev   = Real{0};   //!< dq_M/dt at the last point
+        //! q_M at the gamma stage point, for the BDF2 stage.
+        Real q_m_gamma = Real{0};
         //! Coefficients of q_M = K0 + K1·q_E for the step being
         //! solved. Refreshed by `begin_step`.
         Real k0 = Real{0};
@@ -85,25 +104,56 @@ public:
     /// converged perfectly happily. Recomputing is a handful of
     /// flops per device and removes the failure mode entirely.
     /// It depends only on committed history, so it is idempotent.
-    void begin_step(Real h) {
+    void begin_step(Real h,
+                    TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
         if (!(h > Real{0})) {
             return;
         }
+        const auto k = trbdf2_coeffs();
         for (auto& e : entries_) {
             const Real A = Real{1} / e.params.T_M
                            + Real{1} / e.params.tau;
-            const Real den = Real{1} + h * A / Real{2};
-            e.k1 = (h / (Real{2} * e.params.T_M)) / den;
-            e.k0 = (e.q_m_prev + (h / Real{2}) * e.f_prev) / den;
+            if (stage == TrBdf2Stage::Bdf2Stage2) {
+                const Real den = k.c1 / h + A;
+                e.k1 = (Real{1} / e.params.T_M) / den;
+                e.k0 = -(k.c2 * e.q_m_gamma + k.c3 * e.q_m_prev)
+                       / h / den;
+            } else {
+                const Real den = Real{1} + h * A / Real{2};
+                e.k1 = (h / (Real{2} * e.params.T_M)) / den;
+                e.k0 = (e.q_m_prev + (h / Real{2}) * e.f_prev) / den;
+            }
+        }
+    }
+
+    /// Snapshot q_M at the gamma stage point, from the stage-1
+    /// solution. Must run between the two stages: the BDF2 history
+    /// term reads it.
+    void capture_gamma(const Vector& x_gamma) {
+        for (auto& e : entries_) {
+            const Real v =
+                stamping::read_node_voltage(x_gamma, e.from)
+                - stamping::read_node_voltage(x_gamma, e.to);
+            const Real q_e =
+                models::LauritzenDiode::junction_charge<Real>(
+                    v, e.params);
+            // The same affine relation stage 1 solved with.
+            e.q_m_gamma = e.k0 + e.k1 * q_e;
         }
     }
 
     /// Commit the just-solved step. `h` must be the step the solve
-    /// actually used — the same one the stamp saw.
-    void update_from_state(const Vector& x, Real h) {
+    /// actually used — the same one the stamp saw, and `stage` the
+    /// rule it used, because the committed derivative `f_prev`
+    /// feeds the NEXT step's trapezoidal history term and has to be
+    /// the derivative the method actually produced.
+    void update_from_state(
+        const Vector& x, Real h,
+        TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
         if (entries_.empty() || !(h > Real{0})) {
             return;
         }
+        const auto k = trbdf2_coeffs();
         for (auto& e : entries_) {
             const Real v =
                 stamping::read_node_voltage(x, e.from)
@@ -116,9 +166,14 @@ public:
             // committed charge disagree with the current the
             // circuit was actually solved with.
             const Real q_m = e.k0 + e.k1 * q_e;
-            const Real A = Real{1} / e.params.T_M
-                           + Real{1} / e.params.tau;
-            e.f_prev = q_e / e.params.T_M - A * q_m;
+            if (stage == TrBdf2Stage::Bdf2Stage2) {
+                e.f_prev = (k.c1 * q_m + k.c2 * e.q_m_gamma
+                            + k.c3 * e.q_m_prev) / h;
+            } else {
+                const Real A = Real{1} / e.params.T_M
+                               + Real{1} / e.params.tau;
+                e.f_prev = q_e / e.params.T_M - A * q_m;
+            }
             e.q_m_prev = q_m;
         }
     }
@@ -146,7 +201,10 @@ public:
         entries_ = snap;
     }
 
-    /// Flat (q_M, f) pairs, for `SolverSnapshot`.
+    /// Flat (q_M, f) pairs, for `SolverSnapshot`. The gamma point
+    /// is deliberately NOT carried: it lives only between the two
+    /// stages of one step, and a snapshot is always taken at a step
+    /// boundary.
     [[nodiscard]] std::vector<Real> to_flat() const {
         std::vector<Real> out;
         out.reserve(entries_.size() * 2);

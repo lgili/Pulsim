@@ -16,11 +16,13 @@
 // Jacobian cannot drift from the residual.
 //
 // The coefficients are refreshed HERE, from the history, on every
-// call. K0 and K1 embed `h`, and a variable-step engine retries a
-// rejected step at a different one — so an API that computed them
-// once per step could stamp the wrong interval while Newton
+// call. K0 and K1 embed `h` AND the stage, and a variable-step
+// engine retries a rejected step at a different h while the
+// composite TR-BDF2 step changes stage mid-step — so an API that
+// computed them once could stamp the wrong interval, or the
+// trapezoidal history term inside a BDF2 stage, while Newton
 // converged perfectly happily. Recomputing costs a few flops per
-// device and makes that impossible.
+// device and makes both impossible.
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
@@ -41,12 +43,13 @@ inline Real refresh_lauritzen_diodes(
     sparse::Matrix& J_nl,
     Vector& f_nl,
     LauritzenDiodeHistory& history,
-    Real h) {
+    Real h,
+    TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
     Real max_i = Real{0};
     if (history.empty() || !(h > Real{0})) {
         return max_i;
     }
-    history.begin_step(h);
+    history.begin_step(h, stage);
     for (const auto& e : history.entries()) {
         const Real v = stamping::read_node_voltage(x, e.from)
                        - stamping::read_node_voltage(x, e.to);

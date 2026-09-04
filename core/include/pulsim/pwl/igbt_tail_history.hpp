@@ -37,10 +37,20 @@
 //
 // so Q = K0 + K1·i_ss(v) is affine in i_ss and the branch stays an
 // ordinary nonlinearity — no internal node, no extra unknown.
+//
+// TR-BDF2 SECOND STAGE. Same shape, different coefficients. With
+// dQ/dt = (c1 Q + c2 Q_gamma + c3 Q_n)/h,
+//
+//     Q (c1/h + 1/tau) = k·i_ss - (c2 Q_gamma + c3 Q_n)/h
+//
+// so K1 = k/(c1/h + 1/tau) and
+// K0 = -(c2 Q_gamma + c3 Q_n)/h / (c1/h + 1/tau). The conductance
+// is unchanged; only the history term moves.
 
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -58,6 +68,8 @@ public:
         models::IgbtLevel1::Params params;
         Real q_prev = Real{0};   //!< stored charge [C]
         Real f_prev = Real{0};   //!< dQ/dt at the last point
+        //! Q at the gamma stage point, for the BDF2 stage.
+        Real q_gamma = Real{0};
         //! Coefficients of Q = K0 + K1·i_ss for the step in hand.
         Real k0 = Real{0};
         Real k1 = Real{0};
@@ -99,31 +111,59 @@ public:
     /// integrate the wrong interval while Newton converged
     /// perfectly happily. It reads only committed history, so it
     /// is idempotent.
-    void begin_step(Real h) {
+    void begin_step(Real h,
+                    TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
         if (!(h > Real{0})) {
             return;
         }
+        const auto k = trbdf2_coeffs();
         for (auto& e : entries_) {
-            const Real den =
-                Real{1} + h / (Real{2} * e.params.tau_tail);
-            e.k1 = (h * e.params.k_tail / Real{2}) / den;
-            e.k0 = (e.q_prev + (h / Real{2}) * e.f_prev) / den;
+            if (stage == TrBdf2Stage::Bdf2Stage2) {
+                const Real den = k.c1 / h + Real{1} / e.params.tau_tail;
+                e.k1 = e.params.k_tail / den;
+                e.k0 = -(k.c2 * e.q_gamma + k.c3 * e.q_prev) / h / den;
+            } else {
+                const Real den =
+                    Real{1} + h / (Real{2} * e.params.tau_tail);
+                e.k1 = (h * e.params.k_tail / Real{2}) / den;
+                e.k0 = (e.q_prev + (h / Real{2}) * e.f_prev) / den;
+            }
         }
     }
 
-    /// Commit the just-solved step at the step it actually used.
-    void update_from_state(const Vector& x, Real h) {
+    /// Snapshot Q at the gamma stage point from the stage-1
+    /// solution; the BDF2 history term reads it.
+    void capture_gamma(const Vector& x_gamma) {
+        for (auto& e : entries_) {
+            const Real i_ss = steady_state_at(e, x_gamma);
+            e.q_gamma = e.k0 + e.k1 * i_ss;
+        }
+    }
+
+    /// Commit the just-solved step at the step and stage it
+    /// actually used — `f_prev` feeds the next step's trapezoidal
+    /// history term, so it has to be the derivative the method
+    /// really produced.
+    void update_from_state(
+        const Vector& x, Real h,
+        TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
         if (entries_.empty() || !(h > Real{0})) {
             return;
         }
+        const auto k = trbdf2_coeffs();
         for (auto& e : entries_) {
             const Real i_ss = steady_state_at(e, x);
             // The SAME affine relation the stamp used, so the
             // committed charge cannot disagree with the current
             // the circuit was solved with.
             const Real q = e.k0 + e.k1 * i_ss;
-            e.f_prev = e.params.k_tail * i_ss
-                       - q / e.params.tau_tail;
+            if (stage == TrBdf2Stage::Bdf2Stage2) {
+                e.f_prev = (k.c1 * q + k.c2 * e.q_gamma
+                            + k.c3 * e.q_prev) / h;
+            } else {
+                e.f_prev = e.params.k_tail * i_ss
+                           - q / e.params.tau_tail;
+            }
             e.q_prev = q;
         }
     }

@@ -80,7 +80,14 @@
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
+#include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/lauritzen_diode_history.hpp"
+#include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
+#include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
+#include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
+#include "pulsim/pwl/pmsm_mna_history.hpp"
+#include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
@@ -457,6 +464,31 @@ inline SimulationResult run_transient_trbdf2(
         coss.restore(snap);
     };
 
+    // v2.0 — the three other stateful devices. Each carries a
+    // first-order state whose BDF2 second stage was derived
+    // alongside the Coss's; see `trbdf2_stage.hpp`. Their histories
+    // are committed only on ACCEPT, exactly like the Coss, so a
+    // rejected step never touches them and no rollback is needed.
+    pwl::LauritzenDiodeHistory laur;
+    laur.init(graph, pool);
+    if (initial_state.has_value()) laur.seed_from_dc_op(x);
+    const bool has_laur = !laur.empty();
+
+    pwl::IgbtTailHistory tail;
+    tail.init(graph, pool);
+    if (initial_state.has_value()) tail.seed_from_dc_op(x);
+    const bool has_tail = !tail.empty();
+
+    pwl::PmsmMnaHistory pmsm;
+    pmsm.init(graph, pool);
+    if (initial_state.has_value()) pmsm.seed_from_dc_op(x);
+    const bool has_pmsm = !pmsm.empty();
+
+    // One stage/step pair drives all three: they are always stamped
+    // in the same stage of the same step.
+    auto dev_stage = pwl::TrBdf2Stage::Trapezoidal;
+    Real dev_h = Real{0};
+
     pwl::NonlinearRefreshFn nl_effective = nl_refresh;
     if (has_coss) {
         nl_effective =
@@ -475,6 +507,61 @@ inline SimulationResult run_transient_trbdf2(
                     m, pwl::refresh_nonlinear_capacitors(
                            xx, J_nl, f_nl, coss, coss_h,
                            coss_stage, &q_gamma));
+            };
+    }
+
+    if (has_laur) {
+        nl_effective =
+            [user = nl_effective, &laur, &dev_stage, &dev_h](
+                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
+                const topology::Graph& g,
+                const pwl::DevicePool& pp) -> Real {
+                Real m = Real{0};
+                if (user) {
+                    m = user(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(m, pwl::refresh_lauritzen_diodes(
+                                       xx, J_nl, f_nl, laur, dev_h,
+                                       dev_stage));
+            };
+    }
+    if (has_tail) {
+        nl_effective =
+            [user = nl_effective, &tail, &dev_stage, &dev_h](
+                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
+                const topology::Graph& g,
+                const pwl::DevicePool& pp) -> Real {
+                Real m = Real{0};
+                if (user) {
+                    m = user(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(m, pwl::refresh_igbt_tails(
+                                       xx, J_nl, f_nl, tail, dev_h,
+                                       dev_stage));
+            };
+    }
+    if (has_pmsm) {
+        nl_effective =
+            [user = nl_effective, &pmsm, &dev_stage, &dev_h](
+                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
+                const topology::Graph& g,
+                const pwl::DevicePool& pp) -> Real {
+                Real m = Real{0};
+                if (user) {
+                    m = user(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                return std::max(m, pwl::refresh_pmsm_mna(
+                                       xx, J_nl, f_nl, pmsm, dev_h,
+                                       dev_stage));
             };
     }
 
@@ -723,6 +810,8 @@ inline SimulationResult run_transient_trbdf2(
             x_g = x;                 // Newton warm start
             coss_stage = pwl::CossStage::Trapezoidal;
             coss_h = hg;
+            dev_stage = pwl::TrBdf2Stage::Trapezoidal;
+            dev_h = hg;
             bool stage_ok =
                 solve_dispatch(mask_step, hg, b_stage, x_g);
             ++st.n_solves;
@@ -747,6 +836,18 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     coss_stage = pwl::CossStage::Bdf2Stage2;
                     coss_h = h;
+                }
+                if (has_laur || has_tail || has_pmsm) {
+                    // Each device's state AT THE STAGE POINT feeds
+                    // the BDF2 history term. `h` is the FULL step
+                    // there, while the matrix is still the one
+                    // factored at gamma*h — the identity
+                    // c1/h == 2/(gamma*h) is what allows that.
+                    if (has_laur) laur.capture_gamma(x_g);
+                    if (has_tail) tail.capture_gamma(x_g);
+                    if (has_pmsm) pmsm.capture_gamma(x_g);
+                    dev_stage = pwl::TrBdf2Stage::Bdf2Stage2;
+                    dev_h = h;
                 }
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
@@ -1074,6 +1175,21 @@ inline SimulationResult run_transient_trbdf2(
                 history.commit_trbdf2(x_1, h, x_g);
                 if (has_coss) {
                     commit_coss(x_1, h);
+                }
+                // Committed under the rule the stage actually used,
+                // so the derivative each history carries into the
+                // next step is the one the method produced.
+                if (has_laur) {
+                    laur.update_from_state(
+                        x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
+                }
+                if (has_tail) {
+                    tail.update_from_state(
+                        x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
+                }
+                if (has_pmsm) {
+                    pmsm.update_from_state(
+                        x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
                 }
                 x = x_1;
                 t += h;

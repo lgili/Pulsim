@@ -170,9 +170,15 @@ def test_switch_fn_with_next_edge_after_skips_polling_wrapper() -> None:
     # scheduler) tried to engage the defensive poll cap, the call
     # would still succeed but the warning would fire.
     b2 = p.CircuitBuilder()
-    b2.add_voltage_source("V", "a", "gnd", 0.0)
+    # The transient comes from the SOURCE, not from a `c0=`. It used
+    # to be a 0 V source with `c0=1.0`, which meant this "RC decay"
+    # was a flat zero line: DSED silently started every state at
+    # zero, and `num_steps() > 0` never noticed. DSED now refuses
+    # declared ICs by name, so drive the RC instead — same one-mask,
+    # event-free run, but an actual transient.
+    b2.add_voltage_source("V", "a", "gnd", 1.0)
     b2.add_resistor("R", "a", "b", 1.0)
-    b2.add_capacitor("C", "b", "gnd", 1e-6, c0=1.0)
+    b2.add_capacitor("C", "b", "gnd", 1e-6)
     b2.add_switch("SW", "b", "gnd", g_on=1e-9, g_off=1e-9)
 
     class _ConstantNeaSwitchFn:

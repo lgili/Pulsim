@@ -45,12 +45,13 @@ inline Real refresh_igbt_tails(
     sparse::Matrix& J_nl,
     Vector& f_nl,
     IgbtTailHistory& history,
-    Real h) {
+    Real h,
+    TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
     Real max_i = Real{0};
     if (history.empty() || !(h > Real{0})) {
         return max_i;
     }
-    history.begin_step(h);
+    history.begin_step(h, stage);
     for (const auto& e : history.entries()) {
         // i_ss and its three partials from one AD evaluation, so
         // the Jacobian cannot drift from the residual.

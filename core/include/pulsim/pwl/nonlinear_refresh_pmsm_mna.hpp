@@ -20,6 +20,25 @@
 //
 // KCL at the terminals is the same ±1 pattern as any inductor.
 //
+// UNDER THE TR-BDF2 SECOND STAGE the residual changes SHAPE, not
+// just a coefficient: the derivative is one-sided, so the previous
+// step's dλ/dt is absent altogether,
+//
+//     R_k = (v_k − R i_k) − (c1·λ_k + c2·λ_γ,k + c3·λ_n,k)/h
+//
+// with ∂R_k/∂i_j = −R δ_kj − (c1/h)·L_kj and
+// ∂R_k/∂θ_m = −(c1/h)·pp·[Σ_j dL_kj/dθ_e i_j + dλ_pm,k/dθ_e].
+// Since c1/h == 2/(γh), the CONDUCTANCE block is identical to the
+// trapezoidal one — which is exactly what lets both stages reuse a
+// single matrix factor, and exactly why stamping the wrong history
+// term converges and lies.
+//
+// The mechanical couplings are algebraic (a torque injected into
+// the ω node, ω injected into the θ node), so they carry no
+// derivative and are stage-INDEPENDENT. The ω and θ capacitors are
+// ordinary linear ones and the engine already integrates those in
+// both stages.
+//
 // Mechanics: the ω and θ nodes carry linear capacitors (J and 1 F,
 // added by the builder), so only the two couplings are stamped here:
 //
@@ -51,12 +70,18 @@ inline Real refresh_pmsm_mna(
     sparse::Matrix& J_nl,
     Vector& f_nl,
     const PmsmMnaHistory& history,
-    Real h) {
+    Real h,
+    TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
     Real max_i = Real{0};
     if (history.empty() || !(h > Real{0})) {
         return max_i;
     }
-    const Real two_over_h = Real{2} / h;
+    const auto kc = trbdf2_coeffs();
+    const bool bdf2 = (stage == TrBdf2Stage::Bdf2Stage2);
+    // c1/h in the BDF2 stage, 2/h in the trapezoidal one. The two
+    // coincide when h is the stage's own step, which is what makes
+    // one factor serve both.
+    const Real d_coef = bdf2 ? kc.c1 / h : Real{2} / h;
     for (const auto& e : history.entries()) {
         const auto& p = e.params;
         const Real theta_e = PmsmMnaHistory::theta_e_of(e, x);
@@ -81,9 +106,14 @@ inline Real refresh_pmsm_mna(
                 lam += ind.L[k][j] * i[j];
                 dlam_dth += ind.dL[k][j] * i[j];
             }
+            // Trapezoidal carries the previous derivative; BDF2 is
+            // one-sided and does not.
+            const Real hist =
+                bdf2 ? (kc.c2 * e.lambda_gamma[k]
+                        + kc.c3 * e.lambda_old[k]) / h
+                     : -e.dlam_old[k] - (Real{2} / h) * e.lambda_old[k];
             const Real R_row =
-                (v[k] - p.R_s * i[k]) + (e.v_old[k] - p.R_s * e.i_old[k])
-                - two_over_h * (lam - e.lambda_old[k]);
+                (v[k] - p.R_s * i[k]) - d_coef * lam - hist;
             const Index row = e.cur_row[k];
             const bool ph_act = stamping::node_is_active(e.phase_node[k]);
 
@@ -91,13 +121,13 @@ inline Real refresh_pmsm_mna(
             if (ph_act) J_nl.coeffRef(row, e.phase_node[k]) += Real{1};
             if (n_act)  J_nl.coeffRef(row, e.neutral) -= Real{1};
             for (Size j = 0; j < 3; ++j) {
-                Real d = -two_over_h * ind.L[k][j];
+                Real d = -d_coef * ind.L[k][j];
                 if (j == k) d -= p.R_s;
                 J_nl.coeffRef(row, e.cur_row[j]) += d;
             }
             if (th_act) {
                 J_nl.coeffRef(row, e.theta_node)
-                    += -two_over_h * p.pole_pairs * dlam_dth;
+                    += -d_coef * p.pole_pairs * dlam_dth;
             }
 
             // KCL at the terminals: i_k leaves the phase node and
