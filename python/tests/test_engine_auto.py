@@ -216,15 +216,19 @@ def test_refusals_name_the_mechanism():
         b.add_capacitor("C", "n1", "gnd", 1e-6)
         return b
 
-    from pulsim import _pulsim as _k
+    # No DEVICE refuses any more — nonlinear diodes and MOSFETs were
+    # always served (Newton per stage), and the five stateful devices
+    # each have a derived BDF2 second stage. The saturable inductor
+    # used to stand here as the one exception. What is left refuses
+    # on KWARGS, and each still has to name its own mechanism rather
+    # than say "unsupported".
+    def _tick(t, dt, inp, out, state):
+        out[0] = 0.0
+
     b = fresh()
-    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
-    # A nonlinear diode is SERVED now (Newton per stage), so the
-    # refusal case is the one device whose companion is dt-bound.
-    b = fresh()
-    b.add_saturable_inductor("Lsat", "n1", "gnd", L_0=1e-3,
-                              I_sat=2.0, L_residual=1e-4)
-    with pytest.raises(ValueError, match="saturable"):
+    p.add_c_block(b, inputs=[], outputs=[("i", "n1", "gnd")],
+                  dt=1e-4, fn=_tick)
+    with pytest.raises(ValueError, match="C block"):
         p.simulate(b, t_end=1e-3, engine="trbdf2")
     with pytest.raises(ValueError, match="pass dt="):
         p.simulate(b, t_end=1e-3, engine="auto")
@@ -547,17 +551,25 @@ def test_real_diode_and_mosfet_buck_matches_the_reference():
         _mean_tail(ref, "out"), abs=5e-3)
 
 
-def test_saturable_inductor_is_the_one_refusal():
-    """Its Newton stamp divides by the step and its flux has no
-    snapshot/restore, so a rejected step could not be rolled
-    back."""
+def test_the_saturable_inductor_is_served_not_refused():
+    """It used to be the one device refused outright, on two grounds
+    that are both gone: its stamp divided by a step size pinned at
+    opts.dt (the Coss work made that the actual step of every solve)
+    and its flux history had no snapshot/restore (it has both now).
+    With lambda(i) in the stamp the BDF2 stage is second order rather
+    than first, and the rectified DC drift is gone with it."""
     b = p.CircuitBuilder()
-    b.add_voltage_source("V", "in", "gnd", 5.0)
-    b.add_resistor("R", "in", "n1", 1e3)
+    b.add_sine_voltage_source("V", "in", "gnd", v_dc=0.0,
+                              v_amplitude=50.0, frequency=1e3)
+    b.add_resistor("R", "in", "n1", 0.05)
     b.add_saturable_inductor("Lsat", "n1", "gnd", L_0=1e-3,
                               I_sat=2.0, L_residual=1e-4)
-    with pytest.raises(ValueError, match="saturable"):
-        p.simulate(b, t_end=1e-3, engine="trbdf2")
+    res = p.simulate(b, t_end=2e-3, engine="trbdf2", dt=4e-7,
+                     rtol=1e-7, atol=1e-10)
+    i = np.asarray(res.i("Lsat"))
+    # Actually saturating, and finite.
+    assert np.abs(i).max() > 5 * 2.0, np.abs(i).max()
+    assert np.all(np.isfinite(i))
 
 
 def test_newton_failure_shrinks_the_step_instead_of_aborting():

@@ -69,10 +69,12 @@
 // elements — no dt appears in their re-stamp, so nothing about
 // them cares that h varies.
 //
-// SATURABLE inductors are the one refusal: their Newton stamp
-// divides by the step size and their flux history has no
-// snapshot/restore, so a rejected step could not be rolled back
-// and a mixed-dt answer would be committed as good.
+// Devices that carry STATE need more than that — each needs its own
+// derived BDF2 second stage, since the two stages approximate dX/dt
+// differently and only the CONDUCTANCE coincides. Five have one:
+// the charge-based Coss, the Lauritzen diode, the IGBT turn-off
+// tail, the MNA-native PMSM and the saturable inductor. There are
+// no refusals left.
 
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -86,6 +88,7 @@
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
+#include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
 #include "pulsim/pwl/pmsm_mna_history.hpp"
 #include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/pwl/assemble.hpp"
@@ -242,27 +245,18 @@ inline SimulationResult run_transient_trbdf2(
     // Nonlinear devices are fine: each stage becomes a Newton
     // solve on the same companion matrix (they are memoryless
     // resistive I-V elements — no dt appears in their refresh, so
-    // nothing about them cares that h varies). A SATURABLE
-    // inductor is the exception: its Newton stamp divides by the
-    // step and its flux history has no snapshot/restore, so it
-    // cannot be rolled back when a step is rejected.
+    // nothing about them cares that h varies). The SATURABLE
+    // inductor used to be refused here: its stamp divides by the
+    // step and its flux history had no snapshot/restore. Both are
+    // fixed — the state is now λ(i) with a derived BDF2 stage, and
+    // the history snapshots like the other four — so the refusal is
+    // gone rather than relaxed.
     bool has_nonlinear = false;
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
         if (graph.branch(b_id).kind
-            != topology::BranchKind::Nonlinear) {
-            continue;
-        }
-        has_nonlinear = true;
-        if (pool.kind_of(b_id)
-            == pwl::DevicePool::StoredKind::SaturableInductor) {
-            throw std::invalid_argument(
-                "run_transient_trbdf2: branch "
-                + std::to_string(b_id)
-                + " is a SATURABLE inductor. Its Newton stamp "
-                  "divides by the step size and its flux history "
-                  "cannot be rolled back when a step is rejected, "
-                  "so a variable step would commit a mixed-dt "
-                  "answer. Use engine='pwl' (fixed dt).");
+            == topology::BranchKind::Nonlinear) {
+            has_nonlinear = true;
+            break;
         }
     }
     // A charge-based Coss brings its own refresh (wired below), so
@@ -484,7 +478,12 @@ inline SimulationResult run_transient_trbdf2(
     if (initial_state.has_value()) pmsm.seed_from_dc_op(x);
     const bool has_pmsm = !pmsm.empty();
 
-    // One stage/step pair drives all three: they are always stamped
+    pwl::SaturableInductorHistory sat;
+    sat.init(graph, pool);
+    if (initial_state.has_value()) sat.seed_from_dc_op(x);
+    const bool has_sat = !sat.empty();
+
+    // One stage/step pair drives all four: they are always stamped
     // in the same stage of the same step.
     auto dev_stage = pwl::TrBdf2Stage::Trapezoidal;
     Real dev_h = Real{0};
@@ -562,6 +561,28 @@ inline SimulationResult run_transient_trbdf2(
                 return std::max(m, pwl::refresh_pmsm_mna(
                                        xx, J_nl, f_nl, pmsm, dev_h,
                                        dev_stage));
+            };
+    }
+    if (has_sat) {
+        nl_effective =
+            [user = nl_effective, &sat, &dev_stage, &dev_h](
+                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
+                const topology::Graph& g,
+                const pwl::DevicePool& pp) -> Real {
+                Real m = Real{0};
+                if (user) {
+                    m = user(xx, J_nl, f_nl, g, pp);
+                } else {
+                    J_nl.setZero();
+                    f_nl.setZero();
+                }
+                Real mx = Real{0};
+                for (const auto& e : sat.entries()) {
+                    mx = std::max(mx, pwl::stamp_saturable_inductor(
+                                          e, xx, J_nl, f_nl, dev_h,
+                                          dev_stage));
+                }
+                return std::max(m, mx);
             };
     }
 
@@ -837,7 +858,8 @@ inline SimulationResult run_transient_trbdf2(
                     coss_stage = pwl::CossStage::Bdf2Stage2;
                     coss_h = h;
                 }
-                if (has_laur || has_tail || has_pmsm) {
+                if (has_laur || has_tail || has_pmsm
+                    || has_sat) {
                     // Each device's state AT THE STAGE POINT feeds
                     // the BDF2 history term. `h` is the FULL step
                     // there, while the matrix is still the one
@@ -846,6 +868,7 @@ inline SimulationResult run_transient_trbdf2(
                     if (has_laur) laur.capture_gamma(x_g);
                     if (has_tail) tail.capture_gamma(x_g);
                     if (has_pmsm) pmsm.capture_gamma(x_g);
+                    if (has_sat) sat.capture_gamma(x_g);
                     dev_stage = pwl::TrBdf2Stage::Bdf2Stage2;
                     dev_h = h;
                 }
@@ -1190,6 +1213,12 @@ inline SimulationResult run_transient_trbdf2(
                 if (has_pmsm) {
                     pmsm.update_from_state(
                         x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
+                }
+                if (has_sat) {
+                    // No stage argument: the commit reads the
+                    // converged x and evaluates lambda(i) from the
+                    // model's own law, which is stage-independent.
+                    sat.update_from_state(x_1);
                 }
                 x = x_1;
                 t += h;

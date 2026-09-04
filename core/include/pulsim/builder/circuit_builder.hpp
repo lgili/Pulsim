@@ -1043,9 +1043,12 @@ public:
     /// constraint per iteration.
     ///
     /// Required call sequence in run_transient:
-    ///   * Pass `enable_nonlinear_refresh=True` (or wire
-    ///     `make_combined_nonlinear_refresh(history, dt)`
-    ///     manually for non-Python callers).
+    ///   * Pass `enable_nonlinear_refresh=True`. (This used to
+    ///     name `make_combined_nonlinear_refresh(history, dt)` as
+    ///     a manual alternative for non-Python callers; that
+    ///     function had no call sites and has been deleted — the
+    ///     one implementation is `pwl::stamp_saturable_inductor`,
+    ///     which both engines call.)
     ///   * History is automatically initialized + updated by
     ///     the solver when the circuit contains saturable
     ///     inductors.

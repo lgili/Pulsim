@@ -6,26 +6,49 @@
 //
 // Per-Newton-iteration stamping for `SaturableInductor` branches.
 //
-// Trap rule (with L = L(i_L_new)):
+// THE STATE IS THE FLUX. The device obeys v = dλ/dt with
+// λ(i) = ∫₀ⁱ L(u) du, so the trapezoidal rule is
 //
-//   V_L_new + V_L_old = (2·L_eff/dt) · (i_L_new − i_L_old)
+//   λ(i_new) − λ(i_old) = (h/2)·(v_new + v_old)
 //
-// where V_L_new = v_from − v_to and L_eff = L(i_L_new).
-// Rearranged as the constraint row residual (J·x + f = 0 form):
+// and the constraint-row residual (J·x + f = 0 form) is
 //
-//   R_row = v_from − v_to + V_L_old − (2·L_eff/dt)·(i_L_new − i_L_old) = 0
+//   R_row = (v_from − v_to) + V_L_old
+//           − (2/h)·(λ(i_new) − λ_old) = 0
 //
-// Linearisation (∂R/∂x):
-//   ∂R/∂v_from        = +1
-//   ∂R/∂v_to          = -1
-//   ∂R/∂i_L_new       = -(2·L_eff/dt) - (2/dt)·(i_L_new − i_L_old)·dL/di
+// This used to write the flux difference as L(i_new)·(i_new − i_old)
+// — a right-endpoint rectangle rule, exact only while L is constant
+// across the step. That is not a symmetric error: the stamp solves
+// for Δi given the voltage, so ascending (L(i_new) smallest) Δi came
+// out too large and descending (L(i_new) largest) |Δi| came out too
+// small. Both push the current outward, so the error RECTIFIED. On a
+// zero-mean 1 kHz sine at five thousand steps per cycle the DC
+// current climbed 63.6 → 145.5 A over 400 cycles on a device with
+// I_sat = 5 A, first order in h and unbounded in time, while a
+// linear inductor in the same circuit held to 7e-15 A per cycle.
+//
+// The Jacobian gets SIMPLER, not harder:
+//   ∂R/∂v_from  = +1
+//   ∂R/∂v_to    = −1
+//   ∂R/∂i_L_new = −(2/h)·L(i_new)
+// The old form carried an extra −(2/h)·(i_new − i_old)·dL/di term.
+// It is gone because it only ever existed as the derivative of the
+// wrong expression; dλ/di IS L(i), exactly.
+//
+// TR-BDF2 SECOND STAGE:
+//
+//   R_row = (v_from − v_to)
+//           − (c1·λ(i_new) + c2·λ_γ + c3·λ_old)/h = 0
+//   ∂R/∂i_L_new = −(c1/h)·L(i_new)
+//
+// one-sided, so V_L_old is absent rather than rescaled. Since
+// c1/h == 2/(γh), the conductance is identical to the trapezoidal
+// stage's — which is what lets one factor serve both, and why
+// stamping the wrong history term here would converge and lie.
 //
 // KCL contributions at from/to (current flows i_L from `from` to `to`):
 //   f[from] += i_L_new        J[from, i_L_row] += 1
 //   f[to]   -= i_L_new        J[to,   i_L_row] -= 1
-//
-// Uses AD via `evaluate_current_and_jacobian` on the saturable
-// inductor model (which returns L(i) and dL/di).
 
 #include "pulsim/models/device_model.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
@@ -34,6 +57,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
+#include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -42,6 +66,60 @@
 #include <cmath>
 
 namespace pulsim::pwl {
+
+/// Stamp ONE saturable inductor. Both the stand-alone refresh and the
+/// combined one call this; they used to carry byte-identical copies of
+/// the body, which is how two stamps of the same device drift apart.
+inline Real stamp_saturable_inductor(
+    const SaturableInductorHistory::Entry& e,
+    const Vector& x,
+    sparse::Matrix& J_nl,
+    Vector& f_nl,
+    Real h,
+    TrBdf2Stage stage) {
+    const Real v_from = stamping::read_node_voltage(x, e.from);
+    const Real v_to   = stamping::read_node_voltage(x, e.to);
+    const Real i_L_new = x[e.branch_var_id];
+
+    // λ(i) and its exact derivative L(i) — no AD needed, the model
+    // gives both in closed form.
+    const Real lambda_new =
+        models::SaturableInductor::flux(i_L_new, e.params);
+    const Real L_eff =
+        models::SaturableInductor::current<Real>(&i_L_new, e.params);
+
+    const auto kc = trbdf2_coeffs();
+    const bool bdf2 = (stage == TrBdf2Stage::Bdf2Stage2);
+    // c1/h in the BDF2 stage, 2/h in the trapezoidal one; equal when
+    // h is that stage's own step, which is the whole point of γ.
+    const Real d_coef = bdf2 ? kc.c1 / h : Real{2} / h;
+    // Trapezoidal carries the previous step's voltage; BDF2 is
+    // one-sided and carries none of it.
+    const Real hist =
+        bdf2 ? (kc.c2 * e.lambda_gamma + kc.c3 * e.lambda_old) / h
+             : -e.V_L_old - (Real{2} / h) * e.lambda_old;
+
+    const Real R_row = (v_from - v_to) - d_coef * lambda_new - hist;
+
+    const bool from_active = stamping::node_is_active(e.from);
+    const bool to_active   = stamping::node_is_active(e.to);
+
+    if (from_active) f_nl[e.from] += i_L_new;
+    if (to_active)   f_nl[e.to]   -= i_L_new;
+    f_nl[e.branch_var_id] += R_row;
+
+    if (from_active) {
+        J_nl.coeffRef(e.branch_var_id, e.from) += Real{1};
+        J_nl.coeffRef(e.from, e.branch_var_id) += Real{1};
+    }
+    if (to_active) {
+        J_nl.coeffRef(e.branch_var_id, e.to)   -= Real{1};
+        J_nl.coeffRef(e.to, e.branch_var_id)   -= Real{1};
+    }
+    J_nl.coeffRef(e.branch_var_id, e.branch_var_id) += -d_coef * L_eff;
+
+    return std::abs(i_L_new);
+}
 
 /// Stamp the SaturableInductor contribution. Reads i_L_old
 /// and V_L_old from `history`. Clears J_nl / f_nl first (so
@@ -54,300 +132,35 @@ inline Real refresh_saturable_inductors(
     const topology::Graph& /*graph*/,
     const DevicePool& /*pool*/,
     const SaturableInductorHistory& history,
-    Real dt) {
+    Real dt,
+    TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
     if (J_nl.rows() > 0) J_nl.setZero();
     if (f_nl.size() > 0) f_nl.setZero();
     Real max_abs_i = Real{0};
-
     for (const auto& e : history.entries()) {
-        const Real v_from =
-            stamping::read_node_voltage(x, e.from);
-        const Real v_to =
-            stamping::read_node_voltage(x, e.to);
-        const Real i_L_new = x[e.branch_var_id];
-
-        // Evaluate L(i_L_new) and dL/di_L via AD.
-        const models::ModelInputs<models::SaturableInductor>
-            iv{i_L_new};
-        const auto [L_eff, partials] =
-            models::evaluate_current_and_jacobian<
-                models::SaturableInductor>(iv, e.params);
-        const Real dL_di = partials[0];
-
-        const Real two_over_dt = Real{2} / dt;
-        const Real two_L_over_dt = two_over_dt * L_eff;
-        const Real di = i_L_new - e.i_L_old;
-
-        // Constraint-row residual.
-        const Real R_row =
-            (v_from - v_to) + e.V_L_old -
-            two_L_over_dt * di;
-
-        // KCL residuals at terminals.
-        const bool from_active =
-            stamping::node_is_active(e.from);
-        const bool to_active =
-            stamping::node_is_active(e.to);
-        if (from_active) f_nl[e.from] += i_L_new;
-        if (to_active)   f_nl[e.to]   -= i_L_new;
-        f_nl[e.branch_var_id] += R_row;
-
-        // Jacobian: constraint row.
-        if (from_active) {
-            J_nl.coeffRef(e.branch_var_id, e.from) += Real{1};
-        }
-        if (to_active) {
-            J_nl.coeffRef(e.branch_var_id, e.to)   -= Real{1};
-        }
-        const Real dR_di_L =
-            -two_L_over_dt - two_over_dt * di * dL_di;
-        J_nl.coeffRef(e.branch_var_id, e.branch_var_id)
-            += dR_di_L;
-
-        // Jacobian: KCL rows.
-        if (from_active) {
-            J_nl.coeffRef(e.from, e.branch_var_id) += Real{1};
-        }
-        if (to_active) {
-            J_nl.coeffRef(e.to,   e.branch_var_id) -= Real{1};
-        }
-
-        max_abs_i = std::max(max_abs_i, std::abs(i_L_new));
+        max_abs_i = std::max(
+            max_abs_i,
+            stamp_saturable_inductor(e, x, J_nl, f_nl, dt, stage));
     }
     return max_abs_i;
 }
 
-/// Combined refresh: smooth-blend diodes + SH1 MOSFETs +
-/// IGBT Level 1 + SATURABLE INDUCTORS in one pass.
-/// Inputs: history (saturable inductor (i_L, V_L)_old) and dt.
-[[nodiscard]] inline NonlinearRefreshFn
-make_combined_nonlinear_refresh(
-    const SaturableInductorHistory* history,
-    Real dt) {
-    return [history, dt](const Vector& x,
-                          sparse::Matrix& J_nl,
-                          Vector& f_nl,
-                          const topology::Graph& graph,
-                          const DevicePool& pool) -> Real {
-        if (J_nl.rows() > 0) J_nl.setZero();
-        if (f_nl.size() > 0) f_nl.setZero();
-        Real max_abs_i = Real{0};
-
-        for (Index b_id = 0;
-             b_id < graph.num_branches(); ++b_id) {
-            const auto& branch = graph.branch(b_id);
-            if (branch.kind !=
-                    topology::BranchKind::Nonlinear) {
-                continue;
-            }
-            const auto kind = pool.kind_of(branch.id);
-            if (kind ==
-                    DevicePool::StoredKind::NonlinearDiode) {
-                const auto& p =
-                    pool.nonlinear_diode_params(branch.id);
-                const stamping::BranchCoord coord{
-                    branch.from, branch.to, branch.id};
-                const Real v_from =
-                    stamping::read_node_voltage(x, coord.from);
-                const Real v_to =
-                    stamping::read_node_voltage(x, coord.to);
-                const models::ModelInputs<models::IdealDiode>
-                    v_term{v_from, v_to};
-                const auto [i, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::IdealDiode>(v_term, p);
-                const bool from_active =
-                    stamping::node_is_active(coord.from);
-                const bool to_active =
-                    stamping::node_is_active(coord.to);
-                if (from_active) f_nl[coord.from] += i;
-                if (to_active)   f_nl[coord.to]   -= i;
-                if (from_active) {
-                    J_nl.coeffRef(coord.from, coord.from) +=
-                        partials[0];
-                    if (to_active) {
-                        J_nl.coeffRef(coord.from, coord.to) +=
-                            partials[1];
-                    }
-                }
-                if (to_active) {
-                    if (from_active) {
-                        J_nl.coeffRef(coord.to, coord.from) -=
-                            partials[0];
-                    }
-                    J_nl.coeffRef(coord.to, coord.to) -=
-                        partials[1];
-                }
-                max_abs_i = std::max(max_abs_i, std::abs(i));
-            } else if (kind ==
-                    DevicePool::StoredKind::IgbtLevel1) {
-                const auto& p =
-                    pool.igbt_level1_params(branch.id);
-                const Index collector = branch.from;
-                const Index emitter   = branch.to;
-                const Index gate      =
-                    pool.igbt_level1_gate_node(branch.id);
-                const Real v_c =
-                    stamping::read_node_voltage(x, collector);
-                const Real v_e =
-                    stamping::read_node_voltage(x, emitter);
-                const Real v_g =
-                    stamping::read_node_voltage(x, gate);
-                const models::ModelInputs<models::IgbtLevel1>
-                    v_term{v_c, v_e, v_g};
-                const auto [i, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::IgbtLevel1>(v_term, p);
-                const bool c_active =
-                    stamping::node_is_active(collector);
-                const bool e_active =
-                    stamping::node_is_active(emitter);
-                const bool g_active =
-                    stamping::node_is_active(gate);
-                if (c_active) f_nl[collector] += i;
-                if (e_active) f_nl[emitter]   -= i;
-                if (c_active) {
-                    J_nl.coeffRef(collector, collector) +=
-                        partials[0];
-                    if (e_active) {
-                        J_nl.coeffRef(collector, emitter) +=
-                            partials[1];
-                    }
-                    if (g_active) {
-                        J_nl.coeffRef(collector, gate) +=
-                            partials[2];
-                    }
-                }
-                if (e_active) {
-                    if (c_active) {
-                        J_nl.coeffRef(emitter, collector) -=
-                            partials[0];
-                    }
-                    J_nl.coeffRef(emitter, emitter) -=
-                        partials[1];
-                    if (g_active) {
-                        J_nl.coeffRef(emitter, gate) -=
-                            partials[2];
-                    }
-                }
-                max_abs_i =
-                    std::max(max_abs_i, std::abs(i));
-            } else if (kind ==
-                    DevicePool::StoredKind::MosfetLevel1) {
-                const auto& p =
-                    pool.mosfet_level1_params(branch.id);
-                const Index drain  = branch.from;
-                const Index source = branch.to;
-                const Index gate   =
-                    pool.mosfet_level1_gate_node(branch.id);
-                const Real v_d =
-                    stamping::read_node_voltage(x, drain);
-                const Real v_s =
-                    stamping::read_node_voltage(x, source);
-                const Real v_g =
-                    stamping::read_node_voltage(x, gate);
-                const models::ModelInputs<
-                        models::MosfetLevel1>
-                    v_term{v_d, v_s, v_g};
-                const auto [i, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::MosfetLevel1>(v_term, p);
-                const bool d_active =
-                    stamping::node_is_active(drain);
-                const bool s_active =
-                    stamping::node_is_active(source);
-                const bool g_active =
-                    stamping::node_is_active(gate);
-                if (d_active) f_nl[drain]  += i;
-                if (s_active) f_nl[source] -= i;
-                if (d_active) {
-                    J_nl.coeffRef(drain, drain) +=
-                        partials[0];
-                    if (s_active) {
-                        J_nl.coeffRef(drain, source) +=
-                            partials[1];
-                    }
-                    if (g_active) {
-                        J_nl.coeffRef(drain, gate) +=
-                            partials[2];
-                    }
-                }
-                if (s_active) {
-                    if (d_active) {
-                        J_nl.coeffRef(source, drain) -=
-                            partials[0];
-                    }
-                    J_nl.coeffRef(source, source) -=
-                        partials[1];
-                    if (g_active) {
-                        J_nl.coeffRef(source, gate) -=
-                            partials[2];
-                    }
-                }
-                max_abs_i =
-                    std::max(max_abs_i, std::abs(i));
-            }
-        }
-
-        // Saturable inductors — handled via history.
-        if (history != nullptr && !history->empty()) {
-            for (const auto& e : history->entries()) {
-                const Real v_from =
-                    stamping::read_node_voltage(x, e.from);
-                const Real v_to =
-                    stamping::read_node_voltage(x, e.to);
-                const Real i_L_new = x[e.branch_var_id];
-
-                const models::ModelInputs<
-                        models::SaturableInductor> iv{i_L_new};
-                const auto [L_eff, partials] =
-                    models::evaluate_current_and_jacobian<
-                        models::SaturableInductor>(iv, e.params);
-                const Real dL_di = partials[0];
-
-                const Real two_over_dt = Real{2} / dt;
-                const Real two_L_over_dt = two_over_dt * L_eff;
-                const Real di = i_L_new - e.i_L_old;
-
-                const Real R_row =
-                    (v_from - v_to) + e.V_L_old -
-                    two_L_over_dt * di;
-
-                const bool from_active =
-                    stamping::node_is_active(e.from);
-                const bool to_active =
-                    stamping::node_is_active(e.to);
-                if (from_active) f_nl[e.from] += i_L_new;
-                if (to_active)   f_nl[e.to]   -= i_L_new;
-                f_nl[e.branch_var_id] += R_row;
-
-                if (from_active) {
-                    J_nl.coeffRef(e.branch_var_id, e.from)
-                        += Real{1};
-                }
-                if (to_active) {
-                    J_nl.coeffRef(e.branch_var_id, e.to)
-                        -= Real{1};
-                }
-                const Real dR_di_L =
-                    -two_L_over_dt - two_over_dt * di * dL_di;
-                J_nl.coeffRef(e.branch_var_id, e.branch_var_id)
-                    += dR_di_L;
-
-                if (from_active) {
-                    J_nl.coeffRef(e.from, e.branch_var_id)
-                        += Real{1};
-                }
-                if (to_active) {
-                    J_nl.coeffRef(e.to, e.branch_var_id)
-                        -= Real{1};
-                }
-                max_abs_i =
-                    std::max(max_abs_i, std::abs(i_L_new));
-            }
-        }
-        return max_abs_i;
-    };
-}
+/// NOTE ON A FUNCTION THAT USED TO LIVE HERE.
+///
+/// `make_combined_nonlinear_refresh(history, dt)` sat below this
+/// point: 228 lines that re-implemented diode / MOSFET / IGBT
+/// stamping and then appended a byte-for-byte duplicate of the
+/// saturable block above. It had ZERO call sites anywhere in core,
+/// python, tests, benchmarks or examples — every real caller uses
+/// `make_combined_diode_mosfet_refresh()` instead — so the device's
+/// physics existed in THREE places of which exactly one ran (the
+/// live one was hand-inlined inside `run_transient`).
+///
+/// That is how two stamps of one device drift apart, and it nearly
+/// mattered here: a change applied only to the two copies in this
+/// file would have altered nothing at runtime while leaving the
+/// documentation describing a formula the simulator no longer used.
+/// Both are gone now — one `stamp_saturable_inductor` above, called
+/// from both engines.
 
 }  // namespace pulsim::pwl

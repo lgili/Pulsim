@@ -61,14 +61,24 @@ class CircuitBuilderAdapter:
 
     Notes
     -----
-    The bridge currently supports **LTI circuits only** — circuits
-    with nonlinear devices (diodes, MOSFETs, IGBTs, saturable
-    inductors) will get a ``NotImplementedError`` from the
-    underlying C++ ``compute_lti_state_space()`` because the PED
-    engine doesn't model per-operating-point linearization. For DCM
-    and body-diode commutation use ``pulsim.dsed.PEDSimulatorAuto``
-    directly with a user-defined LTI system (see
-    ``prototype/dsed/buck_dcm_model.py`` for an example).
+    The bridge currently supports **LTI circuits only** — the PED
+    engine doesn't model the per-operating-point linearization that
+    nonlinear devices (diodes, MOSFETs, IGBTs, saturable inductors)
+    need.
+
+    That refusal lives in ``_dsed_dispatch.py``, NOT in C++. This
+    docstring used to say the underlying
+    ``compute_lti_state_space()`` raises ``NotImplementedError`` on
+    a nonlinear topology; it does not. Its state scan skips any
+    branch that is not ``PassiveLinear``, so a nonlinear device is
+    silently OMITTED and extraction succeeds — returning the state
+    space of the circuit with that device deleted. The Python guard
+    is what makes the refusal real, so do not remove it expecting
+    C++ to catch the case.
+
+    For DCM and body-diode commutation use
+    ``pulsim.dsed.PEDSimulatorAuto`` directly with a user-defined
+    LTI system (see ``prototype/dsed/buck_dcm_model.py``).
     """
 
     def __init__(

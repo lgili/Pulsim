@@ -2813,43 +2813,37 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     asked for it wants to know.
     """
     why = []
-    try:
-        from ._pulsim import BranchKind as _BK  # type: ignore
-        n_sat = 0
-        for br in builder.graph.branches:
-            if br.get("kind") != _BK.Nonlinear:
-                continue
-            # Nonlinear diodes / MOSFETs / IGBTs are fine — each
-            # stage becomes a Newton solve on the same companion,
-            # and their re-stamp has no dt in it. A SATURABLE
-            # inductor's does, and its flux cannot be rolled back
-            # when a step is rejected.
-            #
-            # The Lauritzen diode, the IGBT turn-off tail and the
-            # MNA-native PMSM used to be listed here too. Their BDF2
-            # second stages are derived and wired now (see
-            # `pwl/trbdf2_stage.hpp`), so they route like any other
-            # nonlinear device. The saturable inductor stays because
-            # its history still has no snapshot/restore.
-            k = str(builder.pool.kind_of(br["id"]))
-            if k.endswith("SaturableInductor"):
-                n_sat += 1
-
-        if n_sat:
-            why.append(
-                f"{n_sat} saturable inductor(s) — their Newton "
-                "stamp divides by the step size and their flux "
-                "history cannot be rolled back when a step is "
-                "rejected")
-        if on_cache is not None:
-            why.append(
-                "on_cache refactors the fixed-step engine's PWL cache "
-                "mid-run; TR-BDF2 has no such cache, so the hook would "
-                "never fire and whatever it was closing (an "
-                "electro-thermal loop, usually) would silently stay "
-                "open")
-    except Exception:  # pragma: no cover — never block on a probe
-        pass
+    # No device-kind blockers remain. Every nonlinear device is
+        # served on the variable-step engine now: the diodes /
+    # MOSFETs / IGBTs were always fine (each stage is a Newton solve
+    # on the same companion, and their re-stamp carries no dt), and
+    # the five that carry STATE — Coss, Lauritzen diode, IGBT tail,
+    # MNA-native PMSM, saturable inductor — each have a derived BDF2
+    # second stage keyed off `pwl/trbdf2_stage.hpp`.
+    #
+    # The saturable inductor was the last to go, and it needed more
+    # than wiring. Its stamp advanced the flux as L(i_new)·Δi — a
+    # right-endpoint rectangle rule for λ_new − λ_n, which is O(h)
+    # in the residual and would have dragged the second-order stage
+    # down to first order. It also rectifies: a zero-mean source was
+    # driving the DC current from 63.6 A to 145.5 A over 400 cycles.
+    # Putting λ(i) in the stamp fixed both. (A BDF2 stage in the old
+    # L_eff·Δi form does exist — stage 1's own relation folds λ_γ
+    # into one history scalar — it is simply first order. λ is what
+    # makes the stage worth having, not what makes it possible.)
+    #
+    # The device scan used to live in a try/except wrapped around a
+    # `BranchKind` import. With the scan gone the import was dead,
+    # and `on_cache` — which has nothing to do with device kinds —
+    # was still inside that guard: an import failure would have
+    # dropped a real blocker in silence. It is a plain check now.
+    if on_cache is not None:
+        why.append(
+            "on_cache refactors the fixed-step engine's PWL cache "
+            "mid-run; TR-BDF2 has no such cache, so the hook would "
+            "never fire and whatever it was closing (an "
+            "electro-thermal loop, usually) would silently stay "
+            "open")
     if getattr(builder, "_c_blocks", None):
         why.append("C blocks sample on a fixed dt grid")
     if live_stream is not None:

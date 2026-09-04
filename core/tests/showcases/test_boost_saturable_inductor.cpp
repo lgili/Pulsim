@@ -43,7 +43,7 @@ std::string locate_yaml() {
     namespace fs = std::filesystem;
     auto search = fs::current_path();
     for (int i = 0; i < 10; ++i) {
-        const auto candidate = search / "examples" / "v2" /
+        const auto candidate = search / "examples" /
             "boost_saturable_inductor.yaml";
         if (fs::exists(candidate)) {
             return candidate.string();
@@ -65,10 +65,15 @@ TEST_CASE("Showcase: boost converter with saturable inductor",
           "[v2][layer9][showcase][smps][boost_saturable]") {
     const std::string path = locate_yaml();
     INFO("yaml: " << path);
-    if (path.empty()) {
-        WARN("yaml not located — skipping");
-        return;
-    }
+    // Not a WARN-and-return. The upward search looked in
+    // `examples/v2/` while the file has always lived in
+    // `examples/`, so outside ctest (which sets
+    // PULSIM_EXAMPLES_DIR) this test skipped itself in silence —
+    // and it is the ONLY test in either tree that puts a saturable
+    // inductor through current reversal, which is the only regime
+    // where the flux rule can be wrong. A silent skip on the one
+    // test that matters is worse than no test.
+    REQUIRE_FALSE(path.empty());
 
     auto loaded = yaml::load_file(path);
     REQUIRE(loaded.builder.num_branches() > 0);
@@ -123,19 +128,15 @@ TEST_CASE("Showcase: boost converter with saturable inductor",
         result.num_steps() - k_start);
     const Real v_mean = v_sum / n;
 
-    INFO("Saturable-boost V_out mean = " << v_mean
-         << " V (V14 linear case got 19.98 V)");
+    INFO("Saturable-boost V_out mean = " << v_mean << " V");
 
-    // 1) Still boosting (above V_in).
+    // 1) Still boosting (above V_in = 12 V), and bounded. These two
+    //    are shape checks, not the regression check — they passed
+    //    under the superseded rectangle-rule stamp too, and a bound
+    //    that blesses either answer certifies nothing.
     REQUIRE(v_mean > 12.5);
-
-    // 2) Bounded.
     REQUIRE(v_mean < 25.0);
 
-    // 3) Inductor peak current is bounded — saturation acts
-    //    as a soft current limiter.
-    //    L_boost is the first inductor: branch_id depends on
-    //    insertion order in the YAML. Look it up via pool.
     const Index l_branch_var =
         loaded.builder.pool().branch_var_id_for_inductor(
             /*L_boost branch id*/ 2, loaded.builder.graph());
@@ -145,9 +146,31 @@ TEST_CASE("Showcase: boost converter with saturable inductor",
             std::abs(result.states[k][l_branch_var]));
     }
     INFO("Peak |I_L| in steady state = " << i_L_peak_ss
-         << " A (I_sat = 1.5 A; bounded by saturation curve)");
-
-    // Steady-state peak should be a few × I_sat at most —
-    // the saturation curve clamps growth above the knee.
+         << " A (I_sat = 1.5 A)");
     REQUIRE(i_L_peak_ss < 10.0);
+
+    // WHAT THIS TEST DOES NOT DO, stated plainly so the next
+    // reader does not mistake green for coverage.
+    //
+    // The three assertions above are SHAPE checks. All of them
+    // passed under the superseded rectangle-rule stamp for the flux
+    // as well, so none of them discriminates the integration rule.
+    // Tightening them would not help either: this circuit is not in
+    // periodic steady state at t_end (C_out = 100 uF into
+    // R_load = 20 ohm is a 2 ms time constant and the run is 5 ms,
+    // so the output is 2.5 tau in and still ringing on the L-C
+    // tank). Any window statistic here measures that transient, not
+    // the flux rule, and a bound drawn around it would be a golden
+    // number wearing a physics costume.
+    //
+    // The regression that DOES discriminate lives in
+    // python/tests/test_saturable_inductor_flux_closure.py: a
+    // zero-mean drive, where flux closure is exact physics rather
+    // than a settling transient, with a linear inductor as the
+    // control. The algebra it rests on — lambda' = L exactly,
+    // lambda odd, and the linear limit — is pinned in
+    // core/tests/layer2/test_saturable_inductor.cpp.
+    //
+    // What this test is for: the device runs inside a real
+    // switching converter, boosts, and stays bounded.
 }

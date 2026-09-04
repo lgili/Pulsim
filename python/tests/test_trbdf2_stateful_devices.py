@@ -247,3 +247,56 @@ def test_the_answer_converges_with_the_tolerance_not_drifts(rtol, atol):
     m = t > 1.95e-6
     got = float(np.trapezoid(np.maximum(v[m] * i[m], 0.0), t[m]))
     assert _rel(got, _igbt_tail("pwl", 1e-9)) < 0.03, got
+
+
+# ---------------------------------------------------------------
+# 4. Saturable inductor — the last device the router refused.
+#
+# Its state is the FLUX, lambda(i) = integral of L(u) du. The old
+# stamp advanced it as L(i_new)*delta_i, a right-endpoint rectangle
+# rule whose error the residual divides by h -- O(h), so it dragged
+# a second-order stage down to first order, and it rectified rather
+# than cancelled. A BDF2 stage in that form is perfectly
+# constructible (stage 1's own relation folds lambda_gamma into a
+# single history scalar); it is just first order, and it drifts.
+# What lambda buys is the second order, not the stage.
+# ---------------------------------------------------------------
+def _saturable(engine, step, t_end=2e-3):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", v_dc=0.0,
+                              v_amplitude=50.0, frequency=1e3, phase=0.0)
+    b.add_resistor("R", "a", "m", 0.05)
+    b.add_saturable_inductor("Ls", "m", "gnd", 1e-3, 5.0, 5e-5)
+    if engine == "pwl":
+        res = p.simulate(b, t_end=t_end, dt=step, engine="pwl")
+    else:
+        res = p.simulate(b, t_end=t_end, dt=step, engine="trbdf2",
+                         rtol=1e-7, atol=1e-10)
+    t = np.asarray(res.times)
+    i = np.asarray(res.i("Ls"))
+    return float(i[-1]), float(np.abs(i).max()), len(t)
+
+
+def test_saturable_inductor_no_longer_blocks_the_router():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 10.0)
+    b.add_saturable_inductor("Ls", "a", "gnd", 1e-3, 5.0, 5e-5)
+    assert not any("saturable" in w.lower() for w in _blockers(b)), _blockers(b)
+
+
+def test_saturable_inductor_agrees_across_engines():
+    ref, peak_ref, _ = _saturable("pwl", 2e-8)
+    got, peak_got, _ = _saturable("trbdf2", 4e-7)
+    # It must actually be saturating, or this compares two linear
+    # inductors and proves nothing about the flux stamp.
+    assert peak_ref > 5 * 5.0, peak_ref
+    assert _rel(peak_got, peak_ref) < 5e-3, (peak_got, peak_ref)
+    assert _rel(got, ref) < 5e-3, (got, ref)
+
+
+def test_saturable_inductor_survives_the_variable_step():
+    """The device the router refused for years now runs on the
+    engine it was refused from, at a step the fixed one cannot take."""
+    _, _, n_fixed = _saturable("pwl", 2e-8)
+    _, _, n_var = _saturable("trbdf2", 4e-7)
+    assert n_var * 5 < n_fixed, (n_var, n_fixed)
