@@ -208,11 +208,21 @@ type as `engine='pwl'`.
 
 1. **LTI-only circuits**: nonlinear devices (diodes, MOSFETs, IGBTs,
    saturable inductors) need per-operating-point linearization that
-   the PED engine doesn't model. They will raise an error from the
-   C++ `compute_lti_state_space`. For DCM-like behaviour the user
-   should use the explicit `pulsim.dsed.PEDSimulatorAuto` API with a
-   user-defined `BuckDCMModel`-style class (already validated through
-   Gates 1-5).
+   the PED engine doesn't model.
+
+   The refusal is a Python-side guard in `_dsed_dispatch.py`. This
+   section used to say they "raise an error from the C++
+   `compute_lti_state_space`" — they do not. That extractor's state
+   scan skips every branch that is not `PassiveLinear`, so a
+   nonlinear device is silently omitted and extraction *succeeds*,
+   returning the state space of the circuit with the device deleted.
+   Contrast the coupled-inductor case, which the extractor does
+   reject loudly and by name. Anyone relying on a C++ throw here
+   would get a plausible answer to the wrong circuit.
+
+   For DCM-like behaviour the user should use the explicit
+   `pulsim.dsed.PEDSimulatorAuto` API with a user-defined
+   `BuckDCMModel`-style class (already validated through Gates 1-5).
 
 2. **Time-varying sources**: handled by overlaying the source's
    value into `b(t)` at PED step time. The current adapter sketch

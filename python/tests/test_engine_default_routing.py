@@ -35,16 +35,25 @@ def _rc():
 def _rc_unsupported():
     """A circuit the variable-step engine genuinely cannot serve.
 
-    Nonlinear diodes and MOSFETs ARE served (each stage becomes a
-    Newton solve). A saturable inductor is the real blocker: its
-    Newton stamp divides by the step size and its flux history has
-    no snapshot/restore, so a rejected step could not be rolled
-    back.
+    NO DEVICE KIND blocks the router any more — see
+    `test_no_device_kind_blocks_the_router` below. Nonlinear diodes
+    and MOSFETs were always served (each stage becomes a Newton
+    solve), and the five devices that carry state each have a
+    derived BDF2 second stage now. The saturable inductor was the
+    last holdout and used to sit here.
+
+    What remains is structural rather than physical: a C BLOCK
+    samples its `fn` on a fixed dt grid, so a variable step has no
+    grid to fire it on. It is attached to the BUILDER, which is what
+    lets it stand in for the old fixture.
     """
     b = _rc()
-    b.add_saturable_inductor("Lsat", "n1", "gnd",
-                              L_0=1e-3, I_sat=2.0,
-                              L_residual=1e-4)
+
+    def _tick(t, dt, inp, out, state):
+        out[0] = 0.0
+
+    p.add_c_block(b, inputs=[], outputs=[("i", "n1", "gnd")],
+                  dt=1e-4, fn=_tick)
     return b
 
 
@@ -92,22 +101,46 @@ def test_nonlinear_devices_are_served_not_routed_away():
 def test_unsupported_circuit_routes_and_says_why():
     res = p.simulate(_rc_unsupported(), t_end=1e-3, dt=1e-6)
     assert res.engine_used == "pwl"
-    assert "saturable" in res.engine_route_reason
+    assert "C block" in res.engine_route_reason
 
 
 def test_unsupported_and_no_dt_asks_for_one():
     with pytest.raises(ValueError) as e:
         p.simulate(_rc_unsupported(), t_end=1e-3)
     msg = str(e.value)
-    assert "saturable" in msg          # the blocker, named
+    assert "C block" in msg            # the blocker, named
     assert "pass dt=" in msg           # and what to do about it
 
 
 def test_trbdf2_refuses_where_auto_routes():
     """Naming the engine means you want to KNOW."""
-    with pytest.raises(ValueError, match="saturable"):
+    with pytest.raises(ValueError, match="C block"):
         p.simulate(_rc_unsupported(), t_end=1e-3, dt=1e-6,
                     engine="trbdf2")
+
+
+def test_no_device_kind_blocks_the_router():
+    """The statement the fixture above no longer makes. Every device
+    that carries state has a derived TR-BDF2 second stage, so no
+    CIRCUIT routes away from the variable engine — only kwargs and
+    builder-level features do. A device blocker creeping back would
+    silently cost that device's users the adaptive engine, which is
+    exactly the kind of regression nothing else here would catch."""
+    from pulsim import _pulsim as _k
+    b = _rc()
+    b.add_saturable_inductor("Lsat", "n1", "gnd", L_0=1e-3,
+                              I_sat=2.0, L_residual=1e-4)
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    b.add_lauritzen_diode("Dl", "n1", "gnd", tau=1e-7, T_M=1e-8)
+    b.add_igbt_level1("Q", "in", "e", "g", 1.5, 0.05, 5.0,
+                      tau_tail=1e-6, k_tail=0.3)
+    b.add_resistor("Re", "e", "gnd", 1.0)
+    b.add_voltage_source("Vg", "g", "gnd", 0.0)
+    b.add_pmsm_mna("M", "ua", "ub", "uc", "nn", "w", "th",
+                   R_s=0.5, L_d=1e-3, L_q=3e-3, psi_pm=0.05,
+                   pole_pairs=4, J=1e-3, B=1e-4)
+    res = p.simulate(b, t_end=1e-4)      # no dt — router's choice
+    assert res.engine_used == "trbdf2", res.engine_route_reason
 
 
 def test_trbdf2_reads_dt_as_the_step_ceiling():

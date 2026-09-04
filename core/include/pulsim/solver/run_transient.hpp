@@ -526,7 +526,18 @@ inline SimulationResult run_transient(
     }
     if (has_saturable) {
         nl_refresh_effective =
-            [user_refresh = nl_refresh, &sat_history,
+            // `nl_refresh_effective`, NOT the raw `nl_refresh`.
+            // This wrapper is installed LAST, so capturing the raw
+            // user callback discarded every wrapper before it: a
+            // circuit with a saturable inductor and any of {Coss,
+            // Lauritzen diode, MNA-native PMSM, IGBT tail} lost all
+            // four of those Newton stamps in silence. Measured: an
+            // electrically DISCONNECTED saturable inductor on its
+            // own node dropped an IGBT's turn-off energy from
+            // 16.87 mJ to 0.045 mJ — exactly the no-tail value.
+            // The other four wrappers (lines above) always captured
+            // the accumulated one; this was the odd one out.
+            [user_refresh = nl_refresh_effective, &sat_history,
              &refresh_dt](const Vector& x,
                             sparse::Matrix& J_nl,
                             Vector& f_nl,
@@ -540,66 +551,16 @@ inline SimulationResult run_transient(
                     if (J_nl.rows() > 0) J_nl.setZero();
                     if (f_nl.size() > 0) f_nl.setZero();
                 }
-                // Additive saturable-inductor stamping.
+                // Additive saturable-inductor stamping, through
+                // the one shared helper — this file used to carry a
+                // third byte-identical copy of the body, alongside
+                // the two in nonlinear_refresh_saturable_inductor.hpp.
                 for (const auto& e : sat_history.entries()) {
-                    const Real v_from =
-                        stamping::read_node_voltage(x, e.from);
-                    const Real v_to =
-                        stamping::read_node_voltage(x, e.to);
-                    const Real i_L_new = x[e.branch_var_id];
-                    const models::ModelInputs<
-                            models::SaturableInductor> iv{
-                        i_L_new};
-                    const auto [L_eff, partials] =
-                        models::evaluate_current_and_jacobian<
-                            models::SaturableInductor>(
-                                iv, e.params);
-                    const Real dL_di = partials[0];
-                    const Real two_over_dt =
-                        Real{2} / refresh_dt;
-                    const Real two_L_over_dt =
-                        two_over_dt * L_eff;
-                    const Real di = i_L_new - e.i_L_old;
-                    const Real R_row =
-                        (v_from - v_to) + e.V_L_old -
-                        two_L_over_dt * di;
-                    const bool from_active =
-                        stamping::node_is_active(e.from);
-                    const bool to_active =
-                        stamping::node_is_active(e.to);
-                    if (from_active)
-                        f_nl[e.from] += i_L_new;
-                    if (to_active)
-                        f_nl[e.to]   -= i_L_new;
-                    f_nl[e.branch_var_id] += R_row;
-                    if (from_active) {
-                        J_nl.coeffRef(
-                            e.branch_var_id, e.from)
-                            += Real{1};
-                    }
-                    if (to_active) {
-                        J_nl.coeffRef(
-                            e.branch_var_id, e.to)
-                            -= Real{1};
-                    }
-                    const Real dR_di_L =
-                        -two_L_over_dt -
-                        two_over_dt * di * dL_di;
-                    J_nl.coeffRef(
-                        e.branch_var_id, e.branch_var_id)
-                        += dR_di_L;
-                    if (from_active) {
-                        J_nl.coeffRef(
-                            e.from, e.branch_var_id)
-                            += Real{1};
-                    }
-                    if (to_active) {
-                        J_nl.coeffRef(
-                            e.to, e.branch_var_id)
-                            -= Real{1};
-                    }
                     max_i = std::max(
-                        max_i, std::abs(i_L_new));
+                        max_i,
+                        pwl::stamp_saturable_inductor(
+                            e, x, J_nl, f_nl, refresh_dt,
+                            pwl::TrBdf2Stage::Trapezoidal));
                 }
                 return max_i;
             };
@@ -670,6 +631,7 @@ inline SimulationResult run_transient(
     std::vector<pwl::LauritzenDiodeHistory::Entry> laur_snap;
     std::vector<pwl::PmsmMnaHistory::Entry> pmsm_snap;
     std::vector<pwl::IgbtTailHistory::Entry> tail_snap;
+    std::vector<pwl::SaturableInductorHistory::Entry> sat_snap;
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     std::vector<CommutationEvent> step_events;      // per-step event scratch
@@ -712,22 +674,25 @@ inline SimulationResult run_transient(
     // from the DC cascade, reintroduced here. Decide once, before
     // the loop, and let those circuits fail fast and legibly.
     //
-    // A SATURABLE INDUCTOR disqualifies the retry outright. Its
-    // Newton stamp divides by `refresh_dt`, which is fixed at
-    // opts.dt for the whole run (the comment on its declaration
-    // claims otherwise and has always been wrong — harmless until
-    // now, because the only other off-nominal path, the commutation
-    // sub-step, is a purely LINEAR solve through cache.solve_at). A
-    // sub-step would therefore assemble every capacitor and plain
-    // inductor at 2C/sub_dt while the saturable one still used
-    // 2L/opts.dt — 64x out at the bottom of the ladder — and the
-    // mixed-dt answer would be committed as good. Threading the dt
-    // through is not enough on its own either: SaturableInductorHistory
-    // has no snapshot/restore, so its flux cannot be rolled back when
-    // a deeper halving is needed. Refusing is the honest option until
-    // that exists.
+    // A SATURABLE INDUCTOR used to disqualify the retry outright,
+    // for two reasons that are both gone now.
+    //
+    // The first was that its stamp divided by `refresh_dt` while
+    // that was pinned at opts.dt for the whole run, so a sub-step
+    // would have assembled every capacitor and plain inductor at
+    // 2C/sub_dt while the saturable one still used 2L/opts.dt — 64x
+    // out at the bottom of the ladder — and committed the mixed-dt
+    // answer as good. The Coss work (Phase 4 C.1) made `refresh_dt`
+    // the ACTUAL step of every solve on every path, which fixed this
+    // device too as a side effect; the refusal simply outlived it.
+    //
+    // The second was that `SaturableInductorHistory` had no
+    // snapshot/restore, so a sub-step that advanced the flux and a
+    // deeper halving that rolled back would leave the history at a
+    // mid-step value with nothing able to undo it. It has both now,
+    // and `sat_snap` is taken and restored alongside the other four.
     const bool dt_retry_can_help =
-        opts.max_dt_halvings > 0 && !has_saturable &&
+        opts.max_dt_halvings > 0 &&
         pwl::detail::components_without_ground(
             graph, [](const topology::Branch&) { return true; })
             .empty();
@@ -825,6 +790,7 @@ inline SimulationResult run_transient(
             laur_snap = laur_history.snapshot();
             pmsm_snap = pmsm_history.snapshot();
             tail_snap = tail_history.snapshot();
+            sat_snap = sat_history.snapshot();
             if (has_diodes) {
                 diodes.snapshot_on_bits_into(diodes_snap);
             } else {
@@ -1036,6 +1002,7 @@ inline SimulationResult run_transient(
                     laur_history.restore(laur_snap);
                     pmsm_history.restore(pmsm_snap);
                     tail_history.restore(tail_snap);
+                    sat_history.restore(sat_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -1068,14 +1035,15 @@ inline SimulationResult run_transient(
                         // so a snapped-back i_L is what gets baked
                         // into the history rather than the raw solve.
                         //
-                        // And `sat_history` is never advanced here.
-                        // It has no snapshot/restore, so a sub-step
-                        // that advanced it and a later halving that
-                        // rolled back would leave the flux history at
-                        // a mid-step value with nothing able to undo
-                        // it. Leaving it alone reproduces the nominal
-                        // step's semantics exactly; it is committed
-                        // once, at the end, from the final x.
+                        // `sat_history` advances with the rest.
+                        // Each sub-step's flux must be committed
+                        // before the next one reads it, exactly like
+                        // the trap history above — a saturable
+                        // inductor integrated across n sub-steps from
+                        // ONE stale flux would be integrating the
+                        // whole outer step at sub_dt. A deeper
+                        // halving rolls all of them back together
+                        // from `sat_snap`.
                         if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
                             coss_history.update_from_state(x,
@@ -1086,6 +1054,7 @@ inline SimulationResult run_transient(
                                                             sub_dt);
                             tail_history.update_from_state(x,
                                                             sub_dt);
+                            sat_history.update_from_state(x);
                         } else {
                             committed_dt = sub_dt;
                         }
@@ -1241,6 +1210,7 @@ inline SimulationResult run_transient(
                     laur_history.restore(laur_snap);
                     pmsm_history.restore(pmsm_snap);
                     tail_history.restore(tail_snap);
+                    sat_history.restore(sat_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }

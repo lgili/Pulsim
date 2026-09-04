@@ -432,8 +432,21 @@ public:
     /// **Restrictions when implemented:**
     /// * LTI circuits only — nonlinear devices (diodes, MOSFETs,
     ///   IGBTs, saturable inductors) require per-operating-point
-    ///   linearization not modeled by the PED engine; calling this
-    ///   on a nonlinear topology will throw.
+    ///   linearization not modeled by the PED engine.
+    ///
+    ///   This used to claim that calling it on a nonlinear
+    ///   topology "will throw". It does not, and never did. The
+    ///   state scan below is gated on
+    ///   `branch.kind != PassiveLinear`, so a nonlinear branch is
+    ///   SKIPPED rather than rejected: extraction succeeds and
+    ///   returns the state space of the circuit with the device
+    ///   DELETED (its branch row keeps only assemble's 1e-12
+    ///   G_min). Compare the coupled-inductor case below, which
+    ///   does refuse loudly and by name. The real refusal for
+    ///   nonlinear circuits is a Python-side structural guard in
+    ///   `_dsed_dispatch.py`; the same false claim was repeated in
+    ///   `dsed/_builder_bridge.py` and `notes/DSED_BRIDGE_DESIGN.md`
+    ///   and has been corrected in both.
     /// * `h_a`, `h_b` are legacy recovery step sizes, retained for
     ///   API compatibility only — the exact split (v2.0 Phase 1)
     ///   ignores them.

@@ -137,7 +137,14 @@ TEST_CASE("SaturableInductor — transient: current settles at resistive limit",
     const Real i_L_final =
         result.states[result.num_steps() - 1][l_branch_var];
     INFO("Final I_L = " << i_L_final << " A (expected 1 A)");
-    REQUIRE(i_L_final == Approx(1.0).margin(0.05));
+    // The fixed point is EXACT, not approximate: at steady state
+    // di/dt = 0, so the inductor is a short and V/R is the answer
+    // whatever L(i) does on the way there. margin(0.05) was 5 %
+    // of slack around a value the integrator cannot miss — wide
+    // enough to hide a genuinely wrong transient that happens to
+    // land on the right endpoint, which is exactly the failure a
+    // monotonic step response is blind to anyway.
+    REQUIRE(i_L_final == Approx(1.0).margin(1e-9));
 
     // At an intermediate time, the saturable inductor should
     // reach steady state FASTER than the unsaturated version
@@ -147,5 +154,100 @@ TEST_CASE("SaturableInductor — transient: current settles at resistive limit",
     // by 1 ms (10·τ_unsaturated), I is essentially at final.
     const Size k_1ms = static_cast<Size>(1e-3 / dt);
     const Real i_at_1ms = result.states[k_1ms][l_branch_var];
-    REQUIRE(i_at_1ms == Approx(1.0).margin(0.1));
+    INFO("I_L at 1 ms = " << i_at_1ms << " A");
+    REQUIRE(i_at_1ms == Approx(1.0).margin(1e-6));
+
+    // NOTE ON WHAT THIS TEST CANNOT SEE. The current here is
+    // monotonic — it never reverses — and the flux integration
+    // rule's error only shows up under reversal, because it
+    // rectifies rather than cancels. Both assertions above pass
+    // under a right-endpoint rectangle rule for λ and under the
+    // exact integral. The rule itself is pinned algebraically in
+    // "SaturableInductor: flux is the exact integral of L" below,
+    // and at system level in
+    // python/tests/test_saturable_inductor_flux_closure.py.
+}
+
+// =============================================================================
+// Flux linkage — the algebra the transient stamp rests on
+// =============================================================================
+//
+// `current()` returns L(i), and the stamp used to multiply it by a
+// current increment to advance the flux. That is a right-endpoint
+// rectangle rule for ∫L du, exact only while L is constant across
+// the step, and its error rectifies rather than cancels — measured
+// as a DC current climbing 63.6 → 145.5 A over 400 cycles from a
+// zero-mean source.
+//
+// `flux()` is the exact integral. These pin the four properties the
+// stamp depends on. They are algebra, not integration: a system-
+// level check would take a transient to catch a bad λ, while a
+// broken dλ/di fails here instantly.
+
+TEST_CASE("SaturableInductor: flux is the exact integral of L",
+          "[v2][saturable][flux]") {
+    models::SaturableInductor::Params p;
+    p.L_0 = 1e-3;
+    p.I_sat = 5.0;
+    p.L_residual = 5e-5;
+
+    SECTION("dλ/di == L(i) exactly, everywhere on the curve") {
+        // Central difference against the model's own L(i). The
+        // step is chosen so the O(δ²) truncation of the difference
+        // is well below the tolerance — this checks the closed
+        // form, not the differencing.
+        const Real delta = 1e-6;
+        for (const Real i : {-40.0, -7.0, -1.0, -1e-3, 0.0,
+                             1e-3, 1.0, 7.0, 40.0}) {
+            const Real num =
+                (models::SaturableInductor::flux(i + delta, p)
+                 - models::SaturableInductor::flux(i - delta, p))
+                / (2 * delta);
+            const Real ana =
+                models::SaturableInductor::current<Real>(&i, p);
+            INFO("i = " << i);
+            CHECK(num == Approx(ana).epsilon(1e-8));
+        }
+    }
+
+    SECTION("λ is odd and vanishes at zero current") {
+        CHECK(models::SaturableInductor::flux(0.0, p)
+              == Approx(0.0).margin(1e-18));
+        for (const Real i : {0.3, 4.0, 12.0, 100.0}) {
+            CHECK(models::SaturableInductor::flux(-i, p)
+                  == Approx(-models::SaturableInductor::flux(i, p))
+                         .epsilon(1e-14));
+        }
+    }
+
+    SECTION("the non-saturating limits reduce to L_0 * i exactly") {
+        // I_sat → ∞: I_sat·atan(i/I_sat) → i, so λ → L_0·i.
+        models::SaturableInductor::Params big = p;
+        big.I_sat = 1e12;
+        CHECK(models::SaturableInductor::flux(2.0, big)
+              == Approx(big.L_0 * 2.0).epsilon(1e-9));
+        // L_residual = L_0: no saturation at all, λ = L_0·i.
+        models::SaturableInductor::Params flat = p;
+        flat.L_residual = flat.L_0;
+        CHECK(models::SaturableInductor::flux(37.0, flat)
+              == Approx(flat.L_0 * 37.0).epsilon(1e-14));
+    }
+
+    SECTION("the rectangle rule it replaced is genuinely wrong") {
+        // The whole point, made concrete: across one step that
+        // crosses the knee, L(i_new)·Δi and the true Δλ differ by
+        // a large fraction. If this ever stops being true the
+        // device has stopped saturating and the tests above have
+        // become vacuous.
+        const Real i_old = 1.0, i_new = 12.0;
+        const Real exact =
+            models::SaturableInductor::flux(i_new, p)
+            - models::SaturableInductor::flux(i_old, p);
+        const Real rectangle =
+            models::SaturableInductor::current<Real>(&i_new, p)
+            * (i_new - i_old);
+        INFO("exact Δλ = " << exact
+             << ", rectangle = " << rectangle);
+        CHECK(std::abs(rectangle - exact) > 0.5 * std::abs(exact));
+    }
 }

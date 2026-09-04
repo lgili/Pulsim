@@ -74,6 +74,54 @@ struct SaturableInductor {
         const S delta_L = p.L_0 - p.L_residual;
         return p.L_residual + delta_L / denom;
     }
+
+    /// FLUX LINKAGE λ(i) = ∫₀ⁱ L(u) du — the device's actual state.
+    ///
+    ///   λ(i) = L_residual·i
+    ///          + (L_0 − L_residual)·I_sat·atan(i / I_sat)
+    ///
+    /// The comment above calls this an "Atan-shape" saturation, and
+    /// that is literally true: the flux IS an arctangent. Because
+    /// L is even in i, λ is odd; λ(0) = 0; and dλ/di = L(i) exactly,
+    /// since d/di [I_sat·atan(i/I_sat)] = 1/(1 + (i/I_sat)²).
+    ///
+    /// WHY THIS EXISTS. A trapezoidal step on v = dλ/dt is
+    ///
+    ///     λ(i_new) − λ(i_old) = (h/2)·(v_new + v_old)
+    ///
+    /// and the stamp used to write the left-hand side as
+    /// L(i_new)·(i_new − i_old) — a RIGHT-ENDPOINT RECTANGLE RULE,
+    /// exact only while L is constant across the step. It is not a
+    /// symmetric error, because the stamp solves for the current
+    /// increment given the voltage:
+    ///
+    ///     Δi = h·(v_new + v_old) / (2·L(i_new))
+    ///
+    /// Ascending, L(i_new) is the SMALLEST L on the interval, so Δi
+    /// comes out too large. Descending, it is the LARGEST, so |Δi|
+    /// comes out too small. Both push the current outward: the error
+    /// rectifies rather than cancels. Measured on a 1 kHz zero-mean
+    /// sine at five thousand steps per cycle, L_0 = 1 mH,
+    /// I_sat = 5 A, the DC current climbed 63.6 → 72.3 → 104.7 →
+    /// 145.5 A over 10 → 40 → 160 → 400 cycles, from a source with
+    /// no DC at all. First order in h, unbounded in time. A linear
+    /// inductor in the same circuit drifts 7e-15 A per cycle.
+    ///
+    /// Limits, both exact: as I_sat → ∞, I_sat·atan(i/I_sat) → i, so
+    /// λ → L_0·i; as L_residual → L_0, λ = L_0·i directly. The
+    /// non-saturating device reduces to the linear one with no
+    /// residue.
+    ///
+    /// Plain `Real` rather than templated on the AD scalar: the only
+    /// derivative anyone needs is dλ/di, and that is `current()`
+    /// above, analytically. Routing λ through AD would demand an
+    /// `atan` overload on the AD scalar to compute a value the model
+    /// already knows in closed form.
+    [[nodiscard]] static Real flux(Real i_L, const Params& p) noexcept {
+        return p.L_residual * i_L
+               + (p.L_0 - p.L_residual) * p.I_sat
+                     * std::atan(i_L / p.I_sat);
+    }
 };
 
 }  // namespace pulsim::models

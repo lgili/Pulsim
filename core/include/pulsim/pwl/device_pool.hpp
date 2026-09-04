@@ -328,8 +328,9 @@ public:
     /// state vector (numbered in the same `num_inductors_`
     /// sequence). The branch MUST be added with
     /// `BranchKind::Nonlinear` in the graph — assemble skips
-    /// it, and `refresh_saturable_inductors` stamps the
-    /// nonlinear trap-rule constraint per Newton iteration.
+    /// it, and `pwl::stamp_saturable_inductor` stamps the
+    /// nonlinear flux-rule constraint per Newton iteration —
+    /// λ(i_new) − λ_old, not L(i_new)·Δi.
     void add_saturable_inductor(
         Index branch_id,
         models::SaturableInductor::Params p) {
