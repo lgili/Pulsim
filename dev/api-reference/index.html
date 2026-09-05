@@ -2128,6 +2128,7 @@
   <span class="o">.</span><span class="n">add_saturable_inductor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_gapped_core_inductor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_saturable_inductor_table</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+  <span class="o">.</span><span class="n">add_hysteretic_core_inductor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># Jiles-Atherton, solved in the Newton loop</span>
   <span class="o">.</span><span class="n">add_multi_winding_transformer</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># C++ only (not bound in Python)</span>
   <span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_nonlinear_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
@@ -2369,6 +2370,10 @@ result remains valid), and memory drops by the same factor.
 <tr>
 <td><code>add_saturable_inductor</code></td>
 <td><code>(name, from, to, L_0, I_sat, L_residual=0)</code> — the analytic law <code>L(i) = L_res + (L_0−L_res)/(1+(i/I_sat)²)</code>, <code>λ(i) = L_res·i + (L_0−L_res)·I_sat·atan(i/I_sat)</code></td>
+</tr>
+<tr>
+<td><code>add_hysteretic_core_inductor</code></td>
+<td><code>(name, from, to, N, Ae, le, lg, ja, substeps_min=8, M0=0)</code> (C++; Python: <code>pulsim.add_hysteretic_inductor(builder, name=…, from_node=…, to_node=…, params=JilesAthertonParams, N_turns=…, l_m=…, A_core=…, l_gap=0, M0=0)</code>) — Jiles-Atherton hysteresis INSIDE the Newton loop: <code>M</code> integrated from the committed <code>(H_n, M_n)</code> to the <code>H</code> that Ampère with the gap fixes for the trial current, exact <code>L = dλ/di</code> in the Jacobian, branch direction held per step. Replaces the observer (<code>make_hysteretic_inductor_observer</code>, now refusing by name), whose EMF was sign-inverted and unstable above <code>q = L_M/(dt(R+2L_0/dt)) ≈ 0.5</code>. <code>HystereticInductor.bh_loop(res)</code> replays the kernel's integrator on the current trace</td>
 </tr>
 <tr>
 <td><code>add_saturable_inductor_table</code></td>

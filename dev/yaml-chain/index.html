@@ -1677,9 +1677,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#hysteretic_inductor-jiles-atherton-core" class="md-nav__link">
+  <a href="#hysteretic_inductor-jiles-atherton-core-solved-in-the-loop" class="md-nav__link">
     <span class="md-ellipsis">
-      hysteretic_inductor — Jiles-Atherton core
+      hysteretic_inductor — Jiles-Atherton core, solved in the loop
     </span>
   </a>
   
@@ -1838,12 +1838,12 @@
 scenes: <code>IM_Rs_{a,b,c}</code> (stator winding resistances), <code>IM_Lsig_{a,b,c}</code>
 (leakage inductances) and <code>IM_E_{a,b,c}</code> (back-EMF dummy sources).
 The chain block resolves them via <code>builder.branch_id_of(...)</code>.</p>
-<h3 id="hysteretic_inductor-jiles-atherton-core"><code>hysteretic_inductor</code> — Jiles-Atherton core<a class="headerlink" href="#hysteretic_inductor-jiles-atherton-core" title="Permanent link">&para;</a></h3>
+<h3 id="hysteretic_inductor-jiles-atherton-core-solved-in-the-loop"><code>hysteretic_inductor</code> — Jiles-Atherton core, solved in the loop<a class="headerlink" href="#hysteretic_inductor-jiles-atherton-core-solved-in-the-loop" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hysteretic_inductor</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L_core</span>
 <span class="w">  </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">n1</span>
 <span class="w">  </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gnd</span>
-<span class="w">  </span><span class="nt">Ms</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4.0e5</span>
+<span class="w">  </span><span class="nt">Ms</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4.0e5</span><span class="w">      </span><span class="c1"># the material's five JA parameters — REQUIRED</span>
 <span class="w">  </span><span class="nt">a</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50.0</span>
 <span class="w">  </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5e-5</span>
 <span class="w">  </span><span class="nt">c</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.20</span>
@@ -1851,11 +1851,20 @@ The chain block resolves them via <code>builder.branch_id_of(...)</code>.</p>
 <span class="w">  </span><span class="nt">N_turns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
 <span class="w">  </span><span class="nt">l_m</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.05</span>
 <span class="w">  </span><span class="nt">A_core</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
+<span class="w">  </span><span class="nt">l_gap</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">     </span><span class="c1"># optional: TOTAL air gap [m]</span>
+<span class="w">  </span><span class="nt">M0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">        </span><span class="c1"># optional: remanent magnetisation [A/m]</span>
 </code></pre></div>
-<p>Expands into <code>L_core_L0</code> (air-core inductance) + <code>L_core_V_M</code>
-(dummy voltage source carrying the magnetisation EMF). The JA
-observer in the chain reads <code>L_core_L0</code>'s branch current and
-writes <code>+N·A·µ₀·dM/dt</code> into the <code>L_core_V_M</code> source row.</p>
+<p>This is ONE Newton flux branch named <code>L_core</code>: the magnetisation is
+solved at the same time level as the current, with its exact tangent
+in the Jacobian. <code>res.i("L_core")</code> is the winding current; replay the
+B–H trajectory from it with <code>pulsim.HystereticInductor.bh_loop</code> (or
+<code>pulsim._pulsim.ja_replay</code>), which runs the kernel's own integrator.</p>
+<p>It used to expand into <code>L_core_L0</code> + <code>L_core_V_M</code> for a chain block to
+drive one step late. That block injected the magnetisation EMF with
+its sign inverted and was numerically unstable for every shipped use
+(see <code>add_hysteretic_inductor</code>); it is gone, and a <code>chain:</code> entry of
+type <code>hysteretic_inductor</code> now refuses by name. The material
+parameters, which the loader used to ignore, belong on the device.</p>
 <h2 id="the-chain-section">The <code>chain:</code> section<a class="headerlink" href="#the-chain-section" title="Permanent link">&para;</a></h2>
 <p><code>wire_chain_from_yaml(loaded, chain_yaml)</code> is a separate call
 because the kernel's <code>CxxBlockChain</code> is a different module than
@@ -1877,18 +1886,6 @@ a Python list of dicts:</p>
 <span class="s2">  theta_channel: theta</span>
 <span class="s2">  torque_channel: torque</span>
 
-<span class="s2">- type: hysteretic_inductor</span>
-<span class="s2">  device: L_core</span>
-<span class="s2">  Ms: 4.0e5</span>
-<span class="s2">  a: 50.0</span>
-<span class="s2">  alpha: 5e-5</span>
-<span class="s2">  c: 0.20</span>
-<span class="s2">  k: 30.0</span>
-<span class="s2">  N_turns: 100</span>
-<span class="s2">  l_m: 0.05</span>
-<span class="s2">  A_core: 1e-4</span>
-<span class="s2">  M_channel: M</span>
-<span class="s2">  B_channel: B</span>
 <span class="s2">"""</span><span class="p">)</span>
 </code></pre></div>
 <p>Each block must carry:</p>
@@ -1915,8 +1912,8 @@ a Python list of dicts:</p>
 </tr>
 <tr>
 <td><code>hysteretic_inductor</code></td>
-<td><code>hysteretic_inductor</code></td>
-<td><code>M</code>, <code>B</code>, <code>H</code>, <code>vm</code> (all optional)</td>
+<td>—</td>
+<td><strong>removed</strong>: the device is solved in the Newton loop and has no dummy source to drive; the block refuses by name</td>
 </tr>
 <tr>
 <td><code>sliding_mode_observer</code></td>
