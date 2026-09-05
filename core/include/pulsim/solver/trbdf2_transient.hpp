@@ -1170,6 +1170,11 @@ inline SimulationResult run_transient_trbdf2(
                     // NEXT step from their pre-landing state with a
                     // stale V_old — found by an adversarial read
                     // while the hysteretic core was being wired in.
+                    if (has_coss) {
+                        // Trapezoidal commit (the landing is a single
+                        // trap step); commit_coss is the BDF2 form.
+                        coss.update_from_state(x_trial, dt_land);
+                    }
                     if (has_laur) {
                         laur.update_from_state(
                             x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);

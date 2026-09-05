@@ -73,16 +73,51 @@ namespace ja_detail {
 
 inline constexpr Real MU_0 = Real{4} * std::numbers::pi_v<Real> * Real{1e-7};
 
-/// Langevin L(x) = coth x − 1/x, stable at 0 and at large |x|.
+/// Langevin L(x) = coth x − 1/x, accurate to machine precision
+/// everywhere.
+///
+/// coth x − 1/x cancels catastrophically for small x: the relative
+/// error is ε·(1/x)/(x/3) ≈ 7e-16/x², i.e. 1e-11 at x = 0.005. The
+/// observer this model replaced switched to a two-term Taylor series
+/// below |x| = 1e-4 and never noticed — nothing there solved a
+/// Newton system on the result. The in-loop device does: at a
+/// 50 ns step the flux row's stiffness 2L/h is 1600 Ω, so a 1e-9 V
+/// tolerance on dx is 6e-13 A in current and λ(i) must be smooth at
+/// the 1e-12 level. Measured before this fix: λ(i) NON-monotone at
+/// 1 pA spacing (dH per pA between −1e-11 and +5e-11 A/m against
+/// 1.3e-11 expected) and a Newton that crawled and cycled at 1e-6 V
+/// forever on a full bridge. Below |x| = 0.3 the series to x¹⁵ is
+/// accurate to 3e-15; above it the direct form is.
 [[nodiscard]] inline Real langevin(Real x) noexcept {
     const Real ax = std::abs(x);
-    if (ax < Real{1e-4}) return x * (Real{1.0 / 3.0} - x * x * Real{1.0 / 45.0});
+    if (ax < Real{0.3}) {
+        const Real x2 = x * x;
+        // Σ B_{2n} 2^{2n} x^{2n−1} / (2n)!
+        return x * (Real{1.0 / 3.0}
+               + x2 * (Real{-1.0 / 45.0}
+               + x2 * (Real{2.0 / 945.0}
+               + x2 * (Real{-1.0 / 4725.0}
+               + x2 * (Real{2.0 / 93555.0}
+               + x2 * (Real{-1382.0 / 638512875.0}
+               + x2 * (Real{4.0 / 18243225.0}
+               + x2 * (Real{-3617.0 / 162820783125.0}))))))));
+    }
     if (ax > Real{30.0}) return ((x > Real{0}) ? Real{1} : Real{-1}) - Real{1} / x;
-    return std::cosh(x) / std::sinh(x) - Real{1} / x;
+    return Real{1} / std::tanh(x) - Real{1} / x;
 }
 [[nodiscard]] inline Real langevin_deriv(Real x) noexcept {
     const Real ax = std::abs(x);
-    if (ax < Real{1e-4}) return Real{1.0 / 3.0} - x * x * Real{1.0 / 15.0};
+    if (ax < Real{0.3}) {
+        const Real x2 = x * x;
+        return Real{1.0 / 3.0}
+               + x2 * (Real{-1.0 / 15.0}
+               + x2 * (Real{2.0 / 189.0}
+               + x2 * (Real{-1.0 / 675.0}
+               + x2 * (Real{2.0 / 10395.0}
+               + x2 * (Real{-1382.0 / 58046625.0}
+               + x2 * (Real{4.0 / 1403325.0}
+               + x2 * (Real{-3617.0 / 10854718875.0})))))));
+    }
     if (ax > Real{30.0}) return Real{1} / (x * x);
     const Real s = std::sinh(x);
     return Real{1} / (x * x) - Real{1} / (s * s);
@@ -300,9 +335,29 @@ struct JilesAthertonCore {
             if (hi - lo <= Real{1e-15} * (Real{1} + std::abs(H))) break;
         }
         Eval e;
-        e.H = H; e.M = M; e.dM_dH = dMdH;
+        e.H = H; e.M = M;
         e.lambda = flux_of(c, H, M);
-        e.L = inductance_of(c, dMdH);
+        // THE JACOBIAN IS THE DERIVATIVE OF THE MAP THE RESIDUAL USES.
+        // dM/dH at the end point is the exact derivative of the
+        // CONTINUOUS solution; the residual evaluates the DISCRETE
+        // RK4 map with a fixed sub-step count, whose derivative with
+        // respect to H_end differs from it at O(h⁴) — measured 3.7e-5
+        // relative on a ferrite core. That is enough to turn Newton's
+        // quadratic convergence into a linear crawl: on a phase-
+        // shifted full bridge whose secondary floats on 1 GΩ ties,
+        // the first step could not reach the 1e-9 V tolerance in 50
+        // iterations (it did with 1e-7). A central difference of the
+        // whole integration in H_end gives the discrete map's own
+        // tangent to ~1e-9, at two extra integrations per evaluation.
+        const Real dH_tot = std::abs(H - s.H);
+        const Real d = Real{1e-6} * (dH_tot + c.ja.a);
+        const Real M_p = integrate_M(c, s, H + d);
+        const Real M_m = integrate_M(c, s, H - d);
+        Real dM_disc = (M_p - M_m) / (Real{2} * d);
+        // The clamp at ±Ms makes the map flat there: keep L at air.
+        if (!(dM_disc >= Real{0})) dM_disc = Real{0};
+        e.dM_dH = dM_disc;
+        e.L = inductance_of(c, dM_disc);
         return e;
     }
 };

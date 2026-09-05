@@ -128,3 +128,70 @@ TEST_CASE("JA core: refuses non-physical parameters by name",
     c = ferrite(0.0); c.Ae = 100.0;
     CHECK_THROWS_WITH(JA::validate(c, "L1"), ContainsSubstring("mm²"));
 }
+
+
+TEST_CASE("JA core: the Langevin function is smooth across the series/direct "
+          "switch and its derivative is consistent", "[v2][c4][ja][unit]") {
+    using models::ja_detail::langevin;
+    using models::ja_detail::langevin_deriv;
+    // A long-double coth x − 1/x is no reference below x ~ 0.1 (it
+    // cancels too); what CAN be pinned is continuity at the switch,
+    // the small-x limit, and derivative consistency.
+    // Straddle the switch by one ulp-ish: the function itself moves
+    // L'·2e-15 ≈ 7e-16 across the interval, so any mismatch above
+    // 1e-12 is the two formulas disagreeing, not the function moving.
+    CHECK(langevin(0.3 - 1e-15) == Approx(langevin(0.3 + 1e-15)).epsilon(1e-12));
+    CHECK(langevin_deriv(0.3 - 1e-15) == Approx(langevin_deriv(0.3 + 1e-15)).epsilon(1e-12));
+    CHECK(langevin(1e-6) / 1e-6 == Approx(1.0 / 3.0).epsilon(1e-12));
+    CHECK(langevin_deriv(0.0) == Approx(1.0 / 3.0).epsilon(1e-15));
+    // Odd / even.
+    for (const double x : {1e-3, 0.05, 0.29, 0.31, 2.0}) {
+        CHECK(langevin(-x) == Approx(-langevin(x)).epsilon(1e-15));
+        CHECK(langevin_deriv(-x) == Approx(langevin_deriv(x)).epsilon(1e-15));
+    }
+    // Derivative consistency by central difference, where the
+    // difference itself is accurate (x not too small).
+    for (const double x : {0.01, 0.05, 0.1, 0.2, 0.29, 0.31, 0.5, 1.0, 3.0, 10.0}) {
+        const double d = 1e-5 * x;
+        const double fd = (langevin(x + d) - langevin(x - d)) / (2 * d);
+        INFO("x = " << x);
+        CHECK(langevin_deriv(x) == Approx(fd).epsilon(1e-8));
+    }
+    // Against a high-precision series in long double, well inside
+    // the series region (the reference's own truncation is ~1e-20).
+    for (const double x : {1e-4, 1e-3, 1e-2, 0.1}) {
+        const long double xl = x, x2 = xl * xl;
+        const long double ref = xl * (1.0L / 3.0L + x2 * (-1.0L / 45.0L + x2 * (2.0L / 945.0L
+            + x2 * (-1.0L / 4725.0L + x2 * (2.0L / 93555.0L + x2 * (-1382.0L / 638512875.0L
+            + x2 * (4.0L / 18243225.0L + x2 * (-3617.0L / 162820783125.0L))))))));
+        CHECK(langevin(x) == Approx(static_cast<double>(ref)).epsilon(1e-14));
+    }
+    // And against the direct form where IT is accurate.
+    for (const double x : {0.5, 1.0, 2.0, 5.0}) {
+        const long double xl = x;
+        CHECK(langevin(x) == Approx(static_cast<double>(1.0L / std::tanh(xl) - 1.0L / xl)).epsilon(1e-14));
+    }
+}
+
+TEST_CASE("JA core: λ(i) is monotone at picoampere spacing — what a 1e-9 V "
+          "Newton tolerance at a 50 ns step actually needs",
+          "[v2][c4][ja][unit]") {
+    // The PSFB core: 12 turns, 3.5 cm², 100 mm, 1.5 mm gap, N87.
+    JA::Params c;
+    c.N = 12; c.Ae = 3.5e-4; c.le = 0.1; c.lg = 1.5e-3;
+    c.ja = models::JilesAthertonParams{.Ms = 4.0e5, .a = 50.0, .alpha = 5e-5, .c = 0.20, .k = 30.0};
+    JA::State s{0.0, 0.0, 8, 1.0};
+    for (const Real i0 : {0.02, 0.3, 2.0}) {
+        Real prev = JA::evaluate(c, s, i0).lambda;
+        const Real L = JA::evaluate(c, s, i0).L;
+        for (int k = 1; k <= 40; ++k) {
+            const Real i = i0 + k * 1e-12;
+            const Real lam = JA::evaluate(c, s, i).lambda;
+            const Real slope = (lam - prev) / 1e-12;
+            INFO("i0 = " << i0 << " k = " << k << " slope = " << slope << " L = " << L);
+            CHECK(lam > prev);
+            CHECK(slope == Approx(L).epsilon(5e-3));
+            prev = lam;
+        }
+    }
+}

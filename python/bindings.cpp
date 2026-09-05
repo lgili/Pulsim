@@ -1380,6 +1380,26 @@ void init_module(py::module_& m) {
           "Replay the in-loop Jiles-Atherton device on a current trace with "
           "the kernel's own integrator; returns (H, M, B) arrays.");
 
+    m.def("ja_evaluate",
+          [](double N, double Ae, double le, double lg,
+             double Ms, double a, double alpha, double c, double k,
+             double H_n, double M_n, int n_sub, double hint, double i) {
+              models::JilesAthertonCore::Params cp;
+              cp.N = N; cp.Ae = Ae; cp.le = le; cp.lg = lg;
+              cp.ja.Ms = Ms; cp.ja.a = a; cp.ja.alpha = alpha; cp.ja.c = c; cp.ja.k = k;
+              models::JilesAthertonCore::State st;
+              st.H = H_n; st.M = M_n; st.n_sub = n_sub; st.delta_hint = hint;
+              const auto ev = models::JilesAthertonCore::evaluate(cp, st, i);
+              return py::make_tuple(ev.H, ev.M, ev.lambda, ev.L, ev.dM_dH);
+          },
+          py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
+          py::arg("Ms"), py::arg("a"), py::arg("alpha"), py::arg("c"),
+          py::arg("k"), py::arg("H_n"), py::arg("M_n"), py::arg("n_sub"),
+          py::arg("hint"), py::arg("i"),
+          "One in-loop Jiles-Atherton evaluation at a trial current from a "
+          "given step-start state: (H, M, lambda, L, dM_dH). A probe for "
+          "tests and diagnostics.");
+
     // ---- ParametricRefactorResult (v1.4.0) -------------------------------
     py::class_<pwl::ParametricRefactorResult>(m,
         "ParametricRefactorResult",

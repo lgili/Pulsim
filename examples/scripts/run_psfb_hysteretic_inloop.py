@@ -72,6 +72,7 @@ T_END    = 2e-3     # 2 ms = 200 PWM cycles
 N_PRIMARY = 12
 L_M_PATH  = 0.10
 A_CORE    = 3.5e-4
+L_GAP     = 1.5e-3   # total air gap [m] — see build_plant
 
 
 def build_plant():
@@ -90,7 +91,14 @@ def build_plant():
         b.add_diode(name, anode, cathode, 1e3, 1e-9)
 
     # *** The headline change vs run_phase_shift_full_bridge.py ***
-    # Replace the linear L_leak with a JilesAtherton hysteretic inductor.
+    # Replace the linear L_leak with a Jiles-Atherton hysteretic
+    # inductor, solved INSIDE the Newton loop. The core is GAPPED:
+    # 12 turns on this ferrite with a closed path is a 1.9 mH
+    # magnetising branch that saturates at ~3 A — not a resonant
+    # inductor at all. (It only ever "worked" here because the old
+    # observer injected its EMF with the sign inverted, turning it
+    # into a small negative-L correction.) With a 1.5 mm gap it is the
+    # ~38 µH the linear demo uses, with a knee near 30 A.
     ja_params = p.reference_material("ferrite_n87")
     hyst = p.add_hysteretic_inductor(
         b, name="L_leak_JA",
@@ -99,6 +107,7 @@ def build_plant():
         N_turns=N_PRIMARY,
         l_m=L_M_PATH,
         A_core=A_CORE,
+        l_gap=L_GAP,
     )
     # Transformer + rectifier (unchanged from the linear PSFB demo).
     b.add_transformer(

@@ -53,14 +53,14 @@ scenes: `IM_Rs_{a,b,c}` (stator winding resistances), `IM_Lsig_{a,b,c}`
 (leakage inductances) and `IM_E_{a,b,c}` (back-EMF dummy sources).
 The chain block resolves them via `builder.branch_id_of(...)`.
 
-### `hysteretic_inductor` — Jiles-Atherton core
+### `hysteretic_inductor` — Jiles-Atherton core, solved in the loop
 
 ```yaml
 - type: hysteretic_inductor
   name: L_core
   from: n1
   to: gnd
-  Ms: 4.0e5
+  Ms: 4.0e5      # the material's five JA parameters — REQUIRED
   a: 50.0
   alpha: 5e-5
   c: 0.20
@@ -68,12 +68,22 @@ The chain block resolves them via `builder.branch_id_of(...)`.
   N_turns: 100
   l_m: 0.05
   A_core: 1e-4
+  l_gap: 0.0     # optional: TOTAL air gap [m]
+  M0: 0.0        # optional: remanent magnetisation [A/m]
 ```
 
-Expands into `L_core_L0` (air-core inductance) + `L_core_V_M`
-(dummy voltage source carrying the magnetisation EMF). The JA
-observer in the chain reads `L_core_L0`'s branch current and
-writes `+N·A·µ₀·dM/dt` into the `L_core_V_M` source row.
+This is ONE Newton flux branch named `L_core`: the magnetisation is
+solved at the same time level as the current, with its exact tangent
+in the Jacobian. `res.i("L_core")` is the winding current; replay the
+B–H trajectory from it with `pulsim.HystereticInductor.bh_loop` (or
+`pulsim._pulsim.ja_replay`), which runs the kernel's own integrator.
+
+It used to expand into `L_core_L0` + `L_core_V_M` for a chain block to
+drive one step late. That block injected the magnetisation EMF with
+its sign inverted and was numerically unstable for every shipped use
+(see `add_hysteretic_inductor`); it is gone, and a `chain:` entry of
+type `hysteretic_inductor` now refuses by name. The material
+parameters, which the loader used to ignore, belong on the device.
 
 ## The `chain:` section
 
@@ -99,18 +109,6 @@ chain = pulsim.wire_chain_from_yaml(loaded, """
   theta_channel: theta
   torque_channel: torque
 
-- type: hysteretic_inductor
-  device: L_core
-  Ms: 4.0e5
-  a: 50.0
-  alpha: 5e-5
-  c: 0.20
-  k: 30.0
-  N_turns: 100
-  l_m: 0.05
-  A_core: 1e-4
-  M_channel: M
-  B_channel: B
 """)
 ```
 
@@ -126,7 +124,7 @@ Each block must carry:
 | `type:` | Topology device kind | Chain output channels |
 |---|---|---|
 | `induction_motor` | `induction_motor` | `omega`, `theta`, `psi_alpha/beta` (opt), `torque` (opt), `slip` (opt) |
-| `hysteretic_inductor` | `hysteretic_inductor` | `M`, `B`, `H`, `vm` (all optional) |
+| `hysteretic_inductor` | — | **removed**: the device is solved in the Newton loop and has no dummy source to drive; the block refuses by name |
 | `sliding_mode_observer` | *(pure channel — no topology device)* | `theta_hat`, `omega_hat`, optional `e_alpha/beta_hat`, `low_speed_flag` |
 | `flux_mras_observer` | *(pure channel — no topology device)* | `omega_hat`, optional `psi_adj_alpha/beta`, `psi_ref_alpha/beta` |
 
