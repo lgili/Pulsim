@@ -107,25 +107,17 @@ def _add_induction_motor_block(chain, builder, spec: Mapping[str, Any]):
 
 
 def _add_hysteretic_inductor_block(chain, builder, spec: Mapping[str, Any]):
-    """Wire an `add_hysteretic_inductor` call from a chain-spec dict."""
-    device_name = str(spec["device"])
-    inductor_idx, bemf_idx = _resolve_hysteretic_indices(builder, device_name)
-    chain.add_hysteretic_inductor(
-        Ms=float(spec["Ms"]),
-        a=float(spec["a"]),
-        alpha=float(spec["alpha"]),
-        c=float(spec["c"]),
-        k=float(spec["k"]),
-        N_turns=int(spec["N_turns"]),
-        l_m=float(spec["l_m"]),
-        A_core=float(spec["A_core"]),
-        inductor_branch_var_idx=inductor_idx,
-        bemf_source_idx=bemf_idx,
-        M_channel=str(spec.get("M_channel", "")),
-        B_channel=str(spec.get("B_channel", "")),
-        H_channel=str(spec.get("H_channel", "")),
-        vm_channel=str(spec.get("vm_channel", "")),
-    )
+    """REMOVED — a YAML ``hysteretic_inductor`` is solved inside the
+    Newton loop (Phase 4 C.4) and has no dummy source for a chain
+    block to drive. Refuse by name rather than wire a block that
+    would look for a branch that no longer exists."""
+    raise ValueError(
+        f"chain block 'hysteretic_inductor' for device "
+        f"'{spec.get('device')}': the hysteretic inductor is now a Newton "
+        "device solved in the loop; give the material parameters "
+        "(Ms, a, alpha, c, k) on the DEVICE entry and remove the chain "
+        "block. The old block drove a dummy source one step late with an "
+        "inverted sign and was unstable for every shipped use.")
 
 
 def _add_sliding_mode_observer_block(chain, builder, spec: Mapping[str, Any]):

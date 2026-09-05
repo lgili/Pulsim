@@ -81,12 +81,12 @@ inline Real stamp_saturable_inductor(
     const Real v_to   = stamping::read_node_voltage(x, e.to);
     const Real i_L_new = x[e.branch_var_id];
 
-    // λ(i) and its exact derivative L(i) — no AD needed, the model
-    // gives both in closed form.
-    const Real lambda_new =
-        models::SaturableInductor::flux(i_L_new, e.params);
-    const Real L_eff =
-        models::SaturableInductor::inductance(i_L_new, e.params);
+    // λ(i) and its exact derivative L(i) under the entry's law —
+    // closed form for the atan and table laws, an integration of the
+    // Jiles-Atherton ODE from the step-start (H_n, M_n) for the
+    // hysteretic one. Same residual, same Jacobian shape.
+    const auto [lambda_new, L_eff] =
+        SaturableInductorHistory::flux_and_inductance(e, i_L_new, stage);
 
     const auto kc = trbdf2_coeffs();
     const bool bdf2 = (stage == TrBdf2Stage::Bdf2Stage2);

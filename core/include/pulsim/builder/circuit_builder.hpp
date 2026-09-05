@@ -23,6 +23,7 @@
 
 #include "pulsim/models/capacitor.hpp"
 #include "pulsim/models/gapped_core.hpp"
+#include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/current_source.hpp"
 #include "pulsim/models/ideal_diode.hpp"
 #include "pulsim/models/inductor.hpp"
@@ -311,6 +312,46 @@ public:
         p.I_sat = models::GappedCore::knee_current(c);
         p.table = std::move(table);
         return add_saturable_inductor_params_(name, n_pos, n_neg, p);
+    }
+
+    /// Phase 4 C.4 — HYSTERETIC CORE INDUCTOR: Jiles-Atherton INSIDE
+    /// the Newton loop. N turns on a core (Ae, le, TOTAL gap lg) of a
+    /// material given by its five JA parameters. The magnetisation is
+    /// solved at the same time level as the current, with its exact
+    /// tangent in the Jacobian; there is no dummy source, no
+    /// observer, and no one-step lag.
+    ///
+    /// The observer it replaces (`add_hysteretic_inductor` +
+    /// `make_hysteretic_inductor_observer` in Python) injected
+    /// ψ·dM/dt from the PREVIOUS step with its sign inverted — the
+    /// magnetisation acted as a negative inductance (current leading
+    /// voltage, |I₁| > V/R on a passive branch) — and was unstable
+    /// above q = L_M/(dt(R + 2L₀/dt)) ≈ 0.5 (measured: 0.4 → 0.999 A,
+    /// 0.6 → 5e4 A, 2.0 → NaN), i.e. for every shipped use.
+    ///
+    /// `i(name)` is the winding current. The B–H trajectory can be
+    /// replayed from it with the Python helpers (`compute_bh_loop`).
+    CircuitBuilder& add_hysteretic_core_inductor(
+        std::string_view name,
+        std::string_view from, std::string_view to,
+        Real N, Real Ae, Real le, Real lg,
+        const models::JilesAthertonParams& ja,
+        int substeps_min = 8, Real M0 = Real{0}) {
+        models::JilesAthertonCore::Params c;
+        c.N = N; c.Ae = Ae; c.le = le; c.lg = lg; c.ja = ja;
+        c.substeps_min = substeps_min; c.M0 = M0;
+        models::JilesAthertonCore::validate(
+            c, std::format("add_hysteretic_core_inductor(\"{}\")", name));
+        models::SaturableInductor::Params p;
+        // Reported metadata: the initial (anhysteretic) inductance and
+        // the air value; I_sat as the current at H = 3a on the virgin
+        // curve.
+        const Real chi0 = ja.Ms / (Real{3} * ja.a - ja.alpha * ja.Ms);
+        p.L_0 = models::JilesAthertonCore::inductance_of(c, chi0);
+        p.L_residual = models::JilesAthertonCore::inductance_of(c, Real{0});
+        p.I_sat = models::JilesAthertonCore::current_of(c, Real{3} * ja.a, chi0 * Real{3} * ja.a);
+        p.ja = std::make_shared<const models::JilesAthertonCore::Params>(c);
+        return add_saturable_inductor_params_(name, from, to, p);
     }
 
     /// Phase 4 C.4 — SATURABLE TRANSFORMER on a gapped core.

@@ -95,58 +95,35 @@ def main():
         N_turns=N_TURNS,
         l_m=L_M_PATH,
         A_core=A_CORE,
+        M0=RESIDUAL_FRACTION * ja_params.Ms,
     )
 
-    # Observer + initial state (the residual flux).
-    obs, b_extra = p.make_hysteretic_inductor_observer(b, hyst, dt=DT)
-    # We can't easily inject the observer's internal M_prev before the
-    # first step; instead use the JA model directly to settle the
-    # initial M and then the observer kicks in.
-    # Approach: set ``hyst.M`` and the observer's internal state
-    # via a side-channel — we just push the residual into the
-    # ``state["M_prev"]`` dict that the closure owns. The observer
-    # is a closure; the cleanest hook is to call its model's
-    # ``reset`` with a non-zero initial M before the simulation
-    # starts. We use the public ``JilesAthertonModel`` directly to
-    # get the residual analytical value and then patch.
+    # The residual flux IS the device's initial state now: the core is
+    # solved inside the Newton loop, so there is no observer to patch.
     residual_M = RESIDUAL_FRACTION * ja_params.Ms
-    print(f"  JA params (annealed_iron):")
+    print("  JA params (annealed_iron):")
     print(f"    Ms = {ja_params.Ms:.3e} A/m")
     print(f"    a  = {ja_params.a:.2f}, k = {ja_params.k:.2f}")
     print(f"    residual M0 = {residual_M:.3e} A/m "
           f"(= {RESIDUAL_FRACTION*100:.0f} % of Ms)")
-    print(f"  Circuit:")
-    print(f"    L_0 = {hyst.L_0*1e6:.3f} µH (air-core)")
+    print("  Circuit:")
+    print(f"    L_0 = {hyst.L_0*1e6:.3f} µH (air-core floor)")
     print(f"    R_series = {R_SERIES} Ω")
     print(f"    Source: {V_AMP/math.sqrt(2):.1f} V RMS / {F_LINE} Hz "
           f"@ phase {math.degrees(PHASE):.0f}° (worst-case)")
-
-    # Trick: monkey-patch the observer's first call to set residual.
-    obs_called = {"n": 0}
-    orig_obs = obs
-
-    def patched_obs(t, x):
-        if obs_called["n"] == 0:
-            hyst.M = residual_M    # set the live diagnostic
-        obs_called["n"] += 1
-        orig_obs(t, x)
 
     print(f"\n  Running {T_END} s sim @ dt = {DT*1e6:.0f} µs "
           f"= {int(T_END/DT):,} steps")
     res = p.simulate(
         b, t_end=T_END, dt=DT,
         switch_fn=lambda t: p.SwitchStateMask(0),
-        step_observer=patched_obs,
-        b_extra_fn=b_extra,
         progress=True,
     )
 
     # Read inductor current trace.
     times = np.asarray(res.times)
-    states = np.asarray(res.states)
-    i_idx = b.pool.branch_var_id_for_inductor(
-        hyst.inductor_branch_id, b.graph)
-    i_arr = states[:, i_idx]
+    i_arr = np.asarray(res.i(hyst.name))
+    loop = hyst.bh_loop(res, period=1.0 / F_LINE)
 
     # Find first-cycle peak (t < 20 ms) and steady-state peak.
     first_cycle = times < 0.025      # 1.25 cycle window for inrush
@@ -155,24 +132,13 @@ def main():
     i_steady = float(np.max(np.abs(i_arr[steady_state])))
     ratio = i_inrush / max(i_steady, 1e-9)
 
-    print(f"\n  Inrush result:")
+    print("\n  Inrush result:")
     print(f"    Peak current (first cycle)  = {i_inrush:.2f} A")
     print(f"    Peak current (steady state) = {i_steady:.2f} A")
     print(f"    Inrush ratio                = {ratio:.1f} ×")
-    print(f"    Final M (after 25 cycles)   = {hyst.M:.3e} A/m")
-    print(f"    Final B                     = {hyst.B:.4f} T")
-    print()
-    print("  NOTE: this in-loop topology (linear L_0 + dummy V_M)")
-    print("  is at its best when the magnetizing reactance (the JA")
-    print("  contribution) dominates over the series resistance — for")
-    print("  the demo parameters above R = 5 Ω limits the steady-state")
-    print("  current more than the inductance, so the inrush ratio")
-    print("  is modest (real mains transformers show 3–7× because")
-    print("  their magnetizing reactance is huge vs the winding R).")
-    print("  For B-H loop family + cycle-averaged loss analysis on a")
-    print("  captured current trace, use ``compute_bh_loop`` directly")
-    print("  — the post-processing path quantifies the loop area and")
-    print("  loss without the topology mismatch above.")
+    print(f"    Final M (after 25 cycles)   = {float(loop.M[-1]):.3e} A/m")
+    print(f"    Final B                     = {float(loop.B[-1]):.4f} T")
+    print(f"    Last-cycle loop loss        = {loop.avg_power_W:.3f} W")
 
     # CSV trace.
     try:

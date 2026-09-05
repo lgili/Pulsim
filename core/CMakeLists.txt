@@ -137,6 +137,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_ideal_transformer.cpp         # Phase 4 C.4
         tests/layer2/test_flux_table.cpp                # Phase 4 C.4
         tests/layer2/test_gapped_core.cpp               # Phase 4 C.4
+        tests/layer2/test_jiles_atherton_core.cpp       # Phase 4 C.4 (JA in loop)
     )
     target_link_libraries(pulsim_core_layer2_tests
         PRIVATE

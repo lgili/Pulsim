@@ -38,6 +38,7 @@
 // See `examples/v2/` for working samples.
 
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/options.hpp"
 
@@ -411,33 +412,29 @@ inline void load_device(
                 mid_l, neutral, Real{0});
         }
     } else if (type == "hysteretic_inductor") {
-        // Phase 2.2 composite device — JA hysteretic inductor. YAML
-        // creates the linear air-core L_0 + dummy v_M source. The user
-        // wires the BlockChain (`chain.add_hysteretic_inductor(...)`)
-        // in Python using the branch names this loader creates:
-        //   {name}_L0   — linear air-core inductor (from → mid)
-        //   {name}_V_M  — dummy V source for hysteresis EMF (mid → to)
-        const int N_turns =
-            static_cast<int>(require_real(dev, idx, type, "N_turns"));
-        const Real l_m = require_real(dev, idx, type, "l_m");
-        const Real A_core = require_real(dev, idx, type, "A_core");
-        if (N_turns <= 0 || l_m <= Real{0} || A_core <= Real{0}) {
-            throw std::runtime_error(std::format(
-                "yaml::load: hysteretic_inductor '{}' has "
-                "non-physical geometry: N_turns={}, l_m={}, A_core={}",
-                name, N_turns, l_m, A_core));
-        }
-        // L_0 = N²·A·μ₀/l_m.
-        constexpr Real MU_0 = Real{4} * Real{3.14159265358979323846}
-                                * Real{1e-7};
-        const Real L_0 =
-            static_cast<Real>(N_turns) * static_cast<Real>(N_turns)
-            * A_core * MU_0 / l_m;
-        const std::string from = require_string(dev, idx, type, "from");
-        const std::string to = require_string(dev, idx, type, "to");
-        const std::string mid = name + "_mid";
-        b.add_inductor(name + "_L0", from, mid, L_0);
-        b.add_voltage_source(name + "_V_M", mid, to, Real{0});
+        // Phase 4 C.4 — Jiles-Atherton INSIDE the loop. This used to
+        // build an air-core `{name}_L0` in series with a 0 V dummy
+        // source `{name}_V_M` for a chain block to modulate one step
+        // late — with its EMF sign inverted and unstable for every
+        // shipped use. The device is now one Newton flux branch named
+        // `name`; the material's five JA parameters go HERE (they
+        // used to be silently ignored and re-stated in the chain
+        // block), `l_gap` and `M0` are optional.
+        const Real N_turns = require_real(dev, idx, type, "N_turns");
+        const Real l_m     = require_real(dev, idx, type, "l_m");
+        const Real A_core  = require_real(dev, idx, type, "A_core");
+        models::JilesAthertonParams ja;
+        ja.Ms    = require_real(dev, idx, type, "Ms");
+        ja.a     = require_real(dev, idx, type, "a");
+        ja.alpha = require_real(dev, idx, type, "alpha");
+        ja.c     = require_real(dev, idx, type, "c");
+        ja.k     = require_real(dev, idx, type, "k");
+        b.add_hysteretic_core_inductor(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            N_turns, A_core, l_m, real_or(dev, "l_gap", Real{0}), ja,
+            /*substeps_min=*/8, real_or(dev, "M0", Real{0}));
     } else {
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +

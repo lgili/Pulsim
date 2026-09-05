@@ -1163,6 +1163,29 @@ inline SimulationResult run_transient_trbdf2(
                               "this step size");
                     }
                     history.update_from_state(x_trial, dt_land);
+                    // The stateful devices land here too. Only the
+                    // linear companion history was committed at an
+                    // event landing, so the Coss, Lauritzen, IGBT
+                    // tail, PMSM and flux devices integrated the
+                    // NEXT step from their pre-landing state with a
+                    // stale V_old — found by an adversarial read
+                    // while the hysteretic core was being wired in.
+                    if (has_laur) {
+                        laur.update_from_state(
+                            x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);
+                    }
+                    if (has_tail) {
+                        tail.update_from_state(
+                            x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);
+                    }
+                    if (has_pmsm) {
+                        pmsm.update_from_state(
+                            x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);
+                    }
+                    if (has_sat) {
+                        sat.update_from_state(
+                            x_trial, pwl::TrBdf2Stage::Trapezoidal);
+                    }
                     x = x_trial;
                     t += dt_land;
                     const bool flipped =
@@ -1234,10 +1257,10 @@ inline SimulationResult run_transient_trbdf2(
                         x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
                 }
                 if (has_sat) {
-                    // No stage argument: the commit reads the
-                    // converged x and evaluates lambda(i) from the
-                    // model's own law, which is stage-independent.
-                    sat.update_from_state(x_1);
+                    // The stage matters now: the hysteretic law's
+                    // commit must integrate from the same base the
+                    // converged BDF2 residual used, (H_γ, M_γ).
+                    sat.update_from_state(x_1, pwl::TrBdf2Stage::Bdf2Stage2);
                 }
                 x = x_1;
                 t += h;

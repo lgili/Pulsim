@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 pulsim = pytest.importorskip("pulsim")
@@ -129,8 +130,11 @@ def test_yaml_chain_empty_spec_yields_empty_chain():
     assert chain.size() == 0
 
 
-def test_yaml_chain_hysteretic_inductor_e2e():
-    """End-to-end test with the JA hysteretic inductor."""
+def test_yaml_chain_hysteretic_inductor_refuses_the_chain_block():
+    """The JA hysteretic inductor is solved INSIDE the Newton loop
+    (Phase 4 C.4): the YAML device is the whole thing, and the old
+    chain block — which drove a dummy source one step late with an
+    inverted sign — refuses by name. The device itself still runs."""
     yaml_topology = """
 circuit:
   devices:
@@ -138,9 +142,9 @@ circuit:
       name: Vs
       from: a
       to: gnd
-      v_amplitude: 50.0
+      v_amplitude: 1.0
       frequency: 50.0
-    - {type: resistor, name: Rs, from: a, to: n1, R: 1.0}
+    - {type: resistor, name: Rs, from: a, to: n1, R: 0.1}
     - type: hysteretic_inductor
       name: L_core
       from: n1
@@ -157,30 +161,20 @@ circuit:
     chain_spec = [{
         "type": "hysteretic_inductor",
         "device": "L_core",
-        "Ms": 4.0e5,
-        "a": 50.0,
-        "alpha": 5e-5,
-        "c": 0.20,
-        "k": 30.0,
-        "N_turns": 100,
-        "l_m": 0.05,
-        "A_core": 1e-4,
-        "M_channel": "M",
-        "B_channel": "B",
+        "Ms": 4.0e5, "a": 50.0, "alpha": 5e-5, "c": 0.20, "k": 30.0,
+        "N_turns": 100, "l_m": 0.05, "A_core": 1e-4,
     }]
     loaded = pulsim.load_yaml_string(yaml_topology)
-    builder = loaded.builder
-    chain = pulsim.wire_chain_from_yaml(loaded, chain_spec)
-    state_size = builder.pool.state_size(builder.graph)
+    with pytest.raises(ValueError, match="solved in the loop"):
+        pulsim.wire_chain_from_yaml(loaded, chain_spec)
 
+    # Without the block the device does its own work.
     res = pulsim.simulate(
-        builder, t_end=0.05, dt=100e-6,
-        switch_fn=lambda t: pulsim.SwitchStateMask(0),
-        step_observer=chain.make_step_observer(100e-6),
-        b_extra_fn=chain.make_b_extra_fn(state_size))
+        loaded.builder, t_end=0.05, dt=100e-6,
+        switch_fn=lambda t: pulsim.SwitchStateMask(0))
     assert res.num_steps() > 0
-
-    # Magnetisation should build up under 50 V 50 Hz excitation.
-    M_final = chain.get_channel("M")
-    assert abs(M_final) > 1.0, (
-        f"JA core magnetisation didn't build up: M={M_final:.3e}")
+    i = np.asarray(res.i("L_core"))
+    assert np.all(np.isfinite(i))
+    H, M, B = pulsim._pulsim.ja_replay(100.0, 1e-4, 0.05, 0.0,
+                                       4.0e5, 50.0, 5e-5, 0.20, 30.0, 0.0, i)
+    assert float(np.abs(M).max()) > 1.0e4, "JA core magnetisation didn't build up"

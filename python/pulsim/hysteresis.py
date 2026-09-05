@@ -676,32 +676,73 @@ def fit_ja_from_bh_curve(B_array,
 
 @dataclass
 class HystereticInductor:
-    """A hysteretic-core inductor backed by a Jiles-Atherton model.
+    """A hysteretic-core inductor: Jiles-Atherton INSIDE the Newton
+    loop (Phase 4 C.4).
 
-    Returned by :func:`add_hysteretic_inductor`. Stash the
-    handle to (a) read the live ``M`` / ``B`` / ``H`` per-step
-    via the observer, and (b) pass it back to
-    :func:`make_hysteretic_inductor_observer` for the
-    ``step_observer`` + ``b_extra_fn`` pair the simulator
-    needs.
+    Returned by :func:`add_hysteretic_inductor`. The device is a
+    single Newton flux branch named ``name``: ``res.i(name)`` is the
+    winding current, and :meth:`bh_loop` replays the B–H trajectory
+    from it with the SAME integrator the kernel used. There is no
+    dummy source and no observer any more.
     """
     name: str
     params: "JilesAthertonParams"
     N_turns: int
     """Number of turns on the coil."""
     l_m: float
-    """Mean magnetic path length [m]."""
+    """Mean magnetic path length in the core [m]."""
     A_core: float
     """Effective core cross-sectional area [m²]."""
+    l_gap: float
+    """TOTAL air-gap length [m]."""
+    M0: float
+    """Initial (remanent) magnetisation [A/m] at zero current."""
     L_0: float
-    """Air-core inductance L_0 = N²·A·μ_0/l_m [H] — the LINEAR
-    component the kernel sees on the MNA branch."""
+    """Air-core inductance N²·A·μ_0/(l_m + l_gap) [H] — the
+    deep-saturation floor, kept for reporting."""
+    branch_id: int = -1
+    """Branch id of the device."""
     inductor_branch_id: int = -1
+    """Same as ``branch_id`` (kept for callers of the old handle)."""
     bemf_source_id: int = -1
-    # Live observer state (snapshotted between steps for diagnostics).
-    M: float = 0.0
-    H: float = 0.0
-    B: float = 0.0
+    """Always −1: the in-loop device has no dummy source."""
+
+    def bh_loop(self, result, *, period: float | None = None) -> "BHLoopResult":
+        """Replay the kernel's own Jiles-Atherton integrator on this
+        device's simulated current and return the B–H loop.
+
+        Exact by construction: the same RK4 sub-stepping, the same
+        negative-susceptibility guard, the same gap term, the same
+        per-step sub-step count, starting from the same ``M0`` — so
+        the (H, M, B) returned are the ones the solver used, not a
+        forward-Euler approximation of them.
+        """
+        import numpy as _np
+        from . import _pulsim as _k
+        i = _np.asarray(result.i(self.name), dtype=float)
+        t = _np.asarray(result.times, dtype=float)
+        H, M, B = _k.ja_replay(
+            float(self.N_turns), float(self.A_core), float(self.l_m),
+            float(self.l_gap), float(self.params.Ms), float(self.params.a),
+            float(self.params.alpha), float(self.params.c),
+            float(self.params.k), float(self.M0), i)
+        H = _np.asarray(H); M = _np.asarray(M); B = _np.asarray(B)
+        # Last-cycle loop area, exactly as compute_bh_loop reports it.
+        if period is not None and period > 0 and t[-1] - t[0] > period:
+            mask = t >= t[-1] - period
+        else:
+            mask = _np.ones_like(t, dtype=bool)
+        H_p, B_p = H[mask], B[mask]
+        if len(H_p) > 2:
+            energy_per_m3 = float(_np.sum(0.5 * (H_p[:-1] + H_p[1:]) * _np.diff(B_p)))
+        else:
+            energy_per_m3 = 0.0
+        f = 1.0 / period if period else 1.0 / max(t[-1] - t[0], 1e-30)
+        avg_pow_per_m3 = energy_per_m3 * f
+        return BHLoopResult(H=H, B=B, M=M,
+                            energy_per_cycle_per_m3=energy_per_m3,
+                            avg_power_per_m3=avg_pow_per_m3,
+                            avg_power_W=avg_pow_per_m3 * self.A_core * self.l_m)
 
 
 def add_hysteretic_inductor(builder,
@@ -713,122 +754,90 @@ def add_hysteretic_inductor(builder,
                                 N_turns: int,
                                 l_m: float,
                                 A_core: float,
+                                l_gap: float = 0.0,
+                                M0: float = 0.0,
                                 ) -> "HystereticInductor":
-    """Add a Jiles-Atherton hysteretic inductor between two nodes.
+    """Add a Jiles-Atherton hysteretic inductor between two nodes,
+    solved INSIDE the Newton loop.
 
-    Topology:
+    Until Phase 4 C.4 this built an air-core ``L_0`` in series with a
+    dummy source ``{name}_V_M`` that :func:`make_hysteretic_inductor_observer`
+    modulated with ``N·A·μ_0·dM/dt`` from the PREVIOUS step. Two
+    things were wrong with that, both measured:
 
-        from_node ──[ L_0 ]── (mid) ──[ V_M ]── to_node
+    * the sign was inverted — the magnetisation acted as a NEGATIVE
+      inductance (current leading voltage, ``|I₁| > V/R`` on a passive
+      branch);
+    * the one-step-lagged coupling is an explicit treatment of a stiff
+      inductive term, unstable above ``q = L_M/(dt·(R + 2L_0/dt)) ≈ 0.5``
+      (0.4 → 0.999 A; 0.6 → 5e4 A; 2.0 → NaN), i.e. for every shipped
+      use — only the ``±M_s`` clamp bounded it.
 
-    where ``L_0 = N²·A·μ_0/l_m`` is the linear air-core inductance
-    and ``V_M`` is a dummy voltage source that the JA observer
-    modulates to encode ``N·A·μ_0·dM/dt`` — the hysteresis
-    contribution to ``v_L = dλ/dt``.
+    The magnetisation is now part of the same solve as the current,
+    at the same time level, with its exact tangent in the Jacobian.
 
     Parameters
     ----------
     name
-        Prefix for the added components (``{name}_L0`` and
-        ``{name}_V_M``).
+        Device name; ``res.i(name)`` is the winding current.
     from_node, to_node
         Terminal node names.
     params
-        :class:`JilesAthertonParams` — the 5-parameter JA set.
-        See :func:`reference_material` for catalog lookup or
-        :func:`fit_ja_from_bh_curve` for fitting from measurements.
-    N_turns
-        Number of turns on the coil.
-    l_m
-        Mean magnetic path length [m].
-    A_core
-        Effective core cross-sectional area [m²].
+        :class:`JilesAthertonParams` — see :func:`reference_material`
+        or :func:`fit_ja_from_bh_curve`.
+    N_turns, l_m, A_core
+        Turns, mean core path [m], effective area [m²].
+    l_gap
+        TOTAL air-gap length [m] (default 0, the closed core).
+    M0
+        Initial magnetisation [A/m] — the remanent state a previous
+        shutdown left, which is what drives inrush.
 
     Returns
     -------
     HystereticInductor
-        Handle to pass to :func:`make_hysteretic_inductor_observer`.
+        Handle; :meth:`HystereticInductor.bh_loop` replays the loop.
     """
-    if N_turns <= 0 or l_m <= 0.0 or A_core <= 0.0:
+    if N_turns <= 0 or l_m <= 0.0 or A_core <= 0.0 or l_gap < 0.0:
         raise ValueError(
             f"Non-physical geometry: N={N_turns}, l_m={l_m}, "
-            f"A_core={A_core}. All must be positive.")
-    L_0 = (N_turns ** 2) * A_core * _MU0 / l_m
-    mid = f"{name}_mid"
-    ind_id = builder.graph.num_branches
-    builder.add_inductor(f"{name}_L0", from_node, mid, float(L_0))
-    src_id = builder.graph.num_branches
-    builder.add_voltage_source(f"{name}_V_M", mid, to_node, 0.0)
+            f"A_core={A_core}, l_gap={l_gap}.")
+    if abs(M0) > params.Ms:
+        raise ValueError(
+            f"M0 = {M0} A/m exceeds the material's Ms = {params.Ms} A/m.")
+    branch_id = builder.graph.num_branches
+    builder.add_hysteretic_core_inductor(
+        name, from_node, to_node,
+        float(N_turns), float(A_core), float(l_m), float(l_gap),
+        float(params.Ms), float(params.a), float(params.alpha),
+        float(params.c), float(params.k), M0=float(M0))
+    L_0 = (N_turns ** 2) * A_core * _MU0 / (l_m + l_gap)
     return HystereticInductor(
-        name=name,
-        params=params,
-        N_turns=int(N_turns),
-        l_m=float(l_m),
-        A_core=float(A_core),
-        L_0=float(L_0),
-        inductor_branch_id=ind_id,
-        bemf_source_id=src_id,
-    )
+        name=name, params=params, N_turns=int(N_turns), l_m=float(l_m),
+        A_core=float(A_core), l_gap=float(l_gap), M0=float(M0),
+        L_0=float(L_0), branch_id=branch_id, inductor_branch_id=branch_id,
+        bemf_source_id=-1)
 
 
-def make_hysteretic_inductor_observer(builder,
-                                            hyst: "HystereticInductor",
-                                            *,
-                                            dt: float):
-    """Build the ``(step_observer, b_extra_fn)`` pair to attach a
-    :class:`HystereticInductor` to a running simulation.
+def make_hysteretic_inductor_observer(builder, hyst, *, dt: float):
+    """REMOVED — the hysteretic inductor is solved inside the Newton
+    loop and needs no observer.
 
-    The observer:
-      1. Reads the inductor current ``i_L`` from the state vector.
-      2. Computes ``H = N·i_L / l_m``.
-      3. Advances the JA model state ``M`` by one ``dt``.
-      4. Writes back ``V_M = N·A·μ_0·dM/dt`` into ``b_extra``
-         at the dummy voltage source's row (negated to match the
-         kernel's source-row sign convention).
-
-    The ``hyst`` handle is updated in place each step so the
-    caller can read ``hyst.M``, ``hyst.B``, ``hyst.H`` between
-    sim steps for live plotting / channel logging.
+    The observer this returned injected ``ψ·dM/dt`` from the previous
+    step into a dummy source with its sign inverted, and was unstable
+    for every shipped use (see :func:`add_hysteretic_inductor`). Drop
+    the ``step_observer`` / ``b_extra_fn`` pair from the ``simulate``
+    call; the device already does the work. Use
+    :meth:`HystereticInductor.bh_loop` on the result for M/B/H.
     """
-    state_size = builder.pool.state_size(builder.graph)
-    ind_idx = builder.pool.branch_var_id_for_inductor(
-        hyst.inductor_branch_id, builder.graph)
-    src_idx = builder.pool.branch_var_id_for_source(
-        hyst.bemf_source_id, builder.graph)
+    raise RuntimeError(
+        "make_hysteretic_inductor_observer() has been removed: "
+        f"'{getattr(hyst, 'name', hyst)}' is solved INSIDE the Newton "
+        "loop now and needs no step_observer / b_extra_fn. The observer "
+        "it returned injected the magnetisation EMF one step late and "
+        "with its sign inverted, and was numerically unstable for any "
+        "magnetising branch with q = L_M/(dt(R + 2L_0/dt)) > 0.5 — every "
+        "shipped use. Drop the pair from simulate(); read M/B/H with "
+        "hyst.bh_loop(result).")
 
-    model = JilesAthertonModel(hyst.params)
-    # Coupling constant ψ_M = N · A · μ_0 · M → dψ_M/dt = const · dM/dt.
-    psi_coupling = hyst.N_turns * hyst.A_core * _MU0
 
-    # Snapshot the previous M to compute dM/dt → V_M each step.
-    state = {"M_prev": 0.0, "v_M": 0.0}
-
-    def step_observer(t, x):
-        i_L = float(x[ind_idx])
-        H = (hyst.N_turns / hyst.l_m) * i_L
-        model.update(H, dt)
-        dM = model.M - state["M_prev"]
-        state["M_prev"] = model.M
-        # V_M = N·A·μ_0·dM/dt.
-        state["v_M"] = psi_coupling * (dM / max(dt, 1e-18))
-        # Live diagnostics on the handle.
-        hyst.M = model.M
-        hyst.H = H
-        hyst.B = model.B
-
-    def b_extra_fn(t):
-        out = [0.0] * state_size
-        # Total flux linkage of the hysteretic coil:
-        #   λ = L_0·i + N·A·μ_0·M
-        # → dλ/dt = L_0·di/dt + N·A·μ_0·dM/dt = L_0·di/dt + v_M
-        # The branch is:  from_node ── L_0 ── mid ── V_dummy ── to_node
-        # Loop KVL: V_applied = V_L0 + V_dummy_setpoint
-        #         = L_0·di/dt + V_dummy_setpoint
-        # For this to equal dλ/dt we need V_dummy_setpoint = +v_M.
-        # (Earlier sign was inherited from the motor back-EMF pattern by
-        # analogy, but the topology here is single-branch passive — the
-        # hysteresis voltage adds in the SAME direction as the L_0 drop,
-        # not opposite to a separately-driven excitation source.)
-        out[src_idx] = +state["v_M"]
-        return out
-
-    return step_observer, b_extra_fn

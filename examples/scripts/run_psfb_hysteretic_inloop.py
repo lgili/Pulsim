@@ -128,8 +128,8 @@ def main():
         dead_time=100e-9,
     )
 
-    # HystereticInductor observer — runs each step, integrates M.
-    obs, b_extra = p.make_hysteretic_inductor_observer(b, hyst, dt=DT)
+    # The hysteretic inductor is solved INSIDE the Newton loop: no
+    # observer, no dummy source, no one-step lag.
 
     print("  PSFB with HystereticInductor in-loop")
     print(f"    V_bus={V_BUS}V  f_pwm={F_PWM/1e3:.0f}kHz "
@@ -142,23 +142,20 @@ def main():
     res = p.simulate(
         b, t_end=T_END, dt=DT,
         switch_fn=sw_fn,
-        step_observer=obs,
-        b_extra_fn=b_extra,
         progress=True,
     )
 
-    # Captured inductor current.
+    # Captured inductor current, and the B–H trajectory replayed with
+    # the kernel's own integrator.
     times = np.asarray(res.times)
-    states = np.asarray(res.states)
-    i_idx = b.pool.branch_var_id_for_inductor(
-        hyst.inductor_branch_id, b.graph)
-    i_L = states[:, i_idx]
+    i_L = np.asarray(res.i(hyst.name))
+    loop = hyst.bh_loop(res, period=1.0 / F_PWM)
 
     print("\n  Captured inductor (hysteretic) current:")
     print(f"    i_peak    = {float(np.max(np.abs(i_L))):.3f} A")
-    print(f"    final M   = {hyst.M:.4e} A/m")
-    print(f"    final B   = {hyst.B:.4f} T")
-    print(f"    final H   = {hyst.H:.2f} A/m")
+    print(f"    final M   = {float(loop.M[-1]):.4e} A/m")
+    print(f"    final B   = {float(loop.B[-1]):.4f} T")
+    print(f"    final H   = {float(loop.H[-1]):.2f} A/m")
 
     # Save trace: t, i_L, the live JA states (M, B, H), and the
     # output voltage so we can verify the PSFB still operates
