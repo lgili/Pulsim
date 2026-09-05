@@ -643,6 +643,25 @@ inline SimulationResult run_transient_trbdf2(
     // sub-step, and the zero-time initial-bit settle.
     auto trap_solve = [&](const SwitchStateMask& m, Real t0, Real dt,
                            Vector& out_x) -> bool {
+        // EVERY trapezoidal solve tells the stateful devices which
+        // step it is taking. The linear part always received `dt`
+        // through compute_b_extra / solve_dispatch, but the Coss,
+        // Lauritzen, IGBT-tail, PMSM and saturable-inductor wrappers
+        // read (dev_h, coss_h), which the step loop assigns only
+        // after this point — so the zero-time diode settle above the
+        // loop, and every probe / landing solve inside it, stamped
+        // those devices with h = 0 (the settle) or with the PREVIOUS
+        // stage's h (the probes). A saturable inductor or a PMSM in
+        // any circuit with a diode divided by zero in the settle and
+        // took the process down (SIGSEGV, measured); a Coss produced
+        // NaN diode bits in silence, because the settle discards the
+        // solve's return value. Setting the pair here, at the one
+        // choke point all trapezoidal solves pass through, is the
+        // same fix run_transient applies to `refresh_dt`.
+        dev_stage = pwl::TrBdf2Stage::Trapezoidal;
+        dev_h = dt;
+        coss_stage = pwl::CossStage::Trapezoidal;
+        coss_h = dt;
         history.compute_b_extra(dt, b_stage);
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;

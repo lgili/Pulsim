@@ -1208,6 +1208,54 @@ public:
         return *this;
     }
 
+    /// Couple two EXISTING linear inductors by name with coefficient
+    /// k, exactly as `add_transformer` couples the pair it creates.
+    /// This is the method `pulsim.add_flyback` had always called
+    /// behind `hasattr(builder, "add_inductor_coupling")` — and it
+    /// did not exist, so the factory built two UNCOUPLED inductors
+    /// and its test, which counts branches, passed. Both branches
+    /// must be plain (linear) inductors: the coupling lives in the
+    /// linear assembly and a saturable inductor never reaches it —
+    /// its Jacobian would be coupled and its history would not.
+    CircuitBuilder& add_inductor_coupling(
+        std::string_view name_a, std::string_view name_b, Real k) {
+        if (!(k >= Real{0}) || !(k <= Real{1})) {
+            throw std::invalid_argument(std::format(
+                "add_inductor_coupling(\"{}\", \"{}\"): k must be in "
+                "[0, 1] (got {}); reverse one winding for a negative "
+                "coupling.", name_a, name_b, k));
+        }
+        const Index a = branch_id_of(name_a);
+        const Index b = branch_id_of(name_b);
+        if (a < 0 || b < 0) {
+            throw std::invalid_argument(std::format(
+                "add_inductor_coupling(\"{}\", \"{}\"): no branch named "
+                "'{}'.", name_a, name_b, a < 0 ? name_a : name_b));
+        }
+        if (a == b) {
+            throw std::invalid_argument(std::format(
+                "add_inductor_coupling(\"{}\"): an inductor cannot be "
+                "coupled to itself.", name_a));
+        }
+        for (const auto [id, nm] : {std::pair{a, name_a}, std::pair{b, name_b}}) {
+            if (!pool_.is_registered(id) ||
+                pool_.kind_of(id) != pwl::DevicePool::StoredKind::Inductor) {
+                throw std::invalid_argument(std::format(
+                    "add_inductor_coupling: '{}' is not a linear inductor. "
+                    "Only plain inductors can be magnetically coupled "
+                    "through this API; for a saturating core use the "
+                    "saturable transformer.", nm));
+            }
+        }
+        pool_.add_transformer_coupling(
+            a, b,
+            models::TwoWindingTransformer::Params{
+                .L_p = pool_.inductor_params(a).L,
+                .L_s = pool_.inductor_params(b).L,
+                .k = k});
+        return *this;
+    }
+
     /// Layer 2 V16: N-winding transformer (2 ≤ N ≤ 6). Each
     /// winding is added as a regular `Inductor` branch, and
     /// the N·(N−1)/2 pair-wise couplings are registered with

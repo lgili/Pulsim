@@ -26,12 +26,20 @@ circuit:
       R_on: 1.0e-2
       R_off: 1.0e9
 
+    # Dot convention: a FLYBACK stores energy while Q1 is on and
+    # releases it through D1 while Q1 is off, so the secondary must
+    # be wound so that the ON-time voltage REVERSE-biases D1. With
+    # s_from = sec_anode the secondary conducted during the whole ON
+    # interval as well (measured: |i_s| > 0.5 A on 100 % of ON
+    # samples) — a forward converter's polarity, and the "24 V CCM
+    # flyback" the header promised was never what this file built.
+    # The secondary is therefore wound sec_neg → sec_anode.
     - type: transformer
       name: T1
       p_from: vin
       p_to: sw
-      s_from: sec_anode
-      s_to: sec_neg
+      s_from: sec_neg
+      s_to: sec_anode
       L_p: 100.0e-6
       L_s: 25.0e-6
       k: 0.95

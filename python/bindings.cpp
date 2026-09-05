@@ -390,6 +390,13 @@ void init_module(py::module_& m) {
               "If period > 0, repeats. Default rise/fall = 0 "
               "→ instantaneous transition (V12 backward "
               "compat).")
+        .def("add_inductor_coupling",
+              &builder::CircuitBuilder::add_inductor_coupling,
+              py::arg("name_a"), py::arg("name_b"), py::arg("k"),
+              py::return_value_policy::reference,
+              "Magnetically couple two existing linear inductors by "
+              "name with coefficient k in [0, 1], as add_transformer "
+              "does for the pair it creates.")
         .def("add_ideal_transformer",
               &builder::CircuitBuilder::add_ideal_transformer,
               py::arg("name"),
