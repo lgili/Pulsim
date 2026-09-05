@@ -40,6 +40,7 @@
 #include "pulsim/stamping/stamp_current_source.hpp"
 #include "pulsim/stamping/stamp_device.hpp"
 #include "pulsim/stamping/stamp_switch.hpp"
+#include "pulsim/stamping/stamp_ideal_transformer.hpp"
 #include "pulsim/stamping/stamp_vcvs.hpp"
 #include "pulsim/stamping/stamp_voltage_source.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -224,6 +225,20 @@ inline void dc_assemble(const topology::Graph& graph,
                 stamping::stamp_vcvs(J, b, x, coord,
                                       in_pos, in_neg,
                                       branch_var_id, p.gain);
+                break;
+            }
+            case DevicePool::StoredKind::IdealTransformer: {
+                // An ideal transformer transforms DC too — it has no
+                // frequency dependence. It is L_m across the primary
+                // that carries the DC short, and that is a separate
+                // device. Stamp it unchanged.
+                const auto& p = pool.ideal_transformer_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                const auto [p_from, p_to] =
+                    pool.ideal_transformer_primary_nodes(branch.id);
+                stamping::stamp_ideal_transformer(
+                    J, b, x, coord, p_from, p_to, branch_var_id, p.n);
                 break;
             }
             default:

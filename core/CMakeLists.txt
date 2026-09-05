@@ -134,6 +134,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_vcvs.cpp                 # Layer 2 V15
         tests/layer2/test_saturable_inductor.cpp   # Layer 2 V16
         tests/layer2/test_multi_winding_transformer.cpp  # Layer 2 V16
+        tests/layer2/test_ideal_transformer.cpp         # Phase 4 C.4
     )
     target_link_libraries(pulsim_core_layer2_tests
         PRIVATE

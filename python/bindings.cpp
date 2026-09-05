@@ -390,6 +390,19 @@ void init_module(py::module_& m) {
               "If period > 0, repeats. Default rise/fall = 0 "
               "→ instantaneous transition (V12 backward "
               "compat).")
+        .def("add_ideal_transformer",
+              &builder::CircuitBuilder::add_ideal_transformer,
+              py::arg("name"),
+              py::arg("p_from"), py::arg("p_to"),
+              py::arg("s_from"), py::arg("s_to"),
+              py::arg("n"),
+              py::return_value_policy::reference,
+              "Add an IDEAL transformer: v_s = n*v_p, i_p = -n*i_s, "
+              "n = N_s/N_p. The secondary is the branch (i(name) is "
+              "its current); the primary is a node pair receiving the "
+              "reflected current. It transforms DC -- add a "
+              "magnetising inductance across the primary if the real "
+              "device has one.")
         .def("add_vcvs",
               &builder::CircuitBuilder::add_vcvs,
               py::arg("name"),
@@ -1251,7 +1264,8 @@ void init_module(py::module_& m) {
         .value("NonlinearCapacitor",  pwl::DevicePool::StoredKind::NonlinearCapacitor)
         .value("ShockleyDiode",       pwl::DevicePool::StoredKind::ShockleyDiode)
         .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode)
-        .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna);
+        .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna)
+        .value("IdealTransformer",    pwl::DevicePool::StoredKind::IdealTransformer);
 
     // ---- ParametricRefactorResult (v1.4.0) -------------------------------
     py::class_<pwl::ParametricRefactorResult>(m,

@@ -222,6 +222,46 @@ public:
         return *this;
     }
 
+    /// Phase 4 C.4 — IDEAL TRANSFORMER: v_s = n·v_p, i_p = −n·i_s,
+    /// n = N_s/N_p. The one magnetics element the kernel lacked.
+    /// The secondary is the branch (its current is `i(name)`); the
+    /// primary is a pair of node references. It transforms DC — put
+    /// a magnetising inductance across the primary if the physical
+    /// device has one (the saturable transformer does that for you).
+    CircuitBuilder& add_ideal_transformer(
+        std::string_view name,
+        std::string_view p_from, std::string_view p_to,
+        std::string_view s_from, std::string_view s_to,
+        Real n) {
+        if (!(n > Real{0}) || !std::isfinite(n)) {
+            throw std::invalid_argument(std::format(
+                "add_ideal_transformer(\"{}\"): turns ratio n = N_s/N_p "
+                "must be a positive finite number (got {}). Reverse the "
+                "secondary terminals for a polarity flip rather than "
+                "passing a negative ratio.", name, n));
+        }
+        const Index pf = resolve_node_(p_from);
+        const Index pt = resolve_node_(p_to);
+        const Index sf = resolve_node_(s_from);
+        const Index st = resolve_node_(s_to);
+        if (pf == pt) {
+            throw std::invalid_argument(std::format(
+                "add_ideal_transformer(\"{}\"): primary terminals are the "
+                "same node '{}' — the primary would see zero voltage and "
+                "the secondary would be pinned to zero.", name, p_from));
+        }
+        if (sf == st) {
+            throw std::invalid_argument(std::format(
+                "add_ideal_transformer(\"{}\"): secondary terminals are "
+                "the same node '{}'.", name, s_from));
+        }
+        const Index b_id = add_branch_(
+            name, sf, st, topology::BranchKind::Source);
+        pool_.add_ideal_transformer(
+            b_id, pf, pt, models::IdealTransformer::Params{.n = n});
+        return *this;
+    }
+
     /// Add an IDEAL OP-AMP: high-gain VCVS with single-ended
     /// output (out_neg = gnd). Default gain = 10⁵ (≈ open-
     /// loop typical for compensated devices). Combine with

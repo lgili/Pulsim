@@ -311,6 +311,14 @@ inline void load_device(
             require_real(dev, idx, type, "L_p"),
             require_real(dev, idx, type, "L_s"),
             real_or(dev, "k", Real{1}));
+    } else if (type == "ideal_transformer") {
+        b.add_ideal_transformer(
+            name,
+            require_string(dev, idx, type, "p_from"),
+            require_string(dev, idx, type, "p_to"),
+            require_string(dev, idx, type, "s_from"),
+            require_string(dev, idx, type, "s_to"),
+            require_real(dev, idx, type, "n"));
     } else if (type == "induction_motor") {
         // Phase 2.1 composite device — the YAML defines the TOPOLOGY
         // (3× per-phase Rs + σ·Ls + dummy V source). The user wires
@@ -414,7 +422,7 @@ inline void load_device(
             "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, op_amp_ideal, "
-            "transformer, induction_motor");
+            "transformer, ideal_transformer, induction_motor");
     }
 }
 
