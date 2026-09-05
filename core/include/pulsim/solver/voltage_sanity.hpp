@@ -112,6 +112,20 @@ struct ImplausibleVoltage {
             break;
         }
     }
+    // Phase 4 C.4: an ideal transformer legitimately multiplies the
+    // source voltage by its turns ratio — a 1:10 step-up producing
+    // 10× the source is the circuit working, not a solver failure.
+    // Unlike a VCVS's gain (an approximation knob, so the check
+    // declines below), n is a physical ratio, so widen the scale by
+    // it. Cascades compound; step-DOWN ratios do not narrow it.
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (graph.branch(b).kind == topology::BranchKind::Source &&
+            pool.is_registered(b) &&
+            pool.kind_of(b) == SK::IdealTransformer) {
+            const Real n = pool.ideal_transformer_params(b).n;
+            if (n > Real{1}) v_max *= n;
+        }
+    }
     return v_max;
 }
 

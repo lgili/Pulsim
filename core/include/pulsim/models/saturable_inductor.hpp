@@ -37,11 +37,13 @@
 //     extension
 
 #include "pulsim/ad/ad_scalar.hpp"
+#include "pulsim/models/flux_table.hpp"
 #include "pulsim/numeric/concepts.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <cmath>
+#include <memory>
 
 namespace pulsim::models {
 
@@ -54,6 +56,15 @@ struct SaturableInductor {
         // model AD-friendly (no pow needed — just (i/I_sat)²).
         // Smoothing floor: minimum effective L at high |i|.
         Real L_residual = Real{0};    // [H] (0 = no floor)
+        // Phase 4 C.4 — an alternative LAW. When set, λ(i) and L(i)
+        // come from this monotone table (a gapped core, a datasheet
+        // curve, a JA anhysteretic) and the three fields above are
+        // ignored except as reported metadata. Null = the analytic
+        // atan law. A pointer, not a table by value: Params lives in
+        // the pool's variant and is copied into the history on every
+        // snapshot, and a 96-knot table by value would be copied per
+        // step. Trailing with a default so every brace-init compiles.
+        std::shared_ptr<const FluxTable> table{};
     };
 
     static constexpr topology::BranchKind kind =
@@ -118,9 +129,20 @@ struct SaturableInductor {
     /// `atan` overload on the AD scalar to compute a value the model
     /// already knows in closed form.
     [[nodiscard]] static Real flux(Real i_L, const Params& p) noexcept {
+        if (p.table) return p.table->flux(i_L);
         return p.L_residual * i_L
                + (p.L_0 - p.L_residual) * p.I_sat
                      * std::atan(i_L / p.I_sat);
+    }
+
+    /// L(i) = dλ/di, for the law in force — the EXACT derivative of
+    /// the same expression `flux()` evaluates, table or atan. The
+    /// stamp reads this, not `current<Real>()`, so a table-backed
+    /// device cannot end up with a Jacobian from one law and a
+    /// residual from another.
+    [[nodiscard]] static Real inductance(Real i_L, const Params& p) noexcept {
+        if (p.table) return p.table->inductance(i_L);
+        return current<Real>(&i_L, p);
     }
 };
 

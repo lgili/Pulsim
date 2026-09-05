@@ -390,6 +390,44 @@ void init_module(py::module_& m) {
               "If period > 0, repeats. Default rise/fall = 0 "
               "→ instantaneous transition (V12 backward "
               "compat).")
+        .def("add_inductor_coupling",
+              &builder::CircuitBuilder::add_inductor_coupling,
+              py::arg("name_a"), py::arg("name_b"), py::arg("k"),
+              py::return_value_policy::reference,
+              "Magnetically couple two existing linear inductors by "
+              "name with coefficient k in [0, 1], as add_transformer "
+              "does for the pair it creates.")
+        .def("add_saturable_transformer",
+              &builder::CircuitBuilder::add_saturable_transformer,
+              py::arg("name"),
+              py::arg("p_from"), py::arg("p_to"),
+              py::arg("s_from"), py::arg("s_to"),
+              py::arg("N_p"), py::arg("N_s"),
+              py::arg("Ae"), py::arg("le"), py::arg("lg"),
+              py::arg("mu_r0") = 2000.0, py::arg("B_sat") = 0.35,
+              py::arg("L_leak_p") = 0.0, py::arg("L_leak_s") = 0.0,
+              py::return_value_policy::reference,
+              "Saturable transformer on a gapped core: per-winding "
+              "leakage + ideal n = N_s/N_p + ONE magnetising flux "
+              "branch lambda(i) from geometry (N_p turns, Ae, le, TOTAL "
+              "gap lg, mu_r0, B_sat = mu0*Ms), referred to the primary. "
+              "i(name) is the secondary current, i(name + '.m') the "
+              "magnetising current. Below saturation it equals "
+              "add_transformer with L_p = L_leak_p + L_m, M = n*L_m, "
+              "L_s = n^2*L_m + L_leak_s.")
+        .def("add_ideal_transformer",
+              &builder::CircuitBuilder::add_ideal_transformer,
+              py::arg("name"),
+              py::arg("p_from"), py::arg("p_to"),
+              py::arg("s_from"), py::arg("s_to"),
+              py::arg("n"),
+              py::return_value_policy::reference,
+              "Add an IDEAL transformer: v_s = n*v_p, i_p = -n*i_s, "
+              "n = N_s/N_p. The secondary is the branch (i(name) is "
+              "its current); the primary is a node pair receiving the "
+              "reflected current. It transforms DC -- add a "
+              "magnetising inductance across the primary if the real "
+              "device has one.")
         .def("add_vcvs",
               &builder::CircuitBuilder::add_vcvs,
               py::arg("name"),
@@ -693,6 +731,28 @@ void init_module(py::module_& m) {
               "drops smoothly toward L_residual as |i| → I_sat. "
               "Requires Newton refresh — `simulate()` enables "
               "it automatically.")
+        .def("add_saturable_inductor_table",
+              &builder::CircuitBuilder::add_saturable_inductor_table,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("i_knots"), py::arg("lambda_knots"),
+              py::return_value_policy::reference,
+              "Saturable inductor from a (i, lambda) table for i >= 0 "
+              "starting at the origin, strictly increasing in both; "
+              "odd-extended, monotone-cubic between knots, linear "
+              "beyond the last. Same device as add_saturable_inductor "
+              "with a tabulated law.")
+        .def("add_gapped_core_inductor",
+              &builder::CircuitBuilder::add_gapped_core_inductor,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
+              py::arg("mu_r0") = 2000.0, py::arg("B_sat") = 0.35,
+              py::arg("knots") = 128,
+              py::return_value_policy::reference,
+              "Saturable inductor on a gapped core from geometry: N "
+              "turns, Ae [m^2], le [m], TOTAL gap lg [m], initial mu_r, "
+              "B_sat [T] (= mu0*Ms, the datasheet value). lambda(i) is "
+              "generated from Ampere's law by sweeping the core field "
+              "through M = Ms*tanh(H/H0), with exact slopes.")
         .def("add_diode",
               &builder::CircuitBuilder::add_diode,
               py::arg("name"), py::arg("anode"),
@@ -999,6 +1059,12 @@ void init_module(py::module_& m) {
                               kind_str = "lauritzen_diode"; break;
                           case K::PmsmMna:
                               kind_str = "pmsm_mna"; break;
+                          case K::IdealTransformer: {
+                              kind_str = "ideal_transformer";
+                              params["n"] =
+                                  pool.ideal_transformer_params(bid).n;
+                              break;
+                          }
                           }
                       } catch (const std::exception&) {
                           // Branch present in graph but not registered
@@ -1251,7 +1317,8 @@ void init_module(py::module_& m) {
         .value("NonlinearCapacitor",  pwl::DevicePool::StoredKind::NonlinearCapacitor)
         .value("ShockleyDiode",       pwl::DevicePool::StoredKind::ShockleyDiode)
         .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode)
-        .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna);
+        .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna)
+        .value("IdealTransformer",    pwl::DevicePool::StoredKind::IdealTransformer);
 
     // ---- ParametricRefactorResult (v1.4.0) -------------------------------
     py::class_<pwl::ParametricRefactorResult>(m,

@@ -20,6 +20,7 @@
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/inductor.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
+#include "pulsim/models/ideal_transformer.hpp"
 #include "pulsim/models/multi_winding_transformer.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
@@ -75,6 +76,7 @@ public:
         ShockleyDiode      = 16, // Phase 4 C.1 (exponential junction)
         LauritzenDiode     = 17, // Phase 4 C.1 (reverse recovery)
         PmsmMna            = 18, // Phase 4 C.3 (MNA-native PMSM)
+        IdealTransformer   = 19, // Phase 4 C.4 (v_s = n v_p, i_p = -n i_s)
     };
 
     struct SwitchParams {
@@ -312,6 +314,31 @@ public:
             std::pair<Index, Index>{in_pos_node, in_neg_node};
     }
 
+    /// Register an ideal transformer (Phase 4 C.4). `branch_id` is
+    /// the SECONDARY branch (Source kind, own current unknown, like
+    /// a VCVS); the primary terminals are node references that
+    /// receive the reflected current −n·i_s.
+    void add_ideal_transformer(
+        Index branch_id, Index p_from_node, Index p_to_node,
+        models::IdealTransformer::Params p) {
+        entries_[branch_id] = Entry{p};
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+        ideal_transformer_primary_nodes_[branch_id] =
+            std::pair<Index, Index>{p_from_node, p_to_node};
+    }
+
+    [[nodiscard]] std::pair<Index, Index>
+    ideal_transformer_primary_nodes(Index branch_id) const {
+        const auto it = ideal_transformer_primary_nodes_.find(branch_id);
+        if (it == ideal_transformer_primary_nodes_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::ideal_transformer_primary_nodes: branch {} "
+                "is not an IdealTransformer", branch_id));
+        }
+        return it->second;
+    }
+
     [[nodiscard]] std::pair<Index, Index>
     vcvs_input_nodes(Index branch_id) const {
         const auto it = vcvs_input_nodes_.find(branch_id);
@@ -546,6 +573,12 @@ public:
     vcvs_params(Index branch_id) const {
         return require_params_<models::VCVS::Params>(
             branch_id, "vcvs_params", "a VCVS");
+    }
+
+    [[nodiscard]] const models::IdealTransformer::Params&
+    ideal_transformer_params(Index branch_id) const {
+        return require_params_<models::IdealTransformer::Params>(
+            branch_id, "ideal_transformer_params", "an IdealTransformer");
     }
 
     [[nodiscard]] const models::IgbtLevel1::Params&
@@ -888,7 +921,8 @@ private:
                                 models::NonlinearCapacitor::Params,
                                 models::ShockleyDiode::Params,
                                 models::LauritzenDiode::Params,
-                                models::PmsmMna::Params>;
+                                models::PmsmMna::Params,
+                                models::IdealTransformer::Params>;
 
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
@@ -900,8 +934,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 19,
-        "StoredKind has 19 values; Entry must list 19 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 20,
+        "StoredKind has 20 values; Entry must list 20 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -922,6 +956,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::ShockleyDiode,      models::ShockleyDiode::Params>);
     static_assert(kind_maps_to_<StoredKind::LauritzenDiode,     models::LauritzenDiode::Params>);
     static_assert(kind_maps_to_<StoredKind::PmsmMna,            models::PmsmMna::Params>);
+    static_assert(kind_maps_to_<StoredKind::IdealTransformer,   models::IdealTransformer::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1006,6 +1041,8 @@ private:
     // references for the sense inputs.
     numeric::Dictionary<Index, std::pair<Index, Index>>
         vcvs_input_nodes_;
+    std::unordered_map<Index, std::pair<Index, Index>>
+        ideal_transformer_primary_nodes_;
 
     // Layer 2 V17: SaturableInductor branches, in insertion
     // order. Used by the Newton refresh + history tracker to

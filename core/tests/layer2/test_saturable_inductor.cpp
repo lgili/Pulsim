@@ -251,3 +251,98 @@ TEST_CASE("SaturableInductor: flux is the exact integral of L",
         CHECK(std::abs(rectangle - exact) > 0.5 * std::abs(exact));
     }
 }
+
+// =============================================================================
+// Phase 4 C.4 — the table-backed law is the same device
+// =============================================================================
+
+namespace {
+using pulsim::builder::CircuitBuilder;
+using pulsim::pwl::PwlStateSpaceCache;
+using pulsim::solver::SimulationOptions;
+using pulsim::solver::run_transient;
+using pulsim::topology::SwitchStateMask;
+}  // namespace
+
+TEST_CASE("SaturableInductor: a table of the atan law reproduces the atan "
+          "device's transient", "[v2][c4][saturable][table]") {
+    // Same V-R-L step as the V17 test above, once with the analytic
+    // law and once with that law TABULATED (64 sqrt-spaced knots to
+    // 10 I_sat). The two must agree to the table's own accuracy —
+    // which is the accuracy budget of every tabulated core.
+    const Real L_0 = 1e-3, I_sat = 0.5, L_res = 5e-5;
+    auto run = [&](bool tabulated) {
+        CircuitBuilder b;
+        b.add_voltage_source("V", "in", "gnd", 1.0);
+        b.add_resistor("R", "in", "m", 1.0);
+        if (tabulated) {
+            models::SaturableInductor::Params p;
+            p.L_0 = L_0; p.I_sat = I_sat; p.L_residual = L_res;
+            std::vector<Real> i, lam;
+            for (Size k = 0; k < 64; ++k) {
+                const Real u = static_cast<Real>(k) / 63.0;
+                i.push_back(10 * I_sat * u * u);
+                lam.push_back(models::SaturableInductor::flux(i.back(), p));
+            }
+            b.add_saturable_inductor_table("Ls", "m", "gnd", i, lam);
+        } else {
+            b.add_saturable_inductor("Ls", "m", "gnd", L_0, I_sat, L_res);
+        }
+        PwlStateSpaceCache cache(b.graph(), b.pool());
+        SimulationOptions opts{.t_start = 0.0, .t_end = 2e-3, .dt = 1e-6};
+        opts.max_newton_iterations = 50;
+        cache.build(opts.dt);
+        auto sw = [](Real) { return SwitchStateMask(0); };
+        auto r = run_transient(cache, b.graph(), b.pool(), opts, sw, {}, false, {});
+        std::vector<Real> out;
+        const Index row = b.pool().branch_var_id_for_inductor(2, b.graph());
+        for (Size k = 0; k < r.num_steps(); ++k) out.push_back(r.states[k][row]);
+        return out;
+    };
+    const auto a = run(false), t = run(true);
+    REQUIRE(a.size() == t.size());
+    Real err = 0, peak = 0;
+    for (Size k = 0; k < a.size(); ++k) {
+        err = std::max(err, std::abs(a[k] - t[k]));
+        peak = std::max(peak, std::abs(a[k]));
+    }
+    INFO("peak " << peak << " A, max |atan - table| = " << err << " A");
+    REQUIRE(peak > 0.9);                // drove it well past I_sat = 0.5
+    REQUIRE(err < 2e-4 * peak);         // the table's own accuracy
+}
+
+TEST_CASE("SaturableInductor: a gapped core saturates at the current its "
+          "geometry says", "[v2][c4][saturable][gapped]") {
+    // ETD29-class core (see gapped_core.hpp): L_unsat = 111 µH,
+    // knee ≈ 6 A. Drive it from a 20 V source through 1 Ω:
+    // the final current is 20 A (well past the knee) and the
+    // incremental inductance there has collapsed.
+    CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", 20.0);
+    b.add_resistor("R", "in", "m", 1.0);
+    b.add_gapped_core_inductor("Lc", "m", "gnd", 25, 76e-6, 72e-3, 0.5e-3,
+                               2000, 0.35);
+    const auto& p = b.pool().saturable_inductor_params(2);
+    REQUIRE(p.table);
+    CHECK(p.L_0 == Approx(111.4e-6).epsilon(3e-3));
+    CHECK(p.I_sat > 4.0);                 // the knee current
+    CHECK(p.I_sat < 8.0);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    SimulationOptions opts{.t_start = 0.0, .t_end = 5e-3, .dt = 1e-6};
+    opts.max_newton_iterations = 50;
+    cache.build(opts.dt);
+    auto sw = [](Real) { return SwitchStateMask(0); };
+    auto r = run_transient(cache, b.graph(), b.pool(), opts, sw, {}, false, {});
+    const Index row = b.pool().branch_var_id_for_inductor(2, b.graph());
+    const Real i_end = r.states[r.num_steps() - 1][row];
+    CHECK(i_end == Approx(20.0).margin(1e-6));
+    // Time to reach 90 % of final: an UNSATURATED 111 µH / 1 Ω would
+    // take 2.3·τ = 256 µs. The saturating core gets there sooner
+    // because L collapses past 6.4 A.
+    Size k90 = 0;
+    for (; k90 < r.num_steps(); ++k90) if (r.states[k90][row] >= 18.0) break;
+    const Real t90 = k90 * opts.dt;
+    INFO("t(90%) = " << t90 * 1e6 << " µs vs 256 µs unsaturated");
+    CHECK(t90 < 200e-6);
+    CHECK(t90 > 20e-6);
+}

@@ -66,6 +66,33 @@ def test_add_flyback_couples_primary_and_secondary() -> None:
     assert out.primary_name == "fb__Lp"
     assert out.secondary_name == "fb__Ls"
     assert out.primary_branch_id != out.secondary_branch_id
+    # The name says "couples"; this used to check only the counts
+    # above, and the coupling call sat behind a `hasattr` for a
+    # method that did not exist — so every flyback this factory built
+    # had two INDEPENDENT inductors and the test was green. Now the
+    # coupling is asserted where it shows: energy reaches the output.
+    pwm = p.make_pwm_switch_fn(frequency=100e3, duty=0.4, switch_idx=0,
+                               num_switches=b.graph.num_switches, phase=0.0)
+    res = p.simulate(b, t_end=1e-3, dt=2e-8, switch_fn=pwm)
+    v_out = float(np.asarray(res.v("vout"))[-1])
+    assert v_out > 5.0, f"no transformer action: V_out = {v_out} V"
+
+
+def test_add_inductor_coupling_refuses_by_name() -> None:
+    b = p.CircuitBuilder()
+    b.add_inductor("La", "a", "gnd", 1e-3)
+    b.add_inductor("Lb", "b", "gnd", 1e-3)
+    b.add_saturable_inductor("Ls", "c", "gnd", 1e-3, 1.0)
+    b.add_resistor("R", "a", "b", 1.0)
+    with pytest.raises(Exception, match=r"\[0, 1\]"):
+        b.add_inductor_coupling("La", "Lb", 1.5)
+    with pytest.raises(Exception, match="itself"):
+        b.add_inductor_coupling("La", "La", 0.5)
+    with pytest.raises(Exception, match="not a linear inductor"):
+        b.add_inductor_coupling("La", "Ls", 0.5)
+    with pytest.raises(Exception, match="not a linear inductor"):
+        b.add_inductor_coupling("La", "R", 0.5)
+    b.add_inductor_coupling("La", "Lb", 0.9)      # and the good one works
 
 
 def test_add_buck_default_name_when_unspecified() -> None:

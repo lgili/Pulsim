@@ -54,6 +54,7 @@
 #include "pulsim/stamping/stamp_current_source.hpp"
 #include "pulsim/stamping/stamp_device.hpp"
 #include "pulsim/stamping/stamp_switch.hpp"
+#include "pulsim/stamping/stamp_ideal_transformer.hpp"
 #include "pulsim/stamping/stamp_vcvs.hpp"
 #include "pulsim/stamping/stamp_voltage_source.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -199,6 +200,18 @@ inline void assemble_impl(const topology::Graph& graph,
                 stamping::stamp_vcvs(S, b, x, coord,
                                        in_pos, in_neg,
                                        branch_var_id, vp.gain);
+            } else if (src_kind ==
+                       DevicePool::StoredKind::IdealTransformer) {
+                // Phase 4 C.4: VCVS on the secondary plus the
+                // reflected −n·i_s at the primary nodes.
+                const auto& tp =
+                    pool.ideal_transformer_params(branch.id);
+                const auto [p_from, p_to] =
+                    pool.ideal_transformer_primary_nodes(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                stamping::stamp_ideal_transformer(
+                    S, b, x, coord, p_from, p_to, branch_var_id, tp.n);
             } else {
                 const auto& p = pool.voltage_source_params(branch.id);
                 const Index branch_var_id =

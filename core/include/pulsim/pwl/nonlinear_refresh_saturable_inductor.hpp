@@ -86,7 +86,7 @@ inline Real stamp_saturable_inductor(
     const Real lambda_new =
         models::SaturableInductor::flux(i_L_new, e.params);
     const Real L_eff =
-        models::SaturableInductor::current<Real>(&i_L_new, e.params);
+        models::SaturableInductor::inductance(i_L_new, e.params);
 
     const auto kc = trbdf2_coeffs();
     const bool bdf2 = (stage == TrBdf2Stage::Bdf2Stage2);

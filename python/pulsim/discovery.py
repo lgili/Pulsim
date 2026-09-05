@@ -122,11 +122,31 @@ _CATEGORIES: dict[str, list[_Entry]] = {
 
     "Coupled magnetics": [
         _Entry("add_transformer",
-               "Two-winding ideal transformer (L_p, L_s, k)",
-               "Flyback, forward, push-pull, full-bridge isolated DC-DC."),
-        _Entry("add_multi_winding_transformer",
-               "N-winding transformer with N×N coupling matrix",
-               "Multi-output flybacks (main + aux bias + monitor)."),
+               "Two-winding LINEAR coupled-inductor pair (L_p, L_s, k) — "
+               "no core, cannot saturate",
+               "Flyback, forward, push-pull, full-bridge isolated DC-DC "
+               "when the core stays below its knee."),
+        _Entry("add_inductor_coupling",
+               "Couple two existing linear inductors by name with k",
+               "Hand-built transformers; what add_flyback uses."),
+        _Entry("add_ideal_transformer",
+               "Ideal two-port: v_s = n·v_p, i_p = −n·i_s (transforms DC)",
+               "The middle of a T-model; isolation in control loops."),
+        _Entry("add_saturable_transformer",
+               "T-model on a GAPPED CORE: leakage + ideal n + one "
+               "magnetising λ(i) from geometry (N_p, N_s, Ae, le, lg, "
+               "μ_r0, B_sat)",
+               "Flyback / forward / LLC inrush, flux walking, and "
+               "overload — the core runs away where the linear pair "
+               "keeps reporting a tidy output."),
+        _Entry("add_gapped_core_inductor",
+               "Saturable inductor from core geometry (N, Ae, le, lg, "
+               "μ_r0, B_sat)",
+               "Chokes and magnetising branches sized from a datasheet "
+               "core rather than from a fitted L_0 / I_sat."),
+        _Entry("add_saturable_inductor_table",
+               "Saturable inductor from a measured (i, λ) table",
+               "Digitised datasheet or measured B–H curves."),
     ],
 
     "Controlled sources / op-amps": [

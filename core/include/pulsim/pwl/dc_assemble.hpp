@@ -40,6 +40,7 @@
 #include "pulsim/stamping/stamp_current_source.hpp"
 #include "pulsim/stamping/stamp_device.hpp"
 #include "pulsim/stamping/stamp_switch.hpp"
+#include "pulsim/stamping/stamp_ideal_transformer.hpp"
 #include "pulsim/stamping/stamp_vcvs.hpp"
 #include "pulsim/stamping/stamp_voltage_source.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -226,6 +227,20 @@ inline void dc_assemble(const topology::Graph& graph,
                                       branch_var_id, p.gain);
                 break;
             }
+            case DevicePool::StoredKind::IdealTransformer: {
+                // An ideal transformer transforms DC too — it has no
+                // frequency dependence. It is L_m across the primary
+                // that carries the DC short, and that is a separate
+                // device. Stamp it unchanged.
+                const auto& p = pool.ideal_transformer_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                const auto [p_from, p_to] =
+                    pool.ideal_transformer_primary_nodes(branch.id);
+                stamping::stamp_ideal_transformer(
+                    J, b, x, coord, p_from, p_to, branch_var_id, p.n);
+                break;
+            }
             default:
                 break;
             }
@@ -248,9 +263,24 @@ inline void dc_assemble(const topology::Graph& graph,
             ++switch_idx;
             break;
         }
-        case topology::BranchKind::Nonlinear:
-            // Skipped (handled by future Newton OpenSpec).
+        case topology::BranchKind::Nonlinear: {
+            // Newton devices are stamped by their refresh, not here —
+            // EXCEPT the flux devices, whose DC law is exact and
+            // linear: v = dλ/dt = 0, a short, whatever λ(i) does.
+            // Left out, a saturable inductor was OPEN at DC, so a
+            // DC operating point saw it as a break in the circuit,
+            // and an ideal transformer whose magnetising branch it
+            // is would have passed DC straight through to the
+            // secondary (n·V_p instead of 0). The linear inductor's
+            // own DC stamp is the right one.
+            if (pool.kind_of(branch.id)
+                == DevicePool::StoredKind::SaturableInductor) {
+                const Index branch_var_id =
+                    pool.branch_var_id_for_inductor(branch.id, graph);
+                stamp_inductor_dc(J, b, coord, branch_var_id);
+            }
             break;
+        }
         }
     }
 

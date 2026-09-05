@@ -693,11 +693,12 @@ def add_flyback(builder,
     out.secondary_branch_id = int(builder.graph.num_branches)
     builder.add_inductor(out.secondary_name, sec_mid, gnd_node, L_sec)
 
-    # Couple the two inductors. Builder API exposes
-    # add_inductor_coupling(name_a, name_b, k).
-    if hasattr(builder, "add_inductor_coupling"):
-        builder.add_inductor_coupling(
-            out.primary_name, out.secondary_name, k)
+    # Couple the two windings. This used to sit behind
+    # `hasattr(builder, "add_inductor_coupling")` — a method that did
+    # not exist — so every flyback this factory built had two
+    # UNCOUPLED inductors and no transformer action at all, and the
+    # branch-count test never noticed. The method exists now; call it.
+    builder.add_inductor_coupling(out.primary_name, out.secondary_name, k)
 
     builder.add_diode(out.diode_name, sec_mid, vout_node,
                           g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)

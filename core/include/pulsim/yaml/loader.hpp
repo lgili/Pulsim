@@ -311,6 +311,41 @@ inline void load_device(
             require_real(dev, idx, type, "L_p"),
             require_real(dev, idx, type, "L_s"),
             real_or(dev, "k", Real{1}));
+    } else if (type == "gapped_core_inductor") {
+        b.add_gapped_core_inductor(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "N"),
+            require_real(dev, idx, type, "Ae"),
+            require_real(dev, idx, type, "le"),
+            require_real(dev, idx, type, "lg"),
+            real_or(dev, "mu_r0", Real{2000}),
+            real_or(dev, "B_sat", Real{0.35}));
+    } else if (type == "saturable_transformer") {
+        b.add_saturable_transformer(
+            name,
+            require_string(dev, idx, type, "p_from"),
+            require_string(dev, idx, type, "p_to"),
+            require_string(dev, idx, type, "s_from"),
+            require_string(dev, idx, type, "s_to"),
+            require_real(dev, idx, type, "N_p"),
+            require_real(dev, idx, type, "N_s"),
+            require_real(dev, idx, type, "Ae"),
+            require_real(dev, idx, type, "le"),
+            require_real(dev, idx, type, "lg"),
+            real_or(dev, "mu_r0", Real{2000}),
+            real_or(dev, "B_sat", Real{0.35}),
+            real_or(dev, "L_leak_p", Real{0}),
+            real_or(dev, "L_leak_s", Real{0}));
+    } else if (type == "ideal_transformer") {
+        b.add_ideal_transformer(
+            name,
+            require_string(dev, idx, type, "p_from"),
+            require_string(dev, idx, type, "p_to"),
+            require_string(dev, idx, type, "s_from"),
+            require_string(dev, idx, type, "s_to"),
+            require_real(dev, idx, type, "n"));
     } else if (type == "induction_motor") {
         // Phase 2.1 composite device — the YAML defines the TOPOLOGY
         // (3× per-phase Rs + σ·Ls + dummy V source). The user wires
@@ -414,7 +449,8 @@ inline void load_device(
             "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, op_amp_ideal, "
-            "transformer, induction_motor");
+            "gapped_core_inductor, transformer, ideal_transformer, "
+            "saturable_transformer, induction_motor");
     }
 }
 
