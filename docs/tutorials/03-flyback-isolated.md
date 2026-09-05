@@ -111,7 +111,9 @@ Every PWM edge triggers two commutations: Q1 flips, then a few hundred nanosecon
 
 - **Add a clamp.** Real flybacks have RCD snubbers or active clamps to handle leakage-inductance spikes. Add a series-R + parallel-C across `Q1` and watch the spike soften.
 - **Multi-winding (Layer 2 V16).** Use `add_multi_winding_transformer` to build a 3-output flyback (main + aux bias + monitor) and verify each output settles independently.
-- **Saturating core (Layer 2 V17).** Replace `add_transformer` with two `add_saturable_inductor` calls + a `TransformerCoupling` (advanced) — the boost-saturable showcase has the pattern.
+- **Saturating core (Phase 4 C.4).** Replace `add_transformer` with `add_saturable_transformer(name, p_from, p_to, s_from, s_to, N_p, N_s, Ae, le, lg, B_sat=…, L_leak_p=…)`: the same T-model, with the magnetising branch generated from the core's geometry and gap, so an overload or a zero-crossing energisation drives the core past `B_sat` and the current runs away the way it does on the bench. Below the knee it reproduces `add_transformer` exactly (`L_p = L_leak_p + L_m`, `M = n·L_m`, `L_s = n²·L_m`).
+
+  Do **not** build it from two `add_saturable_inductor` calls plus a `TransformerCoupling`. Saturable inductors are Newton devices outside the linear history, so that arrangement couples the Jacobian but not the companion history: it converges, and it is wrong.
 
 ## Going to [Tutorial 04](04-3phase-vsi.md)
 
