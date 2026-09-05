@@ -397,6 +397,24 @@ void init_module(py::module_& m) {
               "Magnetically couple two existing linear inductors by "
               "name with coefficient k in [0, 1], as add_transformer "
               "does for the pair it creates.")
+        .def("add_saturable_transformer",
+              &builder::CircuitBuilder::add_saturable_transformer,
+              py::arg("name"),
+              py::arg("p_from"), py::arg("p_to"),
+              py::arg("s_from"), py::arg("s_to"),
+              py::arg("N_p"), py::arg("N_s"),
+              py::arg("Ae"), py::arg("le"), py::arg("lg"),
+              py::arg("mu_r0") = 2000.0, py::arg("B_sat") = 0.35,
+              py::arg("L_leak_p") = 0.0, py::arg("L_leak_s") = 0.0,
+              py::return_value_policy::reference,
+              "Saturable transformer on a gapped core: per-winding "
+              "leakage + ideal n = N_s/N_p + ONE magnetising flux "
+              "branch lambda(i) from geometry (N_p turns, Ae, le, TOTAL "
+              "gap lg, mu_r0, B_sat = mu0*Ms), referred to the primary. "
+              "i(name) is the secondary current, i(name + '.m') the "
+              "magnetising current. Below saturation it equals "
+              "add_transformer with L_p = L_leak_p + L_m, M = n*L_m, "
+              "L_s = n^2*L_m + L_leak_s.")
         .def("add_ideal_transformer",
               &builder::CircuitBuilder::add_ideal_transformer,
               py::arg("name"),
@@ -728,12 +746,13 @@ void init_module(py::module_& m) {
               py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
               py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
               py::arg("mu_r0") = 2000.0, py::arg("B_sat") = 0.35,
-              py::arg("p_knee") = 4.0, py::arg("knots") = 96,
+              py::arg("knots") = 128,
               py::return_value_policy::reference,
               "Saturable inductor on a gapped core from geometry: N "
               "turns, Ae [m^2], le [m], TOTAL gap lg [m], initial mu_r, "
-              "B_sat [T] where mu_r has halved. lambda(i) is generated "
-              "from Ampere's law by sweeping the flux.")
+              "B_sat [T] (= mu0*Ms, the datasheet value). lambda(i) is "
+              "generated from Ampere's law by sweeping the core field "
+              "through M = Ms*tanh(H/H0), with exact slopes.")
         .def("add_diode",
               &builder::CircuitBuilder::add_diode,
               py::arg("name"), py::arg("anode"),
@@ -1040,6 +1059,12 @@ void init_module(py::module_& m) {
                               kind_str = "lauritzen_diode"; break;
                           case K::PmsmMna:
                               kind_str = "pmsm_mna"; break;
+                          case K::IdealTransformer: {
+                              kind_str = "ideal_transformer";
+                              params["n"] =
+                                  pool.ideal_transformer_params(bid).n;
+                              break;
+                          }
                           }
                       } catch (const std::exception&) {
                           // Branch present in graph but not registered

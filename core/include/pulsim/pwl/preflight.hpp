@@ -218,7 +218,10 @@ private:
         case topology::BranchKind::Source:
             return pool.kind_of(branch.id) != SK::CurrentSource;
         case topology::BranchKind::Nonlinear:
-            return false;
+            // A saturable inductor is a short at DC (v = dλ/dt = 0),
+            // exactly like a linear one; the other Newton devices
+            // are stamped open by the DC assembly and stay so here.
+            return pool.kind_of(branch.id) == SK::SaturableInductor;
         case topology::BranchKind::Switch:
             return true;
     }

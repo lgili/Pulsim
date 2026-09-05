@@ -56,6 +56,51 @@ TEST_CASE("FluxTable: reproduces the analytic law, value and derivative",
     CHECK(tab.L_0() == Approx(p.L_0).epsilon(1e-4));
 }
 
+TEST_CASE("FluxTable: exact knot slopes beat estimated ones by two orders",
+          "[v2][c4][flux_table][unit]") {
+    const auto p = atan_law();
+    const Size n = 64;
+    const Real i_max = 10.0 * p.I_sat;
+    std::vector<Real> i, lam, L;
+    for (Size k = 0; k < n; ++k) {
+        const Real u = static_cast<Real>(k) / static_cast<Real>(n - 1);
+        const Real ik = i_max * u * u;
+        i.push_back(ik);
+        lam.push_back(models::SaturableInductor::flux(ik, p));
+        L.push_back(models::SaturableInductor::current<Real>(&ik, p));
+    }
+    const Real L_tail = models::SaturableInductor::current<Real>(&i_max, p);
+    const models::FluxTable exact(i, lam, L, L_tail, "exact");
+    const models::FluxTable est(i, lam, "estimated");
+    Real e_exact = 0, e_est = 0;
+    for (int k = 1; k <= 20000; ++k) {
+        const Real x = i_max * k / 20000.0;
+        const Real La = models::SaturableInductor::current<Real>(&x, p);
+        e_exact = std::max(e_exact, std::abs(exact.inductance(x) - La) / La);
+        e_est   = std::max(e_est,   std::abs(est.inductance(x)   - La) / La);
+    }
+    INFO("max rel err in L: exact slopes " << e_exact << ", estimated " << e_est);
+    CHECK(e_exact < 1e-4);
+    CHECK(e_est > 10 * e_exact);
+    CHECK(exact.clamped_tangents() == 0);
+    CHECK(exact.max_fritsch_carlson_radius2() <= 9.0);
+}
+
+TEST_CASE("FluxTable: a tangent outside the monotone region is clamped, "
+          "not trusted", "[v2][c4][flux_table][unit]") {
+    // Wildly wrong user slopes: 10× the secant on a straight line.
+    std::vector<Real> i{0, 1, 2, 3}, lam{0, 1e-3, 2e-3, 3e-3}, L{1e-2, 1e-2, 1e-2, 1e-2};
+    const models::FluxTable tab(i, lam, L, 1e-3, "kinked");
+    CHECK(tab.clamped_tangents() > 0);
+    Real prev = -1;
+    for (int k = 0; k <= 3000; ++k) {
+        const Real x = 3.0 * k / 3000.0;
+        CHECK(tab.inductance(x) >= 0.0);
+        CHECK(tab.flux(x) >= prev);
+        prev = tab.flux(x);
+    }
+}
+
 TEST_CASE("FluxTable: odd in i, even L, continuous at the origin and at "
           "the last knot", "[v2][c4][flux_table][unit]") {
     const auto tab = tabulate(48, 30.0);

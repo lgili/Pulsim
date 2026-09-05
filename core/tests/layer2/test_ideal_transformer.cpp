@@ -129,3 +129,55 @@ TEST_CASE("IdealTransformer: the T-model reproduces the coupled-inductor "
     REQUIRE(peak > 5.0);                 // actually transforming
     REQUIRE(err < 1e-6 * peak);          // same linear circuit
 }
+
+TEST_CASE("SaturableTransformer: below saturation it IS the coupled-inductor "
+          "transformer", "[v2][c4][saturable_transformer]") {
+    // Geometry that lands on the example flyback's numbers: N_p = 25
+    // on the ETD29-class core gives L_m = 111.4 µH; N_s = 13 (n = 0.52).
+    // Add 5 µH of primary leakage. The equivalent coupled pair is
+    // L_p = L_lp + L_m, M = n·L_m, L_s = n²·L_m, k = M/√(L_p·L_s).
+    const Real N_p = 25, N_s = 13, Ae = 76e-6, le = 72e-3, lg = 0.5e-3;
+    const Real L_lp = 5e-6;
+    models::GappedCore::Params c;
+    c.N = N_p; c.Ae = Ae; c.le = le; c.lg = lg; c.mu_r0 = 2000; c.B_sat = 0.35;
+    const Real L_m = models::GappedCore::L_unsat(c);
+    const Real n = N_s / N_p;
+    const Real L_p = L_lp + L_m, M = n * L_m, L_s = n * n * L_m;
+    const Real k = M / std::sqrt(L_p * L_s);
+
+    auto run = [&](bool saturable) {
+        CircuitBuilder b;
+        // Small drive: 3 V peak keeps the core far below its knee
+        // (the knee is ~6 A of magnetising current; this draws < 0.3 A).
+        b.add_sine_voltage_source("V", "src", "gnd", 0.0, 3.0, 100e3, 0.0);
+        b.add_resistor("Rs", "src", "p", 0.5);
+        if (saturable) {
+            b.add_saturable_transformer("T", "p", "gnd", "s", "gnd",
+                                        N_p, N_s, Ae, le, lg, 2000, 0.35,
+                                        L_lp, 0.0);
+        } else {
+            b.add_transformer("T", "p", "gnd", "s", "gnd", L_p, L_s, k);
+        }
+        b.add_resistor("RL", "s", "gnd", 5.0);
+        PwlStateSpaceCache cache(b.graph(), b.pool());
+        SimulationOptions opts{.t_start = 0.0, .t_end = 50e-6, .dt = 1e-8};
+        opts.max_newton_iterations = 50;
+        cache.build(opts.dt);
+        auto sw = [](Real) { return SwitchStateMask(0); };
+        auto r = run_transient(cache, b.graph(), b.pool(), opts, sw, {}, false, {});
+        std::vector<Real> vs;
+        const Index s_idx = b.node_id_of("s");
+        for (Size i = 0; i < r.num_steps(); ++i) vs.push_back(r.states[i][s_idx]);
+        return vs;
+    };
+    const auto lin = run(false), sat = run(true);
+    REQUIRE(lin.size() == sat.size());
+    Real peak = 0, err = 0;
+    for (Size i = 0; i < lin.size(); ++i) {
+        peak = std::max(peak, std::abs(lin[i]));
+        err = std::max(err, std::abs(lin[i] - sat[i]));
+    }
+    INFO("k = " << k << ", peak v_s = " << peak << " V, max diff = " << err << " V");
+    REQUIRE(peak > 0.5);
+    REQUIRE(err < 2e-3 * peak);     // the table's accuracy below the knee
+}

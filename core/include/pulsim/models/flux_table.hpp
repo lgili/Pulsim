@@ -9,38 +9,47 @@
 // gap, a B(H) curve from a datasheet or from the Jiles-Atherton
 // anhysteretic — does not have one, so it is tabulated:
 //
-//     knots (i_k, λ_k), k = 0..K-1,  i_0 = 0, λ_0 = 0, strictly
-//     increasing in both,  extended as an ODD function to i < 0.
+//     knots (i_k, λ_k, L_k), k = 0..K-1,  i_0 = λ_0 = 0, i and λ
+//     strictly increasing, L_k = dλ/di at the knot, > 0;
+//     extended as an ODD function to i < 0.
 //
-// Between knots: monotone piecewise-cubic Hermite (Fritsch–Carlson
-// PCHIP). Its interpolant is guaranteed monotone on monotone data,
-// which is what makes L = dλ/di > 0 everywhere — an interpolating
-// spline can overshoot and hand Newton a negative inductance. The
-// derivative is continuous (C¹ λ, C⁰ L); the Jacobian entry is
-// exact for the interpolant, not a finite difference.
+// TRIPLES, NOT PAIRS. Between knots the interpolant is the cubic
+// Hermite with the stored L_k as tangents, so L(i) = dλ/di is the
+// EXACT derivative of the same expression λ(i) evaluates — which is
+// what the Newton stamp needs (residual from λ, Jacobian from L,
+// one function). Every generator knows the slope in closed form: the
+// analytic law has L(i), and a core has L = N²Ae/(le·dH_c/dB + lg/μ₀)
+// at each swept B. Measured against the analytic atan law at 64
+// knots: PCHIP-ESTIMATED slopes give 1.6e-3 relative error in L
+// (O(h²), and 7.5e-3 on a sharp gapped core); EXACT slopes give
+// 2e-5 (1.2e-4 on the same core) — fifty to a hundred times better
+// for the same table. That is why the pair-only constructor below
+// is the fallback for raw digitised data, and says so.
 //
-// Beyond the last knot: linear at the last slope, i.e. a constant
-// residual inductance — a saturated core is an air-core inductor, and
-// extrapolating the cubic instead would eventually turn λ around.
+// Monotonicity: with exact slopes on a concave law the Fritsch–
+// Carlson condition α² + β² ≤ 9 (α = L_k/d_k, β = L_{k+1}/d_k, d_k
+// the secant) holds on every segment (measured max 2.44), which
+// guarantees λ monotone and L > 0 between knots. It is CHECKED at
+// construction and a violating tangent is clamped radially onto the
+// circle — a user table digitised with a kink can otherwise hand
+// Newton a negative inductance. For pairs, Fritsch–Carlson slope
+// estimation is monotone by construction.
 //
-// Accuracy, measured against the analytic atan law it must be able to
-// replace (L0 = 1 mH, I_sat = 5 A, L_res = 50 µH, 0 ≤ i ≤ 10 I_sat):
+// Origin: L_0 is stored exactly (a generator always knows it); it is
+// NOT estimated from the first two knots, where a 3-point end-slope
+// formula is 4e-4 to 1.4e-3 high.
 //
-//     knots   spacing        max rel err λ     max rel err L
-//       32    uniform            4.4e-2            4.4e-2
-//       32    sqrt-spaced        1.8e-4            6.6e-3
-//       64    uniform            1.4e-2            1.4e-2
-//       64    sqrt-spaced        2.1e-5            1.6e-3
+// Tail: linear beyond the last knot at `L_tail`, the exact residual
+// (air) inductance the generator supplies — the saturated core is an
+// air-core inductor. The generator's job is to sweep far enough that
+// the last knot's own L is already within a percent of L_tail, so
+// the Jacobian has no jump there; extrapolating at an ESTIMATED end
+// slope left the saturated inductance 27-33 % high forever.
 //
-// so knots must be DENSE NEAR ZERO where L is largest and λ curves
-// most; uniform spacing wastes most of the table in the flat tail.
-// Callers that generate a table from a core law get that for free by
-// sweeping λ uniformly (i then lands densely below the knee); callers
-// tabulating an i-domain law should use sqrt spacing.
-//
-// Refuses by name: fewer than 3 knots, a non-zero origin, a knot pair
-// that is not strictly increasing in both i and λ (a non-monotone
-// table is a negative inductance, and the stamp would converge on it).
+// Refuses by name: fewer than 3 knots, a non-zero origin, a knot
+// pair that is not strictly increasing in both i and λ, a non-
+// positive slope (a non-monotone table is a negative inductance, and
+// the stamp would converge on it).
 
 #include "pulsim/numeric/types.hpp"
 
@@ -57,23 +66,44 @@ class FluxTable {
 public:
     FluxTable() = default;
 
-    /// Build from knots for i ≥ 0. `what` names the device in
-    /// refusals.
+    /// From TRIPLES: knots for i ≥ 0 with the exact slope at each,
+    /// and the exact residual slope for the tail. The preferred
+    /// constructor — every generator has the slopes.
     FluxTable(std::vector<Real> i_knots, std::vector<Real> lambda_knots,
+              std::vector<Real> slope_knots, Real L_tail,
               const std::string& what = "FluxTable")
+        : i_(std::move(i_knots)), lam_(std::move(lambda_knots)),
+          m_(std::move(slope_knots)), L_tail_(L_tail) {
+        validate_(what, /*with_slopes=*/true);
+        clamp_to_monotone_region_(what);
+    }
+
+    /// From PAIRS: slopes ESTIMATED by Fritsch–Carlson (monotone by
+    /// construction, O(h²) in L — about 1.6e-3 at 64 well-placed
+    /// knots). For raw digitised data only; pass `L_0` and `L_tail`
+    /// when you know them, since the end-slope estimates are the
+    /// worst part of the fit.
+    FluxTable(std::vector<Real> i_knots, std::vector<Real> lambda_knots,
+              const std::string& what = "FluxTable",
+              Real L_0 = Real{0}, Real L_tail = Real{0})
         : i_(std::move(i_knots)), lam_(std::move(lambda_knots)) {
-        validate_(what);
-        compute_slopes_();
+        validate_(what, /*with_slopes=*/false);
+        estimate_slopes_();
+        if (L_0 > Real{0}) m_.front() = L_0;
+        if (L_tail > Real{0}) { m_.back() = L_tail; L_tail_ = L_tail; }
+        else L_tail_ = m_.back();
+        clamp_to_monotone_region_(what);
     }
 
     [[nodiscard]] bool empty() const noexcept { return i_.empty(); }
     [[nodiscard]] Size size() const noexcept { return i_.size(); }
     [[nodiscard]] const std::vector<Real>& i_knots() const noexcept { return i_; }
     [[nodiscard]] const std::vector<Real>& lambda_knots() const noexcept { return lam_; }
+    [[nodiscard]] const std::vector<Real>& slope_knots() const noexcept { return m_; }
     /// dλ/di at the origin — the unsaturated inductance.
-    [[nodiscard]] Real L_0() const noexcept { return m_.empty() ? Real{0} : m_[0]; }
+    [[nodiscard]] Real L_0() const noexcept { return m_.empty() ? Real{0} : m_.front(); }
     /// Slope beyond the last knot — the residual (air) inductance.
-    [[nodiscard]] Real L_residual() const noexcept { return m_.empty() ? Real{0} : m_.back(); }
+    [[nodiscard]] Real L_residual() const noexcept { return L_tail_; }
     [[nodiscard]] Real i_max() const noexcept { return i_.empty() ? Real{0} : i_.back(); }
 
     /// λ(i), odd in i.
@@ -81,7 +111,7 @@ public:
         const Real a = std::abs(i);
         const Real s = i < Real{0} ? Real{-1} : Real{1};
         if (a >= i_.back()) {
-            return s * (lam_.back() + m_.back() * (a - i_.back()));
+            return s * (lam_.back() + L_tail_ * (a - i_.back()));
         }
         const Size j = segment_(a);
         const Real h = i_[j + 1] - i_[j];
@@ -95,10 +125,11 @@ public:
                     + h01 * lam_[j + 1] + h11 * h * m_[j + 1]);
     }
 
-    /// L(i) = dλ/di, even in i, > 0 everywhere.
+    /// L(i) = dλ/di, even in i, > 0 everywhere — the exact derivative
+    /// of `flux()`.
     [[nodiscard]] Real inductance(Real i) const noexcept {
         const Real a = std::abs(i);
-        if (a >= i_.back()) return m_.back();
+        if (a >= i_.back()) return L_tail_;
         const Size j = segment_(a);
         const Real h = i_[j + 1] - i_[j];
         const Real t = (a - i_[j]) / h;
@@ -109,21 +140,31 @@ public:
                + (3 * t2 - 2 * t) * m_[j + 1];
     }
 
+    /// Largest α² + β² seen at construction (≤ 9 after clamping);
+    /// > 9 before clamping means a tangent was pulled in.
+    [[nodiscard]] Real max_fritsch_carlson_radius2() const noexcept {
+        return fc_max_;
+    }
+    [[nodiscard]] Size clamped_tangents() const noexcept { return n_clamped_; }
+
 private:
     std::vector<Real> i_, lam_, m_;
+    Real L_tail_ = Real{0};
+    Real fc_max_ = Real{0};
+    Size n_clamped_ = 0;
 
     [[nodiscard]] Size segment_(Real a) const noexcept {
-        // First knot strictly greater than a, minus one. a < i_.back().
         const auto it = std::upper_bound(i_.begin(), i_.end(), a);
         const auto j = static_cast<Size>(it - i_.begin());
         return j == 0 ? Size{0} : j - 1;
     }
 
-    void validate_(const std::string& what) const {
-        if (i_.size() != lam_.size()) {
+    void validate_(const std::string& what, bool with_slopes) const {
+        if (i_.size() != lam_.size() || (with_slopes && m_.size() != i_.size())) {
             throw std::invalid_argument(std::format(
-                "{}: {} current knots but {} flux knots.",
-                what, i_.size(), lam_.size()));
+                "{}: {} current knots but {} flux knots{}.",
+                what, i_.size(), lam_.size(),
+                with_slopes ? std::format(" and {} slopes", m_.size()) : ""));
         }
         if (i_.size() < 3) {
             throw std::invalid_argument(std::format(
@@ -155,10 +196,25 @@ private:
                     what, k, lam_[k], lam_[k - 1], i_[k - 1], i_[k]));
             }
         }
+        if (with_slopes) {
+            for (Size k = 0; k < m_.size(); ++k) {
+                if (!(m_[k] > Real{0}) || !std::isfinite(m_[k])) {
+                    throw std::invalid_argument(std::format(
+                        "{}: slope (inductance) at knot {} is {} — it must "
+                        "be positive and finite.", what, k, m_[k]));
+                }
+            }
+            if (!(L_tail_ > Real{0}) || !std::isfinite(L_tail_)) {
+                throw std::invalid_argument(std::format(
+                    "{}: the residual (tail) inductance is {} — it must be "
+                    "positive and finite; a saturated core is an air-core "
+                    "inductor, not a short.", what, L_tail_));
+            }
+        }
     }
 
-    /// Fritsch–Carlson shape-preserving slopes.
-    void compute_slopes_() {
+    /// Fritsch–Carlson shape-preserving slope estimates (pairs only).
+    void estimate_slopes_() {
         const Size n = i_.size();
         std::vector<Real> h(n - 1), d(n - 1);
         for (Size k = 0; k + 1 < n; ++k) {
@@ -167,24 +223,39 @@ private:
         }
         m_.assign(n, Real{0});
         for (Size k = 1; k + 1 < n; ++k) {
-            // Secants are all positive here (validated), so the
-            // weighted harmonic mean applies at every interior knot.
             const Real w1 = 2 * h[k] + h[k - 1];
             const Real w2 = h[k] + 2 * h[k - 1];
             m_[k] = (w1 + w2) / (w1 / d[k - 1] + w2 / d[k]);
         }
         auto end_slope = [](Real h0, Real h1, Real d0, Real d1) {
             Real s = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
-            if (s <= Real{0}) s = Real{0};                 // sign of d0
-            else if (s > 3 * d0) s = 3 * d0;               // shape guard
+            if (s <= Real{0}) s = d0;
+            else if (s > 3 * d0) s = 3 * d0;
             return s;
         };
         m_[0]     = end_slope(h[0], h[1], d[0], d[1]);
         m_[n - 1] = end_slope(h[n - 2], h[n - 3], d[n - 2], d[n - 3]);
-        // The origin slope is L_0 and must be positive; a zero from
-        // the guard above would be a shorted inductor at rest.
-        if (!(m_[0] > Real{0})) m_[0] = d[0];
-        if (!(m_[n - 1] > Real{0})) m_[n - 1] = d[n - 2];
+    }
+
+    /// Pull any tangent pair outside the Fritsch–Carlson circle
+    /// (α² + β² ≤ 9) radially onto it. Keeps λ monotone and L > 0
+    /// between knots whatever the caller supplied.
+    void clamp_to_monotone_region_(const std::string& /*what*/) {
+        const Size n = i_.size();
+        fc_max_ = Real{0};
+        n_clamped_ = 0;
+        for (Size k = 0; k + 1 < n; ++k) {
+            const Real d = (lam_[k + 1] - lam_[k]) / (i_[k + 1] - i_[k]);
+            const Real alpha = m_[k] / d, beta = m_[k + 1] / d;
+            const Real r2 = alpha * alpha + beta * beta;
+            fc_max_ = std::max(fc_max_, r2);
+            if (r2 > Real{9}) {
+                const Real tau = Real{3} / std::sqrt(r2);
+                m_[k]     = tau * alpha * d;
+                m_[k + 1] = tau * beta * d;
+                ++n_clamped_;
+            }
+        }
     }
 };
 
