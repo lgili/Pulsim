@@ -38,6 +38,7 @@
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/models/flux_table.hpp"
+#include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/numeric/concepts.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -65,6 +66,13 @@ struct SaturableInductor {
         // snapshot, and a 96-knot table by value would be copied per
         // step. Trailing with a default so every brace-init compiles.
         std::shared_ptr<const FluxTable> table{};
+        // Phase 4 C.4 — the HYSTERETIC law (Jiles-Atherton in the
+        // loop). Unlike the two above it is history-dependent: λ(i)
+        // needs the step-start (H, M), which lives in the history
+        // entry, so `flux()` / `inductance()` cannot serve it — the
+        // stamp evaluates it through `JilesAthertonCore::evaluate`
+        // with that state. `table` and `ja` are mutually exclusive.
+        std::shared_ptr<const JilesAthertonCore::Params> ja{};
     };
 
     static constexpr topology::BranchKind kind =

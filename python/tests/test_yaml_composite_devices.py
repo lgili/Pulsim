@@ -125,14 +125,16 @@ circuit:
 
 
 def test_yaml_loads_hysteretic_inductor_and_creates_branches():
-    """JA hysteretic inductor should create L_0 + dummy V branches and
-    the resulting circuit should simulate."""
+    """A YAML hysteretic inductor is ONE Newton flux branch solved in
+    the loop (Phase 4 C.4) — no air-core L_0, no dummy source — and
+    the circuit simulates without any chain block."""
     loaded = pulsim.load_yaml_string(_JA_YAML)
     builder = loaded.builder
-    # 1 sine source + 1 Rs + 1 L_0 + 1 dummy V = 4 branches.
-    assert builder.graph.num_branches == 4, (
-        f"Expected 4 branches (Vs + Rs + L0 + V_M); got "
+    # 1 sine source + 1 Rs + 1 hysteretic core = 3 branches.
+    assert builder.graph.num_branches == 3, (
+        f"Expected 3 branches (Vs + Rs + L_core); got "
         f"{builder.graph.num_branches}")
+    assert builder.branch_id_of("L_core") >= 0
     # Verify L_0 = N²·A·μ₀/l_m by simulating (topology should solve).
     res = pulsim.simulate(builder, t_end=1e-3, dt=1e-5,
                                   switch_fn=lambda t: pulsim.SwitchStateMask(0))
@@ -157,5 +159,5 @@ circuit:
       l_m: 0.05
       A_core: 1e-4
 """
-    with pytest.raises(Exception, match="non-physical"):
+    with pytest.raises(Exception, match="non-physical|positive integer"):
         pulsim.load_yaml_string(bad_yaml)

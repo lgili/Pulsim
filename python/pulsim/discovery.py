@@ -147,6 +147,11 @@ _CATEGORIES: dict[str, list[_Entry]] = {
         _Entry("add_saturable_inductor_table",
                "Saturable inductor from a measured (i, λ) table",
                "Digitised datasheet or measured B–H curves."),
+        _Entry("add_hysteretic_inductor",
+               "Jiles-Atherton hysteretic core solved INSIDE the Newton "
+               "loop (N_turns, l_m, A_core, l_gap, M0, material)",
+               "Inrush, remanence, loop loss shaping the waveform — no "
+               "observer, no lag."),
     ],
 
     "Controlled sources / op-amps": [

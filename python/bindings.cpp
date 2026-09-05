@@ -397,6 +397,29 @@ void init_module(py::module_& m) {
               "Magnetically couple two existing linear inductors by "
               "name with coefficient k in [0, 1], as add_transformer "
               "does for the pair it creates.")
+        .def("add_hysteretic_core_inductor",
+              [](builder::CircuitBuilder& b, const std::string& name,
+                 const std::string& from, const std::string& to,
+                 double N, double Ae, double le, double lg,
+                 double Ms, double a, double alpha, double c, double k,
+                 int substeps_min, double M0) -> builder::CircuitBuilder& {
+                  models::JilesAthertonParams ja;
+                  ja.Ms = Ms; ja.a = a; ja.alpha = alpha; ja.c = c; ja.k = k;
+                  return b.add_hysteretic_core_inductor(
+                      name, from, to, N, Ae, le, lg, ja, substeps_min, M0);
+              },
+              py::arg("name"), py::arg("from_node"), py::arg("to_node"),
+              py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
+              py::arg("Ms"), py::arg("a"), py::arg("alpha"), py::arg("c"),
+              py::arg("k"), py::arg("substeps_min") = 8, py::arg("M0") = 0.0,
+              py::return_value_policy::reference,
+              "Jiles-Atherton hysteretic core INSIDE the Newton loop: N "
+              "turns on a core (Ae [m^2], le [m], TOTAL gap lg [m]) of a "
+              "material (Ms, a, alpha, c, k). The magnetisation is solved "
+              "at the same time level as the current with its exact "
+              "tangent in the Jacobian -- no dummy source, no observer, no "
+              "one-step lag. i(name) is the winding current; replay the "
+              "B-H trajectory from it with pulsim.compute_bh_loop.")
         .def("add_saturable_transformer",
               &builder::CircuitBuilder::add_saturable_transformer,
               py::arg("name"),
@@ -1319,6 +1342,63 @@ void init_module(py::module_& m) {
         .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode)
         .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna)
         .value("IdealTransformer",    pwl::DevicePool::StoredKind::IdealTransformer);
+
+    // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
+    m.def("ja_replay",
+          [](double N, double Ae, double le, double lg,
+             double Ms, double a, double alpha, double c, double k,
+             double M0, py::array_t<double> current) {
+              models::JilesAthertonCore::Params cp;
+              cp.N = N; cp.Ae = Ae; cp.le = le; cp.lg = lg; cp.M0 = M0;
+              cp.ja.Ms = Ms; cp.ja.a = a; cp.ja.alpha = alpha; cp.ja.c = c; cp.ja.k = k;
+              models::JilesAthertonCore::validate(cp, "ja_replay");
+              auto buf = current.unchecked<1>();
+              const py::ssize_t n = buf.shape(0);
+              py::array_t<double> H(n), M(n), B(n);
+              auto h = H.mutable_unchecked<1>();
+              auto mm = M.mutable_unchecked<1>();
+              auto bb = B.mutable_unchecked<1>();
+              models::JilesAthertonCore::State st;
+              st.H = 0.0; st.M = M0; st.n_sub = cp.substeps_min;
+              for (py::ssize_t i = 0; i < n; ++i) {
+                  const auto ev = models::JilesAthertonCore::evaluate(cp, st, buf(i));
+                  // Same per-step sub-step and direction rules as the
+                  // history commit, so the replay IS the solver's path.
+                  const double span = 2.0 * std::abs(ev.H - st.H);
+                  const double leg = ev.H - st.H;
+                  st.delta_hint = leg > 0 ? 1.0 : leg < 0 ? -1.0 : st.delta_hint;
+                  st.n_sub = models::JilesAthertonCore::substeps_for(cp, span);
+                  st.H = ev.H; st.M = ev.M;
+                  h(i) = ev.H; mm(i) = ev.M;
+                  bb(i) = models::ja_detail::MU_0 * (ev.H + ev.M);
+              }
+              return py::make_tuple(H, M, B);
+          },
+          py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
+          py::arg("Ms"), py::arg("a"), py::arg("alpha"), py::arg("c"),
+          py::arg("k"), py::arg("M0"), py::arg("current"),
+          "Replay the in-loop Jiles-Atherton device on a current trace with "
+          "the kernel's own integrator; returns (H, M, B) arrays.");
+
+    m.def("ja_evaluate",
+          [](double N, double Ae, double le, double lg,
+             double Ms, double a, double alpha, double c, double k,
+             double H_n, double M_n, int n_sub, double hint, double i) {
+              models::JilesAthertonCore::Params cp;
+              cp.N = N; cp.Ae = Ae; cp.le = le; cp.lg = lg;
+              cp.ja.Ms = Ms; cp.ja.a = a; cp.ja.alpha = alpha; cp.ja.c = c; cp.ja.k = k;
+              models::JilesAthertonCore::State st;
+              st.H = H_n; st.M = M_n; st.n_sub = n_sub; st.delta_hint = hint;
+              const auto ev = models::JilesAthertonCore::evaluate(cp, st, i);
+              return py::make_tuple(ev.H, ev.M, ev.lambda, ev.L, ev.dM_dH);
+          },
+          py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
+          py::arg("Ms"), py::arg("a"), py::arg("alpha"), py::arg("c"),
+          py::arg("k"), py::arg("H_n"), py::arg("M_n"), py::arg("n_sub"),
+          py::arg("hint"), py::arg("i"),
+          "One in-loop Jiles-Atherton evaluation at a trial current from a "
+          "given step-start state: (H, M, lambda, L, dM_dH). A probe for "
+          "tests and diagnostics.");
 
     // ---- ParametricRefactorResult (v1.4.0) -------------------------------
     py::class_<pwl::ParametricRefactorResult>(m,

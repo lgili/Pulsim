@@ -72,6 +72,7 @@ T_END    = 2e-3     # 2 ms = 200 PWM cycles
 N_PRIMARY = 12
 L_M_PATH  = 0.10
 A_CORE    = 3.5e-4
+L_GAP     = 1.5e-3   # total air gap [m] — see build_plant
 
 
 def build_plant():
@@ -90,7 +91,14 @@ def build_plant():
         b.add_diode(name, anode, cathode, 1e3, 1e-9)
 
     # *** The headline change vs run_phase_shift_full_bridge.py ***
-    # Replace the linear L_leak with a JilesAtherton hysteretic inductor.
+    # Replace the linear L_leak with a Jiles-Atherton hysteretic
+    # inductor, solved INSIDE the Newton loop. The core is GAPPED:
+    # 12 turns on this ferrite with a closed path is a 1.9 mH
+    # magnetising branch that saturates at ~3 A — not a resonant
+    # inductor at all. (It only ever "worked" here because the old
+    # observer injected its EMF with the sign inverted, turning it
+    # into a small negative-L correction.) With a 1.5 mm gap it is the
+    # ~38 µH the linear demo uses, with a knee near 30 A.
     ja_params = p.reference_material("ferrite_n87")
     hyst = p.add_hysteretic_inductor(
         b, name="L_leak_JA",
@@ -99,6 +107,7 @@ def build_plant():
         N_turns=N_PRIMARY,
         l_m=L_M_PATH,
         A_core=A_CORE,
+        l_gap=L_GAP,
     )
     # Transformer + rectifier (unchanged from the linear PSFB demo).
     b.add_transformer(
@@ -128,8 +137,8 @@ def main():
         dead_time=100e-9,
     )
 
-    # HystereticInductor observer — runs each step, integrates M.
-    obs, b_extra = p.make_hysteretic_inductor_observer(b, hyst, dt=DT)
+    # The hysteretic inductor is solved INSIDE the Newton loop: no
+    # observer, no dummy source, no one-step lag.
 
     print("  PSFB with HystereticInductor in-loop")
     print(f"    V_bus={V_BUS}V  f_pwm={F_PWM/1e3:.0f}kHz "
@@ -142,23 +151,20 @@ def main():
     res = p.simulate(
         b, t_end=T_END, dt=DT,
         switch_fn=sw_fn,
-        step_observer=obs,
-        b_extra_fn=b_extra,
         progress=True,
     )
 
-    # Captured inductor current.
+    # Captured inductor current, and the B–H trajectory replayed with
+    # the kernel's own integrator.
     times = np.asarray(res.times)
-    states = np.asarray(res.states)
-    i_idx = b.pool.branch_var_id_for_inductor(
-        hyst.inductor_branch_id, b.graph)
-    i_L = states[:, i_idx]
+    i_L = np.asarray(res.i(hyst.name))
+    loop = hyst.bh_loop(res, period=1.0 / F_PWM)
 
     print("\n  Captured inductor (hysteretic) current:")
     print(f"    i_peak    = {float(np.max(np.abs(i_L))):.3f} A")
-    print(f"    final M   = {hyst.M:.4e} A/m")
-    print(f"    final B   = {hyst.B:.4f} T")
-    print(f"    final H   = {hyst.H:.2f} A/m")
+    print(f"    final M   = {float(loop.M[-1]):.4e} A/m")
+    print(f"    final B   = {float(loop.B[-1]):.4f} T")
+    print(f"    final H   = {float(loop.H[-1]):.2f} A/m")
 
     # Save trace: t, i_L, the live JA states (M, B, H), and the
     # output voltage so we can verify the PSFB still operates

@@ -25,11 +25,13 @@
 #pragma once
 
 #include "pulsim/blockchain/chain.hpp"
+#include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/numeric/types.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -38,15 +40,10 @@ namespace pulsim::magnetics {
 using blockchain::BlockChain;
 using blockchain::ChainContext;
 
-// Five-parameter Jiles-Atherton parameter set. POD; defaults are not
-// physical — always set them from a material catalog or fit.
-struct JilesAthertonParams {
-    Real Ms = Real{4.0e5};   // saturation magnetisation [A/m]
-    Real a  = Real{50.0};    // anhysteretic shape parameter [A/m]
-    Real alpha = Real{5e-5}; // mean-field coupling (dimensionless)
-    Real c  = Real{0.20};    // reversibility (0..1)
-    Real k  = Real{30.0};    // pinning coefficient [A/m]
-};
+// The five-parameter Jiles-Atherton set now lives with the models
+// (models/jiles_atherton.hpp), where the IN-LOOP core evaluator uses
+// it; this observer-based block shares the same struct.
+using JilesAthertonParams = models::JilesAthertonParams;
 
 
 namespace detail {
@@ -208,6 +205,22 @@ inline void add_hysteretic_inductor_to_chain(
     std::string H_channel  = std::string{},
     std::string vm_channel = std::string{}) {
 
+    // Phase 4 C.4: REFUSED. This block drove a dummy source with
+    // ψ·dM/dt from the previous step — sign inverted (the
+    // magnetisation acted as a negative inductance: current leading
+    // voltage, |I₁| > V/R on a passive branch) and unstable above
+    // q = L_M/(dt(R + 2L₀/dt)) ≈ 0.5, i.e. for every shipped use.
+    // The hysteretic inductor is a Newton device now
+    // (CircuitBuilder::add_hysteretic_core_inductor / the YAML type
+    // `hysteretic_inductor`), and needs no chain block at all.
+    throw std::runtime_error(
+        "add_hysteretic_inductor_to_chain: removed. The Jiles-Atherton "
+        "hysteretic inductor is solved INSIDE the Newton loop now "
+        "(CircuitBuilder::add_hysteretic_core_inductor; YAML type "
+        "'hysteretic_inductor' with Ms/a/alpha/c/k on the device). This "
+        "block injected the magnetisation EMF one step late with an "
+        "inverted sign and was numerically unstable for any magnetising "
+        "branch with q = L_M/(dt(R + 2L0/dt)) > 0.5.");
     auto model = std::make_shared<JilesAthertonModel>(params);
     // ψ_M = N·A·μ₀·M ; dψ_M/dt = N·A·μ₀·dM/dt.
     const Real psi_coupling =
