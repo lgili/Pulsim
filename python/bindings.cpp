@@ -706,6 +706,27 @@ void init_module(py::module_& m) {
               "drops smoothly toward L_residual as |i| → I_sat. "
               "Requires Newton refresh — `simulate()` enables "
               "it automatically.")
+        .def("add_saturable_inductor_table",
+              &builder::CircuitBuilder::add_saturable_inductor_table,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("i_knots"), py::arg("lambda_knots"),
+              py::return_value_policy::reference,
+              "Saturable inductor from a (i, lambda) table for i >= 0 "
+              "starting at the origin, strictly increasing in both; "
+              "odd-extended, monotone-cubic between knots, linear "
+              "beyond the last. Same device as add_saturable_inductor "
+              "with a tabulated law.")
+        .def("add_gapped_core_inductor",
+              &builder::CircuitBuilder::add_gapped_core_inductor,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("N"), py::arg("Ae"), py::arg("le"), py::arg("lg"),
+              py::arg("mu_r0") = 2000.0, py::arg("B_sat") = 0.35,
+              py::arg("p_knee") = 4.0, py::arg("knots") = 96,
+              py::return_value_policy::reference,
+              "Saturable inductor on a gapped core from geometry: N "
+              "turns, Ae [m^2], le [m], TOTAL gap lg [m], initial mu_r, "
+              "B_sat [T] where mu_r has halved. lambda(i) is generated "
+              "from Ampere's law by sweeping the flux.")
         .def("add_diode",
               &builder::CircuitBuilder::add_diode,
               py::arg("name"), py::arg("anode"),

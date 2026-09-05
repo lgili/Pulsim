@@ -78,7 +78,11 @@ TEST_CASE("GappedCore: no gap is a high, fragile inductance; more gap is "
     const Real i_sat_nogap = models::GappedCore::current_at_flux(c, c.N * c.Ae * c.B_sat);
     c.lg = 0.5e-3;
     const Real i_sat_gap = models::GappedCore::current_at_flux(c, c.N * c.Ae * c.B_sat);
-    CHECK(i_sat_nogap < 0.1 * i_sat_gap);
+    // Un-gapped: H(B_sat) with μ_r halved to ~1000 gives ~0.8 A;
+    // gapped: 6.4 A. The gap carries 14× the core's reluctance, so the
+    // knee current scales by about that — a factor of 8 here, since
+    // μ_r has already halved at B_sat.
+    CHECK(i_sat_nogap < 0.2 * i_sat_gap);
 }
 
 TEST_CASE("GappedCore: refuses unit mistakes by name",

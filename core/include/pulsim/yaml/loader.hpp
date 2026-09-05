@@ -311,6 +311,18 @@ inline void load_device(
             require_real(dev, idx, type, "L_p"),
             require_real(dev, idx, type, "L_s"),
             real_or(dev, "k", Real{1}));
+    } else if (type == "gapped_core_inductor") {
+        b.add_gapped_core_inductor(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "N"),
+            require_real(dev, idx, type, "Ae"),
+            require_real(dev, idx, type, "le"),
+            require_real(dev, idx, type, "lg"),
+            real_or(dev, "mu_r0", Real{2000}),
+            real_or(dev, "B_sat", Real{0.35}),
+            real_or(dev, "p_knee", Real{4}));
     } else if (type == "ideal_transformer") {
         b.add_ideal_transformer(
             name,
@@ -422,7 +434,8 @@ inline void load_device(
             "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, op_amp_ideal, "
-            "transformer, ideal_transformer, induction_motor");
+            "gapped_core_inductor, transformer, ideal_transformer, "
+            "induction_motor");
     }
 }
 
