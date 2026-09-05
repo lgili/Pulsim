@@ -1952,8 +1952,9 @@ untouched.</p>
 <ul>
 <li><strong>Add a clamp.</strong> Real flybacks have RCD snubbers or active clamps to handle leakage-inductance spikes. Add a series-R + parallel-C across <code>Q1</code> and watch the spike soften.</li>
 <li><strong>Multi-winding (Layer 2 V16).</strong> Use <code>add_multi_winding_transformer</code> to build a 3-output flyback (main + aux bias + monitor) and verify each output settles independently.</li>
-<li><strong>Saturating core (Layer 2 V17).</strong> Replace <code>add_transformer</code> with two <code>add_saturable_inductor</code> calls + a <code>TransformerCoupling</code> (advanced) — the boost-saturable showcase has the pattern.</li>
+<li><strong>Saturating core (Phase 4 C.4).</strong> Replace <code>add_transformer</code> with <code>add_saturable_transformer(name, p_from, p_to, s_from, s_to, N_p, N_s, Ae, le, lg, B_sat=…, L_leak_p=…)</code>: the same T-model, with the magnetising branch generated from the core's geometry and gap, so an overload or a zero-crossing energisation drives the core past <code>B_sat</code> and the current runs away the way it does on the bench. Below the knee it reproduces <code>add_transformer</code> exactly (<code>L_p = L_leak_p + L_m</code>, <code>M = n·L_m</code>, <code>L_s = n²·L_m</code>).</li>
 </ul>
+<p>Do <strong>not</strong> build it from two <code>add_saturable_inductor</code> calls plus a <code>TransformerCoupling</code>. Saturable inductors are Newton devices outside the linear history, so that arrangement couples the Jacobian but not the companion history: it converges, and it is wrong.</p>
 <h2 id="going-to-tutorial-04">Going to <a href="../04-3phase-vsi/">Tutorial 04</a><a class="headerlink" href="#going-to-tutorial-04" title="Permanent link">&para;</a></h2>
 <p>Next we leave SMPS-land and look at a 3-phase inverter for motor drive applications.</p>
 
