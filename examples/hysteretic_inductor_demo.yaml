@@ -1,15 +1,19 @@
 # Pulsim YAML showcase: hysteretic inductor — 50 V / 50 Hz mains
 # excitation through a ferrite-N87 core (Jiles-Atherton). Phase 2.2.
 #
-# YAML creates the linear L_0 air-core inductor + dummy V_M source
-# (named {name}_L0 and {name}_V_M). The user wires the BlockChain in
-# Python via `chain.add_hysteretic_inductor(...)` so the JA observer
-# integrates M each step and injects v_M = N·A·μ₀·dM/dt.
+# The hysteretic inductor is ONE Newton flux branch solved inside the
+# loop (Phase 4 C.4): the magnetisation is part of the same solve as
+# the current, at the same time level. No air-core L_0, no dummy
+# source, no chain block — the material parameters below are what the
+# device uses (the old loader ignored them and an observer re-stated
+# them one step late, with its sign inverted).
 #
 # Use from Python:
 #   loaded = pulsim.load_yaml_file("hysteretic_inductor_demo.yaml")
-#   builder = loaded.builder
-#   # ... wire chain with inductor + dummy_V branch indices ...
+#   res = pulsim.simulate(loaded.builder, t_end=0.06, dt=2e-5)
+#   i = res.i("L_core")           # winding current
+#   H, M, B = pulsim._pulsim.ja_replay(100, 1e-4, 0.05, 0.0,
+#                                      4.0e5, 50.0, 5e-5, 0.20, 30.0, 0.0, i)
 
 circuit:
   devices:
