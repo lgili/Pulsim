@@ -1,0 +1,61 @@
+# Infineon IPP60R190P7 — 600 V CoolMOS P7 Si super-junction MOSFET.
+# SYNTHETIC ILLUSTRATION — shapes only, not vendor data; see provenance.
+# Datasheet rev 2017-03. TO-220 package.
+provenance:
+  source: synthetic
+  source_ref: "pulsim illustration (no vendor source)"
+  retrieved: "2026-05-10"
+  method: synthetic
+  note: >-
+    ILLUSTRATIVE ONLY. The curves and tables in this file (switching
+    energies, on-state tables, Coss/Ciss/Crss points, B-H points, core
+    geometry, Steinmetz and Jiles-Atherton sets) are plausible shapes
+    written for examples, not the vendor's published data: the
+    switching energies are straight lines through the origin, which no
+    datasheet curve is. Scalar ratings are datasheet headline values;
+    package and identity fields are unverified. pulsim.lib refuses to
+    resolve this part by number unless allow_synthetic=True. For real
+    numbers import the vendor's PLECS thermal file
+    (pulsim.lib.import_plecs_xml) or transcribe the datasheet with
+    provenance into a directory on PULSIM_PARTS_PATH.
+class: mosfet
+vendor: Infineon
+part: IPP60R190P7
+
+# Static parameters
+V_th_25c:           3.0
+V_th_temp_coef:    -6e-3
+R_ds_on_25c:        0.190         # 190 mΩ (typical)
+R_ds_on_temp_coef:  6e-3          # +0.6 %/°C
+V_ds_max:           600.0
+I_dss_25c:          1.0e-9
+
+# Output capacitance vs V_ds (illustrative shape)
+Coss:
+  - { V:   0.0, C: 4.6e-9 }
+  - { V:  10.0, C: 1.4e-9 }
+  - { V:  50.0, C: 200.0e-12 }
+  - { V: 100.0, C: 110.0e-12 }
+  - { V: 400.0, C:  46.0e-12 }
+  - { V: 480.0, C:  43.0e-12 }
+Ciss:
+  - { V:   0.0, C: 5.4e-9 }
+  - { V: 480.0, C: 5.4e-9 }
+Crss:
+  - { V:   0.0, C: 350.0e-12 }
+  - { V:  50.0, C:  60.0e-12 }
+  - { V: 400.0, C:  10.0e-12 }
+  - { V: 480.0, C:   8.0e-12 }
+
+# Switching energies at 400 V bus, 25 °C, 18 V gate drive (illustrative shape)
+# Axes: x = I_d (A), y = V_ds (V); values row-major.
+Eon:
+  x: [5.0, 10.0, 20.0]
+  y: [200.0, 400.0]
+  values: [25.0e-6, 50.0e-6, 100.0e-6,
+           50.0e-6, 100.0e-6, 200.0e-6]
+Eoff:
+  x: [5.0, 10.0, 20.0]
+  y: [200.0, 400.0]
+  values: [10.0e-6, 25.0e-6, 60.0e-6,
+           20.0e-6, 50.0e-6, 130.0e-6]

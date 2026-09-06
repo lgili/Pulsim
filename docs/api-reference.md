@@ -228,6 +228,57 @@ loaded.t_start, loaded.t_end, loaded.dt
 
 Pass the result straight to `simulate(loaded.builder, loaded.t_end, loaded.dt, switch_fn=loaded.switch_fn)`.
 
+## Parts library — `pulsim.lib`
+
+```python
+q = p.lib.igbt("AK40N120", paths=["./parts"])   # or PULSIM_PARTS_PATH
+spec  = q.switch_spec(Tj=125.0)                   # E_on_table / E_off_table + Tj
+cond  = q.conduction_spec(Tj=125.0)               # V_CE_sat / R_CE_sat fitted from the on-state table
+chain = q.thermal().foster_stages()               # for add_foster_network
+part  = p.lib.import_plecs_xml("~/Downloads/IKW40N120T2.xml")
+p.lib.save_part(part, "parts/IKW40N120T2.yaml")
+```
+
+* Every part file carries a `provenance:` block (`source`, `source_ref`,
+  `retrieved`, `method` ∈ transcribed | imported_plecs_xml | measured |
+  vendor_model | synthetic); a file without one is refused by name.
+* The parts shipped with Pulsim are **synthetic illustrations** (their
+  switching-energy tables are straight lines through the origin). They
+  are listed by `list_parts()` but `part()` refuses to resolve them by
+  number unless `allow_synthetic=True`.
+* Search path: directories passed as `paths=`, then `PULSIM_PARTS_PATH`,
+  then the shipped data. The working directory is not searched; a user
+  file shadowing a shipped one is announced once.
+* A table taken at ONE junction temperature refuses `switch_spec(Tj=)`
+  at another temperature unless `allow_tj_mismatch=True` (audit C.1's
+  −35 % error). A diode's recovery table becomes `E_rr_curve` +
+  `V_R_ref` at the stated `V_ref` and `Tj`.
+* `import_plecs_xml` honours the PLECS sign conventions: a `Diode`
+  file's switching losses sit in the −V/+I quadrant, a `… with Diode`
+  file's diode in the +V/−I quadrant (split out as `Erec`, `v_on_diode`,
+  `diode_spec()`). Formulas, class/type mismatches, package
+  descriptions, gate-dependent conduction (without `conduction_index`)
+  and thermal elements that do not match their branch are refused by
+  name; `Variables` Min/Max become `Part.limits`.
+
+## SPICE import — `spice_to_builder(text_or_path, *, strict=False)`
+
+`.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`
+with RS as a series resistor (BV mapped to the kernel's knee at IBV),
+LTspice `D(Ron Roff Vfwd)` → `add_nonlinear_diode`, LEVEL-1 `NMOS`
+→ `add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)`
+with RD/RS series resistors and an explicit body diode when the card
+gives IS/JS, LTspice `VDMOS` → the same with K = KP/2, Rds, and the
+body diode from Is/N/Rb/BV. `.SUBCKT` instances are flattened with
+scoped names (`XA.X1.R1`, node `xa.x1.mid`); `PARAMS:` defaults and
+`k=v` on the X line are evaluated in the caller's scope; local
+`.MODEL` cards shadow outer ones; `.GLOBAL` nodes and `0`/`gnd` are not
+scoped. Refused by name: a `D`/`M` without a model, an undefined model
+(`.INC`/`.LIB` are not followed), a non-LEVEL-1 MOSFET, PMOS/`pchan`,
+a bulk away from the source with GAMMA, IKF, PWL reverse breakdown,
+`AKO:`. Dropped parameters (TT/CJO, gate capacitances, RG, level-2/3
+knobs) are listed in one warning; `strict=True` makes them refusals.
+
 ## C++ namespace mapping
 
 | Python | C++ |

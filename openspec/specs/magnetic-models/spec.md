@@ -71,7 +71,7 @@ Saturable transformer windings SHALL accept an optional `eddy_current: { r_eff, 
 - **AND** the eddy-loss contribution is reflected in winding loss telemetry
 
 ### Requirement: Magnetic Core Catalog
-The repository SHALL host a catalog of magnetic core materials under `devices/cores/<vendor>/<material>.yaml` with at least 4 reference materials.
+The repository SHALL host a catalog of magnetic core materials under `python/pulsim/lib/data/cores/<vendor>/<material>.yaml` (package data, behind `pulsim.lib.core`) with at least 4 reference materials, each carrying a `provenance` block.
 
 #### Scenario: Core library lookup
 - **GIVEN** YAML netlist with `core_model: ferroxcube/N87`

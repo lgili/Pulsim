@@ -316,6 +316,32 @@ _CATEGORIES: dict[str, list[_Entry]] = {
                "Stability checks after auto-tuning."),
     ],
 
+    "Parts library + importers": [
+        _Entry("lib.mosfet / lib.igbt / lib.diode / lib.core",
+               "Look a part up by number from the parts library",
+               "When a loss summary needs a device's switching-energy tables "
+               "or thermal chain. Every part carries provenance; the shipped "
+               "illustrations are synthetic and refused by number unless "
+               "allow_synthetic=True.",
+               "q = p.lib.igbt('AK40N120', paths=['./parts'])\n"
+               "spec = q.switch_spec(Tj=125.0)      # E_on_table/E_off_table + Tj\n"
+               "chain = q.thermal().foster_stages()"),
+        _Entry("lib.import_plecs_xml",
+               "Read a vendor's PLECS thermal description (*.xml) as a Part",
+               "Infineon/Wolfspeed/onsemi publish these: (V, I, Tj) energy "
+               "tables, on-state drop, Foster/Cauer chain. Sign conventions "
+               "(diode tables in the −V or −I quadrant) are folded; formulas "
+               "are refused by name.",
+               "part = p.lib.import_plecs_xml('~/Downloads/IKW40N120T2.xml')\n"
+               "p.lib.save_part(part, 'parts/IKW40N120T2.yaml')"),
+        _Entry("spice_to_builder",
+               "Import a SPICE netlist, .MODEL cards and .SUBCKT included",
+               "Bringing an LTspice/ngspice design in. A diode card becomes "
+               "the Shockley junction it describes, a LEVEL-1 NMOS/VDMOS card "
+               "the Shichman–Hodges device; what cannot be mapped is refused "
+               "by name, what is dropped is listed (strict=True refuses).",
+               "b = p.spice_to_builder('design.cir', strict=False)"),
+    ],
     "Top-level entry": [
         _Entry("simulate",
                "p.simulate(builder, t_end, dt, **kwargs) — one-call API",

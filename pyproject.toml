@@ -48,6 +48,10 @@ data = [
 fast = [
     "numba>=0.58",
 ]
+# The parts library (`pulsim.lib`) reads and writes YAML part files.
+lib = [
+    "PyYAML>=6.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

@@ -1,0 +1,40 @@
+# Ferroxcube 3C90 — MnZn power ferrite, 25 °C
+# SYNTHETIC ILLUSTRATION — shapes only, not vendor data; see provenance.
+#
+# Datasheet reference: Ferroxcube 3C90 datasheet (rev 2008-09).
+
+class: core
+provenance:
+  source: synthetic
+  source_ref: "pulsim illustration (no vendor source)"
+  retrieved: "2026-05-10"
+  method: synthetic
+  note: >-
+    ILLUSTRATIVE ONLY. The curves and tables in this file (switching
+    energies, on-state tables, Coss/Ciss/Crss points, B-H points, core
+    geometry, Steinmetz and Jiles-Atherton sets) are plausible shapes
+    written for examples, not the vendor's published data: the
+    switching energies are straight lines through the origin, which no
+    datasheet curve is. Scalar ratings are datasheet headline values;
+    package and identity fields are unverified. pulsim.lib refuses to
+    resolve this part by number unless allow_synthetic=True. For real
+    numbers import the vendor's PLECS thermal file
+    (pulsim.lib.import_plecs_xml) or transcribe the datasheet with
+    provenance into a directory on PULSIM_PARTS_PATH.
+vendor: Ferroxcube
+material: 3C90
+geometry:
+  area_m2: 1.0e-4
+  path_length_m: 4.0e-2
+bh_curve:
+  - { H: -1200, B: -0.42 }
+  - { H:  -300, B: -0.34 }
+  - { H:   -50, B: -0.10 }
+  - { H:     0, B:  0.00 }
+  - { H:    50, B:  0.10 }
+  - { H:   300, B:  0.34 }
+  - { H:  1200, B:  0.42 }
+steinmetz:
+  k:     1.8e-3
+  alpha: 1.55
+  beta:  2.65
