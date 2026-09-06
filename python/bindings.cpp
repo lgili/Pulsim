@@ -420,6 +420,52 @@ void init_module(py::module_& m) {
               "tangent in the Jacobian -- no dummy source, no observer, no "
               "one-step lag. i(name) is the winding current; replay the "
               "B-H trajectory from it with pulsim.compute_bh_loop.")
+        .def("add_multi_winding_transformer",
+              [](builder::CircuitBuilder& b, const std::string& name,
+                 const std::vector<std::tuple<std::string, std::string, double>>& windings,
+                 const std::vector<std::vector<double>>& k_matrix)
+                  -> builder::CircuitBuilder& {
+                  std::vector<builder::CircuitBuilder::WindingSpec> ws;
+                  for (const auto& [f, t, L] : windings) {
+                      ws.push_back({f, t, L});
+                  }
+                  std::vector<std::vector<Real>> km;
+                  for (const auto& row : k_matrix) km.emplace_back(row.begin(), row.end());
+                  return b.add_multi_winding_transformer(name, ws, km);
+              },
+              py::arg("name"), py::arg("windings"),
+              py::arg("k_matrix") = std::vector<std::vector<double>>{},
+              py::return_value_policy::reference,
+              "N-winding LINEAR coupled-inductor transformer, no ceiling: "
+              "windings = [(from, to, L), ...], k_matrix = N x N couplings "
+              "in [0, 1] (upper triangle read; empty = 1 everywhere). "
+              "Couplings that are not realisable (inductance matrix not "
+              "positive definite) are refused by name. Branch k is named "
+              "name + '.w' + k.")
+        .def("add_saturable_transformer_n",
+              [](builder::CircuitBuilder& b, const std::string& name,
+                 const std::string& p_from, const std::string& p_to,
+                 double N_p, double L_leak_p,
+                 const std::vector<std::tuple<std::string, std::string, double, double>>& secondaries,
+                 double Ae, double le, double lg, double mu_r0, double B_sat)
+                  -> builder::CircuitBuilder& {
+                  std::vector<builder::CircuitBuilder::SecondaryWinding> sw;
+                  for (const auto& [f, t, N, Ll] : secondaries) {
+                      sw.push_back({f, t, N, Ll});
+                  }
+                  return b.add_saturable_transformer_n(
+                      name, p_from, p_to, N_p, L_leak_p, sw, Ae, le, lg, mu_r0, B_sat);
+              },
+              py::arg("name"), py::arg("p_from"), py::arg("p_to"),
+              py::arg("N_p"), py::arg("L_leak_p"), py::arg("secondaries"),
+              py::arg("Ae"), py::arg("le"), py::arg("lg"),
+              py::arg("mu_r0") = 2000.0, py::arg("B_sat") = 0.35,
+              py::return_value_policy::reference,
+              "Saturable transformer with ANY number of secondaries: "
+              "secondaries = [(s_from, s_to, N_s, L_leak_s), ...]. One "
+              "gapped-core magnetising branch (name + '.m') on the primary "
+              "and one ideal transformer per secondary (name + '.s' + k, "
+              "n_k = N_k/N_p). No winding ceiling.")
         .def("add_saturable_transformer",
               &builder::CircuitBuilder::add_saturable_transformer,
               py::arg("name"),
