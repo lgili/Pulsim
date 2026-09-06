@@ -957,6 +957,24 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parts-library-pulsimlib" class="md-nav__link">
+    <span class="md-ellipsis">
+      Parts library — pulsim.lib
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#spice-import-spice_to_buildertext_or_path-strictfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      SPICE import — spice_to_builder(text_or_path, *, strict=False)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#c-namespace-mapping" class="md-nav__link">
     <span class="md-ellipsis">
       C++ namespace mapping
@@ -2064,6 +2082,24 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parts-library-pulsimlib" class="md-nav__link">
+    <span class="md-ellipsis">
+      Parts library — pulsim.lib
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#spice-import-spice_to_buildertext_or_path-strictfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      SPICE import — spice_to_builder(text_or_path, *, strict=False)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#c-namespace-mapping" class="md-nav__link">
     <span class="md-ellipsis">
       C++ namespace mapping
@@ -2503,6 +2539,53 @@ result remains valid), and memory drops by the same factor.
 <span class="n">loaded</span><span class="o">.</span><span class="n">t_start</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">dt</span>
 </code></pre></div>
 <p>Pass the result straight to <code>simulate(loaded.builder, loaded.t_end, loaded.dt, switch_fn=loaded.switch_fn)</code>.</p>
+<h2 id="parts-library-pulsimlib">Parts library — <code>pulsim.lib</code><a class="headerlink" href="#parts-library-pulsimlib" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">q</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">igbt</span><span class="p">(</span><span class="s2">"AK40N120"</span><span class="p">,</span> <span class="n">paths</span><span class="o">=</span><span class="p">[</span><span class="s2">"./parts"</span><span class="p">])</span>   <span class="c1"># or PULSIM_PARTS_PATH</span>
+<span class="n">spec</span>  <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">switch_spec</span><span class="p">(</span><span class="n">Tj</span><span class="o">=</span><span class="mf">125.0</span><span class="p">)</span>                   <span class="c1"># E_on_table / E_off_table + Tj</span>
+<span class="n">cond</span>  <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">conduction_spec</span><span class="p">(</span><span class="n">Tj</span><span class="o">=</span><span class="mf">125.0</span><span class="p">)</span>               <span class="c1"># V_CE_sat / R_CE_sat fitted from the on-state table</span>
+<span class="n">chain</span> <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">thermal</span><span class="p">()</span><span class="o">.</span><span class="n">foster_stages</span><span class="p">()</span>               <span class="c1"># for add_foster_network</span>
+<span class="n">part</span>  <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">import_plecs_xml</span><span class="p">(</span><span class="s2">"~/Downloads/IKW40N120T2.xml"</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">save_part</span><span class="p">(</span><span class="n">part</span><span class="p">,</span> <span class="s2">"parts/IKW40N120T2.yaml"</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>Every part file carries a <code>provenance:</code> block (<code>source</code>, <code>source_ref</code>,
+  <code>retrieved</code>, <code>method</code> ∈ transcribed | imported_plecs_xml | measured |
+  vendor_model | synthetic); a file without one is refused by name.</li>
+<li>The parts shipped with Pulsim are <strong>synthetic illustrations</strong> (their
+  switching-energy tables are straight lines through the origin). They
+  are listed by <code>list_parts()</code> but <code>part()</code> refuses to resolve them by
+  number unless <code>allow_synthetic=True</code>.</li>
+<li>Search path: directories passed as <code>paths=</code>, then <code>PULSIM_PARTS_PATH</code>,
+  then the shipped data. The working directory is not searched; a user
+  file shadowing a shipped one is announced once.</li>
+<li>A table taken at ONE junction temperature refuses <code>switch_spec(Tj=)</code>
+  at another temperature unless <code>allow_tj_mismatch=True</code> (audit C.1's
+  −35 % error). A diode's recovery table becomes <code>E_rr_curve</code> +
+  <code>V_R_ref</code> at the stated <code>V_ref</code> and <code>Tj</code>.</li>
+<li><code>import_plecs_xml</code> honours the PLECS sign conventions: a <code>Diode</code>
+  file's switching losses sit in the −V/+I quadrant, a <code>… with Diode</code>
+  file's diode in the +V/−I quadrant (split out as <code>Erec</code>, <code>v_on_diode</code>,
+  <code>diode_spec()</code>). Formulas, class/type mismatches, package
+  descriptions, gate-dependent conduction (without <code>conduction_index</code>)
+  and thermal elements that do not match their branch are refused by
+  name; <code>Variables</code> Min/Max become <code>Part.limits</code>.</li>
+</ul>
+<h2 id="spice-import-spice_to_buildertext_or_path-strictfalse">SPICE import — <code>spice_to_builder(text_or_path, *, strict=False)</code><a class="headerlink" href="#spice-import-spice_to_buildertext_or_path-strictfalse" title="Permanent link">&para;</a></h2>
+<p><code>.MODEL</code> cards are applied: <code>D(IS N RS BV IBV)</code> → <code>add_shockley_diode</code>
+with RS as a series resistor (BV mapped to the kernel's knee at IBV),
+LTspice <code>D(Ron Roff Vfwd)</code> → <code>add_nonlinear_diode</code>, LEVEL-1 <code>NMOS</code>
+→ <code>add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)</code>
+with RD/RS series resistors and an explicit body diode when the card
+gives IS/JS, LTspice <code>VDMOS</code> → the same with K = KP/2, Rds, and the
+body diode from Is/N/Rb/BV. <code>.SUBCKT</code> instances are flattened with
+scoped names (<code>XA.X1.R1</code>, node <code>xa.x1.mid</code>); <code>PARAMS:</code> defaults and
+<code>k=v</code> on the X line are evaluated in the caller's scope; local
+<code>.MODEL</code> cards shadow outer ones; <code>.GLOBAL</code> nodes and <code>0</code>/<code>gnd</code> are not
+scoped. Refused by name: a <code>D</code>/<code>M</code> without a model, an undefined model
+(<code>.INC</code>/<code>.LIB</code> are not followed), a non-LEVEL-1 MOSFET, PMOS/<code>pchan</code>,
+a bulk away from the source with GAMMA, IKF, PWL reverse breakdown,
+<code>AKO:</code>. Dropped parameters (TT/CJO, gate capacitances, RG, level-2/3
+knobs) are listed in one warning; <code>strict=True</code> makes them refusals.</p>
 <h2 id="c-namespace-mapping">C++ namespace mapping<a class="headerlink" href="#c-namespace-mapping" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
