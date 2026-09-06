@@ -2129,7 +2129,8 @@
   <span class="o">.</span><span class="n">add_gapped_core_inductor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_saturable_inductor_table</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_hysteretic_core_inductor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># Jiles-Atherton, solved in the Newton loop</span>
-  <span class="o">.</span><span class="n">add_multi_winding_transformer</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># C++ only (not bound in Python)</span>
+  <span class="o">.</span><span class="n">add_multi_winding_transformer</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># N windings, no ceiling</span>
+  <span class="o">.</span><span class="n">add_saturable_transformer_n</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>     <span class="c1"># N secondaries on one gapped core</span>
   <span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_nonlinear_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
@@ -2381,7 +2382,11 @@ result remains valid), and memory drops by the same factor.
 </tr>
 <tr>
 <td><code>add_multi_winding_transformer</code></td>
-<td><code>(name, windings, k_matrix)</code> — <strong>C++ only</strong>; not bound in Python. For a multi-output saturable design compose <code>add_saturable_transformer</code> primaries or several <code>add_ideal_transformer</code> secondaries on one magnetising node</td>
+<td><code>(name, windings=[(from, to, L), …], k_matrix=[[…]])</code> — N-winding linear coupled-inductor transformer, <strong>no ceiling</strong> (the old <code>[2, 6]</code> was an argument check with nothing behind it). Couplings that are not realisable — an inductance matrix that is not positive definite, e.g. <code>k12 = k13 = 1</code> with <code>k23 &lt; 1</code> — are refused by name</td>
+</tr>
+<tr>
+<td><code>add_saturable_transformer_n</code></td>
+<td><code>(name, p_from, p_to, N_p, L_leak_p, secondaries=[(s_from, s_to, N_s, L_leak_s), …], Ae, le, lg, mu_r0=2000, B_sat=0.35)</code> — the saturable transformer with any number of secondaries: one gapped-core magnetising branch <code>name.m</code> on the primary and one ideal transformer <code>name.s&lt;k&gt;</code> per secondary, <code>n_k = N_k/N_p</code></td>
 </tr>
 </tbody>
 </table>
