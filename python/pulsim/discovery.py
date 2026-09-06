@@ -129,6 +129,16 @@ _CATEGORIES: dict[str, list[_Entry]] = {
         _Entry("add_inductor_coupling",
                "Couple two existing linear inductors by name with k",
                "Hand-built transformers; what add_flyback uses."),
+        _Entry("add_multi_winding_transformer",
+               "N-winding LINEAR coupled-inductor transformer, no ceiling; "
+               "unrealisable couplings refused by name",
+               "Multi-output flybacks (main + aux bias + monitor) below "
+               "the core's knee."),
+        _Entry("add_saturable_transformer_n",
+               "Saturable transformer with ANY number of secondaries on "
+               "one gapped-core magnetising branch",
+               "Multi-output flyback / forward where the shared core "
+               "saturates."),
         _Entry("add_ideal_transformer",
                "Ideal two-port: v_s = n·v_p, i_p = −n·i_s (transforms DC)",
                "The middle of a T-model; isolation in control loops."),

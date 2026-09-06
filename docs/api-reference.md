@@ -28,7 +28,8 @@ p.CircuitBuilder()
   .add_gapped_core_inductor(...)
   .add_saturable_inductor_table(...)
   .add_hysteretic_core_inductor(...)   # Jiles-Atherton, solved in the Newton loop
-  .add_multi_winding_transformer(...)   # C++ only (not bound in Python)
+  .add_multi_winding_transformer(...)   # N windings, no ceiling
+  .add_saturable_transformer_n(...)     # N secondaries on one gapped core
   .add_diode(...)
   .add_nonlinear_diode(...)
   .add_switch(...)
@@ -137,7 +138,8 @@ Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device
 | `add_saturable_inductor` | `(name, from, to, L_0, I_sat, L_residual=0)` — the analytic law `L(i) = L_res + (L_0−L_res)/(1+(i/I_sat)²)`, `λ(i) = L_res·i + (L_0−L_res)·I_sat·atan(i/I_sat)` |
 | `add_hysteretic_core_inductor` | `(name, from, to, N, Ae, le, lg, ja, substeps_min=8, M0=0)` (C++; Python: `pulsim.add_hysteretic_inductor(builder, name=…, from_node=…, to_node=…, params=JilesAthertonParams, N_turns=…, l_m=…, A_core=…, l_gap=0, M0=0)`) — Jiles-Atherton hysteresis INSIDE the Newton loop: `M` integrated from the committed `(H_n, M_n)` to the `H` that Ampère with the gap fixes for the trial current, exact `L = dλ/di` in the Jacobian, branch direction held per step. Replaces the observer (`make_hysteretic_inductor_observer`, now refusing by name), whose EMF was sign-inverted and unstable above `q = L_M/(dt(R+2L_0/dt)) ≈ 0.5`. `HystereticInductor.bh_loop(res)` replays the kernel's integrator on the current trace |
 | `add_saturable_inductor_table` | `(name, n_pos, n_neg, i_knots, lambda_knots)` — measured `(i, λ)` pairs for `i ≥ 0` from the origin, strictly increasing; odd-extended, monotone-cubic between knots, linear beyond the last |
-| `add_multi_winding_transformer` | `(name, windings, k_matrix)` — **C++ only**; not bound in Python. For a multi-output saturable design compose `add_saturable_transformer` primaries or several `add_ideal_transformer` secondaries on one magnetising node |
+| `add_multi_winding_transformer` | `(name, windings=[(from, to, L), …], k_matrix=[[…]])` — N-winding linear coupled-inductor transformer, **no ceiling** (the old `[2, 6]` was an argument check with nothing behind it). Couplings that are not realisable — an inductance matrix that is not positive definite, e.g. `k12 = k13 = 1` with `k23 < 1` — are refused by name |
+| `add_saturable_transformer_n` | `(name, p_from, p_to, N_p, L_leak_p, secondaries=[(s_from, s_to, N_s, L_leak_s), …], Ae, le, lg, mu_r0=2000, B_sat=0.35)` — the saturable transformer with any number of secondaries: one gapped-core magnetising branch `name.m` on the primary and one ideal transformer `name.s<k>` per secondary, `n_k = N_k/N_p` |
 
 ### Switches + diodes
 

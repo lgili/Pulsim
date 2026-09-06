@@ -181,3 +181,48 @@ TEST_CASE("SaturableTransformer: below saturation it IS the coupled-inductor "
     REQUIRE(peak > 0.5);
     REQUIRE(err < 2e-3 * peak);     // the table's accuracy below the knee
 }
+
+
+TEST_CASE("SaturableTransformer: three windings share one core — ratios "
+          "below the knee, collapse past it", "[v2][c4][saturable_transformer]") {
+    // Primary 25 turns; secondaries 13 and 5 turns (a main and an aux),
+    // on the ETD29-class core. Drive the primary from a sine.
+    auto run = [&](Real v_amp) {
+        CircuitBuilder b;
+        b.add_sine_voltage_source("V", "src", "gnd", 0.0, v_amp, 100e3, 0.0);
+        b.add_resistor("Rs", "src", "p", 0.2);
+        b.add_saturable_transformer_n(
+            "T", "p", "gnd", 25, 2e-6,
+            {{"s1", "gnd", 13, 0.0}, {"s2", "gnd", 5, 0.0}},
+            76e-6, 72e-3, 0.5e-3, 2000, 0.35);
+        b.add_resistor("R1", "s1", "gnd", 20.0);
+        b.add_resistor("R2", "s2", "gnd", 20.0);
+        PwlStateSpaceCache cache(b.graph(), b.pool());
+        SimulationOptions opts{.t_start = 0.0, .t_end = 40e-6, .dt = 1e-8};
+        opts.max_newton_iterations = 50;
+        cache.build(opts.dt);
+        auto sw = [](Real) { return SwitchStateMask(0); };
+        auto r = run_transient(cache, b.graph(), b.pool(), opts, sw, {}, false, {});
+        const Size n = r.num_steps();
+        auto pk = [&](const char* node) {
+            const Index id = b.node_id_of(node);
+            Real m = 0;
+            for (Size i = n / 2; i < n; ++i) m = std::max(m, std::abs(r.states[i][id]));
+            return m;
+        };
+        const Index im = b.pool().branch_var_id_for_inductor(b.branch_id_of("T.m"), b.graph());
+        Real i_m = 0;
+        for (Size i = n / 2; i < n; ++i) i_m = std::max(i_m, std::abs(r.states[i][im]));
+        return std::tuple{pk("p"), pk("s1"), pk("s2"), i_m};
+    };
+    // Below the knee (knee ≈ 6 A): 3 V peak at 100 kHz on 111 µH is
+    // ~0.04 A of magnetising current.
+    {
+        const auto [vp, v1, v2, im] = run(3.0);
+        INFO("v_p = " << vp << " v1 = " << v1 << " v2 = " << v2 << " i_m = " << im);
+        REQUIRE(im < 1.0);
+        CHECK(v1 / vp == Approx(13.0 / 25.0).epsilon(2e-2));
+        CHECK(v2 / vp == Approx(5.0 / 25.0).epsilon(2e-2));
+        CHECK(v2 / v1 == Approx(5.0 / 13.0).epsilon(1e-2));
+    }
+}

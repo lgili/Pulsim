@@ -354,57 +354,87 @@ public:
         return add_saturable_inductor_params_(name, from, to, p);
     }
 
-    /// Phase 4 C.4 — SATURABLE TRANSFORMER on a gapped core.
+    /// One secondary of a saturable transformer: terminals, turns,
+    /// and its own leakage inductance.
+    struct SecondaryWinding {
+        std::string from;
+        std::string to;
+        Real N;
+        Real L_leak = Real{0};
+    };
+
+    /// Phase 4 C.4 — SATURABLE TRANSFORMER on a gapped core, with any
+    /// number of secondaries.
     ///
-    ///     p_from ──[ L_leak_p ]──┬──● IDEAL n ●──[ L_leak_s ]── s_from
-    ///                          [L_m]
-    ///     p_to   ────────────────┴──●         ●──────────────── s_to
+    ///     p_from ──[ L_leak_p ]──┬──● IDEAL n₁ ●──[ L_leak,1 ]── s1_from
+    ///                          [L_m]  ● IDEAL n₂ ●──[ L_leak,2 ]── s2_from
+    ///     p_to   ────────────────┴──●     …     ●─────────────── …
     ///
-    /// The T-model: per-winding LINEAR leakage inductances, an ideal
-    /// transformer with n = N_s/N_p, and ONE magnetising branch —
-    /// a gapped-core flux device λ(i) referred to the PRIMARY (N_p
-    /// turns on the given geometry) — which is the only nonlinear
-    /// element. The core sees the primary voltage after the primary
-    /// leakage drop, which is where a core sits physically.
+    /// The T-model: per-winding LINEAR leakage inductances, one ideal
+    /// transformer per secondary with n_k = N_k/N_p, all sharing the
+    /// primary port, and ONE magnetising branch — a flux device λ(i)
+    /// from the core's geometry referred to the primary — which is
+    /// the only nonlinear element. There is no winding ceiling: an
+    /// ideal N-port is N−1 constraint rows, one per secondary.
     ///
-    /// Why not `add_transformer`: that is a pair of coupled inductors,
-    /// linear by construction, with the magnetising inductance folded
-    /// into L_p and M. There is no place in it for a core, so nothing
-    /// in it can saturate; pushed to 3× B_sat the example flyback
-    /// still returned a tidy output voltage. This device runs away
-    /// there, because the core does.
+    /// Why not `add_transformer` / `add_multi_winding_transformer`:
+    /// those are coupled inductors, linear by construction, with the
+    /// magnetising inductance folded into the L_i and the M_ij. There
+    /// is no place in them for a core, so nothing in them can
+    /// saturate; pushed to 3× B_sat the example flyback still returned
+    /// a tidy output voltage. This device runs away there, because the
+    /// core does.
     ///
-    /// Cross-check against the linear device below saturation: this
-    /// is the coupled pair with L_p = L_leak_p + L_m, M = n·L_m,
-    /// L_s = n²·L_m + L_leak_s, i.e. k = M/√(L_p L_s).
+    /// Cross-check against the linear device below saturation: with
+    /// one secondary this is the coupled pair with L_p = L_leak_p +
+    /// L_m, M = n·L_m, L_s = n²·L_m + L_leak_s, i.e. k = M/√(L_p L_s).
     ///
     /// Branches created: `name.lp` (if L_leak_p > 0), `name.m` (the
     /// magnetising branch; `i(name.m)` is the magnetising current
-    /// referred to the primary), `name` (the ideal secondary;
-    /// `i(name)` is the secondary current), `name.ls` (if
-    /// L_leak_s > 0). Internal nodes `name.pm` / `name.sm`.
-    CircuitBuilder& add_saturable_transformer(
+    /// referred to the primary), then per secondary k (0-based):
+    /// `name.s<k>` (the ideal secondary; `i(name.s<k>)` is its
+    /// current) and `name.ls<k>` (if its leakage > 0). With a single
+    /// secondary the ideal branch is named `name` and its leakage
+    /// `name.ls`, so `add_saturable_transformer` keeps its names.
+    CircuitBuilder& add_saturable_transformer_n(
         std::string_view name,
         std::string_view p_from, std::string_view p_to,
-        std::string_view s_from, std::string_view s_to,
-        Real N_p, Real N_s,
+        Real N_p, Real L_leak_p,
+        const std::vector<SecondaryWinding>& secondaries,
         Real Ae, Real le, Real lg,
-        Real mu_r0 = Real{2000}, Real B_sat = Real{0.35},
-        Real L_leak_p = Real{0}, Real L_leak_s = Real{0}) {
-        if (!(N_p > 0) || !(N_s > 0) || N_p != std::floor(N_p)
-            || N_s != std::floor(N_s)) {
+        Real mu_r0 = Real{2000}, Real B_sat = Real{0.35}) {
+        if (!(N_p > 0) || N_p != std::floor(N_p)) {
             throw std::invalid_argument(std::format(
-                "add_saturable_transformer(\"{}\"): N_p and N_s must be "
-                "positive integers (got {}, {}); reverse the secondary "
-                "terminals for a polarity flip.", name, N_p, N_s));
+                "add_saturable_transformer(\"{}\"): N_p must be a positive "
+                "integer (got {}).", name, N_p));
         }
-        if (!(L_leak_p >= 0) || !(L_leak_s >= 0)) {
+        if (secondaries.empty()) {
             throw std::invalid_argument(std::format(
-                "add_saturable_transformer(\"{}\"): leakage inductances "
-                "must be >= 0 (got {}, {}).", name, L_leak_p, L_leak_s));
+                "add_saturable_transformer(\"{}\"): at least one secondary "
+                "is needed; for a plain saturating choke use "
+                "add_gapped_core_inductor.", name));
         }
+        if (!(L_leak_p >= 0)) {
+            throw std::invalid_argument(std::format(
+                "add_saturable_transformer(\"{}\"): primary leakage must "
+                "be >= 0 (got {}).", name, L_leak_p));
+        }
+        for (Size k = 0; k < secondaries.size(); ++k) {
+            const auto& w = secondaries[k];
+            if (!(w.N > 0) || w.N != std::floor(w.N)) {
+                throw std::invalid_argument(std::format(
+                    "add_saturable_transformer(\"{}\"): secondary {} turns "
+                    "must be a positive integer (got {}); reverse the "
+                    "terminals for a polarity flip.", name, k, w.N));
+            }
+            if (!(w.L_leak >= 0)) {
+                throw std::invalid_argument(std::format(
+                    "add_saturable_transformer(\"{}\"): secondary {} leakage "
+                    "must be >= 0 (got {}).", name, k, w.L_leak));
+            }
+        }
+        const bool single = secondaries.size() == 1;
         const std::string pm = std::format("{}.pm", name);
-        const std::string sm = std::format("{}.sm", name);
         // Primary side: leakage (optional) into the magnetising node.
         std::string core_from = std::string{p_from};
         if (L_leak_p > 0) {
@@ -413,15 +443,40 @@ public:
         }
         add_gapped_core_inductor(std::format("{}.m", name), core_from, p_to,
                                  N_p, Ae, le, lg, mu_r0, B_sat);
-        // Secondary side: ideal transformer, then leakage (optional).
-        std::string sec_from = std::string{s_from};
-        if (L_leak_s > 0) {
-            add_inductor(std::format("{}.ls", name), sm, s_from, L_leak_s);
-            sec_from = sm;
+        // Secondaries: one ideal transformer each on the shared
+        // primary port, then that winding's leakage (optional).
+        for (Size k = 0; k < secondaries.size(); ++k) {
+            const auto& w = secondaries[k];
+            const std::string ideal_name =
+                single ? std::string{name} : std::format("{}.s{}", name, k);
+            const std::string leak_name =
+                single ? std::format("{}.ls", name) : std::format("{}.ls{}", name, k);
+            const std::string sm =
+                single ? std::format("{}.sm", name) : std::format("{}.sm{}", name, k);
+            std::string sec_from = w.from;
+            if (w.L_leak > 0) {
+                add_inductor(leak_name, sm, w.from, w.L_leak);
+                sec_from = sm;
+            }
+            add_ideal_transformer(ideal_name, core_from, p_to, sec_from, w.to,
+                                  w.N / N_p);
         }
-        add_ideal_transformer(name, core_from, p_to, sec_from, s_to,
-                              N_s / N_p);
         return *this;
+    }
+
+    /// The two-winding form of `add_saturable_transformer_n`.
+    CircuitBuilder& add_saturable_transformer(
+        std::string_view name,
+        std::string_view p_from, std::string_view p_to,
+        std::string_view s_from, std::string_view s_to,
+        Real N_p, Real N_s,
+        Real Ae, Real le, Real lg,
+        Real mu_r0 = Real{2000}, Real B_sat = Real{0.35},
+        Real L_leak_p = Real{0}, Real L_leak_s = Real{0}) {
+        return add_saturable_transformer_n(
+            name, p_from, p_to, N_p, L_leak_p,
+            {SecondaryWinding{std::string{s_from}, std::string{s_to}, N_s, L_leak_s}},
+            Ae, le, lg, mu_r0, B_sat);
     }
 
     /// Add an IDEAL OP-AMP: high-gain VCVS with single-ended
@@ -1368,7 +1423,7 @@ public:
         return *this;
     }
 
-    /// Layer 2 V16: N-winding transformer (2 ≤ N ≤ 6). Each
+    /// Layer 2 V16: N-winding transformer (N ≥ 2, no ceiling). Each
     /// winding is added as a regular `Inductor` branch, and
     /// the N·(N−1)/2 pair-wise couplings are registered with
     /// the existing `transformer_couplings_` mechanism — a
@@ -1392,9 +1447,58 @@ public:
         const std::vector<WindingSpec>& windings,
         const std::vector<std::vector<Real>>& k_matrix = {}) {
         const Size N = windings.size();
-        if (N < 2 || N > 6) {
-            throw std::invalid_argument(
-                "add_multi_winding_transformer: N must be in [2, 6]");
+        if (N < 2) {
+            throw std::invalid_argument(std::format(
+                "add_multi_winding_transformer(\"{}\"): a transformer has "
+                "at least 2 windings (got {}).", name, N));
+        }
+        // The old [2, 6] ceiling was an argument check with nothing
+        // behind it — the coupling registry has always been an
+        // unbounded vector. What DOES need checking is whether the
+        // requested couplings describe a transformer that can exist:
+        // the inductance matrix must be positive semi-definite, or
+        // the stored energy ½ iᵀ M i goes negative and the circuit is
+        // an oscillator with no physics behind it. Refuse by name.
+        {
+            models::MultiWindingTransformer::Params mp;
+            for (const auto& w : windings) mp.L_i.push_back(w.L);
+            mp.k_ij = k_matrix;
+            for (Size i = 0; i < N; ++i) {
+                for (Size j = i + 1; j < N; ++j) {
+                    if (!k_matrix.empty() && i < k_matrix.size()
+                        && j < k_matrix[i].size()) {
+                        const Real k = k_matrix[i][j];
+                        if (!(k >= Real{0}) || !(k <= Real{1})) {
+                            throw std::invalid_argument(std::format(
+                                "add_multi_winding_transformer(\"{}\"): "
+                                "k[{}][{}] = {} is outside [0, 1]; reverse a "
+                                "winding for a negative coupling.",
+                                name, i, j, k));
+                        }
+                        if (j < k_matrix.size() && i < k_matrix[j].size()
+                            && std::abs(k_matrix[j][i] - k) > Real{1e-12}
+                            && k_matrix[j][i] != Real{0}) {
+                            throw std::invalid_argument(std::format(
+                                "add_multi_winding_transformer(\"{}\"): the "
+                                "coupling matrix is not symmetric at ({}, {}): "
+                                "{} vs {}.", name, i, j, k, k_matrix[j][i]));
+                        }
+                    }
+                }
+            }
+            const Real pivot =
+                models::MultiWindingTransformer::min_relative_pivot(mp);
+            if (!(pivot > Real{1e-12})) {
+                throw std::invalid_argument(std::format(
+                    "add_multi_winding_transformer(\"{}\"): these couplings "
+                    "are not realisable — the inductance matrix is not "
+                    "positive definite (smallest relative pivot {:.3e}). "
+                    "Three windings with k12 = k13 = 1 and k23 < 1 is the "
+                    "classic case: a flux that links 1 with 2 and 1 with 3 "
+                    "completely must link 2 with 3 completely too. Lower "
+                    "the tight couplings or raise the loose one.",
+                    name, pivot));
+            }
         }
         // Add each winding as a regular inductor branch.
         std::vector<Index> branch_ids;

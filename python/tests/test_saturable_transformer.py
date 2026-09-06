@@ -245,7 +245,7 @@ simulation: {t_start: 0.0, t_end: 2.0e-3, dt: 1.0e-7}
 
 def test_refuses_bad_turns_and_leakage_by_name():
     b = p.CircuitBuilder()
-    with pytest.raises(Exception, match="positive integers"):
+    with pytest.raises(Exception, match="positive integer"):
         b.add_saturable_transformer("T", "a", "gnd", "s", "gnd", N_p=2.5, N_s=1,
                                     Ae=76e-6, le=72e-3, lg=0.5e-3)
     with pytest.raises(Exception, match="leakage"):
