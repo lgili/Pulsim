@@ -1,8 +1,26 @@
 # GaN Systems GS66508T — 650 V GaN HEMT, 50 mΩ.
+# SYNTHETIC ILLUSTRATION — shapes only, not vendor data; see provenance.
 # Datasheet rev 2020-09. PDFN package.
 #
 # Note: GaN HEMTs have NO body diode (Q_rr = 0) — set the embedded
 # diode's Q_rr_table to zero.
+provenance:
+  source: synthetic
+  source_ref: "pulsim illustration (no vendor source)"
+  retrieved: "2026-05-10"
+  method: synthetic
+  note: >-
+    ILLUSTRATIVE ONLY. The curves and tables in this file (switching
+    energies, on-state tables, Coss/Ciss/Crss points, B-H points, core
+    geometry, Steinmetz and Jiles-Atherton sets) are plausible shapes
+    written for examples, not the vendor's published data: the
+    switching energies are straight lines through the origin, which no
+    datasheet curve is. Scalar ratings are datasheet headline values;
+    package and identity fields are unverified. pulsim.lib refuses to
+    resolve this part by number unless allow_synthetic=True. For real
+    numbers import the vendor's PLECS thermal file
+    (pulsim.lib.import_plecs_xml) or transcribe the datasheet with
+    provenance into a directory on PULSIM_PARTS_PATH.
 class: mosfet
 vendor: GaNSystems
 part: GS66508T
