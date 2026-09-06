@@ -71,12 +71,13 @@ def _three_winding(v_amp, f=100e3):
     t = np.asarray(res.times)
     m = t > 2.0 / f
     pk = lambda n: float(np.abs(np.asarray(res.v(n))[m]).max())  # noqa: E731
+    rms = lambda n: float(np.sqrt(np.mean(np.asarray(res.v(n))[m] ** 2)))  # noqa: E731
     i_m = float(np.abs(np.asarray(res.i("T.m"))[m]).max())
-    return pk("p"), pk("s1"), pk("s2"), i_m, res
+    return pk("p"), pk("s1"), pk("s2"), i_m, res, rms("s1")
 
 
 def test_three_winding_saturable_transformer_ratios_below_the_knee():
-    vp, v1, v2, i_m, res = _three_winding(3.0)
+    vp, v1, v2, i_m, res, _ = _three_winding(3.0)
     assert i_m < 1.0                              # far below the ~6 A knee
     assert v1 / vp == pytest.approx(13 / 25, rel=2e-2)
     assert v2 / vp == pytest.approx(5 / 25, rel=2e-2)
@@ -86,17 +87,24 @@ def test_three_winding_saturable_transformer_ratios_below_the_knee():
 
 
 def test_three_winding_saturable_transformer_collapses_past_the_knee():
-    # 10 kHz so the flux swing, λ_pk = V/ω, reaches the core's
-    # λ(B_sat) = 0.665 mWb·t: at 3 V that is 4.8e-5 Wb (far below), at
-    # 100 V it is 1.6 mWb (2.4× past). A linear transformer would give
-    # 33× the secondary voltage; the core does not — the magnetising
-    # current runs past the knee and the secondary voltage stops
-    # following.
-    _, v1_low, _, i_low, _ = _three_winding(3.0, f=10e3)
-    vp_hi, v1_hi, _, i_hi, _ = _three_winding(100.0, f=10e3)
+    """10 kHz so the flux swing λ_pk = V/ω reaches the core's
+    λ(B_sat) = 0.665 mWb·t: at 3 V it is 4.8e-5 Wb (far below), at
+    100 V it is 1.6 mWb (2.4× past).
+
+    Measured: at 3 V i_m peaks at 0.69 A; at 30 V, 6.3 A (the knee);
+    at 100 V, 262 A. The secondary's PEAK voltage barely notices
+    (50.3 V against a linear 51.8 V) — at the flux zero-crossings the
+    core draws nothing and the source is unloaded — so the peak is the
+    wrong metric. Saturation clips the volt-seconds: the secondary's
+    RMS falls to 25.7 V against 36.0 V linear (71 %), and the primary
+    to 63 V RMS behind a 98.7 V peak."""
+    _, _, _, i_low, _, v1_rms_low = _three_winding(3.0, f=10e3)
+    _, v1_pk_hi, _, i_hi, _, v1_rms_hi = _three_winding(100.0, f=10e3)
     assert i_low < 1.0, i_low
-    assert i_hi > 6.0, i_hi
-    assert v1_hi < 0.6 * (100.0 / 3.0 * v1_low), (v1_hi, 100 / 3 * v1_low)
+    assert i_hi > 50.0, i_hi                                  # runaway
+    linear_rms = 100.0 / 3.0 * v1_rms_low
+    assert v1_rms_hi < 0.8 * linear_rms, (v1_rms_hi, linear_rms)
+    assert v1_pk_hi > 0.9 * (100.0 / 3.0) * 1.554 * 0.9      # peak still follows: the point
 
 
 def test_yaml_multi_winding_and_n_secondaries():
