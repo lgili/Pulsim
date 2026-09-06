@@ -323,22 +323,75 @@ inline void load_device(
             require_real(dev, idx, type, "lg"),
             real_or(dev, "mu_r0", Real{2000}),
             real_or(dev, "B_sat", Real{0.35}));
+    } else if (type == "multi_winding_transformer") {
+        // windings: [{from, to, L}, ...]; k: optional N×N matrix.
+        if (!dev["windings"] || !dev["windings"].IsSequence()
+            || dev["windings"].size() < 2) {
+            throw std::runtime_error(std::format(
+                "yaml::load: multi_winding_transformer '{}' needs a "
+                "'windings' list of at least 2 {{from, to, L}} entries.",
+                name));
+        }
+        std::vector<builder::CircuitBuilder::WindingSpec> ws;
+        for (std::size_t k = 0; k < dev["windings"].size(); ++k) {
+            const auto& w = dev["windings"][k];
+            if (!w || !w.IsMap() || !w["from"] || !w["to"] || !w["L"]) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: multi_winding_transformer '{}' winding {} "
+                    "needs from, to and L.", name, k));
+            }
+            ws.push_back({w["from"].as<std::string>(),
+                          w["to"].as<std::string>(),
+                          w["L"].as<Real>()});
+        }
+        std::vector<std::vector<Real>> km;
+        if (dev["k"] && dev["k"].IsSequence()) {
+            for (std::size_t i = 0; i < dev["k"].size(); ++i) {
+                std::vector<Real> row;
+                if (dev["k"][i].IsSequence()) {
+                    for (std::size_t j = 0; j < dev["k"][i].size(); ++j) {
+                        row.push_back(dev["k"][i][j].as<Real>());
+                    }
+                }
+                km.push_back(std::move(row));
+            }
+        }
+        b.add_multi_winding_transformer(name, ws, km);
     } else if (type == "saturable_transformer") {
-        b.add_saturable_transformer(
+        const Real N_p = require_real(dev, idx, type, "N_p");
+        const Real Ae = require_real(dev, idx, type, "Ae");
+        const Real le = require_real(dev, idx, type, "le");
+        const Real lg = require_real(dev, idx, type, "lg");
+        const Real mu_r0 = real_or(dev, "mu_r0", Real{2000});
+        const Real B_sat = real_or(dev, "B_sat", Real{0.35});
+        const Real L_leak_p = real_or(dev, "L_leak_p", Real{0});
+        std::vector<builder::CircuitBuilder::SecondaryWinding> sw;
+        if (dev["secondaries"] && dev["secondaries"].IsSequence()) {
+            // Any number of secondaries: [{s_from, s_to, N_s, L_leak_s}, …]
+            for (std::size_t k = 0; k < dev["secondaries"].size(); ++k) {
+                const auto& w = dev["secondaries"][k];
+                if (!w || !w.IsMap() || !w["s_from"] || !w["s_to"] || !w["N_s"]) {
+                    throw std::runtime_error(std::format(
+                        "yaml::load: saturable_transformer '{}' secondary {} "
+                        "needs s_from, s_to and N_s.", name, k));
+                }
+                sw.push_back({w["s_from"].as<std::string>(),
+                              w["s_to"].as<std::string>(),
+                              w["N_s"].as<Real>(),
+                              w["L_leak_s"] ? w["L_leak_s"].as<Real>() : Real{0}});
+            }
+        } else {
+            // The two-winding keys.
+            sw.push_back({require_string(dev, idx, type, "s_from"),
+                          require_string(dev, idx, type, "s_to"),
+                          require_real(dev, idx, type, "N_s"),
+                          real_or(dev, "L_leak_s", Real{0})});
+        }
+        b.add_saturable_transformer_n(
             name,
             require_string(dev, idx, type, "p_from"),
             require_string(dev, idx, type, "p_to"),
-            require_string(dev, idx, type, "s_from"),
-            require_string(dev, idx, type, "s_to"),
-            require_real(dev, idx, type, "N_p"),
-            require_real(dev, idx, type, "N_s"),
-            require_real(dev, idx, type, "Ae"),
-            require_real(dev, idx, type, "le"),
-            require_real(dev, idx, type, "lg"),
-            real_or(dev, "mu_r0", Real{2000}),
-            real_or(dev, "B_sat", Real{0.35}),
-            real_or(dev, "L_leak_p", Real{0}),
-            real_or(dev, "L_leak_s", Real{0}));
+            N_p, L_leak_p, sw, Ae, le, lg, mu_r0, B_sat);
     } else if (type == "ideal_transformer") {
         b.add_ideal_transformer(
             name,
@@ -446,8 +499,8 @@ inline void load_device(
             "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, op_amp_ideal, "
-            "gapped_core_inductor, transformer, ideal_transformer, "
-            "saturable_transformer, induction_motor");
+            "gapped_core_inductor, transformer, multi_winding_transformer, "
+            "ideal_transformer, saturable_transformer, induction_motor");
     }
 }
 

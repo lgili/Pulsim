@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/models/multi_winding_transformer.hpp"
@@ -17,6 +18,7 @@
 #include "pulsim/solver/run_transient.hpp"
 
 #include <cmath>
+#include <format>
 
 using namespace pulsim;
 using namespace pulsim::builder;
@@ -29,11 +31,8 @@ using Catch::Approx;
 TEST_CASE("MultiWindingTransformer — mutual inductance math",
           "[v2][layer2_v16][multi_winding_transformer][unit]") {
     MultiWindingTransformer::Params p;
-    p.n_windings = 3;
     p.L_i = {1e-3, 4e-3, 9e-3};   // L_p, L_s1, L_s2
-    p.k_ij[0][1] = 1.0;
-    p.k_ij[0][2] = 0.9;
-    p.k_ij[1][2] = 0.8;
+    p.k_ij = {{1.0, 1.0, 0.9}, {1.0, 1.0, 0.8}, {0.9, 0.8, 1.0}};
     // Diagonal: returns L_i directly.
     REQUIRE(MultiWindingTransformer::mutual_inductance(p, 0, 0)
             == Approx(1e-3));
@@ -99,4 +98,63 @@ TEST_CASE("MultiWindingTransformer — N=3 flyback-like topology",
     REQUIRE(b.num_branches() == 6);
     // 3 pair-wise couplings = N*(N-1)/2 = 3.
     REQUIRE(b.pool().transformer_couplings().size() == 3);
+}
+
+
+TEST_CASE("MultiWindingTransformer — eight windings, no ceiling: tightly "
+          "coupled voltages scale as sqrt(L_k/L_1)",
+          "[v2][c4][multi_winding_transformer][unit]") {
+    // The old [2, 6] check was an argument check with nothing behind
+    // it. Eight windings, k = 0.999 everywhere, the first driven, the
+    // rest lightly loaded: v_k/v_1 = sqrt(L_k/L_1) (turns ratio).
+    CircuitBuilder b;
+    b.add_sine_voltage_source("V", "src", "gnd", 0.0, 10.0, 10e3, 0.0);
+    b.add_resistor("Rs", "src", "w1", 0.01);
+    std::vector<CircuitBuilder::WindingSpec> ws;
+    ws.push_back({"w1", "gnd", 1e-3});
+    for (int k = 2; k <= 8; ++k) {
+        ws.push_back({std::format("w{}", k), "gnd", 1e-3 * k * k});   // N_k = k
+    }
+    std::vector<std::vector<Real>> km(8, std::vector<Real>(8, 0.999));
+    b.add_multi_winding_transformer("T8", ws, km);
+    for (int k = 2; k <= 8; ++k) b.add_resistor(std::format("R{}", k), std::format("w{}", k), "gnd", 1e4);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    SimulationOptions opts{.t_start = 0.0, .t_end = 200e-6, .dt = 1e-8};
+    cache.build(opts.dt);
+    auto sw = [](Real) { return SwitchStateMask(0); };
+    auto r = run_transient(cache, b.graph(), b.pool(), opts, sw);
+    const Size n = r.num_steps();
+    const Index w1 = b.node_id_of("w1");
+    Real v1_pk = 0;
+    for (Size i = n / 2; i < n; ++i) v1_pk = std::max(v1_pk, std::abs(r.states[i][w1]));
+    REQUIRE(v1_pk > 5.0);
+    for (int k = 2; k <= 8; ++k) {
+        const Index wk = b.node_id_of(std::format("w{}", k));
+        Real vk_pk = 0;
+        for (Size i = n / 2; i < n; ++i) vk_pk = std::max(vk_pk, std::abs(r.states[i][wk]));
+        INFO("k = " << k << " ratio = " << vk_pk / v1_pk);
+        CHECK(vk_pk / v1_pk == Approx(static_cast<Real>(k)).epsilon(2e-2));
+    }
+}
+
+TEST_CASE("MultiWindingTransformer — non-realisable couplings are refused "
+          "by name", "[v2][c4][multi_winding_transformer][unit]") {
+    using Catch::Matchers::ContainsSubstring;
+    CircuitBuilder b;
+    // k12 = k13 = 1 but k23 = 0.5: the flux that links 1 with 2 and
+    // 1 with 3 completely must link 2 with 3 completely too.
+    std::vector<CircuitBuilder::WindingSpec> ws{{"a", "gnd", 1e-3}, {"b", "gnd", 1e-3}, {"c", "gnd", 1e-3}};
+    CHECK_THROWS_WITH(
+        b.add_multi_winding_transformer("Tbad", ws, {{1, 1, 1}, {1, 1, 0.5}, {1, 0.5, 1}}),
+        ContainsSubstring("not realisable"));
+    CHECK_THROWS_WITH(
+        b.add_multi_winding_transformer("Tbad", ws, {{1, 1.2, 1}, {1.2, 1, 1}, {1, 1, 1}}),
+        ContainsSubstring("outside [0, 1]"));
+    CHECK_THROWS_WITH(
+        b.add_multi_winding_transformer("Tone", {{"a", "gnd", 1e-3}}),
+        ContainsSubstring("at least 2"));
+    // And a realisable set passes: the pivot check is not a blanket
+    // refusal of tight coupling.
+    b.add_multi_winding_transformer("Tok", ws, {{1, 0.99, 0.99}, {0.99, 1, 0.99}, {0.99, 0.99, 1}});
+    REQUIRE(b.num_branches() == 3);
 }
