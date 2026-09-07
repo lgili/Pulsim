@@ -65,6 +65,8 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <utility>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -243,25 +245,48 @@ public:
     [[nodiscard]] std::vector<Entry> snapshot() const { return entries_; }
     void restore(const std::vector<Entry>& snap) { entries_ = snap; }
 
-    /// Flat (λ, i, v) triples per device, for state export / resume.
-    /// `lambda_gamma` is not carried: it lives only between the two
-    /// stages of one step, and a snapshot is always taken at a step
-    /// boundary.
+    /// Number of reals per device in the flat layout.
+    static constexpr Size kFlatPerDevice = 7;
+
+    /// Flat state per device, for state export / resume: (λ, i, v)
+    /// then the Jiles-Atherton state (H, M, branch direction,
+    /// sub-step count — zeros for the stateless laws, and the
+    /// direction and count are carried because a resumed
+    /// hysteretic run would otherwise restart with δ = +1 and the
+    /// minimum sub-step count on whichever branch it was on).
+    /// `lambda_gamma` / `ja_gamma` are not carried: they live only
+    /// between the two stages of one step, and a snapshot is always
+    /// taken at a step boundary.
     [[nodiscard]] std::vector<Real> to_flat() const {
         std::vector<Real> out;
-        out.reserve(entries_.size() * 5);
+        out.reserve(entries_.size() * kFlatPerDevice);
         for (const auto& e : entries_) {
             out.push_back(e.lambda_old);
             out.push_back(e.i_L_old);
             out.push_back(e.V_L_old);
-            // Hysteresis state; zeros for the stateless laws.
             out.push_back(e.ja_state.H);
             out.push_back(e.ja_state.M);
+            out.push_back(static_cast<Real>(e.ja_state.delta_hint));
+            out.push_back(static_cast<Real>(e.ja_state.n_sub));
         }
         return out;
     }
+    /// Refuses a size mismatch by name: a silent return here left a
+    /// resumed run with lambda_old = 0 while x still carried the
+    /// current, and the first Newton step dropped the flux.
     void from_flat(const std::vector<Real>& flat) {
-        if (flat.size() != entries_.size() * 5) return;
+        if (flat.size() != entries_.size() * kFlatPerDevice) {
+            throw std::invalid_argument(
+                "SaturableInductorHistory::from_flat: expected "
+                + std::to_string(entries_.size() * kFlatPerDevice)
+                + " values (" + std::to_string(kFlatPerDevice)
+                + " per saturable / gapped-core / hysteretic-core "
+                  "inductor or saturable-transformer magnetising "
+                  "branch) but got " + std::to_string(flat.size())
+                + " — this snapshot belongs to a different circuit, "
+                  "or to a Pulsim that did not carry saturable-"
+                  "inductor state.");
+        }
         Size p = 0;
         for (auto& e : entries_) {
             e.lambda_old = flat[p++];
@@ -269,6 +294,10 @@ public:
             e.V_L_old    = flat[p++];
             e.ja_state.H = flat[p++];
             e.ja_state.M = flat[p++];
+            e.ja_state.delta_hint =
+                static_cast<decltype(e.ja_state.delta_hint)>(flat[p++]);
+            e.ja_state.n_sub =
+                static_cast<decltype(e.ja_state.n_sub)>(flat[p++]);
         }
     }
 

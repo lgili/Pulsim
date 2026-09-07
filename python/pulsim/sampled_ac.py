@@ -94,8 +94,7 @@ def frequency_response(builder, *, period: float, dt: float,
         A `SteadyStateResult` to reuse. Recomputed if omitted.
     """
     from . import simulate as _simulate
-    from .steady_state import steady_state as _steady_state
-    from ._pulsim import SolverSnapshot  # type: ignore
+    from .steady_state import steady_state as _steady_state, _snapshot_like
 
     freqs = np.asarray(frequencies, dtype=float)
     if freqs.size == 0:
@@ -129,12 +128,11 @@ def frequency_response(builder, *, period: float, dt: float,
     n_runs = int(steady.n_period_runs)
 
     def one_period(hist, sfn):
-        s = SolverSnapshot()
-        s.t = float(snap.t)
-        s.x = np.asarray(snap.x).copy()
-        s.history = [float(v) for v in hist]
-        s.diode_on = list(snap.diode_on)
-        s.valid = True
+        # Every field, not just history/diode_on: a hand-built
+        # snapshot that drops a stateful device's history is refused
+        # by that device's from_flat() (steady_state has already
+        # refused such circuits, so the fields are empty here).
+        s = _snapshot_like(snap, hist)
         return _simulate(builder, t_end=s.t + period, dt=dt,
                           switch_fn=sfn, resume_from=s, **kw)
 

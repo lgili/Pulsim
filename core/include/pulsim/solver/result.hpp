@@ -117,7 +117,11 @@ struct InductorGuardAction {
 /// inductor v_prev = 0), so resuming from it does not reproduce
 /// the run: a continuous 2T RLC and a T-then-resume differ by
 /// 2.3e-4 where a true resume is ~1e-15. A snapshot carries the
-/// parts that were missing, so `resume_from=` is exact.
+/// parts that were missing, so `resume_from=` is exact on the
+/// fixed-step engine. TR-BDF2 fills one and resumes from one too,
+/// to the run's own tolerance: its step controller's state (last
+/// accepted h, the LTE history) is not carried, so the resumed
+/// segment restarts from h_init.
 struct SolverSnapshot {
     Real t = Real{0};
     /// MNA unknowns at `t`.
@@ -128,6 +132,31 @@ struct SolverSnapshot {
     /// Which switched diodes were conducting. Solver-owned bits
     /// that a mask alone cannot reconstruct.
     std::vector<bool> diode_on;
+    /// The five stateful-device histories, each in its own
+    /// to_flat() layout; empty when the circuit has none. Before
+    /// they were carried, a resume restored x and the linear
+    /// companions while every stateful device restarted from its
+    /// init value and the first Newton step reconciled the two by
+    /// jumping — measured: a saturable inductor lost 8 mWb of flux
+    /// at the seam (171.85 A continuous vs 27.14 A resumed), a Coss
+    /// went from 109.85 V to 0.28 V on the first resumed step, an
+    /// IGBT tail of 17.7 A vanished. No error was raised. Each
+    /// history's from_flat() refuses a size mismatch by name.
+    ///
+    /// 7 per device: lambda_old, i_L_old, V_L_old, then the JA
+    /// hysteresis state H, M, branch direction, sub-step count
+    /// (zeros for the stateless laws). Covers the saturable,
+    /// gapped-core and hysteretic-core inductors and the saturable
+    /// transformer's magnetising branch — they share one history.
+    std::vector<Real> saturable_history;
+    /// 3 per device: v_prev, q_prev, i_prev (charge-based Coss).
+    std::vector<Real> coss_history;
+    /// 2 per device: q_M_prev, f_prev (Lauritzen stored charge).
+    std::vector<Real> lauritzen_history;
+    /// 2 per device: q_prev, f_prev (IGBT turn-off tail charge).
+    std::vector<Real> igbt_tail_history;
+    /// 9 per machine: lambda_abc, i_abc, v_abc (MNA PMSM).
+    std::vector<Real> pmsm_history;
     /// True once populated by a run.
     bool valid = false;
 };

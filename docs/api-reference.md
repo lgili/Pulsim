@@ -263,6 +263,41 @@ p.lib.save_part(part, "parts/IKW40N120T2.yaml")
   and thermal elements that do not match their branch are refused by
   name; `Variables` Min/Max become `Part.limits`.
 
+## Resuming a run — `SolverSnapshot` / `simulate(resume_from=...)`
+
+```python
+first  = p.simulate(b, t_end=1e-3, dt=2e-7)          # engine='pwl'
+second = p.simulate(b, t_end=5e-3, dt=2e-7, resume_from=first.final_snapshot)
+```
+
+`result.final_snapshot` carries the whole state at the end of a run:
+the MNA vector `x`, the linear trapezoidal companion `history`, the
+solver-owned `diode_on` bits, and one named field per stateful device
+kind — `saturable_history` (7 reals per saturable, gapped-core or
+hysteretic-core inductor, and per saturable-transformer magnetising
+branch: λ, i, v, then the Jiles-Atherton H, M, branch direction and
+sub-step count), `coss_history` (3), `lauritzen_history` (2),
+`igbt_tail_history` (2), `pmsm_history` (9 per machine). Snapshots
+pickle.
+
+* `engine='pwl'` resumes **exactly**: a two-segment run reproduces the
+  continuous one to machine precision.
+* `engine='trbdf2'` / `'auto'` fills a snapshot and resumes from one to
+  the run's own tolerance — the step controller's state (last accepted
+  `h`, the LTE history) is not carried, so the resumed segment restarts
+  from `h_init`. A TR-BDF2 snapshot resumes exactly on the fixed engine.
+* `engine='dsed'` has no snapshot of its own and refuses `resume_from=`
+  by name.
+* An invalid snapshot, or one whose device histories do not match the
+  circuit, is refused by name rather than resumed from zero. Builder
+  initial conditions (`i0=`, `c0=`) are not applied when resuming: the
+  snapshot is the state.
+
+`steady_state` refuses a circuit containing any of these devices: its
+one-period map is affine only while every dynamic device is a linear
+capacitor or inductor. Settle with a transient run and use its
+`final_snapshot` instead.
+
 ## SPICE import — `spice_to_builder(text_or_path, *, strict=False)`
 
 `.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`

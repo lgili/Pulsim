@@ -2254,20 +2254,67 @@ void init_module(py::module_& m) {
         "does NOT reproduce the run — a continuous 2T RLC and a "
         "T-then-resume differ by 2.3e-4 where a true resume is "
         "~1e-15. A snapshot carries what was missing: the "
-        "trapezoidal companion history and the solver-owned diode "
-        "bits. Pass it as simulate(resume_from=...).")
+        "trapezoidal companion history, the state of every "
+        "stateful device (saturable / gapped / hysteretic "
+        "inductors, charge-based Coss, Lauritzen diodes, IGBT "
+        "tails, MNA PMSMs) and the solver-owned diode bits. Pass "
+        "it as simulate(resume_from=...): exact on engine='pwl', "
+        "to tolerance on engine='trbdf2'. Pickles.")
         .def(py::init<>())
         .def_readwrite("t", &SolverSnapshot::t)
         .def_readwrite("x", &SolverSnapshot::x)
         .def_readwrite("history", &SolverSnapshot::history)
         .def_readwrite("diode_on", &SolverSnapshot::diode_on)
+        .def_readwrite("saturable_history", &SolverSnapshot::saturable_history)
+        .def_readwrite("coss_history", &SolverSnapshot::coss_history)
+        .def_readwrite("lauritzen_history", &SolverSnapshot::lauritzen_history)
+        .def_readwrite("igbt_tail_history", &SolverSnapshot::igbt_tail_history)
+        .def_readwrite("pmsm_history", &SolverSnapshot::pmsm_history)
         .def_readwrite("valid", &SolverSnapshot::valid)
         .def("__repr__", [](const SolverSnapshot& s) {
-            return "<SolverSnapshot t=" + std::to_string(s.t)
+            std::string r = "<SolverSnapshot t=" + std::to_string(s.t)
                    + " n=" + std::to_string(s.x.size())
-                   + " history=" + std::to_string(s.history.size())
-                   + (s.valid ? " valid>" : " EMPTY>");
-        });
+                   + " history=" + std::to_string(s.history.size());
+            if (!s.saturable_history.empty())
+                r += " saturable=" + std::to_string(s.saturable_history.size());
+            if (!s.coss_history.empty())
+                r += " coss=" + std::to_string(s.coss_history.size());
+            if (!s.lauritzen_history.empty())
+                r += " lauritzen=" + std::to_string(s.lauritzen_history.size());
+            if (!s.igbt_tail_history.empty())
+                r += " igbt_tail=" + std::to_string(s.igbt_tail_history.size());
+            if (!s.pmsm_history.empty())
+                r += " pmsm=" + std::to_string(s.pmsm_history.size());
+            return r + (s.valid ? " valid>" : " EMPTY>");
+        })
+        .def(py::pickle(
+            [](const SolverSnapshot& s) {
+                return py::make_tuple(
+                    s.t, s.x, s.history, s.diode_on,
+                    s.saturable_history, s.coss_history,
+                    s.lauritzen_history, s.igbt_tail_history,
+                    s.pmsm_history, s.valid);
+            },
+            [](py::tuple t) {
+                if (t.size() != 10) {
+                    throw std::runtime_error(
+                        "SolverSnapshot: pickled state has "
+                        + std::to_string(t.size())
+                        + " fields, expected 10");
+                }
+                SolverSnapshot s;
+                s.t = t[0].cast<Real>();
+                s.x = t[1].cast<Vector>();
+                s.history = t[2].cast<std::vector<Real>>();
+                s.diode_on = t[3].cast<std::vector<bool>>();
+                s.saturable_history = t[4].cast<std::vector<Real>>();
+                s.coss_history = t[5].cast<std::vector<Real>>();
+                s.lauritzen_history = t[6].cast<std::vector<Real>>();
+                s.igbt_tail_history = t[7].cast<std::vector<Real>>();
+                s.pmsm_history = t[8].cast<std::vector<Real>>();
+                s.valid = t[9].cast<bool>();
+                return s;
+            }));
 
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
@@ -3662,7 +3709,8 @@ void init_module(py::module_& m) {
            bool enable_nonlinear_refresh,
            Size max_newton_iterations,
            Real tol_newton_dx, Real tol_newton_res,
-           bool enable_newton_line_search, bool enable_newton_lm) {
+           bool enable_newton_line_search, bool enable_newton_lm,
+           py::object resume_from) {
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -3728,6 +3776,12 @@ void init_module(py::module_& m) {
             }
             solver::TrBdf2Stats st;
             SimulationResult res;
+            SolverSnapshot resume_snap;
+            const SolverSnapshot* resume_ptr = nullptr;
+            if (!resume_from.is_none()) {
+                resume_snap = resume_from.cast<SolverSnapshot>();
+                resume_ptr = &resume_snap;
+            }
             {
                 // Release the GIL for the run like every sibling
                 // engine binding does: with a native PWM schedule
@@ -3742,7 +3796,7 @@ void init_module(py::module_& m) {
                 res = solver::run_transient_trbdf2(
                     cache, graph, pool, o, switch_fn, b_extra_fn,
                     x0, &st, next_edge_fn, should_continue,
-                    observer_fn, nl_refresh);
+                    observer_fn, nl_refresh, resume_ptr);
             }
             py::dict d;
             d["n_accept"]       = st.n_accept;
@@ -3773,6 +3827,7 @@ void init_module(py::module_& m) {
         py::arg("tol_newton_res") = Real{0},
         py::arg("enable_newton_line_search") = false,
         py::arg("enable_newton_lm") = false,
+        py::arg("resume_from") = py::none(),
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
@@ -3791,7 +3846,8 @@ void init_module(py::module_& m) {
            bool enable_nonlinear_refresh,
            py::object initial_state,
            ShouldContinueFn should_continue,
-           std::shared_ptr<streaming::LiveRing> live_ring) {
+           std::shared_ptr<streaming::LiveRing> live_ring,
+           py::object resume_from) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -3831,6 +3887,12 @@ void init_module(py::module_& m) {
                 x_init = initial_state.cast<Vector>();
                 x_init_ptr = &x_init;
             }
+            SolverSnapshot resume_snap;
+            const SolverSnapshot* resume_ptr = nullptr;
+            if (!resume_from.is_none()) {
+                resume_snap = resume_from.cast<SolverSnapshot>();
+                resume_ptr = &resume_snap;
+            }
             SimulationResult result;
             {
                 py::gil_scoped_release rel;
@@ -3840,7 +3902,8 @@ void init_module(py::module_& m) {
                                           nl_refresh,
                                           observer_eff,
                                           x_init_ptr,
-                                          continue_eff);
+                                          continue_eff,
+                                          resume_ptr);
             }
             return result;
         },
@@ -3853,6 +3916,7 @@ void init_module(py::module_& m) {
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
+        py::arg("resume_from") = py::none(),
         "Run transient with a BlockChain as the per-step observer. "
         "The chain's step is invoked directly in C++ each step — "
         "no Python interpreter cost per step. Equivalent to "

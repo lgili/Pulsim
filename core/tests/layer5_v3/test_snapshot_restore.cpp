@@ -12,6 +12,10 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/history_state.hpp"
+#include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/lauritzen_diode_history.hpp"
+#include "pulsim/pwl/pmsm_mna_history.hpp"
+#include "pulsim/pwl/saturable_inductor_history.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <stdexcept>
@@ -114,4 +118,87 @@ TEST_CASE("DiodeEventState restore_on_bits rejects size mismatch",
     REQUIRE_THROWS_AS(
         diodes.restore_on_bits(std::vector<bool>{false, true}),
         std::invalid_argument);
+}
+
+// =============================================================================
+// The stateful-device histories: to_flat / from_flat round trip, and a
+// size mismatch refused BY NAME.
+//
+// Four of these five used to `return` silently on a size mismatch, so a
+// resume restored x and the linear companions while the device restarted
+// from its init value — measured on a saturable inductor: 8 mWb of flux
+// lost at the seam (171.85 A continuous vs 27.14 A resumed), no error.
+// =============================================================================
+
+TEST_CASE("SaturableInductorHistory flat round-trip carries the JA state",
+          "[v2][layer5_v3][snapshot][stateful]") {
+    Graph g;
+    g.add_node("a");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::Nonlinear);
+
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 5.0});
+    pool.add_saturable_inductor(
+        1, {.L_0 = 1e-3, .I_sat = 5.0, .L_residual = 5e-5});
+
+    SaturableInductorHistory h;
+    h.init(g, pool);
+    REQUIRE(h.entries().size() == 1);
+
+    auto flat = h.to_flat();
+    REQUIRE(flat.size() == SaturableInductorHistory::kFlatPerDevice);
+    REQUIRE(flat.size() == 7);
+
+    // A state a run would have reached, JA fields included.
+    flat[0] = 7.9577e-3;   // lambda_old
+    flat[1] = 27.20;       // i_L_old
+    flat[2] = 50.0;        // V_L_old
+    flat[3] = 120.0;       // H
+    flat[4] = 3.1e5;       // M
+    flat[5] = -1.0;        // branch direction
+    flat[6] = 16.0;        // sub-steps
+    h.from_flat(flat);
+    const auto back = h.to_flat();
+    for (Size k = 0; k < flat.size(); ++k) {
+        REQUIRE(back[k] == Approx(flat[k]));
+    }
+}
+
+TEST_CASE("Stateful histories refuse a size mismatch by name",
+          "[v2][layer5_v3][snapshot][stateful]") {
+    Graph g;
+    g.add_node("a");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::Nonlinear);
+
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 5.0});
+    pool.add_saturable_inductor(
+        1, {.L_0 = 1e-3, .I_sat = 5.0, .L_residual = 5e-5});
+
+    SaturableInductorHistory sat;
+    sat.init(g, pool);
+    // The old five-real layout, and an empty one (a Pulsim that did
+    // not carry the state at all): both used to return silently.
+    REQUIRE_THROWS_AS(sat.from_flat(std::vector<Real>(5, 0.0)),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(sat.from_flat(std::vector<Real>{}),
+                      std::invalid_argument);
+    REQUIRE_NOTHROW(sat.from_flat(std::vector<Real>(7, 0.0)));
+
+    LauritzenDiodeHistory laur;
+    laur.init(g, pool);
+    REQUIRE_THROWS_AS(laur.from_flat(std::vector<Real>(3, 0.0)),
+                      std::invalid_argument);
+
+    IgbtTailHistory tail;
+    tail.init(g, pool);
+    REQUIRE_THROWS_AS(tail.from_flat(std::vector<Real>(3, 0.0)),
+                      std::invalid_argument);
+
+    PmsmMnaHistory pmsm;
+    pmsm.init(g, pool);
+    REQUIRE_THROWS_AS(pmsm.from_flat(std::vector<Real>(4, 0.0)),
+                      std::invalid_argument);
 }

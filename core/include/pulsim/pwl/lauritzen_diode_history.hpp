@@ -49,6 +49,8 @@
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -217,7 +219,10 @@ public:
 
     void from_flat(const std::vector<Real>& flat) {
         if (flat.size() != entries_.size() * 2) {
-            return;
+            throw std::invalid_argument(
+                "LauritzenDiodeHistory::from_flat: expected "
+                + std::to_string(entries_.size() * 2) + " values but got "
+                + std::to_string(flat.size()));
         }
         for (Size k = 0; k < entries_.size(); ++k) {
             entries_[k].q_m_prev = flat[2 * k];
