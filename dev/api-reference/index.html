@@ -966,6 +966,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#resuming-a-run-solversnapshot-simulateresume_from" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resuming a run — SolverSnapshot / simulate(resume_from=...)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#spice-import-spice_to_buildertext_or_path-strictfalse" class="md-nav__link">
     <span class="md-ellipsis">
       SPICE import — spice_to_builder(text_or_path, *, strict=False)
@@ -2091,6 +2100,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#resuming-a-run-solversnapshot-simulateresume_from" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resuming a run — SolverSnapshot / simulate(resume_from=...)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#spice-import-spice_to_buildertext_or_path-strictfalse" class="md-nav__link">
     <span class="md-ellipsis">
       SPICE import — spice_to_builder(text_or_path, *, strict=False)
@@ -2570,6 +2588,37 @@ result remains valid), and memory drops by the same factor.
   and thermal elements that do not match their branch are refused by
   name; <code>Variables</code> Min/Max become <code>Part.limits</code>.</li>
 </ul>
+<h2 id="resuming-a-run-solversnapshot-simulateresume_from">Resuming a run — <code>SolverSnapshot</code> / <code>simulate(resume_from=...)</code><a class="headerlink" href="#resuming-a-run-solversnapshot-simulateresume_from" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">first</span>  <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">)</span>          <span class="c1"># engine='pwl'</span>
+<span class="n">second</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">,</span> <span class="n">resume_from</span><span class="o">=</span><span class="n">first</span><span class="o">.</span><span class="n">final_snapshot</span><span class="p">)</span>
+</code></pre></div>
+<p><code>result.final_snapshot</code> carries the whole state at the end of a run:
+the MNA vector <code>x</code>, the linear trapezoidal companion <code>history</code>, the
+solver-owned <code>diode_on</code> bits, and one named field per stateful device
+kind — <code>saturable_history</code> (7 reals per saturable, gapped-core or
+hysteretic-core inductor, and per saturable-transformer magnetising
+branch: λ, i, v, then the Jiles-Atherton H, M, branch direction and
+sub-step count), <code>coss_history</code> (3), <code>lauritzen_history</code> (2),
+<code>igbt_tail_history</code> (2), <code>pmsm_history</code> (9 per machine). Snapshots
+pickle.</p>
+<ul>
+<li><code>engine='pwl'</code> resumes <strong>exactly</strong>: a two-segment run reproduces the
+  continuous one to machine precision.</li>
+<li><code>engine='trbdf2'</code> / <code>'auto'</code> fills a snapshot and resumes from one to
+  the run's own tolerance — the step controller's state (last accepted
+  <code>h</code>, the LTE history) is not carried, so the resumed segment restarts
+  from <code>h_init</code>. A TR-BDF2 snapshot resumes exactly on the fixed engine.</li>
+<li><code>engine='dsed'</code> has no snapshot of its own and refuses <code>resume_from=</code>
+  by name.</li>
+<li>An invalid snapshot, or one whose device histories do not match the
+  circuit, is refused by name rather than resumed from zero. Builder
+  initial conditions (<code>i0=</code>, <code>c0=</code>) are not applied when resuming: the
+  snapshot is the state.</li>
+</ul>
+<p><code>steady_state</code> refuses a circuit containing any of these devices: its
+one-period map is affine only while every dynamic device is a linear
+capacitor or inductor. Settle with a transient run and use its
+<code>final_snapshot</code> instead.</p>
 <h2 id="spice-import-spice_to_buildertext_or_path-strictfalse">SPICE import — <code>spice_to_builder(text_or_path, *, strict=False)</code><a class="headerlink" href="#spice-import-spice_to_buildertext_or_path-strictfalse" title="Permanent link">&para;</a></h2>
 <p><code>.MODEL</code> cards are applied: <code>D(IS N RS BV IBV)</code> → <code>add_shockley_diode</code>
 with RS as a series resistor (BV mapped to the kernel's knee at IBV),
