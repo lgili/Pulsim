@@ -1738,8 +1738,31 @@ def simulate(
     # for a different circuit. Nothing between here and the PWL
     # cache mutates the graph, so one placement serves all three
     # engines.
+    # ---- resume_from: refuse by name what cannot be honoured, ABOVE
+    # the engine dispatch (three early returns below; a check placed
+    # after the first applies to one engine only). Before this the
+    # DSED engine silently ignored the snapshot and started at t = 0,
+    # and an invalid snapshot resumed from zero.
+    if resume_from is not None:
+        if not getattr(resume_from, "valid", False):
+            raise ValueError(
+                "simulate(resume_from=...): the snapshot is not valid — "
+                "it came from a run that produced none (an aborted run, "
+                "or a SolverSnapshot() built by hand and never "
+                "populated). Resuming from it would start from zero "
+                "without saying so.")
+        if engine == "dsed":
+            raise ValueError(
+                'simulate(engine="dsed"): resume_from is not supported '
+                "by the event-driven engine, which has no snapshot of "
+                'its own; use engine="pwl" (exact resume) or '
+                'engine="trbdf2" / "auto" (resume to tolerance).')
     _ic_from_builder = False
-    if initial_state is None:
+    # A snapshot IS the state: builder ICs (i0=/c0=) must not be
+    # synthesised alongside it, or the engines re-seed the stateful
+    # devices from x after the restore (measured: an IGBT's 17.7 A
+    # tail current lost on resume when its load inductor had i0=).
+    if initial_state is None and resume_from is None:
         try:
             import numpy as _np_check
             candidate = builder.initial_state()
@@ -2078,6 +2101,7 @@ def simulate(
                 switch_fn=switch_fn,
                 b_extra_fn=b_extra_fn,
                 initial_state=initial_state,
+                resume_from=resume_from,
                 max_event_iterations=(
                     0 if max_event_iterations is None
                     else int(max_event_iterations)),
@@ -2583,6 +2607,9 @@ def simulate(
             kwargs["should_continue"] = should_continue
         if live_ring is not None:
             kwargs["live_ring"] = live_ring
+        if resume_from is not None:
+            # The fast path used to drop the snapshot on the floor.
+            kwargs["resume_from"] = resume_from
         res = _k.run_transient_with_chain(
             cache, builder.graph, builder.pool, opts,
             chain=cxx_chain, chain_dt=chain_dt,

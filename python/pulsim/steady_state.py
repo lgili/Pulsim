@@ -81,6 +81,49 @@ class SteadyStateResult:
     pattern: "list[int]" = field(default_factory=list)
 
 
+# Snapshot fields that belong to devices whose state is NOT a linear
+# companion pair: (field, reals per device, name). Widths match the
+# histories' to_flat() layouts in core/include/pulsim/pwl/.
+_STATEFUL_FIELDS = (
+    ("saturable_history", 7,
+     "saturable / gapped-core / hysteretic-core inductor (or saturable-"
+     "transformer magnetising branch)"),
+    ("coss_history", 3, "charge-based nonlinear capacitor"),
+    ("lauritzen_history", 2, "Lauritzen diode"),
+    ("igbt_tail_history", 2, "IGBT with a turn-off tail"),
+    ("pmsm_history", 9, "MNA PMSM"),
+)
+
+
+def _stateful_devices(snap):
+    """``[(count, name), ...]`` of the stateful devices a snapshot
+    carries state for — empty for a circuit of linear companions."""
+    out = []
+    for attr, width, name in _STATEFUL_FIELDS:
+        n = len(getattr(snap, attr, ()))
+        if n:
+            out.append((n // width, name))
+    return out
+
+
+def _snapshot_like(base, history):
+    """A snapshot with `base`'s time, x, diode bits and every stateful
+    field, and the given linear companion history. Copying every
+    field keeps the hand-built probe snapshots loadable by the
+    engines' size-checked from_flat()s."""
+    from ._pulsim import SolverSnapshot  # type: ignore
+
+    s = SolverSnapshot()
+    s.t = float(base.t)
+    s.x = np.asarray(base.x).copy()
+    s.history = [float(v) for v in history]
+    s.diode_on = list(base.diode_on)
+    for attr, _w, _n in _STATEFUL_FIELDS:
+        setattr(s, attr, [float(v) for v in getattr(base, attr, ())])
+    s.valid = True
+    return s
+
+
 def steady_state(builder, *, period: float, dt: float,
                   switch_fn=None, start_from=None,
                   probe_scale: float = 1e-4,
@@ -131,7 +174,6 @@ def steady_state(builder, *, period: float, dt: float,
         is self-consistent. The drift over several periods can.
     """
     from . import simulate as _simulate
-    from ._pulsim import SolverSnapshot  # type: ignore
 
     if not (period > 0):
         raise ValueError(f"steady_state: period must be > 0, "
@@ -169,15 +211,37 @@ def steady_state(builder, *, period: float, dt: float,
     else:
         base_in = start_from
 
+    # The one-period map is affine ONLY while every dynamic device
+    # is a linear capacitor or inductor. A device that carries its
+    # own state (flux, stored charge, tail charge, rotor flux) makes
+    # the map nonlinear in a direction the affine solve below never
+    # sees — and before the snapshot carried that state at all, the
+    # solve ran anyway and returned a transient as an orbit
+    # (measured on a saturable-inductor RC filter: residual 4.95e-7
+    # on the capacitor's two reals, +0.381 A of DC inductor current
+    # in the first period from the "steady" point). Refuse by name.
+    stateful = _stateful_devices(base_in)
+    if stateful:
+        raise ValueError(
+            "steady_state: the one-period map is affine only while "
+            "every dynamic device is a linear capacitor or inductor; "
+            "this circuit has " + ", ".join(
+                f"{k} {name}" for k, name in stateful)
+            + ", whose state the map does not see and whose law is "
+              "not linear in it — a fixed point of the linearised "
+              "map would be a transient returned as an orbit "
+              "(measured: +0.38 A of DC inductor current in the first "
+              "period). Settle with a transient run instead, and use "
+              "its final_snapshot as the starting point of the next.")
     base = run_period(base_in)
     h0 = np.asarray(list(base_in.history), dtype=float)
     c = np.asarray(list(base.final_snapshot.history), dtype=float)
     n = c.size
     if n == 0:
         raise ValueError(
-            "steady_state: this circuit has no dynamic devices, so "
-            "it has no periodic state to find — its solution is "
-            "algebraic at every instant.")
+            "steady_state: this circuit has no linear dynamic devices "
+            "(capacitors or inductors), so it has no periodic state "
+            "to find — its solution is algebraic at every instant.")
     def _pattern(res):
         # The commutation SEQUENCE, not its length: a probe that
         # moves an instant without adding one is exactly the case
@@ -204,13 +268,8 @@ def steady_state(builder, *, period: float, dt: float,
     for j in range(n):
         hj = h0.copy()
         hj[j] += scale
-        s = SolverSnapshot()
-        s.t = t_start
-        s.x = np.asarray(base_in.x).copy()
-        s.history = [float(v) for v in hj]
         # The SAME discrete state as the base run.
-        s.diode_on = list(base_in.diode_on)
-        s.valid = True
+        s = _snapshot_like(base_in, hj)
         r = run_period(s)
         Phi[:, j] = (np.asarray(list(r.final_snapshot.history),
                                  dtype=float) - c) / scale
@@ -243,12 +302,7 @@ def steady_state(builder, *, period: float, dt: float,
     ev = np.linalg.eigvals(Phi)
     radius = float(np.abs(ev).max())
 
-    snap = SolverSnapshot()
-    snap.t = t_start
-    snap.x = np.asarray(base_in.x).copy()
-    snap.history = [float(v) for v in h_star]
-    snap.diode_on = list(base_in.diode_on)
-    snap.valid = True
+    snap = _snapshot_like(base_in, h_star)
 
     residual = float("nan")
     drift = float("nan")

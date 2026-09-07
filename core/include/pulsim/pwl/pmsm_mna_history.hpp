@@ -44,6 +44,8 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <array>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -178,7 +180,12 @@ public:
         return out;
     }
     void from_flat(const std::vector<Real>& flat) {
-        if (flat.size() != entries_.size() * 9) return;
+        if (flat.size() != entries_.size() * 9) {
+            throw std::invalid_argument(
+                "PmsmMnaHistory::from_flat: expected "
+                + std::to_string(entries_.size() * 9) + " values but got "
+                + std::to_string(flat.size()));
+        }
         Size p = 0;
         for (auto& e : entries_) {
             for (Size k = 0; k < 3; ++k) e.lambda_old[k] = flat[p++];

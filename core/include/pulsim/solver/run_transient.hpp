@@ -347,9 +347,17 @@ inline SimulationResult run_transient(
     // V17: saturable inductors carry their own (i_L, V_L)_old
     // history, since they need it in the Newton refresh (not
     // just as a pre-computed b_extra). Initialise to zero.
-    const SolverSnapshot* resume_snap =
-        (resume_from != nullptr && resume_from->valid)
-            ? resume_from : nullptr;
+    if (resume_from != nullptr && !resume_from->valid) {
+        // Refuse by name: a nullptr here used to start the run
+        // from zero with no signal.
+        throw std::invalid_argument(
+            "run_transient(resume_from=...): the snapshot is not "
+            "valid — it came from a run that produced none (an "
+            "aborted run, or a SolverSnapshot() built by hand and "
+            "never populated). Resuming from it would start from "
+            "zero without saying so.");
+    }
+    const SolverSnapshot* resume_snap = resume_from;
     if (resume_snap != nullptr) {
         if (resume_from->x.size() != static_cast<Index>(state_size)) {
             throw std::invalid_argument(
@@ -374,6 +382,8 @@ inline SimulationResult run_transient(
     if (initial_state != nullptr) {
         sat_history.seed_from_dc_op(x);
     }
+    // Resume WINS over a builder-IC seed: the snapshot is the state.
+    if (resume_snap != nullptr) sat_history.from_flat(resume_snap->saturable_history);
     const bool has_saturable = !sat_history.empty();
 
     // V17: shared dt that the saturable-inductor refresh
@@ -404,6 +414,8 @@ inline SimulationResult run_transient(
     if (initial_state != nullptr) {
         coss_history.seed_from_dc_op(x);
     }
+    // Resume WINS over a builder-IC seed: the snapshot is the state.
+    if (resume_snap != nullptr) coss_history.from_flat(resume_snap->coss_history);
     const bool has_coss = !coss_history.empty();
 
     // The Lauritzen diode's stored charge, same shape as the Coss
@@ -414,6 +426,8 @@ inline SimulationResult run_transient(
     if (initial_state != nullptr) {
         laur_history.seed_from_dc_op(x);
     }
+    // Resume WINS over a builder-IC seed: the snapshot is the state.
+    if (resume_snap != nullptr) laur_history.from_flat(resume_snap->lauritzen_history);
     const bool has_lauritzen = !laur_history.empty();
 
     // Phase 4 C.3 — the MNA-native PMSM's flux-linkage state. Same
@@ -424,6 +438,8 @@ inline SimulationResult run_transient(
     if (initial_state != nullptr) {
         pmsm_history.seed_from_dc_op(x);
     }
+    // Resume WINS over a builder-IC seed: the snapshot is the state.
+    if (resume_snap != nullptr) pmsm_history.from_flat(resume_snap->pmsm_history);
     const bool has_pmsm = !pmsm_history.empty();
 
     // The IGBT turn-off tail's stored charge. Same shape again,
@@ -434,6 +450,8 @@ inline SimulationResult run_transient(
     if (initial_state != nullptr) {
         tail_history.seed_from_dc_op(x);
     }
+    // Resume WINS over a builder-IC seed: the snapshot is the state.
+    if (resume_snap != nullptr) tail_history.from_flat(resume_snap->igbt_tail_history);
     const bool has_igbt_tail = !tail_history.empty();
 
     pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
@@ -568,6 +586,11 @@ inline SimulationResult run_transient(
 
     pwl::DiodeEventState diodes{graph, pool};
     diodes.reset();
+    if (resume_snap != nullptr && !resume_snap->diode_on.empty()) {
+        // The solver-owned conduction bits the snapshot promised to
+        // carry (size-checked by name inside).
+        diodes.restore_on_bits(resume_snap->diode_on);
+    }
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
 
@@ -1646,6 +1669,11 @@ inline SimulationResult run_transient(
     result.final_snapshot.t = t_reached;
     result.final_snapshot.x = x;
     result.final_snapshot.history = history.to_flat();
+    result.final_snapshot.saturable_history = sat_history.to_flat();
+    result.final_snapshot.coss_history = coss_history.to_flat();
+    result.final_snapshot.lauritzen_history = laur_history.to_flat();
+    result.final_snapshot.igbt_tail_history = tail_history.to_flat();
+    result.final_snapshot.pmsm_history = pmsm_history.to_flat();
     result.final_snapshot.diode_on =
         has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
     result.final_snapshot.valid = true;

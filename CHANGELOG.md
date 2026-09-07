@@ -8,6 +8,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **Stateful devices survive `resume_from=`, and `steady_state`
+  refuses them by name** (engine defect found while wiring the
+  saturable inductor into TR-BDF2). `SolverSnapshot` carried only
+  the linear trapezoidal companion history; the five stateful-device
+  histories (saturable / gapped / hysteretic inductors and the
+  saturable transformer's magnetising branch, charge-based Coss,
+  Lauritzen diode, IGBT tail, MNA PMSM) restarted from their init
+  value on resume while `x` still described the old state, and the
+  first Newton step reconciled the two by jumping. No error.
+  Measured, a two-segment `resume_from` against one continuous run
+  on the fixed engine:
+
+      device                    at the seam
+      saturable inductor        i(Ls) 171.85 A → 27.14 A (8 mWb of flux lost)
+      gapped-core inductor      99.93 A → 0.018 A on the first resumed step
+      charge-based Coss         109.85 V → 0.28 V on the first resumed step
+      Lauritzen diode, 1 MHz    reverse peak −2.21 A → −1.15 A
+      IGBT turn-off tail        17.72 A → 0 on the first resumed step
+      MNA PMSM                  ω 3.87 vs −1.06 rad/s
+
+  The snapshot now carries every history as a named field
+  (`saturable_history`, `coss_history`, `lauritzen_history`,
+  `igbt_tail_history`, `pmsm_history`; the old `history` keeps its
+  meaning), the fixed engine resumes bit-exactly again (≤ 1e-10
+  relative on all six), each history's `from_flat` refuses a size
+  mismatch by name instead of returning silently, and snapshots
+  pickle. Three more silent drops became refusals or fixes: the
+  TR-BDF2 engine left `final_snapshot` empty with `valid=False` and
+  a fixed-engine resume from it started at zero — it now fills one
+  and accepts `resume_from=` (to the run's tolerance: the step
+  controller's state is not carried); the DSED engine and the
+  closed-loop chain fast path ignored `resume_from` — DSED is
+  refused by name, the chain path honours it; an invalid snapshot is
+  refused instead of ignored; and builder ICs (`i0=`/`c0=`) no
+  longer re-seed the devices after the restore. `steady_state`
+  refuses a circuit with any of these devices: its one-period map
+  is affine only for linear companions, and the point it returned
+  for a saturable-inductor filter carried +0.38 A of DC inductor
+  current in its first period — a transient, returned as an orbit.
+
 * **MNA-native PMSM** (audit C.3, *alto, breaking*). The Python
   PMSM/BLDC/IM are observers: back-EMF from the previous step's
   (θ, ω) injected through `b_extra_fn`, forward-Euler mechanics,

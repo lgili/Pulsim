@@ -181,5 +181,8 @@ def test_argument_errors_name_what_is_wrong():
     static = p.CircuitBuilder()
     static.add_voltage_source("V", "a", "gnd", 5.0)
     static.add_resistor("R", "a", "gnd", 1.0)
-    with pytest.raises(ValueError, match="no dynamic devices"):
+    # "linear" is load-bearing since the stateful-device refusal: a
+    # circuit whose only dynamic device is a saturable inductor has a
+    # periodic state, but not one this affine map can find.
+    with pytest.raises(ValueError, match="no linear dynamic devices"):
         p.steady_state(static, period=T, dt=DT)

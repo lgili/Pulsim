@@ -228,7 +228,13 @@ inline SimulationResult run_transient_trbdf2(
     /// Per-Newton-iteration re-stamp of the nonlinear devices —
     /// the SAME callback the fixed-step engine uses. When present
     /// every stage solve becomes a Newton solve.
-    const pwl::NonlinearRefreshFn& nl_refresh = {}) {
+    const pwl::NonlinearRefreshFn& nl_refresh = {},
+    /// v2.0 Phase 4 — resume from a previous run's `final_snapshot`
+    /// (either engine's): x, the companion histories of every
+    /// dynamic device, and the diode bits. To the run's own
+    /// tolerance, not bit-exact: the step controller's state is not
+    /// in the snapshot, so the segment restarts from h_init.
+    const SolverSnapshot* resume_from = nullptr) {
     using topology::SwitchStateMask;
 
     if (!(opts.t_end > opts.t_start)) {
@@ -364,6 +370,30 @@ inline SimulationResult run_transient_trbdf2(
         x = *initial_state;
         history.seed_from_dc_op(x);
     }
+    if (resume_from != nullptr) {
+        if (!resume_from->valid) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2(resume_from=...): the snapshot "
+                "is not valid — it came from a run that produced none "
+                "(an aborted run, or a SolverSnapshot() built by hand "
+                "and never populated).");
+        }
+        if (resume_from->x.size() != static_cast<Index>(state_size)) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2(resume_from=...): the snapshot's "
+                "state vector has "
+                + std::to_string(resume_from->x.size())
+                + " entries but this circuit has "
+                + std::to_string(state_size)
+                + " — it belongs to a different circuit.");
+        }
+        // Resume WINS over initial_state: the snapshot is the state.
+        x = resume_from->x;
+        history.from_flat(resume_from->history);
+        if (!resume_from->diode_on.empty()) {
+            diodes.restore_on_bits(resume_from->diode_on);
+        }
+    }
 
     // Built-in time-varying source census + reusable buffers
     // (same pattern as run_transient).
@@ -427,6 +457,8 @@ inline SimulationResult run_transient_trbdf2(
     if (initial_state.has_value()) {
         coss.seed_from_dc_op(x);
     }
+    // After the seed, never before: the snapshot is the state.
+    if (resume_from != nullptr) coss.from_flat(resume_from->coss_history);
     const bool has_coss = !coss.empty();
     std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
     std::vector<Real> q_gamma(coss.entries().size(), Real{0});
@@ -466,21 +498,25 @@ inline SimulationResult run_transient_trbdf2(
     pwl::LauritzenDiodeHistory laur;
     laur.init(graph, pool);
     if (initial_state.has_value()) laur.seed_from_dc_op(x);
+    if (resume_from != nullptr) laur.from_flat(resume_from->lauritzen_history);
     const bool has_laur = !laur.empty();
 
     pwl::IgbtTailHistory tail;
     tail.init(graph, pool);
     if (initial_state.has_value()) tail.seed_from_dc_op(x);
+    if (resume_from != nullptr) tail.from_flat(resume_from->igbt_tail_history);
     const bool has_tail = !tail.empty();
 
     pwl::PmsmMnaHistory pmsm;
     pmsm.init(graph, pool);
     if (initial_state.has_value()) pmsm.seed_from_dc_op(x);
+    if (resume_from != nullptr) pmsm.from_flat(resume_from->pmsm_history);
     const bool has_pmsm = !pmsm.empty();
 
     pwl::SaturableInductorHistory sat;
     sat.init(graph, pool);
     if (initial_state.has_value()) sat.seed_from_dc_op(x);
+    if (resume_from != nullptr) sat.from_flat(resume_from->saturable_history);
     const bool has_sat = !sat.empty();
 
     // One stage/step pair drives all four: they are always stamped
@@ -1348,6 +1384,20 @@ inline SimulationResult run_transient_trbdf2(
         throw SimulationAborted(e.what(), std::move(result), t);
     }
 
+    // The complete state at the end, so either engine can continue
+    // from it (this used to be left EMPTY, with `valid = false`, and
+    // a fixed-engine resume from it silently started at zero).
+    result.final_snapshot.t = t;
+    result.final_snapshot.x = x;
+    result.final_snapshot.history = history.to_flat();
+    result.final_snapshot.diode_on = diodes.num_diodes() > 0
+        ? diodes.snapshot_on_bits() : std::vector<bool>{};
+    result.final_snapshot.saturable_history = sat.to_flat();
+    result.final_snapshot.coss_history = coss.to_flat();
+    result.final_snapshot.lauritzen_history = laur.to_flat();
+    result.final_snapshot.igbt_tail_history = tail.to_flat();
+    result.final_snapshot.pmsm_history = pmsm.to_flat();
+    result.final_snapshot.valid = true;
     return result;
 }
 
