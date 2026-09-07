@@ -194,6 +194,11 @@ parameters.
   Infineon IPP60R190P7 (Si CoolMOS), Wolfspeed C3M0065090J (SiC),
   GaN Systems GS66508T, Infineon IKW40N120T2 (Si IGBT TrenchStop2),
   Wolfspeed C4D20120D (SiC Schottky), Vishay VS-30CTH02 (fast-recovery).
+  > **Superseded in v2.0.** These files moved to
+  > `python/pulsim/lib/data/catalog/` (behind `pulsim.lib`), and four of
+  > the six were deleted for naming a package, a topology or a part
+  > number their own content contradicted. What remains is marked
+  > `provenance.method: synthetic`. See the 2.0.0 changelog entry.
 
 **Gates**: G.1 Eon scales linearly per-catalog within 10 %; G.2
 conduction loss within ±5 % over 25–125 °C; G.3 Si Q_rr ramps with

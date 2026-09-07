@@ -310,7 +310,7 @@ from .hysteresis import (
 # public `pulsim.dsed` surface is now just `run_user_lti` + the
 # `CircuitBuilderAdapter` for Bridge.10 advanced users.
 from . import dsed as dsed  # noqa: F401  (re-export submodule)
-# Phase 4 C.5: the parts library — pulsim.lib.mosfet('C3M0065090J'),
+# Phase 4 C.5: the parts library — pulsim.lib.igbt('IKW40N120T2'),
 # pulsim.lib.import_plecs_xml(path).
 from . import lib as lib  # noqa: F401  (re-export submodule)
 from .yaml_chain import wire_chain_from_yaml
@@ -3091,7 +3091,7 @@ def _auto_attach_motor_traces(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "1.8.0"
+__version__ = "2.0.0"
 
 
 # ---------------------------------------------------------------------------

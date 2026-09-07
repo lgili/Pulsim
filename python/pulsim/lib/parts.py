@@ -6,11 +6,11 @@ names the field and says what would have gone wrong, which a
 generic validator cannot.
 
     class: mosfet | igbt | diode | core
-    vendor: Wolfspeed
-    part: C3M0065090J
+    vendor: Infineon
+    part: IKW40N120T2
     provenance:                      # REQUIRED — see Provenance
       source: datasheet
-      source_ref: "C3M0065090J rev 2018-04, Fig. 12 and 13"
+      source_ref: "IKW40N120T2 rev 2013-04, Fig. 12 and 13"
       retrieved: "2026-05-14"
       method: transcribed            # see Provenance for the list
       note: "..."

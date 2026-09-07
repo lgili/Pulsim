@@ -34,7 +34,12 @@ bh_curve:
   - { H:   500, B:  0.20 }
   - { H:  3000, B:  0.45 }
   - { H:  8000, B:  0.50 }
-steinmetz:
-  k:     2.5e-3
-  alpha: 1.4
-  beta:  2.4
+
+# Steinmetz and Jiles-Atherton parameters are NOT duplicated here.
+# Until v2.0 this file carried its own set and disagreed with the
+# Python catalogues in every parameter — three sources, three answers,
+# all synthetic, and nothing said which one a result came from.
+#   no Python catalogue carries this material: it has no
+#   Steinmetz or Jiles-Atherton set at all, rather than a
+#   third invented one. Add it to pulsim/magnetic.py's
+#   _CATALOG (with provenance) if you need one.
