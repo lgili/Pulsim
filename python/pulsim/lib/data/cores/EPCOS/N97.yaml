@@ -32,7 +32,10 @@ bh_curve:
   - { H:     0, B:  0.00 }
   - { H:   200, B:  0.32 }
   - { H:  1400, B:  0.41 }
-steinmetz:
-  k:     1.45e-3
-  alpha: 1.6
-  beta:  2.75
+
+# Steinmetz and Jiles-Atherton parameters are NOT duplicated here.
+# Until v2.0 this file carried its own set and disagreed with the
+# Python catalogues in every parameter — three sources, three answers,
+# all synthetic, and nothing said which one a result came from.
+#   this file said Steinmetz k 1.45e-3, alpha 1.6, beta 2.75;
+#   the number in force is magnetic.core_material('N97').

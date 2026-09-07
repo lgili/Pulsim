@@ -6,6 +6,64 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-08
+
+Pulsim 2.0 is a **breaking** release. It is the result of an audit that
+went device by device and engine by engine, and its rule throughout was
+that a named refusal beats a plausible wrong number. Most of what
+follows was found by measuring something the simulator already claimed
+to do, and finding it did not.
+
+The headline breaks, each detailed in its own entry below:
+
+* `engine='auto'` is the default and it ROUTES; the fixed-step engine
+  is no longer implied.
+* A MOSFET's body diode is part of the device, not an accessory, and an
+  IGBT can no longer conduct in reverse.
+* The PMSM is MNA-native: the observer's one-step lag and its single
+  averaged inductance are gone, and with them the erased saliency.
+* Device models that used to guess now refuse by name: a part file
+  without provenance, a PLECS file whose losses are a formula, a SPICE
+  `.MODEL` the mapping cannot honour, a snapshot whose device histories
+  do not match the circuit, a `steady_state` on a circuit whose
+  one-period map is not affine.
+* The parts shipped under `pulsim.lib` are SYNTHETIC illustrations and
+  will not resolve by manufacturer part number unless asked.
+
+**The shipped parts library was cut down to what is honest.** Four of
+the six device files named a package, a topology or a part number their
+own content contradicted: a SiC MOSFET filed as the TO-247 variant when
+it is TO-263-7, a dual common-cathode 2x15 A rectifier described as a
+single 30 A device, a GaN HEMT in the wrong package, and a part number
+absent from the vendor's 600 V line. They were DELETED rather than
+corrected — the electrical data behind them is invented either way, and
+a corrected header would have left synthetic tables under a real
+manufacturer part number, which is the same defect wearing a better
+label. Two devices and four core materials remain, all marked
+`provenance.method: synthetic`. Real device data enters through
+`pulsim.lib.import_plecs_xml()` or a directory on `PULSIM_PARTS_PATH`.
+
+**One number per core material.** The Steinmetz and Jiles-Atherton sets
+existed in THREE places that disagreed in every parameter —
+`magnetic._CATALOG`, `hysteresis._REFERENCE_MATERIALS`, and the core
+YAML files — all synthetic, with nothing to say which one a given
+result came from. N87, for instance, was Steinmetz `k 1.5e-3 / 1.6 /
+2.7` in the YAML against `16.9 / 1.40 / 2.50` in the code, and
+Jiles-Atherton `Ms 3.5e5, a 150` against `Ms 4.0e5, a 50`. The Python
+tables are now the single source: they work without PyYAML, which is an
+optional dependency, and they are what every test and example actually
+exercises. The YAML files keep the geometry and B-H points, which are
+theirs alone, and each records what it used to claim and which name now
+answers. `reference_material` accepts `N87` as well as `ferrite_n87`,
+so the two halves of one material are reachable by one name.
+
+Four engine defects are documented but NOT fixed, each pinned by a
+strict xfail that names its mechanism and the fix that was tried and
+rejected: the fixed engine's first-order start, the TR-BDF2 stall at
+`h_min`, the diode-mask chatter inside Newton at a stiff step, and the
+femtosecond landing step after a diode turn-off.
+
+
 ### Phase 4 — fidelity and product
 
 * **The TR-BDF2 "switched-diode turn-off with a series inductor"

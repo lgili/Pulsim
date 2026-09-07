@@ -128,6 +128,15 @@ class JilesAthertonParams:
 
 
 # Hand-tuned demo parameter sets for tests / smoke runs.
+# THE single source of truth for Jiles-Atherton parameter sets — see
+# the note on `magnetic._CATALOG`, which owns the Steinmetz half of
+# the same materials. The core files under `pulsim/lib/data/cores/`
+# used to carry a third, disagreeing set; they no longer do.
+#
+# These sets are ILLUSTRATIVE: they produce a loop of the right shape,
+# not a named material's measured loop. `ferrite_n87` and `N87` are
+# the same entry, so the J-A and Steinmetz halves of that material can
+# be reached by one name.
 _REFERENCE_MATERIALS: Dict[str, JilesAthertonParams] = {
     "annealed_iron":  JilesAthertonParams(Ms=1.7e6, a=1.0e3,
                                             alpha=1e-3, c=0.10, k=200),
@@ -140,17 +149,29 @@ _REFERENCE_MATERIALS: Dict[str, JilesAthertonParams] = {
 }
 
 
+#: Material-name spellings that resolve to the same entry, so a core
+#: named `N87` in `magnetic.core_material` answers here too.
+_MATERIAL_ALIASES = {"n87": "ferrite_n87", "ferrite-n87": "ferrite_n87"}
+
+
 def reference_material(name: str) -> JilesAthertonParams:
     """Look up a pre-tuned J-A parameter set by material name.
-    Available: ``annealed_iron``, ``si_steel_m19``, ``ferrite_n87``,
-    ``permalloy``."""
+    Available: ``annealed_iron``, ``si_steel_m19``, ``ferrite_n87``
+    (also spelled ``N87``), ``permalloy``.
+
+    These sets are illustrative — a loop of the right shape, not a
+    named material's measured loop. See `_REFERENCE_MATERIALS`.
+    """
+    key = _MATERIAL_ALIASES.get(name.strip().lower(), name)
     try:
-        return _REFERENCE_MATERIALS[name]
+        return _REFERENCE_MATERIALS[key]
     except KeyError:
         avail = ", ".join(sorted(_REFERENCE_MATERIALS))
         raise KeyError(
             f"unknown reference material {name!r}; "
-            f"available: {avail}")
+            f"available: {avail} (the core files under "
+            "pulsim/lib/data/cores/ carry geometry and B-H points "
+            "only — the J-A parameters live here)")
 
 
 def list_reference_materials() -> list:

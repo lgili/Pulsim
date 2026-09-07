@@ -1,22 +1,24 @@
 """``pulsim.lib`` — the parts library (audit C.5).
 
-    >>> q = pulsim.lib.mosfet("C3M0065090J")
+    >>> q = pulsim.lib.igbt("IKW40N120T2", allow_synthetic=True)
     >>> spec = q.switch_spec(Tj=125.0)      # for losses.device_loss_summary
     >>> part = pulsim.lib.import_plecs_xml("~/Downloads/IKW40N120T2.xml")
 
 Three things this exists to fix, all measured before it was written:
 
-* **Six parts, re-typed by hand.** The shipped device YAMLs under
+* **Parts re-typed by hand.** The shipped device YAMLs under
   ``devices/`` were consumed by nothing in the package — a user
   wanting a MOSFET's switching energies transcribed the same dict by
   hand three calls in a row. They are package data now
   (``pulsim/lib/data``) behind one lookup — and, on inspection, they
-  are SYNTHETIC: every switching-energy table is a straight line
-  through the origin, and four of six headers name the wrong package.
-  They stay as illustrations, marked ``provenance.method: synthetic``,
-  and :func:`part` refuses to resolve them by number unless asked
-  (``allow_synthetic=True``): a lookup of a real part number must not
-  succeed and lie.
+  were SYNTHETIC: every switching-energy table is a straight line
+  through the origin. Four of the six also named the wrong package or
+  a part number that does not exist, and those four were DELETED in
+  2.0 rather than corrected, because the data behind them was invented
+  either way. What ships is two devices and four core materials, all
+  marked ``provenance.method: synthetic``; :func:`part` refuses to
+  resolve them by number unless asked (``allow_synthetic=True``),
+  because a lookup of a real part number must not succeed and lie.
 * **Provenance.** A digitised datasheet curve is the manufacturer's
   copyright, and a number with no origin cannot be checked. Every
   part file carries a ``provenance`` block naming where each number

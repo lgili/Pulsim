@@ -278,7 +278,7 @@ The YAML netlist schema SHALL accept new component types `mosfet_catalog`, `igbt
 - type: mosfet_catalog
   name: Q1
   nodes: [drain, gate, source]
-  model: wolfspeed/C3M0065090J
+  model: infineon/IKW40N120T2
 ```
 - **WHEN** the parser loads the netlist
 - **THEN** the device is instantiated from the named catalog YAML

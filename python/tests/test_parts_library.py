@@ -25,10 +25,10 @@ import pulsim as p
 lib = p.lib
 
 
-def _mosfet(number="C3M0065090J"):
+def _igbt(number="IKW40N120T2"):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return lib.mosfet(number, allow_synthetic=True)
+        return lib.igbt(number, allow_synthetic=True)
 
 
 # --------------------------------------------------------------------------
@@ -37,27 +37,36 @@ def _mosfet(number="C3M0065090J"):
 
 def test_shipped_parts_are_synthetic_and_not_resolvable_by_number():
     parts = lib.list_parts()
-    assert len(parts) >= 10
+    assert len(parts) >= 6
     assert all(pt.is_synthetic for pt in parts)
     assert all(pt.provenance.source_ref and pt.provenance.retrieved for pt in parts)
     with pytest.raises(lib.PartNotFound, match="SYNTHETIC"):
-        lib.mosfet("C3M0065090J")
+        lib.igbt("IKW40N120T2")
     with pytest.warns(UserWarning, match="SYNTHETIC"):
-        q = lib.mosfet("C3M0065090J", allow_synthetic=True)
-    assert q.vendor == "Wolfspeed" and q.cls == "mosfet"
-    assert q.params["R_ds_on_25c"] == pytest.approx(0.065)
-    assert q.params["R_ds_on_temp_coef"] == pytest.approx(4e-3)   # YAML-1.1 '4e-3' coerced
-    assert "Coss" in q.curves and q.curves["Coss"].shape[1] == 2
-    assert lib.search(cls="mosfet") == []                           # synthetic left out
-    assert len(lib.search(cls="mosfet", include_synthetic=True)) >= 3
+        q = lib.igbt("IKW40N120T2", allow_synthetic=True)
+    assert q.vendor == "Infineon" and q.cls == "igbt"
+    assert q.params["V_ce_sat_default"] == pytest.approx(1.95)
+    assert q.params["tau_tail"] == pytest.approx(200e-9)   # YAML-1.1 '200.0e-9' coerced
+    assert lib.search(cls="igbt") == []                            # synthetic left out
+    assert len(lib.search(cls="igbt", include_synthetic=True)) >= 1
+
+
+def test_no_shipped_part_claims_a_number_its_content_contradicts():
+    """v2.0 DELETED the four files whose headers named the wrong
+    package, the wrong topology, or a part number the vendor does not
+    make. Correcting the headers would have left invented electrical
+    data under a real MPN, which is the same defect wearing a better
+    label."""
+    gone = {"C3M0065090J", "IPP60R190P7", "GS66508T", "VS-30CTH02"}
+    assert {pt.number for pt in lib.list_parts()} & gone == set()
 
 
 def test_lookup_is_case_insensitive_and_class_scoped():
-    assert _mosfet("c3m0065090j").number == "C3M0065090J"
-    with pytest.raises(lib.PartNotFound, match="C3M00"):
-        lib.mosfet("C3M0065090D", allow_synthetic=True)      # sibling not shipped: hint
+    assert _igbt("ikw40n120t2").number == "IKW40N120T2"
+    with pytest.raises(lib.PartNotFound, match="IKW40"):
+        lib.igbt("IKW40N120H3", allow_synthetic=True)     # sibling not shipped: hint
     with pytest.raises(lib.PartNotFound, match="search path"):
-        lib.igbt("C3M0065090J", allow_synthetic=True)         # wrong class
+        lib.mosfet("IKW40N120T2", allow_synthetic=True)    # wrong class
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         assert lib.diode("C4D20120D", allow_synthetic=True).cls == "diode"
@@ -88,18 +97,18 @@ def test_a_part_without_provenance_is_refused_by_name(tmp_path):
 def test_user_parts_directory_overrides_the_shipped_one_and_says_so(tmp_path, monkeypatch):
     d = tmp_path / "mine"
     d.mkdir()
-    (d / "C3M0065090J.yaml").write_text(textwrap.dedent("""
-        class: mosfet
-        vendor: Wolfspeed
-        part: C3M0065090J
+    (d / "IKW40N120T2.yaml").write_text(textwrap.dedent("""
+        class: igbt
+        vendor: Infineon
+        part: IKW40N120T2
         provenance: {source: measurement, source_ref: "bench 2026-09-01", retrieved: "2026-09-06", method: measured}
-        R_ds_on_25c: 0.070
+        V_ce_sat_25c: 1.70
     """))
     monkeypatch.setenv("PULSIM_PARTS_PATH", str(d))
     lib.parts._SHADOW_WARNED.clear()
     with pytest.warns(UserWarning, match="shadows"):
-        q = lib.mosfet("C3M0065090J")                 # not synthetic: no opt-in needed
-    assert q.params["R_ds_on_25c"] == pytest.approx(0.070)
+        q = lib.igbt("IKW40N120T2")                   # not synthetic: no opt-in needed
+    assert q.params["V_ce_sat_25c"] == pytest.approx(1.70)
     assert q.provenance.method == "measured"
 
 
@@ -124,7 +133,7 @@ def test_the_working_directory_is_not_searched(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_switch_spec_from_a_single_temperature_table_refuses_off_temperature():
-    q = _mosfet()                             # Eon/Eoff at 25 C, rows at 400/600 V
+    q = _igbt()                               # Eon/Eoff at 25 C, rows at 400/600 V
     with pytest.raises(ValueError, match="ONE junction temperature"):
         q.switch_spec()
     with pytest.raises(ValueError, match="V_ref"):
@@ -135,23 +144,23 @@ def test_switch_spec_from_a_single_temperature_table_refuses_off_temperature():
         spec = q.switch_spec(Tj=125.0, V_ref=600.0, allow_tj_mismatch=True)
     assert spec["V_ref"] == 600.0 and spec["Tj_table"] == 25.0
     spec = q.switch_spec(Tj=25.0, V_ref=600.0)
-    assert spec["E_on_curve"][0] == (10.0, 75e-6)
-    assert spec["E_off_curve"][-1] == (35.0, 105e-6)
+    assert spec["E_on_curve"][0] == (10.0, 600e-6)
+    assert spec["E_off_curve"][-1] == (40.0, 1.2e-3)
 
 
 def test_switch_spec_feeds_the_loss_summary():
-    spec = _mosfet().switch_spec(Tj=25.0, V_ref=600.0)
+    spec = _igbt().switch_spec(Tj=25.0, V_ref=600.0)
     from pulsim.losses import _switch_switching_loss
     times = np.linspace(0.0, 1e-3, 11)
     closed = np.zeros(11, dtype=bool)
     closed[5:] = True
     out = _switch_switching_loss(closed, times, np.full(11, 600.0), np.full(11, 20.0), spec)
-    assert out["E_sw_on_total"] == pytest.approx(150e-6, rel=1e-6)   # the 600 V row at 20 A
+    assert out["E_sw_on_total"] == pytest.approx(1.2e-3, rel=1e-6)   # the 600 V row at 20 A
 
 
 def test_thermal_is_refused_when_the_part_has_none_naming_the_file_and_the_routes():
-    q = _mosfet()
-    with pytest.raises(ValueError, match="C3M0065090J.yaml.*import_plecs_xml.*fit_foster_from_zth"):
+    q = _igbt()
+    with pytest.raises(ValueError, match="IKW40N120T2.yaml.*import_plecs_xml.*fit_foster_from_zth"):
         q.thermal()
 
 

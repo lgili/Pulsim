@@ -93,6 +93,19 @@ class CoreMaterial:
 # Built-in catalog — values from EPCOS / TDK / Ferroxcube datasheets
 # =============================================================================
 
+# THE single source of truth for Steinmetz coefficients. Until v2.0
+# the core files under `pulsim/lib/data/cores/` carried their own set
+# and disagreed with this table in every parameter — three sources
+# (here, `hysteresis._REFERENCE_MATERIALS`, and the YAML), three
+# answers, all synthetic, and nothing said which one a result came
+# from. Those YAML blocks are gone; the files keep the geometry and
+# the B-H points, which are theirs alone.
+#
+# These coefficients are ILLUSTRATIVE. `steinmetz_loss_density` reads
+# P_v [W/m³] = K · f^α · B_peak^β with f in Hz and B in T; a vendor's
+# published curve is a multi-band fit and will not match. For real
+# numbers, fit the vendor's loss chart and add the material here with
+# its provenance.
 _CATALOG = {
     # General-purpose ferrites — typical (~100 kHz, ~0.2 T) Steinmetz
     # coefficients. Manufacturers publish multi-band fits; these are

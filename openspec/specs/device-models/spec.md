@@ -112,17 +112,19 @@ Catalog devices SHALL feed switching-energy lookup tables `E_on(Ic, Vds)`, `E_of
 - **AND** the values match vendor datasheet within 10% under matching conditions
 
 ### Requirement: Catalog Device Library Structure
-The repository SHALL maintain a curated catalog under `python/pulsim/lib/data/catalog/<vendor>/<part>.yaml` (package data, behind `pulsim.lib`) with at least 6 reference devices: Si MOSFET, SiC MOSFET, GaN HEMT, Si IGBT, SiC Schottky, fast-recovery Si diode. Every part file SHALL carry a `provenance` block; the shipped reference parts are synthetic illustrations (`provenance.method: synthetic`) and `pulsim.lib.part()` SHALL refuse to resolve them by part number unless `allow_synthetic=True`.
+The repository SHALL maintain a curated catalog under `python/pulsim/lib/data/catalog/<vendor>/<part>.yaml` (package data, behind `pulsim.lib`). Every part file SHALL carry a `provenance` block. A shipped part whose data is not the manufacturer's SHALL declare `provenance.method: synthetic`, and `pulsim.lib.part()` SHALL refuse to resolve a synthetic part by manufacturer part number unless `allow_synthetic=True`.
+
+A shipped part file SHALL NOT carry a manufacturer part number whose package, topology or existence its own content contradicts. The v2.0 release DELETED four files that did (a SiC MOSFET filed under the wrong package variant, a dual common-cathode diode described as a single device, a GaN HEMT in the wrong package, and a part number absent from the vendor's line) rather than correcting the headers, because the electrical data behind them was invented either way — the count of reference devices is therefore no longer a requirement. Real device data enters through `pulsim.lib.import_plecs_xml()` or a user directory on `PULSIM_PARTS_PATH`.
 
 #### Scenario: Reference catalog present
 - **WHEN** the repository builds
-- **THEN** `python/pulsim/lib/data/catalog/` contains the 6 reference devices
-- **AND** each device has a parity test under `benchmarks/circuits/catalog_vendor_parity/`
+- **THEN** `python/pulsim/lib/data/catalog/` contains at least one device per shipped class
+- **AND** every file in it loads through `pulsim.lib.list_parts()` with a valid provenance block
 
 #### Scenario: Catalog model lookup by name
-- **GIVEN** YAML netlist with `model: wolfspeed/C3M0065090J`
+- **GIVEN** YAML netlist with `model: infineon/IKW40N120T2`
 - **WHEN** the parser loads the netlist
-- **THEN** the catalog device is instantiated from `python/pulsim/lib/data/catalog/Wolfspeed/C3M0065090J.yaml` via `pulsim.lib.mosfet('C3M0065090J', allow_synthetic=True)`
+- **THEN** the catalog device is instantiated from `python/pulsim/lib/data/catalog/Infineon/IKW40N120T2.yaml` via `pulsim.lib.igbt('IKW40N120T2', allow_synthetic=True)`
 - **AND** missing model name produces a deterministic diagnostic
 
 ### Requirement: Datasheet Importer Pipeline
