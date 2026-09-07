@@ -8,6 +8,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **The fixed engine is globally FIRST order from an inconsistent
+  start** (engine defect, characterised and pinned, not yet fixed).
+  It advertises trapezoidal companions and delivers second order only
+  when the run happens to begin consistent. At `t_start` the companion
+  history carries half of each device's state: `seed_from_dc_op` sets
+  an inductor's `v_prev` and a capacitor's `i_prev` to zero, because
+  the state vector does not carry them. The companion source is then
+  wrong by `(h/2L)·v_0` — an O(h) LOCAL error, so the run is globally
+  first order. RL decay (R = 1 Ω, L = 1 mH, i0 = 5 A) at 5 τ:
+
+        dt      rel err      dt/(2 τ)
+        4e-6    +1.997e-03   2.000e-03
+        2e-6    +9.993e-04   1.000e-03
+        1e-6    +4.998e-04   5.000e-04
+
+  exactly `dt/(2 τ)`, falling first order; the same on an RC from
+  `c0`, and on either driven from rest by a DC step. The decisive
+  control: a sine-driven RL from rest, where `v_L(0) = 0` makes the
+  zero seeding accidentally correct, is cleanly second order. The
+  stepper is fine; the start is not. `python/tests/test_first_step_order.py`
+  pins all of it — four strict xfails and the passing control.
+
+  A cheap backward-Euler start was measured and REJECTED: assembling
+  the trapezoidal companion at 2h is exactly the backward-Euler
+  companion for a step of h, and it did restore second order
+  everywhere (the DC-step cases by 1500×) — but it is wrong for any
+  device whose history commit integrates over the elapsed time. A
+  charge-based Coss then integrates twice the interval, moving the
+  documented half-step charge offset to a full step (4.8 % at sample
+  11), and the dt-retry ladder re-scales, changing 21 tests. The right
+  fix is consistent initial conditions — one solve at `t_start` with
+  inductor currents pinned at `i0` and capacitor voltages at `v0`,
+  seeding `v_prev` / `i_prev` from it. That changes no elapsed-time
+  bookkeeping, fixes sample 0 (today it reports 0 V on a node whose
+  consistent value is −5 V), and would remove the charge offset
+  entirely. It needs an MNA solve with capacitors as voltage sources,
+  which the assembly does not offer yet.
+
 * **Stateful devices survive `resume_from=`, and `steady_state`
   refuses them by name** (engine defect found while wiring the
   saturable inductor into TR-BDF2). `SolverSnapshot` carried only
