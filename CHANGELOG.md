@@ -8,6 +8,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **The TR-BDF2 "switched-diode turn-off with a series inductor"
+  defect was mostly a MEASUREMENT artefact** — the engines agreed all
+  along, and the metric was wrong. The strict xfail claimed a plain
+  L-D-RC rectifier "lands at half the fixed engine's output". It used
+  `v[t > 2e-3].mean()`, an UNWEIGHTED mean over samples. TR-BDF2's
+  grid is adaptive and clusters hard around events (after a turn-off
+  it takes tens of femtosecond steps), so that mean counts those
+  instants as heavily as a microsecond of conduction:
+
+        kind     engine   sample mean   time-weighted
+        linear   pwl           6.3295          6.3308
+        linear   trbdf2        3.0408          6.3482
+        atan     trbdf2        3.3101          6.3617
+        gapped   trbdf2        9.7514          6.3494
+
+  Sampled at fixed instants the two engines agree to four digits the
+  whole way through (15.4227 vs 15.4219 at 0.2 ms, 3.1506 vs 3.1506 at
+  0.53 ms). With a time-weighted average all six runs land within
+  0.3 %, so the test now PASSES for the linear, atan and gapped
+  inductors and its xfail is gone. The reported chatter is gone too:
+  what once logged 839,262 diode events for the atan core and 93,998
+  for the gapped one is 6 for all three — 3 cycles of on plus off.
+
+  What is real, and newly pinned: the **femtosecond landing step**.
+  The turn-off is localised correctly (the inductor current is 2 µA
+  there), but the next step is 3e-14 s, and the companion conductance
+  2L/h turns those microamps into −1539 V on the internal node of a
+  20 V circuit. It decays over the ~39 femtosecond steps that follow,
+  which cover 4.4e-12 s of physical time in total, and the OUTPUT is
+  untouched — but a reported kilovolt poisons any max()-based check.
+  Only the constant-L inductor does it: the saturable and gapped cores
+  peak at 20.1 V and 20.6 V, because their L collapses as the current
+  leaves. The fix belongs in the step controller — after landing an
+  event, resume from a physical step size rather than the probe floor.
+
 * **Two engine defects characterised, and one tempting fix refuted**
   (queued as "the absolute Newton tolerances are too tight at a stiff
   step" — measurement says they are two different defects, and that
