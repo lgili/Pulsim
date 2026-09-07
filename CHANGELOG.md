@@ -8,6 +8,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Phase 4 — fidelity and product
 
+* **Two engine defects characterised, and one tempting fix refuted**
+  (queued as "the absolute Newton tolerances are too tight at a stiff
+  step" — measurement says they are two different defects, and that
+  the absolute step tolerance is load-bearing).
+  `python/tests/test_newton_stall_and_mask_chatter.py` carries both.
+
+  *TR-BDF2 stalls at `h_min` after a hard switching edge.* The flyback
+  in `test_saturable_transformer.py::test_engines_agree_below_saturation`
+  aborts with `||dx|| = 8.787e-08` at node `T1.pm` and
+  `||residual|| = 7.629e-06` on the branch row of `T1.m` — a LINEAR
+  inductor, stamped in conductance form and so scaled by `2L/h`, where
+  at `h_min` that residual is a current error of ~1e-13 A. On a 48 V
+  circuit the step is nine converged digits. Both norms sit at their
+  noise floor and the run aborts, because both tolerances are
+  absolute. Three scale-aware step tests were implemented and measured;
+  all three are refuted. Scaled by the RHS norm (what the existing
+  relative RESIDUAL branch uses) the gate becomes 1e-2 at a landing
+  step: the flyback returned 3.53 V against the fixed engine's
+  15.31 V, and the controller ground on a Lauritzen recovery until
+  `max_steps` (10 M steps). Scaled by the solution norm it is still
+  too tight. Per unknown, SPICE-style, it clears the stall — and lets
+  the DC operating-point cascade stop at a SPURIOUS root: the direct
+  solve on a stiff diode chain "converges" with residual 1.07e-11 to a
+  point **10.67 V** away from the homotopy's answer, so `auto` no
+  longer falls through to gmin stepping (five tests pin that
+  fall-through). The absolute step test is what keeps Newton off a
+  spurious branch of a multi-root system. The stall therefore needs
+  the step controller not to reach `h_min` here, or a row-equilibrated
+  Jacobian — not a tolerance change.
+
+  *The fixed engine's 10 ns failure in the PSFB rectifier is
+  diode-mask chatter inside Newton*, not tolerances. With PWL
+  rectifier diodes and a saturable or hysteretic primary the run
+  aborts at t = 1.5e-6 with `||dx|| = 0.76 V` at `vout` against a
+  residual of 5.4e-10 — a bouncing iterate at a near-zero residual. At
+  50 ns all three primaries run and agree. The proof is a control:
+  swap only those four diodes for smooth Shockley junctions and the
+  same circuit runs at 10 ns, agreeing with the linear reference to
+  0.13 %. A linear primary also runs, because without a Newton device
+  the diodes are decided by the OUTER event iteration; with one,
+  `make_combined_diode_mosfet_refresh` re-decides them every Newton
+  iteration and no single mask is self-consistent at that step.
+
 * **The fixed engine is globally FIRST order from an inconsistent
   start** (engine defect, characterised and pinned, not yet fixed).
   It advertises trapezoidal companions and delivers second order only
