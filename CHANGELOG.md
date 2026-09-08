@@ -8,6 +8,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [2.0.0] — 2026-09-08
 
+### Release-readiness pass
+
+Two changes from USING v2.0 to build four industrial compressor-drive
+models end to end. Both close a gap where the simulator answered instead
+of refusing.
+
+* **The three-phase VSI ships its freewheel diodes** (`add_three_phase_vsi`,
+  `with_freewheel_diodes=True` by default). The helper built six bare
+  switches, which is not an inverter for an inductive load: at the first
+  PWM turn-off the current has nowhere to go. The failure was not an
+  error — measured on a clamped inductive leg over the last 2 ms of a
+  300 V bridge:
+
+        with diodes:  v(leg) in [-1.7, 298.7] V,   i_load in [25.6, 33.6] A
+        without:      v(leg) in [-42418, +42418] V, i_load in [-21.0, +21.1] A
+
+  42 kV on a 300 V bus and a load current that reverses, silently. The
+  diodes are part of the device exactly as a MOSFET's body diode is
+  (the same reasoning as audit C.1), so they are on by default;
+  `with_freewheel_diodes=False` is the opt-out for a bridge whose
+  devices genuinely have none, or when you want to supply your own —
+  a co-pack part with a recovery model, or the smooth junctions a
+  Newton-stamped machine wants (see the mask-chatter defect).
+
+* **A Newton failure now reports the RELATIVE norms.** `tol_newton_dx`
+  and `tol_newton_res` stay ABSOLUTE — an absolute step test is what
+  keeps Newton off a spurious branch of a multi-root system, and making
+  it relative was measured to let the DC cascade stop 10.67 V from the
+  homotopy's answer. But an absolute 1e-9 on a 300 V converter
+  switching at kilohertz is 3e-12 relative, and a user reading
+  "||dx|| = 1.0e-06" cannot tell a real non-convergence from a
+  tolerance that does not fit the circuit. The message now gives
+  `dx/|x|` and `res/|b|` with the scales they are taken against, and
+  says which conclusion each supports. On a real compressor drive it
+  reads `dx/|x| = 1.36e-03` against `res/|b| = 2.37e-17` — the residual
+  is at machine noise while the step is not settled, which is a genuine
+  non-convergence and NOT a case for relaxing the tolerance.
+
+
 Pulsim 2.0 is a **breaking** release. It is the result of an audit that
 went device by device and engine by engine, and its rule throughout was
 that a named refusal beats a plausible wrong number. Most of what

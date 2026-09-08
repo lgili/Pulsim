@@ -75,8 +75,14 @@ class ThreePhaseVsiResult:
         wire SPWM/FOC/etc. control to the bridge.
     high_side_switch_indices, low_side_switch_indices
         Convenience views — useful for half-bridge dead-time helpers.
+    diode_names
+        The six antiparallel freewheel diodes, in the same leg order
+        as ``switch_indices``: ``[Dha, Dla, Dhb, Dlb, Dhc, Dlc]``.
+        Empty when the bridge was built with
+        ``with_freewheel_diodes=False``.
     """
     switch_indices: List[int] = field(default_factory=list)
+    diode_names: List[str] = field(default_factory=list)
 
     @property
     def high_side_switch_indices(self) -> List[int]:
@@ -199,9 +205,13 @@ def add_three_phase_vsi(builder,
                             out_c: str,
                             R_on: float = 1e-3,
                             R_off: float = 1e9,
+                            with_freewheel_diodes: bool = True,
+                            V_f: float = 0.7,
+                            R_d: float = 0.05,
                             ) -> ThreePhaseVsiResult:
-    """Add the power stage of a 3-phase voltage source inverter (6
-    ideal switches arranged as three half-bridges).
+    """Add the power stage of a 3-phase voltage source inverter: three
+    half-bridges, each an upper and a lower switch WITH its
+    antiparallel freewheel diode.
 
     Topology
     --------
@@ -217,8 +227,26 @@ def add_three_phase_vsi(builder,
                     │
            vdc_neg ─┘
 
-    The helper builds **only the topology** — no PWM, no dead-time.
-    Wire control via :class:`MixedDomainBlockChain` and one of:
+    The freewheel diodes are ON BY DEFAULT (v2.0), for the same reason
+    a MOSFET's body diode is: they are part of the device, not an
+    accessory. Without them the bridge cannot commutate an INDUCTIVE
+    load at all — at the first PWM turn-off the motor current has
+    nowhere to go, and what the user sees is not a clear error but a
+    Newton failure a few hundred microseconds into the run. That was
+    measured on a compressor drive: the run aborted at t = 168 us with
+    the solver naming a capacitor node, and adding the six diodes moved
+    it 75x further into the simulation.
+
+    Pass ``with_freewheel_diodes=False`` for a bridge whose devices
+    genuinely have no antiparallel path, or when you want to add your
+    own (a discrete co-pack part with a specific recovery model, or a
+    Shockley/Lauritzen junction). Note that PWL diodes and a Newton
+    device in the same circuit can chatter — see
+    ``test_newton_stall_and_mask_chatter.py`` — so a bridge feeding a
+    Newton-stamped machine may want smooth junctions instead.
+
+    The helper builds no PWM and no dead-time. Wire control via
+    :class:`MixedDomainBlockChain` and one of:
 
       * :meth:`chain.make_multi_pwm_switch_fn(["ga","gb","gc"],
         num_switches=builder.graph.num_switches,
@@ -240,6 +268,11 @@ def add_three_phase_vsi(builder,
         Three-phase AC output node names.
     R_on, R_off
         Switch on/off resistance (Ω). Default 1 mΩ / 1 GΩ.
+    with_freewheel_diodes
+        Add the six antiparallel diodes. Default True.
+    V_f, R_d
+        Forward drop (V) and series resistance (Ω) of those diodes.
+        Defaults 0.7 V / 50 mΩ.
 
     Returns
     -------
@@ -281,6 +314,15 @@ def add_three_phase_vsi(builder,
         builder.add_switch(f"{name}__{tag}", frm, to,
                               g_on=g_on, g_off=g_off)
         out.switch_indices.append(int(sw_idx))
+    if with_freewheel_diodes:
+        # Antiparallel to each switch: the upper diode conducts from the
+        # leg output UP to the positive rail, the lower one from the
+        # negative rail UP to the leg output. Same order as the switches.
+        g_d_on = 1.0 / R_d if R_d > 0 else 1e3
+        for tag, frm, to in legs:
+            d_name = f"{name}__D{tag[0].lower()}{tag[2]}"
+            builder.add_diode(d_name, to, frm, g_d_on, g_off, V_th=V_f)
+            out.diode_names.append(d_name)
     return out
 
 
