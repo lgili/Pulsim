@@ -1,0 +1,160 @@
+:root {
+  --pulsim-cyan: #32d2ff;
+  --pulsim-blue: #1f4f7a;
+  --pulsim-navy: #0f2137;
+  --pulsim-amber: #ffb347;
+  --pulsim-hero-bg: radial-gradient(1200px 280px at 5% -10%, rgba(50, 210, 255, 0.2), transparent 60%),
+    radial-gradient(800px 220px at 95% -20%, rgba(255, 179, 71, 0.16), transparent 62%),
+    linear-gradient(135deg, rgba(31, 79, 122, 0.12), rgba(50, 210, 255, 0.06));
+  --pulsim-hero-border: rgba(31, 79, 122, 0.34);
+  --pulsim-card-border: rgba(31, 79, 122, 0.22);
+  --pulsim-card-bg: rgba(31, 79, 122, 0.06);
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #1a476f;
+  --md-primary-fg-color--light: #246493;
+  --md-primary-fg-color--dark: #123452;
+  --md-accent-fg-color: #db7e1d;
+  --md-typeset-a-color: #1b689b;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0d1727;
+  --md-default-fg-color: #d9e5f3;
+  --md-default-fg-color--light: #a9bdd2;
+  --md-default-fg-color--lighter: #8096ad;
+  --md-primary-fg-color: #112338;
+  --md-primary-fg-color--light: #16324f;
+  --md-primary-fg-color--dark: #0b1727;
+  --md-accent-fg-color: #ffb347;
+  --md-typeset-a-color: #67dfff;
+  --pulsim-hero-bg: radial-gradient(1100px 260px at 5% -10%, rgba(50, 210, 255, 0.16), transparent 62%),
+    radial-gradient(700px 200px at 95% -25%, rgba(255, 179, 71, 0.12), transparent 60%),
+    linear-gradient(135deg, rgba(17, 35, 56, 0.9), rgba(14, 31, 49, 0.9));
+  --pulsim-hero-border: rgba(103, 223, 255, 0.26);
+  --pulsim-card-border: rgba(103, 223, 255, 0.2);
+  --pulsim-card-bg: rgba(17, 35, 56, 0.72);
+}
+
+[data-md-color-scheme="slate"] .md-main {
+  background-image:
+    linear-gradient(rgba(13, 23, 39, 0.95), rgba(13, 23, 39, 0.95)),
+    radial-gradient(1300px 500px at 100% -25%, rgba(50, 210, 255, 0.1), transparent 70%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(103, 223, 255, 0.045) 0,
+      rgba(103, 223, 255, 0.045) 1px,
+      transparent 1px,
+      transparent 22px
+    );
+}
+
+.md-header {
+  border-bottom: 1px solid rgba(50, 210, 255, 0.22);
+}
+
+[data-md-color-scheme="default"] .md-header,
+[data-md-color-scheme="default"] .md-tabs {
+  background: linear-gradient(90deg, #16324f, #1f4f7a);
+}
+
+[data-md-color-scheme="slate"] .md-header {
+  background: linear-gradient(90deg, #0e1d31, #12304b);
+}
+
+[data-md-color-scheme="slate"] .md-tabs {
+  background: #112338;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.55rem;
+  width: 1.55rem;
+  filter: drop-shadow(0 0 0.45rem rgba(50, 210, 255, 0.4));
+}
+
+.md-search__form {
+  border: 1px solid rgba(103, 223, 255, 0.25);
+}
+
+.md-typeset a {
+  text-underline-offset: 0.15em;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 10px;
+}
+
+[data-md-color-scheme="slate"] .md-typeset pre > code {
+  background-color: #101f33;
+  border: 1px solid rgba(103, 223, 255, 0.2);
+}
+
+.pulsim-hero {
+  padding: 1.6rem 1.5rem 1.35rem 1.5rem;
+  margin: 0.4rem 0 1.4rem 0;
+  border-radius: 18px;
+  border: 1px solid var(--pulsim-hero-border);
+  background: var(--pulsim-hero-bg);
+}
+
+.pulsim-hero h1 {
+  margin: 0 0 0.4rem 0;
+  font-size: 2rem;
+  line-height: 1.15;
+}
+
+.pulsim-hero p {
+  margin: 0.35rem 0;
+  max-width: 65ch;
+}
+
+.pulsim-hero-actions {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.pulsim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.pulsim-card {
+  border: 1px solid var(--pulsim-card-border);
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  background: var(--pulsim-card-bg);
+}
+
+.pulsim-card code {
+  font-size: 0.9em;
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 14px;
+  border-color: var(--pulsim-card-border);
+  background: linear-gradient(160deg, var(--pulsim-card-bg), rgba(50, 210, 255, 0.04));
+}
+
+.md-typeset .grid.cards > ul > li > p:first-child {
+  margin-top: 0.2rem;
+}
+
+.md-typeset h2 {
+  margin-top: 1.5rem;
+}
+
+@media screen and (max-width: 760px) {
+  .pulsim-hero {
+    padding: 1.2rem 1rem 1.05rem 1rem;
+  }
+
+  .pulsim-hero h1 {
+    font-size: 1.65rem;
+  }
+}
