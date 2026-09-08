@@ -448,14 +448,42 @@ using NonlinearRefreshFn = std::function<
         }
     }
 
+    // Report the norms RELATIVE to the circuit's own scale as well as
+    // absolutely. `tol_dx` and `tol_res` are absolute, deliberately —
+    // an absolute step test is what keeps Newton off a spurious branch
+    // of a multi-root system, and making it relative was measured to
+    // let the DC cascade stop 10.67 V from the homotopy's answer. But
+    // an absolute 1e-9 on a 300 V converter switching at kilohertz is
+    // 3e-12 relative, which no Jacobian delivers, and the user staring
+    // at "1.0e-06" has no way to tell whether that is a real
+    // non-convergence or a tolerance that does not fit their circuit.
+    // So the message says which.
+    const Real x_scale = std::max(
+        Real{1}, x.size() == 0 ? Real{0} : x.cwiseAbs().maxCoeff());
+    const Real rhs_scale = std::max({
+        Real{1},
+        seg.b_constant.size() == 0 ? Real{0}
+                                   : seg.b_constant.cwiseAbs().maxCoeff(),
+        b_extra.size() == 0 ? Real{0} : b_extra.cwiseAbs().maxCoeff()});
     throw std::runtime_error(std::format(
         "solve_with_newton: failed to converge after {} iterations "
         "(||dx||_inf = {:.3e} worst at {}, ||residual||_inf = {:.3e} "
-        "worst at {})",
+        "worst at {}). Relative to this circuit's own scale that is "
+        "dx/|x| = {:.2e} (|x| up to {:.3g}) and res/|b| = {:.2e} "
+        "(|b| up to {:.3g}), against absolute tolerances of {:.1e} and "
+        "{:.1e}. If those RELATIVE figures already look converged for "
+        "your problem, the absolute tolerance is the thing that does "
+        "not fit it — pass tol_newton_dx / tol_newton_res sized to your "
+        "circuit rather than assuming the solve is wrong. If they do "
+        "not, the iterate genuinely is not settling: look at the device "
+        "named above.",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
         last_res_norm,
-        row_equation_label(graph, pool, worst_res_row)));
+        row_equation_label(graph, pool, worst_res_row),
+        last_dx_norm / x_scale, x_scale,
+        last_res_norm / rhs_scale, rhs_scale,
+        tol_dx, tol_res));
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion
