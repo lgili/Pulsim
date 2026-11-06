@@ -105,8 +105,12 @@ tour. Order:
      Re-measured on a fresh builder, a 1 MΩ or 1 GΩ resistor from
      `dcn` to ground did NOT cure it (an earlier run that seemed to was
      reusing a builder that `auto_regularize` had already tied);
-     `dc_neg="gnd"` runs on `trbdf2`. The guide therefore says: connect
-     one DC rail to ground, or pass `dt`.
+     `dc_neg="gnd"` runs on `trbdf2`. The guide therefore said: connect
+     one DC rail to ground, or pass `dt`. Fixed on
+     `fix/v2-b-engine-robustness`: the zero-time probe step grows on a
+     singular factorization (to 6e-10 s here), and the run gives
+     321.851 V across the rails against 321.852 V at `dt=1e-6`. Trap 8
+     now covers reading such rails (`v("dp") - v("dn")`).
    - The fixed engine starts first order from an inconsistent state,
      and initial conditions do not change that: an RL decay with
      `i0=1` has error 1.85e-3 at `dt=1e-5` and 0.92e-3 at `5e-6`, and

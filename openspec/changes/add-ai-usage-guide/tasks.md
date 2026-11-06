@@ -342,7 +342,17 @@ reproduced every friction item.
       `make_dead_time_pwm_pair_fn` too (48/49 at D = 0.5 with 2e-7 dead
       time). The guide's 3.2 on-step block then prints `[50]` and must be
       updated.
-- [ ] 12.2 TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
+- [x] 12.2 (Closed on `fix/v2-b-engine-robustness`: the crossing
+      detector read each step's start from the committed solve, which
+      after a zero-time cascade was solved under the PRE-cascade bits,
+      so a diode left at +eps was never seen to cross; a diode held on
+      the forbidden side through a step is now re-decided, and a
+      chatter guard that gives up takes a 1/100 step. The bridge reads
+      322.057 V against 322.059 V, every diode 0.1606 A against
+      0.1610 A; the 1 mH case holds no diode against its rule (321.807
+      against 321.845 V). The ride warning names the engine asked for,
+      and `simulate` itself names a held diode. Trap 13 rewritten.)
+      TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
       runs half-wave (318.79 V, 12.91 V pp against 322.06 V, 6.38 V pp
       with `dt`). The sliding-mode warning names `engine='auto'` even
       when `engine='trbdf2'` was requested. `V_th > 0` is not sufficient
@@ -373,6 +383,19 @@ reproduced every friction item.
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints
       it many times. Emit it once per result and diode.
+
+- [x] 12.10 (Found and closed on `fix/v2-b-engine-robustness`.)
+      `engine='auto'` with a Python `switch_fn` sampled the gates at t
+      and t + h only and bisected [t, t + h] as if it held one edge: a
+      100 kHz boost over 20 ms (ceiling 20 us, two periods) landed 112
+      gate events instead of 3999 and ended at 589.97 V against
+      48.04 V. A step now samples h/4 .. h plus a walking fraction,
+      bisects the first sub-interval that changes and is capped at
+      twice the narrowest pulse seen (48.034 V, 3999 events); pulses
+      found narrower than the sampling already used are warned about.
+- [x] 12.11 (Found and closed on `fix/v2-b-engine-robustness`.) The
+      floating-DC-side abort of trap 8 (see design.md): the probe step
+      grows on a singular factorization; trap 8 rewritten.
 
 ## 13. Review round 3
 
