@@ -1531,9 +1531,37 @@ def simulate(
     Decision tree, short version:
 
     * **"Não sei qual escolher"** → pass nothing. That is what
-      ``auto`` is for.
+      ``auto`` is for — but read the next section before you
+      average anything.
     * **"Preciso do grid fixo / reprodutibilidade bit-exata"** →
       pass ``dt``.
+
+    **Statistics over the result.** Without ``dt`` (and always on
+    ``engine='trbdf2'`` / ``'dsed'``) the samples are NOT evenly spaced: the step controller packs them
+    around switching edges and diode events — down to femtosecond
+    steps after a turn-off — and stretches them across quiet
+    intervals. ``result.times`` is that variable grid, so plain sample
+    statistics weight each SAMPLE equally instead of each second:
+
+    * ``v[t > t0].mean()`` is wrong. On an L–D–RC rectifier whose
+      output averages 6.33 V it reads 3.04 V on ``engine='trbdf2'``
+      and 5.01 V with the defaults.
+    * ``np.sqrt((v**2).mean())`` is wrong for the same reason.
+    * ``v.max()`` / ``v.min()`` need no weighting, but they include
+      every event-landing sample, sub-nanosecond excursions too.
+    * Slicing by sample index (``v[int(0.7 * len(v)):]``) does not
+      select the last 30 % of the TIME.
+
+    Use the time-weighted helpers instead, which are exact for the
+    piecewise-linear waveform through the samples on any grid::
+
+        s = pulsim.steady_state_stats(result, "out", last=10 / f_sw)
+        s.mean, s.rms, s.ripple_pp
+        pulsim.time_average(result.times, result.v("out"), t_from=2e-3)
+
+    With an explicit ``dt`` the grid is uniform and ``.mean()`` agrees
+    with them to ~4 significant digits; the helpers are still the
+    form that survives dropping the ``dt``.
 
     Examples
     --------
@@ -1567,10 +1595,14 @@ def simulate(
     t_end
         End time, in seconds.
     dt
-        Fixed time step (engine='pwl', required) OR upper-bound
-        ``dt_max`` (engine='dsed', optional — defaults to 10 µs).
+        ``engine='auto'``: given → fixed step of exactly ``dt``;
+        omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
+        or a ``ValueError`` naming what keeps the circuit off it. ``engine='pwl'``: the fixed step, required.
+        ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
+        defaults to 10 µs); the grid is variable either way.
     engine
-        ``'pwl'`` (default, fixed-step) or ``'dsed'`` (variable-step).
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
+        see above.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
@@ -1607,7 +1639,9 @@ def simulate(
     Returns
     -------
     SimulationResult
-        The full per-sample state-vector history.
+        The full per-sample state-vector history, on a uniform grid
+        when ``dt`` was given and a variable one otherwise (see
+        *Statistics over the result* above).
 
     Raises
     ------
