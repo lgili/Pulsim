@@ -706,6 +706,11 @@ def device_thermal_summary(
     # none — then switch_fn is re-evaluated, see _result_views).
     switch_seq_idx_by_bid = _views.switch_bits_by_branch(builder)
     kernel_masks, _ = _views.recorded_switch_states(result, builder)
+    # Where each step starts (the right limit at an engine='dsed'
+    # event, see _result_views.step_start_states), so P_cond_avg
+    # integrates the same per-step waveform as device_loss_summary.
+    states_s, masks_s = _views.step_start_states(result, states,
+                                                 kernel_masks)
 
     out = []
     for bid, t_spec in sorted(thermal_by_bid.items()):
@@ -733,11 +738,16 @@ def device_thermal_summary(
                 continue
             v_R = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
+            v_R_s = (_views.node_voltage_trace(states_s, int(from_id))
+                     - _views.node_voltage_trace(states_s, int(to_id)))
             P_cond_t = v_R * v_R / R
+            g_c = np.full_like(v_R, 1.0 / R)
+            E_cond = _losses._branch_energy(times, v_R, g_c, v_R_s, g_c)
         elif kind == "inductor":
             # Ideal inductor — conduction loss is zero. Any thermal
             # rise comes from P_core_avg above.
             P_cond_t = np.zeros_like(times)
+            E_cond = 0.0
         elif kind == "diode":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -754,12 +764,17 @@ def device_thermal_summary(
                 builder, result, bid, switch_fn=switch_fn, warn=False)
             v_D = d_trace.v
             g_arr = np.where(d_trace.closed, g_on, g_off)
+            g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_D * g_arr, c_spec)
+                E_cond = _losses._conduction_model_energy(
+                    times, v_D * g_arr, d_trace.v_start * g_arr_s, c_spec)
             else:
                 P_cond_t = v_D * v_D * g_arr
+                E_cond = _losses._branch_energy(
+                    times, v_D, g_arr, d_trace.v_start, g_arr_s)
         elif kind == "switch":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -784,13 +799,24 @@ def device_thermal_summary(
             # closed-loop post-hoc mask desync (see _result_views).
             closed = _views.resolve_switch_closed_trace(
                 result, switch_fn, times, sidx, v_SW, name=name)
+            closed_s = closed
+            if (masks_s is not None and masks_s is not kernel_masks
+                    and 0 <= sidx < masks_s.shape[1]):
+                closed_s = np.asarray(masks_s[:, sidx], dtype=bool)
+            v_SW_s = (_views.node_voltage_trace(states_s, int(from_id))
+                      - _views.node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
+            g_arr_s = np.where(closed_s, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_SW * g_arr, c_spec)
+                E_cond = _losses._conduction_model_energy(
+                    times, v_SW * g_arr, v_SW_s * g_arr_s, c_spec)
             else:
                 P_cond_t = v_SW * v_SW * g_arr
+                E_cond = _losses._branch_energy(
+                    times, v_SW, g_arr, v_SW_s, g_arr_s)
         else:
             # Unsupported kind for the thermal pipeline.
             continue
@@ -799,8 +825,8 @@ def device_thermal_summary(
         T_j_trace = compute_temperature(times, P_total_t,
                                           stages, T_amb_dev)
         T = (times[-1] - times[0]) if times.size > 1 else 1.0
-        P_cond_avg = (float(np.trapezoid(P_cond_t, times) / T)
-                      if T > 0 else float(P_cond_t.mean()))
+        P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
+                      else float(P_cond_t.mean()))
         out.append({
             "branch_id": int(bid),
             "kind": kind,

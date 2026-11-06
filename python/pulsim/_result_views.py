@@ -115,6 +115,110 @@ def recorded_switch_states(result, builder=None):
     return _borrow_for_unsolved(arr, recorded_unsolved(result, n)), ""
 
 
+def step_start_states(result, states: np.ndarray,
+                      masks: "np.ndarray | None" = None):
+    """``(states_start, masks_start)``: per sample ``k``, the state and
+    mask the step AFTER sample ``k`` starts from.
+
+    A stored sample is the LEFT limit of time ``t[k]``: the state the
+    step that ended there produced, under the recorded mask
+    ``switch_states[k]``. Where an event fired at ``t[k]`` (a DSED
+    gate edge or diode commutation) the next step starts from a
+    different state, the RIGHT limit, under the post-event mask, and a
+    switched branch's current jumps between the two. ``engine='dsed'``
+    stores those right limits (``result.right_limit_index`` /
+    ``right_limit_states`` / ``right_limit_switch_states``); the rows
+    there are replaced. Everywhere else, and on every result without
+    that record (the pwl and trbdf2 engines integrate each step under
+    one mask and store its end), the start of step ``k + 1`` is sample
+    ``k`` itself and the inputs are returned unchanged (no copy).
+
+    A time integral over step ``(t[k-1], t[k]]`` runs from
+    ``states_start[k-1]`` to ``states[k]``; see :func:`pl_integral`."""
+    idx = getattr(result, "right_limit_index", None)
+    rl_st = getattr(result, "right_limit_states", None)
+    if idx is None or rl_st is None:
+        return states, masks
+    idx = np.asarray(idx, dtype=np.int64)
+    rl_st = np.asarray(rl_st, dtype=float)
+    n = states.shape[0]
+    if (idx.size == 0 or idx.ndim != 1 or rl_st.ndim != 2
+            or rl_st.shape != (idx.size, states.shape[1])
+            or idx.min() < 0 or idx.max() >= n):
+        return states, masks
+    st = np.array(states, dtype=float, copy=True)
+    st[idx] = rl_st
+    mk = masks
+    rl_sw = getattr(result, "right_limit_switch_states", None)
+    if masks is not None and rl_sw is not None:
+        rl_sw = np.asarray(rl_sw, dtype=bool)
+        if rl_sw.shape == (idx.size, masks.shape[1]):
+            mk = np.array(masks, dtype=bool, copy=True)
+            mk[idx] = rl_sw
+    return st, mk
+
+
+def pl_integral(times: np.ndarray, y: np.ndarray,
+                y_start: "np.ndarray | None" = None) -> float:
+    """``∫ y dt`` over the run, each step ``(t[k-1], t[k]]`` integrated
+    as the line from ``y_start[k-1]`` (its start, the right limit of
+    sample ``k - 1``) to ``y[k]`` (its end). Equal to the trapezoid
+    when ``y_start`` is ``y``."""
+    t = np.asarray(times, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if t.size < 2:
+        return 0.0
+    a = y[:-1] if y_start is None else np.asarray(y_start, float)[:-1]
+    return float(np.dot(np.diff(t), 0.5 * (a + y[1:])))
+
+
+def pl_integral_product(times: np.ndarray, y: np.ndarray, z: np.ndarray,
+                        y_start: "np.ndarray | None" = None,
+                        z_start: "np.ndarray | None" = None) -> float:
+    """``∫ y·z dt`` of the same per-step lines (:func:`pl_integral`),
+    integrated EXACTLY: ``h·(2·a_y·a_z + a_y·c_z + c_y·a_z +
+    2·c_y·c_z) / 6`` per step, i.e. ``h·(a² + a·c + c²) / 3`` for a
+    square.
+
+    The trapezoid of the squared samples, ``h·(a² + c²) / 2``, is the
+    integral of a different curve: on a current ramp to zero it reads
+    3/2 of the square's integral. The variable-step engines put one or
+    two long steps across a DCM diode's down-ramp, and the trapezoid
+    read that diode's RMS current +7.8 % and its conduction loss +16 %
+    high on ``engine='auto'``; a fixed grid fine enough to bend the
+    ramp hides it. The mean (:func:`pl_integral`) and the RMS now
+    integrate the same piecewise-linear waveform."""
+    t = np.asarray(times, dtype=float)
+    if t.size < 2:
+        return 0.0
+    y = np.asarray(y, dtype=float)
+    z = np.asarray(z, dtype=float)
+    ay = y[:-1] if y_start is None else np.asarray(y_start, float)[:-1]
+    az = z[:-1] if z_start is None else np.asarray(z_start, float)[:-1]
+    cy, cz = y[1:], z[1:]
+    return float(np.dot(np.diff(t), (2.0 * ay * az + ay * cz + cy * az
+                                     + 2.0 * cy * cz) / 6.0))
+
+
+def pl_integral_abs(times: np.ndarray, y: np.ndarray,
+                    y_start: "np.ndarray | None" = None) -> float:
+    """``∫ |y| dt`` of the per-step lines (:func:`pl_integral`), exact
+    where a step's line crosses zero."""
+    t = np.asarray(times, dtype=float)
+    if t.size < 2:
+        return 0.0
+    y = np.asarray(y, dtype=float)
+    a = y[:-1] if y_start is None else np.asarray(y_start, float)[:-1]
+    c = y[1:]
+    h = np.diff(t)
+    same = (a * c) >= 0.0
+    den = np.abs(a) + np.abs(c)
+    cross = np.divide(a * a + c * c, 2.0 * den,
+                      out=np.zeros_like(den), where=den > 0)
+    return float(np.dot(h, np.where(same, 0.5 * (np.abs(a) + np.abs(c)),
+                                    cross)))
+
+
 def _borrow_for_unsolved(arr: np.ndarray, unsolved: np.ndarray) -> np.ndarray:
     """Read an UNSOLVED row (``switch_states_unsolved``: a sample 0
     seeded from ``initial_state``, whose recorded bits are the mask the
@@ -438,11 +542,14 @@ def resample_uniform(times: np.ndarray, y: np.ndarray,
     return t_u, np.interp(t_u, t, y), float(t_u[1] - t_u[0])
 
 
-def time_weighted_rms(y: np.ndarray, times: np.ndarray) -> float:
-    """RMS over TIME, not over samples: sqrt(∫y² dt / T).
+def time_weighted_rms(y: np.ndarray, times: np.ndarray,
+                      y_start: "np.ndarray | None" = None) -> float:
+    """RMS over TIME, not over samples: sqrt(∫y² dt / T), with ``y``
+    the piecewise-linear waveform of :func:`pl_integral_product`
+    (each step from ``y_start[k-1]``, default ``y[k-1]``, to ``y[k]``).
 
-    Identical to the sample RMS on a uniform grid (to trapezoid
-    error) and the only correct form on an irregular one.
+    Equal to the sample RMS on a uniform grid to discretisation error,
+    and the only correct form on an irregular one.
     """
     y = np.asarray(y, dtype=float)
     t = np.asarray(times, dtype=float)
@@ -453,4 +560,5 @@ def time_weighted_rms(y: np.ndarray, times: np.ndarray) -> float:
     span = float(t[-1] - t[0])
     if not (span > 0):
         return float(np.sqrt(np.mean(y ** 2)))
-    return float(np.sqrt(np.trapezoid(y ** 2, t) / span))
+    sq = pl_integral_product(t, y, y, y_start, y_start)
+    return float(np.sqrt(max(sq, 0.0) / span))

@@ -267,7 +267,10 @@ def average_power_at_node(builder,
 
 def _conduction_stats(v: np.ndarray,
                       g: Union[float, np.ndarray],
-                      times: np.ndarray) -> Dict[str, float]:
+                      times: np.ndarray,
+                      v_start: "Optional[np.ndarray]" = None,
+                      g_start: "Optional[Union[float, np.ndarray]]" = None,
+                      ) -> Dict[str, float]:
     """Compute (i_avg, i_rms, i_peak, P_avg, E_total) for a branch
     whose current trace is ``i = v · g`` and whose instantaneous
     power is ``P = v · i = v² · g``.
@@ -275,31 +278,74 @@ def _conduction_stats(v: np.ndarray,
     ``g`` may be a scalar (constant conductance, e.g. a resistor or
     on-state switch) or an array matching ``v`` (state-dependent
     conductance, e.g. a switch toggling between ``g_on`` / ``g_off``).
+
+    Each step ``(t[k-1], t[k]]`` is the line from its START,
+    ``(v_start, g_start)[k-1]``, to its end ``(v, g)[k]``, integrated
+    exactly (``_result_views.pl_integral`` / ``pl_integral_product``).
+    The start defaults to the sample before the step; it differs only
+    where ``engine='dsed'`` fired an event, whose stored sample is the
+    left limit (``_result_views.step_start_states``).
     """
-    if isinstance(g, np.ndarray):
-        g_arr = g.astype(float, copy=False)
-    else:
-        g_arr = np.full_like(v, float(g))
+    def _arr(x, like):
+        if isinstance(x, np.ndarray):
+            return x.astype(float, copy=False)
+        return np.full_like(like, float(x))
+
+    g_arr = _arr(g, v)
+    vs = v if v_start is None else np.asarray(v_start, dtype=float)
+    gs = g_arr if g_start is None else _arr(g_start, v)
     i = v * g_arr
-    p = v * i
+    i_s = vs * gs
     T = (times[-1] - times[0]) if times.size > 1 else 1.0
     if T <= 0:
         T = 1.0
+    if times.size > 1:
+        Q = _views.pl_integral(times, i, i_s)
+        E = _branch_energy(times, v, g_arr, vs, gs)
+        i_avg, P_avg, E_total = Q / T, E / T, E
+    else:
+        p = v * i
+        i_avg, P_avg, E_total = float(i.mean()), float(p.mean()), 0.0
+    i_peak = float(max(np.abs(i).max(), np.abs(i_s).max())) if i.size \
+        else 0.0
     return {
-        "i_avg": float(np.trapezoid(i, times) / T) if times.size > 1
-                   else float(i.mean()),
+        "i_avg": float(i_avg),
         # Time-weighted, not sample-averaged: on a variable-step
         # grid the samples cluster at commutations (where ripple
         # peaks), and an unweighted mean read +4.6% high on a buck
         # diode at rtol=1e-6 — a bias that GREW as the tolerance
-        # tightened. Identical to the sample RMS on a fixed grid.
-        "i_rms": _time_weighted_rms(i, times),
-        "i_peak": float(np.abs(i).max()) if i.size else 0.0,
-        "P_avg": float(np.trapezoid(p, times) / T) if times.size > 1
-                   else float(p.mean()),
-        "E_total": float(np.trapezoid(p, times)) if times.size > 1
-                     else 0.0,
+        # tightened.
+        "i_rms": _time_weighted_rms(i, times, i_s),
+        "i_peak": i_peak,
+        "P_avg": float(P_avg),
+        "E_total": float(E_total),
     }
+
+
+def _branch_energy(times: np.ndarray, v: np.ndarray, g: np.ndarray,
+                   v_start: np.ndarray, g_start: np.ndarray) -> float:
+    """``∫ v·i dt`` of a conductance branch (``i = g·v``), per step.
+
+    A step whose two ends carry the same conductance (one stamp over
+    the whole step, the usual case and every ``engine='dsed'`` step
+    started from its right limit) is the exact integral of the linear
+    voltage squared, ``g·h·(a² + a·c + c²) / 3``. A step whose ends
+    differ (the fixed and TR-BDF2 engines store no right limit, so the
+    step that flips a switch starts from a sample solved under the
+    OTHER stamp) has no line to integrate: the product of the two
+    lines read a freewheel diode's loss NEGATIVE (−24 V at the g_off
+    end times the g_on end's current), so that step keeps the
+    trapezoid of the two end powers, as before."""
+    t = np.asarray(times, dtype=float)
+    if t.size < 2:
+        return 0.0
+    h = np.diff(t)
+    a, c = v_start[:-1], v[1:]
+    ga, gc = g_start[:-1], g[1:]
+    same = ga == gc
+    lin = gc * (a * a + a * c + c * c) / 3.0
+    trap = 0.5 * (ga * a * a + gc * c * c)
+    return float(np.dot(h, np.where(same, lin, trap)))
 
 
 def _conduction_model_coeffs(spec: Mapping[str, Any]) -> "tuple[float, float]":
@@ -339,6 +385,20 @@ def _conduction_power_offset_slope(i_arr: np.ndarray,
     V_f0, r_on = _conduction_model_coeffs(spec)
     i = np.asarray(i_arr, dtype=float)
     return V_f0 * np.abs(i) + r_on * i * i
+
+
+def _conduction_model_energy(times: np.ndarray, i_arr: np.ndarray,
+                             i_start: np.ndarray,
+                             spec: Mapping[str, Any]) -> float:
+    """``∫ (V_f0·|i| + r_on·i²) dt`` over the run, each step the line
+    from ``i_start[k-1]`` to ``i_arr[k]`` integrated exactly (the same
+    waveform ``_conduction_stats`` integrates)."""
+    V_f0, r_on = _conduction_model_coeffs(spec)
+    if np.asarray(times).size < 2:
+        return 0.0
+    return float(V_f0 * _views.pl_integral_abs(times, i_arr, i_start)
+                 + r_on * _views.pl_integral_product(
+                     times, i_arr, i_arr, i_start, i_start))
 
 
 def _interp_energy_curve(x_query, curve) -> np.ndarray:
@@ -399,9 +459,13 @@ def _time_fraction(mask: np.ndarray, times: np.ndarray) -> float:
     return float(np.dot(m[1:], np.diff(t)) / (t[-1] - t[0]))
 
 
-# A conduction stretch whose forward current never reaches this
-# fraction of the diode's peak is not charged a reverse recovery.
+# A conduction stretch whose forward charge is below this fraction of
+# the recovery charge the spec asks for is not a turn-off: its capped
+# energy (Q_F · V_R) is below this fraction of one real event's.
 _RR_MATERIAL_FRACTION = 1e-3
+# Without a recovery spec (counts only), a stretch whose forward
+# current never reaches this fraction of the diode's peak is dropped.
+_RR_MATERIAL_CURRENT_FRACTION = 1e-3
 
 # Recovery time used to place the V_R reading when diode_specs gives no
 # ``t_rr``: the order of a fast-recovery power diode's. Only WHERE V_R
@@ -495,9 +559,12 @@ def _diode_turn_offs(trace, times: np.ndarray,
     the diode blocks, ``t_off`` the end of its last conducting step
     (``t[k-1]``), ``I_F`` the forward current on the last conducting
     sample, ``I_F_peak`` the largest forward current of the stretch,
-    ``Q_F`` the forward charge it conducted (trapezoid of
-    ``max(i_D, 0)`` over the stretch's steps), ``material`` whether
-    ``I_F_peak >= 1e-3 · i_peak`` of the whole run, ``V_R`` the reverse
+    ``Q_F`` the forward charge it conducted (``max(i_D, 0)`` over the
+    stretch's steps, each from its start ``current_start`` to its end),
+    ``material_current`` whether ``I_F_peak >= 1e-3 · i_peak`` of the
+    whole run (the count-only fallback of :func:`_diode_switching_loss`,
+    which judges materiality by charge when a recovery is specified),
+    ``V_R`` the reverse
     voltage the diode recovers against, and ``unresolved`` whether the
     time grid can place that reading.
 
@@ -534,7 +601,7 @@ def _diode_turn_offs(trace, times: np.ndarray,
     reading inside the step is the plateau. :func:`device_loss_summary`
     counts and warns about the unresolved ones.
 
-    ``material`` and ``Q_F`` exist for the stretches that are not a
+    ``Q_F`` exists for the stretches that are not a
     forward conduction worth a recovery: on an RL half-wave rectifier
     at ``V_th = 0.7`` the fixed engine's trapezoidal g_off/L stiff mode
     turns the reverse-biased diode ON for single steps at ~36 µA
@@ -553,13 +620,17 @@ def _diode_turn_offs(trace, times: np.ndarray,
     v = np.asarray(trace.v, dtype=float)
     i = np.asarray(trace.current, dtype=float)
     i_fwd = np.maximum(i, 0.0)
+    # Where each step starts (the right limit at an engine='dsed'
+    # event; the sample itself elsewhere).
+    i_s = np.asarray(getattr(trace, "current_start", i), dtype=float)
+    i_fwd_s = np.maximum(i_s, 0.0)
     i_pk = float(np.max(np.abs(i))) if i.size else 0.0
     flat_atol = _RR_FLAT_FLOOR * (float(np.max(np.abs(v))) if v.size
                                   else 0.0)
     # Forward charge per step (t[j-1], t[j]], cumulated, so a stretch's
     # charge is a difference of two entries.
     dq = np.zeros(n)
-    dq[1:] = 0.5 * (i_fwd[:-1] + i_fwd[1:]) * np.diff(t)
+    dq[1:] = 0.5 * (i_fwd_s[:-1] + i_fwd[1:]) * np.diff(t)
     q_cum = np.cumsum(dq)
     # Index of the next ON sample after each turn-off (n if none), and
     # the first conducting step of each stretch.
@@ -573,7 +644,7 @@ def _diode_turn_offs(trace, times: np.ndarray,
         # Conducting steps k1 .. k-1 (step j spans (t[j-1], t[j]]).
         Q_F = float(q_cum[k - 1] - (q_cum[k1 - 1] if k1 > 0 else 0.0))
         lo_s = max(k1 - 1, 0)
-        I_F_peak = float(i_fwd[lo_s:k].max())
+        I_F_peak = float(max(i_fwd[lo_s:k].max(), i_fwd_s[lo_s:k].max()))
         # The blocking interval runs from t_off to the last blocking
         # sample before the diode conducts again (or the run ends).
         t_off = float(t[k - 1])
@@ -607,8 +678,8 @@ def _diode_turn_offs(trace, times: np.ndarray,
                     "I_F": I_F, "forced": bool(forced),
                     "I_F_peak": I_F_peak, "Q_F": Q_F,
                     "unresolved": bool(unresolved),
-                    "material": bool(
-                        I_F_peak >= _RR_MATERIAL_FRACTION * i_pk)})
+                    "material_current": bool(
+                        I_F_peak >= _RR_MATERIAL_CURRENT_FRACTION * i_pk)})
     return out
 
 
@@ -633,6 +704,19 @@ def _warn_recovery_quality(name: str, entry: Mapping[str, Any],
     n = int(entry.get("n_turn_off_events", 0))
     n_unres = int(entry.get("n_turn_off_events_unresolved", 0))
     n_cap = int(entry.get("n_turn_off_events_capped", 0))
+    n_drop = int(entry.get("n_turn_off_events_dropped", 0))
+    E_drop = float(entry.get("E_sw_dropped", 0.0))
+    E_tot = float(entry.get("E_sw_total", 0.0))
+    if n_drop > 0 and E_drop > 0.01 * E_tot:
+        warnings.warn(
+            f"device_loss_summary: {n_drop} conduction stretches of "
+            f"{name!r} conducted less than 1e-3 of the recovery charge "
+            f"and were not counted as turn-offs, but together they "
+            f"would add {E_drop:.3g} J (E_sw_total {E_tot:.3g} J). So "
+            f"many tiny re-conductions usually mean a ringing or "
+            f"chatter the time grid does not resolve; refine dt or use "
+            f"engine='auto' to check.",
+            RuntimeWarning, stacklevel=3)
     if n_unres > 0 and float(entry.get("E_sw_total", 0.0)) > 0:
         warnings.warn(
             f"device_loss_summary: {n_unres} of {n} reverse-recovery "
@@ -692,10 +776,21 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
     Two guards keep immaterial conduction out of the total, and both
     are reported:
 
-    * a stretch whose peak forward current stays below
-      ``1e-3 · i_peak`` is not a turn-off at all
-      (``n_turn_off_events_dropped``; excluded from
-      ``n_turn_off_events`` and ``f_sw_estimate``);
+    * a stretch whose forward charge ``Q_F`` is below ``1e-3`` of the
+      recovery charge the spec asks for (``Q_rr``, ``E_rr_ref /
+      V_R_ref``, or ``E_rr_curve(I_F) / V_R_ref``) is not a turn-off
+      at all (``n_turn_off_events_dropped``; excluded from
+      ``n_turn_off_events``, ``f_sw_estimate`` and the total). With
+      the cap below, such a stretch could add at most 1e-3 of one
+      real event's energy, so dropping it cannot change the total
+      materially; ``E_sw_dropped`` reports what the dropped stretches
+      would have added, and a RuntimeWarning fires if that exceeds
+      1 % of the total. A spec with no recovery at all (counts only)
+      falls back to the peak current, ``I_F_peak >= 1e-3 · i_peak``.
+      The materiality is judged against the event's own charge, not
+      against the run's peak current: a boost with a 4 kA start-up
+      inrush dropped all 237 of its 3-4 A light-load recoveries
+      (each above Q_rr) that way, E_sw 4.9× and f_sw 5× low, silently;
     * no event recovers more energy than ``Q_F · V_R``, the stretch's
       own forward charge recovered against ``V_R``
       (``n_turn_off_events_capped``).
@@ -705,13 +800,47 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
     PSIM / LTspice "ideal-diode-with-Qrr" post-processing.
     """
     n_all = len(turn_offs)
-    turn_offs = [ev for ev in turn_offs if ev.get("material", True)]
-    n_off = len(turn_offs)
     T = (times[-1] - times[0]) if times.size > 1 else 0.0
     Q_rr = float(spec.get("Q_rr", 0.0))
     E_rr_ref = float(spec.get("E_rr_ref", 0.0))
     V_R_ref = float(spec.get("V_R_ref", 0.0))
     E_rr_curve = spec.get("E_rr_curve")
+    if E_rr_curve is not None and V_R_ref <= 0:
+        raise ValueError(
+            "diode_specs: E_rr_curve requires a positive V_R_ref.")
+    if E_rr_curve is None and E_rr_ref > 0 and V_R_ref <= 0:
+        raise ValueError(
+            "diode_specs: E_rr_ref requires a positive V_R_ref "
+            "(the reference reverse voltage from the datasheet).")
+    has_rr = Q_rr > 0 or E_rr_ref > 0 or E_rr_curve is not None
+
+    def _q_req(evs) -> np.ndarray:
+        """Recovery charge the spec asks of each event."""
+        if E_rr_curve is not None:
+            I_F = np.asarray([ev["I_F"] for ev in evs], dtype=float)
+            return _interp_energy_curve(I_F, E_rr_curve) / V_R_ref
+        if E_rr_ref > 0:
+            return np.full(len(evs), E_rr_ref / V_R_ref)
+        return np.full(len(evs), Q_rr)
+
+    if has_rr and turn_offs:
+        Q_F_all = np.asarray([ev.get("Q_F", np.inf) for ev in turn_offs],
+                             dtype=float)
+        keep = Q_F_all >= _RR_MATERIAL_FRACTION * _q_req(turn_offs)
+    else:
+        keep = np.asarray([ev.get("material_current",
+                                  ev.get("material", True))
+                           for ev in turn_offs], dtype=bool)
+    dropped = [ev for ev, k in zip(turn_offs, keep) if not k]
+    turn_offs = [ev for ev, k in zip(turn_offs, keep) if k]
+    n_off = len(turn_offs)
+    E_dropped = 0.0
+    if has_rr and dropped:
+        V_R_d = np.asarray([ev["V_R"] for ev in dropped], dtype=float)
+        Q_F_d = np.asarray([ev.get("Q_F", 0.0) for ev in dropped],
+                           dtype=float)
+        E_dropped = float(np.sum(np.minimum(_q_req(dropped), Q_F_d)
+                                 * V_R_d))
 
     bookkeeping = {
         "n_turn_off_events": int(n_off),
@@ -720,15 +849,9 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
         "n_turn_off_events_unresolved": int(sum(
             1 for ev in turn_offs if ev.get("unresolved", False))),
         "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
+        "E_sw_dropped": E_dropped,
     }
-    if E_rr_curve is not None and V_R_ref <= 0:
-        raise ValueError(
-            "diode_specs: E_rr_curve requires a positive V_R_ref.")
-    if E_rr_curve is None and E_rr_ref > 0 and V_R_ref <= 0:
-        raise ValueError(
-            "diode_specs: E_rr_ref requires a positive V_R_ref "
-            "(the reference reverse voltage from the datasheet).")
-    if n_off == 0 or (Q_rr <= 0 and E_rr_ref <= 0 and E_rr_curve is None):
+    if n_off == 0 or not has_rr:
         return {"E_sw_total": 0.0, "P_sw_avg": 0.0, **bookkeeping}
 
     V_R = np.asarray([ev["V_R"] for ev in turn_offs], dtype=float)
@@ -764,7 +887,12 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                             times: np.ndarray,
                             v_SW: np.ndarray,
                             i_SW: np.ndarray,
-                            spec: Mapping[str, Any]) -> Dict[str, float]:
+                            spec: Mapping[str, Any],
+                            *,
+                            closed_start: "Optional[np.ndarray]" = None,
+                            v_start: "Optional[np.ndarray]" = None,
+                            i_start: "Optional[np.ndarray]" = None,
+                            ) -> Dict[str, float]:
     """Post-hoc turn-on / turn-off switching loss for an ideal-switch
     branch (MOSFET / IGBT equivalent).
 
@@ -787,6 +915,16 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     as the blocking voltage (the value the switch was holding off
     just before / just after the transition) and ``|i_SW[k]|`` as
     the load current the device sees while conducting.
+
+    ``closed_start`` / ``v_start`` / ``i_start`` are the state at the
+    start of the step after each sample
+    (``_result_views.step_start_states``). Where the edge fired AT
+    sample ``k-1`` (``engine='dsed'`` stores that event sample as the
+    left limit and the switch already sits in its new state in
+    ``closed_start[k-1]``), the post-edge quantity is read there, at
+    the edge itself, instead of one whole step later: with 1 µs DSED
+    steps the next sample is well into the on-time, and a DCM boost
+    switch's E_on read 4.7 % high.
     """
     E_on_ref  = float(spec.get("E_on_ref",  0.0))
     E_off_ref = float(spec.get("E_off_ref", 0.0))
@@ -857,6 +995,20 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     # adjacent to the edge. For turn-on that's the sample at k (just
     # after closing); for turn-off it's the sample at k-1 (just before
     # opening).
+    cl = np.asarray(closed_trace, dtype=bool)
+    cl_s = cl if closed_start is None else np.asarray(closed_start, bool)
+    v_s = v_SW if v_start is None else np.asarray(v_start, dtype=float)
+    i_s = i_SW if i_start is None else np.asarray(i_start, dtype=float)
+
+    def _post_edge(arr: np.ndarray, arr_s: np.ndarray,
+                   idxs: np.ndarray) -> np.ndarray:
+        """``arr`` just after the edge between ``idxs - 1`` and
+        ``idxs``: at the start of the step if the switch is already in
+        its new state there, else at the end sample ``idxs``."""
+        pre = np.clip(idxs - 1, 0, arr.size - 1)
+        at_edge = cl_s[pre] == cl[idxs]
+        return np.where(at_edge, arr_s[pre], arr[idxs])
+
     def _edge_loss(idxs: np.ndarray, E_ref: float, curve,
                     *, blocking_at_post_edge: bool,
                     load_at_post_edge: bool,
@@ -864,12 +1016,12 @@ def _switch_switching_loss(closed_trace: np.ndarray,
         if idxs.size == 0 or (E_ref <= 0 and curve is None
                                and table is None):
             return 0.0
-        blk_k  = idxs if blocking_at_post_edge \
-                       else np.clip(idxs - 1, 0, v_SW.size - 1)
-        load_k = idxs if load_at_post_edge \
-                       else np.clip(idxs - 1, 0, v_SW.size - 1)
-        V_blk = np.abs(v_SW[blk_k])
-        I_load = np.abs(i_SW[load_k])
+        pre_k = np.clip(idxs - 1, 0, v_SW.size - 1)
+        load_k = idxs if load_at_post_edge else pre_k
+        V_blk = np.abs(_post_edge(v_SW, v_s, idxs)
+                       if blocking_at_post_edge else v_SW[pre_k])
+        I_load = np.abs(_post_edge(i_SW, i_s, idxs)
+                        if load_at_post_edge else i_SW[pre_k])
         if table is not None:
             # The 3-D table needs no V_ref scaling: the voltage IS
             # one of its axes.
@@ -1111,9 +1263,11 @@ def device_loss_summary(
         and accumulates ``E_rr_event = Q_rr · V_R`` or
         ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``, capped at the
         stretch's own forward charge times ``V_R``; stretches whose
-        forward current never reaches ``1e-3 · i_peak`` are dropped.
-        Reports ``E_sw_total``, ``P_sw_avg``, ``n_turn_off_events``,
-        ``n_turn_off_events_dropped``, ``n_turn_off_events_capped``,
+        forward charge is below ``1e-3`` of the recovery charge asked
+        for are dropped (by peak current, ``< 1e-3 · i_peak``, when no
+        recovery is given). Reports ``E_sw_total``, ``P_sw_avg``,
+        ``n_turn_off_events``, ``n_turn_off_events_dropped``,
+        ``E_sw_dropped``, ``n_turn_off_events_capped``,
         ``n_turn_off_events_unresolved``, ``f_sw_estimate`` and the
         ``t_rr`` used. A RuntimeWarning names the diode when a
         turn-off falls on a step longer than ``t_rr`` (E_rr then
@@ -1231,6 +1385,11 @@ def device_loss_summary(
         switch_bits = _views.switch_bits_by_branch(builder)
     except Exception:  # noqa: BLE001 — a duck-typed builder
         switch_bits = {}
+    # Where each step STARTS (the right limit of the sample before it;
+    # the sample itself except at an engine='dsed' event). Every time
+    # integral below runs each step from there to its end sample.
+    states_s, masks_s = _views.step_start_states(result, states,
+                                                 kernel_masks)
 
     summary: List[Dict[str, Any]] = []
     switch_seq_idx = 0  # increments once per Switch / Diode branch
@@ -1249,13 +1408,15 @@ def device_loss_summary(
             except Exception:
                 continue
             i_arr = states[:, i_idx]
+            i_arr_s = states_s[:, i_idx]
             entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "inductor",
                 "name": name,
-                "i_avg": (float(np.trapezoid(i_arr, times) / T)
-                          if T > 0 else float(i_arr.mean())),
-                "i_rms": _time_weighted_rms(i_arr, times),
+                "i_avg": (_views.pl_integral(times, i_arr, i_arr_s) / T
+                          if T > 0 and times.size > 1
+                          else float(i_arr.mean())),
+                "i_rms": _time_weighted_rms(i_arr, times, i_arr_s),
                 "i_peak": float(np.abs(i_arr).max()),
             }
             # Optional Steinmetz / iGSE core loss.
@@ -1279,7 +1440,9 @@ def device_loss_summary(
             v_from = _node_voltage_trace(states, int(from_id))
             v_to   = _node_voltage_trace(states, int(to_id))
             v_R = v_from - v_to
-            stats = _conduction_stats(v_R, 1.0 / R, times)
+            v_R_s = (_node_voltage_trace(states_s, int(from_id))
+                     - _node_voltage_trace(states_s, int(to_id)))
+            stats = _conduction_stats(v_R, 1.0 / R, times, v_R_s)
             summary.append({
                 "branch_id": int(bid),
                 "kind": "resistor",
@@ -1312,7 +1475,9 @@ def device_loss_summary(
                 builder, result, bid, switch_fn=switch_fn, stacklevel=3)
             v_D = d_trace.v
             g_arr = np.where(d_trace.closed, g_on, g_off)
-            stats = _conduction_stats(v_D, g_arr, times)
+            g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
+            stats = _conduction_stats(v_D, g_arr, times,
+                                      d_trace.v_start, g_arr_s)
             entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "diode",
@@ -1327,13 +1492,14 @@ def device_loss_summary(
             c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
             if c_spec is not None:
                 i_D = v_D * g_arr
-                p_model = _conduction_power_offset_slope(i_D, c_spec)
                 V_f0, r_on = _conduction_model_coeffs(c_spec)
+                E_m = _conduction_model_energy(
+                    times, i_D, d_trace.v_start * g_arr_s, c_spec)
                 entry["P_cond_model_avg"] = (
-                    float(np.trapezoid(p_model, times) / T)
-                    if T > 0 else float(p_model.mean()))
-                entry["E_cond_model"] = (float(np.trapezoid(p_model, times))
-                                         if times.size > 1 else 0.0)
+                    E_m / T if T > 0 and times.size > 1
+                    else float(_conduction_power_offset_slope(
+                        i_D, c_spec).mean()))
+                entry["E_cond_model"] = E_m
                 entry["V_f0"] = V_f0
                 entry["r_on"] = r_on
             # Optional datasheet reverse-recovery loss.
@@ -1382,9 +1548,17 @@ def device_loss_summary(
             closed = _views.resolve_switch_closed_trace(
                 switch_fn=switch_fn, result=result, times=times,
                 switch_idx=sw_bit, v_branch=v_SW, name=name)
+            closed_s = closed
+            if (masks_s is not None and masks_s is not kernel_masks
+                    and 0 <= sw_bit < masks_s.shape[1]):
+                closed_s = np.asarray(masks_s[:, sw_bit], dtype=bool)
+            v_SW_s = (_node_voltage_trace(states_s, int(from_id))
+                      - _node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
+            g_arr_s = np.where(closed_s, g_on, g_off)
             i_SW = v_SW * g_arr  # branch current at each sample
-            stats = _conduction_stats(v_SW, g_arr, times)
+            i_SW_s = v_SW_s * g_arr_s  # ... at the start of the next step
+            stats = _conduction_stats(v_SW, g_arr, times, v_SW_s, g_arr_s)
             entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "switch",
@@ -1396,13 +1570,13 @@ def device_loss_summary(
             # an IGBT, or r_on·I for a MOSFET) on the actual current.
             c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
             if c_spec is not None:
-                p_model = _conduction_power_offset_slope(i_SW, c_spec)
                 V_f0, r_on = _conduction_model_coeffs(c_spec)
+                E_m = _conduction_model_energy(times, i_SW, i_SW_s, c_spec)
                 entry["P_cond_model_avg"] = (
-                    float(np.trapezoid(p_model, times) / T)
-                    if T > 0 else float(p_model.mean()))
-                entry["E_cond_model"] = (float(np.trapezoid(p_model, times))
-                                         if times.size > 1 else 0.0)
+                    E_m / T if T > 0 and times.size > 1
+                    else float(_conduction_power_offset_slope(
+                        i_SW, c_spec).mean()))
+                entry["E_cond_model"] = E_m
                 entry["V_f0"] = V_f0
                 entry["r_on"] = r_on
             s_spec = (switch_by_bid.get(bid)
@@ -1410,7 +1584,10 @@ def device_loss_summary(
             if s_spec is not None:
                 entry.update(
                     _switch_switching_loss(closed, times, v_SW,
-                                            i_SW, s_spec))
+                                            i_SW, s_spec,
+                                            closed_start=closed_s,
+                                            v_start=v_SW_s,
+                                            i_start=i_SW_s))
             summary.append(entry)
             switch_seq_idx += 1
             continue

@@ -65,7 +65,13 @@ class DiodeStateTrace:
     ``closed[k]`` is True when the ON stamp (``g_on``) produced sample
     ``k``; ``current = v * (g_on if closed else g_off)`` is then the
     branch current the solver actually carried. ``recorded`` is False
-    when ``closed`` had to be replayed (no kernel record)."""
+    when ``closed`` had to be replayed (no kernel record).
+
+    ``v_start`` / ``closed_start`` are the same at the START of the step
+    after each sample (``_result_views.step_start_states``): equal to
+    ``v`` / ``closed`` except where ``engine='dsed'`` fired an event at
+    the sample, whose stored row is the left limit. Time integrals run
+    each step from ``current_start[k-1]`` to ``current[k]``."""
 
     branch_id: int
     name: str
@@ -78,11 +84,25 @@ class DiodeStateTrace:
     n_rule_violations: int = 0
     max_violation_V: float = 0.0
     violation_t_range: Tuple[float, float] = (float("nan"), float("nan"))
+    v_start: Optional[np.ndarray] = field(default=None, repr=False)
+    closed_start: Optional[np.ndarray] = field(default=None, repr=False)
     _messages: List[str] = field(default_factory=list, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.v_start is None:
+            self.v_start = self.v
+        if self.closed_start is None:
+            self.closed_start = self.closed
 
     @property
     def current(self) -> np.ndarray:
         return self.v * np.where(self.closed, self.g_on, self.g_off)
+
+    @property
+    def current_start(self) -> np.ndarray:
+        """Branch current at the start of the step after each sample."""
+        return self.v_start * np.where(self.closed_start, self.g_on,
+                                       self.g_off)
 
     @property
     def conducting(self) -> np.ndarray:
@@ -118,8 +138,11 @@ class DiodeStateTrace:
         thr = max(1e-12, 1e-6 * i_pk)
         i_fwd = self.g_on * np.asarray(self.v, dtype=float)
         fwd = i_fwd > thr
+        # A step's start is the right limit of the sample before it
+        # (v_start; the sample itself except at a DSED event).
+        fwd_start = self.g_on * np.asarray(self.v_start, dtype=float) > thr
         either = fwd.copy()
-        either[1:] |= fwd[:-1]
+        either[1:] |= fwd_start[:-1]
         stamp = closed.copy()
         stamp[1:] |= closed[:-1] & (np.abs(i_fwd[1:]) <= thr)
         return stamp & either
@@ -223,6 +246,7 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
     node_v = _views.node_voltage_trace
     rec, why = _views.recorded_switch_states(result, builder)
     bits = _views.switch_bits_by_branch(builder) if rec is not None else {}
+    states_s, rec_s = _views.step_start_states(result, states, rec)
     unsolved = _views.recorded_unsolved(result, n) if rec is not None \
         else np.zeros(n, dtype=bool)
     exempt = _event_sample_mask(result, times) | unsolved
@@ -241,9 +265,15 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
         bit = bits.get(bid)
         if rec is not None and bit is not None:
             closed = np.asarray(rec[:, bit], dtype=bool)
+            v_s = c_s = None
+            if states_s is not states:
+                v_s = (node_v(states_s, int(f))
+                       - node_v(states_s, int(to)))
+                c_s = np.asarray(rec_s[:, bit], dtype=bool)
             tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on,
                                  g_off=g_off, V_th=V_th, v=v,
-                                 closed=closed, recorded=True)
+                                 closed=closed, recorded=True,
+                                 v_start=v_s, closed_start=c_s)
         else:
             reason = why if rec is None else (
                 "its mask bit could not be resolved from the builder")
@@ -268,26 +298,40 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
         # carried — but a held-across-the-threshold state means the
         # engine missed a commutation, which the user must hear about.
         if tr.recorded and n:
-            viol = ~exempt & (
-                (~closed & (v - V_th > 1e-3) & (v > 1e-3))
-                | (closed & (v < -1e-3)))
+            off_fwd = ~exempt & ~closed & (v - V_th > 1e-3) & (v > 1e-3)
+            on_rev = ~exempt & closed & (v < -1e-3)
+            viol = off_fwd | on_rev
             if viol.any():
                 tr.n_rule_violations = int(viol.sum())
                 dv = np.where(closed, -v, v - V_th)
                 tr.max_violation_V = float(dv[viol].max())
                 tv = times[viol]
                 tr.violation_t_range = (float(tv.min()), float(tv.max()))
+                # Name what actually happened (a misleading example sent
+                # a reader of the auto-engine bridge looking for a
+                # missed turn-on when the diode was held ON reverse
+                # biased).
+                kinds = []
+                if on_rev.any():
+                    kinds.append(
+                        f"ON while reverse-biased on {int(on_rev.sum())} "
+                        f"samples, by up to "
+                        f"{float((-v[on_rev]).max()):.3g} V")
+                if off_fwd.any():
+                    kinds.append(
+                        f"OFF while forward-biased above V_th = "
+                        f"{V_th:g} V on {int(off_fwd.sum())} samples, by "
+                        f"up to {float((v - V_th)[off_fwd].max()):.3g} V")
                 tr._messages.append(
                     f"diode {name!r}: on {tr.n_rule_violations} samples "
                     f"(t = {tv.min():.6g} .. {tv.max():.6g} s) the "
                     f"simulation held the diode in a state its "
-                    f"commutation rule forbids (by up to "
-                    f"{tr.max_violation_V:.3g} V; e.g. OFF while "
-                    f"forward-biased above V_th = {V_th:g} V). The "
+                    f"commutation rule forbids: {'; '.join(kinds)}. The "
                     f"reported current is what the solver actually "
                     f"stamped, but the engine ({engine!r}) missed a "
-                    f"commutation there, so the waveforms themselves "
-                    f"are suspect in that window; cross-check with "
-                    f"engine='pwl' and a fixed dt.")
+                    f"commutation from t = {tv.min():.6g} s on, so from "
+                    f"there the waveforms of the whole circuit (every "
+                    f"switched branch, not only this diode) are suspect; "
+                    f"cross-check with engine='pwl' and a fixed dt.")
         out[bid] = tr
     return out
