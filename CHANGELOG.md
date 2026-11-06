@@ -23,8 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `engine='pwl'` in all of those. A result without a record falls back
   with a `RuntimeWarning` that names the reason.
 * **Reverse-recovery loss counts real turn-offs only.** Conduction
-  stretches below `1e-3 · i_peak` are dropped and reported
-  (`n_turn_off_events_dropped`), and no event recovers more than its own
+  stretches whose forward charge is below `1e-3` of the recovery charge
+  the spec asks for are dropped and reported
+  (`n_turn_off_events_dropped`, `E_sw_dropped`; warned if they would add
+  more than 1 % of `E_sw_total`), and no event recovers more than its own
   forward charge (`n_turn_off_events_capped`): an RL half-wave at
   `V_th = 0.7` counted 48 recoveries on `engine='pwl'` (4× the energy)
   and 8 on `engine='auto'` (f_sw 120 Hz on a 60 Hz rectifier); both now
@@ -50,9 +52,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   booked the step ending there to the new mode: a DCM boost diode's
   duty read 0.2430 against 0.2209 on `engine='pwl'`, with no warning.
   The event sample is now reconstructed from the pre-event state
-  through the step's mask (0.2210). Its charge bookkeeping keeps an
-  O(step) term at a current jump (−4.2e-3 on a transformer rectifier at
-  the default 1 µs step, halving with the step).
+  through the step's mask (0.2210).
+* **Time integrals start each step from where it really starts.** A DSED
+  event sample is the left limit, so a switched branch's current jumps
+  between it and the start of the next step, and a trapezoid drawn from
+  it spread every forced turn-on over a whole 1 µs step: in the steady
+  state of a DCM boost the diode's `i_avg` read 0.0234 A against
+  0.0535 A (−56 %, `P_avg` −69 %), a synchronous buck's high-side pair
+  +72 %, with no warning. (The −4.2e-3 quoted for this convention in an
+  earlier entry was a transformer rectifier, whose current starts from
+  zero; a hard-switched converter is far worse.) `engine='dsed'` results
+  now also store the RIGHT limit at every event that changed the state
+  (`right_limit_index`, `right_limit_states`,
+  `right_limit_switch_states`; 10 rows on a 100 000-sample rectifier),
+  and the loss and thermal summaries integrate each step from it: the
+  boost diode's charge closes to 1e-5 against C·Δv + ∫v/R on every
+  engine, and a switch's `E_on` reads the current at the edge (+4.7 %
+  before). `np.trapezoid(result.i(...))` on a DSED result still carries
+  the first-order term; use the summary.
+* **RMS and loss integrate the waveform, not the squared samples.** Each
+  step is the line between its ends, integrated exactly
+  (`h·(a² + a·c + c²)/3` for a square). The trapezoid of squared samples
+  read a DCM diode's `i_rms` +7.8 % and `P_avg` +16 % high on
+  `engine='auto'`, which puts one long step across the down-ramp. pwl,
+  auto and dsed now agree to 0.2 % on that diode. A fixed-step or
+  TR-BDF2 step that flips the branch's stamp keeps the trapezoid of its
+  end powers (it has no line to integrate). On a `V_th` turn-on spike
+  the 1 µs grid itself is the error: a reference bridge diode reads
+  2.70 A rms at dt = 1 µs against 2.92 A converged.
+* **Recoveries are judged by their own charge, not by the run's peak.**
+  The old `I_F_peak >= 1e-3 · i_peak` rule dropped all 237 light-load
+  recoveries of a boost whose start-up inrush peaked at 4 kA (each above
+  `Q_rr`): `E_sw` 4.9× and `f_sw_estimate` 5× low, silently. They now
+  count (298 turn-offs, f_sw 99.3 kHz).
+* The commutation-rule warning names the actual violation (a diode held
+  ON while reverse-biased was described as "OFF while forward-biased")
+  and says that every switched branch is suspect from that time on.
+* `switch_states` docs: a raw row flagged in `switch_states_unsolved` is
+  not a solve, and with `store_every > 1` a row is the mask of the last
+  solve before the sample, so duties and integrals alias on a decimated
+  grid.
 * A sample 0 seeded with `initial_state` is read with the first solve's
   mask (it reported a conducting diode at 0 A on that one sample); a
   `resume_from` sample 0 carries its solve's bits and is no longer

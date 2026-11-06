@@ -242,6 +242,14 @@ struct SimulationResult {
     // not listed: the snapshot carries the bits of the solve that
     // produced its state. Sparse, so it costs nothing on a long run.
     //
+    // Decimation (`SimulationOptions::store_every` > 1): row k is the
+    // mask of the LAST solve before sample k, not of the whole stored
+    // interval (t[k-1], t[k]], which spans several solves. KCL against
+    // the record stays exact at every stored sample, but a time
+    // fraction (duty) or a time integral over the stored grid then
+    // aliases: a 50 kHz buck at dt = T/200 read M1 duty 0.5537 and
+    // P_avg +14 % with store_every = 67 (0.5001 at store_every = 1).
+    //
     // `has_switch_states` is false on a result no engine recorded
     // (a default-constructed or hand-built result); consumers must
     // then fall back and say so.

@@ -1983,8 +1983,17 @@ void init_module(py::module_& m) {
             "builder.switch_index_of(name)). A switched branch's "
             "current is exactly (g_on if bit else g_off) * v_branch. "
             "None when the result carries no record (a result not "
-            "produced by a kernel engine). Unpacked on each access; "
-            "the kernel stores ceil(num_switches/8) bytes per sample.")
+            "produced by a kernel engine). Raw: where "
+            "switch_states_unsolved[k] is True (a sample 0 seeded from "
+            "initial_state) the row is the bits the solver carried in, "
+            "not a solve, and g(bit) * v does not hold there; result.i() "
+            "and the loss / thermal summaries read that row with the "
+            "mask of the first solve after it. With store_every > 1 a "
+            "row is the mask of the LAST solve before the sample, not of "
+            "the whole stored interval, so duty cycles and time "
+            "integrals over a decimated grid alias. Unpacked on each "
+            "access; the kernel stores ceil(num_switches/8) bytes per "
+            "sample.")
         .def_property_readonly("switch_states_unsolved",
             [](const SimulationResult& r) -> py::object {
                 if (!r.switch_states_complete()) {

@@ -58,13 +58,38 @@ from the next sample on. A sample 0 seeded with `initial_state` was not
 solved in the run (`result.switch_states_unsolved`): its recorded bits
 are the mask carried in, and the reports read it with the first solve's
 mask. A `resume_from` sample 0 carries the bits of the solve that
-produced it and is not flagged.
+produced it and is not flagged. The raw `result.switch_states` keeps the
+carried bits on such a row; check `switch_states_unsolved` before reading
+it directly.
+
+Time integrals (`i_avg`, `i_rms`, `P_avg`, `E_total`, the conduction
+model, the forward charge of a recovery) integrate each step as the line
+from its START to its end sample, exactly: `h·(a + c)/2` for a current,
+`h·(a² + a·c + c²)/3` for a square. The start of a step is the sample
+before it, except at a DSED event: the stored sample is the left limit
+there, and `engine='dsed'` also stores the right limit the next step
+starts from (`result.right_limit_index` / `right_limit_states` /
+`right_limit_switch_states`). Without it a freewheel diode's turn-on
+jump was drawn as a ramp over the whole next step, and a DCM boost
+diode's `i_avg` read 0.0234 A against 0.0535 A (−56 %), with no warning.
+The same right limit gives a switch's `E_on` its current AT the edge.
+Integrating `np.trapezoid(result.i(name), result.times)` yourself on a
+DSED result keeps that error (first order in the step); read the summary,
+or start each step from the right limit. A step whose two ends carry
+different conductances (a fixed-step or TR-BDF2 commutation step, which
+has no stored right limit) keeps the trapezoid of its two end powers.
+
+With `store_every > 1` a recorded row is the mask of the LAST solve
+before the sample, not of the whole stored interval, so duties and
+integrals alias on a decimated grid (a buck switch's duty read 0.554
+instead of 0.500 at `store_every = 67`). Keep `store_every = 1` for loss
+work.
 
 PSIM-style datasheet annotations add:
 
 | Field | Source |
 |---|---|
-| `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `n_turn_off_events_capped`, `n_turn_off_events_unresolved`, `f_sw_estimate`, `t_rr` | diode + `diode_specs` |
+| `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `E_sw_dropped`, `n_turn_off_events_capped`, `n_turn_off_events_unresolved`, `f_sw_estimate`, `t_rr` | diode + `diode_specs` |
 | `E_sw_on_total`, `E_sw_off_total`, `n_turn_on_events` | switch + `switch_specs` |
 | `P_core_avg`, `E_core_total`, `B_peak` | inductor + `core_loss_specs` |
 
@@ -146,11 +171,20 @@ longer than `t_rr` around the turn-offs (`engine='pwl'` with
 
 Two guards keep immaterial conduction out, and both are reported:
 
-* a stretch whose peak forward current never reaches `1e-3 · i_peak` is
-  not a recovery (`n_turn_off_events_dropped`; excluded from
-  `n_turn_off_events` and `f_sw_estimate`) — the fixed engine's
-  trapezoidal stiff mode can turn a reverse-biased diode ON for single
-  ~µA steps;
+* a stretch whose forward charge `Q_F` is below `1e-3` of the recovery
+  charge the spec asks for (`Q_rr`, `E_rr_ref / V_R_ref`, or
+  `E_rr_curve(I_F) / V_R_ref`) is not a recovery
+  (`n_turn_off_events_dropped`; excluded from `n_turn_off_events`,
+  `f_sw_estimate` and the total) — the fixed engine's trapezoidal stiff
+  mode can turn a reverse-biased diode ON for single ~µA steps. With the
+  cap below, a dropped stretch could add at most 1e-3 of one event's
+  energy; `E_sw_dropped` reports what they would add together, and a
+  `RuntimeWarning` fires if that exceeds 1 % of `E_sw_total`. The test
+  is the stretch's own charge, not the run's peak current: a 4 kA
+  start-up inrush made the old `1e-3 · i_peak` rule drop all 237 light-
+  load recoveries of a boost (each above `Q_rr`), `E_sw` 4.9× and
+  `f_sw_estimate` 5× low. A spec without any recovery (counts only)
+  still uses the peak-current rule;
 * no event recovers more than its own forward charge: `E_rr` is capped
   at `Q_F · V_R` (`n_turn_off_events_capped`). Capped events usually
   are one-step re-conductions from a ringing the grid does not resolve
