@@ -223,3 +223,43 @@
 - [ ] 9.4 Run ctest in `.scratch/build-ctest` after the binding changes:
       green.
 - [x] 9.5 Delete the scratch venvs and wheel trees.
+
+## 10. Naive-agent evaluation, round 1
+
+Three agents with no prior Pulsim context solved a buck, a bridge
+rectifier and a three-phase VSI from the guide alone; a reviewer
+reproduced every friction item.
+
+- [x] 10.1 Section 3.2 printed a ripple of 67 mV pp where
+      `dI / (8 f C)` gives 16 mV: `make_pwm_switch_fn` puts some edges
+      one step off on a `dt` grid. The guide now builds the PWM in whole
+      steps (`grid_pwm`), shows the on-step count of the helper (49/50/51)
+      as an executed block, and 6.2 compares ripple, not only means.
+      Tutorial 02's ripple prose no longer quotes the jitter as ringing.
+- [x] 10.2 Trap 13: without `dt`, a `V_th = 0` bridge behind a series
+      resistance runs half-wave (318.8 V, 12.9 V pp against 322.1 V,
+      6.4 V pp). Section 2 and the short version route PWL diodes without
+      `dt` to `V_th > 0`.
+- [x] 10.3 Trap 14: `res.v("gnd")` returns a branch current.
+- [x] 10.4 Section 3.4: both summaries average the whole record and
+      `T_j` starts cold; the example adds the windowed conduction loss and
+      the steady-state temperature. Reverse-recovery loss
+      (`diode_specs`) is documented as unreliable with an xfail check.
+- [x] 10.5 Section 3.7: three-phase VSI with SPWM and dead time
+      (293.9 V against the ideal 293.9 V), the reverse-conduction and
+      loss-attribution caveat; the `add_three_phase_vsi` docstring names
+      the same path.
+- [x] 10.6 Section 4: voltage-source current sign, PWM `phase` units,
+      and the `make_three_phase_spwm_fn`, `ThreePhaseLegIndices` and
+      `device_thermal_summary` signatures. Trap 1: read a Shockley
+      diode's current through a series resistor. 6.1: a diode run whose
+      currents close the balance, and windowed end values via
+      `np.interp`. Trap 11 uses a reproducible example.
+- [x] 10.7 `.scratch/` is git-ignored, so an sdist built from a working
+      tree does not ship scratch files; the unknown-attribute message no
+      longer names pulsim 1.0.0.
+- [ ] 10.8 Library defects found, not fixed in this change:
+      `make_pwm_switch_fn` edge jitter; `res.v` of a ground name;
+      `diode_specs` sampling `V_R` at the commutation instant; the
+      TR-BDF2 `V_th = 0` bridge; `res.i` on a Shockley diode pointing to
+      a summary that omits it; `ThreePhaseVsiResult` not exported.
