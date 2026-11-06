@@ -457,7 +457,14 @@ using NonlinearRefreshFn = std::function<
     // 3e-12 relative, which no Jacobian delivers, and the user staring
     // at "1.0e-06" has no way to tell whether that is a real
     // non-convergence or a tolerance that does not fit their circuit.
-    // So the message says which.
+    // So the message gives both — and it must NOT tell them to loosen
+    // the tolerances when the relative figures look converged. It
+    // used to, and following it was measured to be a 4.3x wrong
+    // answer: the snubbed flyback of test_saturable_transformer.py
+    // aborts at h_min on TR-BDF2, and with tol_newton_dx = 1e-5 /
+    // tol_newton_res = 1e-4 it "completes" at V_out = 3.53 V against
+    // 15.31 V on engine='pwl', dt = 1e-8. Point at the fixed engine as
+    // a cross-check and at the device instead.
     const Real x_scale = std::max(
         Real{1}, x.size() == 0 ? Real{0} : x.cwiseAbs().maxCoeff());
     const Real rhs_scale = std::max({
@@ -471,12 +478,16 @@ using NonlinearRefreshFn = std::function<
         "worst at {}). Relative to this circuit's own scale that is "
         "dx/|x| = {:.2e} (|x| up to {:.3g}) and res/|b| = {:.2e} "
         "(|b| up to {:.3g}), against absolute tolerances of {:.1e} and "
-        "{:.1e}. If those RELATIVE figures already look converged for "
-        "your problem, the absolute tolerance is the thing that does "
-        "not fit it — pass tol_newton_dx / tol_newton_res sized to your "
-        "circuit rather than assuming the solve is wrong. If they do "
-        "not, the iterate genuinely is not settling: look at the device "
-        "named above.",
+        "{:.1e}. Do not loosen tol_newton_dx / tol_newton_res to get "
+        "past this, even if the relative figures look converged: the "
+        "absolute step test is what keeps Newton off a spurious root, "
+        "and loosening it has produced silently wrong operating points "
+        "(a flyback that aborted this way, re-run with loosened "
+        "tolerances, reported 3.5 V instead of 15.3 V). Instead, look "
+        "at the device named above, and "
+        "cross-check on the fixed-step engine: engine='pwl' with an "
+        "explicit dt (a smaller dt if that engine is the one that "
+        "failed).",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
         last_res_norm,

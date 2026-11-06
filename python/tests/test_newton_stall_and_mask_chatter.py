@@ -156,3 +156,61 @@ def test_the_control_smooth_diodes_make_the_same_circuit_converge():
     v_lin = _run("linear", 10e-9, rectifier="shockley")
     v_sat = _run("saturable", 10e-9, rectifier="shockley")
     assert v_sat == pytest.approx(v_lin, rel=0.005), (v_sat, v_lin)
+
+
+# ---------------------------------------------------------------------------
+# The abort message must not send the user into a wrong answer.
+#
+# It used to say: when the RELATIVE figures look converged, "pass
+# tol_newton_dx / tol_newton_res sized to your circuit rather than
+# assuming the solve is wrong". On DEFECT 1's flyback that advice
+# (tol_newton_dx=1e-5, tol_newton_res=1e-4) completes and reports
+# V_out = 3.53 V against the fixed engine's 15.31 V. The abort is
+# reached in well under a second, so this pins the message, not the
+# stall.
+
+_FLYBACK_CORE = dict(N_p=25, N_s=13, Ae=76e-6, le=72e-3, lg=0.5e-3,
+                     B_sat=0.35)
+
+
+def _snubbed_flyback():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 48.0)
+    b.add_switch("Q1", "sw", "gnd", 1e3, 1e-9)
+    b.add_resistor("Rsn", "sw", "sn1", 47.0)
+    b.add_capacitor("Csn", "sn1", "gnd", 2.2e-9)
+    b.add_saturable_transformer("T1", "vin", "sw", "sec_neg", "sec_anode",
+                                L_leak_p=5e-6, **_FLYBACK_CORE)
+    b.add_diode("D1", "sec_anode", "vout", 1e3, 1e-9, V_th=0.7)
+    b.add_capacitor("Cout", "vout", "sec_neg", 100e-6)
+    b.add_resistor("R_L", "vout", "sec_neg", 5.0)
+    b.add_resistor("Rgnd", "sec_neg", "gnd", 1e-6)
+    q = b.switch_index_of("Q1")
+    n = b.graph.num_switches
+
+    def sf(t, T=10e-6):
+        m = p.SwitchStateMask(n)
+        m.set(q, (t % T) / T < 0.4)
+        return m
+
+    return b, sf
+
+
+@pytest.mark.parametrize("engine", [None, "trbdf2"])
+def test_the_newton_abort_does_not_recommend_loosening_tolerances(engine):
+    b, sf = _snubbed_flyback()
+    kw = {} if engine is None else {"engine": engine}
+    with pytest.raises(p.SimulationAborted) as exc:
+        p.simulate(b, t_end=1e-3, switch_fn=sf, **kw)
+    msg = str(exc.value)
+    # Still the h_min stall, with its diagnostics intact.
+    assert "h already at h_min" in msg, msg
+    assert "dx/|x| =" in msg and "res/|b| =" in msg, msg
+    # The refuted advice is gone, and the message says why.
+    assert "sized to your circuit" not in msg, msg
+    assert "Do not loosen tol_newton_dx / tol_newton_res" in msg, msg
+    assert "silently wrong" in msg, msg
+    # The safe next steps are there.
+    assert "engine='pwl' with an explicit dt" in msg, msg
+    assert "known TR-BDF2 stall at h_min" in msg, msg
+    assert "KNOWN_LIMITATIONS.md" in msg, msg
