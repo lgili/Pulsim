@@ -1342,6 +1342,14 @@ class SolverOptions:
 
     When both are given, the flat kwargs override the corresponding
     fields on `solver`.
+
+    ``tol_newton_dx`` / ``tol_newton_res`` are ABSOLUTE (engine
+    default 1e-9) on purpose — an absolute step test is what keeps
+    Newton off a spurious root. Do not loosen them to get past a
+    Newton abort: on the snubbed flyback of
+    ``test_saturable_transformer.py`` that turned a TR-BDF2 abort into
+    a run reporting 3.53 V where ``engine='pwl'`` gives 15.31 V.
+    Cross-check on ``engine='pwl'`` with an explicit ``dt`` instead.
     """
     # Newton / nonlinear refresh ------------------------------------
     enable_nonlinear_refresh: Optional[bool] = None
@@ -1596,6 +1604,13 @@ def simulate(
         ``None`` (default) means auto-detect.
     max_newton_iterations, max_event_iterations
         PWL-only: forwarded to :class:`SimulationOptions`.
+    tol_newton_dx, tol_newton_res
+        ABSOLUTE Newton tolerances on ``||dx||_inf`` and
+        ``||residual||_inf``; ``None`` keeps the engine default
+        (1e-9). Do not loosen them to get past a Newton abort — that
+        has produced silently wrong operating points (see
+        :class:`SolverOptions`). Cross-check on ``engine='pwl'`` with
+        an explicit ``dt`` instead.
 
     Returns
     -------

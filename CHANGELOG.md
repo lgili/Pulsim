@@ -40,11 +40,22 @@ of refusing.
   switching at kilohertz is 3e-12 relative, and a user reading
   "||dx|| = 1.0e-06" cannot tell a real non-convergence from a
   tolerance that does not fit the circuit. The message now gives
-  `dx/|x|` and `res/|b|` with the scales they are taken against, and
-  says which conclusion each supports. On a real compressor drive it
-  reads `dx/|x| = 1.36e-03` against `res/|b| = 2.37e-17` — the residual
-  is at machine noise while the step is not settled, which is a genuine
-  non-convergence and NOT a case for relaxing the tolerance.
+  `dx/|x|` and `res/|b|` with the scales they are taken against. On a
+  real compressor drive it reads `dx/|x| = 1.36e-03` against
+  `res/|b| = 2.37e-17` — the residual is at machine noise while the
+  step is not settled, which is a genuine non-convergence.
+
+  The message does NOT recommend loosening `tol_newton_dx` /
+  `tol_newton_res`, even when the relative figures look converged. An
+  earlier wording did, and following it is a silently wrong answer:
+  the snubbed flyback of `test_saturable_transformer.py` aborts at
+  `h_min` on `engine='trbdf2'` (and on `'auto'`), and with
+  `tol_newton_dx=1e-5, tol_newton_res=1e-4` it completes and reports
+  V_out = 3.53 V against 15.31 V on `engine='pwl', dt=1e-8` — 4.3x
+  low. The message now says so, points at the named device and at
+  `engine='pwl'` with an explicit `dt` as the cross-check, and on a
+  TR-BDF2 abort at `h_min` names the known stall below (see also
+  `KNOWN_LIMITATIONS.md`).
 
 
 Pulsim 2.0 is a **breaking** release. It is the result of an audit that
