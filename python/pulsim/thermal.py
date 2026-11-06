@@ -658,19 +658,26 @@ def device_thermal_summary(
              "T_j_trace": np.ndarray,  # °C (see below)
              "T_j_avg": float, "T_j_peak": float,
              "T_ambient_C": float,
-             "R_th_total": float}      # sum of Foster R_th [K/W]
+             "R_th_total": float,      # sum of Foster R_th [K/W]
+             "t_window_start": float, "t_window_end": float}  # [s]
 
     ``T_j_trace`` is the IIR output on :func:`compute_temperature`'s
     grid: ``result.times`` on a fixed grid (``engine='pwl'``), a
     uniform resample of it on a variable-step one (``'trbdf2'`` /
-    ``'auto'``). On ``engine='dsed'``,
-    whose step-start power is inserted after each event, it is sampled
-    back at ``result.times`` (one value per sample), and ``T_j_avg`` /
-    ``T_j_peak`` are read on the uniform internal grid, so the average
-    is over time. A seeded, unsolved row 0 has no defined
+    ``'auto'``). On ``engine='dsed'`` (``result.engine_used``), whose
+    step-start power is inserted after each event, it is sampled back
+    at ``result.times`` (one value per sample) for every device, and
+    ``T_j_avg`` / ``T_j_peak`` are read on the uniform internal grid,
+    so the average is over time. On a variable grid that average is
+    only as good as the linear resample of the power: against the
+    exact single-stage identity
+    ``mean ΔT = R·P_avg − τ·ΔT_end / T_span`` it measured −0.50 K of a
+    182 K rise (DSED boost, R_th 1000 K/W, τ 0.1 ms, 2 ms), +0.83 K on
+    ``'auto'`` and −0.002 K on the fixed grid. A seeded, unsolved row 0 has no defined
     switched-branch power: the network starts at the first solved
     sample, and a trace on ``result.times`` reads ``T_ambient_C`` at
-    the dropped row.
+    the dropped row; ``t_window_start`` /
+    ``t_window_end`` give the window the averages were taken over.
 
     Notes
     -----
@@ -685,6 +692,7 @@ def device_thermal_summary(
     """
     if not thermal_specs:
         return []
+    is_dsed = getattr(result, "engine_used", None) == "dsed"
 
     # From the first solved sample on, as device_loss_summary: a
     # seeded, unsolved row 0 has no defined switched-branch current
@@ -877,7 +885,7 @@ def device_thermal_summary(
         t_aug, p_aug = _with_step_starts(times, P_cond_t + P_constant,
                                          P_start_t + P_constant)
         T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev)
-        if t_aug.size == times.size:
+        if t_aug.size == times.size and not is_dsed:
             # pwl / trbdf2: unchanged (compute_temperature's own grid;
             # a variable-step trace is resampled to a uniform one).
             T_j_trace = T_j_int
@@ -885,8 +893,13 @@ def device_thermal_summary(
             T_j_peak = float(np.max(T_j_trace))
             on_times = _views.grid_is_uniform(times)
         else:
-            # engine='dsed': the step-start power was inserted, so the
-            # IIR ran on a longer grid (uniform after its resample).
+            # engine='dsed': its event grid is not uniform, and where
+            # the step-start power differs from the stored sample it was
+            # inserted, so the IIR ran on a uniform resample of a longer
+            # grid. Every DSED device takes this branch, inserted
+            # samples or not (a resistor's power has no step-start
+            # jump: its trace was the resample itself, index 500 at
+            # 485.9 µs against t[500] = 497.8 µs on a 1 ms boost).
             # Sample it back at result.times, one value per sample, and
             # average over TIME on the uniform internal grid (a plain
             # mean of the trace at the clustered event times is not).
@@ -917,6 +930,9 @@ def device_thermal_summary(
             "T_j_peak": T_j_peak,
             "T_ambient_C": T_amb_dev,
             "R_th_total": float(sum(s.R_th_K_per_W for s in stages)),
+            # The network's window: from the first solved sample.
+            "t_window_start": float(times[0]) if times.size else 0.0,
+            "t_window_end": float(times[-1]) if times.size else 0.0,
         })
     return out
 
