@@ -40,6 +40,7 @@ import pulsim as p
 
 ENGINES = ("pwl", "auto")
 _RULE = "commutation rule forbids"
+_CHATTER = "That is numerical chatter"
 
 
 def _run(b, t_end, engine, dt=None, **kw):
@@ -235,10 +236,20 @@ def _snubber_charge(r, Cs):
 @pytest.mark.parametrize("Cs", (1e-9, 100e-9))
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
 def test_snubber_across_the_diode_closes_the_charge_on_pwl(V_th, Cs):
+    """The charge closes on what the solver stamped. At V_th = 0.7 that
+    stamp chatters inside the conduction (the trapezoidal rule reflects
+    the Cs-g_on step from +V_th to about -V_th), and the summary says
+    so by name; at V_th = 0 it does not chatter and nothing warns."""
     b, pwm, T = _snubbed_boost(V_th, Cs)
     r = _run(b, 3e-3, "pwl", dt=T / 400, switch_fn=pwm)
     s, cur, msgs = _report(b, r, ["D1"])
-    assert not msgs, msgs
+    if V_th > 0:
+        assert msgs and all(_CHATTER in m for m in msgs), msgs
+        assert _entry(s, "D1")["n_chatter_gaps"] > 100
+    else:
+        # (Gaps of immaterial current at v_D ≈ 0 may still be merged;
+        # they cover too little time to warn about.)
+        assert not msgs, msgs
     q_d = np.trapezoid(cur["D1"], np.asarray(r.times))
     q_phys = _snubber_charge(r, Cs)
     assert q_phys > 5e-3
@@ -811,13 +822,17 @@ def test_unresolved_recoveries_and_capped_blips_warn(div):
     snubber's 10 ns time constant: the turn-offs are counted as
     unresolved, and the trapezoidal ring's one-step re-conductions
     (235 "turn-offs" at T/50 on a 200-cycle run, f_sw 117.5 kHz) are
-    capped at their own forward charge. Both used to pass silently;
-    each now warns and names the diode."""
+    either capped at their own forward charge (and warned about) or,
+    where the diode never blocked more than 2·V_th between them, merged
+    into the conduction around them as chatter (206 at T/50, 33 merged;
+    208 at T/20 with 8 capped). Both used to pass silently."""
     d, msgs = _snubbed_report(div)
     assert d["n_turn_off_events_unresolved"] > 0
     assert any("'D1'" in m and "longer than t_rr" in m for m in msgs)
-    assert d["n_turn_off_events_capped"] > 0
-    assert any("'D1'" in m and "capped" in m for m in msgs)
+    assert d["n_turn_off_events_capped"] > 0 or d["n_chatter_gaps"] > 0, d
+    if d["n_turn_off_events_capped"] > 0:
+        assert any("'D1'" in m and "capped" in m for m in msgs)
+    assert d["n_turn_off_events"] <= 210, d
 
 
 @pytest.mark.parametrize("engine,div", [("pwl", 1000), ("pwl", 200),
@@ -1105,3 +1120,184 @@ def test_rule_violation_names_the_actual_violation():
         assert "ON while reverse-biased" in m or "OFF while" in m, m
         assert "every switched branch" in m, m
     assert any("ON while reverse-biased" in m for m in rule), rule
+
+
+# ---------------------------------------------------------------------
+# Repair round 3: curve materiality, snubber chatter, counts-only
+# materiality, DSED junction temperature
+# ---------------------------------------------------------------------
+
+# A recovery-energy curve through the origin (a straight line, as the
+# shipped IKW40N120T2 Erec table and PLECS tables starting at (0, 0)).
+_CURVE_ORIGIN = {"E_rr_curve": [(1.0, 1e-6), (5.0, 5e-6)], "V_R_ref": 50.0,
+                 "t_rr": 5e-6}
+
+
+@pytest.mark.parametrize("V_th,engine", [(0.7, "pwl"), (2.0, "pwl"),
+                                         (0.7, "auto"), (2.0, "auto"),
+                                         (0.7, "dsed")])
+def test_rl_half_wave_curve_through_the_origin_counts_real_turn_offs(
+        V_th, engine):
+    """With an E_rr_curve the charge a stretch had to reach was
+    E_rr_curve(I_F) / V_R_ref, which goes to zero with the stretch's own
+    current: every ~36 µA chatter blip counted. Measured before: 48
+    turn-offs on pwl at V_th = 0.7 (f_sw 720 Hz), 21 at V_th = 2.0
+    (315 Hz), 8 on auto (120 Hz), no warning. Materiality is now judged
+    on the curve's own current axis: I_F_peak against 1e-3 of the
+    smallest tabulated current."""
+    b = _rl_half_wave(V_th)
+    r = _run(b, 4 / 60, engine, dt=2e-6)
+    s, _, msgs = _report(b, r, ["D"], diode_specs={"D": _CURVE_ORIGIN})
+    e = _entry(s, "D")
+    assert e["n_turn_off_events"] == 4, e
+    assert e["f_sw_estimate"] == pytest.approx(60.0, rel=1e-3), e
+    # The dropped blips are what the curve would charge them, and the
+    # only warning allowed says so.
+    assert all("would add" in m for m in msgs), msgs
+    if engine == "pwl":
+        assert e["n_turn_off_events_dropped"] > 0, e
+
+
+def test_curve_materiality_uses_the_tabulated_current_axis():
+    """Unit check of the rule: a curve with no positive current falls
+    back to its (constant) charge."""
+    from pulsim.losses import _diode_switching_loss
+    t = np.linspace(0.0, 1e-3, 11)
+    ev = [{"t": 5e-4, "V_R": 10.0, "I_F": 0.0, "I_F_peak": 2.0,
+           "Q_F": 1e-6},
+          {"t": 6e-4, "V_R": 10.0, "I_F": 0.0, "I_F_peak": 5e-4,
+           "Q_F": 1e-11}]
+    curve = {"E_rr_curve": [(0.0, 0.0), (1.0, 1e-6)], "V_R_ref": 10.0}
+    out = _diode_switching_loss(ev, t, np.zeros_like(t), curve)
+    assert out["n_turn_off_events"] == 1
+    assert out["n_turn_off_events_dropped"] == 1
+    flat = {"E_rr_curve": [(0.0, 1e-6)], "V_R_ref": 10.0}
+    out = _diode_switching_loss(ev, t, np.zeros_like(t), flat)
+    # Constant 1e-7 C asked: 1e-6 C passes, 1e-11 C does not.
+    assert out["n_turn_off_events"] == 1
+
+
+def _snubbed_boost_100k(V_th: float):
+    """The physics review's circuit: 24 V, 220 µH, Q1 g_on = 50 S at
+    100 kHz / D = 0.5, D1 with 100 nF directly across it, 100 µF ||
+    30 Ω."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_inductor("L1", "vin", "sw", 220e-6)
+    b.add_switch("Q1", "sw", "gnd", g_on=50.0, g_off=1e-9)
+    b.add_diode("D1", "sw", "out", 1e3, 1e-9, V_th=V_th)
+    b.add_capacitor("Cs", "sw", "out", 100e-9)
+    b.add_capacitor("C1", "out", "gnd", 100e-6)
+    b.add_resistor("RL", "out", "gnd", 30.0)
+    T = 1e-5
+    q1 = b.switch_index_of("Q1")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q1, (t % T) < 0.5 * T)
+        return m
+    return b, pwm, T
+
+
+@pytest.mark.parametrize("div", (400, 2000))
+def test_snubber_chatter_is_not_counted_as_turn_offs(div):
+    """Cs = 100 nF across a V_th = 0.7 diode on the fixed engine: the
+    trapezoidal rule reflects each ON step from +V_th to about -V_th,
+    so the record reads ON OFF OFF ... through every conduction. Each
+    gap followed more than Q_rr, so each was charged: 4580 turn-offs
+    at dt = T/400 and 15887 at T/2000 on a 100 kHz version (f_sw 15x
+    to 53x the PWM), with no warning, and 2857 of them never reverse-
+    biased the diode. A gap whose step averages never fall below -2·V_th
+    and that no other switch forced is now chatter inside one
+    conduction: the count matches V_th = 0 (one per cycle; 299 and
+    300 at V_th = 0.7), and a warning names the chatter."""
+    counts = {}
+    for V_th in (0.7, 0.0):
+        b, pwm, T = _snubbed_boost_100k(V_th)
+        r = _run(b, 3e-3, "pwl", dt=T / div, switch_fn=pwm)
+        s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 50e-9}})
+        e = _entry(s, "D1")
+        counts[V_th] = e["n_turn_off_events"]
+        assert e["f_sw_estimate"] == pytest.approx(1.0 / T, rel=0.02), e
+        if V_th > 0:
+            assert e["n_chatter_gaps"] > 1000, e
+            assert any(_CHATTER in m for m in msgs), msgs
+        else:
+            assert not any(_CHATTER in m for m in msgs), msgs
+    assert abs(counts[0.7] - counts[0.0]) <= 2, counts
+
+
+def test_forced_commutation_into_a_small_voltage_is_still_a_turn_off():
+    """The first cycles of a boost whose output is still below V_th: Q
+    turning on leaves D1 blocking only millivolts, inside the band the
+    chatter rule forgives. A commutation another switch forced is a
+    turn-off all the same (engine='auto' merged 6 of them as chatter,
+    and warned, before the other-switch condition)."""
+    b, pwm, T = _snubbed_boost_100k(0.7)
+    r = _run(b, 3e-3, "auto", switch_fn=pwm)
+    s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 50e-9}})
+    e = _entry(s, "D1")
+    assert e["f_sw_estimate"] == pytest.approx(1.0 / T, rel=0.02), e
+    assert not any(_CHATTER in m for m in msgs), msgs
+
+
+@pytest.mark.parametrize("spec", ({}, {"t_rr": 1e-7}))
+def test_counts_only_recoveries_after_an_inrush_are_not_dropped(spec):
+    """With no recovery charge in the spec the count was judged against
+    1e-3 of the run's peak current, 4 A after a 4 kA inrush: 237 of
+    the boost's 3-4 A light-load recoveries dropped, f_sw 20.3 kHz on
+    100 kHz, no warning. The reference is now the median peak of the
+    stretches that pass the run-peak cut (never above the run's peak,
+    so nothing the old rule kept is dropped)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 400.0)
+    b.add_inductor("L1", "vin", "sw", 10e-6)
+    b.add_switch("Q1", "sw", "gnd", g_on=100.0, g_off=1e-9)
+    b.add_diode("D1", "sw", "out", 1e3, 1e-9, V_th=0.7)
+    b.add_capacitor("C1", "out", "gnd", 1e-3)
+    b.add_resistor("RL", "out", "gnd", 2000.0)
+    T = 1e-5
+    q = b.switch_index_of("Q1")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q, (t % T) < 0.01 * T)
+        return m
+    r = _run(b, 3e-3, "pwl", dt=T / 1000, switch_fn=pwm)
+    s, _, msgs = _report(b, r, [], diode_specs={"D1": spec})
+    d = _entry(s, "D1")
+    assert not msgs, msgs
+    assert d["n_turn_off_events_dropped"] == 0, d
+    assert d["f_sw_estimate"] == pytest.approx(1e5, rel=0.02), d
+    # The RL half-wave blips are still dropped without a spec.
+    b2 = _rl_half_wave(0.7)
+    r2 = _run(b2, 4 / 60, "pwl", dt=2e-6)
+    s2, _, _ = _report(b2, r2, [], diode_specs={"D": dict(spec)})
+    assert _entry(s2, "D")["n_turn_off_events"] == 4
+
+
+@pytest.mark.parametrize("R_load", (500.0, 20.0))
+def test_dsed_junction_temperature_follows_the_step_start_power(R_load):
+    """T_j was built from the stored DSED samples, the left limits,
+    while P_cond_avg integrates each step from its right limit: on the
+    boost (R_th 1000 K/W, tau 0.1 ms) (T_j_avg - 25)/R_th / P_cond_avg
+    read 0.989 for D1 and 1.010 for Q1 in DCM, 0.980 for D1 in CCM.
+    The thermal trace now carries the step-start power too; DSED then
+    agrees with the fixed engine (whose own residual, 0.6 % in CCM, is
+    the T_j_avg mean over the start-up rise)."""
+    st = [p.FosterStage(R_th_K_per_W=1000.0, tau_s=1e-4)]
+    ratios = {}
+    for engine in ("pwl", "dsed"):
+        b, pwm, T = _boost(0.7, R_load)
+        r = _run(b, 3e-3, engine, dt=T / 1000, switch_fn=pwm)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            th = p.device_thermal_summary(
+                b, r, switch_fn=pwm,
+                thermal_specs={"D1": {"stages": st}, "Q": {"stages": st}})
+        for e in th:
+            ratios[(engine, e["name"])] = (
+                (e["T_j_avg"] - 25.0) / 1000.0 / e["P_cond_avg"])
+    for name in ("D1", "Q"):
+        assert ratios[("dsed", name)] == pytest.approx(
+            ratios[("pwl", name)], abs=5e-3), ratios
