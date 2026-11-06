@@ -468,6 +468,14 @@ _RR_MATERIAL_FRACTION = 1e-3
 # reference current is dropped (see _diode_switching_loss).
 _RR_MATERIAL_CURRENT_FRACTION = 1e-3
 
+# A blocking gap of at most this many steps, between two conducting
+# stretches of a diode, is "short" (_short_blocking_gaps). Snubber
+# chatter on the fixed engine: median 1-7 steps, 99th percentile 2-18
+# (100 kHz boost, Cs 1 nF / 100 nF, dt = T/400 and T/2000). The
+# shortest real blocking interval engine='auto' took on that boost: 54
+# steps (half a period at start-up).
+_SHORT_GAP_STEPS = 32
+
 
 # Recovery time used to place the V_R reading when diode_specs gives no
 # ``t_rr``: the order of a fast-recovery power diode's. Only WHERE V_R
@@ -549,55 +557,48 @@ def _other_bits_flipped(masks: "Optional[np.ndarray]",
     return out
 
 
-def _chatter_gaps(trace, other_flip: "Optional[np.ndarray]" = None,
-                  ) -> "tuple[np.ndarray, int]":
-    """Blocking gaps of one diode that are chatter inside a single
-    conduction, not turn-offs.
+def _short_blocking_gaps(trace) -> "tuple[np.ndarray, int]":
+    """Short, shallow blocking gaps of one diode: a DETECTOR for a
+    possible numerical chatter, used only to warn
+    (:func:`_warn_short_gaps`). Nothing is merged or re-labelled: the
+    record is what the solver stamped, and every count, charge and
+    energy is read from it as recorded.
 
-    Returns ``(conducting, n_gaps)``: ``trace.conducting`` with those
-    gaps filled, and how many there were. A gap (a maximal run of
-    non-conducting steps between two conducting ones) is chatter when
-    the diode never blocks across it: the step-averaged ``v_D`` (the
-    midpoint of each step's two ends, from the last conducting sample
-    to the next one) stays above ``−2·V_th``, AND no other bit of the
-    recorded stamped mask flips on those steps (``other_flip``; a
-    commutation forced by another switch is a real turn-off even when
-    the voltage it leaves is small, e.g. the first cycles of a boost
-    whose output is still below V_th). A turn-off is the start of
-    blocking, so a gap the diode spends within a reflection of its own
-    commutation band is part of the conduction around it. For
-    ``V_th = 0`` any reverse step average is blocking, so nothing
-    changes there.
+    Returns ``(in_gap, n_gaps)``: per sample, whether its step lies in
+    such a gap, and how many gaps there were. A gap is a maximal run of
+    non-conducting steps (``trace.conducting``) between two conducting
+    ones; it counts when it lasts at most ``_SHORT_GAP_STEPS`` steps
+    and the step-averaged ``v_D`` (the midpoint of each step's two
+    ends, from the last conducting sample to the next one) never falls
+    below ``−2·V_th``: the diode never blocked more than a reflection
+    of its own commutation band.
 
-    Why: a V_th > 0 diode with a capacitor across it (a snubber, a
-    junction capacitance) on the fixed engine. The ON step (``g_on``
-    across ``Cs``, τ = 0.1 ns ≪ dt) is reflected by the trapezoidal
-    rule from ``v_D ≈ V_th`` to ``≈ −V_th``; the diode drops to OFF,
-    the inductor current recharges ``Cs`` up to ``V_th`` over a few
-    steps, and the cycle repeats through the whole conduction
-    interval. On the round-2 snubbed boost (Cs = 100 nF across D1,
-    V_th = 0.7, Q_rr 50 nC) every gap followed more than Q_rr of
-    forward charge, so 4580 "turn-offs" were charged and f_sw read
-    1.53 MHz on a 100 kHz converter (15887 at dt = T/2000, 299 at
-    V_th = 0), with no warning. The gaps last ``≈ 2·V_th·Cs / i_L`` in
-    time, so their sample count grows as dt shrinks and no length
-    rule separates them. The reflected sample sits at ``2·i/g_on −
-    V_th − δ`` (δ: how far past V_th the crossing solve went, up to one
-    step's rise Δv), so the lowest step average is about ``−V_th −
-    Δv/2``: measured −0.34 / −0.62 / −0.62 V at dt = T/100 / T/400 /
-    T/2000, too close to −V_th = −0.7 V for a ±V_th rule, hence 2·V_th
-    (good for Δv up to 2·V_th per step). A real turn-off reaches the
-    circuit's reverse voltage (−24 to −90 V there; −43 V on an RL
-    half-wave), and every turn-off of a switched converter that spans
-    a gate edge is excluded by ``other_flip`` whatever its voltage.
+    The pattern it looks for: a V_th > 0 diode with a capacitor across
+    it (a snubber, a junction capacitance) or in a tight loop with it
+    (a rectifier's bulk capacitor). Its mode through the diode's
+    on-conductance has τ = C·(1/g_on + R_loop); for ``dt > 2·τ`` the
+    trapezoidal rule's amplification ``(1 − dt/2τ)/(1 + dt/2τ)`` is
+    negative, so each ON step is reflected from ``v_D ≈ V_th`` to about
+    ``−V_th``, the stamp drops OFF, the circuit recharges the capacitor
+    to V_th within a few steps and the cycle repeats through the whole
+    conduction: 4580 recorded turn-offs at dt = T/400 on a 100 kHz
+    boost with 100 nF across D1 (299 at V_th = 0). Measured onset on a
+    1000 µF transformer rectifier (τ = 5 µs): none at dt <= 2.4·τ, 82
+    gaps at 3.2·τ; on 100 µF (τ = 0.5 µs): none at 2·τ, 355 at 4·τ.
+    The lowest step
+    average in such a gap measured −0.34 to −0.62 V at V_th = 0.7,
+    hence the 2·V_th band.
 
-    The stamped state itself is left alone: duty and conduction loss
-    report what the solver carried, and :func:`device_loss_summary`
-    warns (:func:`_warn_chatter`)."""
-    cond = np.asarray(trace.conducting, dtype=bool).copy()
+    It is a heuristic both ways. A real turn-off into a small reverse
+    voltage that lasts only a few steps (a 100 kHz pulsed charger
+    blocking 0.5 V at dt = 1 µs: 5 steps) is counted, and chatter with
+    longer gaps is not (a 100 µF rectifier at dt = 4·τ: gaps of ~45
+    steps). For ``V_th = 0`` any reverse step average blocks."""
+    cond = np.asarray(trace.conducting, dtype=bool)
     n = cond.size
+    in_gap = np.zeros(n, dtype=bool)
     if n < 3:
-        return cond, 0
+        return in_gap, 0
     V_th = max(float(getattr(trace, "V_th", 0.0)), 0.0)
     v = np.asarray(trace.v, dtype=float)
     v_s = np.asarray(getattr(trace, "v_start", v), dtype=float)
@@ -610,16 +611,14 @@ def _chatter_gaps(trace, other_flip: "Optional[np.ndarray]" = None,
     mid[1:] = 0.5 * (v_s[:-1] + v[1:])
     n_gaps = 0
     for k, end in zip(ks.tolist(), ends.tolist()):
-        # Steps k .. end: from the last conducting sample k-1 to the
-        # next conducting sample `end` (none: the run ends blocking).
-        if end >= n:
-            continue
-        if other_flip is not None and bool(other_flip[k:end + 1].any()):
+        # Blocking steps k .. end-1, then the step `end` that conducts
+        # again (none: the run ends blocking, not a gap).
+        if end >= n or end - k > _SHORT_GAP_STEPS:
             continue
         if float(mid[k:end + 1].min()) >= -2.0 * V_th:
-            cond[k:end] = True
+            in_gap[k:end] = True
             n_gaps += 1
-    return cond, n_gaps
+    return in_gap, n_gaps
 
 
 def _diode_turn_offs(trace, times: np.ndarray,
@@ -684,13 +683,13 @@ def _diode_turn_offs(trace, times: np.ndarray,
     ``Q_rr · V_R`` inflated ``E_sw_total`` 4× (48 "turn-offs" instead
     of 4). See :func:`_diode_switching_loss`.
 
-    Gaps that :func:`_chatter_gaps` identifies as chatter inside one
-    conduction are filled first, so the stretches on either side are
-    one stretch with one turn-off (its ``Q_F`` the sum)."""
+    Every recorded stretch counts, including the ones a capacitor's
+    trapezoidal reflection chops a conduction into
+    (:func:`_short_blocking_gaps` only detects and warns about those)."""
     # Transitions of the per-step CONDUCTING flag, not of the raw
     # stamp: a V_th = 0 diode the fixed engine chatters ON/OFF at
     # ~1e-7 A is not recovering from a forward current each time.
-    closed, _ = _chatter_gaps(trace, other_flip)
+    closed = np.asarray(trace.conducting, dtype=bool)
     n = closed.size
     if n < 2:
         return []
@@ -821,35 +820,60 @@ def _warn_recovery_quality(name: str, entry: Mapping[str, Any],
             RuntimeWarning, stacklevel=3)
 
 
-def _warn_chatter(name: str, n_gaps: int, n_turn_offs: int,
-                  t_gaps: float, t_cond: float, V_th: float) -> None:
-    """RuntimeWarning when a diode's record chatters inside its
-    conduction (:func:`_chatter_gaps`) for a material share of it: at
-    least 3 gaps, at least one per real turn-off, covering at least 1 %
-    of the conduction time. (The femtosecond landing gaps of
-    ``engine='auto'`` cover ~1e-10 of it; the snubbed fixed-engine
-    chatter 28-56 % in ~14 gaps per conduction. An RL half-wave at
-    V_th = 2 merges 3 in-band waits before its 4 turn-ons, 1.4 % of the
-    time: harmless for the count, and not chatter.)"""
-    if (n_gaps < 3 or n_gaps < n_turn_offs
-            or not (t_gaps >= 0.01 * t_cond)):
+def _warn_short_gaps(name: str, n_gaps: int, n_turn_offs: int,
+                     t_gaps: float, t_cond: float, V_th: float,
+                     g_on: float, engine: "Optional[str]") -> None:
+    """RuntimeWarning when short, shallow blocking gaps
+    (:func:`_short_blocking_gaps`) make up most of a diode's recorded
+    turn-offs and a material share of its conduction: at least 3 gaps,
+    at least half of the turn-offs, at least 1 % of the conducting plus
+    gap time. The snubbed fixed-engine chatter: 93 % of the turn-offs,
+    28 % of the time (100 kHz boost, 100 nF, dt = T/400); engine='auto'
+    on the same boost has none. The half keeps a few real start-up
+    commutations into a small voltage quiet: a plain boost on 'auto' /
+    'dsed' has 4 such gaps (output still below 2·V_th) of ~300
+    turn-offs, 1.3 % of its conducting time.
+
+    Only on the fixed-step engine (``result.engine_used`` 'pwl', or a
+    result that does not say): the mechanism is the trapezoidal rule's
+    reflection at a fixed dt, which the L-stable TR-BDF2 steps of
+    'trbdf2' / 'auto' and the event-driven 'dsed' do not have. There
+    the gaps are real short blocking intervals (a 100 kHz pulsed
+    charger blocking 0.5 V on 'auto': 99 of them, its 100 real
+    turn-offs) and the warning's advice would be circular;
+    ``n_short_blocking_gaps`` is still reported."""
+    if engine in ("trbdf2", "dsed"):
         return
+    if (n_gaps < 3 or 2 * n_gaps < n_turn_offs
+            or not (t_gaps >= 0.01 * (t_cond + t_gaps))):
+        return
+    tau_uF = 1e-6 / g_on if g_on > 0 else float("nan")
     warnings.warn(
-        f"device_loss_summary: the solver stamped {name!r} OFF for "
-        f"{n_gaps} gaps ({100.0 * t_gaps / t_cond:.3g} % of its "
-        f"conduction time) in which the diode never blocked more than "
-        f"2·V_th = {2.0 * V_th:.3g} V of reverse voltage ({n_turn_offs} "
-        f"real turn-offs). That is "
-        f"numerical chatter, typically a "
-        f"capacitor across a V_th > 0 diode whose fast mode the fixed "
-        f"engine's trapezoidal rule leaves undamped. The gaps are not "
-        f"counted as turn-offs, but the diode's current, duty and "
-        f"conduction loss follow the chattering stamp (the current "
-        f"detours through the capacitor in each gap). A smaller dt "
-        f"does not help (the mode is ~g_on·C fast; the gaps covered 28 % "
-        f"of the conduction at dt = T/400 and 56 % at T/2000 in one "
-        f"boost): check with engine='auto', whose step control damps "
-        f"it, or put the capacitor's series resistance in the model.",
+        f"device_loss_summary: {name!r} stopped conducting {n_gaps} "
+        f"times for at most {_SHORT_GAP_STEPS} steps without blocking "
+        f"more than 2·V_th = {2.0 * V_th:.3g} V "
+        f"({100.0 * t_gaps / (t_cond + t_gaps):.3g} % of its conducting "
+        f"time; {n_turn_offs} recorded turn-offs in all). This may be "
+        f"numerical chatter of the fixed-step trapezoidal rule against "
+        f"a capacitor across the diode (or in a tight loop with it): "
+        f"for dt > 2·tau, tau = C·(1/g_on + R_loop), the rule reflects "
+        f"each ON step from +V_th to about -V_th, the stamp drops OFF "
+        f"and the circuit recharges the capacitor within a few steps. "
+        f"It may also be real, short blocking intervals into a small "
+        f"reverse voltage. The numbers are reported as recorded: if it "
+        f"is chatter, every gap is counted as a turn-off, inflating "
+        f"n_turn_off_events, f_sw_estimate and E_sw_total / P_sw_avg "
+        f"(one E_rr per gap), and the current, duty and conduction loss "
+        f"follow the chattering stamp. A smaller dt removes it only "
+        f"once dt is about 2·tau or less (a rectifier capacitor with "
+        f"tau = 5 µs chattered at dt = 16 µs and above, not at 12 µs "
+        f"and below); above that it does not, and it can multiply the "
+        f"gaps (a snubbed boost: 4580 turn-offs at dt = T/400, 15887 "
+        f"at T/2000). For a capacitor directly across the diode, "
+        f"tau = C/g_on = {tau_uF:.3g} s per µF at g_on = {g_on:.3g} S, "
+        f"out of reach for a snubber. Check with engine='auto', whose "
+        f"TR-BDF2 steps do not reflect it, or model the capacitor's "
+        f"series resistance (it lengthens tau).",
         RuntimeWarning, stacklevel=3)
 
 
@@ -1436,11 +1460,14 @@ def device_loss_summary(
         forward charge is below ``1e-3`` of the recovery charge asked
         for are dropped (by peak forward current when the spec is an
         ``E_rr_curve`` or gives no recovery, see
-        ``_diode_switching_loss``). A blocking gap across which no step
-        average of ``v_D`` falls below ``−2·V_th`` is chatter inside one
-        conduction, not a turn-off (every diode entry reports
-        ``n_chatter_gaps``; a RuntimeWarning fires when they cover
-        1 % or more of the conduction time). Reports ``E_sw_total``, ``P_sw_avg``,
+        ``_diode_switching_loss``). Every recorded stretch counts.
+        Every diode entry reports ``n_short_blocking_gaps``: blocking
+        gaps of at most 32 steps across which no step average of
+        ``v_D`` falls below ``−2·V_th``, the signature of the fixed
+        engine's trapezoidal chatter against a capacitor across the
+        diode; on the fixed-step engine a RuntimeWarning says which
+        numbers that would inflate when they cover 1 % or more of the
+        conducting time (see ``_short_blocking_gaps``). Reports ``E_sw_total``, ``P_sw_avg``,
         ``n_turn_off_events``, ``n_turn_off_events_dropped``,
         ``E_sw_dropped``, ``n_turn_off_events_capped``,
         ``n_turn_off_events_unresolved``, ``f_sw_estimate`` and the
@@ -1667,16 +1694,17 @@ def device_loss_summary(
             }
             d_flip = _other_bits_flipped(kernel_masks,
                                          switch_bits.get(int(bid), -1))
-            cond_m, n_chat = _chatter_gaps(d_trace, d_flip)
-            entry["n_chatter_gaps"] = int(n_chat)
-            if n_chat and times.size > 1:
+            in_gap, n_short = _short_blocking_gaps(d_trace)
+            entry["n_short_blocking_gaps"] = int(n_short)
+            if n_short and times.size > 1:
                 h = np.diff(times)
-                gap = cond_m & ~np.asarray(d_trace.conducting, dtype=bool)
-                _warn_chatter(
-                    name, n_chat,
-                    int(np.count_nonzero(cond_m[:-1] & ~cond_m[1:])),
-                    float(np.dot(h, gap[1:])), float(np.dot(h, cond_m[1:])),
-                    V_th)
+                cond_d = np.asarray(d_trace.conducting, dtype=bool)
+                _warn_short_gaps(
+                    name, n_short,
+                    int(np.count_nonzero(cond_d[:-1] & ~cond_d[1:])),
+                    float(np.dot(h, in_gap[1:])),
+                    float(np.dot(h, cond_d[1:])), V_th, g_on,
+                    getattr(result, "engine_used", None))
             # Optional datasheet offset+slope conduction model
             # (V_f0 + r_d·I) applied to the actual current trace.
             c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
