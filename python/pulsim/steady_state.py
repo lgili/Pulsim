@@ -40,7 +40,9 @@ where it should be ON. Nothing reports it — the run just
 integrates a different converter. Dividing first,
 `(t / T) % 1.0 < D`, is exact at those points, and
 `pulsim.NativePwm2Switch` already does that (verified at twelve
-boundaries). It is worth knowing here because a steady state
+boundaries). The built-in helpers (`make_pwm_switch_fn` & co.) and
+`NativePwm2Switch` also snap an edge that sits on a `dt` grid point
+to that point, so a whole-step on-time is the same in every period. It is worth knowing here because a steady state
 computed over one period and then used for a long run is exactly
 the setup that exposes it.
 """
@@ -375,8 +377,10 @@ def steady_state(builder, *, period: float, dt: float,
                     "computed in floating point — every period is "
                     "then a slightly different circuit and no "
                     "exact periodic orbit exists. Pin the edge to "
-                    "a step index, or use "
-                    "pulsim.NativePwm2Switch. Pass verify=False "
+                    "a step index, or use the built-in helpers "
+                    "(pulsim.make_pwm_switch_fn & co., "
+                    "pulsim.NativePwm2Switch), whose edges on the dt "
+                    "grid are exact. Pass verify=False "
                     "to accept the one-period answer anyway.")
 
     return SteadyStateResult(

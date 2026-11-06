@@ -186,6 +186,7 @@ if(PULSIM_BUILD_TESTS)
         tests/sources/test_three_phase_spwm_fn.cpp    # Layer 2 V8
         tests/sources/test_phase_shift_full_bridge_fn.cpp  # V9
         tests/sources/test_combined_switch_fn.cpp     # Layer 2 V10
+        tests/sources/test_pwm_grid_edges.cpp         # grid-exact edges
     )
     target_link_libraries(pulsim_core_sources_tests
         PRIVATE

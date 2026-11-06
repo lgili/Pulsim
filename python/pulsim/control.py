@@ -689,10 +689,17 @@ class PwmGenerator:
         if not math.isfinite(T) or T == 0:
             self.state = 0.0
             return 0.0
-        phase01 = math.fmod((t - self.phase) / T, 1.0)
-        if phase01 < 0:
-            phase01 += 1.0
-        self.state = 1.0 if phase01 < duty else 0.0
+        # Grid-exact edges, like the C++ helpers (pwm_phase.hpp): an
+        # edge that sits on a time-grid point takes effect AT that
+        # point instead of a step early or late from the rounding of
+        # t / T.
+        x = (t - self.phase) / T
+        tol = 64 * 2.220446049250313e-16 * max(
+            1.0, (abs(t) + abs(self.phase)) / T)
+        u = x - math.floor(x)
+        if u >= 1.0 - tol:
+            u = 0.0
+        self.state = 0.0 if u >= duty - tol else 1.0
         return self.state
 
 
