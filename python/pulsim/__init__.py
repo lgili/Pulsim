@@ -2286,7 +2286,8 @@ def simulate(
                 "average was correct to 0.1 mV on a flyback at the "
                 "default rtol, but a tightened rtol can bias it by "
                 "~0.5 %, and a V_th=0 bridge behind a source "
-                "resistance ran HALF-WAVE with only this warning. "
+                "resistance ran HALF-WAVE (reading res.i of its "
+                "diodes then warns of the missed commutation). "
                 "Cross-check with a dt (engine='pwl'), or give the "
                 "diode its physical V_th (that IS the hysteresis "
                 "band).",

@@ -64,7 +64,8 @@ rather than an error.
   every engine. `average_power_at_node` had the same index.
 * The `engine='auto'` sliding-mode warning no longer names DCM as the
   only cause or promises a correct average: a `V_th = 0` bridge behind a
-  source resistance runs half-wave with only that warning.
+  source resistance runs half-wave, and only that warning and the
+  missed-commutation warning of `res.i` on its diodes say so.
 * **Diode and switch currents, duties and losses come from the mask the
   solver stamped.** `SimulationResult.switch_states` records, per stored
   sample, the switch / diode mask of the solve that produced it (all

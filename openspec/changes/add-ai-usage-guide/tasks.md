@@ -345,7 +345,12 @@ reproduced every friction item.
 - [ ] 12.2 TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
       runs half-wave (318.79 V, 12.91 V pp against 322.06 V, 6.38 V pp
       with `dt`). The sliding-mode warning names `engine='auto'` even
-      when `engine='trbdf2'` was requested.
+      when `engine='trbdf2'` was requested. `V_th > 0` is not sufficient
+      either: the same bridge with 1 mH of line and the default
+      `V_th = 0.7` held `BR__D2`/`BR__D4` OFF while forward-biased by
+      45.1 V at t = 75.92 ms (one sample), accepted 22 steps above
+      tolerance at the step floor and warned of 5 boundary rides; V_dc
+      321.807 V against 321.844 V with `dt = 1e-6`.
 - [ ] 12.3 `res.i()` on a Shockley diode raises `NotImplementedError`
       pointing to `device_loss_summary`, which omits Shockley diodes.
 - [ ] 12.4 `device_loss_summary` / `device_thermal_summary` have no
@@ -364,3 +369,27 @@ reproduced every friction item.
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
       one; the soft turn-off should cost about 0.
+- [ ] 12.9 The missed-commutation warning of `res.i` repeats once per
+      call site (Python's default filter keys on the caller's line), so
+      a script that reads `res.i` of each diode in several places prints
+      it many times. Emit it once per result and diode.
+
+## 13. Review round 3
+
+- [x] 13.1 `test_every_inline_reference_resolves` failed without
+      pyqtgraph (CI installs `.[dev]`, which lacks it): trap 6 named
+      `p.LiveScope`, which `pulsim/__init__.py` exports only when
+      pyqtgraph imports. Trap 6 now says `from pulsim.scope import
+      LiveScope` (needs pyqtgraph). New
+      `test_inline_references_resolve_without_optional_extras` runs the
+      resolver in a child with pyqtgraph and matplotlib blocked; it fails
+      on the old wording and passes on the new.
+- [x] 13.2 Trap 13 names both warnings (`simulate`'s boundary ride and
+      `res.i`'s "OFF while forward-biased" missed commutation) and says
+      `V_th > 0` is no guarantee (the 12.2 case, reproduced); the short
+      version says to heed `res.i` warnings. The sliding-mode warning and
+      the CHANGELOG no longer say the half-wave run gives "only this
+      warning".
+- [x] 13.3 Trap 10 says its 5.84 / 5.99 V come from
+      `make_pwm_switch_fn`.
+
