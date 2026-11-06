@@ -43,7 +43,7 @@
 
 ## 2. Stub generation and shipping
 
-- [ ] 2.1 Add `scripts/generate_stubs.py`. It:
+- [x] 2.1 Add `scripts/generate_stubs.py`. It:
       - runs the pinned `pybind11-stubgen` on `pulsim._pulsim` with
         `--exit-code --numpy-array-use-type-var` and
         `--enum-class-locations` for `DCStrategy` and
@@ -55,42 +55,46 @@
 
       `--check` regenerates the stub into a temporary directory and
       exits 1 with a unified diff.
-- [ ] 2.2 Write `scripts/stubs_overlay.pyi`. It declares the members the
+- [x] 2.2 Write `scripts/stubs_overlay.pyi`. It declares the members the
       Python layer attaches: `SimulationResult.v`, `.i`, `.power`,
       `.engine_used`, `.engine_route_reason`, and any other attribute
       that `python/pulsim/__init__.py` assigns onto a native class. Find
       them with
       `grep -n "^[A-Z][A-Za-z]*\.[a-z_]* = " python/pulsim/__init__.py`
       and the `res.<attr> =` sites.
-- [ ] 2.3 Generate and commit `python/pulsim/_pulsim.pyi`, and add an
+- [x] 2.3 Generate and commit `python/pulsim/_pulsim.pyi`, and add an
       empty `python/pulsim/py.typed`.
-- [ ] 2.4 Add `*.md` and `py.typed` to the build-tree glob in
+- [ ] 2.4 (Globs added, build-tree and install rule; the `ai_guide()`
+      confirmation waits for 4.1.) Add `*.md` and `py.typed` to the build-tree glob in
       `python/CMakeLists.txt`. Then confirm that
       `PYTHONPATH=build/python python -c "import pulsim;
       pulsim.ai_guide()"` works from a plain CMake build.
-- [ ] 2.5 Build one wheel (`pip wheel . -w .scratch/wheel`) and confirm
+- [ ] 2.5 (Pre-checked without a wheel build: scikit-build-core's
+      `iter_package_files` for `wheel.packages = ["python/pulsim"]` lists
+      `pulsim/py.typed` and `pulsim/_pulsim.pyi`; the wheel build itself
+      waits for `AI_GUIDE.md`.) Build one wheel (`pip wheel . -w .scratch/wheel`) and confirm
       that `unzip -l` lists `pulsim/py.typed`, `pulsim/_pulsim.pyi` and
       `pulsim/AI_GUIDE.md`. If any is missing, add an `install(FILES …)`
       rule. Delete the wheel tree afterwards.
-- [ ] 2.6 Add pinned `pybind11-stubgen` and `mypy` to the `dev` extra in
+- [x] 2.6 Add pinned `pybind11-stubgen` and `mypy` to the `dev` extra in
       `pyproject.toml`.
 
 ## 3. Stub tests (`python/tests/test_stubs.py`)
 
-- [ ] 3.1 Structural test: the stub passes `ast.parse`, and contains no
+- [x] 3.1 Structural test: the stub passes `ast.parse`, and contains no
       `pybind11_stubgen`, no `0x[0-9a-f]+` and no `::`.
-- [ ] 3.2 Coverage test: every public name of `pulsim._pulsim`, and every
+- [x] 3.2 Coverage test: every public name of `pulsim._pulsim`, and every
       public member of its classes, including the overlay members, is
       declared in the stub.
-- [ ] 3.3 Signature test: for each native callable, parse the first line
+- [x] 3.3 Signature test: for each native callable, parse the first line
       of `__doc__` (handling the "Overloaded function." form) and
       compare it with the stub `def`. Compare parameter names, their
       order, and whether each has a default. The failure message names
       the symbol and `python scripts/generate_stubs.py`.
-- [ ] 3.4 Prove 3.2 and 3.3 non-vacuous. Feed each test an in-memory
+- [x] 3.4 Prove 3.2 and 3.3 non-vacuous. Feed each test an in-memory
       copy of the stub with one method deleted, and one with two
       parameters swapped. Each must fail.
-- [ ] 3.5 mypy test, skipped without mypy:
+- [x] 3.5 mypy test, skipped without mypy:
       - the stub alone checks clean with `--follow-imports=silent`;
       - the concatenated guide and getting-started snippets report no
         error on a pulsim symbol;

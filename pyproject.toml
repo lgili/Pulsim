@@ -61,6 +61,13 @@ dev = [
     # `benchmarks/_console.py` degrades gracefully when rich is absent,
     # so this stays a soft dev dep — CI without rich keeps working.
     "rich>=13.0",
+    # Typed stubs for the native module (python/pulsim/_pulsim.pyi).
+    # Pinned: `scripts/generate_stubs.py --check` is a byte-for-byte
+    # diff and stubgen output changes between releases; mypy runs the
+    # stub checks in python/tests/test_stubs.py. Bump deliberately and
+    # regenerate the stub in the same commit.
+    "pybind11-stubgen==3.0.0",
+    "mypy==2.4.1",
 ]
 docs = [
     "mkdocs>=1.6,<2.0",

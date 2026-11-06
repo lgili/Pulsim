@@ -191,6 +191,23 @@ pybind11 versions:
    substitution: `py::class_` forward declarations, `py::kw_only()`,
    `py::arg_v(..., "PreflightOptions()")`, and `std::optional`
    parameters.
+
+   Until those binding fixes (tasks 1.1-1.4) land, the script rewrites
+   exactly these constructs deterministically, one documented rule
+   each: a C++ name becomes the bound class of the same name (and fails
+   if there is none), an `<... object at 0x...>` default becomes `...`,
+   `*` is inserted before the first required-after-optional parameter
+   (the contract `py::kw_only()` will give), and a `= None` default
+   gains `| None`. stubgen tolerates only the two known invalid-
+   expression patterns, so any NEW raw C++ type still fails
+   `--exit-code`. Once the bindings are fixed the rules match nothing
+   and are deleted. Three further rules are permanent: `FixedSize`
+   annotations become `list[int]` (no generator import in the shipped
+   stub), the `__eq__`/`__ne__` operand is typed `object` (pybind
+   returns `NotImplemented` for a foreign operand; mypy otherwise
+   reports a Liskov violation per class), and an array-shape TypeVar in
+   a class attribute (`SolverSnapshot.x`) becomes `int`, since it is
+   unbound there.
 3. A third check confirms that the stub helps rather than only parses.
    `mypy --follow-imports=silent` runs over the concatenated snippets
    of the guide and of getting-started, and reports no error that

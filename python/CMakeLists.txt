@@ -117,6 +117,10 @@ file(GLOB_RECURSE _pulsim_pkg_files
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.js
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.svg
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.h
+    # PEP 561 marker + in-package docs (AI_GUIDE.md): without them a
+    # PYTHONPATH=build/python import has no typing and no guide.
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.md
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/py.typed
 )
 foreach(_pulsim_file IN LISTS _pulsim_pkg_files)
     configure_file(
@@ -141,6 +145,8 @@ file(GLOB _pulsim_top_files
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.py
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.pyi
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.md
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/py.typed
 )
 install(FILES ${_pulsim_top_files}
     DESTINATION pulsim
