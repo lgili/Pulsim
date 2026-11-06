@@ -214,3 +214,21 @@ def test_the_newton_abort_does_not_recommend_loosening_tolerances(engine):
     assert "engine='pwl' with an explicit dt" in msg, msg
     assert "known TR-BDF2 stall at h_min" in msg, msg
     assert "KNOWN_LIMITATIONS.md" in msg, msg
+
+
+def test_the_fixed_engine_abort_does_not_send_the_user_to_a_smaller_dt():
+    """DEFECT 2's abort on the fixed engine. A smaller dt makes the
+    mask chatter worse (it aborts at 10, 5 and 2 ns and runs at 50 ns,
+    the control above), so the message must not suggest one, and it
+    must name the known limitation and the measured workarounds."""
+    with pytest.raises(p.SimulationAborted) as exc:
+        _run("saturable", 10e-9)
+    msg = str(exc.value)
+    assert "solve_with_newton" in msg, msg
+    assert "sized to your circuit" not in msg, msg
+    assert "Do not loosen tol_newton_dx / tol_newton_res" in msg, msg
+    assert "a smaller dt if" not in msg, msg
+    assert "diode-mask chatter" in msg, msg
+    assert "a smaller dt makes it worse" in msg, msg
+    assert "add_shockley_diode" in msg, msg
+    assert "KNOWN_LIMITATIONS.md" in msg, msg

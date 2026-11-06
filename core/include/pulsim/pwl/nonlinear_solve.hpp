@@ -463,8 +463,11 @@ using NonlinearRefreshFn = std::function<
     // answer: the snubbed flyback of test_saturable_transformer.py
     // aborts at h_min on TR-BDF2, and with tol_newton_dx = 1e-5 /
     // tol_newton_res = 1e-4 it "completes" at V_out = 3.53 V against
-    // 15.31 V on engine='pwl', dt = 1e-8. Point at the fixed engine as
-    // a cross-check and at the device instead.
+    // 15.31 V on engine='pwl', dt = 1e-8. Point at the device and at
+    // the OTHER engine as a cross-check instead. Do not prescribe a
+    // dt direction here: on the fixed engine the documented Newton
+    // failure (diode-mask chatter) gets WORSE with a smaller dt, and
+    // run_transient adds its own engine-specific note.
     const Real x_scale = std::max(
         Real{1}, x.size() == 0 ? Real{0} : x.cwiseAbs().maxCoeff());
     const Real rhs_scale = std::max({
@@ -484,10 +487,9 @@ using NonlinearRefreshFn = std::function<
         "and loosening it has produced silently wrong operating points "
         "(a flyback that aborted this way, re-run with loosened "
         "tolerances, reported 3.5 V instead of 15.3 V). Instead, look "
-        "at the device named above, and "
-        "cross-check on the fixed-step engine: engine='pwl' with an "
-        "explicit dt (a smaller dt if that engine is the one that "
-        "failed).",
+        "at the device named above, and cross-check on the other "
+        "transient engine (engine='pwl' with an explicit dt, if this "
+        "came from TR-BDF2 or 'auto').",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
         last_res_norm,
