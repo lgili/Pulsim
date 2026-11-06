@@ -2278,18 +2278,18 @@ def simulate(
             warnings.warn(
                 f"simulate(engine='auto'): a diode rode its "
                 f"conduction boundary on "
-                f"{_stats['n_chatter_breaks']} step(s) — the "
-                "signature of an un-hysteresed ideal diode "
-                "(V_th=0) in DCM, which is a SLIDING-MODE model: "
-                "the reference engine chatters ~600 flips per "
-                "period on it. This engine AVERAGES the slide; at "
-                "the default rtol the average is correct (checked "
-                "at 0.1 mV on the flyback), but tightening rtol "
-                "partially resolves the slide and can BIAS the "
-                "mean by ~0.5%. Give the diode its physical V_th "
-                "(that IS the hysteresis band) for "
-                "tolerance-proportional convergence, or use "
-                "engine='pwl'.",
+                f"{_stats['n_chatter_breaks']} step(s): its "
+                "current sat at zero while the engine decided its "
+                "state (a SLIDING-MODE model; the usual cause is an "
+                "ideal V_th=0 diode at a zero-current commutation, "
+                "e.g. in DCM). This engine AVERAGES the slide. That "
+                "average was correct to 0.1 mV on a flyback at the "
+                "default rtol, but a tightened rtol can bias it by "
+                "~0.5 %, and a V_th=0 bridge behind a source "
+                "resistance ran HALF-WAVE with only this warning. "
+                "Cross-check with a dt (engine='pwl'), or give the "
+                "diode its physical V_th (that IS the hysteresis "
+                "band).",
                 stacklevel=2)
         return res
 

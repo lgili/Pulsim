@@ -131,18 +131,7 @@ def add_bridge_rectifier(builder,
 
     Topology
     --------
-    ::
-
-                   ┌─ D1 ─┐         ┌─ D4 ──┐
-            ac_a ──┤       ├── dc_pos       │
-                   └─ D3 ─┘         │       │
-                                    │       │
-                   ┌─ D2 ─┐         │       │
-            ac_b ──┤       ├──┘   D3 ↑    D4 ↑
-                   └─ D4 ─┘
-                                  dc_neg ──┘
-
-    Concretely:
+    Each diode is listed anode → cathode:
       * D1: ac_a → dc_pos (forward when ac_a is the high-side)
       * D2: ac_b → dc_pos
       * D3: dc_neg → ac_b  (return path)
@@ -185,9 +174,9 @@ def add_bridge_rectifier(builder,
     Returns
     -------
     BridgeRectifierResult
-        Holds the four diode branch IDs (useful for probing per-diode
-        current with :meth:`pool.branch_var_id_for_inductor`-style
-        lookups via the kernel's branch-current accessors).
+        ``diode_names`` (``f"{name}__D1"`` ... ``__D4"``) and
+        ``diode_branch_ids``. Read each diode's current with
+        ``result.i(n) for n in diode_names``.
     """
     out = BridgeRectifierResult()
     # We compute the four branch IDs by reading the graph BEFORE and
@@ -268,8 +257,13 @@ def add_three_phase_vsi(builder,
                                            builder.graph.num_switches,
                                            dead_time)
 
-    The switches are bidirectional: a gated-on switch also carries the
-    freewheel current, so the diodes conduct only during the dead time.
+    The switches are bidirectional: a gated-on switch carries most of
+    the freewheel current. A PWL diode turns off only when its current
+    reverses, so after the dead time the antiparallel diode stays on in
+    parallel with its switch and carries ``R_on / (R_on + R_d)`` of
+    that current (2 % at the defaults) until the opposite switch turns
+    on. With no dead time the diodes never conduct. Read the split
+    with ``res.i(f"{name}__HSa")`` and ``res.i(f"{name}__Dha")``.
     For closed-loop control, wire the gates via
     :class:`MixedDomainBlockChain` and one of:
 
