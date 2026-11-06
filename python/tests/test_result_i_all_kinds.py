@@ -194,12 +194,14 @@ def test_switch_current_matches_inductor_when_closed():
 
 
 def test_switch_without_switch_fn_raises_with_hint():
-    """If the result was built without ``simulate`` (so ``_switch_fn``
-    is not stashed), ``result.i('switch_name')`` raises
+    """A kernel result records the stamped mask, so removing the
+    ``_switch_fn`` stash changes nothing: ``result.i('Q1')`` is still
+    exact. Only a result with NO record and no ``_switch_fn`` raises
     ``NotImplementedError`` with a hint to set ``result._switch_fn``."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 5.0)
-    b.add_switch("Q1", "vin", "gnd", g_on=1e3, g_off=1e-9)
+    b.add_resistor("R", "vin", "n", 10.0)
+    b.add_switch("Q1", "n", "gnd", g_on=1e3, g_off=1e-9)
 
     sf = p.make_pwm_switch_fn(
         frequency=10e3,
@@ -208,14 +210,21 @@ def test_switch_without_switch_fn_raises_with_hint():
         num_switches=b.graph.num_switches,
     )
     res = p.simulate(b, t_end=1e-3, dt=1e-5, switch_fn=sf)
-    # Manually remove the stash to mimic the "result built another way"
-    # case.
+    expected = np.asarray(res.i("Q1"))
     try:
         del res._switch_fn
     except AttributeError:
         pass
+    assert np.array_equal(np.asarray(res.i("Q1")), expected)
+    assert float(np.abs(expected).max()) > 0.4   # ~5 V / 10 Ω when ON
+
+    class _NoRecord:   # a result "built another way"
+        times = res.times
+        states = np.asarray(res.states)
+        _builder = b
+
     with pytest.raises(NotImplementedError) as exc:
-        res.i("Q1")
+        p.SimulationResult.i(_NoRecord(), "Q1")
     msg = str(exc.value)
     assert "switch_fn" in msg
     assert "_switch_fn" in msg

@@ -9,6 +9,9 @@ inductors (see commit history of `python/pulsim/losses.py`).
 from __future__ import annotations
 
 import math
+import warnings
+
+import numpy as np
 
 import pytest
 
@@ -179,38 +182,52 @@ def test_device_loss_summary_diode_reverse_biased_is_tiny() -> None:
     assert d["P_avg"] < 1e-6
 
 
-def test_device_loss_summary_switch_requires_switch_fn() -> None:
-    """An ideal switch entry is only reported when `switch_fn=` is
-    passed — without it the summary skips the switch (no silent
-    default to "always closed")."""
+def test_device_loss_summary_switch_reads_the_kernel_record() -> None:
+    """The switch state comes from the mask the solver stamped for
+    each sample, so a kernel result reports the switch without
+    ``switch_fn``. A result with no such record (built another way)
+    still skips the switch — no silent default to "always closed" —
+    unless ``switch_fn`` is supplied."""
     V_dc = 5.0
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", V_dc)
     b.add_resistor("R1", "vin", "mid", 1.0)
     b.add_switch("SW1", "mid", "gnd", g_on=100.0, g_off=1e-9)
 
-    # PWM-driven switch: closed half the time.
     n_sw = b.graph.num_switches
 
-    def half_closed(_t: float):
+    def always_closed(_t: float):
         mask = p.SwitchStateMask(n_sw)
-        # SW1 is the only switch — keep it closed always at first.
         mask.set(0, True)
         return mask
 
-    res = p.simulate(b, t_end=1e-3, dt=1e-5, switch_fn=half_closed)
+    res = p.simulate(b, t_end=1e-3, dt=1e-5, switch_fn=always_closed)
 
-    # Without switch_fn: no switch entry.
-    summary_no_fn = p.device_loss_summary(b, res)
+    # Kernel result: the record carries the state, no switch_fn needed.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        summary_rec = p.device_loss_summary(b, res)
+    sw_entries = [e for e in summary_rec if e["kind"] == "switch"]
+    assert len(sw_entries) == 1
+    assert sw_entries[0]["name"] == "SW1"
+    assert sw_entries[0]["duty_closed"] > 0.95  # always closed
+
+    class _NoRecord:   # a result "built another way"
+        times = res.times
+        states = np.asarray(res.states)
+        _builder = b
+
+    # No record and no switch_fn: the switch is skipped.
+    summary_no_fn = p.device_loss_summary(b, _NoRecord())
     assert not any(e["kind"] == "switch" for e in summary_no_fn)
 
-    # With switch_fn: switch entry shows up.
-    summary_with_fn = p.device_loss_summary(b, res, switch_fn=half_closed)
+    # No record, switch_fn supplied: re-evaluated, with a warning.
+    with pytest.warns(RuntimeWarning, match="no record"):
+        summary_with_fn = p.device_loss_summary(
+            b, _NoRecord(), switch_fn=always_closed)
     sw_entries = [e for e in summary_with_fn if e["kind"] == "switch"]
     assert len(sw_entries) == 1
-    sw = sw_entries[0]
-    assert sw["name"] == "SW1"
-    assert sw["duty_closed"] > 0.95  # always closed in this test
+    assert sw_entries[0]["duty_closed"] > 0.95
 
 
 def test_device_loss_summary_switch_pwm_duty() -> None:

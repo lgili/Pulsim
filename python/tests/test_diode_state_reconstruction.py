@@ -19,10 +19,13 @@ summary reported a 700.0 A peak (``g_on · V_th`` on an event landing
 stored with the pre-flip mask) while ``result.i()`` said 0.0017 A, and
 at ``V_th = 0`` a 3417 A peak on a diode the solver had stamped OFF.
 
-These tests pin the shared reconstruction (``pulsim._diode_state``)
-against what the result itself can prove: Kirchhoff's current law on
-the DC side, the state variables (source and inductor currents), and
-agreement across engines and across ``V_th``.
+These tests pin the shared diode state (``pulsim._diode_state``, which
+now reads the kernel's per-sample record of the stamped mask,
+``SimulationResult.switch_states``) against what the result itself can
+prove: Kirchhoff's current law on the DC side, the state variables
+(source and inductor currents), and agreement across engines and across
+``V_th``. The record's own reproducers live in
+``test_switch_state_record.py``.
 """
 
 from __future__ import annotations
@@ -321,21 +324,24 @@ def test_single_diode_current_is_the_load_current(V_th, engine):
     assert 0.35 < e["duty_conducting"] < 0.55, e
 
 
-def test_undecidable_band_samples_warn_and_name_the_diode():
-    """With a device whose currents are not reconstructed, no node
-    balance is trusted; the band samples fall back to the kernel's
-    hysteresis (inherit the previous state) and that must be LOUD."""
+def test_vcvs_on_the_circuit_no_longer_hides_the_band_state():
+    """A device whose terminal currents the old KCL inference did not
+    model (a VCVS) switched the inference off and left the band samples
+    to a hysteresis fill, with a warning. The recorded stamp needs no
+    inference: the diode is the load current, silently."""
     b = _half_wave(0.7, with_vcvs=True)
     r = p.simulate(b, 5e-3, engine="pwl", dt=1e-6)
-    with pytest.warns(RuntimeWarning, match=r"diode 'D1'.*vcvs"):
-        p.device_loss_summary(b, r)
-    with pytest.warns(RuntimeWarning, match=r"diode 'D1'"):
-        r.i("D1")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        i_d = np.asarray(r.i("D1"))
+        s = p.device_loss_summary(b, r)
+    assert np.allclose(i_d, np.asarray(r.v("k")) / 10.0,
+                       rtol=1e-6, atol=1e-6)
+    assert _entry(s, "D1")["i_peak"] > 0.9
 
 
 def test_v_th_zero_without_kcl_is_still_exact_and_quiet():
-    """V_th = 0 has no band: the voltage alone decides, so even with
-    KCL disabled there is nothing to warn about."""
+    """V_th = 0 with a VCVS on the circuit: exact and quiet as well."""
     b = _half_wave(0.0, with_vcvs=True)
     r = p.simulate(b, 5e-3, engine="pwl", dt=1e-6)
     with warnings.catch_warnings():
@@ -571,10 +577,10 @@ def test_v_th_zero_chatter_is_not_conduction_or_recovery():
 
 def test_bridge_with_floating_dc_side_resolves_through_ground():
     """AC side grounded, DC side floating: D3/D4 meet the source only
-    at ground, so without a ground balance their band samples fell
-    back to hysteresis (D3 i_peak 49.68 A, D2 P_avg 0.00076 W, 6
-    warnings). With it, every diode matches the DC-referenced bridge
-    and the charge closes to ~4e-12."""
+    at ground. The KCL inference first needed a ground balance here
+    (D3 i_peak 49.68 A, D2 P_avg 0.00076 W, 6 warnings without one);
+    the recorded stamp matches the DC-referenced bridge and the charge
+    closes to ~4e-12, silently."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vac", "s", "gnd", v_dc=0.0, v_amplitude=325.0,
                               frequency=50.0, phase=0.0)
@@ -605,11 +611,11 @@ def test_bridge_with_floating_dc_side_resolves_through_ground():
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_villard_doubler_resolves_through_the_series_capacitor(engine):
-    """Villard doubler at V_th = 0.7: the pump capacitor sits in series
-    with the source resistor, so its current is EXACT by KCL at their
-    shared node — no C·Δv/Δt estimate. Before, D2 had 110-154
-    unresolved samples and a KCL error up to 6.9 A; now the node
-    between C1, D1 and D2 balances to ~1e-10 A, silently."""
+    """Villard doubler at V_th = 0.7: the node between the pump
+    capacitor, D1 and D2 must balance against the source resistor's
+    current. The KCL inference once left D2 with 110-154 unresolved
+    samples and a 6.9 A error there; with the recorded stamp the node
+    balances to ~1e-10 A, silently."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vac", "s", "gnd", v_dc=0.0, v_amplitude=100.0,
                               frequency=50.0, phase=0.0)

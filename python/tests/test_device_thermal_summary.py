@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 import pytest
 
 import pulsim as p
@@ -197,9 +199,10 @@ def test_device_thermal_summary_missing_stages_errors() -> None:
         )
 
 
-def test_device_thermal_summary_switch_requires_switch_fn() -> None:
-    """A switch listed in thermal_specs without `switch_fn` must
-    error — the per-step mask is needed to reconstruct P_cond(t)."""
+def test_device_thermal_summary_switch_reads_the_kernel_record() -> None:
+    """P_cond(t) of a switch needs its per-sample state. A kernel
+    result carries the stamped mask, so no ``switch_fn`` is needed; a
+    result with no such record must still error without one."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 5.0)
     b.add_resistor("R1", "vin", "mid", 1.0)
@@ -211,13 +214,25 @@ def test_device_thermal_summary_switch_requires_switch_fn() -> None:
         return m
 
     res = p.simulate(b, t_end=1e-3, dt=1e-5, switch_fn=pwm)
+    specs = {"SW1": {"stages": [p.FosterStage(0.5, 1e-3)]}}
+
+    rec = p.device_thermal_summary(b, res, thermal_specs=specs)
+    with_fn = p.device_thermal_summary(b, res, thermal_specs=specs,
+                                       switch_fn=pwm)
+    assert len(rec) == 1 and rec[0]["name"] == "SW1"
+    assert rec[0]["P_cond_avg"] > 0.0
+    assert rec[0]["P_cond_avg"] == pytest.approx(with_fn[0]["P_cond_avg"],
+                                                 rel=1e-9)
+    assert rec[0]["T_j_peak"] == pytest.approx(with_fn[0]["T_j_peak"],
+                                               rel=1e-9)
+
+    class _NoRecord:   # a result "built another way"
+        times = res.times
+        states = np.asarray(res.states)
+        _builder = b
+
     with pytest.raises(ValueError, match="switch_fn"):
-        p.device_thermal_summary(
-            b, res,
-            thermal_specs={"SW1":
-                                {"stages": [p.FosterStage(0.5, 1e-3)]}},
-            # switch_fn intentionally omitted
-        )
+        p.device_thermal_summary(b, _NoRecord(), thermal_specs=specs)
 
 
 def test_device_thermal_summary_empty_specs_yields_empty_list() -> None:

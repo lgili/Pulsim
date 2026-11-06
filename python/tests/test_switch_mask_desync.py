@@ -7,9 +7,11 @@ off-state terminal voltage that produced an unphysical ``v²·g_on``
 conduction spike (``P_cond`` ~ 1e4 W, ``T_j`` ~ 1e4 °C) on a device
 dissipating milliwatts.
 
-Fix: :func:`pulsim._result_views.resolve_switch_closed_trace` prefers an
-exact mask recorded at simulate-time (:class:`pulsim.SwitchMaskRecorder`)
-and otherwise re-evaluates ``switch_fn`` with a voltage-consistency guard
+Fix: :func:`pulsim._result_views.resolve_switch_closed_trace` reads the
+kernel's own per-sample record of the stamped mask
+(``SimulationResult.switch_states``); without one it prefers an exact
+mask recorded at simulate-time (:class:`pulsim.SwitchMaskRecorder`) and
+otherwise re-evaluates ``switch_fn`` with a voltage-consistency guard
 that drops samples claiming ON while the device is clearly blocking.
 """
 from __future__ import annotations
@@ -55,8 +57,9 @@ def _desync_warnings(record):
 def test_closed_loop_conduction_is_physical():
     """The reported bug: closed-loop cold-start → ~1e4 W / 1e4 °C.
 
-    After the fix the conduction is physical and the desync is flagged.
-    """
+    A kernel result now records the mask it STAMPED for every sample,
+    so the summary reads the true historical switch state: physical,
+    and silent (there is no desync left to correct)."""
     b = _build_buck_switch()
     loop = _make_loop(b)
     res = p.simulate(b, t_end=20e-3, dt=2e-6,
@@ -70,11 +73,42 @@ def test_closed_loop_conduction_is_physical():
         summ = p.device_thermal_summary(
             b, res, thermal_specs={"Q": {"stages": _stages()}},
             switch_fn=loop.switch_fn, T_ambient_C=25.0)
-    # The guard must announce the desync it corrected.
-    assert _desync_warnings(rec), "expected a post-hoc mask desync warning"
+    assert not _desync_warnings(rec), [str(w.message) for w in rec]
 
     q = next(d for d in summ if d["name"] == "Q")
     # Pre-fix: P_cond_avg ~ 6.8e3 W, T_j_peak ~ 5.9e3 °C.
+    assert q["P_cond_avg"] < 50.0, q["P_cond_avg"]
+    assert q["T_j_peak"] < 200.0, q["T_j_peak"]
+
+
+class _NoRecord:
+    """The same result without the kernel's mask record — what the
+    post-hoc switch_fn guard still exists for."""
+
+    def __init__(self, r):
+        self.times = r.times
+        self.states = np.asarray(r.states)
+        self._builder = r._builder
+
+
+def test_closed_loop_without_a_record_is_guarded_and_flagged():
+    """With no recorded mask the converged closed-loop switch_fn is
+    re-evaluated post hoc; the voltage-consistency guard must still
+    keep the conduction physical and announce the desync."""
+    b = _build_buck_switch()
+    loop = _make_loop(b)
+    res = p.simulate(b, t_end=20e-3, dt=2e-6,
+                     switch_fn=loop.switch_fn,
+                     step_observer=loop.step_observer)
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        summ = p.device_thermal_summary(
+            b, _NoRecord(res), thermal_specs={"Q": {"stages": _stages()}},
+            switch_fn=loop.switch_fn, T_ambient_C=25.0)
+    assert _desync_warnings(rec), "expected a post-hoc mask desync warning"
+    assert any("no record of the stamped switch mask" in str(w.message)
+               for w in rec)
+    q = next(d for d in summ if d["name"] == "Q")
     assert q["P_cond_avg"] < 50.0, q["P_cond_avg"]
     assert q["T_j_peak"] < 200.0, q["T_j_peak"]
 
