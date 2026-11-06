@@ -77,15 +77,15 @@ def _q_load(r, node, C, R):
     return C * (v[-1] - v[0]) + np.trapezoid(v / R, t)
 
 
-# Trapezoid over the stored grid: exact bookkeeping on the fixed
-# engine's trapezoidal companions (measured ~3e-12); the adaptive grid
-# integrates the same currents to ~1e-4. DSED stores the LEFT limit at
-# an event sample (the stamped-mask convention), so a current that
-# jumps at a V_th turn-on is drawn as a ramp over the next step: an
-# O(h) trapezoid error, -4.2e-3 at the default 1 µs step on the
-# transformer rectifier (it halves with the step; see
-# test_dsed_charge_error_is_the_one_step_jump_term).
-TOL = {"pwl": 1e-9, "auto": 1e-3, "dsed": 6e-3}
+# The summary's i_avg against C·Δv + ∫v/R: exact bookkeeping on the
+# fixed engine's trapezoidal companions (measured ~3e-12); the adaptive
+# grid integrates the same currents to ~1e-4. DSED stores the LEFT
+# limit at an event sample and, separately, the RIGHT limit the next
+# step starts from; the summary integrates each step from the latter
+# (measured +1.4e-4 at the default 1 µs step on the transformer
+# rectifier, second order in the step; see
+# test_dsed_summary_starts_each_step_from_the_right_limit).
+TOL = {"pwl": 1e-9, "auto": 1e-3, "dsed": 5e-4}
 
 
 # ---------------------------------------------------------------------
@@ -313,31 +313,48 @@ _RECT_CASES = [(k, v, e) for k in ("xfmr", "vcvs") for v in (0.7, 0.0)
 def test_rectifier_charge_closes_through_any_device(kind, V_th, engine):
     _, r, s, cur, msgs = _rectifier_run(kind, V_th, engine)
     assert not msgs, msgs
-    q_d = np.trapezoid(cur["D"], np.asarray(r.times))
+    t = np.asarray(r.times)
+    e = _entry(s, "D")
+    q_d = e["i_avg"] * (t[-1] - t[0])
     q_phys = _q_load(r, "k", 1000e-6, 20.0)
     assert q_phys > 0.05
     assert abs(q_d - q_phys) <= TOL[engine] * q_phys, (q_d, q_phys)
-    e = _entry(s, "D")
+    if engine != "dsed":
+        # No stored right limit: the plain trapezoid of r.i() is the
+        # same integral.
+        assert np.trapezoid(cur["D"], t) == pytest.approx(q_d, rel=1e-12)
     assert 0.2 < e["duty_conducting"] < 0.23, e
 
 
-def test_dsed_charge_error_is_the_one_step_jump_term():
-    """The DSED charge residual on the transformer rectifier is the
-    trapezoid drawing each V_th turn-on's current jump as a ramp over
-    one step, so it is first order in the step and has the sign of a
-    missing half-step of current (measured -4.22e-3, -2.15e-3,
-    -0.87e-3 at a median step of 1 µs, 0.5 µs, 0.2 µs)."""
-    errs = []
+def test_dsed_summary_starts_each_step_from_the_right_limit():
+    """A DSED event sample is the LEFT limit (the stamped-mask
+    convention), so a current that jumps at a V_th turn-on is drawn as
+    a ramp over the next step by a plain trapezoid of r.i(): first order
+    in the step, with the sign of a missing half-step of current
+    (measured -4.22e-3, -2.15e-3 at the default step and dt = 5e-6).
+    The result also stores the RIGHT limit at each event, and the
+    summary integrates every step from it: +1.39e-4 and +3.5e-5, second
+    order. Only the 10 samples where an event changed the state carry
+    a right limit."""
+    raw, summ = [], []
     for kw in ({}, {"dt": 5e-6}):
         b = _xfmr_rectifier(0.7)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             r = p.simulate(b, 0.1, engine="dsed", **kw)
-        q_d = np.trapezoid(np.asarray(r.i("D")), np.asarray(r.times))
+            s = p.device_loss_summary(b, r)
+        t = np.asarray(r.times)
         q_phys = _q_load(r, "k", 1000e-6, 20.0)
-        errs.append((q_d - q_phys) / q_phys)
-    assert errs[0] < 0 and errs[1] < 0, errs
-    assert 0.35 < errs[1] / errs[0] < 0.65, errs
+        q_raw = np.trapezoid(np.asarray(r.i("D")), t)
+        q_sum = _entry(s, "D")["i_avg"] * (t[-1] - t[0])
+        raw.append((q_raw - q_phys) / q_phys)
+        summ.append((q_sum - q_phys) / q_phys)
+        assert r.right_limit_index.size == r.n_events
+        assert r.right_limit_states.shape == (
+            r.n_events, np.asarray(r.states).shape[1])
+    assert raw[0] < 0 and raw[1] < 0, raw
+    assert 0.35 < raw[1] / raw[0] < 0.65, raw
+    assert abs(summ[0]) < 3e-4 and abs(summ[1]) < 0.4 * abs(summ[0]), summ
 
 
 @pytest.mark.parametrize("engine", ENGINES + ("dsed",))
@@ -510,29 +527,35 @@ def _reference_bridge(V_th: float):
 
 
 @functools.lru_cache(maxsize=None)
-def _ref_run(V_th: float, engine: str):
+def _ref_run(V_th: float, engine: str, dt: float = 1e-6):
     b = _reference_bridge(V_th)
-    r = _run(b, 0.06, engine, dt=1e-6)
+    r = _run(b, 0.06, engine, dt=dt)
     return _report(b, r, BRIDGE) + (r,)
 
 
 def test_reference_bridge_agrees_across_engines_at_v_th_0_7():
-    """pwl vs auto at the helper defaults (V_th = 0.7). Measured:
-    D1 rms 10.246 / 10.263 A, duty 0.1030 / 0.1030, P_avg 0.1050 /
-    0.1054 W; D2 rms 2.937 / 3.006 A, duty 0.0292 / 0.0293, P_avg
-    0.00866 / 0.00907 W. D2's residual is the V_th turn-on spike (the
-    diode voltage collapses from 0.7 V into a ~3 mΩ loop with no
-    inductance: 345 A on pwl at dt = 1 µs, 458 A on auto) — about a
-    fifth of D2's small loss, resolved differently by the two grids.
-    Peaks are therefore not compared."""
-    s_p, _, m_p, _ = _ref_run(0.7, "pwl")
+    """auto vs a converged pwl run (dt = 0.1 µs) at the helper defaults
+    (V_th = 0.7). Measured: D1 rms 10.253 / 10.244 A, P_avg 0.10520 /
+    0.10515 W; D2 rms 2.957 / 2.922 A, P_avg 0.00885 / 0.00875 W; duty
+    0.1030 and 0.0293 on both.
+
+    D2's loss is dominated by its V_th turn-on spike (the diode voltage
+    collapses from 0.7 V into a ~3 mΩ loop with no inductance; τ ≈
+    1.4 µs), so it is a grid property: pwl at dt = 1 µs reads a 345 A
+    peak and D2 rms 2.702 A (dt = 0.25 µs: 429 A, 2.878 A; 0.1 µs:
+    451 A, 2.922 A), auto 458 A and 2.957 A. Each step is integrated
+    as the line between its ends, so the dt = 1 µs run no longer
+    overstates the spike's decaying step by the trapezoid of its
+    squares (it read 2.937 A with that, close to converged only by
+    accident). Peaks are therefore not compared."""
+    s_p, _, m_p, _ = _ref_run(0.7, "pwl", dt=1e-7)
     s_a, _, m_a, _ = _ref_run(0.7, "auto")
     assert not m_p and not m_a, (m_p, m_a)
     for name in BRIDGE:
         a, b_ = _entry(s_p, name), _entry(s_a, name)
-        assert b_["i_rms"] == pytest.approx(a["i_rms"], rel=0.03), name
+        assert b_["i_rms"] == pytest.approx(a["i_rms"], rel=0.02), name
         assert abs(b_["duty_conducting"] - a["duty_conducting"]) < 1e-3
-        assert b_["P_avg"] == pytest.approx(a["P_avg"], rel=0.06), name
+        assert b_["P_avg"] == pytest.approx(a["P_avg"], rel=0.02), name
         assert a["duty_conducting"] > 0.02 and a["P_avg"] > 1e-3
 
 
@@ -869,3 +892,216 @@ def test_t_rr_must_be_a_positive_time():
         with pytest.raises(ValueError, match="t_rr"):
             p.device_loss_summary(b, r, diode_specs={
                 "D1": {"Q_rr": 1e-7, "t_rr": bad}})
+
+
+# ---------------------------------------------------------------------
+# Review round 3 — integrals start each step from its right limit;
+# recoveries are judged by their own charge
+# ---------------------------------------------------------------------
+
+class _Window:
+    """The samples of ``r`` from ``t0`` on, as a result (with the
+    record and, unless ``right_limits=False``, the DSED right limits)."""
+
+    def __init__(self, r, t0, right_limits=True):
+        t = np.asarray(r.times)
+        k0 = int(np.searchsorted(t, t0))
+        self.times = t[k0:]
+        self.states = np.asarray(r.states)[k0:]
+        self.switch_states = np.asarray(r.switch_states)[k0:]
+        self.switch_states_unsolved = np.zeros(self.times.size, bool)
+        self.engine_used = getattr(r, "engine_used", None)
+        idx = getattr(r, "right_limit_index", None)
+        if idx is not None and right_limits:
+            m = idx >= k0
+            self.right_limit_index = idx[m] - k0
+            self.right_limit_states = r.right_limit_states[m]
+            self.right_limit_switch_states = \
+                r.right_limit_switch_states[m]
+
+
+@pytest.mark.parametrize("R_load", (500.0, 20.0))
+@pytest.mark.parametrize("engine", ("pwl", "auto", "dsed"))
+def test_switched_branch_charge_closes_in_steady_state(engine, R_load):
+    """Boost (DCM at 500 Ω, CCM at 20 Ω), steady-state window
+    t >= 2 ms. D1's i_avg must equal the load charge C·Δv + ∫v/R
+    (an independent KCL balance) and Q's i_avg the charge of i_L over
+    the steps the record has Q ON. On DSED the turn-on sample is the
+    left limit (i_D = 0), and a trapezoid from it spread each 0 -> I_L
+    jump over the next 1 µs step: D1 i_avg read 0.02343 A against
+    0.05345 A in DCM (-56 %) and -2.5 % in CCM, with no warning. All
+    engines now agree to 1e-4."""
+    b, r = _boost_run(0.7, R_load, engine)
+    w = _Window(r, 2e-3)
+    s, _, msgs = _report(b, w, [])
+    assert not msgs, msgs
+    t = w.times
+    T = t[-1] - t[0]
+    v_out = np.asarray(r.v("out"))[-t.size:]
+    q_load = 47e-6 * (v_out[-1] - v_out[0]) + np.trapezoid(v_out / R_load, t)
+    d = _entry(s, "D1")
+    assert d["i_avg"] * T == pytest.approx(q_load, rel=1e-4)
+    i_l = np.asarray(r.i("L"))[-t.size:]
+    q_on = w.switch_states[1:, b.switch_index_of("Q")]
+    q_q = np.dot(q_on * np.diff(t), 0.5 * (i_l[:-1] + i_l[1:]))
+    # (pwl: its commutation step starts from the other stamp's sample,
+    # measured +2.0e-3 in DCM.)
+    assert _entry(s, "Q")["i_avg"] * T == pytest.approx(
+        q_q, rel=3e-3 if engine == "pwl" else 1e-4)
+    if engine == "dsed":
+        bad = _entry(_report(b, _Window(r, 2e-3, right_limits=False),
+                             [])[0], "D1")
+        assert bad["i_avg"] * T < (0.6 if R_load == 500.0 else 0.99) \
+            * q_load
+
+
+@pytest.mark.parametrize("R_load", (500.0, 20.0))
+def test_conduction_loss_agrees_across_engines_in_steady_state(R_load):
+    """Each step is integrated as the line between its ends, and its
+    square exactly, h·(a² + a·c + c²)/3. The trapezoid of the squared
+    samples read the DCM diode's P_avg +16 % high on auto (one long step
+    across its down-ramp) and DSED's -69 % (its jump drawn as a ramp).
+    Measured now, t >= 2 ms, D1 P_avg: DCM 2.2797e-5 / 2.2766e-5 /
+    2.2785e-5 W (pwl T/1000, auto, dsed), CCM 3.0867e-3 / 3.0860e-3 /
+    3.0859e-3 W."""
+    ref = {}
+    for engine in ("pwl", "auto", "dsed"):
+        b, r = _boost_run(0.7, R_load, engine)
+        s, _, msgs = _report(b, _Window(r, 2e-3), [])
+        assert not msgs, (engine, msgs)
+        for name in ("D1", "Q"):
+            e = _entry(s, name)
+            if engine == "pwl":
+                ref[name] = e
+                continue
+            assert e["P_avg"] == pytest.approx(ref[name]["P_avg"],
+                                               rel=5e-3), (engine, name)
+            assert e["i_rms"] == pytest.approx(ref[name]["i_rms"],
+                                               rel=5e-3), (engine, name)
+
+
+def _sync_buck(R_load: float):
+    """48 V synchronous buck, add_mosfet HS / LS with body diodes,
+    22 µH, 100 µF || R_load, 100 kHz, D = 0.4, 200 ns dead time."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 48.0)
+    b.add_mosfet("HS", "vin", "sw")
+    b.add_mosfet("LS", "sw", "gnd")
+    b.add_inductor("L1", "sw", "out", 22e-6)
+    b.add_capacitor("C1", "out", "gnd", 100e-6)
+    b.add_resistor("RL", "out", "gnd", R_load)
+    T, D, TD = 1e-5, 0.4, 200e-9
+    hs, ls = b.switch_index_of("HS"), b.switch_index_of("LS")
+
+    def pwm(t):
+        x = t % T
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(hs, x < D * T)
+        m.set(ls, (D * T + TD) <= x < (T - TD))
+        return m
+    return b, pwm, T
+
+
+@pytest.mark.parametrize("engine", ("pwl", "auto", "dsed"))
+def test_sync_buck_pair_charge_is_the_inductor_charge(engine):
+    """The high-side pair (HS minus its body diode) carries i_L over
+    exactly the steps the record has it ON. DSED read that pair's charge
+    +72 % high at RL = 50 Ω (1.250e-3 C against 7.27e-4 C): the charge
+    of every turn-on jump went to the wrong device. Now pwl T/1000
+    +0.66 % (its own commutation steps), auto -0.02 %, dsed 0.000 %."""
+    b, pwm, T = _sync_buck(50.0)
+    r = _run(b, 2e-3, engine, dt=T / 1000, switch_fn=pwm)
+    s, _, msgs = _report(b, r, [])
+    assert not msgs, msgs
+    t = np.asarray(r.times)
+    i_l = np.asarray(r.i("L1"))
+    S = np.asarray(r.switch_states, dtype=bool)
+    hs_on = S[1:, b.switch_index_of("HS")] | S[1:, b.switch_index_of(
+        "HS_body")]
+    ls_on = S[1:, b.switch_index_of("LS")] | S[1:, b.switch_index_of(
+        "LS_body")]
+    seg = np.diff(t) * 0.5 * (i_l[:-1] + i_l[1:])
+    q_exact = seg[hs_on & ~ls_on].sum()
+    e = {x["name"]: x for x in s}
+    q_pair = (e["HS"]["i_avg"] - e["HS_body"]["i_avg"]) * (t[-1] - t[0])
+    tol = 1e-2 if engine == "pwl" else 1e-3
+    assert q_pair == pytest.approx(q_exact, rel=tol)
+
+
+@pytest.mark.parametrize("R_load", (500.0, 20.0))
+def test_dsed_switch_edge_energy_reads_the_edge_itself(R_load):
+    """E_on scales with the load current just after the edge. On DSED
+    the next sample is a whole 1 µs step into the on-time, so E_on read
+    +4.7 % (DCM) / +3.7 % (CCM) against pwl; the current at the edge is
+    the event's right limit. Measured now: DCM 2.1771e-4 / 2.1810e-4 J,
+    CCM 4.4355e-4 / 4.4388e-4 J (dsed / pwl T/1000)."""
+    spec = {"Q": {"E_on_ref": 1e-6, "E_off_ref": 1e-6, "V_ref": 24.0,
+                  "I_ref": 2.0}}
+    out = {}
+    for engine in ("pwl", "dsed"):
+        b, r = _boost_run(0.7, R_load, engine)
+        out[engine] = _entry(_report(b, r, [], switch_specs=spec)[0], "Q")
+    for key in ("E_sw_on_total", "E_sw_off_total"):
+        assert out["dsed"][key] == pytest.approx(out["pwl"][key],
+                                                 rel=5e-3), key
+
+
+def test_recoveries_after_a_start_up_inrush_are_not_dropped():
+    """400 V boost, 10 µH, 1 mF || 2 kΩ, D = 0.01 at 100 kHz, Q_rr =
+    100 nC. The start-up inrush peaks at 4 kA; afterwards each cycle is
+    a light-load DCM recovery of ~4 A (forward charge 0.14-0.21 µC,
+    above Q_rr) against ~400 V. The old rule (I_F_peak >= 1e-3 ·
+    i_peak of the whole run) dropped 237 of them: n_turn_off_events 61,
+    f_sw_estimate 20.3 kHz, E_sw_total 2.46e-3 J, no warning. Judged
+    by their own charge they count: 298 turn-offs, f_sw 99.3 kHz,
+    1.195e-2 J."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 400.0)
+    b.add_inductor("L1", "vin", "sw", 10e-6)
+    b.add_switch("Q1", "sw", "gnd", g_on=100.0, g_off=1e-9)
+    b.add_diode("D1", "sw", "out", 1e3, 1e-9, V_th=0.7)
+    b.add_capacitor("C1", "out", "gnd", 1e-3)
+    b.add_resistor("RL", "out", "gnd", 2000.0)
+    T = 1e-5
+    q = b.switch_index_of("Q1")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q, (t % T) < 0.01 * T)
+        return m
+    r = _run(b, 3e-3, "pwl", dt=T / 1000, switch_fn=pwm)
+    s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 100e-9}})
+    d = _entry(s, "D1")
+    assert not msgs, msgs
+    assert np.abs(np.asarray(r.i("L1"))).max() > 1e3
+    assert d["n_turn_off_events_dropped"] == 0
+    assert d["f_sw_estimate"] == pytest.approx(1e5, rel=0.02)
+    # Every light-load recovery is ~Q_rr · 400 V = 4e-5 J.
+    assert d["E_sw_total"] > 0.9 * 270 * 100e-9 * 400.0
+
+
+def test_immaterial_reconductions_are_bounded_by_charge():
+    """The RL half-wave's fixed-engine blips (single steps at ~36 µA,
+    ~7e-11 C, against Q_rr = 1 µC) are still not turn-offs, and the
+    energy they would add is reported and negligible."""
+    _, d, _, msgs = _rl_run(0.7, "pwl")
+    assert d["n_turn_off_events"] == 4
+    assert d["n_turn_off_events_dropped"] > 0
+    assert 0.0 <= d["E_sw_dropped"] < 1e-3 * d["E_sw_total"]
+    assert not any("would add" in m for m in msgs), msgs
+
+
+def test_rule_violation_names_the_actual_violation():
+    """The auto-engine bridge with line inductance holds D2 / D4 ON
+    while reverse-biased. The warning said 'e.g. OFF while
+    forward-biased', the opposite case; it now names what happened and
+    that the whole circuit is suspect from there on."""
+    b = _bridge_with_line_l(0.7)
+    r = _run(b, 0.08, "auto", dt=1e-6)
+    _, _, msgs = _report(b, r, list(BRIDGE))
+    rule = [m for m in msgs if _RULE in m]
+    assert rule, msgs
+    for m in rule:
+        assert "ON while reverse-biased" in m or "OFF while" in m, m
+        assert "every switched branch" in m, m
+    assert any("ON while reverse-biased" in m for m in rule), rule
