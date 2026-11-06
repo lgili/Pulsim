@@ -37,13 +37,24 @@ recognises. Common fields:
 | `i_avg`, `i_rms`, `i_peak` | float | every device |
 | `P_avg`, `E_total` | float | resistor / diode / switch |
 | `duty_conducting` | float ∈ [0, 1] | diode |
-| `duty_closed` | float ∈ [0, 1] | switch (needs `switch_fn=`) |
+| `duty_closed` | float ∈ [0, 1] | switch |
+
+Switch and diode states are not inferred. Every engine records, with
+each stored sample, the switch / diode mask it **stamped** for the solve
+that produced it (`result.switch_states`, one bool column per
+`builder.switch_index_of(name)`), so a switched branch's current is
+exactly `(g_on if closed else g_off) · v`. A PWL diode needs this: its ON
+state is a pure conductance, so a diode carrying 48 A at `g_on = 1e3`
+sits at 48 mV — inside `0 < v_D < V_th`, where the voltage alone cannot
+say whether it conducts. `switch_fn=` is only needed for a result built
+without the record (it is then re-evaluated, with a warning). Duties are
+time-weighted per step, so a variable-step grid does not bias them.
 
 PSIM-style datasheet annotations add:
 
 | Field | Source |
 |---|---|
-| `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `f_sw_estimate` | diode + `diode_specs` |
+| `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `n_turn_off_events_capped`, `f_sw_estimate` | diode + `diode_specs` |
 | `E_sw_on_total`, `E_sw_off_total`, `n_turn_on_events` | switch + `switch_specs` |
 | `P_core_avg`, `E_core_total`, `B_peak` | inductor + `core_loss_specs` |
 
@@ -97,9 +108,22 @@ diode_specs = {"D1": {"Q_rr": 50e-9}}
 diode_specs = {"D1": {"E_rr_ref": 30e-6, "V_R_ref": 600.0}}
 ```
 
-For every turn-off event in `result.commutation_events` matching the
-branch, Pulsim interpolates `|V_R(t_event)|` from the trace and
-accumulates `E_rr = Q_rr · V_R` or `E_rr = E_rr_ref · (V_R / V_R_ref)`.
+A turn-off is the end of a conducting stretch of the diode's recorded
+state. For each one Pulsim takes the SETTLED reverse voltage `V_R` (the
+time-weighted `|v_D|` over two mean steps after the first blocking
+sample — not the first blocking sample, which can sit inside a
+femtosecond stiff-mode transient) and accumulates
+`E_rr = Q_rr · V_R` or `E_rr = E_rr_ref · (V_R / V_R_ref)`.
+
+Two guards keep immaterial conduction out, and both are reported:
+
+* a stretch whose peak forward current never reaches `1e-3 · i_peak` is
+  not a recovery (`n_turn_off_events_dropped`; excluded from
+  `n_turn_off_events` and `f_sw_estimate`) — the fixed engine's
+  trapezoidal stiff mode can turn a reverse-biased diode ON for single
+  ~µA steps;
+* no event recovers more than its own forward charge: `E_rr` is capped
+  at `Q_F · V_R` (`n_turn_off_events_capped`).
 
 The `SwitchedDiode` kernel model has no physical recovery charge — this
 is a datasheet annotation pass, matching the LTspice "ideal-diode-with-Qrr"

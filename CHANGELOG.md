@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+* **Diode and switch currents, duties and losses come from the mask the
+  solver stamped.** `SimulationResult.switch_states` records, per stored
+  sample, the switch / diode mask of the solve that produced it (all
+  engines; 1 byte per sample for up to 8 switch-kind branches — +1.8 %
+  on a 1e6-sample buck), and `result.i()`, `device_loss_summary` and
+  `device_thermal_summary` read `i = g(mask) · v` from it. A PWL diode's
+  ON state is a pure conductance, so a conducting diode sits at
+  `i / g_on`, inside `0 < v_D < V_th`: the old `v_D > V_th` rule reported
+  every bridge diode at the `V_th = 0.7` default as idle (0 A, 0 W), and
+  the interim post-hoc inference lost the charge whenever a snubber,
+  an ideal transformer or a VCVS sat on the circuit (0.000 duty on a
+  transformer-secondary rectifier). Now charge closes to ~3e-12 on
+  `engine='pwl'` in all of those. A result without a record falls back
+  with a `RuntimeWarning` that names the reason.
+* **Reverse-recovery loss counts real turn-offs only.** Conduction
+  stretches below `1e-3 · i_peak` are dropped and reported
+  (`n_turn_off_events_dropped`), and no event recovers more than its own
+  forward charge (`n_turn_off_events_capped`): an RL half-wave at
+  `V_th = 0.7` counted 48 recoveries on `engine='pwl'` (4× the energy)
+  and 8 on `engine='auto'` (f_sw 120 Hz on a 60 Hz rectifier); both now
+  count 4 and agree with `V_th = 0` and `engine='dsed'` to 2 %.
+
 ## [2.0.0] — 2026-09-08
 
 ### Release-readiness pass

@@ -25,10 +25,11 @@ Two modes:
 
    :func:`device_loss_summary` walks every resistor, inductor,
    ideal-switch and switched-diode branch and reports per-device
-   conduction statistics. Pass ``switch_fn=`` to reconstruct
-   switch conduction loss from the same deterministic mask the
-   simulation used; pass ``core_loss_specs=`` to add Steinmetz /
-   iGSE core loss on selected inductors.
+   conduction statistics. Switch and diode states come from the
+   kernel's per-sample record of the mask it stamped
+   (``result.switch_states``); ``switch_fn=`` is only needed for a
+   result built without that record. Pass ``core_loss_specs=`` to add
+   Steinmetz / iGSE core loss on selected inductors.
 
 The reconstruction is post-hoc only — the kernel itself stays
 fixed-dt and the result trace is processed in NumPy. No kernel
@@ -397,20 +398,27 @@ def _time_fraction(mask: np.ndarray, times: np.ndarray) -> float:
     return float(np.dot(m[1:], np.diff(t)) / (t[-1] - t[0]))
 
 
+# A conduction stretch whose forward current never reaches this
+# fraction of the diode's peak is not charged a reverse recovery.
+_RR_MATERIAL_FRACTION = 1e-3
+
+
 def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
-    """Turn-off instants of one diode, read from its reconstructed
+    """Turn-off instants of one diode, read from its recorded
     conduction-state trace (``pulsim._diode_state``).
 
-    One record per end of a conducting stretch: ``t`` is the first
-    sample the diode blocks, ``I_F`` the forward current on the last
-    conducting sample and ``V_R`` the SETTLED
-    reverse voltage it blocks: the time-weighted mean of ``|v_D|``
-    over the blocking samples within TWO mean steps of the run,
-    ``2 (t_end − t_0) / (n − 1)``, after the first blocking sample
-    (cut short where the diode turns back on; ``|v_D|`` on the first
-    blocking sample itself if it is the only one). Turn-offs are the
-    ends of the diode's CONDUCTING steps
-    (``DiodeStateTrace.conducting``).
+    One record per end of a conducting stretch (a maximal run of
+    ``DiodeStateTrace.conducting`` steps): ``t`` is the first sample
+    the diode blocks, ``I_F`` the forward current on the last
+    conducting sample, ``I_F_peak`` the largest forward current of the
+    stretch, ``Q_F`` the forward charge it conducted (trapezoid of
+    ``max(i_D, 0)`` over the stretch's steps), ``material`` whether
+    ``I_F_peak >= 1e-3 · i_peak`` of the whole run, and ``V_R`` the
+    SETTLED reverse voltage it blocks: the time-weighted mean of
+    ``|v_D|`` over the blocking samples within TWO mean steps of the
+    run, ``2 (t_end − t_0) / (n − 1)``, after the first blocking
+    sample (cut short where the diode turns back on; ``|v_D|`` on the
+    first blocking sample itself if it is the only one).
 
     Not simply ``|v_D|`` on the first blocking sample. When the diode
     turns off at its current zero and leaves a node held only by
@@ -428,17 +436,13 @@ def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
       single samples read 5.76 V and 63.56 V. Two steps average the
       alternation out exactly (34.66 V).
 
-    On a hard-switched turn-off (the node is clamped, no stiff mode)
-    the two windows read the same constant voltage.
-
-    Not ``result.commutation_events``: the fixed engine records an
-    event only when ``v_D − V_th`` changes sign between two stored
-    samples, which a conducting diode with ``V_th > 0`` never does
-    (0 events on a 50 Hz bridge at ``V_th = 0.7``), and its
-    interpolated event time sits AT the current zero, where an ideal
-    diode's voltage is ~0 — so ``|v_D(t_event)|`` put ``V_R`` ≈ 1 mV
-    into every ``E_rr = Q_rr · V_R`` and the recovery loss read zero
-    on a 48 V hard-switched buck."""
+    ``material`` and ``Q_F`` exist for the stretches that are not a
+    forward conduction worth a recovery: on an RL half-wave rectifier
+    at ``V_th = 0.7`` the fixed engine's trapezoidal g_off/L stiff mode
+    turns the reverse-biased diode ON for single steps at ~36 µA
+    (5.6e-6 · i_peak, ~7e-11 C each). Charging each of those the full
+    ``Q_rr · V_R`` inflated ``E_sw_total`` 4× (48 "turn-offs" instead
+    of 4). See :func:`_diode_switching_loss`."""
     # Transitions of the per-step CONDUCTING flag, not of the raw
     # stamp: a V_th = 0 diode the fixed engine chatters ON/OFF at
     # ~1e-7 A is not recovering from a forward current each time.
@@ -449,14 +453,29 @@ def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
     t = np.asarray(times, dtype=float)
     ks = np.nonzero(closed[:-1] & ~closed[1:])[0] + 1
     v_abs = np.abs(np.asarray(trace.v, dtype=float))
-    i = trace.current
+    i = np.asarray(trace.current, dtype=float)
+    i_fwd = np.maximum(i, 0.0)
+    i_pk = float(np.max(np.abs(i))) if i.size else 0.0
     span = float(t[-1] - t[0])
     window = 2.0 * span / (n - 1) if span > 0 else 0.0
-    # Index of the next ON sample after each turn-off (n if none).
+    # Forward charge per step (t[j-1], t[j]], cumulated, so a stretch's
+    # charge is a difference of two entries.
+    dq = np.zeros(n)
+    dq[1:] = 0.5 * (i_fwd[:-1] + i_fwd[1:]) * np.diff(t)
+    q_cum = np.cumsum(dq)
+    # Index of the next ON sample after each turn-off (n if none), and
+    # the first conducting step of each stretch.
     on_idx = np.nonzero(closed)[0]
     ends = np.append(on_idx, n)[np.searchsorted(on_idx, ks)]
+    starts_all = np.nonzero(closed & ~np.concatenate(([False],
+                                                       closed[:-1])))[0]
     out: List[Dict[str, float]] = []
     for k, end in zip(ks.tolist(), ends.tolist()):
+        k1 = int(starts_all[np.searchsorted(starts_all, k) - 1])
+        # Conducting steps k1 .. k-1 (step j spans (t[j-1], t[j]]).
+        Q_F = float(q_cum[k - 1] - (q_cum[k1 - 1] if k1 > 0 else 0.0))
+        lo_s = max(k1 - 1, 0)
+        I_F_peak = float(i_fwd[lo_s:k].max())
         # The window opens at the first blocking SAMPLE, not at the
         # last conducting one: the step that produced sample k may be
         # the long one that carried the current down to its zero
@@ -475,7 +494,10 @@ def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
                 wsum += w
         V_R = acc / wsum if wsum > 0 else float(v_abs[k])
         out.append({"t": float(t[k]), "V_R": float(V_R),
-                    "I_F": float(abs(i[k - 1]))})
+                    "I_F": float(abs(i[k - 1])),
+                    "I_F_peak": I_F_peak, "Q_F": Q_F,
+                    "material": bool(
+                        I_F_peak >= _RR_MATERIAL_FRACTION * i_pk)})
     return out
 
 
@@ -500,15 +522,28 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
 
     Either form yields the same number when
     ``E_rr_ref = Q_rr · V_R_ref``. ``turn_offs`` comes from
-    :func:`_diode_turn_offs`: ``V_R`` is the reverse voltage on the
-    first stored sample the diode blocks — the voltage it recovers
+    :func:`_diode_turn_offs`: ``V_R`` is the settled reverse voltage
+    the diode blocks after the turn-off — the voltage it recovers
     against (full ``V_in`` for a hard-switched freewheel diode, near
     zero for a naturally commutated line rectifier).
+
+    Two guards keep immaterial conduction out of the total, and both
+    are reported:
+
+    * a stretch whose peak forward current stays below
+      ``1e-3 · i_peak`` is not a turn-off at all
+      (``n_turn_off_events_dropped``; excluded from
+      ``n_turn_off_events`` and ``f_sw_estimate``);
+    * no event recovers more energy than ``Q_F · V_R``, the stretch's
+      own forward charge recovered against ``V_R``
+      (``n_turn_off_events_capped``).
 
     The ideal ``SwitchedDiode`` kernel model has no physical
     recovery charge; this is a datasheet annotation, matching
     PSIM / LTspice "ideal-diode-with-Qrr" post-processing.
     """
+    n_all = len(turn_offs)
+    turn_offs = [ev for ev in turn_offs if ev.get("material", True)]
     n_off = len(turn_offs)
     T = (times[-1] - times[0]) if times.size > 1 else 0.0
     Q_rr = float(spec.get("Q_rr", 0.0))
@@ -518,6 +553,8 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
 
     bookkeeping = {
         "n_turn_off_events": int(n_off),
+        "n_turn_off_events_dropped": int(n_all - n_off),
+        "n_turn_off_events_capped": 0,
         "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
     }
     if E_rr_curve is not None and V_R_ref <= 0:
@@ -541,6 +578,16 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
         E_per_event = E_rr_ref * (V_R / V_R_ref)
     else:
         E_per_event = Q_rr * V_R
+    # A diode cannot recover more charge than it conducted: cap each
+    # event at Q_F · V_R, the energy of recovering ALL of the stretch's
+    # forward charge (the datasheet Q_rr assumes a forward current that
+    # stored at least that much).
+    Q_F = np.asarray([ev.get("Q_F", np.inf) for ev in turn_offs],
+                     dtype=float)
+    cap = Q_F * V_R
+    capped = E_per_event > cap
+    E_per_event = np.where(capped, cap, E_per_event)
+    bookkeeping["n_turn_off_events_capped"] = int(capped.sum())
     E_total = float(np.sum(E_per_event))
     return {
         "E_sw_total": E_total,
@@ -832,18 +879,19 @@ def device_loss_summary(
       in ``core_loss_specs``, the entry also gets ``P_core_avg``,
       ``E_core_total`` and ``B_peak`` (Steinmetz / iGSE).
     * **diode** (ideal switched diode with ``g_on`` / ``g_off``) —
-      the per-sample conduction state is reconstructed by
-      :mod:`pulsim._diode_state` (the kernel's commutation rule plus a
-      node current balance; NOT ``v_D > V_th`` — a conducting PWL
-      diode drops ``i / g_on``, far below ``V_th``). Reports the same
-      current + power metrics as the resistor path, plus
+      the per-sample conduction state is the stamp the solver recorded
+      (:mod:`pulsim._diode_state`; NOT ``v_D > V_th`` — a conducting
+      PWL diode drops ``i / g_on``, far below ``V_th``). Reports the
+      same current + power metrics as the resistor path, plus
       ``duty_conducting`` (time-weighted fraction of the run carrying
-      forward current). A ``RuntimeWarning`` names the diode when its
-      state could not be recovered on some samples.
-    * **switch** (ideal switch with ``g_on`` / ``g_off``) — requires
-      ``switch_fn`` so the per-step closed/open mask can be sampled
-      deterministically. Without ``switch_fn`` the switch entry is
-      skipped (kept honest — no silent default).
+      forward current). A ``RuntimeWarning`` names the diode when the
+      result carries no record (the state is then replayed from the
+      kernel rule) or when the engine held it across its own
+      commutation rule.
+    * **switch** (ideal switch with ``g_on`` / ``g_off``) — the
+      recorded stamped mask; without a record, ``switch_fn`` is
+      re-evaluated (with a warning), and without either the switch
+      entry is skipped (kept honest — no silent default).
 
     Parameters
     ----------
@@ -886,12 +934,14 @@ def device_loss_summary(
             # diode carried just before each recovery.
             {"E_rr_curve": [(I_F, E_rr), …], "V_R_ref": float (V)}
 
-        For each ON→OFF transition of the diode's reconstructed
-        conduction state the helper takes ``V_R`` = the reverse
-        voltage on the first sample the diode blocks and accumulates
-        ``E_rr_event = Q_rr · V_R`` or
-        ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``. Reports
-        ``E_sw_total``, ``P_sw_avg``, ``n_turn_off_events``,
+        For each end of a conducting stretch of the diode's recorded
+        state the helper takes ``V_R`` = the settled reverse voltage it
+        blocks and accumulates ``E_rr_event = Q_rr · V_R`` or
+        ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``, capped at the
+        stretch's own forward charge times ``V_R``; stretches whose
+        forward current never reaches ``1e-3 · i_peak`` are dropped.
+        Reports ``E_sw_total``, ``P_sw_avg``, ``n_turn_off_events``,
+        ``n_turn_off_events_dropped``, ``n_turn_off_events_capped``,
         ``f_sw_estimate``.
     switch_specs : mapping, optional
         Per-switch datasheet annotations for MOSFET / IGBT-style
@@ -995,6 +1045,14 @@ def device_loss_summary(
         switch_specs, "switch_specs")
     cond_by_bid, cond_by_name = _build_spec_lookup(
         conduction_specs, "conduction_specs")
+
+    # The kernel's per-sample record of the stamped mask (None for a
+    # result that carries none) and each switch-kind branch's bit.
+    kernel_masks, _ = _views.recorded_switch_states(result, builder)
+    try:
+        switch_bits = _views.switch_bits_by_branch(builder)
+    except Exception:  # noqa: BLE001 — a duck-typed builder
+        switch_bits = {}
 
     summary: List[Dict[str, Any]] = []
     switch_seq_idx = 0  # increments once per Switch / Diode branch
@@ -1119,9 +1177,12 @@ def device_loss_summary(
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
                 switch_seq_idx += 1
                 continue
-            if switch_fn is None:
-                # Honest skip — without switch_fn we have no way to
-                # know the per-step mask state.
+            sw_bit = switch_bits.get(int(bid), switch_seq_idx)
+            if switch_fn is None and not (
+                    kernel_masks is not None
+                    and 0 <= sw_bit < kernel_masks.shape[1]):
+                # Honest skip — no recorded mask and no switch_fn: no
+                # way to know the per-step state.
                 switch_seq_idx += 1
                 continue
             from_id, to_id = desc.get("nodes", (None, None))
@@ -1130,12 +1191,12 @@ def device_loss_summary(
                 continue
             v_SW = (_node_voltage_trace(states, int(from_id))
                     - _node_voltage_trace(states, int(to_id)))
-            # Recorded mask if available, else re-evaluate switch_fn with
-            # a voltage-consistency guard (robust to the closed-loop
-            # post-hoc mask desync — see _result_views).
+            # The kernel's record of the stamped mask; without one, a
+            # SwitchMaskRecorder, else switch_fn re-evaluated under a
+            # voltage-consistency guard (see _result_views).
             closed = _views.resolve_switch_closed_trace(
                 switch_fn=switch_fn, result=result, times=times,
-                switch_idx=switch_seq_idx, v_branch=v_SW, name=name)
+                switch_idx=sw_bit, v_branch=v_SW, name=name)
             g_arr = np.where(closed, g_on, g_off)
             i_SW = v_SW * g_arr  # branch current at each sample
             stats = _conduction_stats(v_SW, g_arr, times)

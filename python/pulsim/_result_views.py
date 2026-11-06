@@ -68,6 +68,80 @@ def node_voltage_trace(states: np.ndarray, node_id: int) -> np.ndarray:
     return states[:, node_id]
 
 
+# ---------------------------------------------------------------
+# The kernel's per-sample record of the STAMPED mask
+# ---------------------------------------------------------------
+
+def recorded_switch_states(result, builder=None):
+    """``(states, reason)``: the ``(n_samples, n_switches)`` bool array
+    of the switch / diode mask the solver stamped for each stored
+    sample (``SimulationResult.switch_states``), or ``(None, reason)``
+    when the result carries no usable record — ``reason`` says why,
+    for the fallback's warning.
+
+    The record is validated against the result (one row per sample)
+    and, when ``builder`` is given, against the circuit (one column per
+    switch-kind branch)."""
+    try:
+        rec = getattr(result, "switch_states", None)
+    except Exception as exc:  # noqa: BLE001 — a broken property
+        return None, f"reading result.switch_states failed ({exc!r})"
+    if rec is None:
+        return None, ("result.switch_states is absent — a result not "
+                      "produced by a kernel engine, or one whose "
+                      "engine path does not record it")
+    arr = np.asarray(rec, dtype=bool)
+    n = int(np.asarray(result.times).shape[0])
+    if arr.ndim != 2 or arr.shape[0] != n:
+        return None, (f"result.switch_states has shape {arr.shape}, "
+                      f"not ({n}, n_switches)")
+    if builder is not None:
+        try:
+            n_sw = int(builder.graph.num_switches)
+        except Exception:  # noqa: BLE001 — a duck-typed builder
+            n_sw = arr.shape[1]
+        if arr.shape[1] != n_sw:
+            return None, (f"result.switch_states has {arr.shape[1]} "
+                          f"columns but the circuit has {n_sw} "
+                          f"switch-kind branches")
+    return arr, ""
+
+
+def recorded_unsolved(result, n: int) -> np.ndarray:
+    """Per-sample bool: the sample was not produced by a solve under
+    its recorded mask (``SimulationResult.switch_states_unsolved``)."""
+    u = getattr(result, "switch_states_unsolved", None)
+    if u is None:
+        return np.zeros(n, dtype=bool)
+    u = np.asarray(u, dtype=bool)
+    return u if u.shape == (n,) else np.zeros(n, dtype=bool)
+
+
+def switch_bits_by_branch(builder) -> "dict[int, int]":
+    """``{branch_id: SwitchStateMask bit}`` for every switch-kind
+    branch (controlled switches, PWL diodes, MOSFET body diodes — they
+    interleave in builder order). ``switch_index_of(name)`` is the
+    authority; an unnamed branch falls back to its position among the
+    switch / diode components."""
+    out: "dict[int, int]" = {}
+    pos = 0
+    for c in sorted(builder.components(),
+                    key=lambda d: int(d.get("branch_id", -1))):
+        if c.get("kind") not in ("switch", "diode"):
+            continue
+        bid = int(c["branch_id"])
+        bit = pos
+        name = c.get("name")
+        if name:
+            try:
+                bit = int(builder.switch_index_of(name))
+            except Exception:  # noqa: BLE001 — alias / unnamed
+                bit = pos
+        out[bid] = bit
+        pos += 1
+    return out
+
+
 def evaluate_switch_mask_trace(
     switch_fn: Callable[[float], Any],
     times: np.ndarray,
@@ -200,12 +274,24 @@ def resolve_switch_closed_trace(result: Any,
 
     Preference order:
 
-    1. A :class:`SwitchMaskRecorder` passed as ``switch_fn`` (exact
+    1. The kernel's own record of the mask it STAMPED for each sample
+       (``result.switch_states``) — exact on every engine, for
+       stateless and closed-loop switch_fns alike, with no switch_fn
+       call at all.
+    2. A :class:`SwitchMaskRecorder` passed as ``switch_fn`` (exact
        simulate-time history) — or a ``result._switch_masks`` 2-D bool
        array attached by the caller.
-    2. Re-evaluate ``switch_fn(t)`` (faithful for stateless switch_fns)
+    3. Re-evaluate ``switch_fn(t)`` (faithful for stateless switch_fns)
        then apply :func:`_voltage_consistency_guard`.
     """
+    kernel, _ = recorded_switch_states(result)
+    if kernel is not None and 0 <= switch_idx < kernel.shape[1]:
+        return np.asarray(kernel[:, switch_idx], dtype=bool)
+    if switch_fn is None:
+        raise ValueError(
+            f"switch {name!r}: the result carries no record of the "
+            f"stamped switch mask and no switch_fn was given to "
+            f"re-evaluate.")
     rec = getattr(switch_fn, "recorded_mask_trace", None)
     q = mask_sample_times(result, times)
     if callable(rec):
@@ -216,6 +302,13 @@ def resolve_switch_closed_trace(result: Any,
         if (arr.ndim == 2 and arr.shape[0] == np.asarray(times).size
                 and 0 <= switch_idx < arr.shape[1]):
             return arr[:, switch_idx].astype(bool)
+    warnings.warn(
+        f"switch {name!r}: the result carries no record of the stamped "
+        f"switch mask ({recorded_switch_states(result)[1]}), so "
+        f"switch_fn was re-evaluated after the run. That is exact only "
+        f"for a stateless switch_fn; use a result returned by "
+        f"pulsim.simulate(), which records the mask on every engine.",
+        RuntimeWarning, stacklevel=3)
     closed = evaluate_switch_mask_trace(switch_fn, q, switch_idx)
     return _voltage_consistency_guard(closed, v_branch, name=name)
 

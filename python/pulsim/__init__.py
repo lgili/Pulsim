@@ -861,13 +861,13 @@ def _result_i(self, name: str, t=None):
     | ``current_source``         | constant ``I`` from params              |
     | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
     |                            | on samples the solver stamped the diode |
-    |                            | ON, ``g_off`` otherwise (state from     |
-    |                            | ``pulsim._diode_state``; NOT            |
-    |                            | ``v_D > V_th`` — V_th is a commutation  |
-    |                            | threshold, not a drop)                  |
+    |                            | ON, ``g_off`` otherwise (the kernel's   |
+    |                            | per-sample ``switch_states`` record;    |
+    |                            | NOT ``v_D > V_th`` — V_th is a          |
+    |                            | commutation threshold, not a drop)      |
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
-    |                            | ``G = g_on`` when ``switch_fn`` mask    |
-    |                            | bit is set, ``g_off`` otherwise         |
+    |                            | ``G = g_on`` when the recorded stamped  |
+    |                            | mask bit is set, ``g_off`` otherwise    |
     +----------------------------+-----------------------------------------+
 
     Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -876,11 +876,12 @@ def _result_i(self, name: str, t=None):
     ``node_id < 0`` as ``V = 0`` instead of Python's
     negative-indexing into ``states``.
 
-    Switch-fn requirement. Switch-branch reconstruction needs the
-    per-step mask schedule. ``pulsim.simulate(...)`` auto-stashes the
-    composed ``switch_fn`` on ``result._switch_fn``; if you're
-    operating on a result built another way, set ``result._switch_fn
-    = your_switch_fn`` before calling ``.i()``.
+    Switch / diode state. Every engine records, per stored sample,
+    the mask it STAMPED for the solve that produced it
+    (``result.switch_states``); switch and diode currents read that,
+    with no ``switch_fn`` call. Only a result built another way (no
+    record) needs ``result._switch_fn = your_switch_fn`` for a switch,
+    and then the switch_fn is re-evaluated with a warning.
 
     Not yet supported (deferred to future PRs because their device
     params aren't exposed by ``builder.components()`` today):
@@ -1044,8 +1045,9 @@ def _result_i(self, name: str, t=None):
     if kind == "diode":
         # PWL switched diode: a pure conductance in each state (the
         # ON drop is i/g_on — there is NO V_th offset in the stamp;
-        # V_th only gates OFF→ON). The per-sample state comes from
-        # the one reconstruction shared with device_loss_summary and
+        # V_th only gates OFF→ON). The per-sample state is the
+        # kernel's record of the stamped mask, read through the one
+        # helper shared with device_loss_summary and
         # device_thermal_summary (`pulsim._diode_state`).
         try:
             float(params["g_on"])
@@ -1069,15 +1071,6 @@ def _result_i(self, name: str, t=None):
                 f"result.i({name!r}): switch params missing "
                 f"`g_on`/`g_off` ({exc!r})") from None
         sf = getattr(self, "_switch_fn", None)
-        if sf is None:
-            raise NotImplementedError(
-                f"result.i({name!r}): switch current reconstruction "
-                f"requires the original `switch_fn` to be available on "
-                f"the result. `pulsim.simulate(...)` auto-stashes it "
-                f"on `result._switch_fn`; if you built this result "
-                f"another way, set "
-                f"`result._switch_fn = your_switch_fn` before calling "
-                f"`.i()`.")
         try:
             seq_idx = int(builder.switch_index_of(name))
         except Exception as exc:  # noqa: BLE001 — usage error
@@ -1085,11 +1078,21 @@ def _result_i(self, name: str, t=None):
                 f"result.i({name!r}): switch_index_of failed "
                 f"({exc!r}); make sure {name!r} is a switch added "
                 f"via `builder.add_switch`.") from None
+        from ._result_views import recorded_switch_states as _rec_sw
+        if sf is None and _rec_sw(self, builder)[0] is None:
+            raise NotImplementedError(
+                f"result.i({name!r}): this result carries no record of "
+                f"the stamped switch mask, and switch current "
+                f"reconstruction then needs the original `switch_fn`. "
+                f"`pulsim.simulate(...)` records the mask on every "
+                f"engine; if you built this result another way, set "
+                f"`result._switch_fn = your_switch_fn` before calling "
+                f"`.i()`.")
         times_arr = _ta(self)
         v_sw = _v_branch()
-        # Prefer the recorded mask; else re-evaluate switch_fn with a
-        # voltage-consistency guard (robust to the closed-loop post-hoc
-        # mask desync — see _result_views.resolve_switch_closed_trace).
+        # The kernel's record of the stamped mask; without one, a
+        # recorder, else switch_fn re-evaluated under a
+        # voltage-consistency guard (_result_views).
         closed = _resolve_switch_closed(
             self, sf, times_arr, seq_idx, v_sw, name=name)
         G_arr = _np.where(closed, g_on, g_off)

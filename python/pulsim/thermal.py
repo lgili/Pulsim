@@ -572,14 +572,14 @@ def device_thermal_summary(
     """End-to-end ``per-device P(t) → T_j(t)`` glue.
 
     .. note::
-       For a **closed-loop** ``switch_fn`` (PI / PFC / FOC), wrap it in
-       :class:`pulsim.SwitchMaskRecorder` and pass that to both
-       :func:`pulsim.simulate` and this call, so the true historical
-       switch state is used. Otherwise ``switch_fn`` is re-evaluated
-       post-hoc — fine for stateless PWM, but a stateful controller has
-       since converged; a voltage-consistency guard catches the
-       resulting blocking-while-ON samples and warns, but the recorder
-       is exact.
+       Switch and diode states are read from the mask the solver
+       stamped for every sample (``result.switch_states``) — exact for
+       closed-loop (PI / PFC / FOC) controllers too, with no
+       ``switch_fn`` call. Only a result built without that record
+       re-evaluates ``switch_fn`` post-hoc (with a warning): fine for
+       stateless PWM, but a stateful controller has since converged;
+       there, wrap it in :class:`pulsim.SwitchMaskRecorder` and pass
+       that to both :func:`pulsim.simulate` and this call.
 
     When a device appears in ``conduction_specs`` (``{name|bid:
     {"V_f0"/"V_ce0": …, "r_on"/"r_ce": …}}``) its conduction power trace
@@ -617,8 +617,9 @@ def device_thermal_summary(
     switch_fn, switch_specs, diode_specs, core_loss_specs
         Forwarded into the loss-reconstruction phase — same shapes
         and semantics as :func:`pulsim.device_loss_summary`.
-        ``switch_fn`` is required when any switch entry is listed
-        in ``thermal_specs``.
+        ``switch_fn`` is required only when a switch entry is listed
+        in ``thermal_specs`` and the result carries no stamped-mask
+        record.
 
     Returns
     -------
@@ -700,15 +701,11 @@ def device_thermal_summary(
                         f"unknown device {key!r}.")
                 cond_by_bid[int(d["branch_id"])] = spec
 
-    # Need switch_seq_idx (same logic as device_loss_summary).
-    switch_seq_idx_by_bid = {}
-    switch_seq_counter = 0
-    for bid in range(builder.graph.num_branches):
-        desc = comps_by_bid.get(bid, {})
-        kind = desc.get("kind", "unknown")
-        if kind in ("diode", "switch"):
-            switch_seq_idx_by_bid[bid] = switch_seq_counter
-            switch_seq_counter += 1
+    # Each switch-kind branch's SwitchStateMask bit, and the kernel's
+    # per-sample record of the stamped mask (None if the result has
+    # none — then switch_fn is re-evaluated, see _result_views).
+    switch_seq_idx_by_bid = _views.switch_bits_by_branch(builder)
+    kernel_masks, _ = _views.recorded_switch_states(result, builder)
 
     out = []
     for bid, t_spec in sorted(thermal_by_bid.items()):
@@ -749,7 +746,7 @@ def device_thermal_summary(
             if not (np.isfinite(g_on) and np.isfinite(g_off)) \
                     or from_id is None or to_id is None:
                 continue
-            # Same reconstruction as device_loss_summary / result.i()
+            # Same recorded stamp as device_loss_summary / result.i()
             # (a PWL diode's ON drop is i/g_on, not V_th — see
             # pulsim._diode_state). The loss summary above already
             # warned about this diode, so stay quiet here.
@@ -771,14 +768,15 @@ def device_thermal_summary(
             if not (np.isfinite(g_on) and np.isfinite(g_off)) \
                     or from_id is None or to_id is None:
                 continue
-            if switch_fn is None:
-                raise ValueError(
-                    f"thermal_specs targets switch {name!r} but "
-                    "switch_fn= was not provided — pass the same "
-                    "callable you used in simulate().")
             sidx = switch_seq_idx_by_bid.get(bid)
             if sidx is None:
                 continue
+            if switch_fn is None and kernel_masks is None:
+                raise ValueError(
+                    f"thermal_specs targets switch {name!r}, the result "
+                    "carries no record of the stamped switch mask, and "
+                    "switch_fn= was not provided — pass the same "
+                    "callable you used in simulate().")
             v_SW = (_views.node_voltage_trace(states, int(from_id))
                     - _views.node_voltage_trace(states, int(to_id)))
             # Use the recorded mask when available, else re-evaluate
