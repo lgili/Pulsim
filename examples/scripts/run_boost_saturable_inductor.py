@@ -73,8 +73,10 @@ def main() -> None:
     v_out = np.array([s[vout_idx] for s in res.states])
     v_sw  = np.array([s[sw_idx]   for s in res.states])
 
-    k_skip = int(0.7 * res.num_steps())
-    v_mean = v_out[k_skip:].mean()
+    # Time-weighted (p.steady_state_stats): correct on any grid, including
+    # the variable-step one simulate() uses when no dt is given -- a plain
+    # mean over the samples is not.
+    v_mean = p.steady_state_stats(res, v_out, last=0.3 * (t_end - t_start)).mean
     print(f"  V_out DC ≈ {v_mean:.2f} V  (lower than the linear-L boost)")
 
     try:

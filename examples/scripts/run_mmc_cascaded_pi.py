@@ -256,19 +256,19 @@ def main() -> None:
     # KPIs
     # =========================================================================
 
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
     # Pre-step steady state (40-60 ms).
-    pre_mask = (log_t >= 40e-3) & (log_t < T_STEP)
+    pre_v_out = p.time_average(log_t, log_v_out, 40e-3, T_STEP)
     # Post-step steady state (90-100 ms).
-    post_mask = log_t >= 90e-3
-    pre_v_out  = log_v_out[pre_mask]
-    post_v_out = log_v_out[post_mask]
+    post_v_out = p.time_average(log_t, log_v_out, t_from=90e-3)
     print(f"\nKPIs:")
-    print(f"  V_out  pre-step  (40-60 ms): mean={pre_v_out.mean():.2f} V "
+    print(f"  V_out  pre-step  (40-60 ms): mean={pre_v_out:.2f} V "
           f"(target {V_OUT_REF_PRE} V, error "
-          f"{pre_v_out.mean()-V_OUT_REF_PRE:+.2f} V)")
-    print(f"  V_out  post-step (90-100 ms): mean={post_v_out.mean():.2f} V "
+          f"{pre_v_out-V_OUT_REF_PRE:+.2f} V)")
+    print(f"  V_out  post-step (90-100 ms): mean={post_v_out:.2f} V "
           f"(target {V_OUT_REF_POST} V, error "
-          f"{post_v_out.mean()-V_OUT_REF_POST:+.2f} V)")
+          f"{post_v_out-V_OUT_REF_POST:+.2f} V)")
     print(f"  Min / Max V_out during step transient: "
           f"{log_v_out.min():.2f} / {log_v_out.max():.2f} V")
     print(f"  v_C drift (start → end): "

@@ -80,7 +80,7 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
 
 Returns a `SimulationResult` with parallel arrays:
-- `result.times` — `list[float]`, length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on.
+- `result.times` — `list[float]`. With a fixed `dt`: length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on. Without one the grid is **variable-step** and the spacing is not uniform — average with [the time-weighted helpers](#statistics-over-a-result-time-weighted), not `.mean()`.
 - `result.states` — read-only `numpy.ndarray` of shape
   `(num_steps, pool.state_size(graph))`. A **zero-copy view** over the
   kernel's contiguous sample buffer (v2.0): indexing, slicing,
@@ -224,6 +224,80 @@ opts.store_every              # int
   `(num_steps, state_size)` (zero-copy view)
 - `result.commutation_events` — list[CommutationEvent] (event-detection details)
 - `result.num_steps()` — int
+
+## Statistics over a result (time-weighted)
+
+`result.times` is uniform only when you passed `dt`. Without one
+(`engine='auto'`, the default, picks TR-BDF2) and on `engine='trbdf2'` /
+`'dsed'`, the step controller packs samples around switching edges and
+diode events — down to femtosecond steps after a turn-off — and
+stretches them across the quiet stretches in between. Plain sample
+statistics then weight each *sample* equally instead of each *second*.
+
+Measured on an L–D–RC rectifier (20 V, 1 kHz sine; 111 µH, 2 Ω ‖ 10 µF),
+average output over 2–3 ms:
+
+| engine | samples | `v[t >= 2e-3].mean()` | `p.time_average(t, v, 2e-3)` |
+|---|---:|---:|---:|
+| `pwl`, `dt=2e-7` | 15001 | 6.3295 V | 6.3308 V |
+| `trbdf2`, `dt=4e-6` (ceiling) | 1775 | **3.0408 V** | 6.3298 V |
+| `auto`, no `dt` | 1297 | **5.0070 V** | 6.3300 V |
+
+The engines agree; the sample mean does not. The same applies to
+`np.sqrt((v**2).mean())`, and to slicing by index
+(`v[int(0.7 * len(v)):]` is not "the last 30 % of the time").
+
+```python
+import pulsim as p
+
+res = p.simulate(b, t_end=3e-3)                  # the rectifier above; variable-step
+
+s = p.steady_state_stats(res, "o", t_from=2e-3)  # node, branch, or array
+s.mean, s.rms, s.min, s.max, s.ripple_pp         # TimeStats
+
+s = p.steady_state_stats(res, "Lc", last=1e-3)  # branch current, last period
+p.time_average(res.times, res.v("o"), 2e-3, 3e-3)
+p.time_rms(res.times, res.i("Lc"), t_from=2e-3)
+t_w, v_w = p.time_window(res.times, res.v("o"), 2e-3, 3e-3)
+```
+
+| Function | Returns |
+|---|---|
+| `time_average(t, y, t_from=None, t_to=None)` | `(1/T) ∫ y dt` |
+| `time_rms(t, y, t_from=None, t_to=None)` | `sqrt((1/T) ∫ y² dt)` |
+| `time_window(t, y, t_from=None, t_to=None)` | samples inside the window, end points interpolated onto its edges |
+| `steady_state_stats(result, what, *, t_from=, last=, t_to=None, kind=None)` | `TimeStats(mean, rms, min, max, ripple_pp, t_from, t_to)` |
+
+What they do:
+
+- **Integrate the piecewise-linear waveform through the samples
+  exactly** — the curve a plot draws. Ramps and triangles come out
+  exact; a sine converges as the square of the step.
+- **Interpolate window edges** that fall between samples, so a window
+  covers exactly `[t_from, t_to]`.
+- **Repeated timestamps** (an event recorded on both sides of a jump)
+  get zero weight, and the jump is kept: a window that *starts* on the
+  event takes the post-jump value.
+- **Refuse** (`ValueError`) an empty or reversed window, one that
+  reaches outside the record, decreasing `t`, mismatched lengths, or
+  NaN/inf inside the window. `steady_state_stats` also requires
+  exactly one of `t_from=` / `last=`: averaging from `t = 0` would
+  fold the start-up transient into a "steady-state" figure.
+- `steady_state_stats(result, "name")` looks the name up as a node
+  (`result.v`) and as a branch (`result.i`); a name that is both raises
+  and asks for `kind='v'` / `kind='i'`. An array must be sampled on
+  `result.times`; for a signal with its own time base (observer logs,
+  `result.signal(...)`), call `time_average(t_sig, y_sig, ...)`.
+
+Choose a window that spans a whole number of switching (or line)
+periods; a fractional period biases the mean by up to half the ripple.
+
+`min` / `max` need no weighting, but on a variable grid they include
+every event-landing sample, sub-nanosecond excursions too. With an
+explicit `dt` the grid is uniform and `.mean()` agrees with
+`time_average` to about four significant digits (the difference is the
+half weight the trapezoid gives the two end samples) — the helpers are
+still the form that keeps working when the `dt` is dropped.
 
 ## YAML loader
 

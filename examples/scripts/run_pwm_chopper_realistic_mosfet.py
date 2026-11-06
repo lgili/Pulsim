@@ -72,7 +72,8 @@ def main() -> None:
 
     print(f"  V_drain range: [{v_drain.min():.2f}, {v_drain.max():.2f}] V "
           f"(target ~[1.45, 8])")
-    print(f"  V_drain mean:  {v_drain.mean():.2f} V (target ~5.4)")
+    # Time-weighted over the whole run (correct on any grid; a sample mean is not).
+    print(f"  V_drain mean:  {p.time_average(res.times, v_drain):.2f} V (target ~5.4)")
 
     try:
         import matplotlib.pyplot as plt

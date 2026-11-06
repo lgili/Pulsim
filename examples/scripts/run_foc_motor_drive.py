@@ -274,9 +274,12 @@ def main() -> None:
     i_q_arr = -np.sin(theta_arr)*alpha + np.cos(theta_arr)*beta
 
     # KPI — last 5 ms steady-state.
-    mask = times >= (T_END - 5e-3)
-    i_d_ss = i_d_arr[mask].mean()
-    i_q_ss = i_q_arr[mask].mean()
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
+    t_ss = T_END - 5e-3
+    mask = times >= t_ss
+    i_d_ss = p.time_average(times, i_d_arr, t_from=t_ss)
+    i_q_ss = p.time_average(times, i_q_arr, t_from=t_ss)
     print(f"\n  KPI (last 5 ms steady-state):")
     print(f"    i_d = {i_d_ss:+.3f} A  (target 0.0)")
     print(f"    i_q = {i_q_ss:+.3f} A  (target {I_Q_REF})")

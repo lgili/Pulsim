@@ -105,10 +105,12 @@ def run_case(spec: CaseSpec) -> dict:
         )
         result["samples"] = res.num_steps()
 
-        # Steady-state V_out (last 10 % of samples).
-        k_late = int(0.9 * res.num_steps())
-        v_out_arr = np.array([s[vout_idx] for s in res.states[k_late:]])
-        result["v_out_late"] = float(v_out_arr.mean())
+        # Steady-state V_out over the last 10 % of the run, time-weighted
+        # (p.time_average is correct on any grid; a sample mean is not).
+        t_arr = np.asarray(res.times)
+        v_out_arr = np.array([s[vout_idx] for s in res.states])
+        result["v_out_late"] = p.time_average(
+            t_arr, v_out_arr, t_from=t_arr[0] + 0.9 * (t_arr[-1] - t_arr[0]))
     except Exception as e:
         result["crashed"] = True
         result["error"] = str(e)[:120]

@@ -129,6 +129,15 @@ If `dt` is too large compared to the system's smallest time constant, the trapez
 
 **Fix:** profile to confirm where time is spent. The cache lookup is O(1); the trap solve is O(state_size) for a triangular back-sub. Newton refresh dominates for nonlinear circuits.
 
+### Symptom: the average changes when I drop `dt`
+
+Without `dt` the grid is variable-step: samples cluster around events,
+so `v[t > t0].mean()` over-weights them (an L–D–RC rectifier reads
+3.04 V instead of 6.33 V on TR-BDF2). The circuit did not change; the
+metric did. Use `p.steady_state_stats(res, "out", t_from=t0)` or
+`p.time_average(res.times, v, t0)` — see
+[Statistics over a result](api-reference.md#statistics-over-a-result-time-weighted).
+
 ## Builder / API pitfalls
 
 ### Symptom: "branch_id N is not a Resistor"

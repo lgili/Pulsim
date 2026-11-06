@@ -186,9 +186,12 @@ def main():
                                       shape_c*i_c[k])
         mech_replay.integrate(times[k], T_em, DT)
 
-    mask = times >= (T_END - 20e-3)
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
+    t_ss = T_END - 20e-3
+    mask = times >= t_ss
     print(f"\n  KPI (last 20 ms):")
-    print(f"    ω mean        = {omega[mask].mean():.2f} rad/s")
+    print(f"    ω mean        = {p.time_average(times, omega, t_from=t_ss):.2f} rad/s")
     print(f"    θ_m turns     = {theta_m[-1]/(2*math.pi):.2f}")
     print(f"    |i_a|_peak    = {np.abs(i_a[mask]).max():.2f} A")
     print(f"    final ω       = {motor.mech.omega_rad_s:.2f} rad/s")
