@@ -880,9 +880,17 @@ def _result_i(self, name: str, t=None):
     the mask it STAMPED for the solve that produced it
     (``result.switch_states``); switch and diode currents read that,
     with no ``switch_fn`` call. Row 0 of a run seeded with
-    ``initial_state`` is not a solve in this run
-    (``switch_states_unsolved``) and is read with the first solve's
-    mask. Only a result built another way (no record) needs
+    ``initial_state`` (including the state ``c0=`` / ``i0=`` build) is
+    not a solve in this run (``switch_states_unsolved``): its state
+    came from a solve whose mask this run does not know, so a switch
+    or diode current there is undefined. Reading it with any guessed
+    mask can invent a ``g_on·V`` current (48 kA through a buck's
+    MOSFET seeded on a gate edge), so that row returns the value of
+    the FIRST SOLVED sample after it instead: a real current, one step
+    late, never a phantom. (NaN would be more literal, but every
+    ``i0=`` / ``c0=`` run has such a row, and plots and sums of
+    ``result.i()`` would break.) The loss and thermal summaries do not
+    use the row at all. Only a result built another way (no record) needs
     ``result._switch_fn = your_switch_fn`` for a switch, and then the
     switch_fn is re-evaluated with a warning.
 
@@ -996,6 +1004,21 @@ def _result_i(self, name: str, t=None):
     def _finalize(col):
         return col if t is None else col[t]
 
+    def _hold_unsolved(col):
+        # A switched branch has no defined current on an unsolved row
+        # (switch_states_unsolved): it reads the next solved sample's
+        # value (NaN if there is none). See the docstring.
+        from ._result_views import recorded_unsolved as _uns
+        u = _uns(self, int(col.shape[0]))
+        if not u.any():
+            return col
+        col = _np.array(col, dtype=float, copy=True)
+        solved = _np.nonzero(~u)[0]
+        for k in _np.nonzero(u)[0].tolist():
+            j = _np.searchsorted(solved, k)
+            col[k] = col[solved[j]] if j < solved.size else _np.nan
+        return col
+
     # ----------------------- resistor --------------------------------
     if kind == "resistor":
         try:
@@ -1062,7 +1085,7 @@ def _result_i(self, name: str, t=None):
         _need_nodes()
         from ._diode_state import diode_state_trace as _diode_trace
         tr = _diode_trace(builder, self, b_id, stacklevel=3)
-        return _finalize(tr.current)
+        return _finalize(_hold_unsolved(tr.current))
 
     # ----------------------- switch ----------------------------------
     if kind == "switch":
@@ -1099,7 +1122,7 @@ def _result_i(self, name: str, t=None):
         closed = _resolve_switch_closed(
             self, sf, times_arr, seq_idx, v_sw, name=name)
         G_arr = _np.where(closed, g_on, g_off)
-        return _finalize(v_sw * G_arr)
+        return _finalize(_hold_unsolved(v_sw * G_arr))
 
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(

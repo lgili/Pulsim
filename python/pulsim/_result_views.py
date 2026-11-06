@@ -81,9 +81,11 @@ def recorded_switch_states(result, builder=None):
 
     The record is validated against the result (one row per sample)
     and, when ``builder`` is given, against the circuit (one column per
-    switch-kind branch). An unsolved row (a sample 0 seeded from
-    ``initial_state``) is returned with the mask of the first solve
-    after it (:func:`_borrow_for_unsolved`)."""
+    switch-kind branch). An unsolved row (``switch_states_unsolved``:
+    a sample 0 seeded from ``initial_state``) is returned as recorded,
+    the bits the solver carried in; they say nothing about the solve
+    that produced its state, so the consumers drop it
+    (:func:`solved_part`)."""
     try:
         rec = getattr(result, "switch_states", None)
     except Exception as exc:  # noqa: BLE001 — a broken property
@@ -112,7 +114,7 @@ def recorded_switch_states(result, builder=None):
             return None, (f"result.switch_states has {arr.shape[1]} "
                           f"columns but the circuit has {n_sw} "
                           f"switch-kind branches")
-    return _borrow_for_unsolved(arr, recorded_unsolved(result, n)), ""
+    return arr, ""
 
 
 def step_start_states(result, states: np.ndarray,
@@ -219,30 +221,78 @@ def pl_integral_abs(times: np.ndarray, y: np.ndarray,
                                     cross)))
 
 
-def _borrow_for_unsolved(arr: np.ndarray, unsolved: np.ndarray) -> np.ndarray:
-    """Read an UNSOLVED row (``switch_states_unsolved``: a sample 0
-    seeded from ``initial_state``, whose recorded bits are the mask the
-    solver carried in, not the one its state was solved under) with the
-    mask of the first solve after it.
+def first_solved_index(result) -> int:
+    """Index of the first sample produced by a solve under its recorded
+    mask: the number of leading UNSOLVED rows
+    (``switch_states_unsolved``; today only a sample 0 seeded from
+    ``initial_state``, or resumed from a snapshot without
+    ``stamped_mask``). 0 when there are none, or when no row is
+    solved."""
+    n = int(np.asarray(result.times).shape[0])
+    u = recorded_unsolved(result, n)
+    if not u.any():
+        return 0
+    solved = np.nonzero(~u)[0]
+    return int(solved[0]) if solved.size else 0
 
-    Measured on an RL half-wave seeded mid-conduction: the carried row
-    had the diode OFF while the seeded state carried 1.259 A through
-    it, a 1.26 A KCL residual at that one sample (every other sample
-    closes to 2e-12); the first solve has it ON, and reading row 0
-    with it closes KCL there too. Continuity is the better guess for a
-    single seeded sample: its state came out of a solve that the next
-    step continues. The flag itself is kept, so the commutation-rule
-    check still exempts the row."""
-    if not unsolved.any():
-        return arr
-    out = arr.copy()
-    solved = np.nonzero(~unsolved)[0]
-    for i in np.nonzero(unsolved)[0]:
-        j = solved[np.searchsorted(solved, i)] if (
-            solved.size and solved[-1] > i) else None
-        if j is not None:
-            out[i] = arr[j]
-    return out
+
+class _SolvedPart:
+    """``result`` from its first solved sample on: the per-sample
+    arrays sliced, everything else read from ``result``."""
+
+    def __init__(self, result, k0: int):
+        self._result = result
+        self._k0 = k0
+        n = int(np.asarray(result.times).shape[0])
+        self.times = np.asarray(result.times, dtype=float)[k0:]
+        self.states = states_as_array(result)[k0:]
+        sw = getattr(result, "switch_states", None)
+        self.switch_states = (None if sw is None
+                              else np.asarray(sw, dtype=bool)[k0:])
+        self.switch_states_unsolved = recorded_unsolved(result, n)[k0:]
+        masks = getattr(result, "_switch_masks", None)
+        if masks is not None:
+            arr = np.asarray(masks)
+            self._switch_masks = (arr[k0:] if arr.ndim == 2
+                                  and arr.shape[0] == n else arr)
+        idx = getattr(result, "right_limit_index", None)
+        if idx is not None:
+            idx = np.asarray(idx, dtype=np.int64)
+            keep = idx >= k0
+            self.right_limit_index = idx[keep] - k0
+            for name in ("right_limit_states",
+                         "right_limit_switch_states"):
+                arr = getattr(result, name, None)
+                if arr is not None:
+                    arr = np.asarray(arr)
+                    setattr(self, name, arr[keep] if arr.shape[:1]
+                            == keep.shape else arr)
+
+    def __getattr__(self, name):
+        return getattr(self._result, name)
+
+
+def solved_part(result):
+    """``result`` without its leading UNSOLVED rows
+    (:func:`first_solved_index`), or ``result`` itself when it has
+    none.
+
+    An unsolved row has no defined branch current: its state came out
+    of a solve this run did not record (a previous run, a hand-made
+    vector), and the recorded bits are only the ones the solver
+    carried in. Neither the carried bits nor the first solve's are
+    safe to read it with: at a gate edge the seeded state is the
+    pre-edge solve while every later mask is post-edge, and a buck
+    seeded there read M1 at g_on · 48 V = 48 kA (i_peak 48023.6 A,
+    P_avg 36× high on trbdf2, 3500× on pwl, no warning) with the
+    first solve's mask. So :func:`pulsim.device_loss_summary` and
+    :func:`pulsim.device_thermal_summary` start at the first solved
+    sample: peaks, RMS, averages, duty and every time integral cover
+    ``[t[k0], t_end]`` (on a fixed grid, one step less than the run),
+    and ``result.i()`` returns the first solved sample's value for a
+    switch or diode there."""
+    k0 = first_solved_index(result)
+    return result if k0 == 0 else _SolvedPart(result, k0)
 
 
 def record_advice(result) -> str:

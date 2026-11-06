@@ -1371,6 +1371,15 @@ def device_loss_summary(
       re-evaluated (with a warning), and without either the switch
       entry is skipped (kept honest — no silent default).
 
+    A run seeded with ``initial_state`` (or resumed from a snapshot
+    without ``stamped_mask``) has an UNSOLVED row 0
+    (``result.switch_states_unsolved``): its state came from a solve
+    whose mask the record does not know, so no switched-branch current
+    is defined there. Every statistic, average and integral then runs
+    from the first solved sample to the end of the run (one step less
+    than the run on a fixed grid); see
+    ``pulsim._result_views.solved_part``.
+
     Parameters
     ----------
     builder, result
@@ -1494,6 +1503,9 @@ def device_loss_summary(
         One entry per known device in branch-id order. Unknown
         kinds (sources, capacitors, ...) are skipped silently.
     """
+    # From the first solved sample on: a seeded, unsolved row 0 has no
+    # defined switched-branch current (_result_views.solved_part).
+    result = _views.solved_part(result)
     states = _states_as_array(result)
     times = _times_as_array(result)
     T = (times[-1] - times[0]) if times.size > 1 else 1.0

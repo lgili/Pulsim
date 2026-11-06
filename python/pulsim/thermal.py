@@ -655,10 +655,22 @@ def device_thermal_summary(
             {"branch_id": int, "kind": str, "name": str,
              "P_cond_avg": float, "P_sw_avg": float,
              "P_core_avg": float, "P_total_avg": float,
-             "T_j_trace": np.ndarray,  # °C
+             "T_j_trace": np.ndarray,  # °C (see below)
              "T_j_avg": float, "T_j_peak": float,
              "T_ambient_C": float,
              "R_th_total": float}      # sum of Foster R_th [K/W]
+
+    ``T_j_trace`` is the IIR output on :func:`compute_temperature`'s
+    grid: ``result.times`` on a fixed grid (``engine='pwl'``), a
+    uniform resample of it on a variable-step one (``'trbdf2'`` /
+    ``'auto'``). On ``engine='dsed'``,
+    whose step-start power is inserted after each event, it is sampled
+    back at ``result.times`` (one value per sample), and ``T_j_avg`` /
+    ``T_j_peak`` are read on the uniform internal grid, so the average
+    is over time. A seeded, unsolved row 0 has no defined
+    switched-branch power: the network starts at the first solved
+    sample, and a trace on ``result.times`` reads ``T_ambient_C`` at
+    the dropped row.
 
     Notes
     -----
@@ -674,8 +686,16 @@ def device_thermal_summary(
     if not thermal_specs:
         return []
 
+    # From the first solved sample on, as device_loss_summary: a
+    # seeded, unsolved row 0 has no defined switched-branch current
+    # (_result_views.solved_part). T_j_trace keeps one sample per
+    # result.times: the dropped rows read T_ambient, where the network
+    # starts.
+    n_full = int(np.asarray(result.times).shape[0])
+    result = _views.solved_part(result)
     states = _views.states_as_array(result)
     times = np.asarray(result.times, dtype=float)
+    n_lead = n_full - times.size
 
     # Resolve thermal_specs into branch_id-keyed mapping.
     try:
@@ -854,10 +874,33 @@ def device_thermal_summary(
             # Unsupported kind for the thermal pipeline.
             continue
 
-        T_j_trace = compute_temperature(
-            *_with_step_starts(times, P_cond_t + P_constant,
-                               P_start_t + P_constant),
-            stages, T_amb_dev)
+        t_aug, p_aug = _with_step_starts(times, P_cond_t + P_constant,
+                                         P_start_t + P_constant)
+        T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev)
+        if t_aug.size == times.size:
+            # pwl / trbdf2: unchanged (compute_temperature's own grid;
+            # a variable-step trace is resampled to a uniform one).
+            T_j_trace = T_j_int
+            T_j_avg = float(np.mean(T_j_trace))
+            T_j_peak = float(np.max(T_j_trace))
+            on_times = _views.grid_is_uniform(times)
+        else:
+            # engine='dsed': the step-start power was inserted, so the
+            # IIR ran on a longer grid (uniform after its resample).
+            # Sample it back at result.times, one value per sample, and
+            # average over TIME on the uniform internal grid (a plain
+            # mean of the trace at the clustered event times is not).
+            t_int = (t_aug if _views.grid_is_uniform(t_aug)
+                     else _views.resample_uniform(t_aug, p_aug)[0])
+            T_j_trace = np.interp(times, t_int, T_j_int)
+            T_j_avg = float(np.mean(T_j_int))
+            T_j_peak = float(np.max(T_j_int))
+            on_times = True
+        if n_lead and on_times:
+            # One value per result.times sample (a resampled
+            # variable-step trace is on its own grid and stays so).
+            T_j_trace = np.concatenate(
+                (np.full(n_lead, T_amb_dev), T_j_trace))
         T = (times[-1] - times[0]) if times.size > 1 else 1.0
         P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
                       else float(P_cond_t.mean()))
@@ -870,8 +913,8 @@ def device_thermal_summary(
             "P_core_avg": P_core_avg,
             "P_total_avg": P_cond_avg + P_constant,
             "T_j_trace": T_j_trace,
-            "T_j_avg": float(np.mean(T_j_trace)),
-            "T_j_peak": float(np.max(T_j_trace)),
+            "T_j_avg": T_j_avg,
+            "T_j_peak": T_j_peak,
             "T_ambient_C": T_amb_dev,
             "R_th_total": float(sum(s.R_th_K_per_W for s in stages)),
         })

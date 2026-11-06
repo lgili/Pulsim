@@ -36,8 +36,10 @@ nothing.
 ``result.switch_states_unsolved[k]`` flags the rare sample whose state was
 not a solve under its recorded mask (a sample 0 seeded from
 ``initial_state``); the recorded mask there is the bits the solver carried
-in, so the row is read with the mask of the first solve after it
-(``_result_views._borrow_for_unsolved``).
+in, which say nothing about the solve that produced the state, so the row
+has no defined current: ``result.i()`` returns the first solved sample's
+value there and the loss and thermal summaries start at that sample
+(``_result_views.solved_part``). The trace below keeps the carried bits.
 
 When a result carries no record (a hand-built result, a stitched
 ``AdaptiveResult`` whose segments lacked it, the DSED Python-adapter path),
