@@ -55,7 +55,10 @@
 ## 4. Examples
 
 - [x] 4.1 `examples/scripts/run_im_direct_online_start.py` — DOL start at 400 V / 50 Hz, plots stator current / rotor flux / torque / speed. Validated locally: motor reaches synchronous speed (1500 rpm) at 0 % slip with no load in 1.5 s sim time / 0.2 s wall.
-- [ ] 4.2 `examples/yaml/induction_motor_dol.yaml` — equivalent YAML showcase (deferred with task 3).
+- [x] 4.2 `examples/yaml/induction_motor_dol.yaml` — equivalent YAML showcase (deferred with task 3).
+  (Reconciled 2026-11: shipped as examples/induction_motor_dol.yaml in
+  8fb792cf; p.load_yaml_file returns a LoadedCircuit with the
+  IM_Rs_a / IM_E_a branches.)
 - [ ] 4.3 `examples/scripts/run_im_ifoc_closed_loop.py` — indirect FOC with torque-step response using `MixedDomainBlockChain` (deferred for the sensorless-observer change which depends on it).
   (Reconciled 2026-11: the script exists, but it runs at T_load = 0
   with no torque step and does not use MixedDomainBlockChain.)

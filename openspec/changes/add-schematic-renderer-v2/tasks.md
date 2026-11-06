@@ -123,12 +123,13 @@
   recognizer and LLM classifier).
 
 ## Phase 6 — Validation + ship
-- [x] 6.1 Run `pytest python/tests/test_schematic_*
+- [ ] 6.1 Run `pytest python/tests/test_schematic_*
   python/tests/test_topology_recognizer.py
   python/tests/test_llm_classifier.py
   python/tests/test_template_layouts.py` — all green.
-  (Reconciled 2026-11: the three existing files pass: 63 passed, 1
-  skipped (the gated real-API test).)
+  (Reconciled 2026-11: the three named files pass: 63 passed, 1
+  skipped (the gated real-API test). The test_schematic_* files of
+  1.10 were never restored, so this waits on 1.10.)
 - [ ] 6.2 Render the three benchmark circuits the user cares about
   (buck, boost, flyback) and visually confirm the SVG is publication-
   quality. Update golden fixtures if intentional adjustments are

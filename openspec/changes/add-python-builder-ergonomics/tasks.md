@@ -130,7 +130,10 @@
 - [x] 5.1 Update `docs/tutorials/basics.md` to show
       `add_capacitor("Cout", "vout", "gnd", 220e-6, c0=12.0)` as
       the recommended IC pattern. (Reconciled 2026-11: that page
-      never existed; the pattern is in `docs/helpers.md` §5.3.)
+      never existed; the pattern is in `docs/helpers.md` §5.3, with
+      `c0=12.0`, `i0=0.5` and `set_initial`. Kept ticked because the
+      content shipped; 5.2 is unticked because its YAML round-trip
+      did not.)
 - [ ] 5.2 Add or extend `docs/tutorials/gui-integration.md`
       explaining how `set_alias` round-trips GUI human labels
       through pulsim — concrete example with a YAML round-trip.

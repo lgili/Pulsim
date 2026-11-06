@@ -49,8 +49,19 @@
 ## 4. Examples — deferred to v1.5.0 final
 
 - [ ] 4.1 `examples/scripts/run_saturable_reactor_hysteresis.py` — 50 Hz mains transformer with JA core; demonstrates residual-flux-driven inrush and B-H loop family.
+  (Reconciled 2026-11: the inrush half ships as
+  examples/scripts/run_saturable_reactor_inrush.py: 50 Hz, JA core,
+  80 % residual M, inrush ratio 45.9x, B-H trace to CSV. It shows
+  one loop settling, not a loop family.)
 - [ ] 4.2 `examples/scripts/run_psfb_with_ja_transformer.py` — PSFB with JA transformer; compares average loss to Steinmetz / iGSE prediction.
-- [ ] 4.3 `examples/yaml/hysteretic_inductor_demo.yaml` — depends on YAML support.
+  (Reconciled 2026-11: examples/scripts/run_psfb_ja_loss_analysis.py
+  replays JA on a linear PSFB's captured current after the run; the
+  transformer is not hysteretic in the loop and there is no Steinmetz
+  or iGSE comparison.)
+- [x] 4.3 `examples/yaml/hysteretic_inductor_demo.yaml` — depends on YAML support.
+  (Reconciled 2026-11: shipped as examples/hysteretic_inductor_demo.yaml;
+  it loads and simulates as its header says: 0.06 s at dt = 2e-5,
+  3001 samples.)
 
 ## 5. Docs — deferred to v1.5.0 final
 

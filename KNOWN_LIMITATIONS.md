@@ -4,8 +4,9 @@
 > It lists the limitations re-verified on 2.0, each with its measured
 > effect and a workaround. This file is the 1.3 catalogue. Its sections
 > were not re-verified for 2.0, except two. The "Transient engines
-> (2.0)" defects still reproduce; the chatter circuit aborts at 10, 5
-> and 2 ns and runs at 50 ns. Two entries are out of date: `.subckt`
+> (2.0)" defects still reproduce; the chatter circuit aborts at 20, 10,
+> 5 and 2 ns and runs at 50 ns, 2.4 % low. Its Shockley workaround is a
+> model change: the output falls by 16.6 %. Two entries are out of date: `.subckt`
 > is now flattened, and since 1.4.0 the AC sweep has factorised with
 > the in-house `PulsimComplexSparseLuSolver`, not `Eigen::SparseLU`.
 
@@ -239,7 +240,11 @@ tolerances is not the remedy either (see the section above).
 **Workarounds.** A coarser `dt`, or smooth Shockley junctions
 (`add_shockley_diode`) for those diodes — with the four rectifier
 diodes swapped, the same circuit runs at 10 ns and agrees with the
-linear reference to 0.13 %.
+linear reference to 0.13 %. That reference also uses Shockley
+diodes. The swap changes the model: each junction drops about 0.7 V
+and a PWL diode drops none. The output, `v(vout) - v(rect_neg)` over
+1.5-2 ms, is 5.785 V against 6.938 V with PWL diodes (-16.6 %).
+At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 
 ---
 
