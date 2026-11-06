@@ -190,6 +190,7 @@ from .periodic import (
     PeriodicShootingResult,
     run_periodic_shooting,
 )
+from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -561,6 +562,12 @@ __all__ = [
     # guide since v1.5; exported as of Phase 0).
     "PeriodicShootingResult",
     "run_periodic_shooting",
+    # Time-weighted statistics (correct on variable-step grids).
+    "TimeStats",
+    "time_window",
+    "time_average",
+    "time_rms",
+    "steady_state_stats",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
