@@ -120,7 +120,10 @@ class _StubIndex:
 # Runtime side
 # ---------------------------------------------------------------------------
 def _is_dunder(name: str) -> bool:
-    return name.startswith("__") and name.endswith("__")
+    # ``_pybind11_conduit_v1_`` (pybind11 3) is pybind11's cross-module
+    # interop hook on every class, not pulsim API: treated like a dunder.
+    return (name.startswith("__") and name.endswith("__")) \
+        or name.startswith("_pybind11_")
 
 
 def _is_pybind_callable(obj: object) -> bool:
@@ -242,6 +245,8 @@ def coverage_problems(stub_src: str, instance_attrs: set[str]) -> list[str]:
             # Dunders and pybind internals (``__entries``) are only
             # checked when they are bound callables (``__init__``, ...).
             if k.startswith("__") and not _is_pybind_callable(v):
+                continue
+            if k.startswith("_pybind11_"):
                 continue
             if k not in declared:
                 problems.append(f"{cname}.{k}")

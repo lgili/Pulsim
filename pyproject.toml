@@ -1,5 +1,13 @@
 [build-system]
-requires = ["scikit-build-core>=0.5", "pybind11>=2.10"]
+# pybind11 is pinned to one minor: python/pulsim/_pulsim.pyi is generated
+# from the built extension, and pybind11 3 writes signatures differently
+# from 2.x (properties, Sequence inputs, NDArray, typed tuples) and 3.1
+# differently from 3.0 (float as SupportsFloat | SupportsIndex). An
+# unpinned build got the latest pybind11 and failed the stub checks. Bump
+# with PYBIND11_SERIES in scripts/generate_stubs.py, the FetchContent tag
+# in python/CMakeLists.txt and the CIBW_BEFORE_BUILD_* lines, then
+# regenerate the stub.
+requires = ["scikit-build-core>=0.5", "pybind11>=3.1,<3.2"]
 build-backend = "scikit_build_core.build"
 
 [project]

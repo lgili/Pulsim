@@ -45,13 +45,15 @@ set(Python3_FIND_UNVERSIONED_NAMES "FIRST")
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
 # Prefer pybind11 provided by the build environment (e.g., installed via pip)
+# Keep the tag on the minor pinned in pyproject.toml [build-system]: the
+# shipped type stub is generated from it (scripts/generate_stubs.py).
 find_package(pybind11 CONFIG QUIET)
 if(NOT pybind11_FOUND)
     include(FetchContent)
     FetchContent_Declare(
         pybind11
         GIT_REPOSITORY https://github.com/pybind/pybind11.git
-        GIT_TAG v2.12.0
+        GIT_TAG v3.1.0
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(pybind11)

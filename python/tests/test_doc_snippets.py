@@ -33,7 +33,9 @@ Expected output
     ``Expected output:``), the block's stdout must match that fence.
     Whitespace is normalised, words must match exactly, and each number
     may differ by one unit of its last printed digit (or 1e-6 relative,
-    whichever is larger).
+    whichever is larger). pybind11's spellings of a numeric parameter
+    (``typing.SupportsFloat | typing.SupportsIndex`` in 3.1,
+    ``typing.SupportsFloat`` in 3.0, ``float`` in 2.x) compare equal.
 
 Annotations
     An HTML comment on the line directly above a fence (invisible on
@@ -212,10 +214,28 @@ def _unit(token: str) -> float:
     return 10.0 ** (-decimals + (int(exp) if exp else 0))
 
 
+# pybind11 3.1 / 3.0 / 2.x spell a ``float`` parameter of a printed
+# signature three ways (same for ``int``); the docs show the pinned 3.1
+# form and a reader may hold any build. Longest form first.
+_PYBIND11_SPELLINGS = (
+    ("typing.SupportsFloat | typing.SupportsIndex", "float"),
+    ("typing.SupportsInt | typing.SupportsIndex", "int"),
+    ("typing.SupportsFloat", "float"),
+    ("typing.SupportsInt", "int"),
+)
+
+
+def _canonical(text: str) -> str:
+    text = " ".join(text.split())
+    for old, new in _PYBIND11_SPELLINGS:
+        text = text.replace(old, new)
+    return text
+
+
 def output_mismatch(got: str, expected: str) -> str | None:
     """None if ``got`` matches ``expected`` under the documented rules."""
-    g = " ".join(got.split())
-    e = " ".join(expected.split())
+    g = _canonical(got)
+    e = _canonical(expected)
     g_parts, e_parts = _NUM.split(g), _NUM.split(e)
     g_nums, e_nums = _NUM.findall(g), _NUM.findall(e)
     if g_parts != e_parts or len(g_nums) != len(e_nums):
@@ -389,6 +409,13 @@ def test_runner_catches_a_stale_expected_value(tmp_path):
           f"Expected output:\n{FENCE}\nv = 3.161 V\n{FENCE}\n")
     with pytest.raises(SnippetFailure, match=r"3\.151 where the doc says 3\.161"):
         _run(md, tmp_path)
+
+
+def test_runner_accepts_any_pybind11_spelling_of_float():
+    doc = "f(self: X, a: typing.SupportsFloat | typing.SupportsIndex, n: typing.SupportsInt | typing.SupportsIndex = 0) -> None"
+    assert output_mismatch("f(self: X, a: float, n: int = 0) -> None", doc) is None
+    assert output_mismatch("f(self: X, a: typing.SupportsFloat, n: typing.SupportsInt = 0) -> None", doc) is None
+    assert output_mismatch("f(self: X, a: str, n: int = 0) -> None", doc) is not None
 
 
 def test_runner_accepts_a_last_digit_difference(tmp_path):
