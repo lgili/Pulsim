@@ -245,8 +245,16 @@ inline SimulationResult run_transient(
         // on a STRICTLY UNIFORM grid (steps 0, m, 2m, …) so the
         // recorded trace keeps a constant spacing of m·dt.
         if (k % opts.store_every == 0) {
+            if (!result.has_switch_states) {
+                // No graph here; the mask itself carries the width.
+                result.begin_switch_state_record(
+                    mask.size(), opts.expected_sample_count());
+            }
             result.times.push_back(t);
             result.states.push_back(x);
+            // No diodes on this overload: the stamped mask is the
+            // one switch_fn returned for this solve.
+            result.record_switch_state(mask);
         }
     }
 
@@ -325,6 +333,9 @@ inline SimulationResult run_transient(
     // DECIMATED sample count (opts.store_every).
     result.reserve(opts.expected_sample_count(),
                     static_cast<Index>(state_size));
+    result.begin_switch_state_record(
+        static_cast<Size>(graph.num_switches()),
+        opts.expected_sample_count());
 
     Vector x = Vector::Zero(state_size);
     pwl::HistoryState history{graph, pool};
@@ -601,6 +612,15 @@ inline SimulationResult run_transient(
     // iterate diode consistency at the DC system, and seed
     // HistoryState + DiodeEventState from the DC solution.
     // Sample 0 becomes the DC state vector instead of zero.
+    // The mask stamped for sample 0 (`SimulationResult::
+    // switch_state_bits`). A DC operating point was SOLVED under
+    // `dc.mask`; a zero IC is consistent with every mask (v = 0, so
+    // i = g·v = 0 either way) and records the mask the run starts
+    // with; a state seeded from `initial_state` / `resume_from` was
+    // solved by no mask in this run and is flagged unsolved.
+    topology::SwitchStateMask initial_mask(
+        static_cast<std::size_t>(graph.num_switches()));
+    bool initial_mask_known = false;
     if (start_from_dc_op) {
         // v2.0 Phase 2 (B.2): one shared implementation of "the DC
         // operating point" (pwl/dc_operating_point.hpp) — nonlinear
@@ -630,6 +650,8 @@ inline SimulationResult run_transient(
             "run_transient(start_from_dc_op)");
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
+        initial_mask = dc.mask;
+        initial_mask_known = true;
     }
 
     Vector b_extra(static_cast<Index>(state_size));
@@ -659,6 +681,10 @@ inline SimulationResult run_transient(
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     std::vector<CommutationEvent> step_events;      // per-step event scratch
     std::vector<bool> post_event_bits;              // substep-correction scratch
+    // The mask of the LAST solve that produced x — recorded with
+    // each stored sample (SimulationResult::switch_state_bits).
+    topology::SwitchStateMask stamped_mask(
+        static_cast<std::size_t>(graph.num_switches()));
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
@@ -769,6 +795,19 @@ inline SimulationResult run_transient(
         result.times.push_back(opts.t_start);
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
+        if (initial_mask_known) {
+            result.record_switch_state(initial_mask);
+        } else {
+            const bool seeded =
+                initial_state != nullptr || resume_snap != nullptr;
+            result.record_switch_state(
+                has_diodes
+                    ? combine_masks(switch_fn(opts.t_start),
+                                    diodes.current_diode_mask(),
+                                    diode_owned)
+                    : switch_fn(opts.t_start),
+                /*solved=*/!seeded);
+        }
 
         // Prime the observer with the initial condition so a
         // discrete-time PI / sampler / lookup-table sees the
@@ -953,6 +992,10 @@ inline SimulationResult run_transient(
                     // nothing extra.
                     cache.solve_at(mask, for_dt, b_extra, x);
                 }
+                // The mask x was just solved under — what the
+                // stored sample records (a mask cycle breaks out
+                // BEFORE re-solving, so this stays the last solve).
+                stamped_mask = mask;
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
@@ -1324,6 +1367,7 @@ inline SimulationResult run_transient(
                         accumulate_b_extra(t, dt2);
                         cache.solve_at(
                             mask_post, dt2, b_extra, x);
+                        stamped_mask = mask_post;
                         // History commit DEFERRED to after the freeze guard
                         // (below): the guard must be able to snap an
                         // unphysical i_L back BEFORE it is baked into the
@@ -1456,6 +1500,7 @@ inline SimulationResult run_transient(
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(iters - 1);
+                result.record_switch_state(stamped_mask);
             }
         }
     } else {
@@ -1578,6 +1623,7 @@ inline SimulationResult run_transient(
                 } else {
                     cache.solve(mask, b_extra_user, x);
                 }
+                stamped_mask = mask;
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
@@ -1663,6 +1709,7 @@ inline SimulationResult run_transient(
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(iters - 1);
+                result.record_switch_state(stamped_mask);
             }
         }
     }

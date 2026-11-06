@@ -708,6 +708,16 @@ inline SimulationResult run_transient_trbdf2(
         return ok;
     };
 
+    // Mask recorded with sample 0 (SimulationResult::
+    // switch_state_bits): the bits the run STARTS from, taken before
+    // the settle below re-decides them. A zero IC is consistent with
+    // every mask (v = 0, so i = g·v = 0); a state seeded from
+    // `initial_state` / `resume_from` was solved by no mask in this
+    // run and is flagged unsolved.
+    const SwitchStateMask initial_mask = mask_at(opts.t_start);
+    const bool initial_seeded =
+        initial_state.has_value() || resume_from != nullptr;
+
     // ---- consistent initial diode bits (zero-time settle) ----
     // A tiny trap step pins every capacitor to its (v, i) and asks
     // the network which diodes conduct; iterate to a fixed point,
@@ -725,9 +735,12 @@ inline SimulationResult run_transient_trbdf2(
 
     SimulationResult result;
     result.times.reserve(4096);
+    result.begin_switch_state_record(
+        static_cast<Size>(graph.num_switches()), 4096);
     result.times.push_back(opts.t_start);
     result.states.push_back(x);
     result.event_iteration_count.push_back(0);
+    result.record_switch_state(initial_mask, !initial_seeded);
 
     // Coupling-aware inductor di/dt for the LTE (a coupled winding's
     // v = L·di/dt + M·di_other/dt, so f ≠ v/L there). Resolved once.
@@ -1264,6 +1277,14 @@ inline SimulationResult run_transient_trbdf2(
                     result.times.push_back(t);
                     result.states.push_back(x);
                     result.event_iteration_count.push_back(0);
+                    // The landing is a REAL trap solve over dt_land
+                    // under the PRE-commutation mask (mask_step); the
+                    // bits flip only after it. It is not an
+                    // interpolation, and the record says which mask
+                    // produced it — so g·v at this sample is the
+                    // current the solver carried, with no phantom
+                    // g_on·V_th from the post-flip bits.
+                    result.record_switch_state(mask_step);
                     ++st.n_diode_events;
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
@@ -1317,6 +1338,8 @@ inline SimulationResult run_transient_trbdf2(
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(0);
+                // Both TR-BDF2 stages solved under mask_step.
+                result.record_switch_state(mask_step);
                 ++st.n_accept;
                 if (pending_gate_slot >= 0) {
                     // The h that survived right after this gate
