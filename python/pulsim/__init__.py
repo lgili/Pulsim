@@ -446,6 +446,18 @@ try:
 except ImportError:  # pragma: no cover
     _HAS_SCOPE = False
 
+# Importing the ``pulsim.scope`` submodule (above) makes the import
+# system bind the *module* to the package attribute ``scope``, which
+# silently replaced the ``pulsim.scope(builder, result, ...)`` plotting
+# function imported from ``.plot`` -- ``p.scope(...)`` then raised
+# ``TypeError: 'module' object is not callable``. Rebind the function.
+# The submodule stays importable: it is cached in ``sys.modules``, so
+# ``import pulsim.scope`` and ``from pulsim.scope import LiveScope`` keep
+# working and do not re-bind the attribute. (``import pulsim.scope as m``
+# resolves the attribute first and therefore yields the function; use
+# ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
+from .plot import scope  # noqa: E402,F811
+
 __all__ = [
     "CircuitBuilder",
     "Graph",

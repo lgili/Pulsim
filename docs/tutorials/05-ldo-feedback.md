@@ -73,7 +73,7 @@ print(f"V_out (final) = {res.states[-1][vout_idx]:.3f} V (target 4.0 V)")
 
 Expected:
 ```
-V_out (final) = 3.998 V (target 4.0 V)
+V_out (final) = 4.000 V (target 4.0 V)
 ```
 
 ## What the closed loop is doing
@@ -94,7 +94,7 @@ If you hit the third case, increase `Cout`, lower `GAIN`, or add a compensation 
 ## Try this next
 
 - **Step load.** Add a switch in parallel with `R_L` that doubles the load at `t = 1 ms`. Watch the output dip and recover.
-- **Bode plot.** Once the [AC analysis proposal](https://github.com/lgili/Pulsim/blob/main/openspec/changes/add-pulsim-ac-analysis/proposal.md) ships, sweep the loop gain from 10 Hz to 1 MHz and verify the crossover frequency.
+- **Bode plot.** AC analysis has shipped (`p.run_ac_sweep`, `p.plot_bode`, `p.stability_margins`): sweep the loop gain from 10 Hz to 1 MHz and read off the crossover frequency.
 - **Replace the VCVS with two cascaded VCVSs.** Models a 2-stage op-amp; lets you add a dominant pole between stages.
 
 ## Going to [Tutorial 06](06-igbt-boost.md)
