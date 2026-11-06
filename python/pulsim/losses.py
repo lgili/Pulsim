@@ -463,9 +463,11 @@ def _time_fraction(mask: np.ndarray, times: np.ndarray) -> float:
 # the recovery charge the spec asks for is not a turn-off: its capped
 # energy (Q_F · V_R) is below this fraction of one real event's.
 _RR_MATERIAL_FRACTION = 1e-3
-# Without a recovery spec (counts only), a stretch whose forward
-# current never reaches this fraction of the diode's peak is dropped.
+# Without a recovery charge scale (counts only, or an E_rr_curve), a
+# stretch whose forward current never reaches this fraction of a
+# reference current is dropped (see _diode_switching_loss).
 _RR_MATERIAL_CURRENT_FRACTION = 1e-3
+
 
 # Recovery time used to place the V_R reading when diode_specs gives no
 # ``t_rr``: the order of a fast-recovery power diode's. Only WHERE V_R
@@ -547,6 +549,79 @@ def _other_bits_flipped(masks: "Optional[np.ndarray]",
     return out
 
 
+def _chatter_gaps(trace, other_flip: "Optional[np.ndarray]" = None,
+                  ) -> "tuple[np.ndarray, int]":
+    """Blocking gaps of one diode that are chatter inside a single
+    conduction, not turn-offs.
+
+    Returns ``(conducting, n_gaps)``: ``trace.conducting`` with those
+    gaps filled, and how many there were. A gap (a maximal run of
+    non-conducting steps between two conducting ones) is chatter when
+    the diode never blocks across it: the step-averaged ``v_D`` (the
+    midpoint of each step's two ends, from the last conducting sample
+    to the next one) stays above ``−2·V_th``, AND no other bit of the
+    recorded stamped mask flips on those steps (``other_flip``; a
+    commutation forced by another switch is a real turn-off even when
+    the voltage it leaves is small, e.g. the first cycles of a boost
+    whose output is still below V_th). A turn-off is the start of
+    blocking, so a gap the diode spends within a reflection of its own
+    commutation band is part of the conduction around it. For
+    ``V_th = 0`` any reverse step average is blocking, so nothing
+    changes there.
+
+    Why: a V_th > 0 diode with a capacitor across it (a snubber, a
+    junction capacitance) on the fixed engine. The ON step (``g_on``
+    across ``Cs``, τ = 0.1 ns ≪ dt) is reflected by the trapezoidal
+    rule from ``v_D ≈ V_th`` to ``≈ −V_th``; the diode drops to OFF,
+    the inductor current recharges ``Cs`` up to ``V_th`` over a few
+    steps, and the cycle repeats through the whole conduction
+    interval. On the round-2 snubbed boost (Cs = 100 nF across D1,
+    V_th = 0.7, Q_rr 50 nC) every gap followed more than Q_rr of
+    forward charge, so 4580 "turn-offs" were charged and f_sw read
+    1.53 MHz on a 100 kHz converter (15887 at dt = T/2000, 299 at
+    V_th = 0), with no warning. The gaps last ``≈ 2·V_th·Cs / i_L`` in
+    time, so their sample count grows as dt shrinks and no length
+    rule separates them. The reflected sample sits at ``2·i/g_on −
+    V_th − δ`` (δ: how far past V_th the crossing solve went, up to one
+    step's rise Δv), so the lowest step average is about ``−V_th −
+    Δv/2``: measured −0.34 / −0.62 / −0.62 V at dt = T/100 / T/400 /
+    T/2000, too close to −V_th = −0.7 V for a ±V_th rule, hence 2·V_th
+    (good for Δv up to 2·V_th per step). A real turn-off reaches the
+    circuit's reverse voltage (−24 to −90 V there; −43 V on an RL
+    half-wave), and every turn-off of a switched converter that spans
+    a gate edge is excluded by ``other_flip`` whatever its voltage.
+
+    The stamped state itself is left alone: duty and conduction loss
+    report what the solver carried, and :func:`device_loss_summary`
+    warns (:func:`_warn_chatter`)."""
+    cond = np.asarray(trace.conducting, dtype=bool).copy()
+    n = cond.size
+    if n < 3:
+        return cond, 0
+    V_th = max(float(getattr(trace, "V_th", 0.0)), 0.0)
+    v = np.asarray(trace.v, dtype=float)
+    v_s = np.asarray(getattr(trace, "v_start", v), dtype=float)
+    ks = np.nonzero(cond[:-1] & ~cond[1:])[0] + 1
+    on_idx = np.nonzero(cond)[0]
+    ends = np.append(on_idx, n)[np.searchsorted(on_idx, ks)]
+    # Step averages: step j spans (t[j-1], t[j]], from v_s[j-1] to v[j].
+    mid = np.empty(n)
+    mid[0] = v[0]
+    mid[1:] = 0.5 * (v_s[:-1] + v[1:])
+    n_gaps = 0
+    for k, end in zip(ks.tolist(), ends.tolist()):
+        # Steps k .. end: from the last conducting sample k-1 to the
+        # next conducting sample `end` (none: the run ends blocking).
+        if end >= n:
+            continue
+        if other_flip is not None and bool(other_flip[k:end + 1].any()):
+            continue
+        if float(mid[k:end + 1].min()) >= -2.0 * V_th:
+            cond[k:end] = True
+            n_gaps += 1
+    return cond, n_gaps
+
+
 def _diode_turn_offs(trace, times: np.ndarray,
                      t_rr: float = _DEFAULT_T_RR,
                      other_flip: "Optional[np.ndarray]" = None,
@@ -562,8 +637,8 @@ def _diode_turn_offs(trace, times: np.ndarray,
     ``Q_F`` the forward charge it conducted (``max(i_D, 0)`` over the
     stretch's steps, each from its start ``current_start`` to its end),
     ``material_current`` whether ``I_F_peak >= 1e-3 · i_peak`` of the
-    whole run (the count-only fallback of :func:`_diode_switching_loss`,
-    which judges materiality by charge when a recovery is specified),
+    whole run (the first cut of the count-only rule of
+    :func:`_diode_switching_loss`),
     ``V_R`` the reverse
     voltage the diode recovers against, and ``unresolved`` whether the
     time grid can place that reading.
@@ -607,11 +682,15 @@ def _diode_turn_offs(trace, times: np.ndarray,
     turns the reverse-biased diode ON for single steps at ~36 µA
     (5.6e-6 · i_peak, ~7e-11 C each). Charging each of those the full
     ``Q_rr · V_R`` inflated ``E_sw_total`` 4× (48 "turn-offs" instead
-    of 4). See :func:`_diode_switching_loss`."""
+    of 4). See :func:`_diode_switching_loss`.
+
+    Gaps that :func:`_chatter_gaps` identifies as chatter inside one
+    conduction are filled first, so the stretches on either side are
+    one stretch with one turn-off (its ``Q_F`` the sum)."""
     # Transitions of the per-step CONDUCTING flag, not of the raw
     # stamp: a V_th = 0 diode the fixed engine chatters ON/OFF at
     # ~1e-7 A is not recovering from a forward current each time.
-    closed = np.asarray(trace.conducting, dtype=bool)
+    closed, _ = _chatter_gaps(trace, other_flip)
     n = closed.size
     if n < 2:
         return []
@@ -742,6 +821,38 @@ def _warn_recovery_quality(name: str, entry: Mapping[str, Any],
             RuntimeWarning, stacklevel=3)
 
 
+def _warn_chatter(name: str, n_gaps: int, n_turn_offs: int,
+                  t_gaps: float, t_cond: float, V_th: float) -> None:
+    """RuntimeWarning when a diode's record chatters inside its
+    conduction (:func:`_chatter_gaps`) for a material share of it: at
+    least 3 gaps, at least one per real turn-off, covering at least 1 %
+    of the conduction time. (The femtosecond landing gaps of
+    ``engine='auto'`` cover ~1e-10 of it; the snubbed fixed-engine
+    chatter 28-56 % in ~14 gaps per conduction. An RL half-wave at
+    V_th = 2 merges 3 in-band waits before its 4 turn-ons, 1.4 % of the
+    time: harmless for the count, and not chatter.)"""
+    if (n_gaps < 3 or n_gaps < n_turn_offs
+            or not (t_gaps >= 0.01 * t_cond)):
+        return
+    warnings.warn(
+        f"device_loss_summary: the solver stamped {name!r} OFF for "
+        f"{n_gaps} gaps ({100.0 * t_gaps / t_cond:.3g} % of its "
+        f"conduction time) in which the diode never blocked more than "
+        f"2·V_th = {2.0 * V_th:.3g} V of reverse voltage ({n_turn_offs} "
+        f"real turn-offs). That is "
+        f"numerical chatter, typically a "
+        f"capacitor across a V_th > 0 diode whose fast mode the fixed "
+        f"engine's trapezoidal rule leaves undamped. The gaps are not "
+        f"counted as turn-offs, but the diode's current, duty and "
+        f"conduction loss follow the chattering stamp (the current "
+        f"detours through the capacitor in each gap). A smaller dt "
+        f"does not help (the mode is ~g_on·C fast; the gaps covered 28 % "
+        f"of the conduction at dt = T/400 and 56 % at T/2000 in one "
+        f"boost): check with engine='auto', whose step control damps "
+        f"it, or put the capacitor's series resistance in the model.",
+        RuntimeWarning, stacklevel=3)
+
+
 def _diode_switching_loss(turn_offs: List[Dict[str, float]],
                           times: np.ndarray,
                           v_D: np.ndarray,
@@ -778,7 +889,7 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
 
     * a stretch whose forward charge ``Q_F`` is below ``1e-3`` of the
       recovery charge the spec asks for (``Q_rr``, ``E_rr_ref /
-      V_R_ref``, or ``E_rr_curve(I_F) / V_R_ref``) is not a turn-off
+      V_R_ref``) is not a turn-off
       at all (``n_turn_off_events_dropped``; excluded from
       ``n_turn_off_events``, ``f_sw_estimate`` and the total). With
       the cap below, such a stretch could add at most 1e-3 of one
@@ -786,7 +897,15 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
       materially; ``E_sw_dropped`` reports what the dropped stretches
       would have added, and a RuntimeWarning fires if that exceeds
       1 % of the total. A spec with no recovery at all (counts only)
-      falls back to the peak current, ``I_F_peak >= 1e-3 · i_peak``.
+      judges the peak forward current ``I_F_peak`` instead, against
+      ``1e-3`` of the median ``I_F_peak`` of the stretches that reach
+      ``1e-3`` of the run's peak current. An ``E_rr_curve`` spec judges
+      ``I_F_peak`` against ``1e-3`` of the curve's smallest tabulated
+      positive current: the curve's own axis, on which E_rr itself is
+      read (at ``I_F``, the current the diode carries when it is cut
+      off). A curve's charge would scale with the stretch's own
+      current, so a curve through the origin would ask nothing of a
+      chatter blip and count every one.
       The materiality is judged against the event's own charge, not
       against the run's peak current: a boost with a 4 kA start-up
       inrush dropped all 237 of its 3-4 A light-load recoveries
@@ -813,9 +932,16 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
             "diode_specs: E_rr_ref requires a positive V_R_ref "
             "(the reference reverse voltage from the datasheet).")
     has_rr = Q_rr > 0 or E_rr_ref > 0 or E_rr_curve is not None
+    # The current axis of an E_rr_curve: its smallest tabulated
+    # positive current (None for a curve with no positive current).
+    I_tab = None
+    if E_rr_curve is not None:
+        I_pos = [float(i) for i, _ in E_rr_curve if float(i) > 0]
+        I_tab = min(I_pos) if I_pos else None
 
     def _q_req(evs) -> np.ndarray:
-        """Recovery charge the spec asks of each event."""
+        """Recovery charge the spec asks of each event (the energy it
+        charges, before the Q_F cap, divided by V_R)."""
         if E_rr_curve is not None:
             I_F = np.asarray([ev["I_F"] for ev in evs], dtype=float)
             return _interp_energy_curve(I_F, E_rr_curve) / V_R_ref
@@ -823,14 +949,49 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
             return np.full(len(evs), E_rr_ref / V_R_ref)
         return np.full(len(evs), Q_rr)
 
-    if has_rr and turn_offs:
+    def _peak(evs) -> np.ndarray:
+        return np.asarray([ev.get("I_F_peak", np.inf) for ev in evs],
+                          dtype=float)
+
+    if not turn_offs:
+        keep = np.zeros(0, dtype=bool)
+    elif E_rr_curve is not None and I_tab is not None:
+        # A curve is indexed by current, so materiality is judged on
+        # that axis: the stretch's peak forward current against the
+        # smallest current the datasheet tabulates. Not by charge: the
+        # charge a curve asks for scales with the current, and a curve
+        # through the origin (PLECS tables start at (0 A, 0 J)) asks a
+        # 36 µA chatter blip for 1e-12 C, so all 44 blips of an RL
+        # half-wave were counted (48 turn-offs, f_sw 720 Hz on 60 Hz).
+        keep = _peak(turn_offs) >= _RR_MATERIAL_CURRENT_FRACTION * I_tab
+    elif has_rr:
         Q_F_all = np.asarray([ev.get("Q_F", np.inf) for ev in turn_offs],
                              dtype=float)
-        keep = Q_F_all >= _RR_MATERIAL_FRACTION * _q_req(turn_offs)
+        if E_rr_curve is not None:
+            # A curve with no positive current: a constant charge.
+            q_ref = np.full(len(turn_offs), max(
+                float(e) for _, e in E_rr_curve) / V_R_ref)
+        else:
+            q_ref = _q_req(turn_offs)
+        keep = Q_F_all >= _RR_MATERIAL_FRACTION * q_ref
     else:
-        keep = np.asarray([ev.get("material_current",
-                                  ev.get("material", True))
-                           for ev in turn_offs], dtype=bool)
+        # Counts only: no charge or current scale from the spec. The
+        # run's peak current is the first cut; the reference is then
+        # the MEDIAN peak of the stretches that pass it (the typical
+        # conduction), which is never above the run's peak, so this
+        # drops no stretch the run-peak rule kept. A 4 kA start-up
+        # inrush set the run-peak threshold at 4 A and dropped all 237
+        # of a boost's 3-4 A light-load recoveries (f_sw 20 kHz on
+        # 100 kHz).
+        pk = _peak(turn_offs)
+        first = np.asarray([ev.get("material_current",
+                                   ev.get("material", True))
+                            for ev in turn_offs], dtype=bool)
+        if first.any() and np.all(np.isfinite(pk)):
+            ref = float(np.median(pk[first]))
+            keep = pk >= _RR_MATERIAL_CURRENT_FRACTION * ref
+        else:
+            keep = first
     dropped = [ev for ev, k in zip(turn_offs, keep) if not k]
     turn_offs = [ev for ev, k in zip(turn_offs, keep) if k]
     n_off = len(turn_offs)
@@ -1264,8 +1425,13 @@ def device_loss_summary(
         ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``, capped at the
         stretch's own forward charge times ``V_R``; stretches whose
         forward charge is below ``1e-3`` of the recovery charge asked
-        for are dropped (by peak current, ``< 1e-3 · i_peak``, when no
-        recovery is given). Reports ``E_sw_total``, ``P_sw_avg``,
+        for are dropped (by peak forward current when the spec is an
+        ``E_rr_curve`` or gives no recovery, see
+        ``_diode_switching_loss``). A blocking gap across which no step
+        average of ``v_D`` falls below ``−2·V_th`` is chatter inside one
+        conduction, not a turn-off (every diode entry reports
+        ``n_chatter_gaps``; a RuntimeWarning fires when they cover
+        1 % or more of the conduction time). Reports ``E_sw_total``, ``P_sw_avg``,
         ``n_turn_off_events``, ``n_turn_off_events_dropped``,
         ``E_sw_dropped``, ``n_turn_off_events_capped``,
         ``n_turn_off_events_unresolved``, ``f_sw_estimate`` and the
@@ -1487,6 +1653,18 @@ def device_loss_summary(
                                                   times),
                 **stats,
             }
+            d_flip = _other_bits_flipped(kernel_masks,
+                                         switch_bits.get(int(bid), -1))
+            cond_m, n_chat = _chatter_gaps(d_trace, d_flip)
+            entry["n_chatter_gaps"] = int(n_chat)
+            if n_chat and times.size > 1:
+                h = np.diff(times)
+                gap = cond_m & ~np.asarray(d_trace.conducting, dtype=bool)
+                _warn_chatter(
+                    name, n_chat,
+                    int(np.count_nonzero(cond_m[:-1] & ~cond_m[1:])),
+                    float(np.dot(h, gap[1:])), float(np.dot(h, cond_m[1:])),
+                    V_th)
             # Optional datasheet offset+slope conduction model
             # (V_f0 + r_d·I) applied to the actual current trace.
             c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
@@ -1511,9 +1689,7 @@ def device_loss_summary(
                     _diode_switching_loss(
                         _diode_turn_offs(
                             d_trace, times, t_rr=t_rr,
-                            other_flip=_other_bits_flipped(
-                                kernel_masks,
-                                switch_bits.get(int(bid), -1))),
+                            other_flip=d_flip),
                         times, v_D, d_spec, i_D=v_D * g_arr))
                 entry["t_rr"] = t_rr
                 _warn_recovery_quality(name, entry, t_rr)
