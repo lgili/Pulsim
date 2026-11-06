@@ -165,7 +165,22 @@ def add_bridge_rectifier(builder,
     g_off
         Reverse leakage conductance (S). Default 1e-9.
     V_th
-        Forward voltage threshold (V). Default 0.7.
+        Turn-on (commutation) threshold (V). Default 0.7.
+
+        This is NOT a forward voltage drop. The PWL ``SwitchedDiode``
+        is a pure conductance in both states: OFF -> ON when
+        ``v_D >= V_th``, ON -> OFF when its current reverses, and while
+        ON it drops only ``i / g_on`` (48 A at ``g_on = 1e3`` is 48 mV,
+        for ``V_th = 0`` and ``0.7`` alike). ``V_th`` therefore adds no
+        conduction loss, and because the diode's voltage collapses
+        from ``V_th`` to ``i / g_on`` the instant it turns on, a
+        non-zero ``V_th`` in a low-impedance loop (a capacitor-input
+        bridge) injects a turn-on current spike of roughly
+        ``V_th / R_loop`` that the ``V_th = 0`` circuit does not have.
+        For datasheet conduction loss use
+        ``device_loss_summary(..., conduction_specs={name: {"V_f0": ...,
+        "r_on": ...}})``, which applies ``V_f0·|i| + r_on·i²`` to the
+        simulated current.
 
     Returns
     -------
@@ -271,8 +286,15 @@ def add_three_phase_vsi(builder,
     with_freewheel_diodes
         Add the six antiparallel diodes. Default True.
     V_f, R_d
-        Forward drop (V) and series resistance (Ω) of those diodes.
-        Defaults 0.7 V / 50 mΩ.
+        ``V_f`` is passed to each diode as its ``V_th`` — a turn-on
+        (commutation) THRESHOLD, not a forward voltage drop: the PWL
+        diode is a pure conductance ``1 / R_d`` while ON, so it drops
+        ``R_d · i`` and ``V_f`` adds no conduction loss (see
+        :func:`add_bridge_rectifier`'s ``V_th``). For a datasheet
+        ``V_f0 + r_d · I`` conduction loss use
+        ``device_loss_summary(..., conduction_specs={diode_name:
+        {"V_f0": ..., "r_on": ...}})``. ``R_d`` is the diode's ON
+        resistance (Ω). Defaults 0.7 V / 50 mΩ.
 
     Returns
     -------
