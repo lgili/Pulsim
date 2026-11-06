@@ -213,18 +213,22 @@ def make_rc(R=5.0, C=10e-6):
     b.add_capacitor     ("C_out", "vout", "gnd", C)
     return b
 
+base = make_rc()
+VOUT = base.node_id_of("vout")              # ask for the node by name
+
 def vout_at_t_end(res, _params):
-    states = np.asarray(res.states)
-    return {"vout": float(states[-1, 1])}   # column 1 = node "vout"
+    return {"vout": float(res.states[-1][VOUT])}
 
 # Sweep R_load through 100 values. v1.4.0 path-based refactor:
 # build the cache ONCE, then reuse the L+U factors at each point.
 out = p.sweep_path_aware(
-    make_rc(),                               # initial builder
+    base,                                    # initial builder
     params={"R_load": np.linspace(1, 20, 100).tolist()},
     kpi_fn=vout_at_t_end,
     t_end=50e-6, dt=1e-6,                    # tau = R·C spans 10–200 µs
+    verbose=False,
 )
+assert not out.failed, out.failed            # [(index, error), ...]
 for R, v in zip(out.params["R_load"][:3], out.kpis["vout"][:3]):
     print(f"R_load = {R:6.3f} Ω  ->  vout = {v:.3f} V")
 # With the [data] extra (pandas): out.to_dataframe() gives one row per run.
@@ -240,9 +244,11 @@ speedup over the legacy rebuild-per-sample pattern.
 ## What's new in v2.0
 
 Pulsim 2.0.0 (2026-09-08) is a **breaking** release. Its rule
-throughout: a named refusal beats a plausible wrong number. Full detail
-in [`CHANGELOG.md`](CHANGELOG.md); porting notes in the
-[migration guide](docs/migration-from-v1.md).
+throughout: a named refusal beats a plausible wrong number. The full list
+of breaking changes is the "headline breaks" part of the 2.0.0 entry in
+[`CHANGELOG.md`](CHANGELOG.md); there is no separate 1.x → 2.0 porting
+guide yet. ([`docs/migration-from-v1.md`](docs/migration-from-v1.md) is
+older and different: it covers the C++ v1-runtime → v2 module split.)
 
 * **`engine='auto'` is the default, and it routes.** Pass `dt` and you
   get the fixed-step `pwl` engine exactly as before; omit it and the
@@ -338,9 +344,9 @@ them is on the roadmap.
 |---|---|---|
 | **v1.3.0** | In-house real sparse LU (KLU removed) | ✅ shipped |
 | **v1.4.0** | Complex sparse LU + multi-bit + parametric refactor + Python helpers | ✅ shipped |
-| v1.5.0 | Reachability-based sparse triangular solve (close the n ≥ 64 Eigen gap on AC sweep) | planned |
-| v1.6.0 | AC-sweep symbolic-reuse: amortise `analyze` across all frequencies | planned |
-| v1.7.0 | BTF block-triangular ordering — composes with path-union for an extra ~2× on wide multi-bit transitions | planned |
+| v1.5.0 | Reachability-based sparse triangular solve (close the n ≥ 64 Eigen gap on AC sweep) | not shipped — still open (v1.5.0 was never tagged) |
+| v1.6.0 | AC-sweep symbolic-reuse: amortise `analyze` across all frequencies | not shipped — still open (v1.6–v1.8 shipped other work, see CHANGELOG) |
+| v1.7.0 | BTF block-triangular ordering — composes with path-union for an extra ~2× on wide multi-bit transitions | not shipped — still open (v1.6–v1.8 shipped other work, see CHANGELOG) |
 | **v2.0.0** | Breaking: `engine='auto'` routing, devices that refuse instead of guessing — see [What's new in v2.0](#whats-new-in-v20) | ✅ released 2026-09-08 |
 
 ---
