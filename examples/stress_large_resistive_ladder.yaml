@@ -10005,3 +10005,10 @@ circuit:
     from: n1999
     to: gnd
     R: 1000.0
+
+# Run settings (top-level, a sibling of `circuit:`). Purely resistive:
+# every step is the same DC solve, so a few steps suffice.
+simulation:
+  t_start: 0.0
+  t_end: 1.0e-5
+  dt: 1.0e-6

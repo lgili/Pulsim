@@ -1504,9 +1504,40 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
     return step_observer, b_extra_fn
 
 
+def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
+    """Unpack a :class:`LoadedCircuit` for :func:`simulate`.
+
+    Returns ``(builder, t_end, dt, t_start, store_every)`` with the
+    YAML's ``simulation:`` values filling what the caller left unset,
+    or raises ``ValueError`` naming ``lc.source`` when the window it
+    would run is empty.
+    """
+    opts = lc.options
+    if t_start == 0.0:
+        t_start = float(lc.t_start)
+    if t_end is None:
+        t_end = float(lc.t_end)
+        if not (t_end > t_start):
+            why = ("has no top-level 'simulation:' block"
+                   if not lc.has_simulation else
+                   "has a simulation: block without a t_end after "
+                   f"t_start ({t_start!r})")
+            raise ValueError(
+                f"simulate(): the YAML {lc.source!r} {why}, so its run "
+                f"window is empty (t_end = {t_end!r}). Add a top-level "
+                "'simulation: {t_end: ..., dt: ...}' (a sibling of "
+                "'circuit:', not nested under it), or pass t_end= to "
+                "simulate().")
+    if dt is None and lc.dt > 0.0:
+        dt = float(lc.dt)
+    if store_every is None and int(opts.store_every) != 1:
+        store_every = int(opts.store_every)
+    return lc.builder, t_end, dt, t_start, store_every
+
+
 def simulate(
-    builder: CircuitBuilder,
-    t_end: float,
+    builder: "CircuitBuilder | LoadedCircuit",
+    t_end: Optional[float] = None,
     dt: Optional[float] = None,
     *,
     # --- engine selector ---
@@ -1652,12 +1683,27 @@ def simulate(
             integrator='rk45',
         )
 
+    From a YAML netlist, pass the :class:`LoadedCircuit` itself::
+
+        lc = pulsim.load_yaml_file("examples/rc_circuit.yaml")
+        result = pulsim.simulate(lc)          # t_end / dt from the file
+
     Parameters
     ----------
     builder
-        A populated :class:`CircuitBuilder`.
+        A populated :class:`CircuitBuilder`, or a :class:`LoadedCircuit`
+        from :func:`load_yaml_file` / :func:`load_yaml_string`. From a
+        ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
+        sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
+        ``store_every`` (when not passed) from its ``simulation:``
+        block; a keyword you pass wins. The other ``simulation:``
+        fields stay on ``loaded.options`` — forward them yourself. A
+        ``LoadedCircuit`` whose ``t_end`` is not after ``t_start`` (no
+        top-level ``simulation:`` block, or no ``t_end`` in it) is
+        refused with a ``ValueError`` naming the YAML file.
     t_end
-        End time, in seconds.
+        End time, in seconds. Required with a :class:`CircuitBuilder`;
+        must be greater than ``t_start``.
     dt
         ``engine='auto'``: given → fixed step of exactly ``dt``;
         omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
@@ -1732,6 +1778,28 @@ def simulate(
         PED today with a user-supplied LTI system, use
         :func:`pulsim.dsed.run_user_lti` directly.
     """
+    # ---- LoadedCircuit (YAML) + the run window. ----
+    # Above everything else, so every engine sees the same t_end / dt.
+    # A YAML whose run settings did not load (no top-level
+    # `simulation:` block) used to reach the engines as t_end = dt = 0
+    # and died on an engine-specific message about the step ceiling;
+    # refuse it here and name the file.
+    if isinstance(builder, LoadedCircuit):
+        builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
+            builder, t_end, dt, t_start, store_every)
+    if t_end is None:
+        raise TypeError(
+            "simulate(): missing required argument 't_end' (end time, s). "
+            "Only a LoadedCircuit with a simulation: block supplies it.")
+    if not (t_end > t_start):
+        raise ValueError(
+            f"simulate(): t_end ({t_end!r}) must be greater than t_start "
+            f"({t_start!r}). If these came from a YAML's "
+            "loaded.options, the file had no top-level simulation: block "
+            "(loaded.has_simulation is False); pass the LoadedCircuit "
+            "itself, simulate(loaded), to have the file named, or pass "
+            "t_end=.")
+
     # ---- Merge `solver` bundle (v1.5 Round 2 ergonomics). ----
     # For every advanced kernel knob, the flat kwarg wins when the
     # user explicitly passed something non-default; otherwise we pull

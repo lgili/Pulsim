@@ -1444,12 +1444,56 @@ class SimulationResult:
         ...
 class LoadedCircuit:
     """
-    Result of `load_yaml_*`: a populated `CircuitBuilder` + `SimulationOptions`.
+    Result of `load_yaml_*`: a populated `CircuitBuilder` (`.builder`) + the `simulation:` block (`.options`).
+
+    Read-only conveniences: `source`, `has_simulation`, `t_start`, `t_end`, `dt`, `switch_names`, `node_names`, `warnings`. `pulsim.simulate(loaded, ...)` takes t_start / t_end / dt / store_every from it.
     """
     options: SimulationOptions
+    def __repr__(self) -> str:
+        ...
     @property
     def builder(self) -> CircuitBuilder:
         ...
+    @property
+    def dt(self) -> float:
+        """
+        `simulation.dt` (s); 0.0 when the YAML does not set it (then `simulate(loaded)` runs without a dt, i.e. on the variable-step engine where it qualifies). Same value as `options.dt`.
+        """
+    @property
+    def has_simulation(self) -> bool:
+        """
+        True when the YAML has a top-level `simulation:` block. When False, `t_end` and `dt` are 0.0 (not set) and `simulate(loaded)` refuses until you pass `t_end`.
+        """
+    @property
+    def node_names(self) -> list[str]:
+        """
+        Non-ground node names in node-id order (the names `result.v(name)` accepts). Ground ('gnd' / '0') is not listed.
+        """
+    @property
+    def source(self) -> str:
+        """
+        Where the YAML came from: the path given to `load_yaml_file`, or '<string>' for `load_yaml_string`.
+        """
+    @property
+    def switch_names(self) -> list[str]:
+        """
+        Names of the switching branches in SwitchStateMask bit order: `switch_names[k]` is the device at bit k, i.e. `builder.switch_index_of(switch_names[k]) == k`. Includes the generated ones (a MOSFET's '<name>_body' diode, binary diodes).
+        """
+    @property
+    def t_end(self) -> float:
+        """
+        `simulation.t_end` (s); 0.0 when the YAML does not set it. Same value as `options.t_end`.
+        """
+    @property
+    def t_start(self) -> float:
+        """
+        `simulation.t_start` (s); 0.0 when not set. Same value as `options.t_start`.
+        """
+    @property
+    def warnings(self) -> list[str]:
+        """
+        Non-fatal loader findings (unknown `simulation:` keys), each also emitted as a UserWarning at load time.
+        """
 class NativePwm2Switch:
     """
     Native 2-switch complementary PWM for DSED. Pass directly as `switch_fn=` to `pulsim.simulate(engine='dsed', ...)` — the dispatch detects the type and calls the C++ implementation without GIL roundtrips per scheduler step. ~25× faster per switch_fn call than the equivalent Python class.
@@ -2351,11 +2395,11 @@ def ja_replay(N: float, Ae: float, le: float, lg: float, Ms: float, a: float, al
     """
 def load_yaml_file(path: str) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options).
+    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`.
     """
 def load_yaml_string(yaml_text: str) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options).
+    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Refuses unknown top-level / `circuit:` keys (a `simulation:` block indented under `circuit:` included); warns on unknown `simulation:` keys.
     """
 def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> collections.abc.Callable[[float], SwitchStateMask]:
     """

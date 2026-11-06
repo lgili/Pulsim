@@ -40,3 +40,9 @@ circuit:
       N_turns: 100
       l_m: 0.05    # mean magnetic path [m]
       A_core: 1e-4 # cross-section [m²]
+
+# Run settings (top-level, a sibling of `circuit:`). Three mains cycles.
+simulation:
+  t_start: 0.0
+  t_end: 0.06
+  dt: 2.0e-5

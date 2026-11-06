@@ -23,7 +23,7 @@
 //         name: <string, optional — used in error messages>
 //         <type-specific fields, see design.md>
 //
-//   simulation: [optional]
+//   simulation: [optional, TOP-LEVEL — a sibling of `circuit:`]
 //     t_start: <Real>
 //     t_end: <Real>
 //     dt: <Real>
@@ -35,7 +35,17 @@
 //     tol_newton_dx: <Real>
 //     tol_newton_res: <Real>
 //
-// See `examples/v2/` for working samples.
+// Key validation (2.0.x): the only top-level keys are `circuit` and
+// `simulation`, and the only `circuit:` keys are `nodes` and
+// `devices`. Anything else is REFUSED with a message naming the key —
+// in particular a `simulation:` block indented under `circuit:`, which
+// used to be ignored silently and left t_end = dt = 0. A legacy
+// `schema: pulsim-v1` netlist is refused by name. Unknown keys INSIDE
+// `simulation:` are not fatal: they are collected in
+// `LoadedCircuit::warnings` (the Python binding re-emits each one as a
+// `UserWarning`).
+//
+// See `examples/*.yaml` for working samples.
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
@@ -46,9 +56,12 @@
 
 #include <format>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace pulsim::yaml {
 
@@ -56,6 +69,14 @@ namespace pulsim::yaml {
 struct LoadedCircuit {
     builder::CircuitBuilder    builder;
     solver::SimulationOptions  options;
+    /// Where the YAML came from: the path given to `load_file`, or
+    /// `"<string>"` for `load_string`. Named in error messages.
+    std::string                source{"<string>"};
+    /// True when the YAML has a top-level `simulation:` map. When it
+    /// is false `options.t_end` / `options.dt` are 0 (not set).
+    bool                       has_simulation{false};
+    /// Non-fatal findings (unknown `simulation:` keys), in file order.
+    std::vector<std::string>   warnings{};
 };
 
 namespace detail {
@@ -504,6 +525,83 @@ inline void load_device(
     }
 }
 
+/// Keys `load_simulation_options` reads. Anything else in the block
+/// is reported (not fatal) — see `collect_unknown_simulation_keys`.
+inline constexpr std::string_view kSimulationKeys[] = {
+    "t_start", "t_end", "dt", "store_every",
+    "enable_newton_line_search", "enable_newton_lm",
+    "enable_substep_state_correction",
+    "max_event_iterations", "max_newton_iterations",
+    "tol_newton_dx", "tol_newton_res",
+    "integrator", "rtol", "atol", "dt_init",
+};
+
+[[nodiscard]] inline bool is_known_simulation_key(std::string_view k) {
+    for (const auto known : kSimulationKeys) {
+        if (k == known) return true;
+    }
+    return false;
+}
+
+/// The v1 schema spelled some simulation keys differently; a v1 key in
+/// a v2 file would otherwise read as "not set" (t_end = 0).
+[[nodiscard]] inline std::string_view v2_spelling_of(std::string_view k) {
+    if (k == "tstop")  return "t_end";
+    if (k == "tstart") return "t_start";
+    if (k == "t_stop") return "t_end";
+    return {};
+}
+
+inline void collect_unknown_simulation_keys(
+    const YAML::Node& sim, std::vector<std::string>& out) {
+    for (const auto& kv : sim) {
+        if (!kv.first.IsScalar()) continue;
+        const std::string key = kv.first.as<std::string>();
+        if (is_known_simulation_key(key)) continue;
+        const std::string_view hint = v2_spelling_of(key);
+        out.push_back(hint.empty()
+            ? std::format(
+                  "simulation.{} is not a v2 simulation key and was "
+                  "ignored (known keys: t_start, t_end, dt, store_every, "
+                  "max_newton_iterations, max_event_iterations, "
+                  "tol_newton_dx, tol_newton_res, "
+                  "enable_newton_line_search, enable_newton_lm, "
+                  "enable_substep_state_correction, integrator, rtol, "
+                  "atol, dt_init)", key)
+            : std::format(
+                  "simulation.{} is the v1 spelling and was ignored; "
+                  "the v2 key is '{}'", key, hint));
+    }
+}
+
+/// Refuse any key of `map` that is not in `allowed`. `where` names the
+/// map in the message ("top-level", "circuit:").
+inline void refuse_unknown_keys(
+    const YAML::Node& map, std::initializer_list<std::string_view> allowed,
+    std::string_view where) {
+    for (const auto& kv : map) {
+        if (!kv.first.IsScalar()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: {} keys must be scalars", where));
+        }
+        const std::string key = kv.first.as<std::string>();
+        bool ok = false;
+        std::string accepted;
+        for (const auto a : allowed) {
+            if (key == a) ok = true;
+            if (!accepted.empty()) accepted += ", ";
+            accepted += a;
+        }
+        if (!ok) {
+            throw std::runtime_error(std::format(
+                "yaml::load: unknown {} key '{}' (accepted: {}). The "
+                "loader refuses unknown keys instead of ignoring them, "
+                "so a typo or a mis-indented block cannot vanish "
+                "silently.", where, key, accepted));
+        }
+    }
+}
+
 inline void load_simulation_options(
     solver::SimulationOptions& opts,
     const YAML::Node& sim) {
@@ -546,11 +644,12 @@ inline void load_simulation_options(
 
 }  // namespace detail
 
-/// Parse a YAML circuit description from a string. Throws
-/// `std::runtime_error` on validation errors or malformed
-/// YAML.
-[[nodiscard]] inline LoadedCircuit load_string(
-    const std::string& yaml_text) {
+namespace detail {
+
+/// Shared body of `load_string` / `load_file`. `source` is recorded on
+/// the result and is what error messages call the file.
+[[nodiscard]] inline LoadedCircuit load_text(
+    const std::string& yaml_text, const std::string& source) {
     YAML::Node root;
     try {
         root = YAML::Load(yaml_text);
@@ -566,7 +665,27 @@ inline void load_simulation_options(
             "with 'circuit:' and optional 'simulation:'");
     }
 
+    // A legacy v1 netlist (`schema: pulsim-v1` + `components:`) is a
+    // different format, not a typo: say so before the generic
+    // unknown-key refusal.
+    const bool v1_schema =
+        (root["schema"] && root["schema"].IsScalar() &&
+         root["schema"].as<std::string>().rfind("pulsim-v1", 0) == 0) ||
+        (!root["circuit"] && root["components"]);
+    if (v1_schema) {
+        throw std::runtime_error(
+            "yaml::load_string: this is a pulsim v1 netlist "
+            "('schema: pulsim-v1' / 'components:'), which the 2.0 "
+            "loader does not read. A v2 netlist has 'circuit: devices:' "
+            "and a top-level 'simulation:' (t_end, dt); see "
+            "docs/migration-from-v1.md.");
+    }
+
+    detail::refuse_unknown_keys(root, {"circuit", "simulation"},
+                                "top-level");
+
     LoadedCircuit loaded;
+    loaded.source = source;
 
     const YAML::Node circuit = root["circuit"];
     if (!circuit || !circuit.IsMap()) {
@@ -574,6 +693,19 @@ inline void load_simulation_options(
             "yaml::load_string: missing required top-level "
             "key 'circuit:'");
     }
+
+    // The silent-zero trap: `simulation:` indented one level too far,
+    // under `circuit:`. Refused with the fix spelled out, because the
+    // run it would otherwise produce has t_end = dt = 0.
+    if (circuit["simulation"]) {
+        throw std::runtime_error(
+            "yaml::load_string: 'simulation:' is nested under "
+            "'circuit:'. It must be a TOP-LEVEL key, a sibling of "
+            "'circuit:' — dedent the block. As written, t_end and dt "
+            "would not be read and would load as 0.");
+    }
+    detail::refuse_unknown_keys(circuit, {"nodes", "devices"},
+                                "circuit:");
 
     // Optional: pre-declare nodes (auto-created on device
     // reference anyway, but exposing it gives the user
@@ -600,13 +732,31 @@ inline void load_simulation_options(
         ++idx;
     }
 
-    // Optional simulation block.
-    if (root["simulation"] && root["simulation"].IsMap()) {
-        detail::load_simulation_options(
-            loaded.options, root["simulation"]);
+    // Optional simulation block. Present-but-not-a-map (an empty
+    // `simulation:` reads as null) is refused rather than ignored.
+    if (root["simulation"]) {
+        const YAML::Node sim = root["simulation"];
+        if (!sim.IsMap()) {
+            throw std::runtime_error(
+                "yaml::load_string: 'simulation:' must be a map "
+                "(t_end: ..., dt: ...); it is empty or not a map.");
+        }
+        detail::collect_unknown_simulation_keys(sim, loaded.warnings);
+        detail::load_simulation_options(loaded.options, sim);
+        loaded.has_simulation = true;
     }
 
     return loaded;
+}
+
+}  // namespace detail
+
+/// Parse a YAML circuit description from a string. Throws
+/// `std::runtime_error` on validation errors or malformed
+/// YAML.
+[[nodiscard]] inline LoadedCircuit load_string(
+    const std::string& yaml_text) {
+    return detail::load_text(yaml_text, "<string>");
 }
 
 /// Parse a YAML circuit description from a file on disk.
@@ -621,7 +771,7 @@ inline void load_simulation_options(
     std::stringstream ss;
     ss << stream.rdbuf();
     try {
-        return load_string(ss.str());
+        return detail::load_text(ss.str(), path);
     } catch (const std::exception& e) {
         throw std::runtime_error(
             "yaml::load_file('" + path + "'): " + e.what());

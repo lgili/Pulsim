@@ -282,9 +282,10 @@ P_rr = 0.988 W, 500 turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)
 
 ### 3.5 YAML netlist
 
-`p.load_yaml_string` / `p.load_yaml_file` return a `LoadedCircuit` with
-`.builder` and `.options`. The gate drive is not in the YAML: build
-the `switch_fn` from the loaded builder.
+`p.load_yaml_*` return a `LoadedCircuit` (`.builder`, `.options`,
+`.switch_names`). `simulation:` must be top-level (nested: refused);
+`p.simulate(lc)` takes t_end/dt from it. The gate drive is not in the
+YAML: pass a `switch_fn`.
 
 ```python
 lc = p.load_yaml_string("""
@@ -297,7 +298,7 @@ simulation:
   t_end: 5.0e-3
   dt: 1.0e-6
 """)
-res = p.simulate(lc.builder, t_end=lc.options.t_end, dt=lc.options.dt)
+res = p.simulate(lc)
 print(f"v_out(end) = {res.v('out')[-1]:.3f} V")
 ```
 
@@ -421,7 +422,7 @@ p.make_pwm_switch_fn(frequency, duty, switch_idx, num_switches, phase=0.0)
 p.make_dead_time_pwm_pair_fn(frequency, duty, hs_switch_idx, ls_switch_idx, num_switches, dead_time, phase=0.0)
 p.make_three_phase_spwm_fn(carrier_frequency, modulation_frequency, modulation_index, legs, num_switches, dead_time, modulation_phase=0.0, carrier_phase=0.0)
 p.ThreePhaseLegIndices(hs_a, ls_a, hs_b, ls_b, hs_c, ls_c)
-p.simulate(builder, t_end, dt=None, *, engine='auto', rtol=None, atol=None, ...)
+p.simulate(builder, t_end=None, dt=None, *, engine='auto', rtol=None, atol=None, ...)
 res.v(name, t=None)
 res.i(name, t=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)

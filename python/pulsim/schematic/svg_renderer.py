@@ -950,3 +950,11 @@ def render_png(layout: SchematicLayout, path: Any,
             "`pip install pulsim[schematic]` (which pulls cairosvg) "
             "or use `render_svg()` for SVG-only output."
         )
+    except OSError as exc:
+        # cairosvg imports, but cffi cannot find the cairo C library
+        # (no `libcairo` on the loader path). The SVG was written.
+        raise ImportError(
+            "PNG output: cairosvg is installed but the cairo C library "
+            "is missing (`brew install cairo` on macOS, `apt-get install "
+            f"libcairo2` on Debian/Ubuntu). The SVG is at {svg_path}."
+        ) from exc

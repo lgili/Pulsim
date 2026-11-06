@@ -36,3 +36,10 @@ circuit:
     # Leakage R from neutral to gnd (keeps MNA non-singular for the
     # floating-neutral Y-connected stator).
     - {type: resistor, name: R_leak, from: n, to: gnd, R: 1.0e6}
+
+# Run settings (top-level, a sibling of `circuit:`). 0.5 s covers the
+# DOL start transient; the sources are 0 V until the chain injects them.
+simulation:
+  t_start: 0.0
+  t_end: 0.5
+  dt: 1.0e-4
