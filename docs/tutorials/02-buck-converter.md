@@ -73,7 +73,7 @@ n_sw   = b.graph.num_switches
 pwm = p.make_pwm_switch_fn(F_PWM, DUTY, q1_bit, n_sw, phase=0.0)
 ```
 
-`make_pwm_switch_fn` returns a `t -> SwitchStateMask` callable that flips bit 0 ON during the first 50 % of each cycle and OFF for the rest. The body diode and free-wheel diode bits are managed by the event-detection loop inside `run_transient` (no manual driving needed).
+`make_pwm_switch_fn` returns a `t -> SwitchStateMask` callable that turns bit `q1_bit` ON during the first 50 % of each cycle and OFF for the rest. The body diode and free-wheel diode bits are managed by the event-detection loop inside `run_transient` (no manual driving needed).
 
 ## Run
 
@@ -109,9 +109,15 @@ which decays to ≈ 0.12 V by 9–10 ms. The window mean is already on target.
 
 ## Reading the YAML
 
-[`examples/buck.yaml`](https://github.com/lgili/Pulsim/blob/main/examples/buck.yaml) declares the same power stage (with a 5 Ω load and the free-wheel diode named `D_FW`):
+[`examples/buck.yaml`](https://github.com/lgili/Pulsim/blob/main/examples/buck.yaml) declares the same power stage (with a 5 Ω load and the free-wheel diode named `D_FW`). The block below carries that file's content inline, so it runs without a clone of the repository; with a clone, `p.load_yaml_file("examples/buck.yaml")` (path relative to the repository root) gives the same result.
 
-```yaml
+The YAML holds the circuit and the run settings, not the gate drive.
+`p.load_yaml_string(...)` / `p.load_yaml_file(...)` return a `LoadedCircuit`
+with `.builder` and `.options`; build the PWM from the loaded builder
+exactly as above:
+
+```python
+BUCK_YAML = """
 circuit:
   devices:
     - {type: voltage_source,         name: Vin,  from: vin, to: gnd, V: 24.0}
@@ -120,19 +126,14 @@ circuit:
     - {type: diode,                  name: D_FW, anode: gnd, cathode: sw,
        g_on: 1.0e3, g_off: 1.0e-9, V_th: 0.7}
     - {type: inductor,               name: L1,   from: sw, to: vout, L: 100.0e-6}
-    ...
+    - {type: capacitor,              name: Cout, from: vout, to: gnd, C: 47.0e-6}
+    - {type: resistor,               name: R_L,  from: vout, to: gnd, R: 5.0}
 simulation:
+  t_start: 0.0
   t_end: 5.0e-3
   dt: 1.0e-7
-```
-
-The YAML holds the circuit and the run settings, not the gate drive.
-`p.load_yaml_file(...)` returns a `LoadedCircuit` with `.builder` and
-`.options`; build the PWM from the loaded builder exactly as above:
-
-```python
-# Run from the repository root (the path is relative to it).
-lc  = p.load_yaml_file("examples/buck.yaml")
+"""
+lc  = p.load_yaml_string(BUCK_YAML)
 pwm = p.make_pwm_switch_fn(100e3, 0.5, lc.builder.switch_index_of("Q1"),
                            lc.builder.graph.num_switches)
 res = p.simulate(lc.builder, t_end=lc.options.t_end, dt=lc.options.dt, switch_fn=pwm)

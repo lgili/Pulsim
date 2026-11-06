@@ -96,12 +96,14 @@ Diodes and ideal switches change state when a current/voltage crosses zero. The 
 For circuits that don't need programmatic generation, you can author a YAML file and load it:
 
 ```python
-loaded = p.load_yaml_file("examples/buck.yaml")
-res = p.simulate(loaded.builder, t_end=loaded.t_end, dt=loaded.dt,
-                 switch_fn=loaded.switch_fn)
+loaded = p.load_yaml_file("examples/buck.yaml")   # path relative to the repo root
+pwm = p.make_pwm_switch_fn(100e3, 0.5, loaded.builder.switch_index_of("Q1"),
+                           loaded.builder.graph.num_switches)
+res = p.simulate(loaded.builder, t_end=loaded.options.t_end,
+                 dt=loaded.options.dt, switch_fn=pwm)
 ```
 
-The YAML loader builds a `LoadedCircuit` containing the populated `CircuitBuilder`, default time window, and a `switch_fn` that combines all declared PWM helpers.
+The YAML loader builds a `LoadedCircuit` with two attributes: `.builder` (the populated `CircuitBuilder`) and `.options` (the `simulation:` block — `t_end`, `dt`, ...). The YAML does not carry the gate drive: build the `switch_fn` from the loaded builder, asking it for the switch's bit by name.
 
 ## How a tutorial walks through this
 

@@ -174,7 +174,7 @@ The installed `pulsim` wheel is stale relative to the source tree.
 If you hit something not listed here, the best signals are:
 
 1. **Minimum repro YAML or 10-line Python snippet.**
-2. **`opts.max_newton_iterations = 50; print(res.commutations)`** — the event log shows which switch flipped when, often pointing at the root cause.
+2. **`opts.max_newton_iterations = 50; print(res.commutation_events)`** — the event log shows which switch flipped when, often pointing at the root cause.
 3. **`cache.dt()` value** — confirms you didn't accidentally pass `dt = 0` (static-only cache).
 
 Open an issue with those three pieces of evidence and we can usually pinpoint the problem in one round-trip.

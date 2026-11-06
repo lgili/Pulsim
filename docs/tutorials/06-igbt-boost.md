@@ -68,7 +68,7 @@ b.add_pulse_voltage_source(
 ```python
 import numpy as np
 
-T_END = 6e-3
+T_END = 12e-3
 res = p.simulate(b, t_end=T_END, dt=2e-8)
 # Newton refresh auto-enabled thanks to the IGBT.
 
@@ -84,22 +84,24 @@ print(f"V_out (steady-state mean) = {v_mean:.2f} V"
 
 Expected:
 ```
-V_out (steady-state mean) = 18.65 V (ideal boost: 20.00 V)
+V_out (steady-state mean) = 18.67 V (ideal boost: 20.00 V)
 ```
 
-The run needs a few milliseconds: the 220 µH / 47 µF output stage rings
+The run needs about 10 ms: the 220 µH / 47 µF output stage rings
 at roughly `(1 − D) / (2π·√(L·C)) ≈ 0.9 kHz` and is lightly damped by the
 20 Ω load. Over the
 second half of a 2 ms run the mean is still 18.39 V, and the last
-0.5 ms of that run averages 19.45 V — neither is steady state.
+0.5 ms of that run averages 19.45 V — neither is steady state. A 6 ms
+run is close but still ringing: second-half mean 18.65 V, last 0.5 ms
+18.54 V. At 12 ms the two agree (18.67 V and 18.67 V).
 
 The shortfall from 20 V is the IGBT's `V_CE_sat = 2 V`. During the
 on-time the inductor sees `V_in − V_CE_sat` instead of `V_in`, so the
 volt-second balance gives `V_out = (V_in − D · V_CE_sat) / (1 − D) =
 (12 − 0.8) / 0.6 = 18.67 V`, which the run reproduces. Re-run with
-`V_CE_sat=0.0` and the mean is 20.00 V. The diode contributes nothing:
+`V_CE_sat=0.0` and the mean is 20.01 V. The diode contributes nothing:
 its `V_th = 0.7` is the voltage at which it commutates, not a forward
-drop (re-running with `V_th=0.0` gives the same 18.65 V). A saturation
+drop (re-running with `V_th=0.0` gives the same 18.67 V). A saturation
 voltage that does not shrink with current is exactly why IGBTs lose to
 SiC MOSFETs at low voltage and high frequency.
 
