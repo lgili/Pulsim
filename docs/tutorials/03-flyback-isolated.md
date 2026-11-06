@@ -36,12 +36,14 @@ DUTY  = 0.40
 
 b = p.CircuitBuilder()
 b.add_voltage_source("Vin", "vin", "gnd", V_IN)
-b.add_transformer(
-    "T1",
-    primary_pos="vin", primary_neg="sw_pri",
-    secondary_pos="sec_pos", secondary_neg="sec_gnd",
-    L_p=200e-6, L_s=200e-6, k=0.95,
-)
+# add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k).
+# The secondary is wound sec_gnd -> sec_pos: while Q1 is ON the
+# primary sees +V_in from vin to sw_pri, which drives sec_pos
+# NEGATIVE and reverse-biases Dout. That is what makes it a flyback
+# (store while ON, release while OFF). Winding it sec_pos -> sec_gnd
+# conducts during the ON time -- a forward converter's polarity.
+b.add_transformer("T1", "vin", "sw_pri", "sec_gnd", "sec_pos",
+                  L_p=200e-6, L_s=200e-6, k=0.95)
 b.add_mosfet ("Q1", "sw_pri", "gnd")   # low-side switch on primary
 b.add_diode  ("Dout", "sec_pos", "vout", 1e3, 1e-9, V_th=0.7)
 b.add_capacitor("Cout", "vout", "sec_gnd", 47e-6)
@@ -54,8 +56,8 @@ b.add_resistor ("R_L",  "vout", "sec_gnd", 10.0)
 > Since v2.0 you do not write that tie yourself: `simulate()` runs a
 > topology preflight, spots the unreferenced secondary, inserts a
 > 1 GΩ tie and tells you exactly which node it anchored to (the
-> lowest-numbered node of the subnet — here `sec_pos`, so the device
-> is called `R_auto_iso_sec_pos`; which node carries the tie does not
+> lowest-numbered node of the subnet — here `sec_gnd`, so the device
+> is called `R_auto_iso_sec_gnd`; which node carries the tie does not
 > matter, since all it does is fix the subnet's reference). Inspect it
 > with
 > `result._preflight`, or pass `auto_regularize=False` to get the
@@ -77,26 +79,44 @@ b.add_resistor ("R_L",  "vout", "sec_gnd", 10.0)
 ## Switch driver
 
 ```python
-pwm = p.make_pwm_switch_fn(
-    switch_index=0, frequency=F_PWM, duty=DUTY, phase=0.0,
-)
+q1_bit = b.switch_index_of("Q1")
+pwm = p.make_pwm_switch_fn(F_PWM, DUTY, q1_bit, b.graph.num_switches)
 ```
 
-Switch index 0 is `Q1`. The diode `Dout` has its own switch index (1), but the user does NOT drive it — event detection flips it automatically when current tries to flow backward.
+`add_mosfet` adds Q1 *and* its body diode `Q1_body`, so the switching
+branches are Q1 (bit 0), `Q1_body` (bit 1) and `Dout` (bit 2) — ask
+`switch_index_of` rather than counting. You do NOT drive the diode
+bits: event detection flips them when their current tries to reverse.
 
 ## Run
 
 ```python
+import numpy as np
+
 res = p.simulate(b, t_end=10e-3, dt=1e-7, switch_fn=pwm)
 
-vout_idx = b.node_id_of("vout")
-v = [s[vout_idx] for s in res.states]
-k_skip = int(5e-3 / 1e-7)
-print(f"V_out (mean over last half) = "
-      f"{sum(v[k_skip:]) / (len(v) - k_skip):.2f} V")
+# Measure the output across its own load: vout relative to sec_gnd.
+vout_idx, sgnd_idx = b.node_id_of("vout"), b.node_id_of("sec_gnd")
+t = np.asarray(res.times)
+v = np.array([s[vout_idx] - s[sgnd_idx] for s in res.states])
+m = t >= 5e-3                       # last half, time-weighted
+v_mean = np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0])
+print(f"V_out (mean over last half) = {v_mean:.2f} V")
 ```
 
-For ideal 1:1 ratio + 40 % duty: `V_out ≈ V_in · D / (1 − D) ≈ 16 V` (continuous conduction; less in DCM, more with leakage spike).
+Expected output (the run also prints the preflight warning about the
+`R_auto_iso_sec_gnd` tie described above):
+```
+V_out (mean over last half) = 10.73 V
+```
+
+For an ideal 1:1 ratio at 40 % duty in continuous conduction,
+`V_out = V_in · D / (1 − D) = 16 V`. The run lands well below that
+because `k = 0.95` leaves 5 % of each winding (10 µH) as leakage, and
+nothing clamps it: the leakage energy rings the primary switch node up
+to ≈ 770 V at every turn-off instead of reaching the output. Raise the
+coupling and the output climbs to the ideal value — `k = 0.99` gives
+14.57 V and `k = 0.999` gives 15.98 V (same run, mean over 9–10 ms).
 
 ## Two switch states, four commutations
 

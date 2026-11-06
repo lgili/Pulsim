@@ -66,11 +66,17 @@ b.add_pulse_voltage_source(
 ## Run
 
 ```python
-res = p.simulate(b, t_end=2e-3, dt=2e-8)
+import numpy as np
+
+T_END = 6e-3
+res = p.simulate(b, t_end=T_END, dt=2e-8)
 # Newton refresh auto-enabled thanks to the IGBT.
 
 vout_idx = b.node_id_of("vout")
-v_mean = sum(s[vout_idx] for s in res.states[len(res.states)//2:]) / (len(res.states)//2)
+t = np.asarray(res.times)
+v = np.array([s[vout_idx] for s in res.states])
+m = t >= T_END / 2                  # second half, time-weighted
+v_mean = np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0])
 boost_ideal = V_IN / (1.0 - DUTY)
 print(f"V_out (steady-state mean) = {v_mean:.2f} V"
       f" (ideal boost: {boost_ideal:.2f} V)")
@@ -78,10 +84,24 @@ print(f"V_out (steady-state mean) = {v_mean:.2f} V"
 
 Expected:
 ```
-V_out (steady-state mean) = 18.45 V (ideal boost: 20.00 V)
+V_out (steady-state mean) = 18.65 V (ideal boost: 20.00 V)
 ```
 
-The shortfall is due to `V_CE_sat ≈ 2 V` IGBT drop plus the diode V_F ≈ 0.7 V — the **dominant losses** in IGBT-based converters, exactly why IGBTs lose to SiC MOSFETs at high frequencies.
+The run needs a few milliseconds: the 220 µH / 47 µF output stage rings
+at roughly `(1 − D) / (2π·√(L·C)) ≈ 0.9 kHz` and is lightly damped by the
+20 Ω load. Over the
+second half of a 2 ms run the mean is still 18.39 V, and the last
+0.5 ms of that run averages 19.45 V — neither is steady state.
+
+The shortfall from 20 V is the IGBT's `V_CE_sat = 2 V`. During the
+on-time the inductor sees `V_in − V_CE_sat` instead of `V_in`, so the
+volt-second balance gives `V_out = (V_in − D · V_CE_sat) / (1 − D) =
+(12 − 0.8) / 0.6 = 18.67 V`, which the run reproduces. Re-run with
+`V_CE_sat=0.0` and the mean is 20.00 V. The diode contributes nothing:
+its `V_th = 0.7` is the voltage at which it commutates, not a forward
+drop (re-running with `V_th=0.0` gives the same 18.65 V). A saturation
+voltage that does not shrink with current is exactly why IGBTs lose to
+SiC MOSFETs at low voltage and high frequency.
 
 ## The convergence story (why this isn't trivial)
 
