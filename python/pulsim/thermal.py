@@ -557,6 +557,31 @@ def make_thermal_observer(builder,
 # :mod:`pulsim._result_views`.
 
 
+def _with_step_starts(times: np.ndarray, p: np.ndarray,
+                      p_start: np.ndarray):
+    """``(times, p)`` with the step-start power inserted wherever it
+    differs from the stored sample (the right limit of an
+    ``engine='dsed'`` event, see ``_result_views.step_start_states``),
+    a hair (1e-6 of the step) after the sample.
+
+    So T_j sees the same per-step power waveform that ``P_cond_avg``
+    integrates. From the stored samples alone (the left limits), T_j
+    on a DSED boost disagreed with ``R_th · P_cond_avg`` by up to 2 %
+    (D1 CCM ratio 0.980, Q1 1.010); pwl and trbdf2 store no right
+    limits, so they are returned unchanged."""
+    t = np.asarray(times, dtype=float)
+    p = np.asarray(p, dtype=float)
+    p_start = np.asarray(p_start, dtype=float)
+    if t.size < 2 or p_start is p or p_start.shape != p.shape:
+        return t, p
+    h = np.diff(t)
+    idx = np.nonzero((p_start[:-1] != p[:-1]) & (h > 0))[0]
+    if idx.size == 0:
+        return t, p
+    return (np.insert(t, idx + 1, t[idx] + 1e-6 * h[idx]),
+            np.insert(p, idx + 1, p_start[idx]))
+
+
 def device_thermal_summary(
     builder,
     result,
@@ -741,12 +766,14 @@ def device_thermal_summary(
             v_R_s = (_views.node_voltage_trace(states_s, int(from_id))
                      - _views.node_voltage_trace(states_s, int(to_id)))
             P_cond_t = v_R * v_R / R
+            P_start_t = v_R_s * v_R_s / R
             g_c = np.full_like(v_R, 1.0 / R)
             E_cond = _losses._branch_energy(times, v_R, g_c, v_R_s, g_c)
         elif kind == "inductor":
             # Ideal inductor — conduction loss is zero. Any thermal
             # rise comes from P_core_avg above.
             P_cond_t = np.zeros_like(times)
+            P_start_t = P_cond_t
             E_cond = 0.0
         elif kind == "diode":
             params = desc.get("params", {})
@@ -769,10 +796,13 @@ def device_thermal_summary(
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_D * g_arr, c_spec)
+                P_start_t = _losses._conduction_power_offset_slope(
+                    d_trace.v_start * g_arr_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
                     times, v_D * g_arr, d_trace.v_start * g_arr_s, c_spec)
             else:
                 P_cond_t = v_D * v_D * g_arr
+                P_start_t = d_trace.v_start * d_trace.v_start * g_arr_s
                 E_cond = _losses._branch_energy(
                     times, v_D, g_arr, d_trace.v_start, g_arr_s)
         elif kind == "switch":
@@ -811,19 +841,23 @@ def device_thermal_summary(
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_SW * g_arr, c_spec)
+                P_start_t = _losses._conduction_power_offset_slope(
+                    v_SW_s * g_arr_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
                     times, v_SW * g_arr, v_SW_s * g_arr_s, c_spec)
             else:
                 P_cond_t = v_SW * v_SW * g_arr
+                P_start_t = v_SW_s * v_SW_s * g_arr_s
                 E_cond = _losses._branch_energy(
                     times, v_SW, g_arr, v_SW_s, g_arr_s)
         else:
             # Unsupported kind for the thermal pipeline.
             continue
 
-        P_total_t = P_cond_t + P_constant
-        T_j_trace = compute_temperature(times, P_total_t,
-                                          stages, T_amb_dev)
+        T_j_trace = compute_temperature(
+            *_with_step_starts(times, P_cond_t + P_constant,
+                               P_start_t + P_constant),
+            stages, T_amb_dev)
         T = (times[-1] - times[0]) if times.size > 1 else 1.0
         P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
                       else float(P_cond_t.mean()))
