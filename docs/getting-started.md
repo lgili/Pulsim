@@ -118,12 +118,14 @@ Plotting needs the `[jupyter]` extra (matplotlib). One line plots
 named signals and returns the matplotlib `Figure` (add `show=True` to
 open a window, or `save="rc.png"` to write a file):
 
+<!-- doctest: requires=matplotlib -->
 ```python
 fig = p.scope(b, res, signals=["vc"])
 ```
 
 Or hand the arrays to matplotlib yourself:
 
+<!-- doctest: requires=matplotlib -->
 ```python
 import matplotlib.pyplot as plt
 

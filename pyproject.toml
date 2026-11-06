@@ -124,6 +124,9 @@ testpaths = ["python/tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "doc_snippets: executes the python blocks of the user-facing docs (python/tests/test_doc_snippets.py)",
+]
 
 [tool.coverage.run]
 source = ["pulsim"]

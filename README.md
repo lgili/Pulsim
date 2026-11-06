@@ -196,6 +196,7 @@ print(f"v_C(5 ms) = {res.states[-1][b.node_id_of('vc')]:.3f} V")   # 4.966 V
 To see the waveform, install the `[jupyter]` extra (matplotlib) and add
 one line:
 
+<!-- doctest: requires=matplotlib -->
 ```python
 p.scope(b, res, signals=["vc"])           # one-line waveform plot
 ```
