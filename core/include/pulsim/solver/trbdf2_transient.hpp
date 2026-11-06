@@ -121,9 +121,13 @@ struct TrBdf2Options {
     /// 0 = auto (h_max / 100).
     Real h_init  = Real{0};
     /// Step ceiling — also the gate-edge SAMPLING resolution
-    /// ceiling: an on-off gate pulse narrower than h_max can be
-    /// missed entirely, exactly like dsed's dt_max. 0 = auto
-    /// (span / 1000).
+    /// ceiling: an opaque switch_fn is sampled every h/4 inside a
+    /// step, so an isolated on-off gate pulse narrower than h_max/4
+    /// can be missed entirely and SILENTLY (nothing saw it to warn
+    /// about); one at least h_max/4 wide is always landed. A periodic
+    /// gate is safer: once two of its edges are seen the step is
+    /// capped at twice the narrowest pulse. 0 = auto (span / 1000,
+    /// lowered by the circuit's own periodic sources).
     Real h_max   = Real{0};
     /// Accepted-step floor. 0 = auto (span · 1e-11).
     ///
@@ -187,9 +191,11 @@ struct TrBdf2Stats {
     /// apart.
     Real gate_pulse_min = 0;
     /// Gate pulses that turned out NARROWER than the switch_fn
-    /// sampling spacing (h/4) the run had already used: pulses that
-    /// narrow may have been stepped over before the width was known.
-    /// The Python layer warns.
+    /// sampling spacing (h/4) used while that pulse was open: it was
+    /// landed by luck, so pulses that narrow may have been stepped
+    /// over before the width was known. The Python layer warns. An
+    /// isolated (one-shot) pulse narrower than h_max/4 that is never
+    /// sampled is NOT counted — nothing saw it.
     Size n_gate_undersampled = 0;
     /// Largest switch_fn sampling spacing (h/4) the run used.
     Real gate_sample_spacing_max = 0;
@@ -197,6 +203,11 @@ struct TrBdf2Stats {
     /// rule forbids (on the bits the last decision used) and so were
     /// re-decided by a zero-time cascade before stepping.
     Size n_held_diode_redecided = 0;
+    /// Gate edges found at a step boundary that no step had landed
+    /// (an edge within an ulp of a step's end, e.g. one a controller
+    /// tick ended the step on): the diodes were re-settled under the
+    /// new gates before stepping, as at a landed edge.
+    Size n_gate_boundary_settles = 0;
     /// The probe step a singular factorization forced (0 = the default
     /// h_probe_floor was enough). See `probe_solve`.
     Real probe_floor_used = 0;
@@ -965,7 +976,44 @@ inline SimulationResult run_transient_trbdf2(
     const Real gate_pulse_floor =
         std::max(Real{16} * h_min, span * Real{1e-9});
     Real gate_spacing_max = Real{0};
+    // Per gate bit: the largest sampling spacing used since that bit's
+    // PREVIOUS seen toggle (or the run start, before its first one),
+    // i.e. while the pulse now closing was open or while pulses could
+    // have passed unseen. A pulse is "undersampled" only against THAT
+    // spacing: compared with the run-wide maximum, every smooth SPWM
+    // whose pulses narrow gradually (each one landed, at a spacing
+    // already capped by the previous pulse) was flagged — 22 times
+    // over 0.2 s of a 10 kHz three-phase VSI whose 16000 edges were
+    // all landed. Not reset at a bit's FIRST toggle: a PWM that starts
+    // late is found by the walking sample only after some pulses went
+    // by at the idle spacing, and those are what the warning confesses.
+    std::vector<Real> gate_spacing_open(n_sw_total, Real{0});
+    std::vector<Size> gate_bits;
+    for (Size i = 0; i < n_sw_total; ++i) {
+        if (!diode_owned.get(i)) {
+            gate_bits.push_back(i);
+        }
+    }
     Real gate_jitter = Real{0};
+    // The gate bits the diode bits were last decided (or last solved)
+    // under. A gate edge that falls within an ulp of a step's END is
+    // not seen by that step's samples (t + h rounds to the pre-edge
+    // side) and so is not landed, and the zero-time cascade a landed
+    // edge gets never ran: the next step then solved the post-edge
+    // gates with the pre-edge diode bits. Measured where a controller
+    // tick (which ends a step exactly on k·T) met a 10 kHz buck's
+    // turn-on: a 2.1e-11 s sample with Q1 ON and D1 ON, v_sw = +6 V
+    // across two 1 mOhm stamps. The step start compares and settles.
+    SwitchStateMask gates_decided = gate_prev;
+    auto gates_differ = [&](const SwitchStateMask& a,
+                            const SwitchStateMask& b) {
+        for (const Size i : gate_bits) {
+            if (a.get(i) != b.get(i)) {
+                return true;
+            }
+        }
+        return false;
+    };
     auto learn_gate_toggles = [&](const SwitchStateMask& sw,
                                    Real at_t) {
         if (sw == gate_prev) {
@@ -982,10 +1030,11 @@ inline SimulationResult run_transient_trbdf2(
                     // 1 % margin: a pulse as wide as the spacing
                     // cannot fit between two samples, and the widths
                     // carry the bisection's h_min of noise.
-                    if (gate_spacing_max > Real{1.01} * w) {
+                    if (gate_spacing_open[i] > Real{1.01} * w) {
                         ++st.n_gate_undersampled;
                     }
                 }
+                gate_spacing_open[i] = Real{0};
             }
             gate_toggled[i] = true;
             gate_last_toggle[i] = at_t;
@@ -1030,6 +1079,22 @@ inline SimulationResult run_transient_trbdf2(
                                              h_min));
                 }
             }
+            if (has_diodes && gates_differ(sw_now, gates_decided)) {
+                // An edge at this step boundary that no step landed
+                // (see gates_decided): settle the diodes under the
+                // gates the step will use, as a landed edge does.
+                for (Size it = 0; it < opts.max_event_iterations;
+                     ++it) {
+                    gates_decided = mask_at(t + Real{0.5} * h_min);
+                    probe_solve(gates_decided, t, h_probe_floor,
+                                x_trial);
+                    x_sig = x_trial;
+                    if (!diodes.update_from_state(x_trial)) {
+                        break;
+                    }
+                }
+                ++st.n_gate_boundary_settles;
+            }
             // Land the next tick exactly, like a gate edge.
             if (has_ticks && t_next_tick > t
                 && t_next_tick - t < h) {
@@ -1057,9 +1122,14 @@ inline SimulationResult run_transient_trbdf2(
             bool gates_flat = false;
             if (!landed_on_edge) {
                 if (learn_gates) {
-                    gate_spacing_max = std::max(
-                        gate_spacing_max,
-                        h / static_cast<Real>(kGateSamples));
+                    const Real spacing =
+                        h / static_cast<Real>(kGateSamples);
+                    gate_spacing_max =
+                        std::max(gate_spacing_max, spacing);
+                    for (const Size i : gate_bits) {
+                        gate_spacing_open[i] =
+                            std::max(gate_spacing_open[i], spacing);
+                    }
                 }
                 // h/4, h/2, 3h/4, h, plus one sample at a fraction
                 // that walks the golden-ratio sequence from step to
@@ -1380,7 +1450,8 @@ inline SimulationResult run_transient_trbdf2(
                                  it2 < opts.max_event_iterations;
                                  ++it2) {
                                 // Probe, not a committed step.
-                                probe_solve(mask_at(t), t,
+                                gates_decided = mask_at(t);
+                                probe_solve(gates_decided, t,
                                             h_probe_floor,
                                             x_trial);
                                 x_sig = x_trial;
@@ -1546,7 +1617,8 @@ inline SimulationResult run_transient_trbdf2(
                         for (Size it2 = 0;
                              it2 < opts.max_event_iterations;
                              ++it2) {
-                            probe_solve(mask_at(t), t, h_zero,
+                            gates_decided = mask_at(t);
+                            probe_solve(gates_decided, t, h_zero,
                                         x_trial);
                             x_sig = x_trial;
                             if (!diodes.update_from_state(
@@ -1572,6 +1644,7 @@ inline SimulationResult run_transient_trbdf2(
                     result.record_switch_state(mask_step);
                     x_mask = mask_step;
                     x_mask_known = true;
+                    gates_decided = mask_step;
                     ++st.n_diode_events;
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
@@ -1630,6 +1703,7 @@ inline SimulationResult run_transient_trbdf2(
                 result.record_switch_state(mask_step);
                 x_mask = mask_step;
                 x_mask_known = true;
+                gates_decided = mask_step;
                 ++st.n_accept;
                 if (pending_gate_slot >= 0) {
                     // The h that survived right after this gate
@@ -1662,7 +1736,8 @@ inline SimulationResult run_transient_trbdf2(
                         for (Size it = 0;
                              it < opts.max_event_iterations;
                              ++it) {
-                            probe_solve(mask_at(t + h_probe), t,
+                            gates_decided = mask_at(t + h_probe);
+                            probe_solve(gates_decided, t,
                                         h_probe, x_trial);
                             x_sig = x_trial;
                             if (!diodes.update_from_state(

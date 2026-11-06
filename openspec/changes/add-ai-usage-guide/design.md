@@ -110,7 +110,10 @@ tour. Order:
      `fix/v2-b-engine-robustness`: the zero-time probe step grows on a
      singular factorization (to 6e-10 s here), and the run gives
      321.851 V across the rails against 321.852 V at `dt=1e-6`. Trap 8
-     now covers reading such rails (`v("dp") - v("dn")`).
+     now covers reading such rails (`v("dp") - v("dn")`) and the
+     warning a learned probe floor raises: with 10 mF the floating
+     rails read 323.94 V against 324.51 V (grounded: 324.516 against
+     324.516), so grounding a rail is still the better circuit.
    - The fixed engine starts first order from an inconsistent state,
      and initial conditions do not change that: an RL decay with
      `i0=1` has error 1.85e-3 at `dt=1e-5` and 0.92e-3 at `5e-6`, and

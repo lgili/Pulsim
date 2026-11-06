@@ -391,11 +391,38 @@ reproduced every friction item.
       gate events instead of 3999 and ended at 589.97 V against
       48.04 V. A step now samples h/4 .. h plus a walking fraction,
       bisects the first sub-interval that changes and is capped at
-      twice the narrowest pulse seen (48.034 V, 3999 events); pulses
-      found narrower than the sampling already used are warned about.
+      twice the narrowest pulse seen (48.034 V, 3999 events); a pulse
+      landed although narrower than the sampling used while it was
+      open (or before that gate's first edge) is warned about; against
+      the run-wide spacing, 0.2 s of a smooth 10 kHz SPWM raised it on
+      22 pulses with all 16000 edges landed (now 0). Closed for PERIODIC gates only: a one-shot
+      pulse narrower than h_max/4 (5 us on a 20 ms run) that falls
+      between samples is skipped with no warning, since nothing saw
+      it (11 of 20 phases of a 2 us pulse; a 5 us pulse is landed at
+      all 20). Documented in trap 13 and `TrBdf2Options::h_max`; the
+      cure is `dt` (the ceiling) or an oracle-backed `NativePwm2Switch`.
 - [x] 12.11 (Found and closed on `fix/v2-b-engine-robustness`.) The
       floating-DC-side abort of trap 8 (see design.md): the probe step
-      grows on a singular factorization; trap 8 rewritten.
+      grows on a singular factorization; trap 8 rewritten. The run is
+      not as robust as `engine='pwl'` on variants (10 mF: 323.94 V
+      against 324.51 V; a 1 mH DC choke: a 76.7 kV common-mode
+      sample), so a learned probe floor now warns, naming the subnet
+      that reaches ground only through switches and the fix (ground a
+      rail). The choke variant learns no floor; its held-diode
+      `RuntimeWarning` names the subnet instead.
+- [x] 12.12 (Found in review and closed on `fix/v2-b-engine-robustness`.)
+      A controller tick that coincides with a gate edge stored a
+      shoot-through sample on TR-BDF2: the 10 kHz buck of
+      `test_engine_auto_closed_loop.py` with `controller_period=50e-6`
+      recorded Q1 ON with D1 ON (v_sw = +6 V across two 1 mOhm stamps)
+      at t = 1.00000002e-4 s; 0 without `controller_period`. The tick
+      ends a step on k*T, t + h rounds to the pre-edge side, so the edge
+      was not landed and its zero-time diode cascade never ran. Present
+      on the base (3 samples; 219 on the setpoint-step test), surfaced
+      by the new held-diode `RuntimeWarning`. The step start now
+      compares the gates with those the diodes were last decided under
+      and re-settles (`n_gate_boundary_settles`): 0 violations on both
+      tests, which now assert the warning is absent.
 
 ## 13. Review round 3
 

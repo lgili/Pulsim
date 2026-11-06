@@ -3899,6 +3899,7 @@ void init_module(py::module_& m) {
             d["gate_sample_spacing_max"] = st.gate_sample_spacing_max;
             d["n_held_diode_redecided"] = st.n_held_diode_redecided;
             d["probe_floor_used"] = st.probe_floor_used;
+            d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

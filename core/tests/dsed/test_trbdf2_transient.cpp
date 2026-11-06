@@ -407,3 +407,52 @@ TEST_CASE("TR-BDF2: a floating DC side runs on a longer probe step",
     }
     REQUIRE(acc / span == Approx(321.85).margin(0.05));
 }
+
+TEST_CASE("TR-BDF2: a gate edge at a step boundary re-settles the diodes",
+          "[v2][trbdf2][robustness]") {
+    // 10 kHz buck, D = 0.4, from a plain lambda, with a controller tick
+    // every 50 µs. The tick ends a step exactly on k·T, where the
+    // turn-on edge also sits; t + h rounded to the pre-edge side, so
+    // that step saw no edge and the zero-time cascade a landed edge
+    // gets never ran. The next step solved Q1 ON with D1 still ON:
+    // a 2.1e-11 s sample at v_sw = +6 V across two 1 mOhm stamps.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "vin", "gnd", 12.0);
+    b.add_mosfet_with_body_diode("Q1", "vin", "sw", 1e-3, 1e9, 0.7);
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9, 0.7);
+    b.add_inductor("L1", "sw", "vout", 220e-6);
+    b.add_capacitor("Cout", "vout", "gnd", 220e-6);
+    b.add_resistor("R_L", "vout", "gnd", 8.0);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    const Size q = static_cast<Size>(b.switch_index_of("Q1"));
+    const Size d = static_cast<Size>(b.switch_index_of("D1"));
+    const Real T = 1e-4;
+    auto sf = [&](Real t) {
+        topology::SwitchStateMask m(n_sw);
+        m.set(q, std::fmod(t, T) / T < 0.4);
+        return m;
+    };
+    solver::TrBdf2Options o;
+    o.t_end = 1e-3;
+    o.observer_period = 50e-6;
+    solver::TrBdf2Stats st;
+    Size ticks = 0;
+    const auto res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, [&](Real, const Vector&) { ++ticks; });
+    REQUIRE(ticks == 20);
+    REQUIRE(st.n_gate_boundary_settles >= 1);
+    REQUIRE(res.has_switch_states);
+    Size shoot_through = 0;
+    for (Size k = 0; k < res.times.size(); ++k) {
+        const auto* row =
+            &res.switch_state_bits[k * res.switch_state_stride];
+        const bool q_on = (row[q / 8] >> (q % 8)) & 1U;
+        const bool d_on = (row[d / 8] >> (d % 8)) & 1U;
+        shoot_through += (q_on && d_on) ? 1 : 0;
+    }
+    REQUIRE(shoot_through == 0);
+}

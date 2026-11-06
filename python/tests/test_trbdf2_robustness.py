@@ -225,9 +225,9 @@ def test_line_inductance_bridge_holds_no_diode_against_its_rule():
                                                 abs=0.05)
 
 
-def test_sliding_mode_warning_names_the_engine_that_was_asked():
-    """The boundary-ride warning said engine='auto' when engine='trbdf2'
-    had been requested by name."""
+def _snubbed_boost():
+    """24 V boost, 220 µH, Q1 g_on 50 S at 100 kHz D = 0.5, 100 nF
+    across D1 (V_th 0.7), 100 µF || 30 ohm."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 24.0)
     b.add_inductor("L", "vin", "sw", 220e-6)
@@ -236,7 +236,23 @@ def test_sliding_mode_warning_names_the_engine_that_was_asked():
     b.add_capacitor("Cs", "sw", "out", 100e-9)
     b.add_capacitor("C", "out", "gnd", 100e-6)
     b.add_resistor("RL", "out", "gnd", 30.0)
-    pwm = _py_pwm(b.switch_index_of("Q1"), b.graph.num_switches, 0.5)
+    return b, _py_pwm(b.switch_index_of("Q1"), b.graph.num_switches, 0.5)
+
+
+def test_snubbed_boost_tracks_the_fixed_engine():
+    """The task's headline E2c case. engine='auto' without dt ended at
+    27.59 V at 3 ms on the base of this change; engine='pwl' at
+    dt = 1e-8 ends at 54.48 V (measured; too slow to rerun here)."""
+    b, pwm = _snubbed_boost()
+    r, _ = _run(b, 3e-3, switch_fn=pwm)
+    assert r.engine_used == "trbdf2"
+    assert float(r.v("out")[-1]) == pytest.approx(54.48, abs=0.1)
+
+
+def test_sliding_mode_warning_names_the_engine_that_was_asked():
+    """The boundary-ride warning said engine='auto' when engine='trbdf2'
+    had been requested by name."""
+    b, pwm = _snubbed_boost()
     _, msgs = _run(b, 6e-3, engine="trbdf2", switch_fn=pwm)
     ride = [m for m in msgs if "conduction boundary" in m]
     assert ride and all(m.startswith("simulate(engine='trbdf2')")
@@ -263,13 +279,139 @@ def test_floating_dc_side_runs_without_dt():
     (numerically singular) for mask 0b0000 N=4 (dt=6e-14) ... node dn".
     Now the probe step grows to 6e-10 s once and the run gives
     321.851 V across the rails against 321.852 V at dt = 1e-6."""
-    r, _ = _run(_floating_dc_bridge(), 0.06)
+    r, msgs = _run(_floating_dc_bridge(), 0.06)
     ref, _ = _run(_floating_dc_bridge(), 0.06, dt=1e-6)
     assert r.engine_used == "trbdf2"
     assert 0.0 < r._trbdf2_stats["probe_floor_used"] <= 0.06 * 1e-6
+    # The floor is evidence of a floating subnet: named, with the fix.
+    flt = [m for m in msgs if "reach the rest of the circuit" in m]
+    assert len(flt) == 1 and "node(s) dp, dn" in flt[0], msgs
+    assert "ground a rail" in flt[0]
 
     def vdc(res):
         t = np.asarray(res.times)
         return p.time_average(t, res.v("dp") - res.v("dn"), t_from=0.04)
 
     assert vdc(r) == pytest.approx(vdc(ref), abs=0.01)
+
+
+def test_grounded_dc_side_raises_no_floating_warning():
+    """The control: the same bridge with dc_neg grounded needs no probe
+    floor and so names no floating subnet."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 325.0, 50.0)
+    b.add_resistor("Rs", "ac", "acx", 1e-3)
+    b.add_resistor("Rb", "acb", "gnd", 1e-3)
+    p.add_bridge_rectifier(b, "BR", ac_a="acx", ac_b="acb", dc_pos="dp",
+                           dc_neg="gnd")
+    b.add_capacitor("C", "dp", "gnd", 470e-6)
+    b.add_resistor("RL", "dp", "gnd", 1e3)
+    r, msgs = _run(b, 0.02)
+    assert r._trbdf2_stats["probe_floor_used"] == 0.0
+    assert not [m for m in msgs if "reach the rest of the circuit" in m]
+
+
+def test_floating_subnet_finder():
+    """Union-find over the non-switch branches: the DC pair of a
+    floating bridge is named, a buck's switch node (tied by its
+    inductor) is not."""
+    assert p._floating_subnets(_floating_dc_bridge()) == [["dp", "dn"]]
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 12.0)
+    b.add_mosfet("Q", "in", "sw")
+    b.add_diode("D", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "o", 1e-4)
+    b.add_resistor("R", "o", "gnd", 1.0)
+    assert p._floating_subnets(b) == []
+
+
+# ---------------------------------------------------------------------
+# E1 limits — what the gate sampling can and cannot promise
+# ---------------------------------------------------------------------
+
+def _one_shot(t_on, width):
+    """10 V through a 100 S switch, 1 ohm into 1 µF || 1 kOhm; the
+    switch closes ONCE, for `width` seconds from `t_on`."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_switch("S", "vin", "x", 100.0, 1e-9)
+    b.add_resistor("R", "x", "c", 1.0)
+    b.add_capacitor("C", "c", "gnd", 1e-6)
+    b.add_resistor("RL", "c", "gnd", 1e3)
+    n, s = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(s, t_on <= t < t_on + width)
+        return m
+    return b, fn
+
+
+@pytest.mark.parametrize("k", range(0, 20, 3))
+def test_one_shot_pulse_a_quarter_of_the_ceiling_wide_is_landed(k):
+    """20 ms run: the default ceiling is 20 µs and switch_fn is sampled
+    every 5 µs, so a 5 µs one-shot pulse is landed at every phase
+    (v_C peaks at 9.92 V)."""
+    b, fn = _one_shot(10e-3 + k * 0.37e-6 * 7.3, 5e-6)
+    r, _ = _run(b, 20e-3, switch_fn=fn)
+    assert r._trbdf2_stats["n_gate_events"] == 2
+    assert float(r.v("c").max()) > 9.0
+
+
+def test_one_shot_pulse_narrower_than_a_quarter_of_the_ceiling_needs_dt():
+    """The documented limit: an isolated 2 µs pulse under the 20 µs
+    default ceiling falls between samples at some phases (11 of 20
+    measured) and NOTHING warns, because nothing saw it. dt = 4 µs (a
+    1 µs sampling spacing) lands it: 8.6149 V peak against 8.6154 V on
+    engine='pwl' at dt = 1e-7."""
+    t_on = 10e-3 + 2 * 0.37e-6 * 7.3      # a phase that misses it
+    b, fn = _one_shot(t_on, 2e-6)
+    r, msgs = _run(b, 20e-3, switch_fn=fn)
+    assert r._trbdf2_stats["n_gate_events"] == 0
+    assert float(r.v("c").max()) < 1e-3
+    assert not [m for m in msgs if "gate pulse" in m], msgs
+    b, fn = _one_shot(t_on, 2e-6)
+    r, _ = _run(b, 20e-3, engine="trbdf2", dt=4e-6, switch_fn=fn)
+    assert r._trbdf2_stats["n_gate_events"] == 2
+    assert float(r.v("c").max()) == pytest.approx(8.6154, abs=0.01)
+
+
+def test_smooth_spwm_over_many_cycles_raises_no_pulse_warning():
+    """0.2 s of a 10 kHz SPWM VSI: every one of its 16000 edges is
+    landed and each pulse is sampled at a spacing capped by the
+    previous one. Compared with the run-wide largest spacing (12.5 µs,
+    from before the first pulse) 22 gradually-narrowing pulses used to
+    count as undersampled and raise the pulse warning."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dcp", "gnd", 600.0)
+    v = p.add_three_phase_vsi(b, "INV", vdc_pos="dcp", vdc_neg="gnd",
+                              out_a="a", out_b="b", out_c="c")
+    for ph in "abc":
+        b.add_resistor(f"R{ph}", ph, f"m{ph}", 10.0)
+        b.add_inductor(f"L{ph}", f"m{ph}", "n", 5e-3)
+    spwm = p.make_three_phase_spwm_fn(
+        10e3, 50.0, 0.8, p.ThreePhaseLegIndices(*v.switch_indices),
+        b.graph.num_switches, 1e-6)
+    r, msgs = _run(b, 0.2, switch_fn=lambda t: spwm(t))
+    st = r._trbdf2_stats
+    assert st["n_gate_events"] == 16000
+    assert st["n_gate_undersampled"] == 0
+    assert not [m for m in msgs if "gate pulse" in m], msgs
+
+
+def test_held_diode_warning_names_a_floating_subnet():
+    """The floating bridge with a 1 mH DC choke learns no probe floor,
+    but a missed commutation swings dq/dn to a 76.7 kV common-mode
+    sample: the held-diode warning names the subnet and the cure (with
+    dc_neg grounded no diode is held)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "s", "gnd", 0.0, 325.0, 50.0)
+    b.add_resistor("Rs", "s", "a", 1e-3)
+    p.add_bridge_rectifier(b, "BR", ac_a="a", ac_b="gnd", dc_pos="dp",
+                           dc_neg="dn")
+    b.add_inductor("Lf", "dp", "dq", 1e-3)
+    b.add_capacitor("C", "dq", "dn", 470e-6)
+    b.add_resistor("RL", "dq", "dn", 1e3)
+    _, msgs = _run(b, 0.06)
+    held = [m for m in msgs if "commutation rule forbids" in m]
+    assert held and "Node(s) dp, dn, dq reach the rest" in held[0], msgs

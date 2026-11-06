@@ -2096,8 +2096,9 @@ def simulate(
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
         #      which is also the gate-edge sampling resolution
-        #      (a gate pulse narrower than h_max can be missed,
-        #      exactly like dsed's dt_max). ----
+        #      (switch_fn is sampled every h/4, so a one-shot gate
+        #      pulse narrower than h_max/4 can be missed SILENTLY;
+        #      a periodic one caps h at twice its pulse once seen). ----
         # Every unsupported combination was already caught by
         # _trbdf2_blockers above (which is also what routes
         # engine='auto' away from here).
@@ -2940,23 +2941,50 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             "the diode its physical V_th (that IS the hysteresis "
             "band).",
             stacklevel=3)
-    # Gate pulses narrower than the switch_fn sampling the engine had
-    # already used: an opaque switch_fn is only seen where it is
-    # called, so a pulse that narrow may have been stepped over before
-    # its width was known (the step is capped at twice the narrowest
-    # pulse from then on).
+    # A gate pulse landed although narrower than the switch_fn
+    # sampling used while it was open (or before that bit's first
+    # edge): it was found by luck, so pulses that narrow may have been
+    # stepped over before its width was known (the step is capped at
+    # twice the narrowest pulse from then on). A one-shot pulse that
+    # no sample hit is not counted: nothing saw it.
     if stats.get("n_gate_undersampled", 0) > 0:
         w = float(stats.get("gate_pulse_min", 0.0))
         sp = float(stats.get("gate_sample_spacing_max", 0.0))
         warnings.warn(
-            f"{eng}: switch_fn produced a gate pulse of {w:.3g} s "
-            f"after the engine had already sampled it {sp:.3g} s "
-            "apart, so pulses that narrow may have been stepped over "
-            "before then (this engine sees a Python switch_fn only "
-            "where it calls it). Pass dt=<at most half the narrowest "
+            f"{eng}: switch_fn produced a gate pulse of {w:.3g} s, "
+            "narrower than the spacing at which the engine had been "
+            f"sampling that gate (at most {sp:.3g} s), so pulses that "
+            "narrow may have been stepped over before then (this "
+            "engine sees a Python switch_fn only where it calls it). "
+            "Pass dt=<at most half the narrowest "
             "pulse> as the step ceiling (engine='trbdf2'), drive the "
             "gates with p.NativePwm2Switch, whose edges the engine "
             "computes, or use engine='pwl' with a dt on the PWM grid.",
+            stacklevel=3)
+    # The zero-time probe needed a longer step to factor: some subnet
+    # reaches the rest of the circuit only through switches and diodes,
+    # so while they are OFF its common mode is set by g_off alone. The
+    # E3 reproducer (bridge, floating 470 uF DC side) still answers
+    # right (321.851 V vs 321.852 V on dt = 1e-6), but its variants do
+    # not: 10 mF across the rails read 323.94 V vs 324.51 V, and a
+    # 1 mH DC choke put a 76.7 kV common-mode sample on dn.
+    pf = float(stats.get("probe_floor_used", 0.0) or 0.0)
+    subnets = None
+    if pf > 0.0:
+        subnets = _floating_subnets(builder)
+        where = ("node(s) " + "; ".join(", ".join(sn) for sn in subnets)
+                 if subnets else "some subnet")
+        warnings.warn(
+            f"{eng}: {where} reach the rest of the circuit only "
+            "through switches/diodes, so while those are OFF the "
+            "subnet's common-mode voltage is set by their g_off alone "
+            "and the zero-time diode probe could not factor it at its "
+            f"default step (it used {pf:.3g} s). The differential "
+            "answer is usually right, but this engine resolves that "
+            "common mode less robustly than engine='pwl'. Tie the "
+            "subnet to ground (ground a rail, e.g. dc_neg, or add a "
+            "resistor to gnd) or cross-check with engine='pwl' and a "
+            "fixed dt.",
             stacklevel=3)
     # A diode held in a state its own commutation rule forbids is a
     # commutation the engine missed: every switched branch after it is
@@ -2976,14 +3004,64 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             names = ", ".join(
                 f"{tr.name!r} ({tr.n_rule_violations} samples, by up to "
                 f"{tr.max_violation_V:.3g} V)" for tr in bad)
+            if subnets is None:
+                subnets = _floating_subnets(builder)
+            # A floating DC choke: dq/dn swung to 76.7 kV common mode
+            # with no probe floor learned, so name the subnet here too.
+            hint = ("" if not subnets else
+                    " Node(s) " + "; ".join(", ".join(sn) for sn in subnets)
+                    + " reach the rest of the circuit only through "
+                    "switches/diodes; grounding one of them (a DC rail) "
+                    "removed this on a floating-rail bridge with a DC "
+                    "choke.")
             warnings.warn(
                 f"{eng}: the variable-step engine held diode(s) {names} "
                 f"in a state their commutation rule forbids, from "
                 f"t = {first:.6g} s: a missed commutation, so every "
                 "switched branch from there on is suspect. Rerun with "
                 "engine='pwl' and a fixed dt and compare (res.i of each "
-                "diode says which samples).",
+                "diode says which samples)." + hint,
                 RuntimeWarning, stacklevel=3)
+
+
+def _floating_subnets(builder) -> list:
+    """Node-name groups that reach ground only through switch
+    branches (switches, diodes, body diodes): union-find over every
+    other branch except current sources, which carry no voltage
+    reference. Best effort: [] when the builder cannot be read."""
+    try:
+        g = builder.graph
+        branches = list(g.branches)
+        current_src = {c.get("branch_id") for c in builder.components()
+                       if "current_source" in str(c.get("kind", ""))}
+        n = int(g.num_nodes)
+    except (AttributeError, TypeError):  # pragma: no cover
+        return []
+    parent = list(range(n + 1))       # slot n = ground
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def slot(node):
+        return n if node < 0 else node
+
+    for br in branches:
+        kind = getattr(br["kind"], "name", str(br["kind"]))
+        if kind.endswith("Switch") or br["id"] in current_src:
+            continue
+        ra, rb = find(slot(br["from_"])), find(slot(br["to"]))
+        if ra != rb:
+            parent[ra] = rb
+    gnd = find(n)
+    groups: dict = {}
+    for i in range(n):
+        r = find(i)
+        if r != gnd:
+            groups.setdefault(r, []).append(g.node_name(i) or f"#{i}")
+    return sorted(groups.values())
 
 
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
