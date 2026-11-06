@@ -31,6 +31,7 @@ while the line inductor carried 294.1 A.
 from __future__ import annotations
 
 import functools
+import pickle
 import warnings
 
 import numpy as np
@@ -40,7 +41,7 @@ import pulsim as p
 
 ENGINES = ("pwl", "auto")
 _RULE = "commutation rule forbids"
-_CHATTER = "That is numerical chatter"
+_CHATTER = "may be numerical chatter"
 
 
 def _run(b, t_end, engine, dt=None, **kw):
@@ -167,25 +168,128 @@ def _rl_seeded(engine: str):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_seeded_row_is_read_with_the_first_solve_mask(engine):
+def test_seeded_row_has_no_switched_current(engine):
     """initial_state carries no diode bits: row 0 records the diode
     OFF while the seeded state carries 1.259 A through it (its own
     solve had it ON). Read with the carried row, result.i() missed the
-    inductor current by 1.26 A at k = 0 (KCL residual 0.197 relative,
-    2e-12 everywhere else). The consumers read an unsolved row with the
-    mask of the first solve after it, so KCL closes at every sample."""
+    inductor current by 1.26 A at k = 0. Reading it with the first
+    solve's mask instead closed KCL here, but invents a g_on·V current
+    where the seed sits on a gate edge (48 kA through a buck's MOSFET,
+    test_seeded_state_on_a_gate_edge_has_no_phantom_current). An
+    unsolved row has no defined switched-branch current: result.i()
+    reads the first solved sample's value there (a real current one
+    step late) and the summaries start at that sample."""
     b, r = _rl_seeded(engine)
     bit = b.switch_index_of("D")
     assert r.switch_states_unsolved[0]
+    assert not r.switch_states_unsolved[1:].any()
     assert not r.switch_states[0, bit] and r.switch_states[1, bit]
     i_d = np.asarray(r.i("D"))
     i_l = np.asarray(r.i("L"))
+    assert i_d[0] == i_d[1] and np.isfinite(i_d).all()
     assert i_l[0] > 1.0
-    assert np.abs(i_d - i_l).max() <= 1e-9 * np.abs(i_l).max()
+    assert np.abs(i_d[1:] - i_l[1:]).max() <= 1e-9 * np.abs(i_l).max()
     s, cur, msgs = _report(b, r, ["D"])
     assert not msgs, msgs
     assert _entry(s, "D")["i_peak"] == pytest.approx(
-        float(np.abs(i_l).max()), rel=1e-9)
+        float(np.abs(i_l[1:]).max()), rel=1e-9)
+
+
+@pytest.mark.parametrize("where", ("gate_edge", "mid_period"))
+@pytest.mark.parametrize("engine", ENGINES)
+def test_resume_row_zero_is_the_previous_runs_last_row(engine, where):
+    """A resume's row 0 is the previous run's last sample: same x, and
+    now the same stamped mask (SolverSnapshot.stamped_mask), solved.
+    Before, it was labelled with diode_on + switch_fn(t_start): on a
+    TR-BDF2 run that ended exactly on a gate edge those are the
+    post-edge bits, while x is the pre-edge solve (M1 read ON at the
+    pre-edge freewheel state, a g_on·V phantom, with no flag)."""
+    b, pwm, T = _buck()
+    t_end = 12 * T if where == "gate_edge" else 12.3 * T
+    r0 = _run(b, t_end, engine, dt=T / 200, switch_fn=pwm)
+    snap = r0.final_snapshot
+    last = np.asarray(r0.switch_states[-1], dtype=bool)
+    assert list(snap.stamped_mask) == last.tolist()
+    b1, pwm1, _ = _buck()
+    r1 = _run(b1, t_end + 3 * T, engine, dt=T / 200, switch_fn=pwm1,
+              t_start=float(snap.t), resume_from=snap)
+    assert not r1.switch_states_unsolved.any()
+    assert np.array_equal(r1.switch_states[0], last)
+    assert np.array_equal(np.asarray(r1.states[0]),
+                          np.asarray(r0.states[-1]))
+    i_l = np.abs(np.asarray(r1.i("L1"))).max()
+    for n in ("M1", "D1"):
+        assert r1.i(n)[0] == pytest.approx(r0.i(n)[-1], rel=1e-12,
+                                           abs=1e-12), n
+        assert np.abs(np.asarray(r1.i(n))).max() <= 1.01 * i_l, n
+    if engine == "auto" and where == "gate_edge":
+        # The case the field exists for: the stored sample is the
+        # pre-edge solve (M1 OFF, D1 freewheeling) while the bits the
+        # next step starts from are already post-edge.
+        m1, d1 = b.switch_index_of("M1"), b.switch_index_of("D1")
+        assert not last[m1] and last[d1]
+        assert pwm(float(snap.t)).get(m1)
+        assert not list(snap.diode_on)[-1]
+
+
+def test_snapshot_without_stamped_mask_flags_row_zero():
+    """A snapshot pickled before the field (10 fields), or one whose
+    stamped_mask was cleared, resumes with row 0 unsolved."""
+    b, pwm, T = _buck()
+    r0 = _run(b, 12 * T, "pwl", dt=T / 200, switch_fn=pwm)
+    snap = r0.final_snapshot
+    st = snap.__getstate__()
+    assert len(st) == 11
+    again = pickle.loads(pickle.dumps(snap))
+    assert list(again.stamped_mask) == list(snap.stamped_mask)
+    old = type(snap).__new__(type(snap))
+    old.__setstate__(tuple(st[:10]))
+    assert list(old.stamped_mask) == [] and old.valid
+    r1 = _run(b, 14 * T, "pwl", dt=T / 200, switch_fn=pwm,
+              t_start=float(old.t), resume_from=old)
+    assert r1.switch_states_unsolved[0]
+    assert not r1.switch_states_unsolved[1:].any()
+    assert r1.i("M1")[0] == r1.i("M1")[1]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_seeded_state_on_a_gate_edge_has_no_phantom_current(engine):
+    """initial_state taken from a TR-BDF2 run that ended on a gate edge
+    (pre-edge freewheel state, M1 turning ON at t_start). Reading the
+    unsolved row 0 with the first solve's mask (M1 ON) gave M1
+    g_on · 48 V: i_peak 48023.6 A, P_avg 36x high on 'auto' and 3500x
+    on 'pwl', no warning. Row 0 is now left out of the summaries, and
+    result.i() reads the first solved sample there."""
+    b, pwm, T = _buck()
+    r0 = _run(b, 12 * T, "auto", switch_fn=pwm)
+    x0 = np.asarray(r0.states)[-1].copy()
+    b1, pwm1, _ = _buck()
+    r1 = _run(b1, 17 * T, engine, dt=T / 200, switch_fn=pwm1,
+              t_start=float(r0.times[-1]), initial_state=x0)
+    assert r1.switch_states_unsolved[0]
+    for n in ("M1", "D1"):
+        i = np.asarray(r1.i(n))
+        assert i[0] == i[1] and np.isfinite(i).all(), n
+        assert np.abs(i).max() <= 1.01 * np.abs(r1.i("L1")).max(), n
+    s, _, msgs = _report(b1, r1, [])
+    assert not msgs, msgs
+    i_l = float(np.abs(np.asarray(r1.i("L1"))).max())
+    for n in ("M1", "D1"):
+        assert _entry(s, n)["i_peak"] <= 1.01 * i_l, (n, _entry(s, n))
+    # The same window of an unbroken run: the averages agree.
+    rc = _run(b, 17 * T, engine, dt=T / 200, switch_fn=pwm)
+    t = np.asarray(rc.times)
+    i_m = np.abs(np.asarray(rc.i("M1")))
+    w = t >= float(r1.times[1])
+    ref = np.trapezoid(i_m[w], t[w]) / (t[w][-1] - t[w][0])
+    assert _entry(s, "M1")["i_avg"] == pytest.approx(ref, rel=0.02)
+    if engine == "pwl":
+        th = p.device_thermal_summary(
+            b1, r1, thermal_specs={"M1": {"stages": [
+                p.FosterStage(R_th_K_per_W=1.0, tau_s=1e-4)]}})
+        assert th[0]["T_j_trace"].shape == np.asarray(r1.times).shape
+        assert th[0]["T_j_trace"][0] == 25.0
+        assert th[0]["T_j_peak"] < 30.0
 
 
 def test_switch_duty_needs_no_switch_fn():
@@ -245,10 +349,8 @@ def test_snubber_across_the_diode_closes_the_charge_on_pwl(V_th, Cs):
     s, cur, msgs = _report(b, r, ["D1"])
     if V_th > 0:
         assert msgs and all(_CHATTER in m for m in msgs), msgs
-        assert _entry(s, "D1")["n_chatter_gaps"] > 100
+        assert _entry(s, "D1")["n_short_blocking_gaps"] > 100
     else:
-        # (Gaps of immaterial current at v_D ≈ 0 may still be merged;
-        # they cover too little time to warn about.)
         assert not msgs, msgs
     q_d = np.trapezoid(cur["D1"], np.asarray(r.times))
     q_phys = _snubber_charge(r, Cs)
@@ -821,18 +923,20 @@ def test_unresolved_recoveries_and_capped_blips_warn(div):
     """dt = T/50 and T/20 are longer than t_rr = 100 ns and than the
     snubber's 10 ns time constant: the turn-offs are counted as
     unresolved, and the trapezoidal ring's one-step re-conductions
-    (235 "turn-offs" at T/50 on a 200-cycle run, f_sw 117.5 kHz) are
-    either capped at their own forward charge (and warned about) or,
-    where the diode never blocked more than 2·V_th between them, merged
-    into the conduction around them as chatter (206 at T/50, 33 merged;
-    208 at T/20 with 8 capped). Both used to pass silently."""
+    (239 recorded turn-offs at T/50 on a 200-cycle run, 212 at T/20)
+    are counted as recorded; each extra one is capped at its own
+    forward charge (31 / 12, warned about) or is a short, shallow gap
+    the chatter detector reports (37 / 8). Both used to pass silently.
+    (Round 3 merged the gaps and pinned <= 210; merging is gone: the
+    record is what the solver stamped.)"""
     d, msgs = _snubbed_report(div)
     assert d["n_turn_off_events_unresolved"] > 0
     assert any("'D1'" in m and "longer than t_rr" in m for m in msgs)
-    assert d["n_turn_off_events_capped"] > 0 or d["n_chatter_gaps"] > 0, d
-    if d["n_turn_off_events_capped"] > 0:
-        assert any("'D1'" in m and "capped" in m for m in msgs)
-    assert d["n_turn_off_events"] <= 210, d
+    assert d["n_turn_off_events_capped"] > 0, d
+    assert any("'D1'" in m and "capped" in m for m in msgs)
+    extra = d["n_turn_off_events"] - 200
+    assert 0 < extra <= (d["n_turn_off_events_capped"]
+                         + d["n_short_blocking_gaps"]), d
 
 
 @pytest.mark.parametrize("engine,div", [("pwl", 1000), ("pwl", 200),
@@ -1200,45 +1304,132 @@ def _snubbed_boost_100k(V_th: float):
 
 
 @pytest.mark.parametrize("div", (400, 2000))
-def test_snubber_chatter_is_not_counted_as_turn_offs(div):
+def test_snubber_chatter_is_counted_as_recorded_and_warned(div):
     """Cs = 100 nF across a V_th = 0.7 diode on the fixed engine: the
     trapezoidal rule reflects each ON step from +V_th to about -V_th,
-    so the record reads ON OFF OFF ... through every conduction. Each
-    gap followed more than Q_rr, so each was charged: 4580 turn-offs
-    at dt = T/400 and 15887 at T/2000 on a 100 kHz version (f_sw 15x
-    to 53x the PWM), with no warning, and 2857 of them never reverse-
-    biased the diode. A gap whose step averages never fall below -2·V_th
-    and that no other switch forced is now chatter inside one
-    conduction: the count matches V_th = 0 (one per cycle; 299 and
-    300 at V_th = 0.7), and a warning names the chatter."""
-    counts = {}
+    so the record reads ON OFF OFF ... through every conduction: 4580
+    recorded turn-offs at dt = T/400 and 15887 at T/2000 (f_sw 15x to
+    53x the PWM). Round 3 merged those gaps; that also merged real
+    source-commutated turn-offs into a small reverse voltage
+    (test_source_commutated_turn_off_into_a_small_voltage_is_counted),
+    so the record is now reported as stamped and a warning says the
+    gaps may be chatter and which numbers it inflates. At V_th = 0
+    nothing chatters and nothing warns."""
     for V_th in (0.7, 0.0):
         b, pwm, T = _snubbed_boost_100k(V_th)
         r = _run(b, 3e-3, "pwl", dt=T / div, switch_fn=pwm)
         s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 50e-9}})
         e = _entry(s, "D1")
-        counts[V_th] = e["n_turn_off_events"]
-        assert e["f_sw_estimate"] == pytest.approx(1.0 / T, rel=0.02), e
+        chatter = [m for m in msgs if _CHATTER in m]
+        n_rec = _recorded_turn_offs(b, r, "D1")
+        assert (e["n_turn_off_events"] + e["n_turn_off_events_dropped"]
+                == n_rec), (e, n_rec)
         if V_th > 0:
-            assert e["n_chatter_gaps"] > 1000, e
-            assert any(_CHATTER in m for m in msgs), msgs
+            assert e["n_short_blocking_gaps"] > 1000, e
+            assert e["f_sw_estimate"] > 10.0 / T, e
+            assert len(chatter) == 1, msgs
+            for word in ("n_turn_off_events", "f_sw_estimate",
+                         "E_sw_total", "engine='auto'"):
+                assert word in chatter[0], (word, chatter[0])
         else:
-            assert not any(_CHATTER in m for m in msgs), msgs
-    assert abs(counts[0.7] - counts[0.0]) <= 2, counts
+            assert e["f_sw_estimate"] == pytest.approx(1.0 / T, rel=0.02)
+            assert not chatter, msgs
+
+
+def _recorded_turn_offs(b, r, name):
+    """Conducting-to-blocking transitions of the recorded stamp."""
+    from pulsim._diode_state import diode_state_trace
+    tr = diode_state_trace(b, r, b.branch_index_of(name), warn=False)
+    c = np.asarray(tr.conducting, dtype=bool)
+    return int(np.count_nonzero(c[:-1] & ~c[1:]))
 
 
 def test_forced_commutation_into_a_small_voltage_is_still_a_turn_off():
     """The first cycles of a boost whose output is still below V_th: Q
-    turning on leaves D1 blocking only millivolts, inside the band the
-    chatter rule forgives. A commutation another switch forced is a
-    turn-off all the same (engine='auto' merged 6 of them as chatter,
-    and warned, before the other-switch condition)."""
+    turning on leaves D1 blocking only millivolts. On engine='auto'
+    every commutation is a turn-off and the chatter warning stays
+    quiet (its TR-BDF2 steps do not reflect the snubber mode)."""
     b, pwm, T = _snubbed_boost_100k(0.7)
     r = _run(b, 3e-3, "auto", switch_fn=pwm)
     s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 50e-9}})
     e = _entry(s, "D1")
     assert e["f_sw_estimate"] == pytest.approx(1.0 / T, rel=0.02), e
     assert not any(_CHATTER in m for m in msgs), msgs
+
+
+def _pulsed_charger():
+    """100 kHz pulse 11.5 / 14.4 V through 0.5 Ω and a V_th = 0.7
+    diode into a 12 V battery: the diode conducts on the high level and
+    blocks 0.5 V on the low one, with no other switch in the circuit."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("V", "s", "gnd", 11.5, 14.4, 0.0, 5e-6, 1e-5)
+    b.add_resistor("R", "s", "a", 0.5)
+    b.add_diode("D", "a", "k", 1e3, 1e-9, V_th=0.7)
+    b.add_voltage_source("B", "k", "gnd", 12.0)
+    return b
+
+
+@pytest.mark.parametrize("engine,dt", [("pwl", 1e-6), ("pwl", 1e-7),
+                                       ("auto", None)])
+def test_source_commutated_turn_off_into_a_small_voltage_is_counted(
+        engine, dt):
+    """Round 3 merged every blocking gap that stayed above -2·V_th and
+    that no other switch forced: in a circuit with no other switch,
+    real turn-offs into a small reverse voltage too. The pulsed
+    charger's 100 turn-offs read 1 (f_sw 1 kHz on 100 kHz, E_sw 100x
+    low) on every engine, with a chatter warning. Every recorded
+    stretch now counts. On 'pwl' at dt = 1 µs the 5-step gaps match the
+    chatter detector, which warns that they MAY be chatter (numbers
+    unchanged); at 0.1 µs (50 steps) and on 'auto' nothing warns."""
+    b = _pulsed_charger()
+    r = _run(b, 1e-3, engine, dt=dt)
+    s, _, msgs = _report(b, r, [], diode_specs={"D": {"Q_rr": 50e-9}})
+    e = _entry(s, "D")
+    assert e["n_turn_off_events"] == 100, e
+    assert e["f_sw_estimate"] == pytest.approx(1e5, rel=1e-6), e
+    assert e["E_sw_total"] == pytest.approx(100 * 50e-9 * 0.5, rel=1e-6)
+    chatter = [m for m in msgs if _CHATTER in m]
+    if engine == "pwl" and dt == 1e-6:
+        assert e["n_short_blocking_gaps"] == 99, e
+        assert len(chatter) == 1 and "may also be real" in chatter[0]
+    else:
+        assert not chatter, msgs
+
+
+def test_paired_diode_chatter_warns_and_reports_the_record():
+    """Two in-phase boost phases, each D with 100 nF across it, on the
+    fixed engine: both diodes chatter in the same steps. Round 3's
+    'no other mask bit flips' guard counted the other diode's bit, so
+    no gap was ever merged and nothing warned (601 turn-offs each on
+    this 1 ms run, f_sw 601 kHz on 100 kHz). Now each diode warns (502
+    short gaps each), and every count is the recorded one."""
+    T = 1e-5
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    for ph in "ab":
+        b.add_inductor("L" + ph, "vin", "sw" + ph, 220e-6)
+        b.add_switch("Q" + ph, "sw" + ph, "gnd", g_on=50.0, g_off=1e-9)
+        b.add_diode("D" + ph, "sw" + ph, "out", 1e3, 1e-9, V_th=0.7)
+        b.add_capacitor("Cs" + ph, "sw" + ph, "out", 100e-9)
+    b.add_capacitor("C1", "out", "gnd", 100e-6)
+    b.add_resistor("RL", "out", "gnd", 15.0)
+    qa, qb = b.switch_index_of("Qa"), b.switch_index_of("Qb")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        on = (t % T) < 0.5 * T
+        m.set(qa, on)
+        m.set(qb, on)
+        return m
+    r = _run(b, 1e-3, "pwl", dt=T / 400, switch_fn=pwm)
+    spec = {"Q_rr": 50e-9}
+    s, _, msgs = _report(b, r, [], diode_specs={"Da": spec, "Db": spec})
+    for n in ("Da", "Db"):
+        e = _entry(s, n)
+        assert (e["n_turn_off_events"] + e["n_turn_off_events_dropped"]
+                == _recorded_turn_offs(b, r, n)), e
+        assert e["n_short_blocking_gaps"] > 0.5 * e["n_turn_off_events"]
+        assert sum(1 for m in msgs if _CHATTER in m and f"{n!r}" in m) == 1
 
 
 @pytest.mark.parametrize("spec", ({}, {"t_rr": 1e-7}))
@@ -1295,9 +1486,19 @@ def test_dsed_junction_temperature_follows_the_step_start_power(R_load):
             th = p.device_thermal_summary(
                 b, r, switch_fn=pwm,
                 thermal_specs={"D1": {"stages": st}, "Q": {"stages": st}})
+        t = np.asarray(r.times)
         for e in th:
             ratios[(engine, e["name"])] = (
                 (e["T_j_avg"] - 25.0) / 1000.0 / e["P_cond_avg"])
+            # One T_j per stored sample (DSED computes on the grid
+            # with the step-start power inserted and samples back), and
+            # T_j_avg is a time average: a plain mean over DSED's
+            # event-clustered samples is not.
+            tj = np.asarray(e["T_j_trace"])
+            assert tj.shape == t.shape, (engine, tj.shape, t.shape)
+            tw = np.trapezoid(tj, t) / (t[-1] - t[0])
+            assert e["T_j_avg"] - 25.0 == pytest.approx(
+                tw - 25.0, rel=2e-3), (engine, e["name"])
     for name in ("D1", "Q"):
         assert ratios[("dsed", name)] == pytest.approx(
             ratios[("pwl", name)], abs=5e-3), ratios
