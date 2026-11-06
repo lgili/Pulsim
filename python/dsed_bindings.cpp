@@ -274,6 +274,104 @@ py::array_t<double> reconstruct_full_states(
     return out;
 }
 
+/// The RIGHT limit of every sample where an event changed the state
+/// or the mask: the full MNA state rebuilt through the POST-event mask
+/// (sample_masks[k]) from the post-event integrator state (states[k]).
+/// It is where the NEXT step starts. Written into `d` as
+/// `right_limit_index` (sample indices, increasing),
+/// `right_limit_states` ((m, n_mna)) and `right_limit_switch_states`
+/// ((m, n_switches) bool).
+///
+/// Why: a stored DSED event sample is the LEFT limit (the state the
+/// step that ended there produced, reconstruct_full_states), so a
+/// switched branch's current jumps between that sample and the start
+/// of the next step. A trapezoid drawn from the left limit spread a
+/// freewheel diode's 0 -> I_L turn-on jump as a ramp over the whole
+/// following step (1 us by default): a DCM boost diode's average
+/// current read 0.0234 A against 0.0535 A. Integrating each step from
+/// the right limit of its start sample to the left limit of its end
+/// sample closes that charge exactly.
+template <class AdapterT, class ResultT>
+void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
+                              py::dict& d) {
+    const auto n = res.times.size();
+    std::vector<std::size_t> idx;
+    using MaskT = typename decltype(res.sample_masks)::value_type;
+    if constexpr (!std::is_same_v<MaskT, PyMask>) {
+        if (n > 0 && res.sample_masks.size() == n
+            && res.step_masks.size() == n) {
+            std::size_t next_pre = 0;
+            for (std::size_t i = 0; i < n; ++i) {
+                bool fired = false;
+                while (next_pre < res.pre_event_index.size()
+                       && res.pre_event_index[next_pre] < i) {
+                    ++next_pre;
+                }
+                // A fired event that left the state untouched (a
+                // same-mask gate edge is dropped inside fire_event_,
+                // and a source-only circuit "fires" its t_end edge on
+                // every step) has right limit == left limit: skip it,
+                // or the record doubles the state storage for nothing.
+                if (next_pre < res.pre_event_index.size()
+                    && res.pre_event_index[next_pre] == i
+                    && next_pre < res.pre_event_states.size()) {
+                    const auto& xp = res.pre_event_states[next_pre];
+                    const auto& xs = res.states[i];
+                    fired = xp.size() != xs.size()
+                            || (xp.array() != xs.array()).any();
+                }
+                if (fired || !(res.step_masks[i] == res.sample_masks[i])) {
+                    idx.push_back(i);
+                }
+            }
+        }
+    }
+    const auto m = static_cast<py::ssize_t>(idx.size());
+    py::array_t<std::int64_t> idx_arr(m);
+    auto* ip = idx_arr.mutable_data();
+    for (py::ssize_t j = 0; j < m; ++j) {
+        ip[j] = static_cast<std::int64_t>(idx[static_cast<std::size_t>(j)]);
+    }
+    d["right_limit_index"] = std::move(idx_arr);
+    if (m == 0) {
+        d["right_limit_states"] =
+            py::array_t<double>(std::vector<py::ssize_t>{0, 0});
+        d["right_limit_switch_states"] =
+            py::array_t<bool>(std::vector<py::ssize_t>{0, 0});
+        return;
+    }
+    if constexpr (!std::is_same_v<MaskT, PyMask>) {
+        const auto& m0 = res.sample_masks[idx[0]];
+        adapter.set_mask(m0);
+        const pulsim::Vector first =
+            adapter.recover_full(res.times[idx[0]], res.states[idx[0]]);
+        const auto n_mna = static_cast<py::ssize_t>(first.size());
+        const auto n_sw = static_cast<py::ssize_t>(m0.size());
+        py::array_t<double> st(std::vector<py::ssize_t>{m, n_mna});
+        py::array_t<bool> sw(std::vector<py::ssize_t>{m, n_sw});
+        auto* sp = st.mutable_data();
+        auto* wp = sw.mutable_data();
+        for (py::ssize_t j = 0; j < m; ++j) {
+            const auto i = idx[static_cast<std::size_t>(j)];
+            const auto& mask = res.sample_masks[i];
+            if (j > 0) {
+                adapter.set_mask(mask);
+            }
+            const pulsim::Vector full = (j == 0)
+                ? first
+                : adapter.recover_full(res.times[i], res.states[i]);
+            for (py::ssize_t c = 0; c < n_mna; ++c) {
+                sp[j * n_mna + c] = full[c];
+            }
+            for (py::ssize_t c = 0; c < n_sw; ++c) {
+                wp[j * n_sw + c] = mask.get(static_cast<pulsim::Size>(c));
+            }
+        }
+        d["right_limit_states"] = std::move(st);
+        d["right_limit_switch_states"] = std::move(sw);
+    }
+}
+
 /// Per-sample switch / diode mask as an (n_samples, n_switches) bool
 /// array — the same record `SimulationResult.switch_states` carries
 /// on the pwl / trbdf2 engines: row k is the STAMPED mask, the one in
@@ -785,6 +883,7 @@ void init_module(py::module_& m) {
             // v2.0 Phase 3 item 5 — the unified result: full MNA
             // trajectory reconstructed per recorded sample.
             d["states_full"] = reconstruct_full_states(adapter, res);
+            reconstruct_right_limits(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -823,6 +922,7 @@ void init_module(py::module_& m) {
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res);
             d["states_full"] = reconstruct_full_states(adapter, res);
+            reconstruct_right_limits(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -858,6 +958,7 @@ void init_module(py::module_& m) {
             py::gil_scoped_acquire acquire;
             auto d = ped_result_auto_to_dict(res);
             d["states_full"] = reconstruct_full_states(adapter, res);
+            reconstruct_right_limits(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
