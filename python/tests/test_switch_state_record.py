@@ -297,36 +297,92 @@ def test_seeded_state_on_a_gate_edge_has_no_phantom_current(engine):
         assert th[0]["T_j_peak"] < 30.0
 
 
-@pytest.mark.parametrize("seed", ("resume", "initial_state"))
-@pytest.mark.parametrize("src,k_ulp", [("pwl", 0), ("auto", 1),
-                                       ("auto", 50), ("auto", 1000)])
-def test_resume_just_before_a_gate_edge_is_not_silent(src, k_ulp, seed):
-    """A TR-BDF2 run resumed 1..1000 ulp BEFORE M1's turn-on edge (a
-    pwl snapshot at 12 T always lands 1 ulp short) stores t[1] on the
-    edge with M1 ON and D1 still ON: a commutation landing carrying
-    24 kA (M1 i_peak 24011.8 A, P_avg 2.187 W; the unbroken run: 25.3 A,
-    0.259 W). Landings were exempt from the rule check, so this was
-    reported with no warning. A landing is now exempt only inside the
-    run's own envelope (no more current than the diode carries on any
-    other solved sample), so D1 is named — unless the engine stops
-    storing the shoot-through."""
+def _resume_buck(src, t_end, dt, seed):
     b, pwm, T = _buck()
-    t_end = 12 * T - k_ulp * np.spacing(12 * T)
-    # dt = 1e-7 (not T / 200 = 1.0000000000000001e-7): 2400 steps of it
-    # end 2 ulp short of 12 T.
-    r0 = _run(b, t_end, src, dt=1e-7, switch_fn=pwm)
-    assert 0 < 12 * T - float(r0.final_snapshot.t) < 1e-15
-    snap = r0.final_snapshot
+    snap = _run(b, t_end, src, dt=dt, switch_fn=pwm).final_snapshot
     b1, pwm1, _ = _buck()
     kw = (dict(resume_from=snap) if seed == "resume"
           else dict(initial_state=np.asarray(snap.x)))
     r1 = _run(b1, 15 * T, "auto", switch_fn=pwm1, t_start=float(snap.t),
               **kw)
+    return b1, r1, float(snap.t)
+
+
+@pytest.mark.parametrize("seed", ("resume", "initial_state"))
+@pytest.mark.parametrize("src,k_ulp", [("pwl", 0), ("auto", 1),
+                                       ("auto", 50), ("auto", 1000)])
+def test_resume_just_before_a_gate_edge_matches_the_edge(src, k_ulp, seed):
+    """A TR-BDF2 run resumed 1..1000 ulp BEFORE M1's turn-on edge (a
+    pwl snapshot at 12 T with dt = 1e-7 lands 2 ulp short) settled its
+    diodes under the pre-edge gates, but its first step reads them at
+    t + h_min / 2, past the edge, without landing it: t[1] was stored
+    with M1 ON and D1 still ON (M1 i_peak 24011.8 A, P_avg 2.187 W;
+    resumed exactly on the edge: 25.3 A, 0.259 W), and, as a
+    commutation landing, without a warning. The settle now reads the
+    gates where the first step does."""
+    T = 1 / 50e3
+    ulp = np.spacing(12 * T)
+    # dt = 1e-7 (not T / 200 = 1.0000000000000001e-7): 2400 steps of it
+    # end 2 ulp short of 12 T.
+    b1, r1, t0 = _resume_buck(src, 12 * T - k_ulp * ulp, 1e-7, seed)
+    assert 0 < 12 * T - t0 < 1e-15
     s, _, msgs = _report(b1, r1, [])
-    i_l = float(np.abs(np.asarray(r1.i("L1"))).max())
-    clean = all(_entry(s, n)["i_peak"] <= 1.01 * i_l for n in ("M1", "D1"))
-    named = any(_RULE in m and "'D1'" in m for m in msgs)
-    assert clean or named, (_entry(s, "M1"), msgs)
+    assert not msgs, msgs
+    # Reference: 1e6 ulp (27 fs) short, far enough for the first step
+    # to land the edge. Measured within 2e-3 (pwl P_avg) of the above.
+    b2, r2, t2 = _resume_buck(src, 12 * T - 1e6 * ulp, 1e-7, seed)
+    s2, _, _ = _report(b2, r2, [])
+    for n in ("M1", "D1"):
+        for k in ("i_peak", "P_avg"):
+            assert _entry(s, n)[k] == pytest.approx(_entry(s2, n)[k],
+                                                    rel=1e-2), (n, k)
+
+
+def test_landing_outside_the_envelope_is_checked():
+    """The rule check's landing exemption, on a recorded auto buck run
+    whose landings all sit inside the envelope: a D1 landing stored
+    under the ON stamp, edited to the shoot-through the
+    resume above used to store (v_D = -24 V, 24 kA against ~25 A on
+    every other sample) is named; one edited to a reverse current
+    within the run's peak stays exempt."""
+    from pulsim._diode_state import diode_state_traces
+
+    class _Edited:
+        def __init__(self, r, states):
+            self.times = r.times
+            self.states = states
+            self.switch_states = np.asarray(r.switch_states)
+            self.switch_states_unsolved = np.asarray(
+                r.switch_states_unsolved)
+            self.commutation_events = list(r.commutation_events)
+            self.event_iteration_breaches = []
+            self.engine_used = r.engine_used
+
+    b, pwm, T = _buck()
+    r = _run(b, 4 * T, "auto", switch_fn=pwm)
+    d1 = b.branch_index_of("D1")
+    bit = b.switch_index_of("D1")
+    t = np.asarray(r.times)
+    rec = np.asarray(r.switch_states)
+    k = next(int(np.searchsorted(t, ev.t_estimated))
+             for ev in r.commutation_events
+             if ev.branch_id == d1
+             and t[np.searchsorted(t, ev.t_estimated)] == ev.t_estimated
+             and rec[np.searchsorted(t, ev.t_estimated), bit])
+    sw = next(c for c in b.components() if c["name"] == "D1")["nodes"][1]
+    S = np.array(r.states, dtype=float)
+
+    def check(v_sw):
+        S2 = S.copy()
+        S2[k, sw] = v_sw
+        return diode_state_traces(b, _Edited(r, S2))[d1]
+
+    assert check(S[k, sw]).n_rule_violations == 0
+    assert check(0.01).n_rule_violations == 0          # 10 A reverse
+    tr = check(24.0)
+    assert tr.n_rule_violations == 1
+    assert tr.max_violation_V == pytest.approx(24.0)
+    assert any("commutation landing" in m for m in tr._messages)
 
 
 def test_source_step_landing_stays_inside_the_envelope():

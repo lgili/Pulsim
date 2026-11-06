@@ -736,10 +736,15 @@ inline SimulationResult run_transient_trbdf2(
     // A tiny trap step pins every capacitor to its (v, i) and asks
     // the network which diodes conduct; iterate to a fixed point,
     // exactly run_transient's per-step event iteration at t_start.
+    // The gates are read where the first step reads them (sw_now in
+    // the edge clamp, t + h_min / 2): an edge closer than that is not
+    // landed, so settling under mask_at(t_start) left a resume 1 ulp
+    // before a buck's turn-on edge with D1 ON across M1 ON (24 kA).
     if (has_diodes) {
         const Real h_probe = h_probe_floor;
+        const Real t_gates = opts.t_start + Real{0.5} * h_min;
         for (Size it = 0; it < opts.max_event_iterations; ++it) {
-            trap_solve(mask_at(opts.t_start), opts.t_start, h_probe,
+            trap_solve(mask_at(t_gates), opts.t_start, h_probe,
                         x_trial);
             if (!diodes.update_from_state(x_trial)) {
                 break;

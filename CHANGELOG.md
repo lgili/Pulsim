@@ -22,6 +22,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transformer-secondary rectifier). Now charge closes to ~3e-12 on
   `engine='pwl'` in all of those. A result without a record falls back
   with a `RuntimeWarning` that names the reason.
+* **A TR-BDF2 run resumed just before a gate edge no longer stores a
+  shoot-through.** Resumed (or seeded) 1–1000 ulp before a buck's
+  turn-on edge — a pwl snapshot at 12 T with dt = 1e-7 lands 2 ulp
+  short — the zero-time diode settle read the pre-edge gates while the
+  first step read them past the edge without landing it, so t[1] held
+  D1 ON across M1 ON: M1 `i_peak` 24011.8 A, `P_avg` 2.187 W (25.3 A,
+  0.259 W from a well-separated start), with no warning, because a
+  commutation landing was exempt from the diode rule check. The settle
+  now reads the gates where the first step does (`t_start + h_min/2`),
+  and the results match a resume exactly on the edge to 1e-11
+  (TR-BDF2 source) and one 27 fs early to 2e-3 (pwl source).
+  The rule check now exempts a landing only inside the run's own
+  envelope (an ON stamp carrying no more current than the diode does on
+  any other solved sample, an OFF stamp no more forward voltage than
+  any node reaches); outside it the diode is named.
 * **Reverse-recovery loss counts real turn-offs only.** Conduction
   stretches whose forward charge is below `1e-3` of the recovery charge
   the spec asks for are dropped and reported
