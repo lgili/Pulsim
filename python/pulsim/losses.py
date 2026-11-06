@@ -247,7 +247,8 @@ def average_power_at_node(builder,
     node_idx = builder.node_id_of(node_name)
     states = _states_as_array(result)
     times = _times_as_array(result)
-    v = states[:, node_idx]
+    # Ground (node id -1) is 0 V, not the last state column.
+    v = states[:, node_idx] if node_idx >= 0 else np.zeros(len(times))
     try:
         i_idx = builder.pool.branch_var_id_for_inductor(
             current_branch_id, builder.graph)

@@ -788,11 +788,14 @@ def _result_v(self, name: str, t=None):
     ----------
     name : str
         Node name passed to ``CircuitBuilder.add_*`` (or a
-        registered alias when alias support is enabled).
+        registered alias when alias support is enabled). A ground
+        name (``"gnd"``, ``"GND"``, ``"0"``) returns zeros.
     t : int | slice | array-like, optional
-        Step selection. ``None`` (default) returns the full
-        per-sample trace as a ``numpy.ndarray``. An ``int``
-        returns a scalar ``float``.
+        SAMPLE selection (an index into ``times``, not a time).
+        ``None`` (default) returns the full per-sample trace as a
+        ``numpy.ndarray``. An ``int`` returns a scalar ``float``.
+        For the value at a time use
+        ``np.interp(t, res.times, res.v(name))``.
     """
     import numpy as _np
     builder = getattr(self, "_builder", None)
@@ -829,6 +832,12 @@ def _result_v(self, name: str, t=None):
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "node", sugg) from None
     states = _np.asarray(self.states)
+    if idx < 0:
+        # Ground ("gnd", "GND", "0") is the reference, not a state:
+        # node_id_of returns -1 for it, and states[:, -1] is the LAST
+        # state column (a branch current), which this used to return.
+        col = _np.zeros(states.shape[0], dtype=float)
+        return col if t is None else col[t]
     # `states` is a READ-ONLY zero-copy view over the kernel buffer
     # (v2.0). A per-signal trace is small (one column), and v1.x
     # handed back a writable owned array here — so copy the column
