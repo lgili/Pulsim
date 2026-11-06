@@ -52,6 +52,7 @@ from typing import Callable, Optional, Union
 
 import numpy as np
 
+from . import _diode_state
 from . import _result_views as _views
 from . import losses as _losses
 
@@ -744,14 +745,18 @@ def device_thermal_summary(
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
             g_off = float(params.get("g_off", float("nan")))
-            V_th = float(params.get("V_th", 0.0))
             from_id, to_id = desc.get("nodes", (None, None))
             if not (np.isfinite(g_on) and np.isfinite(g_off)) \
                     or from_id is None or to_id is None:
                 continue
-            v_D = (_views.node_voltage_trace(states, int(from_id))
-                   - _views.node_voltage_trace(states, int(to_id)))
-            g_arr = np.where(v_D > V_th, g_on, g_off)
+            # Same reconstruction as device_loss_summary / result.i()
+            # (a PWL diode's ON drop is i/g_on, not V_th — see
+            # pulsim._diode_state). The loss summary above already
+            # warned about this diode, so stay quiet here.
+            d_trace = _diode_state.diode_state_trace(
+                builder, result, bid, switch_fn=switch_fn, warn=False)
+            v_D = d_trace.v
+            g_arr = np.where(d_trace.closed, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(

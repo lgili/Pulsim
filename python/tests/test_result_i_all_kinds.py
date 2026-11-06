@@ -90,8 +90,16 @@ def test_capacitor_current_envelope_matches_analytical_rc():
 # ---------------------------------------------------------------------------
 def test_diode_current_zero_during_reverse_bias_positive_during_conduction():
     """Half-wave rectifier (50 Hz sine, 1 Ω load). The diode current
-    should be ≈ zero during the negative half-cycle (reverse-biased)
-    and follow ``(V_sin − V_th)/R`` during the positive half-cycle."""
+    is ≈ zero under REVERSE bias and is the load current while it
+    conducts.
+
+    The PWL diode's ON state is a pure conductance (no V_th offset):
+    it turns on when v_D reaches V_th but stays on, inside the
+    0 < v_D < V_th hysteresis band, until its current reverses — so
+    while v_src falls from 0.7 V to 0 it still carries v_src/2 (up to
+    0.31 A here). This test used to demand ≈0 A for every
+    v_src < V_th − 0.05, which only passed because result.i() rebuilt
+    the state as ``v_D > V_th`` and dropped those samples."""
     V_amp = 10.0
     R = 1.0
     f = 50.0
@@ -109,9 +117,14 @@ def test_diode_current_zero_during_reverse_bias_positive_during_conduction():
     v_src = res.v("vin")
     i_D = res.i("D1")
 
-    # During reverse bias (v_src < V_th), i_D ≈ 0 (only g_off leakage
+    # Series circuit: the diode current IS the load current, at every
+    # sample, including the hysteresis band.
+    np.testing.assert_allclose(i_D, np.asarray(res.v("vout")) / R,
+                               rtol=1e-9, atol=1e-9)
+
+    # During reverse bias (v_src < 0), i_D ≈ 0 (only g_off leakage
     # at most v_src · 1e-9 ≈ 1e-8 A peak).
-    reverse_mask = v_src < V_th - 0.05  # small margin around V_th
+    reverse_mask = v_src < -0.05
     assert np.all(np.abs(i_D[reverse_mask]) < 1e-4), (
         f"diode leakage in reverse bias should be tiny, "
         f"max={np.max(np.abs(i_D[reverse_mask])):.3e}")

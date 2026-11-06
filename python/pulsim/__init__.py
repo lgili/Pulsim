@@ -840,9 +840,12 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
-    | ``diode`` (PWL switched)   | ``(V_from − V_to − V_th)·G`` where      |
-    |                            | ``G = g_on`` when forward-biased,       |
-    |                            | ``g_off`` otherwise                     |
+    | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
+    |                            | on samples the solver stamped the diode |
+    |                            | ON, ``g_off`` otherwise (state from     |
+    |                            | ``pulsim._diode_state``; NOT            |
+    |                            | ``v_D > V_th`` — V_th is a commutation  |
+    |                            | threshold, not a drop)                  |
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
     |                            | ``G = g_on`` when ``switch_fn`` mask    |
     |                            | bit is set, ``g_off`` otherwise         |
@@ -1020,27 +1023,22 @@ def _result_i(self, name: str, t=None):
 
     # ----------------------- diode -----------------------------------
     if kind == "diode":
-        # PWL switched diode: closed when v_D > V_th. Use g_on while
-        # forward-biased, g_off while reverse-biased. Mirrors the
-        # convention from `pulsim.losses._conduction_stats(diode)`.
+        # PWL switched diode: a pure conductance in each state (the
+        # ON drop is i/g_on — there is NO V_th offset in the stamp;
+        # V_th only gates OFF→ON). The per-sample state comes from
+        # the one reconstruction shared with device_loss_summary and
+        # device_thermal_summary (`pulsim._diode_state`).
         try:
-            g_on = float(params["g_on"])
-            g_off = float(params["g_off"])
-            V_th = float(params.get("V_th", 0.0))
+            float(params["g_on"])
+            float(params["g_off"])
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"result.i({name!r}): diode params missing "
-                f"`g_on`/`g_off`/`V_th` ({exc!r})") from None
-        v_D = _v_branch()
-        closed = v_D > V_th
-        G_arr = _np.where(closed, g_on, g_off)
-        # The diode stamp models the on-state as a conductance to a
-        # virtual V_th supply: i_D = G·(v_D − V_th) when closed,
-        # i_D = G·v_D when open (g_off is leakage with no threshold).
-        col = _np.where(closed,
-                          G_arr * (v_D - V_th),
-                          G_arr * v_D)
-        return _finalize(col)
+                f"`g_on`/`g_off` ({exc!r})") from None
+        _need_nodes()
+        from ._diode_state import diode_state_trace as _diode_trace
+        tr = _diode_trace(builder, self, b_id, stacklevel=3)
+        return _finalize(tr.current)
 
     # ----------------------- switch ----------------------------------
     if kind == "switch":

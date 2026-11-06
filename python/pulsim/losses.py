@@ -46,6 +46,7 @@ from .loss_tables import (
     as_loss_table as _as_loss_table,
     resolve_tj as _resolve_tj,
 )
+from . import _diode_state
 from . import _result_views as _views
 from ._result_views import time_weighted_rms as _time_weighted_rms
 from . import magnetic as _magnetic
@@ -370,14 +371,56 @@ def _interp_energy_curve(x_query, curve) -> np.ndarray:
     return np.maximum(out, 0.0)
 
 
-def _diode_switching_loss(events_for_branch,
+def _time_fraction(mask: np.ndarray, times: np.ndarray) -> float:
+    """Fraction of the run's TIME during which ``mask`` is True.
+
+    Time-weighted on purpose: a variable-step engine clusters samples
+    at commutations, so a plain ``mask.mean()`` over-weights exactly
+    the instants a device changes state. Identical to the sample mean
+    on a uniform grid."""
+    m = np.asarray(mask, dtype=float)
+    t = np.asarray(times, dtype=float)
+    if m.size == 0:
+        return 0.0
+    if t.size != m.size or t.size < 2 or not (t[-1] > t[0]):
+        return float(m.mean())
+    return float(np.trapezoid(m, t) / (t[-1] - t[0]))
+
+
+def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
+    """Turn-off instants of one diode, read from its reconstructed
+    conduction-state trace (``pulsim._diode_state``).
+
+    One record per ON→OFF transition of the stamp the solver used:
+    ``t`` is the first sample the diode blocks, ``V_R`` the reverse
+    voltage it blocks there and ``I_F`` the forward current on the
+    last conducting sample.
+
+    Not ``result.commutation_events``: the fixed engine records an
+    event only when ``v_D − V_th`` changes sign between two stored
+    samples, which a conducting diode with ``V_th > 0`` never does
+    (0 events on a 50 Hz bridge at ``V_th = 0.7``), and its
+    interpolated event time sits AT the current zero, where an ideal
+    diode's voltage is ~0 — so ``|v_D(t_event)|`` put ``V_R`` ≈ 1 mV
+    into every ``E_rr = Q_rr · V_R`` and the recovery loss read zero
+    on a 48 V hard-switched buck."""
+    closed = np.asarray(trace.closed, dtype=bool)
+    if closed.size < 2:
+        return []
+    ks = np.nonzero(closed[:-1] & ~closed[1:])[0] + 1
+    v = np.asarray(trace.v, dtype=float)
+    i = trace.current
+    return [{"t": float(times[k]), "V_R": float(abs(v[k])),
+             "I_F": float(abs(i[k - 1]))} for k in ks]
+
+
+def _diode_switching_loss(turn_offs: List[Dict[str, float]],
                           times: np.ndarray,
                           v_D: np.ndarray,
                           spec: Mapping[str, Any],
                           i_D: "Optional[np.ndarray]" = None,
                           ) -> Dict[str, float]:
-    """Post-hoc reverse-recovery switching loss from
-    ``SimulationResult.commutation_events``.
+    """Post-hoc reverse-recovery switching loss at each diode turn-off.
 
     Mirrors PSIM's diode-loss panel — two equivalent entry points:
 
@@ -391,17 +434,16 @@ def _diode_switching_loss(events_for_branch,
       diodes.
 
     Either form yields the same number when
-    ``E_rr_ref = Q_rr · V_R_ref``. ``V_R`` itself is linearly
-    interpolated from the result trace at each event time, so the
-    formula tracks the actual reverse voltage the diode sees —
-    independent of the simulation dt.
+    ``E_rr_ref = Q_rr · V_R_ref``. ``turn_offs`` comes from
+    :func:`_diode_turn_offs`: ``V_R`` is the reverse voltage on the
+    first stored sample the diode blocks — the voltage it recovers
+    against (full ``V_in`` for a hard-switched freewheel diode, near
+    zero for a naturally commutated line rectifier).
 
     The ideal ``SwitchedDiode`` kernel model has no physical
     recovery charge; this is a datasheet annotation, matching
     PSIM / LTspice "ideal-diode-with-Qrr" post-processing.
     """
-    turn_offs = [ev for ev in events_for_branch
-                  if bool(ev.new_state) is False]
     n_off = len(turn_offs)
     T = (times[-1] - times[0]) if times.size > 1 else 0.0
     Q_rr = float(spec.get("Q_rr", 0.0))
@@ -413,33 +455,24 @@ def _diode_switching_loss(events_for_branch,
         "n_turn_off_events": int(n_off),
         "f_sw_estimate": (float(n_off) / T) if T > 0 else 0.0,
     }
+    if E_rr_curve is not None and V_R_ref <= 0:
+        raise ValueError(
+            "diode_specs: E_rr_curve requires a positive V_R_ref.")
+    if E_rr_curve is None and E_rr_ref > 0 and V_R_ref <= 0:
+        raise ValueError(
+            "diode_specs: E_rr_ref requires a positive V_R_ref "
+            "(the reference reverse voltage from the datasheet).")
     if n_off == 0 or (Q_rr <= 0 and E_rr_ref <= 0 and E_rr_curve is None):
         return {"E_sw_total": 0.0, "P_sw_avg": 0.0, **bookkeeping}
 
-    # Interpolate |v_D| at every turn-off instant.
-    t_off = np.asarray([float(ev.t_estimated) for ev in turn_offs])
-    V_R = np.interp(t_off, times, np.abs(v_D))
+    V_R = np.asarray([ev["V_R"] for ev in turn_offs], dtype=float)
 
     if E_rr_curve is not None:
         # Nonlinear E_rr(I_F): interpolate the datasheet curve at the
         # forward current the diode was carrying just before recovery.
-        if V_R_ref <= 0:
-            raise ValueError(
-                "diode_specs: E_rr_curve requires a positive V_R_ref.")
-        if i_D is None:
-            raise ValueError(
-                "diode_specs: E_rr_curve needs the diode current trace "
-                "(i_D=) — pass it from device_loss_summary.")
-        idx_before = np.clip(
-            np.searchsorted(times, t_off, side="left") - 1,
-            0, times.size - 1)
-        I_F = np.abs(np.asarray(i_D, dtype=float)[idx_before])
+        I_F = np.asarray([ev["I_F"] for ev in turn_offs], dtype=float)
         E_per_event = _interp_energy_curve(I_F, E_rr_curve) * (V_R / V_R_ref)
     elif E_rr_ref > 0:
-        if V_R_ref <= 0:
-            raise ValueError(
-                "diode_specs: E_rr_ref requires a positive V_R_ref "
-                "(the reference reverse voltage from the datasheet).")
         E_per_event = E_rr_ref * (V_R / V_R_ref)
     else:
         E_per_event = Q_rr * V_R
@@ -734,9 +767,14 @@ def device_loss_summary(
       in ``core_loss_specs``, the entry also gets ``P_core_avg``,
       ``E_core_total`` and ``B_peak`` (Steinmetz / iGSE).
     * **diode** (ideal switched diode with ``g_on`` / ``g_off``) —
-      conduction state is inferred from the node-voltage drop and
-      the device's ``V_th``. Reports the same current + power metrics
-      as the resistor path.
+      the per-sample conduction state is reconstructed by
+      :mod:`pulsim._diode_state` (the kernel's commutation rule plus a
+      node current balance; NOT ``v_D > V_th`` — a conducting PWL
+      diode drops ``i / g_on``, far below ``V_th``). Reports the same
+      current + power metrics as the resistor path, plus
+      ``duty_conducting`` (time-weighted fraction of the run carrying
+      forward current). A ``RuntimeWarning`` names the diode when its
+      state could not be recovered on some samples.
     * **switch** (ideal switch with ``g_on`` / ``g_off``) — requires
       ``switch_fn`` so the per-step closed/open mask can be sampled
       deterministically. Without ``switch_fn`` the switch entry is
@@ -783,9 +821,9 @@ def device_loss_summary(
             # diode carried just before each recovery.
             {"E_rr_curve": [(I_F, E_rr), …], "V_R_ref": float (V)}
 
-        For each turn-off event in
-        ``result.commutation_events`` matching the branch the
-        helper interpolates ``|V_R(t_event)|`` and accumulates
+        For each ON→OFF transition of the diode's reconstructed
+        conduction state the helper takes ``V_R`` = the reverse
+        voltage on the first sample the diode blocks and accumulates
         ``E_rr_event = Q_rr · V_R`` or
         ``E_rr_event = E_rr_ref · (V_R / V_R_ref)``. Reports
         ``E_sw_total``, ``P_sw_avg``, ``n_turn_off_events``,
@@ -893,13 +931,6 @@ def device_loss_summary(
     cond_by_bid, cond_by_name = _build_spec_lookup(
         conduction_specs, "conduction_specs")
 
-    # Bucket commutation events by branch_id so the diode handler
-    # can iterate only its own.
-    events = list(getattr(result, "commutation_events", []))
-    events_by_branch: Dict[int, list] = {}
-    for ev in events:
-        events_by_branch.setdefault(int(ev.branch_id), []).append(ev)
-
     summary: List[Dict[str, Any]] = []
     switch_seq_idx = 0  # increments once per Switch / Diode branch
                         # in branch-id order — matches the kernel
@@ -958,8 +989,13 @@ def device_loss_summary(
             continue
 
         if kind == "diode":
-            # SwitchedDiode: closed when v_D > V_th. Use g_on while
-            # forward-biased, g_off while reverse-biased.
+            # PWL SwitchedDiode. Its ON state is a pure conductance —
+            # the drop is i/g_on whatever V_th is; V_th only gates the
+            # OFF→ON commutation — so `v_D > V_th` is NOT the
+            # conduction state (it called a 48 A bridge diode idle).
+            # The state comes from the one shared reconstruction in
+            # pulsim._diode_state, also used by result.i() and the
+            # thermal summary.
             params = desc.get("params", {})
             g_on  = float(params.get("g_on", float("nan")))
             g_off = float(params.get("g_off", float("nan")))
@@ -971,18 +1007,18 @@ def device_loss_summary(
             if from_id is None or to_id is None:
                 switch_seq_idx += 1
                 continue
-            v_D = (_node_voltage_trace(states, int(from_id))
-                   - _node_voltage_trace(states, int(to_id)))
-            closed = v_D > V_th
-            g_arr = np.where(closed, g_on, g_off)
+            d_trace = _diode_state.diode_state_trace(
+                builder, result, bid, switch_fn=switch_fn, stacklevel=3)
+            v_D = d_trace.v
+            g_arr = np.where(d_trace.closed, g_on, g_off)
             stats = _conduction_stats(v_D, g_arr, times)
             entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "diode",
                 "name": name,
                 "V_th": V_th,
-                "duty_conducting": float(closed.mean())
-                                       if closed.size else 0.0,
+                "duty_conducting": _time_fraction(d_trace.conducting,
+                                                  times),
                 **stats,
             }
             # Optional datasheet offset+slope conduction model
@@ -1003,10 +1039,10 @@ def device_loss_summary(
             d_spec = (diode_by_bid.get(bid)
                       or diode_by_name.get(name))
             if d_spec is not None:
-                ev_branch = events_by_branch.get(int(bid), [])
                 entry.update(
-                    _diode_switching_loss(ev_branch, times, v_D, d_spec,
-                                          i_D=v_D * g_arr))
+                    _diode_switching_loss(
+                        _diode_turn_offs(d_trace, times), times, v_D,
+                        d_spec, i_D=v_D * g_arr))
             summary.append(entry)
             switch_seq_idx += 1
             continue
@@ -1042,8 +1078,7 @@ def device_loss_summary(
                 "branch_id": int(bid),
                 "kind": "switch",
                 "name": name,
-                "duty_closed": float(closed.mean())
-                                   if closed.size else 0.0,
+                "duty_closed": _time_fraction(closed, times),
                 **stats,
             }
             # Optional offset+slope conduction model (V_ce0 + r_ce·I for
