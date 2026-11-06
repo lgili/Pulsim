@@ -43,9 +43,28 @@ rather than an error.
   / `add_flyback` are now documented as commutation thresholds, not
   forward drops; `p.catalog()` no longer recommends a 1 µΩ resistor to
   tie a floating subnet (that is a galvanic bond, not a reference).
+  `add_three_phase_vsi` no longer says its diodes conduct only in the
+  dead time: a PWL diode turns off only when its current reverses, so it
+  stays on in parallel with the gated-on switch (2 % of the current at
+  the defaults; 12.9 % of samples on a 10 kHz, 1 µs dead-time SPWM leg).
+  The `switch_specs` docstrings now say that `V_blk` is measured across
+  the OPEN switch (before a turn-on, after a turn-off), so a soft edge
+  after a dead time costs about 0 J.
+* **pybind11 is pinned to 3.1** (`pybind11>=3.1,<3.2` in
+  `[build-system]` and the cibuildwheel steps; CMake's fallback fetches
+  `v3.1.0`). The stub is generated from that build; an unpinned build
+  got whatever pybind11 was newest, and 3.x writes signatures
+  differently from 2.x (and 3.1 from 3.0), which failed the stub checks.
 
 ### Fixed
 
+* **`res.v("gnd")` is zeros.** A ground name (`"gnd"`, `"GND"`, `"0"`)
+  has node id -1, and `res.v` returned `states[:, -1]`, the last state
+  column (a branch current: 1 V into 1 Ω read `-1`), with no error, on
+  every engine. `average_power_at_node` had the same index.
+* The `engine='auto'` sliding-mode warning no longer names DCM as the
+  only cause or promises a correct average: a `V_th = 0` bridge behind a
+  source resistance runs half-wave with only that warning.
 * **Diode and switch currents, duties and losses come from the mask the
   solver stamped.** `SimulationResult.switch_states` records, per stored
   sample, the switch / diode mask of the solve that produced it (all

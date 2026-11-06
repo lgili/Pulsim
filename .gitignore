@@ -87,6 +87,7 @@ package-lock.json
 build-dsed/
 build-s6/
 build_tests/
+build-tests/
 
 # Agent scratch space (scripts, logs, venvs). scikit-build-core puts
 # untracked files into the sdist unless they are ignored.
