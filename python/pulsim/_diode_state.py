@@ -214,7 +214,8 @@ def _event_sample_mask(result, times: np.ndarray) -> np.ndarray:
     landings, committed under the PRE-flip mask just past the
     crossing) or at an event-iteration breach (the fixed engine kept
     the last solve without converging) — where the kernel's own rule
-    legitimately does not hold for the stored stamp."""
+    legitimately does not hold for the stored stamp, within the
+    envelope ``_build`` bounds it by."""
     n = times.size
     out = np.zeros(n, dtype=bool)
     if not n:
@@ -251,7 +252,21 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
     states_s, rec_s = _views.step_start_states(result, states, rec)
     unsolved = _views.recorded_unsolved(result, n) if rec is not None \
         else np.zeros(n, dtype=bool)
-    exempt = _event_sample_mask(result, times) | unsolved
+    landing = _event_sample_mask(result, times) & ~unsolved
+    rest = ~landing & ~unsolved
+    # A landing is the PRE-flip stamp solved just past its crossing, so
+    # the rule fails there only by what the crossing allows. One that
+    # leaves the run's own envelope (below) is not a landing artefact
+    # but a state the circuit never reaches otherwise — a gate edge
+    # 1 ulp after a resume's t_start stored a buck's D1 ON across M1
+    # turning on (24 kA, i_peak 25 A elsewhere) — and is checked.
+    # Measured over the suite's diode circuits: legitimate landings sit
+    # at |i|/i_env <= 1.0015 (that one inside a run already warned for
+    # 25 held samples) and v/v_env <= 0.17 (a source stepping 2.9 V
+    # across V_th); that shoot-through sits at |i|/i_env ~ 950.
+    n_nodes = int(getattr(getattr(builder, "graph", None), "num_nodes", 0))
+    v_env = float(np.abs(states[rest][:, :n_nodes]).max()) \
+        if n_nodes and rest.any() else 0.0
     engine = getattr(result, "engine_used", "?")
 
     out: Dict[int, DiodeStateTrace] = {}
@@ -300,6 +315,13 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
         # carried — but a held-across-the-threshold state means the
         # engine missed a commutation, which the user must hear about.
         if tr.recorded and n:
+            # Envelope of a landing: an ON stamp carries no more current
+            # than the diode carries on any other solved sample; an OFF
+            # stamp holds no more forward voltage than any node reaches.
+            i_abs = np.abs(tr.current)
+            i_env = float(i_abs[rest].max()) if rest.any() else 0.0
+            exempt = unsolved | (landing & np.where(closed, i_abs <= i_env,
+                                                    v <= v_env))
             off_fwd = ~exempt & ~closed & (v - V_th > 1e-3) & (v > 1e-3)
             on_rev = ~exempt & closed & (v < -1e-3)
             viol = off_fwd | on_rev
@@ -324,6 +346,14 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                         f"OFF while forward-biased above V_th = "
                         f"{V_th:g} V on {int(off_fwd.sum())} samples, by "
                         f"up to {float((v - V_th)[off_fwd].max()):.3g} V")
+                n_land = int((viol & landing).sum())
+                if n_land:
+                    kinds.append(
+                        f"{n_land} of them at a commutation landing whose "
+                        f"pre-flip stamp carried more current, or held "
+                        f"more forward voltage, than any other solved "
+                        f"sample (the reported peaks and energies "
+                        f"include it)")
                 tr._messages.append(
                     f"diode {name!r}: on {tr.n_rule_violations} samples "
                     f"(t = {tv.min():.6g} .. {tv.max():.6g} s) the "

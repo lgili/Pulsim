@@ -297,6 +297,50 @@ def test_seeded_state_on_a_gate_edge_has_no_phantom_current(engine):
         assert th[0]["T_j_peak"] < 30.0
 
 
+@pytest.mark.parametrize("seed", ("resume", "initial_state"))
+@pytest.mark.parametrize("src,k_ulp", [("pwl", 0), ("auto", 1),
+                                       ("auto", 50), ("auto", 1000)])
+def test_resume_just_before_a_gate_edge_is_not_silent(src, k_ulp, seed):
+    """A TR-BDF2 run resumed 1..1000 ulp BEFORE M1's turn-on edge (a
+    pwl snapshot at 12 T always lands 1 ulp short) stores t[1] on the
+    edge with M1 ON and D1 still ON: a commutation landing carrying
+    24 kA (M1 i_peak 24011.8 A, P_avg 2.187 W; the unbroken run: 25.3 A,
+    0.259 W). Landings were exempt from the rule check, so this was
+    reported with no warning. A landing is now exempt only inside the
+    run's own envelope (no more current than the diode carries on any
+    other solved sample), so D1 is named — unless the engine stops
+    storing the shoot-through."""
+    b, pwm, T = _buck()
+    t_end = 12 * T - k_ulp * np.spacing(12 * T)
+    # dt = 1e-7 (not T / 200 = 1.0000000000000001e-7): 2400 steps of it
+    # end 2 ulp short of 12 T.
+    r0 = _run(b, t_end, src, dt=1e-7, switch_fn=pwm)
+    assert 0 < 12 * T - float(r0.final_snapshot.t) < 1e-15
+    snap = r0.final_snapshot
+    b1, pwm1, _ = _buck()
+    kw = (dict(resume_from=snap) if seed == "resume"
+          else dict(initial_state=np.asarray(snap.x)))
+    r1 = _run(b1, 15 * T, "auto", switch_fn=pwm1, t_start=float(snap.t),
+              **kw)
+    s, _, msgs = _report(b1, r1, [])
+    i_l = float(np.abs(np.asarray(r1.i("L1"))).max())
+    clean = all(_entry(s, n)["i_peak"] <= 1.01 * i_l for n in ("M1", "D1"))
+    named = any(_RULE in m and "'D1'" in m for m in msgs)
+    assert clean or named, (_entry(s, "M1"), msgs)
+
+
+def test_source_step_landing_stays_inside_the_envelope():
+    """The other side of the landing envelope: the pulsed charger's
+    source steps 2.9 V at each edge, so its auto landings hold D OFF
+    at 2.4 V forward (1.7 V past V_th) for one sample — the largest
+    legitimate landing violation measured, inside the 14.4 V the
+    circuit reaches. No rule warning."""
+    b = _pulsed_charger()
+    r = _run(b, 1e-3, "auto")
+    _, _, msgs = _report(b, r, [])
+    assert not any(_RULE in m for m in msgs), msgs
+
+
 def test_switch_duty_needs_no_switch_fn():
     """The record makes a switch's state solver-owned data: the summary
     reports it with no switch_fn at all, on both engines."""
