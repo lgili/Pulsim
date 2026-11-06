@@ -207,16 +207,40 @@ def resolve_switch_closed_trace(result: Any,
        then apply :func:`_voltage_consistency_guard`.
     """
     rec = getattr(switch_fn, "recorded_mask_trace", None)
+    q = mask_sample_times(result, times)
     if callable(rec):
-        return np.asarray(rec(times, switch_idx), dtype=bool)
+        return np.asarray(rec(q, switch_idx), dtype=bool)
     masks = getattr(result, "_switch_masks", None)
     if masks is not None:
         arr = np.asarray(masks)
         if (arr.ndim == 2 and arr.shape[0] == np.asarray(times).size
                 and 0 <= switch_idx < arr.shape[1]):
             return arr[:, switch_idx].astype(bool)
-    closed = evaluate_switch_mask_trace(switch_fn, times, switch_idx)
+    closed = evaluate_switch_mask_trace(switch_fn, q, switch_idx)
     return _voltage_consistency_guard(closed, v_branch, name=name)
+
+
+def mask_sample_times(result: Any, times: np.ndarray) -> np.ndarray:
+    """The time at which the engine evaluated ``switch_fn`` for the
+    step that PRODUCED each stored sample.
+
+    * Fixed-step engine (``engine='pwl'``): the step's end, i.e. the
+      sample time itself (``run_event_iteration(t, ...)`` calls
+      ``switch_fn(t)``).
+    * ``engine='trbdf2'`` / ``'auto'``: the step MIDPOINT
+      (``trbdf2_transient.hpp``: ``mask_step = switch_fn(t + h/2)``).
+      A step that lands on a gate edge is therefore stored with the
+      PRE-edge mask; re-evaluating ``switch_fn`` at the sample time
+      returned the post-edge state, which made a 50 kHz buck's switch
+      read 0.455 duty instead of 0.500 and set off the closed-loop
+      desync warning on a stateless PWM.
+    """
+    t = np.asarray(times, dtype=float)
+    if getattr(result, "engine_used", None) != "trbdf2" or t.size < 2:
+        return t
+    q = t.copy()
+    q[1:] = 0.5 * (t[:-1] + t[1:])
+    return q
 
 
 # ---------------------------------------------------------------
