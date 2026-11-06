@@ -215,7 +215,8 @@ def report(data: "dict[str, np.ndarray]") -> None:
     arm_names = ("a_p", "b_p", "c_p", "a_n", "b_n", "c_n")
     for k, name in enumerate(arm_names):
         v_last = v_C[k, last_period_mask]
-        mean = float(v_last.mean())
+        # Time-weighted (correct on any grid; a sample mean is not).
+        mean = p.time_average(t, v_C[k], t_from=T_END - 1.0 / F_AC)
         pkpk = float(v_last.max() - v_last.min())
         drift = mean - V_C0
         print(f"  arm_{name:<6} {mean:>12.3f} {pkpk:>12.4f} {drift:>+12.4f}")

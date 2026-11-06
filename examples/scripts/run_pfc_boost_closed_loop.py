@@ -170,14 +170,18 @@ def main() -> None:
 
     # KPI
     # Last 2 AC cycles → assess settled V_bus and i_L tracking.
-    k_late = int(0.6 * res.num_steps())
-    v_bus_mean = v_bus_arr[k_late:].mean()
-    v_bus_ripple = float(np.ptp(v_bus_arr[k_late:]))
+    # Time-weighted (p.steady_state_stats): correct on any grid, unlike a
+    # plain mean over the samples of a variable-step run.
+    ss_bus = p.steady_state_stats(res, "vbus", last=0.4 * T_END)
+    v_bus_mean = ss_bus.mean
+    v_bus_ripple = ss_bus.ripple_pp
     print(f"\n  KPI:")
     print(f"    V_bus mean (late):  {v_bus_mean:.2f} V (target {V_BUS_REF:.0f})")
     print(f"    V_bus ripple (pp):  {v_bus_ripple:.2f} V")
     print(f"    i_L peak:           {i_L_arr.max():.3f} A")
-    # Power-factor proxy: correlation between i_L and |v_ac|.
+    # Power-factor proxy: correlation between i_L and |v_ac|, sample-
+    # weighted (this script runs on a fixed dt, where that is fine).
+    k_late = int(0.6 * res.num_steps())
     abs_vac = np.abs(v_ac_arr[k_late:])
     iL_late = i_L_arr[k_late:]
     if iL_late.std() > 0 and abs_vac.std() > 0:

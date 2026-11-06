@@ -126,14 +126,16 @@ def main() -> None:
     print(f"    |I_n|   = {abs(In):>7.3f} A")
     print(f"    CUF     = {cuf*100:>6.2f} %  (current "
           f"unbalance — symmetric rectifier ≈ 0)")
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
     print(f"\n  DC bus:")
     print(f"    V_dc mean (after 40 ms): "
-          f"{v_dc[times > 40e-3].mean():.1f} V  "
+          f"{p.time_average(times, v_dc, t_from=40e-3):.1f} V  "
           f"(target ≈ V_LL_peak·1.35 ≈ "
           f"{V_RMS*np.sqrt(2)*np.sqrt(3)*1.35/np.sqrt(2):.0f})")
     print(f"    V_dc ripple (40-80 ms): "
           f"{v_dc[times > 40e-3].max() - v_dc[times > 40e-3].min():.1f} V")
-    print(f"    P_grid mean (40-80 ms): {p_inst[times > 40e-3].mean():.1f} W")
+    print(f"    P_grid mean (40-80 ms): {p.time_average(times, p_inst, t_from=40e-3):.1f} W")
 
     # Plot
     try:

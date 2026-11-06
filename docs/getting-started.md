@@ -1,40 +1,46 @@
 # Getting started
 
-## Prerequisites
-
-- **macOS or Linux** (Windows is best-effort via WSL2)
-- **CMake ≥ 3.24**, **Ninja**
-- **Clang 16+** or **GCC 13+** (we use C++23)
-- **Python 3.11+** with `pip`
-- A package manager for the third-party dependencies: KLU (SuiteSparse), Eigen, yaml-cpp, Catch2, pybind11. On macOS, install via Homebrew.
+## Install
 
 ```bash
-brew install cmake ninja llvm suite-sparse eigen yaml-cpp catch2 pybind11
+pip install pulsim
 ```
 
-## Build the C++ core + Python bindings
+Pulsim ships binary wheels for **CPython 3.10, 3.11, 3.12 and 3.13** on
+
+- macOS on Apple silicon (arm64),
+- Linux x86_64 (manylinux_2_28),
+- Windows x64.
+
+No compiler is needed. The only runtime dependency is **NumPy**. Optional
+features live in extras, so the base install stays small:
+
+| Extra | Pulls in | Needed for |
+|---|---|---|
+| `pulsim[jupyter]` | matplotlib, plotly, ipywidgets | `p.scope(...)`, `p.plot.*`, notebook widgets |
+| `pulsim[data]` | pandas, xarray | `SweepResult.to_dataframe()` |
+| `pulsim[lib]` | PyYAML | reading/writing part files in `pulsim.lib` |
+| `pulsim[fast]` | numba | `@p.fast_block` JIT-compiled control blocks |
+| `pulsim[schematic]` | schemdraw, networkx, cairosvg, anthropic | schematic rendering |
 
 ```bash
-git clone https://github.com/lgili/pulsim
-cd pulsim
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+pip install "pulsim[jupyter]"          # e.g. to plot
 ```
 
-A successful build produces:
-- `build/core/pulsim_core_*_tests` — Catch2 binaries (run with `ctest --output-on-failure`).
-- `build/python/pulsim/_pulsim.cpython-3X-darwin.so` — the Python extension.
-
-For local Python development without `pip install`:
+Check the install:
 
 ```bash
-export PYTHONPATH="$(pwd)/build/python:$PYTHONPATH"
 python -c "import pulsim as p; print(p.__version__)"
 ```
 
-## Your first transient — a 3-line RC
+```
+2.0.0
+```
+
+## Your first transient — an RC in a few lines
 
 ```python
+import numpy as np
 import pulsim as p
 
 b = p.CircuitBuilder()
@@ -43,42 +49,129 @@ b.add_resistor       ("R",  "n0", "vc",  1000.0)   # 1 kΩ
 b.add_capacitor      ("C",  "vc", "gnd", 1e-6)     # 1 µF; τ = 1 ms
 
 res = p.simulate(b, t_end=5e-3, dt=1e-5)
-vc_idx = b.node_id_of("vc")
 
-# Print v_C at t = 1τ (should be ≈ V·(1 − 1/e) ≈ 3.16 V).
-k_1tau = int(1e-3 / 1e-5)
-print(f"v_C(1τ) = {res.states[k_1tau][vc_idx]:.3f} V")
+# v_C at t = 1τ; the analytical value is V·(1 − 1/e) = 3.161 V.
+v_c = res.v("vc")                      # numpy array, one value per sample
+print(f"v_C(1τ) = {np.interp(1e-3, res.times, v_c):.3f} V  [{res.engine_used}]")
 ```
 
 Expected output:
 ```
-v_C(1τ) = 3.162 V
+v_C(1τ) = 3.151 V  [pwl]
 ```
 
-That's the entire flow. `simulate()` (proposal #3.3) hides:
-1. Building the PWL state-space cache (`PwlStateSpaceCache`).
-2. Constructing the `SimulationOptions`.
-3. Defaulting the `switch_fn` to "all switches closed" (here there are no switches, so it's a no-op).
-4. Auto-detecting nonlinear devices and enabling the Newton refresh if needed.
-5. Calling `run_transient`.
+Passing `dt` asks for the **fixed-step** trapezoidal engine (`pwl`). It
+starts from an all-zero state, so the 5 V source is switched on during
+the first step; the response is the exact exponential delayed by half a
+step (`dt/2 = 5 µs`), which is the 0.3 % gap to 3.161 V. Shrink `dt` and
+the gap shrinks with it.
+
+Leave `dt` out and the default `engine='auto'` picks the engine — here
+the variable-step TR-BDF2 engine, which lands on the analytical value:
+
+```python
+res_auto = p.simulate(b, t_end=5e-3)
+print(f"v_C(1τ) = {np.interp(1e-3, res_auto.times, res_auto.v('vc')):.3f} V"
+      f"  [{res_auto.engine_used}]")
+```
+
+```
+v_C(1τ) = 3.161 V  [trbdf2]
+```
+
+`res.engine_used` says which engine ran and `res.engine_route_reason`
+says why `auto` did not take the variable-step one. A variable-step run
+has a non-uniform time grid: interpolate with `np.interp` or average
+with `np.trapezoid(y, t) / (t[-1] - t[0])` rather than indexing samples
+or taking a plain `.mean()`.
+
+That is the entire flow. `simulate()` hides:
+
+1. Choosing the engine (`dt` given → `pwl`; otherwise `auto` routes).
+2. Building the PWL state-space cache (`PwlStateSpaceCache`) for the
+   fixed-step engine — lazily, one factorisation per switch state the
+   run actually visits.
+3. Constructing the `SimulationOptions`.
+4. Auto-detecting nonlinear devices and enabling the Newton refresh if
+   needed.
+5. Running the transient.
+
+## Reading results
+
+`res.times` is the list of sample times and `res.states` a read-only
+`numpy` array of shape `(num_samples, state_size)`. You rarely need to
+index it by hand: ask by name.
+
+```python
+v_c = res.v("vc")      # node voltage trace
+i_r = res.i("R")       # branch current through R, from n0 to vc
+print(f"i_R(0+) = {i_r[1] * 1e3:.3f} mA,  i_R(end) = {i_r[-1] * 1e6:.3f} µA")
+```
+
+```
+i_R(0+) = 4.975 mA,  i_R(end) = 33.858 µA
+```
 
 ## Plotting
 
-`SimulationResult` has parallel `times` and `states` arrays. You can hand them to matplotlib:
+Plotting needs the `[jupyter]` extra (matplotlib). One line plots
+named signals and returns the matplotlib `Figure` (add `show=True` to
+open a window, or `save="rc.png"` to write a file):
+
+```python
+fig = p.scope(b, res, signals=["vc"])
+```
+
+Or hand the arrays to matplotlib yourself:
 
 ```python
 import matplotlib.pyplot as plt
 
-times = res.times                      # list[float], length N
-v_c   = [s[vc_idx] for s in res.states]
-plt.plot(times, v_c)
+plt.plot(res.times, res.v("vc"))
 plt.xlabel("t [s]"); plt.ylabel("v_C [V]")
 plt.show()
 ```
 
-For circuits with **branch-current unknowns** (voltage sources, inductors), the corresponding indices are obtained via `pool.branch_var_id_for_source(branch_id, graph)` or `branch_var_id_for_inductor(...)`.
-
 ## Where to go next
 
 - [Mental model](mental-model.md) — what `Graph`, `DevicePool`, `PwlStateSpaceCache` actually are.
-- [Tutorial 01 — RC charging from a pulse source](tutorials/01-rc-charging.md) — same example, but driven by `PulseVoltageSource` (V12).
+- [Tutorial 01 — RC charging from a pulse source](tutorials/01-rc-charging.md) — same example, but driven by `PulseVoltageSource`.
+- [API reference](api-reference.md) — every builder method and helper signature.
+
+## Building from source
+
+Only needed if you want to work on the C++ kernel or the bindings.
+
+**Requirements.** A C++23 compiler (AppleClang 15+ / Clang 17+ /
+GCC 13+), CMake ≥ 3.20 and Python ≥ 3.10. Ninja is optional. Nothing
+else has to be installed by hand: Eigen 3.4 is taken from the system if
+CMake finds it and downloaded otherwise; yaml-cpp, Catch2 (tests) and
+pybind11 (if the build environment does not provide it) are fetched at
+configure time.
+
+**Python package, editable.** `pip` drives the CMake build through
+scikit-build-core:
+
+```bash
+git clone https://github.com/lgili/Pulsim.git
+cd Pulsim
+pip install -e .
+```
+
+**Plain CMake** — for the C++ tests, or a build-tree Python package:
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSIM_BUILD_PYTHON=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+`PULSIM_BUILD_TESTS` (default `ON`) builds the Catch2 binaries
+`build/core/pulsim_core_*_tests`. `PULSIM_BUILD_PYTHON` (default `OFF`)
+builds the extension into `build/python/pulsim/`, a full copy of the
+package; use it without installing:
+
+```bash
+export PYTHONPATH="$(pwd)/build/python:$PYTHONPATH"
+python -c "import pulsim as p; print(p.__version__)"
+```

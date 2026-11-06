@@ -70,7 +70,8 @@ def ripple_kpi(res, params) -> dict:
     v_tail = v_out[tail_mask]
     return {
         "v_ripple_pp": float(v_tail.max() - v_tail.min()),
-        "v_mean":      float(v_tail.mean()),
+        # Time-weighted: correct on any grid, unlike a sample mean.
+        "v_mean":      p.time_average(times, v_out, t_from=times[-1] - 0.3e-3),
     }
 
 

@@ -7,8 +7,13 @@ message: >-
   If you use Pulsim in academic work, please cite it as below.
 type: software
 title: 'Pulsim: A piecewise-linear state-space simulator for switched-mode power electronics'
-version: 1.7.0
-date-released: 2026-06-03
+version: 2.0.0
+date-released: 2026-09-08
+# DOI: none minted yet. Archive the v2.0.0 release on Zenodo (GitHub
+# integration, done by the maintainer) and uncomment the line below
+# with the version DOI it issues; add the same `doi` to the BibTeX
+# entry in README.md.
+# doi: 10.5281/zenodo.XXXXXXX
 license: MIT
 url: 'https://github.com/lgili/Pulsim'
 repository-code: 'https://github.com/lgili/Pulsim'

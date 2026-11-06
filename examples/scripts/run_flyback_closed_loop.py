@@ -135,13 +135,15 @@ def main() -> None:
     v_out_arr = res.v("vout")
     v_sw_arr  = res.v("sw")
 
-    pre  = v_out_arr[(times > 1.0) & (times < T_STEP*1e3)]
-    post = v_out_arr[(times > T_STEP*1e3 + 0.5)]
+    # Time-weighted window means (p.time_average): correct on any grid,
+    # unlike a plain mean over the samples of a variable-step run.
+    pre  = p.time_average(res.times, v_out_arr, 1.0e-3, T_STEP)
+    post = p.time_average(res.times, v_out_arr, t_from=T_STEP + 0.5e-3)
     print(f"\n  KPI:")
     print(f"    V_out pre-step  ({1.0}–{T_STEP*1e3:.1f} ms): "
-          f"mean = {pre.mean():.2f} V (target {V_REF:.1f})")
+          f"mean = {pre:.2f} V (target {V_REF:.1f})")
     print(f"    V_out post-step (>{T_STEP*1e3 + 0.5} ms): "
-          f"mean = {post.mean():.2f} V (target {V_REF_2:.1f})")
+          f"mean = {post:.2f} V (target {V_REF_2:.1f})")
 
     try:
         import matplotlib.pyplot as plt

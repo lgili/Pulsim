@@ -1091,6 +1091,17 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (!step_retried) {
+                    // A Newton failure that survived every halving on
+                    // this engine is, in the one case characterised
+                    // (CHANGELOG 2.0.0, test_newton_stall_and_mask_
+                    // chatter.py), PWL diode-mask chatter inside the
+                    // Newton loop, and it gets WORSE with a smaller
+                    // dt: the PSFB reproducer aborts at 10, 5 and
+                    // 2 ns and runs at 50 ns. Say so, rather than let
+                    // the user reach for a smaller dt.
+                    const bool newton_failed =
+                        why.find("solve_with_newton")
+                        != std::string::npos;
                     throw std::runtime_error(std::format(
                         "run_transient: the step ending at t = {} "
                         "could not be taken, even split into {} "
@@ -1099,11 +1110,25 @@ inline SimulationResult run_transient(
                         "raise max_dt_halvings only if you believe "
                         "otherwise; more likely the circuit needs a "
                         "snubber, a softer device model, or a look at "
-                        "the device the message above names.",
+                        "the device the message above names.{}",
                         t, Size{1} << halving_cap,
                         opts.dt / static_cast<Real>(
                             Size{1} << halving_cap),
-                        Size{1} << halving_cap, why));
+                        Size{1} << halving_cap, why,
+                        newton_failed
+                            ? "\nIf PWL diodes (add_diode) share the "
+                              "circuit with a Newton device (saturable "
+                              "or hysteretic magnetics, a smooth "
+                              "junction), this is likely the known "
+                              "diode-mask chatter inside Newton "
+                              "(CHANGELOG 2.0.0; KNOWN_LIMITATIONS.md), "
+                              "and a smaller dt makes it worse, not "
+                              "better. Measured workarounds: a coarser "
+                              "dt (the PSFB reproducer aborts at 10 ns "
+                              "and runs at 50 ns), or smooth Shockley "
+                              "junctions (add_shockley_diode) for "
+                              "those diodes."
+                            : ""));
                 }
             }
 

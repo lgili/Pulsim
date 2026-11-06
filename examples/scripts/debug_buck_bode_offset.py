@@ -152,7 +152,10 @@ def main() -> None:
     print(f"  amp_phasor / amp_analytical:   {amp_phasor/amp_analytical:.3f}x")
     print(f"  dB(phasor/analytical):         "
           f"{20*math.log10(amp_phasor/amp_analytical):+.2f} dB")
-    print(f"  V_out DC:                      {v_w_avg.mean():.3f} V "
+    # DC level time-weighted on the raw trace (p.time_average). The block
+    # averaging and DC removal above are sample-count based and assume this
+    # script's fixed dt; they are signal processing, not a steady-state figure.
+    print(f"  V_out DC:                      {p.time_average(t_w, v_w):.3f} V "
           f"(target D·V_in = {D_OP*V_IN:.1f})")
 
     # Plot.

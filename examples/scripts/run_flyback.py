@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-
 import pulsim as p
 
 
@@ -73,10 +71,12 @@ def main() -> None:
                       switch_fn=pwm, progress="bar")
     print(f"  samples: {res.num_steps()}")
 
-    v_out = res.v("vout")
-    k_skip = int(0.7 * res.num_steps())
-    v_mean   = v_out[k_skip:].mean()
-    v_ripple = float(np.ptp(v_out[k_skip:]))
+    # Time-weighted (p.steady_state_stats): correct on any grid, including
+    # the variable-step one simulate() uses when no dt is given -- a plain
+    # mean over the samples is not.
+    ss = p.steady_state_stats(res, "vout", last=0.3 * (t_end - t_start))
+    v_mean   = ss.mean
+    v_ripple = ss.ripple_pp
     print(f"  V_out DC ≈ {v_mean:.2f} V (target ~20–25, "
           f"ripple {v_ripple:.2f} V pp)")
 

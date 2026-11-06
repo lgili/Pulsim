@@ -20,16 +20,23 @@ is what was underneath.
 trapezoidal solve passes through — the same shape as the fixed
 engine's `refresh_dt` fix.
 
-WHAT THESE TESTS DELIBERATELY AVOID. The variable-step engine has a
-separate, pre-existing defect at a switched diode's TURN-OFF when an
-inductor is in series with it: a plain LINEAR L–D–RC rectifier lands
-at half the fixed engine's output with a 1.5 kV spike on the internal
-node, and a flux device in the same place makes the diode chatter
-hundreds of thousands of times. That is tracked by the strict xfail
-at the bottom of this file. The regression tests above it therefore
-stop before the first turn-off (0.4 ms of a 1 kHz drive): the settle
-and the turn-on are what the fix here is about, and they are what
-crashed.
+WHY THE FIRST TESTS STOP AT 0.4 ms. They pin the settle and the
+first turn-on (0.4 ms of a 1 kHz drive), which is what crashed; the
+switched diode's TURN-OFF with an inductor in series is covered
+separately further down.
+
+That turn-off was once reported as a second engine defect: "a plain
+linear L-D-RC rectifier lands at half the fixed engine's output". It
+does not. The figure came from an unweighted `.mean()` over TR-BDF2's
+adaptive grid, which clusters samples after each turn-off (3.04 V
+sample mean vs 6.35 V time-weighted; the fixed engine gives 6.33 V).
+`test_switched_diode_turn_off_with_series_inductor_on_trbdf2` shows
+the engines agree once the average is time-weighted (see CHANGELOG
+2.0.0 and `pulsim.time_average`). What remains real is narrower: a
+femtosecond landing step after the turn-off puts a ~1.5 kV,
+4.4e-12 s artefact on the INTERNAL node of the linear case (the
+output is untouched) -- the strict xfail at the bottom. The flux
+devices' former diode chatter is gone (6 events in 3 cycles).
 """
 
 import math

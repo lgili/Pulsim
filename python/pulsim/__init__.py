@@ -190,6 +190,7 @@ from .periodic import (
     PeriodicShootingResult,
     run_periodic_shooting,
 )
+from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -446,6 +447,18 @@ try:
 except ImportError:  # pragma: no cover
     _HAS_SCOPE = False
 
+# Importing the ``pulsim.scope`` submodule (above) makes the import
+# system bind the *module* to the package attribute ``scope``, which
+# silently replaced the ``pulsim.scope(builder, result, ...)`` plotting
+# function imported from ``.plot`` -- ``p.scope(...)`` then raised
+# ``TypeError: 'module' object is not callable``. Rebind the function.
+# The submodule stays importable: it is cached in ``sys.modules``, so
+# ``import pulsim.scope`` and ``from pulsim.scope import LiveScope`` keep
+# working and do not re-bind the attribute. (``import pulsim.scope as m``
+# resolves the attribute first and therefore yields the function; use
+# ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
+from .plot import scope  # noqa: E402,F811
+
 __all__ = [
     "CircuitBuilder",
     "Graph",
@@ -561,6 +574,12 @@ __all__ = [
     # guide since v1.5; exported as of Phase 0).
     "PeriodicShootingResult",
     "run_periodic_shooting",
+    # Time-weighted statistics (correct on variable-step grids).
+    "TimeStats",
+    "time_window",
+    "time_average",
+    "time_rms",
+    "steady_state_stats",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -1340,6 +1359,16 @@ class SolverOptions:
 
     When both are given, the flat kwargs override the corresponding
     fields on `solver`.
+
+    ``tol_newton_dx`` / ``tol_newton_res`` are ABSOLUTE (engine
+    default 1e-9) on purpose — an absolute step test is what keeps
+    Newton off a spurious root. Do not loosen them to get past a
+    Newton abort: on the snubbed flyback of
+    ``test_saturable_transformer.py`` that turned a TR-BDF2 abort into
+    a run reporting 3.53 V where ``engine='pwl'`` gives 15.31 V.
+    Cross-check on the other engine instead (``engine='pwl'`` with an
+    explicit ``dt`` after a TR-BDF2 abort); on the fixed engine a
+    smaller ``dt`` is not the remedy (``docs/gotchas.md`` (e)).
     """
     # Newton / nonlinear refresh ------------------------------------
     enable_nonlinear_refresh: Optional[bool] = None
@@ -1522,9 +1551,37 @@ def simulate(
     Decision tree, short version:
 
     * **"Não sei qual escolher"** → pass nothing. That is what
-      ``auto`` is for.
+      ``auto`` is for — but read the next section before you
+      average anything.
     * **"Preciso do grid fixo / reprodutibilidade bit-exata"** →
       pass ``dt``.
+
+    **Statistics over the result.** Without ``dt`` (and always on
+    ``engine='trbdf2'`` / ``'dsed'``) the samples are NOT evenly spaced: the step controller packs them
+    around switching edges and diode events — down to femtosecond
+    steps after a turn-off — and stretches them across quiet
+    intervals. ``result.times`` is that variable grid, so plain sample
+    statistics weight each SAMPLE equally instead of each second:
+
+    * ``v[t > t0].mean()`` is wrong. On an L–D–RC rectifier whose
+      output averages 6.33 V it reads 3.04 V on ``engine='trbdf2'``
+      and 5.01 V with the defaults.
+    * ``np.sqrt((v**2).mean())`` is wrong for the same reason.
+    * ``v.max()`` / ``v.min()`` need no weighting, but they include
+      every event-landing sample, sub-nanosecond excursions too.
+    * Slicing by sample index (``v[int(0.7 * len(v)):]``) does not
+      select the last 30 % of the TIME.
+
+    Use the time-weighted helpers instead, which are exact for the
+    piecewise-linear waveform through the samples on any grid::
+
+        s = pulsim.steady_state_stats(result, "out", last=10 / f_sw)
+        s.mean, s.rms, s.ripple_pp
+        pulsim.time_average(result.times, result.v("out"), t_from=2e-3)
+
+    With an explicit ``dt`` the grid is uniform and ``.mean()`` agrees
+    with them to ~4 significant digits; the helpers are still the
+    form that survives dropping the ``dt``.
 
     Examples
     --------
@@ -1558,10 +1615,14 @@ def simulate(
     t_end
         End time, in seconds.
     dt
-        Fixed time step (engine='pwl', required) OR upper-bound
-        ``dt_max`` (engine='dsed', optional — defaults to 10 µs).
+        ``engine='auto'``: given → fixed step of exactly ``dt``;
+        omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
+        or a ``ValueError`` naming what keeps the circuit off it. ``engine='pwl'``: the fixed step, required.
+        ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
+        defaults to 10 µs); the grid is variable either way.
     engine
-        ``'pwl'`` (default, fixed-step) or ``'dsed'`` (variable-step).
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
+        see above.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
@@ -1594,11 +1655,21 @@ def simulate(
         ``None`` (default) means auto-detect.
     max_newton_iterations, max_event_iterations
         PWL-only: forwarded to :class:`SimulationOptions`.
+    tol_newton_dx, tol_newton_res
+        ABSOLUTE Newton tolerances on ``||dx||_inf`` and
+        ``||residual||_inf``; ``None`` keeps the engine default
+        (1e-9). Do not loosen them to get past a Newton abort — that
+        has produced silently wrong operating points (see
+        :class:`SolverOptions`). Cross-check on the other engine
+        instead (``engine='pwl'`` with an explicit ``dt`` after a
+        TR-BDF2 abort).
 
     Returns
     -------
     SimulationResult
-        The full per-sample state-vector history.
+        The full per-sample state-vector history, on a uniform grid
+        when ``dt`` was given and a variable one otherwise (see
+        *Statistics over the result* above).
 
     Raises
     ------

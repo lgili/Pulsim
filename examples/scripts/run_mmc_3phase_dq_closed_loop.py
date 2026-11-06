@@ -323,20 +323,22 @@ def main() -> None:
 
     # KPIs — measured mean current in the steady-state windows.
     times_ms = log["t"] * 1e3
-    pre_mask  = (times_ms >  5) & (times_ms < T_STEP_D*1e3)
-    btwn_mask = (times_ms >  T_STEP_D*1e3 + 3) & (times_ms < T_STEP_Q*1e3)
-    post_mask = times_ms >  T_STEP_Q*1e3 + 3
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
+    i_d_pre  = p.time_average(log["t"], log["i_d"], 5e-3, T_STEP_D)
+    i_d_btwn = p.time_average(log["t"], log["i_d"], T_STEP_D + 3e-3, T_STEP_Q)
+    i_q_post = p.time_average(log["t"], log["i_q"], t_from=T_STEP_Q + 3e-3)
 
     print(f"\nKPIs:")
     print(f"  i_d  pre-step   (5–{T_STEP_D*1e3:.0f} ms): "
-          f"mean = {log['i_d'][pre_mask].mean():.2f} A "
+          f"mean = {i_d_pre:.2f} A "
           f"(target {I_D_REF_1:.1f})")
     print(f"  i_d  mid window ({T_STEP_D*1e3+3:.0f}–"
           f"{T_STEP_Q*1e3:.0f} ms): "
-          f"mean = {log['i_d'][btwn_mask].mean():.2f} A "
+          f"mean = {i_d_btwn:.2f} A "
           f"(target {I_D_REF_2:.1f})")
     print(f"  i_q  post-step  (>{T_STEP_Q*1e3+3:.0f} ms): "
-          f"mean = {log['i_q'][post_mask].mean():.2f} A "
+          f"mean = {i_q_post:.2f} A "
           f"(target {I_Q_REF_2:.1f})")
     print(f"  v_C drift (per arm, start → end):")
     for k, name in enumerate(("a_p", "b_p", "c_p", "a_n", "b_n", "c_n")):
