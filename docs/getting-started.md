@@ -118,12 +118,14 @@ Plotting needs the `[jupyter]` extra (matplotlib). One line plots
 named signals and returns the matplotlib `Figure` (add `show=True` to
 open a window, or `save="rc.png"` to write a file):
 
+<!-- doctest: requires=matplotlib -->
 ```python
 fig = p.scope(b, res, signals=["vc"])
 ```
 
 Or hand the arrays to matplotlib yourself:
 
+<!-- doctest: requires=matplotlib -->
 ```python
 import matplotlib.pyplot as plt
 
@@ -131,6 +133,16 @@ plt.plot(res.times, res.v("vc"))
 plt.xlabel("t [s]"); plt.ylabel("v_C [V]")
 plt.show()
 ```
+
+## Using Pulsim with AI assistants
+
+If an AI coding assistant writes your Pulsim scripts, have it read the
+usage guide that ships with the package first: `python -m pulsim.guide`
+prints it for the installed version (the same text is on the
+[AI assistants page](ai-guide.md)). It lists the exact signatures, the
+traps that return plausible wrong numbers, and the checks that catch
+them. Tools that read an [`llms.txt`](llms.txt) index find one at the
+root of these docs.
 
 ## Where to go next
 

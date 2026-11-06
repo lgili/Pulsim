@@ -247,7 +247,8 @@ def average_power_at_node(builder,
     node_idx = builder.node_id_of(node_name)
     states = _states_as_array(result)
     times = _times_as_array(result)
-    v = states[:, node_idx]
+    # Ground (node id -1) is 0 V, not the last state column.
+    v = states[:, node_idx] if node_idx >= 0 else np.zeros(len(times))
     try:
         i_idx = builder.pool.branch_var_id_for_inductor(
             current_branch_id, builder.graph)
@@ -1125,10 +1126,16 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     record, ``switch_fn`` re-evaluated after the run (with a
     RuntimeWarning).
 
-    At each edge between samples k-1 and k, we take ``|v_SW[k-1]|``
-    as the blocking voltage (the value the switch was holding off
-    just before / just after the transition) and ``|i_SW[k]|`` as
-    the load current the device sees while conducting.
+    At each edge between samples k-1 and k the blocking voltage is
+    the |v_SW| the switch holds while OPEN next to the edge (the
+    sample before a turn-on, the sample after a turn-off) and the
+    load current is the |i_SW| it carries while CLOSED next to it (the
+    sample after a turn-on, the sample before a turn-off). Both are
+    measured, so a soft edge -- where the antiparallel diode holds the
+    switch near 0 V, e.g. after a dead time -- costs about 0 J. With
+    no dead time the complementary switch takes the current at the
+    same instant, the switch blocks the full bus on the soft edge too,
+    and that edge is charged like a hard one.
 
     ``closed_start`` / ``v_start`` / ``i_start`` are the state at the
     start of the step after each sample
@@ -1539,8 +1546,11 @@ def device_loss_summary(
             E_on  = E_on_ref  · (|V_blk| / V_ref) · (|I_load| / I_ref)
             E_off = E_off_ref · (|V_blk| / V_ref) · (|I_load| / I_ref)
 
-        ``V_blk`` is the sample just before the edge,
-        ``I_load`` is the sample just after. Reports
+        ``V_blk`` is the measured voltage across the OPEN switch
+        (the sample before a turn-on, after a turn-off) and
+        ``I_load`` the current through the CLOSED switch (the sample
+        after a turn-on, before a turn-off), so a soft edge clamped by
+        an antiparallel diode costs about 0 J. Reports
         ``E_sw_on_total``, ``E_sw_off_total``, ``E_sw_total``,
         ``P_sw_avg``, plus ``n_turn_on_events`` /
         ``n_turn_off_events`` / ``f_sw_estimate``.

@@ -6,8 +6,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Using Pulsim with AI coding assistants
+
+AI assistants write Pulsim 1.x calls, and other simulators' semantics,
+with full confidence: until this release the tutorials themselves had
+broken calls, and several 2.0 behaviours (a diode `V_th` that is not a
+drop, a `.mean()` that is biased on the variable-step grid, a
+`SwitchStateMask(n)` that takes a size) return a plausible wrong number
+rather than an error.
+
+* **Typed stubs.** `pulsim/_pulsim.pyi` and a PEP 561 `py.typed` ship in
+  the wheel, so IDEs, mypy and assistants see the real signatures of the
+  pybind11 classes (mypy now rejects `add_sine_voltage_source(...,
+  amplitude=10.0)`). `scripts/generate_stubs.py` regenerates them;
+  `python/tests/test_stubs.py` fails when they drift from the bindings.
+* **A usage guide in the package.** `python -m pulsim.guide` prints
+  `pulsim/AI_GUIDE.md` (`--path` prints its location) and
+  `pulsim.ai_guide()` returns it, headed by the installed version. It
+  holds the verified 2.x idioms, the exact signatures of the most used
+  calls, the traps with their measured consequences, and how to verify
+  a result (charge balance, two engines, time-weighted statistics, step
+  convergence). It is also a page of the docs site. The `AttributeError`
+  for an unknown or retired `pulsim.X` now names the guide.
+* **`docs/llms.txt`**, an index of the docs for tools that read one, and
+  a "Using Pulsim with AI assistants" section in the README and the
+  docs.
+* **Executed documentation.** `python/tests/test_doc_snippets.py` runs
+  every `python` block of the guide, the README, getting-started and the
+  six tutorials, in order and outside the repository, and compares
+  printed output with the expected-output blocks (one unit of the last
+  digit). Run against the pre-fix docs, it fails on each broken call
+  and stale number that was fixed by hand for this release, including
+  a tutorial that only ran inside a clone. About 5 s in total.
+* **Docstrings that contradicted the guide.** `add_bridge_rectifier(V_th=)`,
+  `add_three_phase_vsi(V_f=)` and the `V_th` of `add_buck` / `add_boost`
+  / `add_flyback` are now documented as commutation thresholds, not
+  forward drops; `p.catalog()` no longer recommends a 1 µΩ resistor to
+  tie a floating subnet (that is a galvanic bond, not a reference).
+  `add_three_phase_vsi` no longer says its diodes conduct only in the
+  dead time: a PWL diode turns off only when its current reverses, so it
+  stays on in parallel with the gated-on switch (2 % of the current at
+  the defaults; 12.9 % of samples on a 10 kHz, 1 µs dead-time SPWM leg).
+  The `switch_specs` docstrings now say that `V_blk` is measured across
+  the OPEN switch (before a turn-on, after a turn-off), so a soft edge
+  after a dead time costs about 0 J.
+* **pybind11 is pinned to 3.1** (`pybind11>=3.1,<3.2` in
+  `[build-system]` and the cibuildwheel steps; CMake's fallback fetches
+  `v3.1.0`). The stub is generated from that build; an unpinned build
+  got whatever pybind11 was newest, and 3.x writes signatures
+  differently from 2.x (and 3.1 from 3.0), which failed the stub checks.
+
 ### Fixed
 
+* **`res.v("gnd")` is zeros.** A ground name (`"gnd"`, `"GND"`, `"0"`)
+  has node id -1, and `res.v` returned `states[:, -1]`, the last state
+  column (a branch current: 1 V into 1 Ω read `-1`), with no error, on
+  every engine. `average_power_at_node` had the same index.
+* The `engine='auto'` sliding-mode warning no longer names DCM as the
+  only cause or promises a correct average: a `V_th = 0` bridge behind a
+  source resistance runs half-wave, and only that warning and the
+  missed-commutation warning of `res.i` on its diodes say so.
 * **Diode and switch currents, duties and losses come from the mask the
   solver stamped.** `SimulationResult.switch_states` records, per stored
   sample, the switch / diode mask of the solve that produced it (all

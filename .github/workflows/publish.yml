@@ -94,23 +94,29 @@ jobs:
           # Windows: Install build tools via pip
           CIBW_BEFORE_BUILD_WINDOWS: |
             python -m pip install --upgrade pip setuptools wheel
-            python -m pip install cmake ninja scikit-build-core pybind11
+            python -m pip install cmake ninja scikit-build-core "pybind11>=3.1,<3.2"
 
           # Linux: Install Python build deps
           CIBW_BEFORE_BUILD_LINUX: |
             python -m pip install --upgrade pip setuptools wheel
-            python -m pip install cmake ninja scikit-build-core pybind11
+            python -m pip install cmake ninja scikit-build-core "pybind11>=3.1,<3.2"
 
           # macOS: Install build tools via Homebrew
           CIBW_BEFORE_BUILD_MACOS: |
             brew install cmake ninja || true
             python -m pip install --upgrade pip setuptools wheel
-            python -m pip install scikit-build-core pybind11
+            python -m pip install scikit-build-core "pybind11>=3.1,<3.2"
 
           CIBW_BUILD_VERBOSITY: 1
 
-          # Wheel smoke test (avoid repo-local test harness assumptions).
-          CIBW_TEST_COMMAND: python -c "import pulsim; print(pulsim.__version__)"
+          # Wheel smoke test (avoid repo-local test harness assumptions):
+          # the typing files and the usage guide ship next to __init__.py,
+          # and `python -m pulsim.guide` finds the guide.
+          CIBW_TEST_COMMAND: >-
+            python -c "import pathlib, pulsim; d = pathlib.Path(pulsim.__file__).parent;
+            missing = [f for f in ('py.typed', '_pulsim.pyi', 'AI_GUIDE.md') if not (d / f).is_file()];
+            assert not missing, missing; print(pulsim.__version__)"
+            && python -m pulsim.guide --path
 
       - name: List built wheels
         shell: bash

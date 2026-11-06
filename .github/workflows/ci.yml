@@ -177,6 +177,14 @@ jobs:
           # transient pip build-env paths (Windows runner instability).
           pip install ".[dev]"
 
+      # The executed docs (python/tests/test_doc_snippets.py) skip the
+      # blocks annotated `doctest: requires=matplotlib` where it is
+      # missing; this leg installs it so those blocks run somewhere.
+      - name: Install matplotlib (plotting doc snippets)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: |
+          pip install matplotlib
+
       - name: Run Python tests
         run: |
           pytest python/tests -v

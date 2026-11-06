@@ -459,7 +459,13 @@ except ImportError:  # pragma: no cover
 # ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
 from .plot import scope  # noqa: E402,F811
 
+# The usage guide (AI_GUIDE.md). Only the accessor is imported here, never
+# the ``pulsim.guide`` CLI module: importing it eagerly would make
+# ``python -m pulsim.guide`` warn that the module is already loaded.
+from ._ai_guide import ai_guide  # noqa: E402
+
 __all__ = [
+    "ai_guide",
     "CircuitBuilder",
     "Graph",
     "DevicePool",
@@ -782,11 +788,14 @@ def _result_v(self, name: str, t=None):
     ----------
     name : str
         Node name passed to ``CircuitBuilder.add_*`` (or a
-        registered alias when alias support is enabled).
+        registered alias when alias support is enabled). A ground
+        name (``"gnd"``, ``"GND"``, ``"0"``) returns zeros.
     t : int | slice | array-like, optional
-        Step selection. ``None`` (default) returns the full
-        per-sample trace as a ``numpy.ndarray``. An ``int``
-        returns a scalar ``float``.
+        SAMPLE selection (an index into ``times``, not a time).
+        ``None`` (default) returns the full per-sample trace as a
+        ``numpy.ndarray``. An ``int`` returns a scalar ``float``.
+        For the value at a time use
+        ``np.interp(t, res.times, res.v(name))``.
     """
     import numpy as _np
     builder = getattr(self, "_builder", None)
@@ -823,6 +832,12 @@ def _result_v(self, name: str, t=None):
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "node", sugg) from None
     states = _np.asarray(self.states)
+    if idx < 0:
+        # Ground ("gnd", "GND", "0") is the reference, not a state:
+        # node_id_of returns -1 for it, and states[:, -1] is the LAST
+        # state column (a branch current), which this used to return.
+        col = _np.zeros(states.shape[0], dtype=float)
+        return col if t is None else col[t]
     # `states` is a READ-ONLY zero-copy view over the kernel buffer
     # (v2.0). A per-signal trace is small (one column), and v1.x
     # handed back a writable owned array here — so copy the column
@@ -2263,18 +2278,19 @@ def simulate(
             warnings.warn(
                 f"simulate(engine='auto'): a diode rode its "
                 f"conduction boundary on "
-                f"{_stats['n_chatter_breaks']} step(s) — the "
-                "signature of an un-hysteresed ideal diode "
-                "(V_th=0) in DCM, which is a SLIDING-MODE model: "
-                "the reference engine chatters ~600 flips per "
-                "period on it. This engine AVERAGES the slide; at "
-                "the default rtol the average is correct (checked "
-                "at 0.1 mV on the flyback), but tightening rtol "
-                "partially resolves the slide and can BIAS the "
-                "mean by ~0.5%. Give the diode its physical V_th "
-                "(that IS the hysteresis band) for "
-                "tolerance-proportional convergence, or use "
-                "engine='pwl'.",
+                f"{_stats['n_chatter_breaks']} step(s): its "
+                "current sat at zero while the engine decided its "
+                "state (a SLIDING-MODE model; the usual cause is an "
+                "ideal V_th=0 diode at a zero-current commutation, "
+                "e.g. in DCM). This engine AVERAGES the slide. That "
+                "average was correct to 0.1 mV on a flyback at the "
+                "default rtol, but a tightened rtol can bias it by "
+                "~0.5 %, and a V_th=0 bridge behind a source "
+                "resistance ran HALF-WAVE (reading res.i of its "
+                "diodes then warns of the missed commutation). "
+                "Cross-check with a dt (engine='pwl'), or give the "
+                "diode its physical V_th (that IS the hysteresis "
+                "band).",
                 stacklevel=2)
         return res
 
@@ -3272,8 +3288,9 @@ def __getattr__(name: str):
             f"pulsim.{name} was a v1 symbol and is no longer "
             f"available (pulsim 1.0.0 retired the legacy kernel). "
             f"Migration hint: {hint}. See "
-            f"docs/migration-guide.md for the full mapping.")
+            f"docs/migration-guide.md for the full mapping, and run "
+            f"`python -m pulsim.guide` for the current API.")
     raise AttributeError(
         f"module 'pulsim' has no attribute {name!r}. "
-        f"pulsim 1.0.0 ships only the modern surface — "
-        f"see docs/migration-guide.md if you're porting v1 code.")
+        f"Run `python -m pulsim.guide` for the current API, and see "
+        f"docs/migration-guide.md if you're porting v1 code.")

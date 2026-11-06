@@ -196,6 +196,7 @@ print(f"v_C(5 ms) = {res.states[-1][b.node_id_of('vc')]:.3f} V")   # 4.966 V
 To see the waveform, install the `[jupyter]` extra (matplotlib) and add
 one line:
 
+<!-- doctest: requires=matplotlib -->
 ```python
 p.scope(b, res, signals=["vc"])           # one-line waveform plot
 ```
@@ -238,6 +239,23 @@ For Monte Carlo, swap `sweep_path_aware` →
 `monte_carlo_path_aware(builder, distributions={"R_load": lambda r:
 r.uniform(1, 20)}, n_samples=1000, ...)` and get the same ~3.4×
 speedup over the legacy rebuild-per-sample pattern.
+
+### Using Pulsim with AI assistants
+
+The package ships a usage guide written for AI coding assistants (and
+useful to people): the verified 2.x idioms, exact signatures, the traps
+that return a plausible wrong number, and how to check a result. It
+always matches the installed version:
+
+```bash
+python -m pulsim.guide          # print it (also: pulsim.ai_guide())
+python -m pulsim.guide --path   # where the file is
+```
+
+Point your assistant at it, e.g. in `CLAUDE.md`, `AGENTS.md` or
+`.github/copilot-instructions.md`: *"Before writing or changing code that
+uses pulsim, run `python -m pulsim.guide` and follow it."* The docs also
+publish [`llms.txt`](docs/llms.txt), an index for tools that read one.
 
 ---
 

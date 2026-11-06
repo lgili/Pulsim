@@ -131,18 +131,7 @@ def add_bridge_rectifier(builder,
 
     Topology
     --------
-    ::
-
-                   ┌─ D1 ─┐         ┌─ D4 ──┐
-            ac_a ──┤       ├── dc_pos       │
-                   └─ D3 ─┘         │       │
-                                    │       │
-                   ┌─ D2 ─┐         │       │
-            ac_b ──┤       ├──┘   D3 ↑    D4 ↑
-                   └─ D4 ─┘
-                                  dc_neg ──┘
-
-    Concretely:
+    Each diode is listed anode → cathode:
       * D1: ac_a → dc_pos (forward when ac_a is the high-side)
       * D2: ac_b → dc_pos
       * D3: dc_neg → ac_b  (return path)
@@ -185,9 +174,9 @@ def add_bridge_rectifier(builder,
     Returns
     -------
     BridgeRectifierResult
-        Holds the four diode branch IDs (useful for probing per-diode
-        current with :meth:`pool.branch_var_id_for_inductor`-style
-        lookups via the kernel's branch-current accessors).
+        ``diode_names`` (``f"{name}__D1"`` ... ``__D4"``) and
+        ``diode_branch_ids``. Read each diode's current with
+        ``result.i(n) for n in diode_names``.
     """
     out = BridgeRectifierResult()
     # We compute the four branch IDs by reading the graph BEFORE and
@@ -260,7 +249,22 @@ def add_three_phase_vsi(builder,
     ``test_newton_stall_and_mask_chatter.py`` — so a bridge feeding a
     Newton-stamped machine may want smooth junctions instead.
 
-    The helper builds no PWM and no dead-time. Wire control via
+    The helper builds no PWM and no dead-time. For open-loop SPWM with a
+    dead time, one call drives all six switches::
+
+        legs = p.ThreePhaseLegIndices(*result.switch_indices)
+        sw_fn = p.make_three_phase_spwm_fn(f_carrier, f_1, m, legs,
+                                           builder.graph.num_switches,
+                                           dead_time)
+
+    The switches are bidirectional: a gated-on switch carries most of
+    the freewheel current. A PWL diode turns off only when its current
+    reverses, so after the dead time the antiparallel diode stays on in
+    parallel with its switch and carries ``R_on / (R_on + R_d)`` of
+    that current (2 % at the defaults) until the opposite switch turns
+    on. With no dead time the diodes never conduct. Read the split
+    with ``res.i(f"{name}__HSa")`` and ``res.i(f"{name}__Dha")``.
+    For closed-loop control, wire the gates via
     :class:`MixedDomainBlockChain` and one of:
 
       * :meth:`chain.make_multi_pwm_switch_fn(["ga","gb","gc"],
@@ -569,7 +573,9 @@ def add_buck(builder,
         High-side switch on/off conductances. Default 1 kS / 1 nS
         (R_on = 1 mΩ, R_off = 1 GΩ).
     diode_g_on, diode_g_off, V_th
-        Diode parameters. Default 1 kS / 1 µS / 0 V.
+        Diode on/off conductances and commutation threshold. Default
+        1 kS / 1 µS / 0 V. ``V_th`` is the turn-on threshold, NOT a
+        forward drop: the on-state is ``diode_g_on`` alone.
 
     Returns
     -------
@@ -647,6 +653,13 @@ def add_boost(builder,
     inductor node: `{name}__sw`.
 
     Same docstring + same caller contract as :func:`add_buck`.
+
+    Parameters
+    ----------
+    V_th
+        Commutation threshold of the output diode, NOT a forward drop:
+        the on-state is ``diode_g_on`` alone. Other parameters as in
+        :func:`add_buck`.
     """
     if V_in <= 0:
         raise ValueError("add_boost: V_in must be > 0")
@@ -721,6 +734,12 @@ def add_flyback(builder,
     `{name}__LS`, `{name}__D`, `{name}__C`, `{name}__R`.
     Intermediate nodes: `{name}__sw` (primary-switch midpoint),
     `{name}__sec` (secondary-winding midpoint).
+
+    Parameters
+    ----------
+    V_th
+        Commutation threshold of the output diode, NOT a forward drop:
+        the on-state is ``diode_g_on`` alone.
     """
     if V_in <= 0:
         raise ValueError("add_flyback: V_in must be > 0")

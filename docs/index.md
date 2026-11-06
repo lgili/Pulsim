@@ -17,6 +17,13 @@ If you've used SPICE before, the mental model is similar but the implementation 
 - You're doing **RF / high-frequency PCB** simulations with distributed elements — Pulsim is lumped-only.
 - You need built-in convergence retries that mask physically dubious circuits — the kernel's Newton is principled but unforgiving; expect to think about your circuit.
 
+## Using Pulsim with AI assistants
+
+AI coding assistants were trained on Pulsim 1.x and on other simulators.
+Point them at the guide that ships with the package, `python -m
+pulsim.guide` (also on the [AI assistants page](ai-guide.md)), and at the
+[`llms.txt`](llms.txt) index of these docs.
+
 ## Reading order
 
 1. [**Getting started**](getting-started.md) — install, run the first transient, see a plot.
