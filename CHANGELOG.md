@@ -44,11 +44,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   diode with 100 nF across it on `engine='pwl'` records 4580 turn-offs on
   a 100 kHz boost (f_sw 1.53 MHz): the trapezoidal rule reflects each ON
   step against the capacitor. Every diode entry now reports
-  `n_short_blocking_gaps` (blocking gaps of at most 32 steps that never
-  reverse-bias the diode beyond `2·V_th`), and on the fixed-step engine
-  a `RuntimeWarning` says when they make up most of the turn-offs that
-  they may be chatter, which fields that inflates (`n_turn_off_events`,
-  `f_sw_estimate`, `E_sw_total`) and when a smaller dt helps. The counts
+  `n_possible_chatter_gaps`: blocking gaps that never reverse-bias the
+  diode beyond `2·V_th` and where at least two of the three runs around
+  the gap (conduction before, gap, conduction after) last at most 2
+  steps, since a reflected ON step lasts one. The gap length is not
+  used: a 100 µF transformer rectifier at dt = 2 µs chatters with gaps
+  of 40 to 187 steps (360 turn-offs for 5 real ones, E_sw 70× high),
+  which a 32-step cap missed with no warning, and a pulsed charger's
+  real 5-step blocking intervals (between 5-step conductions) are not
+  reported. On the fixed-step engine a `RuntimeWarning` says when they
+  make up most of the turn-offs that they may be chatter, which fields
+  that inflates (`n_turn_off_events`, `f_sw_estimate`, `E_sw_total`),
+  when a smaller dt helps, and to compare with `engine='trbdf2'`
+  treating a disagreement as unresolved (not `engine='auto'` as the
+  reference: with `dt` it is this same engine, and TR-BDF2 is itself
+  wrong on that snubbed boost, 27.6 V against 54.5 V). The counts
   stay as recorded: merging those gaps into one conduction also merged
   real source-commutated turn-offs into a small reverse voltage (a
   100 kHz pulsed charger read 1 turn-off instead of 100, E_sw 100× low),
@@ -57,8 +67,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was built from the left-limit samples only and disagreed with
   `P_cond_avg` by up to 2 % on `engine='dsed'`; it now agrees with
   the fixed engine to 0.3 %. It keeps one value per `result.times`
-  sample, and `T_j_avg` is a time average (not a plain mean over the
-  event-clustered samples).
+  sample for every device (one without a step-start jump, such as a
+  resistor, used to keep a uniform resample that merely had as many
+  samples: 36 K off on a 907 K ramp), and `T_j_avg` is a time average
+  (not a plain mean over the event-clustered samples).
 * **Reverse-recovery `V_R` is read at a physical instant,
   `t_off + t_rr`.** New `diode_specs` key `t_rr` (default 100 ns). The
   previous window of two MEAN steps after the turn-off was a different
@@ -120,7 +132,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   current (its state came from a solve this run did not record):
   `result.i()` returns the first solved sample's value for a switch or
   diode there (every `i0=` / `c0=` run has such a row) and the loss and
-  thermal summaries start at the first solved sample. Reading it with
+  thermal summaries start at the first solved sample; every summary
+  entry reports that window as `t_window_start` / `t_window_end`
+  (an energy total leaves out `[t[0], t[1]]`: 7.6 % of an RL
+  freewheel's diode charge at 20 steps, 0.08 % at 2000). Reading it with
   the carried bits reported a conducting diode at 0 A; reading it with
   the first solve's mask put 48 kA through a buck's MOSFET when the seed
   sat on a gate edge.
