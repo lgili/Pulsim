@@ -133,6 +133,25 @@ def test_every_inline_reference_resolves(guide_text):
     assert not bad, "names the installed pulsim does not have:\n" + "\n".join(bad)
 
 
+def test_inline_references_resolve_without_optional_extras():
+    # CI installs ".[dev]", which has neither pyqtgraph nor matplotlib;
+    # pulsim exports e.g. LiveScope only when pyqtgraph imports. Block
+    # both in a child interpreter so this check does not depend on what
+    # the local Python happens to have.
+    code = (
+        "import sys\n"
+        "sys.modules['pyqtgraph'] = None\n"
+        "sys.modules['matplotlib'] = None\n"
+        f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
+        "import test_ai_guide as t\n"
+        "print('\\n'.join(t._unresolved(t.GUIDE.read_text(encoding='utf-8'))))\n")
+    proc = subprocess.run([sys.executable, "-c", code], env=_subprocess_env(),
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "", (
+        "names that need an optional extra:\n" + proc.stdout)
+
+
 def test_name_check_catches_an_invented_name(guide_text):
     edited = guide_text + "\nUse `p.add_buck_converter(...)` and `b.add_mosfett`.\n"
     bad = _unresolved(edited)

@@ -22,7 +22,8 @@ Short version:
 - Switch bits come from `b.switch_index_of(name)`; mask size from
   `b.graph.num_switches`. `p.SwitchStateMask(n)` is a SIZE.
 - PWL diode `V_th` is a commutation threshold, not a forward drop.
-  Without `dt`, give PWL diodes `V_th > 0` (trap 13).
+  Without `dt`, give PWL diodes `V_th > 0` and heed `res.i` warnings
+  (trap 13).
 - Loss and thermal summaries average the WHOLE run, start-up included
   (3.4).
 - Check every result physically (section 6) before reporting it.
@@ -85,9 +86,9 @@ add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: s
 - **Pass `dt`** when a `switch_fn` drives the circuit, when you need a
   uniform grid, or when you compare runs bit for bit. Every on-time
   must be a whole number of steps, and every edge on the grid (3.2).
-- **Omit `dt`** for passive and source-driven circuits, for diode
-  circuits whose PWL diodes have `V_th > 0` (trap 13), and as the second
-  engine in a cross-check.
+- **Omit `dt`** for passive and source-driven circuits, for circuits
+  whose PWL diodes have `V_th > 0` (trap 13), and as the second engine
+  in a cross-check.
 
 ## 3. Canonical examples
 
@@ -461,14 +462,14 @@ Each row was measured on this version. The fix column is what to write.
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. On a snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4` let `auto` finish at 3.53 V; the fixed engine gives 15.31 V. No error, no warning | Keep the defaults; read the abort; run `engine='pwl'` with a `dt`; fix gate edges, body diodes, initial state |
-| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` is the plotting function (needs matplotlib) | `from pulsim.scope import LiveScope` (or `p.LiveScope`); `import pulsim.scope as m` gives you the function |
+| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` is the plotting function (needs matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
 | 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. On the VSI of Tutorial 04 a 1 mOhm neutral-to-rail tie drove 58.8 A of DC through every phase (0.0 A floating or with 1 MOhm) | Leave it to `auto_regularize` (default on): it ties each floating subnet with 1 GOhm and warns. Your own tie: 1 MOhm or larger |
 | 8 | A rectifier's DC side can float | With every diode off at t = 0, `engine='auto'` aborts: `factorize failed (numerically singular) ... dt=6e-14 ... node dcn`. A 1 MOhm or 1 GOhm rail-to-ground resistor did NOT cure it | Connect one DC rail to `"gnd"` (as in 3.3), or pass `dt` |
 | 9 | A fixed-step run is second order from t = 0 | It starts from an inconsistent state and is first order globally, ICs included: RL decay with `i0=1`, error at 1 ms 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6`; sample 0 of node voltages reads 0 V | Halve `dt` and compare (6.3); discard the start-up; or omit `dt` |
-| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid. Buck D = 0.25 at 100 kHz: 5.84 V with `dt=2e-7` (on-time = 12.5 steps), 5.99 V with `dt=1e-7`. `make_pwm_switch_fn` still puts edges one step off (3.2) | Make `D/f_sw` a whole number of steps; compute the PWM in steps (`grid_pwm`, 3.2) |
+| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid. Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 5.84 V with `dt=2e-7` (on-time = 12.5 steps), 5.99 V with `dt=1e-7`. `make_pwm_switch_fn` still puts edges one step off (3.2) | Make `D/f_sw` a whole number of steps; compute the PWM in steps (`grid_pwm`, 3.2) |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | Pulsim 2 refuses instead of guessing (unsupported model, invalid snapshot, singular circuit). A broad except turns that into a silent wrong answer | Let it raise; read the message, it names the device and the fix |
-| 13 | `V_th = 0` diodes are fine on any engine | Without `dt`, a `V_th = 0` bridge behind 0.1 ohm (230 V rms, 470 uF, 1 kOhm) ran half-wave: 318.8 V, 12.9 V pp, `BR__D1` and `BR__D3` never conducting; with `dt=1e-6`, 322.1 V, 6.4 V pp. Only a warning that a diode "rode its conduction boundary" | Without `dt` use `V_th > 0` (0.7: 322.1 V on both engines); with `V_th = 0` pass `dt`. On that warning, rerun with `dt` (6.2) |
+| 13 | `V_th = 0` diodes are fine on any engine | Without `dt`, a `V_th = 0` bridge behind 0.1 ohm (230 V rms, 470 uF, 1 kOhm) ran half-wave: 318.8 V, 12.9 V pp, `BR__D1` and `BR__D3` never conducting; with `dt=1e-6`, 322.1 V, 6.4 V pp. `simulate` warns a diode "rode its conduction boundary"; `res.i` warns it was held "OFF while forward-biased" (a missed commutation). `V_th > 0` is no guarantee: with 1 mH of line and `V_th = 0.7`, TR-BDF2 missed one commutation (V_dc still within 0.04 V of `dt`) | With `V_th = 0` pass `dt` (0.7: 322.1 V on both engines). On either warning, rerun with `dt` (6.2) |
 | 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | It joins samples with lines, so each hard edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, analytic 1.5044 A. Same for `device_loss_summary`'s `i_rms` (not its `P_avg`) | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three. Keep `time_rms` for smooth or variable-grid traces; halve `dt` to check |
 
 Traps 1, 3 and 4, executed:
