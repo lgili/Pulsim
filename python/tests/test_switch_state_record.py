@@ -193,6 +193,10 @@ def test_seeded_row_has_no_switched_current(engine):
     assert not msgs, msgs
     assert _entry(s, "D")["i_peak"] == pytest.approx(
         float(np.abs(i_l[1:]).max()), rel=1e-9)
+    # The shortened window is in the data, not only in the docs.
+    t = np.asarray(r.times)
+    for e in s:
+        assert e["t_window_start"] == t[1] and e["t_window_end"] == t[-1]
 
 
 @pytest.mark.parametrize("where", ("gate_edge", "mid_period"))
@@ -289,6 +293,7 @@ def test_seeded_state_on_a_gate_edge_has_no_phantom_current(engine):
                 p.FosterStage(R_th_K_per_W=1.0, tau_s=1e-4)]}})
         assert th[0]["T_j_trace"].shape == np.asarray(r1.times).shape
         assert th[0]["T_j_trace"][0] == 25.0
+        assert th[0]["t_window_start"] == float(r1.times[1])
         assert th[0]["T_j_peak"] < 30.0
 
 
@@ -349,7 +354,7 @@ def test_snubber_across_the_diode_closes_the_charge_on_pwl(V_th, Cs):
     s, cur, msgs = _report(b, r, ["D1"])
     if V_th > 0:
         assert msgs and all(_CHATTER in m for m in msgs), msgs
-        assert _entry(s, "D1")["n_short_blocking_gaps"] > 100
+        assert _entry(s, "D1")["n_possible_chatter_gaps"] > 100
     else:
         assert not msgs, msgs
     q_d = np.trapezoid(cur["D1"], np.asarray(r.times))
@@ -925,8 +930,9 @@ def test_unresolved_recoveries_and_capped_blips_warn(div):
     unresolved, and the trapezoidal ring's one-step re-conductions
     (239 recorded turn-offs at T/50 on a 200-cycle run, 212 at T/20)
     are counted as recorded; each extra one is capped at its own
-    forward charge (31 / 12, warned about) or is a short, shallow gap
-    the chatter detector reports (37 / 8). Both used to pass silently.
+    forward charge (31 / 12, warned about) or is a 1-step gap next to a
+    1-step re-conduction that the chatter detector reports (33 / 4).
+    Both used to pass silently.
     (Round 3 merged the gaps and pinned <= 210; merging is gone: the
     record is what the solver stamped.)"""
     d, msgs = _snubbed_report(div)
@@ -936,7 +942,7 @@ def test_unresolved_recoveries_and_capped_blips_warn(div):
     assert any("'D1'" in m and "capped" in m for m in msgs)
     extra = d["n_turn_off_events"] - 200
     assert 0 < extra <= (d["n_turn_off_events_capped"]
-                         + d["n_short_blocking_gaps"]), d
+                         + d["n_possible_chatter_gaps"]), d
 
 
 @pytest.mark.parametrize("engine,div", [("pwl", 1000), ("pwl", 200),
@@ -1325,11 +1331,12 @@ def test_snubber_chatter_is_counted_as_recorded_and_warned(div):
         assert (e["n_turn_off_events"] + e["n_turn_off_events_dropped"]
                 == n_rec), (e, n_rec)
         if V_th > 0:
-            assert e["n_short_blocking_gaps"] > 1000, e
+            assert e["n_possible_chatter_gaps"] > 1000, e
             assert e["f_sw_estimate"] > 10.0 / T, e
             assert len(chatter) == 1, msgs
             for word in ("n_turn_off_events", "f_sw_estimate",
-                         "E_sw_total", "engine='auto'"):
+                         "E_sw_total", "engine='trbdf2'", "WITHOUT dt",
+                         "treat a disagreement as unresolved"):
                 assert word in chatter[0], (word, chatter[0])
         else:
             assert e["f_sw_estimate"] == pytest.approx(1.0 / T, rel=0.02)
@@ -1378,9 +1385,11 @@ def test_source_commutated_turn_off_into_a_small_voltage_is_counted(
     real turn-offs into a small reverse voltage too. The pulsed
     charger's 100 turn-offs read 1 (f_sw 1 kHz on 100 kHz, E_sw 100x
     low) on every engine, with a chatter warning. Every recorded
-    stretch now counts. On 'pwl' at dt = 1 µs the 5-step gaps match the
-    chatter detector, which warns that they MAY be chatter (numbers
-    unchanged); at 0.1 µs (50 steps) and on 'auto' nothing warns."""
+    stretch now counts. The chatter detector does not take them for
+    chatter either: the conduction on each side lasts 5 steps at
+    dt = 1 µs (50 at 0.1 µs), where a reflected ON step lasts one. A
+    detector keyed on the gap length (at most 32 steps) warned on the
+    1 µs run."""
     b = _pulsed_charger()
     r = _run(b, 1e-3, engine, dt=dt)
     s, _, msgs = _report(b, r, [], diode_specs={"D": {"Q_rr": 50e-9}})
@@ -1388,12 +1397,8 @@ def test_source_commutated_turn_off_into_a_small_voltage_is_counted(
     assert e["n_turn_off_events"] == 100, e
     assert e["f_sw_estimate"] == pytest.approx(1e5, rel=1e-6), e
     assert e["E_sw_total"] == pytest.approx(100 * 50e-9 * 0.5, rel=1e-6)
-    chatter = [m for m in msgs if _CHATTER in m]
-    if engine == "pwl" and dt == 1e-6:
-        assert e["n_short_blocking_gaps"] == 99, e
-        assert len(chatter) == 1 and "may also be real" in chatter[0]
-    else:
-        assert not chatter, msgs
+    assert e["n_possible_chatter_gaps"] == 0, e
+    assert not any(_CHATTER in m for m in msgs), msgs
 
 
 def test_paired_diode_chatter_warns_and_reports_the_record():
@@ -1428,8 +1433,47 @@ def test_paired_diode_chatter_warns_and_reports_the_record():
         e = _entry(s, n)
         assert (e["n_turn_off_events"] + e["n_turn_off_events_dropped"]
                 == _recorded_turn_offs(b, r, n)), e
-        assert e["n_short_blocking_gaps"] > 0.5 * e["n_turn_off_events"]
+        assert e["n_possible_chatter_gaps"] > 0.5 * e["n_turn_off_events"]
         assert sum(1 for m in msgs if _CHATTER in m and f"{n!r}" in m) == 1
+
+
+def _transformer_rectifier(C):
+    """50 Hz, 100 V through 0.1 Ω and a 5:1 ideal transformer into a
+    V_th = 0.7 diode, C and 20 Ω: tau = C·(1/g_on + R_loop) = 0.5 µs
+    at C = 100 µF."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "s", "gnd", 0.0, 100.0, 50.0)
+    b.add_resistor("Rp", "s", "p", 0.1)
+    b.add_ideal_transformer("T1", "p", "gnd", "sec", "gnd", 0.2)
+    b.add_diode("D", "sec", "k", 1e3, 1e-9, V_th=0.7)
+    b.add_capacitor("C", "k", "gnd", C)
+    b.add_resistor("RL", "k", "gnd", 20.0)
+    return b
+
+
+@pytest.mark.parametrize("dt,n_gaps", [(1e-6, 0), (2e-6, 355)])
+def test_rectifier_chatter_with_long_gaps_is_reported(dt, n_gaps):
+    """A capacitor-input rectifier, 100 µF, 0.1 s (5 real turn-offs).
+    At dt = 2 µs = 4·tau the trapezoidal rule reflects each ON step and
+    the capacitor takes 40 to 187 steps to recharge to V_th: 360
+    recorded turn-offs, E_sw 70x the real one. A detector capped at 32
+    gap steps reported 0 gaps and stayed silent. Each gap sits between
+    1-step conducting stretches, which is what the detector now keys
+    on; at dt = 1 µs = 2·tau there is no chatter and nothing warns."""
+    b = _transformer_rectifier(100e-6)
+    r = _run(b, 0.1, "pwl", dt=dt)
+    s, _, msgs = _report(b, r, [], diode_specs={"D": {"Q_rr": 1e-6}})
+    e = _entry(s, "D")
+    chatter = [m for m in msgs if _CHATTER in m]
+    assert e["n_turn_off_events"] + e["n_turn_off_events_dropped"] == (
+        _recorded_turn_offs(b, r, "D"))
+    assert e["n_possible_chatter_gaps"] == n_gaps, e
+    if n_gaps:
+        assert e["n_turn_off_events"] > 300, e
+        assert len(chatter) == 1, msgs
+    else:
+        assert e["n_turn_off_events"] == 5, e
+        assert not chatter, msgs
 
 
 @pytest.mark.parametrize("spec", ({}, {"t_rr": 1e-7}))
@@ -1465,6 +1509,40 @@ def test_counts_only_recoveries_after_an_inrush_are_not_dropped(spec):
     r2 = _run(b2, 4 / 60, "pwl", dt=2e-6)
     s2, _, _ = _report(b2, r2, [], diode_specs={"D": dict(spec)})
     assert _entry(s2, "D")["n_turn_off_events"] == 4
+
+
+def test_dsed_trace_without_a_step_start_jump_is_on_result_times():
+    """A DSED device whose step-start power equals its stored sample
+    (a resistor on the output capacitor) had no samples inserted, and
+    took the pwl/trbdf2 branch: its T_j_trace was compute_temperature's
+    uniform resample, len(times) samples only because the resample is
+    clipped to at least that many, NOT at result.times (index 500 at
+    485.9 µs against t[500] = 497.8 µs; 36 K off an IIR sampled at
+    result.times on a 907 K ramp). Every DSED device is sampled back."""
+    b, pwm, T = _boost(0.7, 20.0)
+    r = _run(b, 1e-3, "dsed", switch_fn=pwm)
+    t = np.asarray(r.times)
+    R_th, tau = 10.0, 2e-5
+    st = [p.FosterStage(R_th_K_per_W=R_th, tau_s=tau)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        th = p.device_thermal_summary(b, r, switch_fn=pwm,
+                                      thermal_specs={"RL": {"stages": st}})
+    tj = np.asarray(th[0]["T_j_trace"])
+    assert tj.shape == t.shape
+    # Reference: the same IIR on a fine uniform grid of v_out²/R.
+    tf = np.linspace(t[0], t[-1], 100_001)
+    P = np.interp(tf, t, np.asarray(r.v("out"))) ** 2 / 20.0
+    a = np.exp(-(tf[1] - tf[0]) / tau)
+    out = np.empty_like(P)
+    acc = 0.0
+    for k, x in enumerate(P):
+        acc = a * acc + R_th * (1.0 - a) * x
+        out[k] = acc
+    ref = 25.0 + np.interp(t, tf, out)
+    rise = float(ref.max() - ref.min())
+    assert rise > 500.0
+    assert np.abs(tj - ref).max() <= 0.01 * rise
 
 
 @pytest.mark.parametrize("R_load", (500.0, 20.0))

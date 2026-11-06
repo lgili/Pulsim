@@ -247,3 +247,84 @@ TEST_CASE("Stamped-mask record: wide masks pack LSB-first",
     blank.times.push_back(0.0);
     REQUIRE_FALSE(blank.switch_states_complete());
 }
+
+// A resume's sample 0 is the previous run's last sample: same x, and
+// the mask that x was solved under (SolverSnapshot::stamped_mask),
+// solved. Before the field it was labelled with the carried diode bits
+// + switch_fn(t_start): a TR-BDF2 run that ends exactly on a gate edge
+// stores the pre-edge solve while its diode bits are already
+// post-edge, so the label disagreed with x. check_record closes KCL on
+// every row, row 0 included. A snapshot without the field (an older
+// pickle) resumes with row 0 unsolved.
+TEST_CASE("Stamped-mask record: a resume's row 0 is the snapshot's "
+          "stamped mask",
+          "[v2][record][resume]") {
+    // 4 kHz gate: t = 1e-3 s is a gate edge (S1 turns ON).
+    constexpr Real t_edge = 1e-3;
+    constexpr Real t_end = 3e-3;
+    constexpr Real dt = 1e-6;
+    auto check_resume = [](const Rig& rig,
+                           const solver::SimulationResult& r0,
+                           const solver::SimulationResult& r1) {
+        const auto& snap = r0.final_snapshot;
+        REQUIRE(snap.valid);
+        REQUIRE(snap.stamped_mask.size() == 2);
+        const Size last = r0.times.size() - 1;
+        for (Size i = 0; i < 2; ++i) {
+            REQUIRE(snap.stamped_mask[i] == r0.switch_state(last, i));
+            REQUIRE(r1.switch_state(0, i) == r0.switch_state(last, i));
+        }
+        REQUIRE(r1.switch_state_unsolved.empty());
+        REQUIRE(r1.states[0].isApprox(r0.states[last]));
+        check_record(rig, r1);
+    };
+
+    SECTION("fixed engine") {
+        Rig rig;
+        pwl::PwlStateSpaceCache cache{rig.b.graph(), rig.b.pool()};
+        cache.build(dt);
+        auto gate = [&](Real t) { return rig.gate(t); };
+        solver::SimulationOptions o0{.t_start = 0.0, .t_end = t_edge,
+                                     .dt = dt};
+        const auto r0 = solver::run_transient(
+            cache, rig.b.graph(), rig.b.pool(), o0, gate);
+        solver::SimulationOptions o1{
+            .t_start = r0.final_snapshot.t, .t_end = t_end, .dt = dt};
+        const auto r1 = solver::run_transient(
+            cache, rig.b.graph(), rig.b.pool(), o1, gate, {}, false, {},
+            {}, nullptr, {}, &r0.final_snapshot);
+        check_resume(rig, r0, r1);
+
+        // No stamped_mask: row 0 is flagged unsolved, nothing else.
+        solver::SolverSnapshot old = r0.final_snapshot;
+        old.stamped_mask.clear();
+        const auto r2 = solver::run_transient(
+            cache, rig.b.graph(), rig.b.pool(), o1, gate, {}, false, {},
+            {}, nullptr, {}, &old);
+        REQUIRE(r2.switch_state_unsolved == std::vector<Size>{0});
+    }
+
+    SECTION("TR-BDF2, ending exactly on a gate edge") {
+        Rig rig;
+        pwl::PwlStateSpaceCache cache{rig.b.graph(), rig.b.pool()};
+        cache.build_lazy(dt);
+        auto gate = [&](Real t) { return rig.gate(t); };
+        solver::TrBdf2Options o0;
+        o0.t_start = 0.0;
+        o0.t_end = t_edge;
+        const auto r0 = solver::run_transient_trbdf2(
+            cache, rig.b.graph(), rig.b.pool(), o0, gate);
+        REQUIRE(r0.times.back() == Approx(t_edge));
+        solver::TrBdf2Options o1;
+        o1.t_start = r0.final_snapshot.t;
+        o1.t_end = t_end;
+        const auto r1 = solver::run_transient_trbdf2(
+            cache, rig.b.graph(), rig.b.pool(), o1, gate, {},
+            std::nullopt, nullptr, {}, {}, {}, {}, &r0.final_snapshot);
+        check_resume(rig, r0, r1);
+        // The stored sample is the pre-edge solve: S1 still OFF in the
+        // record, while switch_fn(t_start) already has it ON.
+        REQUIRE_FALSE(r1.switch_state(0, static_cast<Size>(rig.s_bit)));
+        REQUIRE(rig.gate(o1.t_start).get(static_cast<Size>(rig.s_bit)));
+    }
+}
