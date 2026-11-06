@@ -78,9 +78,14 @@ def _q_load(r, node, C, R):
 
 
 # Trapezoid over the stored grid: exact bookkeeping on the fixed
-# engine's trapezoidal companions (measured ~3e-12); the adaptive and
-# DSED grids integrate the same currents to ~1e-4 (auto) / ~1e-3 (dsed).
-TOL = {"pwl": 1e-9, "auto": 1e-3, "dsed": 3e-3}
+# engine's trapezoidal companions (measured ~3e-12); the adaptive grid
+# integrates the same currents to ~1e-4. DSED stores the LEFT limit at
+# an event sample (the stamped-mask convention), so a current that
+# jumps at a V_th turn-on is drawn as a ramp over the next step: an
+# O(h) trapezoid error, -4.2e-3 at the default 1 µs step on the
+# transformer rectifier (it halves with the step; see
+# test_dsed_charge_error_is_the_one_step_jump_term).
+TOL = {"pwl": 1e-9, "auto": 1e-3, "dsed": 6e-3}
 
 
 # ---------------------------------------------------------------------
@@ -140,10 +145,46 @@ def test_seeded_initial_state_is_flagged_unsolved():
     r = _run(b, 2e-4, "pwl", dt=T / 200, switch_fn=pwm, initial_state=x0)
     u = r.switch_states_unsolved
     assert u[0] and not u[1:].any()
-    ra = _run(b, 4e-4, "auto", switch_fn=pwm,
-              resume_from=r0.final_snapshot)
-    ua = ra.switch_states_unsolved
-    assert ua[0] and not ua[1:].any()
+    # resume_from carries the bits of the solve that produced its
+    # state, so its first row IS a stamped mask: not flagged, and equal
+    # to the previous run's last row.
+    for engine in ENGINES:
+        ra = _run(b, 4e-4, engine, dt=T / 200, switch_fn=pwm,
+                  resume_from=r0.final_snapshot)
+        assert not ra.switch_states_unsolved.any(), engine
+        assert np.array_equal(ra.switch_states[0], r0.switch_states[-1])
+
+
+def _rl_seeded(engine: str):
+    """RL half-wave seeded with ``initial_state`` mid-conduction."""
+    b = _rl_half_wave(0.7)
+    r1 = _run(b, 0.0105, engine, dt=2e-6)
+    b2 = _rl_half_wave(0.7)
+    r2 = _run(b2, 0.02, engine, dt=2e-6, t_start=0.0105,
+              initial_state=np.asarray(r1.states[-1]))
+    return b2, r2
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_seeded_row_is_read_with_the_first_solve_mask(engine):
+    """initial_state carries no diode bits: row 0 records the diode
+    OFF while the seeded state carries 1.259 A through it (its own
+    solve had it ON). Read with the carried row, result.i() missed the
+    inductor current by 1.26 A at k = 0 (KCL residual 0.197 relative,
+    2e-12 everywhere else). The consumers read an unsolved row with the
+    mask of the first solve after it, so KCL closes at every sample."""
+    b, r = _rl_seeded(engine)
+    bit = b.switch_index_of("D")
+    assert r.switch_states_unsolved[0]
+    assert not r.switch_states[0, bit] and r.switch_states[1, bit]
+    i_d = np.asarray(r.i("D"))
+    i_l = np.asarray(r.i("L"))
+    assert i_l[0] > 1.0
+    assert np.abs(i_d - i_l).max() <= 1e-9 * np.abs(i_l).max()
+    s, cur, msgs = _report(b, r, ["D"])
+    assert not msgs, msgs
+    assert _entry(s, "D")["i_peak"] == pytest.approx(
+        float(np.abs(i_l).max()), rel=1e-9)
 
 
 def test_switch_duty_needs_no_switch_fn():
@@ -280,6 +321,25 @@ def test_rectifier_charge_closes_through_any_device(kind, V_th, engine):
     assert 0.2 < e["duty_conducting"] < 0.23, e
 
 
+def test_dsed_charge_error_is_the_one_step_jump_term():
+    """The DSED charge residual on the transformer rectifier is the
+    trapezoid drawing each V_th turn-on's current jump as a ramp over
+    one step, so it is first order in the step and has the sign of a
+    missing half-step of current (measured -4.22e-3, -2.15e-3,
+    -0.87e-3 at a median step of 1 µs, 0.5 µs, 0.2 µs)."""
+    errs = []
+    for kw in ({}, {"dt": 5e-6}):
+        b = _xfmr_rectifier(0.7)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = p.simulate(b, 0.1, engine="dsed", **kw)
+        q_d = np.trapezoid(np.asarray(r.i("D")), np.asarray(r.times))
+        q_phys = _q_load(r, "k", 1000e-6, 20.0)
+        errs.append((q_d - q_phys) / q_phys)
+    assert errs[0] < 0 and errs[1] < 0, errs
+    assert 0.35 < errs[1] / errs[0] < 0.65, errs
+
+
 @pytest.mark.parametrize("engine", ENGINES + ("dsed",))
 def test_vcvs_probe_diode_is_the_series_resistor_current(engine):
     """Sample by sample, against an independent branch."""
@@ -323,7 +383,11 @@ def _rl_half_wave(V_th: float):
 def _rl_run(V_th: float, engine: str):
     b = _rl_half_wave(V_th)
     r = _run(b, 4 / 60, engine, dt=2e-6)
-    s, cur, msgs = _report(b, r, ["D"], diode_specs={"D": {"Q_rr": 1e-6}})
+    # t_rr = 5 µs (a line-frequency rectifier diode): every engine's
+    # grid resolves it (pwl dt = 2 µs, dsed dt_max = 1 µs), so V_R is
+    # read at the same physical instant everywhere and nothing warns.
+    s, cur, msgs = _report(b, r, ["D"],
+                           diode_specs={"D": {"Q_rr": 1e-6, "t_rr": 5e-6}})
     return r, _entry(s, "D"), cur["D"], msgs
 
 
@@ -338,8 +402,11 @@ def test_rl_half_wave_recovery_counts_real_turn_offs_only(V_th, engine):
     ~7e-11 C). They were each charged Q_rr·V_R: 48 events and 4× the
     energy on pwl at V_th = 0.7, and auto counted 8 (f_sw 120 Hz).
     Four cycles, four recoveries, on every engine and V_th; the
-    dropped stretches are reported, and E_sw matches V_th = 0 on pwl
-    (measured 1.7236e-4 J pwl, 1.755e-4 auto, 1.7226e-4 dsed)."""
+    dropped stretches are reported, and E_sw matches V_th = 0 on pwl.
+    V_R is read at t_off + t_rr on every engine (measured at
+    t_rr = 100 ns: 1.7218e-4 J pwl, 1.7221e-4 auto and dsed; the
+    previous two-mean-step window gave 1.7236e-4 / 1.755e-4 /
+    1.7226e-4)."""
     r, e, i_d, msgs = _rl_run(V_th, engine)
     assert not msgs, msgs
     assert e["n_turn_off_events"] == 4, e
@@ -530,3 +597,275 @@ def test_adaptive_result_stitches_the_record():
     assert ar.switch_states is not None
     assert ar.switch_states.shape == (ar.times.size, b.graph.num_switches)
     assert not ar.switch_states_unsolved.any()
+
+
+# ---------------------------------------------------------------------
+# Review round 2 — DSED records the mask of the STEP, not the post-event
+# mask
+# ---------------------------------------------------------------------
+
+def _boost(V_th: float, R_load: float):
+    """12 V → boost, 100 µH, Q 100 kHz at D = 0.5, D1 sw → out,
+    47 µF || R_load (500 Ω: DCM, 20 Ω: CCM)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L", "vin", "sw", 100e-6)
+    b.add_switch("Q", "sw", "gnd", g_on=100.0, g_off=1e-9)
+    b.add_diode("D1", "sw", "out", 1e3, 1e-9, V_th=V_th)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", R_load)
+    T = 1e-5
+    q = b.switch_index_of("Q")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q, (t % T) < 0.5 * T)
+        return m
+    return b, pwm, T
+
+
+@functools.lru_cache(maxsize=None)
+def _boost_run(V_th: float, R_load: float, engine: str, div: int = 1000):
+    b, pwm, T = _boost(V_th, R_load)
+    r = _run(b, 3e-3, engine, dt=T / div, switch_fn=pwm)
+    return b, r
+
+
+@pytest.mark.parametrize("R_load", (500.0, 20.0))
+def test_dsed_duty_matches_the_fixed_engine(R_load):
+    """DSED fires an event and then stored the POST-event mask, so each
+    event sample booked the step that ended there to the new mode: the
+    DCM diode read duty 0.2430 against 0.2209 on pwl (steady state
+    0.2000 against a true 0.1780), CCM 0.4767 against 0.4665, with no
+    warning. Recording the mask of the step (and reconstructing the
+    event sample through it, from the pre-event state) gives 0.2210 and
+    0.4667. The switch's duty needs no switch_fn on either engine."""
+    out = {}
+    for engine in ("pwl", "dsed"):
+        b, r = _boost_run(0.7, R_load, engine)
+        s, _, msgs = _report(b, r, [])
+        assert not msgs, (engine, msgs)
+        out[engine] = s
+    for name, key in (("D1", "duty_conducting"), ("Q", "duty_closed")):
+        assert _entry(out["dsed"], name)[key] == pytest.approx(
+            _entry(out["pwl"], name)[key], abs=0.005), name
+    assert _entry(out["dsed"], "Q")["duty_closed"] == pytest.approx(
+        0.5, abs=1e-3)
+
+
+def test_dsed_record_books_each_step_to_the_mode_integrated_over_it():
+    """Over every step, the recorded mode must be the one whose
+    dynamics the inductor followed: Q ON → di_L/dt = V_in/L > 0; D1 ON
+    with Q OFF → di_L/dt = (V_in − V_out)/L < 0; both OFF (DCM idle) →
+    i_L ≈ 0. Steady-state D1 duty from the record matches the i_L
+    down-slope time (0.1780) to 1e-3; the post-event convention read
+    0.2000. Q's recorded duty is 0.5."""
+    b, r = _boost_run(0.7, 500.0, "dsed")
+    t = np.asarray(r.times)
+    i_l = np.asarray(r.i("L"))
+    S = r.switch_states
+    q_on = S[1:, b.switch_index_of("Q")]
+    d_on = S[1:, b.switch_index_of("D1")]
+    di = np.diff(i_l)
+    tol = 1e-9 * np.abs(i_l).max()
+    # After start-up (V_out > V_in from ~0.3 ms on).
+    late = t[1:] > 1e-3
+    assert (di[q_on & late] > -tol).all()
+    assert (di[d_on & ~q_on & late] < tol).all()
+    idle = ~q_on & ~d_on & late
+    assert idle.any()
+    assert np.abs(i_l[1:][idle]).max() < 1e-6 * np.abs(i_l).max()
+    dt = np.diff(t)
+    late = t[1:] > 2e-3
+    falling = (di < 0) & (i_l[:-1] > 1e-6 * np.abs(i_l).max())
+    T_late = dt[late].sum()
+    duty_truth = np.dot(falling[late], dt[late]) / T_late
+    duty_rec = np.dot((d_on & ~q_on)[late], dt[late]) / T_late
+    assert duty_truth == pytest.approx(0.178, abs=2e-3)
+    assert duty_rec == pytest.approx(duty_truth, abs=1e-3)
+    q_duty = np.dot(q_on[late], dt[late]) / T_late
+    assert q_duty == pytest.approx(0.5, abs=1e-3)
+
+
+# ---------------------------------------------------------------------
+# Review round 2 — V_R at a physical instant, t_off + t_rr
+# ---------------------------------------------------------------------
+
+def _line_bridge():
+    """325 V / 50 Hz, 1 mΩ, add_bridge_rectifier (V_th = 0.7),
+    470 µF || 1 kΩ."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "s", "b", v_dc=0.0, v_amplitude=325.0,
+                              frequency=50.0, phase=0.0)
+    b.add_resistor("Rs", "s", "a", 1e-3)
+    p.topology.add_bridge_rectifier(b, "BR", ac_a="a", ac_b="b",
+                                    dc_pos="p", dc_neg="gnd", V_th=0.7)
+    b.add_capacitor("C", "p", "gnd", 470e-6)
+    b.add_resistor("RL", "p", "gnd", 1000.0)
+    return b
+
+
+def test_line_rectifier_recovery_is_negligible_on_every_grid():
+    """A capacitor-input line rectifier commutates naturally: the diode
+    current decays to zero and v_D then rises as (t − t_0)², so there
+    is essentially no voltage to recover against. The two-mean-step
+    window read V_R 1.66 mV on pwl (dt = 1 µs) and 1.81 V on auto
+    (200 µs steps): E_sw 1.66e-8 J vs 1.81e-5 J, 1087× apart, silently.
+    Read at t_off + t_rr both are below 1e-12 J here, and auto, whose
+    step cannot resolve t_rr, says so."""
+    spec = {"BR__D1": {"Q_rr": 1e-6}}
+    e = {}
+    for engine in ("pwl", "auto"):
+        b = _line_bridge()
+        r = _run(b, 0.1, engine, dt=1e-6)
+        s, _, msgs = _report(b, r, [], diode_specs=spec)
+        e[engine] = (_entry(s, "BR__D1"), msgs)
+    for engine, (d, _) in e.items():
+        assert d["n_turn_off_events"] == 5, (engine, d)
+        assert d["E_sw_total"] < 1e-12, (engine, d)
+        assert d["E_sw_total"] < 1e-9 * d["P_avg"] * 0.1, (engine, d)
+    d_auto, m_auto = e["auto"]
+    assert d_auto["n_turn_off_events_unresolved"] > 0
+    assert not m_auto or any("longer than t_rr" in m for m in m_auto)
+
+
+def _snubbed_dcm_boost(V_th: float = 0.7):
+    """The DCM boost (500 Ω) with an RC snubber across the switch node
+    and 10 nH in series with D1: its L1–Cs ring after each natural
+    turn-off is what a window counted in steps read differently on
+    every grid."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L1", "vin", "sw", 100e-6)
+    b.add_switch("Q1", "sw", "gnd", g_on=100.0, g_off=1e-9)
+    b.add_diode("D1", "sw", "x", 1e3, 1e-9, V_th=V_th)
+    b.add_inductor("Ld", "x", "out", 10e-9)
+    b.add_resistor("Rs", "sw", "sm", 10.0)
+    b.add_capacitor("Cs", "sm", "x", 1e-9)
+    b.add_capacitor("C1", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", 500.0)
+    T = 1e-5
+    q = b.switch_index_of("Q1")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q, (t % T) < 0.5 * T)
+        return m
+    return b, pwm, T
+
+
+@functools.lru_cache(maxsize=None)
+def _snubbed_report(div):
+    b, pwm, T = _snubbed_dcm_boost()
+    if div == "auto":
+        r = _run(b, 2e-3, "auto", switch_fn=pwm)
+    else:
+        r = _run(b, 2e-3, "pwl", dt=T / div, switch_fn=pwm)
+    s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 100e-9}})
+    return _entry(s, "D1"), msgs
+
+
+def test_recovery_energy_does_not_follow_the_step_size():
+    """Snubbed DCM boost, Q_rr = 100 nC. Two-mean-step window: E_sw
+    1.059e-4 (pwl T/1000), 1.367e-4 (T/200), 2.406e-4 (T/50),
+    8.734e-4 J (T/20), no warning. At t_off + t_rr: 1.302e-4, 1.253e-4
+    and 1.332e-4 J (auto) on the grids that resolve t_rr = 100 ns."""
+    ref, m_ref = _snubbed_report(1000)
+    assert not m_ref, m_ref
+    assert ref["n_turn_off_events"] == 200
+    for div in (200, "auto"):
+        d, msgs = _snubbed_report(div)
+        assert not msgs, (div, msgs)
+        assert d["n_turn_off_events"] == 200, div
+        assert d["n_turn_off_events_unresolved"] == 0, div
+        assert d["E_sw_total"] == pytest.approx(ref["E_sw_total"],
+                                                rel=0.08), div
+
+
+@pytest.mark.parametrize("div", (50, 20))
+def test_unresolved_recoveries_and_capped_blips_warn(div):
+    """dt = T/50 and T/20 are longer than t_rr = 100 ns and than the
+    snubber's 10 ns time constant: the turn-offs are counted as
+    unresolved, and the trapezoidal ring's one-step re-conductions
+    (235 "turn-offs" at T/50 on a 200-cycle run, f_sw 117.5 kHz) are
+    capped at their own forward charge. Both used to pass silently;
+    each now warns and names the diode."""
+    d, msgs = _snubbed_report(div)
+    assert d["n_turn_off_events_unresolved"] > 0
+    assert any("'D1'" in m and "longer than t_rr" in m for m in msgs)
+    assert d["n_turn_off_events_capped"] > 0
+    assert any("'D1'" in m and "capped" in m for m in msgs)
+
+
+@pytest.mark.parametrize("engine,div", [("pwl", 1000), ("pwl", 200),
+                                        ("auto", 1000), ("dsed", 1000)])
+@pytest.mark.parametrize("R_load", (20.0, 500.0))
+def test_hard_and_natural_recoveries_agree_across_engines(R_load, engine,
+                                                          div):
+    """Unsnubbed boost, Q_rr = 100 nC (CCM: forced turn-offs at Q's
+    edge; DCM: natural ones at the current zero). Measured: CCM
+    6.935e-4 / 6.922e-4 / 6.934e-4 / 6.764e-4 J (pwl T/1000, T/200,
+    auto, dsed), DCM 9.877e-4 / 9.863e-4 / 9.871e-4 / 9.868e-4 J."""
+    b, r = _boost_run(0.7, R_load, engine, div)
+    b_ref, r_ref = _boost_run(0.7, R_load, "pwl", 1000)
+    spec = {"D1": {"Q_rr": 100e-9}}
+    d = _entry(_report(b, r, [], diode_specs=spec)[0], "D1")
+    d_ref = _entry(_report(b_ref, r_ref, [], diode_specs=spec)[0], "D1")
+    assert d["n_turn_off_events"] == d_ref["n_turn_off_events"]
+    assert d["E_sw_total"] == pytest.approx(d_ref["E_sw_total"], rel=0.03)
+
+
+def test_recovery_voltage_reading_rules():
+    """The V_R reading on synthetic traces: the fixed engine's
+    alternation, a forced turn-off on a coarse grid, a natural one on a
+    coarse grid, and a diode that stops inside its V_th band."""
+    from pulsim.losses import _diode_turn_offs
+
+    class Tr:
+        def __init__(self, v, closed, g_on=1e3):
+            self.v = np.asarray(v, dtype=float)
+            self.closed = np.asarray(closed, dtype=bool)
+            self.conducting = self.closed & (self.v > 0)
+            self.current = np.where(self.closed, g_on, 1e-9) * self.v
+
+    # (a) Alternation V_s ± A after the turn-off, fine grid: exact V_s.
+    t = np.arange(40) * 10e-9
+    v = np.full(40, 1e-3)
+    v[10:] = -34.66 + 28.9 * (-1.0) ** np.arange(30)
+    closed = np.arange(40) < 10
+    (ev,) = _diode_turn_offs(Tr(v, closed), t, t_rr=100e-9)
+    assert ev["V_R"] == pytest.approx(34.66, rel=1e-12)
+    assert not ev["unresolved"]
+    # (b) Forced (another bit flips on that step) and flat, 1 µs grid.
+    t = np.arange(10) * 1e-6
+    v = np.where(np.arange(10) < 4, 1e-3, -24.0)
+    flip = np.zeros(10, dtype=bool)
+    flip[4] = True
+    (ev,) = _diode_turn_offs(Tr(v, np.arange(10) < 4), t, t_rr=100e-9,
+                             other_flip=flip)
+    assert ev["forced"] and not ev["unresolved"]
+    assert ev["V_R"] == pytest.approx(24.0)
+    # (c) The same samples with no other bit flipping (a natural
+    #     turn-off): the grid hides how v_D rose — unresolved.
+    (ev,) = _diode_turn_offs(Tr(v, np.arange(10) < 4), t, t_rr=100e-9,
+                             other_flip=np.zeros(10, dtype=bool))
+    assert ev["unresolved"]
+    # (d) A slow (t − t_0)² rise after a natural zero on a 200 µs grid
+    #     is not extrapolated into a forward voltage, and a diode that
+    #     stops inside 0 < v_D < V_th blocks nothing.
+    t = np.arange(10) * 200e-6
+    v = np.where(np.arange(10) < 4, 1e-4,
+                 -0.32 * (np.arange(10) - 3.0) ** 2)
+    (ev,) = _diode_turn_offs(Tr(v, np.arange(10) < 4), t, t_rr=100e-9)
+    assert 0.0 <= ev["V_R"] < 0.01
+    v = np.where(np.arange(10) < 4, 1e-3, 2e-3)
+    (ev,) = _diode_turn_offs(Tr(v, np.arange(10) < 4), t)
+    assert ev["V_R"] == 0.0
+
+
+def test_t_rr_must_be_a_positive_time():
+    b, r = _boost_run(0.7, 20.0, "pwl", 200)
+    for bad in (0.0, -1e-7, float("nan")):
+        with pytest.raises(ValueError, match="t_rr"):
+            p.device_loss_summary(b, r, diode_specs={
+                "D1": {"Q_rr": 1e-7, "t_rr": bad}})

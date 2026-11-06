@@ -560,8 +560,10 @@ def test_v_th_zero_chatter_is_not_conduction_or_recovery():
             r = p.simulate(b, 0.06, **kw)
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
-            s = p.device_loss_summary(b, r,
-                                      diode_specs={"D1": {"Q_rr": 1e-7}})
+            # t_rr = 5 µs: resolved by pwl's 1 µs grid, so no
+            # unresolved-recovery warning either.
+            s = p.device_loss_summary(
+                b, r, diode_specs={"D1": {"Q_rr": 1e-7, "t_rr": 5e-6}})
         out[engine] = _entry(s, "D1")
     assert out["pwl"]["n_turn_off_events"] == 3
     assert out["auto"]["n_turn_off_events"] == 3

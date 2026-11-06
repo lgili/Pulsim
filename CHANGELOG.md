@@ -28,7 +28,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   forward charge (`n_turn_off_events_capped`): an RL half-wave at
   `V_th = 0.7` counted 48 recoveries on `engine='pwl'` (4× the energy)
   and 8 on `engine='auto'` (f_sw 120 Hz on a 60 Hz rectifier); both now
-  count 4 and agree with `V_th = 0` and `engine='dsed'` to 2 %.
+  count 4 and agree with `V_th = 0` and `engine='dsed'` to 0.02 %.
+  Capped events also raise a `RuntimeWarning`: they are usually
+  one-step re-conductions of an unresolved snubber ring, which inflate
+  `n_turn_off_events` (235 instead of 200 on a 100 kHz boost at
+  dt = T/50).
+* **Reverse-recovery `V_R` is read at a physical instant,
+  `t_off + t_rr`.** New `diode_specs` key `t_rr` (default 100 ns). The
+  previous window of two MEAN steps after the turn-off was a different
+  interval on every grid: a line rectifier's `E_rr` was 1087× apart
+  between `engine='pwl'` (dt = 1 µs) and `engine='auto'` (200 µs steps),
+  and a snubbed DCM boost's grew 8× from dt = T/1000 to T/20, silently.
+  Now both line-rectifier engines give < 1e-12 J (natural commutation
+  recovers against almost no voltage) and the snubbed boost agrees to
+  6 % on every grid that resolves `t_rr`. Turn-offs on a step longer than
+  `t_rr` are counted (`n_turn_off_events_unresolved`) and warned about,
+  except forced ones with a flat blocking voltage. Only reverse bias
+  counts: a diode that stops inside its `V_th` band blocks nothing.
+* **`engine='dsed'` records the mask of the step, like the other
+  engines.** It stored the post-event mask at each event sample, which
+  booked the step ending there to the new mode: a DCM boost diode's
+  duty read 0.2430 against 0.2209 on `engine='pwl'`, with no warning.
+  The event sample is now reconstructed from the pre-event state
+  through the step's mask (0.2210). Its charge bookkeeping keeps an
+  O(step) term at a current jump (−4.2e-3 on a transformer rectifier at
+  the default 1 µs step, halving with the step).
+* A sample 0 seeded with `initial_state` is read with the first solve's
+  mask (it reported a conducting diode at 0 A on that one sample); a
+  `resume_from` sample 0 carries its solve's bits and is no longer
+  flagged unsolved.
 
 ## [2.0.0] — 2026-09-08
 

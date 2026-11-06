@@ -50,11 +50,21 @@ say whether it conducts. `switch_fn=` is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.
 
+Row `k` of the record is the mask in force over the step
+`(t[k-1], t[k]]`, and the sample's state is the solve under it. At a
+commutation the stored sample is therefore the state just BEFORE the
+switch flips (a TR-BDF2 landing, a DSED event), and the new mode appears
+from the next sample on. A sample 0 seeded with `initial_state` was not
+solved in the run (`result.switch_states_unsolved`): its recorded bits
+are the mask carried in, and the reports read it with the first solve's
+mask. A `resume_from` sample 0 carries the bits of the solve that
+produced it and is not flagged.
+
 PSIM-style datasheet annotations add:
 
 | Field | Source |
 |---|---|
-| `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `n_turn_off_events_capped`, `f_sw_estimate` | diode + `diode_specs` |
+| `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `n_turn_off_events_capped`, `n_turn_off_events_unresolved`, `f_sw_estimate`, `t_rr` | diode + `diode_specs` |
 | `E_sw_on_total`, `E_sw_off_total`, `n_turn_on_events` | switch + `switch_specs` |
 | `P_core_avg`, `E_core_total`, `B_peak` | inductor + `core_loss_specs` |
 
@@ -106,14 +116,33 @@ diode_specs = {"D1": {"Q_rr": 50e-9}}
 
 # Datasheet energy + reference voltage (fast/soft recovery):
 diode_specs = {"D1": {"E_rr_ref": 30e-6, "V_R_ref": 600.0}}
+
+# Either form takes the recovery time (default 100 ns):
+diode_specs = {"D1": {"Q_rr": 50e-9, "t_rr": 35e-9}}
 ```
 
 A turn-off is the end of a conducting stretch of the diode's recorded
-state. For each one Pulsim takes the SETTLED reverse voltage `V_R` (the
-time-weighted `|v_D|` over two mean steps after the first blocking
-sample — not the first blocking sample, which can sit inside a
-femtosecond stiff-mode transient) and accumulates
-`E_rr = Q_rr · V_R` or `E_rr = E_rr_ref · (V_R / V_R_ref)`.
+state, at `t_off` (the end of its last conducting step). Pulsim reads
+the reverse voltage `V_R = max(−v_D, 0)` one recovery time later, at
+`t_off + t_rr` — a physical instant, the same on every engine and step
+size — and accumulates `E_rr = Q_rr · V_R` or
+`E_rr = E_rr_ref · (V_R / V_R_ref)`. `v_D` is read from the blocking
+samples paired into step midpoints, which cancels the fixed engine's
+trapezoidal alternation around a node held only by `g_off`. A
+hard-switched diode blocks its full voltage at once; a naturally
+commutated one (a line rectifier, a DCM turn-off) recovers against the
+little voltage that has built up after its current zero, so its `E_rr`
+is small — as it is in hardware.
+
+When the step that carries a turn-off is longer than `t_rr`, the grid
+cannot show how `v_D` rose inside it and `E_rr` depends on the step size.
+Those turn-offs are counted in `n_turn_off_events_unresolved` and a
+`RuntimeWarning` names the diode. The exception is a FORCED turn-off
+(another switch flips on the same step while the diode still carries
+current) whose blocking voltage is flat after the step: the voltage
+jumped at the turn-off, so the reading is the plateau. Use a step no
+longer than `t_rr` around the turn-offs (`engine='pwl'` with
+`dt <= t_rr`, or a smaller `dt_max`), or pass the datasheet `t_rr`.
 
 Two guards keep immaterial conduction out, and both are reported:
 
@@ -123,7 +152,10 @@ Two guards keep immaterial conduction out, and both are reported:
   trapezoidal stiff mode can turn a reverse-biased diode ON for single
   ~µA steps;
 * no event recovers more than its own forward charge: `E_rr` is capped
-  at `Q_F · V_R` (`n_turn_off_events_capped`).
+  at `Q_F · V_R` (`n_turn_off_events_capped`). Capped events usually
+  are one-step re-conductions from a ringing the grid does not resolve
+  (a snubber faster than `dt`), which also inflate `n_turn_off_events`
+  and `f_sw_estimate`, so a `RuntimeWarning` reports them.
 
 The `SwitchedDiode` kernel model has no physical recovery charge — this
 is a datasheet annotation pass, matching the LTspice "ideal-diode-with-Qrr"
