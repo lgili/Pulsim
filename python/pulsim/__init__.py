@@ -865,12 +865,15 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
-    | ``diode`` (PWL switched)   | ``(V_from − V_to − V_th)·G`` where      |
-    |                            | ``G = g_on`` when forward-biased,       |
-    |                            | ``g_off`` otherwise                     |
+    | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
+    |                            | on samples the solver stamped the diode |
+    |                            | ON, ``g_off`` otherwise (the kernel's   |
+    |                            | per-sample ``switch_states`` record;    |
+    |                            | NOT ``v_D > V_th`` — V_th is a          |
+    |                            | commutation threshold, not a drop)      |
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
-    |                            | ``G = g_on`` when ``switch_fn`` mask    |
-    |                            | bit is set, ``g_off`` otherwise         |
+    |                            | ``G = g_on`` when the recorded stamped  |
+    |                            | mask bit is set, ``g_off`` otherwise    |
     +----------------------------+-----------------------------------------+
 
     Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -879,11 +882,23 @@ def _result_i(self, name: str, t=None):
     ``node_id < 0`` as ``V = 0`` instead of Python's
     negative-indexing into ``states``.
 
-    Switch-fn requirement. Switch-branch reconstruction needs the
-    per-step mask schedule. ``pulsim.simulate(...)`` auto-stashes the
-    composed ``switch_fn`` on ``result._switch_fn``; if you're
-    operating on a result built another way, set ``result._switch_fn
-    = your_switch_fn`` before calling ``.i()``.
+    Switch / diode state. Every engine records, per stored sample,
+    the mask it STAMPED for the solve that produced it
+    (``result.switch_states``); switch and diode currents read that,
+    with no ``switch_fn`` call. Row 0 of a run seeded with
+    ``initial_state`` (including the state ``c0=`` / ``i0=`` build) is
+    not a solve in this run (``switch_states_unsolved``): its state
+    came from a solve whose mask this run does not know, so a switch
+    or diode current there is undefined. Reading it with any guessed
+    mask can invent a ``g_on·V`` current (48 kA through a buck's
+    MOSFET seeded on a gate edge), so that row returns the value of
+    the FIRST SOLVED sample after it instead: a real current, one step
+    late, never a phantom. (NaN would be more literal, but every
+    ``i0=`` / ``c0=`` run has such a row, and plots and sums of
+    ``result.i()`` would break.) The loss and thermal summaries do not
+    use the row at all. Only a result built another way (no record) needs
+    ``result._switch_fn = your_switch_fn`` for a switch, and then the
+    switch_fn is re-evaluated with a warning.
 
     Not yet supported (deferred to future PRs because their device
     params aren't exposed by ``builder.components()`` today):
@@ -995,6 +1010,21 @@ def _result_i(self, name: str, t=None):
     def _finalize(col):
         return col if t is None else col[t]
 
+    def _hold_unsolved(col):
+        # A switched branch has no defined current on an unsolved row
+        # (switch_states_unsolved): it reads the next solved sample's
+        # value (NaN if there is none). See the docstring.
+        from ._result_views import recorded_unsolved as _uns
+        u = _uns(self, int(col.shape[0]))
+        if not u.any():
+            return col
+        col = _np.array(col, dtype=float, copy=True)
+        solved = _np.nonzero(~u)[0]
+        for k in _np.nonzero(u)[0].tolist():
+            j = _np.searchsorted(solved, k)
+            col[k] = col[solved[j]] if j < solved.size else _np.nan
+        return col
+
     # ----------------------- resistor --------------------------------
     if kind == "resistor":
         try:
@@ -1045,27 +1075,23 @@ def _result_i(self, name: str, t=None):
 
     # ----------------------- diode -----------------------------------
     if kind == "diode":
-        # PWL switched diode: closed when v_D > V_th. Use g_on while
-        # forward-biased, g_off while reverse-biased. Mirrors the
-        # convention from `pulsim.losses._conduction_stats(diode)`.
+        # PWL switched diode: a pure conductance in each state (the
+        # ON drop is i/g_on — there is NO V_th offset in the stamp;
+        # V_th only gates OFF→ON). The per-sample state is the
+        # kernel's record of the stamped mask, read through the one
+        # helper shared with device_loss_summary and
+        # device_thermal_summary (`pulsim._diode_state`).
         try:
-            g_on = float(params["g_on"])
-            g_off = float(params["g_off"])
-            V_th = float(params.get("V_th", 0.0))
+            float(params["g_on"])
+            float(params["g_off"])
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"result.i({name!r}): diode params missing "
-                f"`g_on`/`g_off`/`V_th` ({exc!r})") from None
-        v_D = _v_branch()
-        closed = v_D > V_th
-        G_arr = _np.where(closed, g_on, g_off)
-        # The diode stamp models the on-state as a conductance to a
-        # virtual V_th supply: i_D = G·(v_D − V_th) when closed,
-        # i_D = G·v_D when open (g_off is leakage with no threshold).
-        col = _np.where(closed,
-                          G_arr * (v_D - V_th),
-                          G_arr * v_D)
-        return _finalize(col)
+                f"`g_on`/`g_off` ({exc!r})") from None
+        _need_nodes()
+        from ._diode_state import diode_state_trace as _diode_trace
+        tr = _diode_trace(builder, self, b_id, stacklevel=3)
+        return _finalize(_hold_unsolved(tr.current))
 
     # ----------------------- switch ----------------------------------
     if kind == "switch":
@@ -1077,15 +1103,6 @@ def _result_i(self, name: str, t=None):
                 f"result.i({name!r}): switch params missing "
                 f"`g_on`/`g_off` ({exc!r})") from None
         sf = getattr(self, "_switch_fn", None)
-        if sf is None:
-            raise NotImplementedError(
-                f"result.i({name!r}): switch current reconstruction "
-                f"requires the original `switch_fn` to be available on "
-                f"the result. `pulsim.simulate(...)` auto-stashes it "
-                f"on `result._switch_fn`; if you built this result "
-                f"another way, set "
-                f"`result._switch_fn = your_switch_fn` before calling "
-                f"`.i()`.")
         try:
             seq_idx = int(builder.switch_index_of(name))
         except Exception as exc:  # noqa: BLE001 — usage error
@@ -1093,15 +1110,25 @@ def _result_i(self, name: str, t=None):
                 f"result.i({name!r}): switch_index_of failed "
                 f"({exc!r}); make sure {name!r} is a switch added "
                 f"via `builder.add_switch`.") from None
+        from ._result_views import recorded_switch_states as _rec_sw
+        if sf is None and _rec_sw(self, builder)[0] is None:
+            raise NotImplementedError(
+                f"result.i({name!r}): this result carries no record of "
+                f"the stamped switch mask, and switch current "
+                f"reconstruction then needs the original `switch_fn`. "
+                f"`pulsim.simulate(...)` records the mask on every "
+                f"engine; if you built this result another way, set "
+                f"`result._switch_fn = your_switch_fn` before calling "
+                f"`.i()`.")
         times_arr = _ta(self)
         v_sw = _v_branch()
-        # Prefer the recorded mask; else re-evaluate switch_fn with a
-        # voltage-consistency guard (robust to the closed-loop post-hoc
-        # mask desync — see _result_views.resolve_switch_closed_trace).
+        # The kernel's record of the stamped mask; without one, a
+        # recorder, else switch_fn re-evaluated under a
+        # voltage-consistency guard (_result_views).
         closed = _resolve_switch_closed(
             self, sf, times_arr, seq_idx, v_sw, name=name)
         G_arr = _np.where(closed, g_on, g_off)
-        return _finalize(v_sw * G_arr)
+        return _finalize(_hold_unsolved(v_sw * G_arr))
 
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(

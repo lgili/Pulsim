@@ -45,6 +45,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_bdf2_scheduler.cpp  # Gate 4.C — end-to-end BDF2 PED scheduler
         tests/dsed/test_mmc_thevenin_arm.cpp
         tests/dsed/test_trbdf2_transient.cpp
+        tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
         tests/dsed/test_event_projection.cpp

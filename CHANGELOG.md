@@ -44,6 +44,161 @@ rather than an error.
   forward drops; `p.catalog()` no longer recommends a 1 µΩ resistor to
   tie a floating subnet (that is a galvanic bond, not a reference).
 
+### Fixed
+
+* **Diode and switch currents, duties and losses come from the mask the
+  solver stamped.** `SimulationResult.switch_states` records, per stored
+  sample, the switch / diode mask of the solve that produced it (all
+  engines; 1 byte per sample for up to 8 switch-kind branches — +1.8 %
+  on a 1e6-sample buck), and `result.i()`, `device_loss_summary` and
+  `device_thermal_summary` read `i = g(mask) · v` from it. A PWL diode's
+  ON state is a pure conductance, so a conducting diode sits at
+  `i / g_on`, inside `0 < v_D < V_th`: the old `v_D > V_th` rule reported
+  every bridge diode at the `V_th = 0.7` default as idle (0 A, 0 W), and
+  the interim post-hoc inference lost the charge whenever a snubber,
+  an ideal transformer or a VCVS sat on the circuit (0.000 duty on a
+  transformer-secondary rectifier). Now charge closes to ~3e-12 on
+  `engine='pwl'` in all of those. A result without a record falls back
+  with a `RuntimeWarning` that names the reason.
+* **A TR-BDF2 run resumed just before a gate edge no longer stores a
+  shoot-through.** Resumed (or seeded) 1–1000 ulp before a buck's
+  turn-on edge — a pwl snapshot at 12 T with dt = 1e-7 lands 2 ulp
+  short — the zero-time diode settle read the pre-edge gates while the
+  first step read them past the edge without landing it, so t[1] held
+  D1 ON across M1 ON: M1 `i_peak` 24011.8 A, `P_avg` 2.187 W (25.3 A,
+  0.259 W from a well-separated start), with no warning, because a
+  commutation landing was exempt from the diode rule check. The settle
+  now reads the gates where the first step does (`t_start + h_min/2`),
+  and the results match a resume exactly on the edge to 1e-11
+  (TR-BDF2 source) and one 27 fs early to 2e-3 (pwl source).
+  The rule check now exempts a landing only inside the run's own
+  envelope (an ON stamp carrying no more current than the diode does on
+  any other solved sample, an OFF stamp no more forward voltage than
+  any node reaches); outside it the diode is named.
+* **Reverse-recovery loss counts real turn-offs only.** Conduction
+  stretches whose forward charge is below `1e-3` of the recovery charge
+  the spec asks for are dropped and reported
+  (`n_turn_off_events_dropped`, `E_sw_dropped`; warned if they would add
+  more than 1 % of `E_sw_total`), and no event recovers more than its own
+  forward charge (`n_turn_off_events_capped`): an RL half-wave at
+  `V_th = 0.7` counted 48 recoveries on `engine='pwl'` (4× the energy)
+  and 8 on `engine='auto'` (f_sw 120 Hz on a 60 Hz rectifier); both now
+  count 4 and agree with `V_th = 0` and `engine='dsed'` to 0.02 %.
+  Capped events also raise a `RuntimeWarning`: they are usually
+  one-step re-conductions of an unresolved snubber ring, which inflate
+  `n_turn_off_events` (235 instead of 200 on a 100 kHz boost at
+  dt = T/50). An `E_rr_curve` spec is judged on the curve's current
+  axis (peak forward current against 1e-3 of its smallest tabulated
+  current): a curve through the origin had counted all 44 RL half-wave
+  blips (f_sw 720 Hz). A counts-only spec judges against the median
+  peak of the material stretches, not the run's peak (a 4 kA inrush
+  had dropped 237 light-load recoveries).
+* **Possible diode chatter is reported, not hidden.** A `V_th = 0.7`
+  diode with 100 nF across it on `engine='pwl'` records 4580 turn-offs on
+  a 100 kHz boost (f_sw 1.53 MHz): the trapezoidal rule reflects each ON
+  step against the capacitor. Every diode entry now reports
+  `n_possible_chatter_gaps`: blocking gaps that never reverse-bias the
+  diode beyond `2·V_th` and where at least two of the three runs around
+  the gap (conduction before, gap, conduction after) last at most 2
+  steps, since a reflected ON step lasts one. The gap length is not
+  used: a 100 µF transformer rectifier at dt = 2 µs chatters with gaps
+  of 40 to 187 steps (360 turn-offs for 5 real ones, E_sw 70× high),
+  which a 32-step cap missed with no warning, and a pulsed charger's
+  real 5-step blocking intervals (between 5-step conductions) are not
+  reported. On the fixed-step engine a `RuntimeWarning` says when they
+  make up most of the turn-offs that they may be chatter, which fields
+  that inflates (`n_turn_off_events`, `f_sw_estimate`, `E_sw_total`),
+  when a smaller dt helps, and to compare with `engine='trbdf2'`
+  treating a disagreement as unresolved (not `engine='auto'` as the
+  reference: with `dt` it is this same engine, and TR-BDF2 is itself
+  wrong on that snubbed boost, 27.6 V against 54.5 V). The counts
+  stay as recorded: merging those gaps into one conduction also merged
+  real source-commutated turn-offs into a small reverse voltage (a
+  100 kHz pulsed charger read 1 turn-off instead of 100, E_sw 100× low),
+  and missed paired diodes that chatter in the same steps.
+* **DSED junction temperature uses the step-start power.** `T_j_trace`
+  was built from the left-limit samples only and disagreed with
+  `P_cond_avg` by up to 2 % on `engine='dsed'`; it now agrees with
+  the fixed engine to 0.3 %. It keeps one value per `result.times`
+  sample for every device (one without a step-start jump, such as a
+  resistor, used to keep a uniform resample that merely had as many
+  samples: 36 K off on a 907 K ramp), and `T_j_avg` is a time average
+  (not a plain mean over the event-clustered samples).
+* **Reverse-recovery `V_R` is read at a physical instant,
+  `t_off + t_rr`.** New `diode_specs` key `t_rr` (default 100 ns). The
+  previous window of two MEAN steps after the turn-off was a different
+  interval on every grid: a line rectifier's `E_rr` was 1087× apart
+  between `engine='pwl'` (dt = 1 µs) and `engine='auto'` (200 µs steps),
+  and a snubbed DCM boost's grew 8× from dt = T/1000 to T/20, silently.
+  Now both line-rectifier engines give < 1e-12 J (natural commutation
+  recovers against almost no voltage) and the snubbed boost agrees to
+  6 % on every grid that resolves `t_rr`. Turn-offs on a step longer than
+  `t_rr` are counted (`n_turn_off_events_unresolved`) and warned about,
+  except forced ones with a flat blocking voltage. Only reverse bias
+  counts: a diode that stops inside its `V_th` band blocks nothing.
+* **`engine='dsed'` records the mask of the step, like the other
+  engines.** It stored the post-event mask at each event sample, which
+  booked the step ending there to the new mode: a DCM boost diode's
+  duty read 0.2430 against 0.2209 on `engine='pwl'`, with no warning.
+  The event sample is now reconstructed from the pre-event state
+  through the step's mask (0.2210).
+* **Time integrals start each step from where it really starts.** A DSED
+  event sample is the left limit, so a switched branch's current jumps
+  between it and the start of the next step, and a trapezoid drawn from
+  it spread every forced turn-on over a whole 1 µs step: in the steady
+  state of a DCM boost the diode's `i_avg` read 0.0234 A against
+  0.0535 A (−56 %, `P_avg` −69 %), a synchronous buck's high-side pair
+  +72 %, with no warning. (The −4.2e-3 quoted for this convention in an
+  earlier entry was a transformer rectifier, whose current starts from
+  zero; a hard-switched converter is far worse.) `engine='dsed'` results
+  now also store the RIGHT limit at every event that changed the state
+  (`right_limit_index`, `right_limit_states`,
+  `right_limit_switch_states`; 10 rows on a 100 000-sample rectifier),
+  and the loss and thermal summaries integrate each step from it: the
+  boost diode's charge closes to 1e-5 against C·Δv + ∫v/R on every
+  engine, and a switch's `E_on` reads the current at the edge (+4.7 %
+  before). `np.trapezoid(result.i(...))` on a DSED result still carries
+  the first-order term; use the summary.
+* **RMS and loss integrate the waveform, not the squared samples.** Each
+  step is the line between its ends, integrated exactly
+  (`h·(a² + a·c + c²)/3` for a square). The trapezoid of squared samples
+  read a DCM diode's `i_rms` +7.8 % and `P_avg` +16 % high on
+  `engine='auto'`, which puts one long step across the down-ramp. pwl,
+  auto and dsed now agree to 0.2 % on that diode. A fixed-step or
+  TR-BDF2 step that flips the branch's stamp keeps the trapezoid of its
+  end powers (it has no line to integrate). On a `V_th` turn-on spike
+  the 1 µs grid itself is the error: a reference bridge diode reads
+  2.70 A rms at dt = 1 µs against 2.92 A converged.
+* **Recoveries are judged by their own charge, not by the run's peak.**
+  The old `I_F_peak >= 1e-3 · i_peak` rule dropped all 237 light-load
+  recoveries of a boost whose start-up inrush peaked at 4 kA (each above
+  `Q_rr`): `E_sw` 4.9× and `f_sw_estimate` 5× low, silently. They now
+  count (298 turn-offs, f_sw 99.3 kHz).
+* The commutation-rule warning names the actual violation (a diode held
+  ON while reverse-biased was described as "OFF while forward-biased")
+  and says that every switched branch is suspect from that time on.
+* `switch_states` docs: a raw row flagged in `switch_states_unsolved` is
+  not a solve, and with `store_every > 1` a row is the mask of the last
+  solve before the sample, so duties and integrals alias on a decimated
+  grid.
+* A sample 0 seeded with `initial_state` has no defined switched-branch
+  current (its state came from a solve this run did not record):
+  `result.i()` returns the first solved sample's value for a switch or
+  diode there (every `i0=` / `c0=` run has such a row) and the loss and
+  thermal summaries start at the first solved sample; every summary
+  entry reports that window as `t_window_start` / `t_window_end`
+  (an energy total leaves out `[t[0], t[1]]`: 7.6 % of an RL
+  freewheel's diode charge at 20 steps, 0.08 % at 2000). Reading it with
+  the carried bits reported a conducting diode at 0 A; reading it with
+  the first solve's mask put 48 kA through a buck's MOSFET when the seed
+  sat on a gate edge.
+* A `resume_from` sample 0 records the mask its state was solved under,
+  carried in the new `SolverSnapshot.stamped_mask` (pickled; an older
+  snapshot without it resumes with row 0 flagged unsolved). A TR-BDF2
+  run that ends exactly on a gate edge stores that sample under the
+  pre-edge mask and then re-decides the diodes, so `diode_on` +
+  `switch_fn(t)` labelled the resumed row with the post-edge circuit.
+
 ## [2.0.0] — 2026-09-08
 
 ### Release-readiness pass

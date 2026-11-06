@@ -62,6 +62,10 @@ class AdaptiveResult:
     times: np.ndarray
     states: np.ndarray
     dt_history: list = field(default_factory=list)
+    #: Per-sample stamped switch / diode mask, stitched from the
+    #: segments' ``switch_states`` (``None`` if any segment lacked it).
+    switch_states: "np.ndarray | None" = None
+    switch_states_unsolved: "np.ndarray | None" = None
     n_accepted: int = 0
     n_rejected: int = 0
     t_start: float = 0.0
@@ -138,6 +142,8 @@ def run_transient_adaptive(builder,
 
     times_segments = []
     states_segments = []
+    mask_segments: list = []
+    unsolved_segments: list = []
     dt_history = []
     n_accepted = 0
     n_rejected = 0
@@ -167,12 +173,22 @@ def run_transient_adaptive(builder,
         )
         seg_times = np.asarray(res.times)
         seg_states = np.asarray(res.states)
+        seg_masks = getattr(res, "switch_states", None)
+        seg_unsolved = getattr(res, "switch_states_unsolved", None)
         # The first state of the next segment equals the last of
         # the previous one when chaining — drop the duplicate
-        # except on the first segment.
+        # except on the first segment. (That duplicate is also the
+        # segment's seeded, unsolved sample; the kept copy is the
+        # previous segment's own solve.)
         if times_segments:
             seg_times = seg_times[1:]
             seg_states = seg_states[1:]
+            if seg_masks is not None:
+                seg_masks = np.asarray(seg_masks)[1:]
+            if seg_unsolved is not None:
+                seg_unsolved = np.asarray(seg_unsolved)[1:]
+        mask_segments.append(seg_masks)
+        unsolved_segments.append(seg_unsolved)
 
         # LTE-like estimate: max change-rate within the segment.
         if seg_states.shape[0] >= 2:
@@ -233,8 +249,24 @@ def run_transient_adaptive(builder,
         all_times = np.array([t_start])
         all_states = np.zeros((1, builder.pool.state_size(builder.graph)))
 
+    # Carry the stamped-mask record only if EVERY segment had one —
+    # a partial record would silently misalign with `times`.
+    all_masks = all_unsolved = None
+    if mask_segments and all(m is not None for m in mask_segments):
+        all_masks = np.concatenate(
+            [np.asarray(m, dtype=bool) for m in mask_segments], axis=0)
+        if all(u is not None for u in unsolved_segments):
+            all_unsolved = np.concatenate(
+                [np.asarray(u, dtype=bool) for u in unsolved_segments])
+        else:
+            all_unsolved = np.zeros(all_masks.shape[0], dtype=bool)
+        if all_masks.shape[0] != all_times.shape[0]:
+            all_masks = all_unsolved = None
+
     return AdaptiveResult(
         times=all_times, states=all_states,
+        switch_states=all_masks,
+        switch_states_unsolved=all_unsolved,
         dt_history=dt_history,
         n_accepted=n_accepted, n_rejected=n_rejected,
         t_start=t_start, t_end=t_end,

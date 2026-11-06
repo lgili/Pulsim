@@ -346,6 +346,25 @@ class _PEDSimulationResult:
     * ``cpu_time_seconds`` — wall-clock from the PED scheduler
     * ``event_iteration_count`` / ``commutation_events`` — empty lists
       (PED uses a different event model)
+    * ``switch_states`` — the per-sample mode mask, ``(n, n_switches)``
+      bool, the same record the pwl / trbdf2 engines carry. Each full
+      MNA sample is reconstructed THROUGH that sample's mask, so a
+      switched branch's current is exactly ``g(bit) · v`` there.
+      ``None`` when the kernel returned only reduced states (no node
+      voltages to apply it to) or no typed mask (the Python-adapter
+      path, which never carries PWL diodes).
+    * ``right_limit_index`` / ``right_limit_states`` /
+      ``right_limit_switch_states`` — at every sample where an event
+      fired, the RIGHT limit: the full MNA state and the mask the next
+      step starts from (the post-event state rebuilt through the
+      post-event mask). The sample itself is the LEFT limit, the state
+      the step that ended there produced, under ``switch_states[k]``.
+      A switched branch's current jumps between the two, so a time
+      integral must start each step from the right limit of its first
+      sample (``pulsim._result_views.step_start_states``); a trapezoid
+      from the left limit read a DCM boost diode's average current at
+      0.0234 A against 0.0535 A. Empty when no event fired, ``None``
+      when ``switch_states`` is ``None``.
     """
 
     def __init__(
@@ -354,6 +373,10 @@ class _PEDSimulationResult:
         states: list,
         *,
         states_full=None,
+        switch_states=None,
+        right_limit_index=None,
+        right_limit_states=None,
+        right_limit_switch_states=None,
         n_accept: int = 0,
         n_reject: int = 0,
         n_events: int = 0,
@@ -396,6 +419,39 @@ class _PEDSimulationResult:
         # for API-compat with code that destructures both result types.
         self.event_iteration_count: list = []
         self.commutation_events: list = []
+        sw = None
+        if switch_states is not None and full is not None:
+            sw = _np.asarray(switch_states, dtype=bool)
+            if sw.ndim != 2 or sw.shape[0] != len(times):
+                sw = None
+            else:
+                sw.setflags(write=False)
+        self.switch_states = sw
+        self.switch_states_unsolved = (
+            _np.zeros(len(times), dtype=bool) if sw is not None else None)
+        rl_idx = rl_states = rl_sw = None
+        if sw is not None and right_limit_index is not None:
+            rl_idx = _np.asarray(right_limit_index, dtype=_np.int64)
+            rl_states = _np.asarray(right_limit_states, dtype=float)
+            rl_sw = _np.asarray(right_limit_switch_states, dtype=bool)
+            if rl_idx.size == 0:
+                rl_states = _np.zeros((0, full.shape[1]))
+                rl_sw = _np.zeros((0, sw.shape[1]), dtype=bool)
+            ok = (rl_idx.ndim == 1
+                  and rl_states.shape == (rl_idx.size, full.shape[1])
+                  and rl_sw.shape == (rl_idx.size, sw.shape[1])
+                  and (rl_idx.size == 0
+                       or (rl_idx.min() >= 0
+                           and rl_idx.max() < len(times)
+                           and _np.all(_np.diff(rl_idx) > 0))))
+            if ok:
+                for a in (rl_idx, rl_states, rl_sw):
+                    a.setflags(write=False)
+            else:
+                rl_idx = rl_states = rl_sw = None
+        self.right_limit_index = rl_idx
+        self.right_limit_states = rl_states
+        self.right_limit_switch_states = rl_sw
 
     @property
     def states_bytes(self) -> int:
@@ -695,6 +751,11 @@ def run_dsed_from_builder(
                 times=times,
                 states=states,
                 states_full=native_res.get("states_full"),
+                switch_states=native_res.get("switch_states"),
+                right_limit_index=native_res.get("right_limit_index"),
+                right_limit_states=native_res.get("right_limit_states"),
+                right_limit_switch_states=native_res.get(
+                    "right_limit_switch_states"),
                 n_accept=native_res.get("n_accept", 0),
                 n_reject=native_res.get("n_reject", 0),
                 n_events=native_res.get("n_events", 0),

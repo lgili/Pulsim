@@ -52,6 +52,7 @@ from typing import Callable, Optional, Union
 
 import numpy as np
 
+from . import _diode_state
 from . import _result_views as _views
 from . import losses as _losses
 
@@ -556,6 +557,31 @@ def make_thermal_observer(builder,
 # :mod:`pulsim._result_views`.
 
 
+def _with_step_starts(times: np.ndarray, p: np.ndarray,
+                      p_start: np.ndarray):
+    """``(times, p)`` with the step-start power inserted wherever it
+    differs from the stored sample (the right limit of an
+    ``engine='dsed'`` event, see ``_result_views.step_start_states``),
+    a hair (1e-6 of the step) after the sample.
+
+    So T_j sees the same per-step power waveform that ``P_cond_avg``
+    integrates. From the stored samples alone (the left limits), T_j
+    on a DSED boost disagreed with ``R_th · P_cond_avg`` by up to 2 %
+    (D1 CCM ratio 0.980, Q1 1.010); pwl and trbdf2 store no right
+    limits, so they are returned unchanged."""
+    t = np.asarray(times, dtype=float)
+    p = np.asarray(p, dtype=float)
+    p_start = np.asarray(p_start, dtype=float)
+    if t.size < 2 or p_start is p or p_start.shape != p.shape:
+        return t, p
+    h = np.diff(t)
+    idx = np.nonzero((p_start[:-1] != p[:-1]) & (h > 0))[0]
+    if idx.size == 0:
+        return t, p
+    return (np.insert(t, idx + 1, t[idx] + 1e-6 * h[idx]),
+            np.insert(p, idx + 1, p_start[idx]))
+
+
 def device_thermal_summary(
     builder,
     result,
@@ -571,14 +597,14 @@ def device_thermal_summary(
     """End-to-end ``per-device P(t) → T_j(t)`` glue.
 
     .. note::
-       For a **closed-loop** ``switch_fn`` (PI / PFC / FOC), wrap it in
-       :class:`pulsim.SwitchMaskRecorder` and pass that to both
-       :func:`pulsim.simulate` and this call, so the true historical
-       switch state is used. Otherwise ``switch_fn`` is re-evaluated
-       post-hoc — fine for stateless PWM, but a stateful controller has
-       since converged; a voltage-consistency guard catches the
-       resulting blocking-while-ON samples and warns, but the recorder
-       is exact.
+       Switch and diode states are read from the mask the solver
+       stamped for every sample (``result.switch_states``) — exact for
+       closed-loop (PI / PFC / FOC) controllers too, with no
+       ``switch_fn`` call. Only a result built without that record
+       re-evaluates ``switch_fn`` post-hoc (with a warning): fine for
+       stateless PWM, but a stateful controller has since converged;
+       there, wrap it in :class:`pulsim.SwitchMaskRecorder` and pass
+       that to both :func:`pulsim.simulate` and this call.
 
     When a device appears in ``conduction_specs`` (``{name|bid:
     {"V_f0"/"V_ce0": …, "r_on"/"r_ce": …}}``) its conduction power trace
@@ -616,8 +642,9 @@ def device_thermal_summary(
     switch_fn, switch_specs, diode_specs, core_loss_specs
         Forwarded into the loss-reconstruction phase — same shapes
         and semantics as :func:`pulsim.device_loss_summary`.
-        ``switch_fn`` is required when any switch entry is listed
-        in ``thermal_specs``.
+        ``switch_fn`` is required only when a switch entry is listed
+        in ``thermal_specs`` and the result carries no stamped-mask
+        record.
 
     Returns
     -------
@@ -628,10 +655,29 @@ def device_thermal_summary(
             {"branch_id": int, "kind": str, "name": str,
              "P_cond_avg": float, "P_sw_avg": float,
              "P_core_avg": float, "P_total_avg": float,
-             "T_j_trace": np.ndarray,  # °C
+             "T_j_trace": np.ndarray,  # °C (see below)
              "T_j_avg": float, "T_j_peak": float,
              "T_ambient_C": float,
-             "R_th_total": float}      # sum of Foster R_th [K/W]
+             "R_th_total": float,      # sum of Foster R_th [K/W]
+             "t_window_start": float, "t_window_end": float}  # [s]
+
+    ``T_j_trace`` is the IIR output on :func:`compute_temperature`'s
+    grid: ``result.times`` on a fixed grid (``engine='pwl'``), a
+    uniform resample of it on a variable-step one (``'trbdf2'`` /
+    ``'auto'``). On ``engine='dsed'`` (``result.engine_used``), whose
+    step-start power is inserted after each event, it is sampled back
+    at ``result.times`` (one value per sample) for every device, and
+    ``T_j_avg`` / ``T_j_peak`` are read on the uniform internal grid,
+    so the average is over time. On a variable grid that average is
+    only as good as the linear resample of the power: against the
+    exact single-stage identity
+    ``mean ΔT = R·P_avg − τ·ΔT_end / T_span`` it measured −0.50 K of a
+    182 K rise (DSED boost, R_th 1000 K/W, τ 0.1 ms, 2 ms), +0.83 K on
+    ``'auto'`` and −0.002 K on the fixed grid. A seeded, unsolved row 0 has no defined
+    switched-branch power: the network starts at the first solved
+    sample, and a trace on ``result.times`` reads ``T_ambient_C`` at
+    the dropped row; ``t_window_start`` /
+    ``t_window_end`` give the window the averages were taken over.
 
     Notes
     -----
@@ -646,9 +692,18 @@ def device_thermal_summary(
     """
     if not thermal_specs:
         return []
+    is_dsed = getattr(result, "engine_used", None) == "dsed"
 
+    # From the first solved sample on, as device_loss_summary: a
+    # seeded, unsolved row 0 has no defined switched-branch current
+    # (_result_views.solved_part). T_j_trace keeps one sample per
+    # result.times: the dropped rows read T_ambient, where the network
+    # starts.
+    n_full = int(np.asarray(result.times).shape[0])
+    result = _views.solved_part(result)
     states = _views.states_as_array(result)
     times = np.asarray(result.times, dtype=float)
+    n_lead = n_full - times.size
 
     # Resolve thermal_specs into branch_id-keyed mapping.
     try:
@@ -699,15 +754,16 @@ def device_thermal_summary(
                         f"unknown device {key!r}.")
                 cond_by_bid[int(d["branch_id"])] = spec
 
-    # Need switch_seq_idx (same logic as device_loss_summary).
-    switch_seq_idx_by_bid = {}
-    switch_seq_counter = 0
-    for bid in range(builder.graph.num_branches):
-        desc = comps_by_bid.get(bid, {})
-        kind = desc.get("kind", "unknown")
-        if kind in ("diode", "switch"):
-            switch_seq_idx_by_bid[bid] = switch_seq_counter
-            switch_seq_counter += 1
+    # Each switch-kind branch's SwitchStateMask bit, and the kernel's
+    # per-sample record of the stamped mask (None if the result has
+    # none — then switch_fn is re-evaluated, see _result_views).
+    switch_seq_idx_by_bid = _views.switch_bits_by_branch(builder)
+    kernel_masks, _ = _views.recorded_switch_states(result, builder)
+    # Where each step starts (the right limit at an engine='dsed'
+    # event, see _result_views.step_start_states), so P_cond_avg
+    # integrates the same per-step waveform as device_loss_summary.
+    states_s, masks_s = _views.step_start_states(result, states,
+                                                 kernel_masks)
 
     out = []
     for bid, t_spec in sorted(thermal_by_bid.items()):
@@ -735,29 +791,48 @@ def device_thermal_summary(
                 continue
             v_R = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
+            v_R_s = (_views.node_voltage_trace(states_s, int(from_id))
+                     - _views.node_voltage_trace(states_s, int(to_id)))
             P_cond_t = v_R * v_R / R
+            P_start_t = v_R_s * v_R_s / R
+            g_c = np.full_like(v_R, 1.0 / R)
+            E_cond = _losses._branch_energy(times, v_R, g_c, v_R_s, g_c)
         elif kind == "inductor":
             # Ideal inductor — conduction loss is zero. Any thermal
             # rise comes from P_core_avg above.
             P_cond_t = np.zeros_like(times)
+            P_start_t = P_cond_t
+            E_cond = 0.0
         elif kind == "diode":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
             g_off = float(params.get("g_off", float("nan")))
-            V_th = float(params.get("V_th", 0.0))
             from_id, to_id = desc.get("nodes", (None, None))
             if not (np.isfinite(g_on) and np.isfinite(g_off)) \
                     or from_id is None or to_id is None:
                 continue
-            v_D = (_views.node_voltage_trace(states, int(from_id))
-                   - _views.node_voltage_trace(states, int(to_id)))
-            g_arr = np.where(v_D > V_th, g_on, g_off)
+            # Same recorded stamp as device_loss_summary / result.i()
+            # (a PWL diode's ON drop is i/g_on, not V_th — see
+            # pulsim._diode_state). The loss summary above already
+            # warned about this diode, so stay quiet here.
+            d_trace = _diode_state.diode_state_trace(
+                builder, result, bid, switch_fn=switch_fn, warn=False)
+            v_D = d_trace.v
+            g_arr = np.where(d_trace.closed, g_on, g_off)
+            g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_D * g_arr, c_spec)
+                P_start_t = _losses._conduction_power_offset_slope(
+                    d_trace.v_start * g_arr_s, c_spec)
+                E_cond = _losses._conduction_model_energy(
+                    times, v_D * g_arr, d_trace.v_start * g_arr_s, c_spec)
             else:
                 P_cond_t = v_D * v_D * g_arr
+                P_start_t = d_trace.v_start * d_trace.v_start * g_arr_s
+                E_cond = _losses._branch_energy(
+                    times, v_D, g_arr, d_trace.v_start, g_arr_s)
         elif kind == "switch":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -766,14 +841,15 @@ def device_thermal_summary(
             if not (np.isfinite(g_on) and np.isfinite(g_off)) \
                     or from_id is None or to_id is None:
                 continue
-            if switch_fn is None:
-                raise ValueError(
-                    f"thermal_specs targets switch {name!r} but "
-                    "switch_fn= was not provided — pass the same "
-                    "callable you used in simulate().")
             sidx = switch_seq_idx_by_bid.get(bid)
             if sidx is None:
                 continue
+            if switch_fn is None and kernel_masks is None:
+                raise ValueError(
+                    f"thermal_specs targets switch {name!r}, the result "
+                    "carries no record of the stamped switch mask, and "
+                    "switch_fn= was not provided — pass the same "
+                    "callable you used in simulate().")
             v_SW = (_views.node_voltage_trace(states, int(from_id))
                     - _views.node_voltage_trace(states, int(to_id)))
             # Use the recorded mask when available, else re-evaluate
@@ -781,23 +857,66 @@ def device_thermal_summary(
             # closed-loop post-hoc mask desync (see _result_views).
             closed = _views.resolve_switch_closed_trace(
                 result, switch_fn, times, sidx, v_SW, name=name)
+            closed_s = closed
+            if (masks_s is not None and masks_s is not kernel_masks
+                    and 0 <= sidx < masks_s.shape[1]):
+                closed_s = np.asarray(masks_s[:, sidx], dtype=bool)
+            v_SW_s = (_views.node_voltage_trace(states_s, int(from_id))
+                      - _views.node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
+            g_arr_s = np.where(closed_s, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_SW * g_arr, c_spec)
+                P_start_t = _losses._conduction_power_offset_slope(
+                    v_SW_s * g_arr_s, c_spec)
+                E_cond = _losses._conduction_model_energy(
+                    times, v_SW * g_arr, v_SW_s * g_arr_s, c_spec)
             else:
                 P_cond_t = v_SW * v_SW * g_arr
+                P_start_t = v_SW_s * v_SW_s * g_arr_s
+                E_cond = _losses._branch_energy(
+                    times, v_SW, g_arr, v_SW_s, g_arr_s)
         else:
             # Unsupported kind for the thermal pipeline.
             continue
 
-        P_total_t = P_cond_t + P_constant
-        T_j_trace = compute_temperature(times, P_total_t,
-                                          stages, T_amb_dev)
+        t_aug, p_aug = _with_step_starts(times, P_cond_t + P_constant,
+                                         P_start_t + P_constant)
+        T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev)
+        if t_aug.size == times.size and not is_dsed:
+            # pwl / trbdf2: unchanged (compute_temperature's own grid;
+            # a variable-step trace is resampled to a uniform one).
+            T_j_trace = T_j_int
+            T_j_avg = float(np.mean(T_j_trace))
+            T_j_peak = float(np.max(T_j_trace))
+            on_times = _views.grid_is_uniform(times)
+        else:
+            # engine='dsed': its event grid is not uniform, and where
+            # the step-start power differs from the stored sample it was
+            # inserted, so the IIR ran on a uniform resample of a longer
+            # grid. Every DSED device takes this branch, inserted
+            # samples or not (a resistor's power has no step-start
+            # jump: its trace was the resample itself, index 500 at
+            # 485.9 µs against t[500] = 497.8 µs on a 1 ms boost).
+            # Sample it back at result.times, one value per sample, and
+            # average over TIME on the uniform internal grid (a plain
+            # mean of the trace at the clustered event times is not).
+            t_int = (t_aug if _views.grid_is_uniform(t_aug)
+                     else _views.resample_uniform(t_aug, p_aug)[0])
+            T_j_trace = np.interp(times, t_int, T_j_int)
+            T_j_avg = float(np.mean(T_j_int))
+            T_j_peak = float(np.max(T_j_int))
+            on_times = True
+        if n_lead and on_times:
+            # One value per result.times sample (a resampled
+            # variable-step trace is on its own grid and stays so).
+            T_j_trace = np.concatenate(
+                (np.full(n_lead, T_amb_dev), T_j_trace))
         T = (times[-1] - times[0]) if times.size > 1 else 1.0
-        P_cond_avg = (float(np.trapezoid(P_cond_t, times) / T)
-                      if T > 0 else float(P_cond_t.mean()))
+        P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
+                      else float(P_cond_t.mean()))
         out.append({
             "branch_id": int(bid),
             "kind": kind,
@@ -807,10 +926,13 @@ def device_thermal_summary(
             "P_core_avg": P_core_avg,
             "P_total_avg": P_cond_avg + P_constant,
             "T_j_trace": T_j_trace,
-            "T_j_avg": float(np.mean(T_j_trace)),
-            "T_j_peak": float(np.max(T_j_trace)),
+            "T_j_avg": T_j_avg,
+            "T_j_peak": T_j_peak,
             "T_ambient_C": T_amb_dev,
             "R_th_total": float(sum(s.R_th_K_per_W for s in stages)),
+            # The network's window: from the first solved sample.
+            "t_window_start": float(times[0]) if times.size else 0.0,
+            "t_window_end": float(times[-1]) if times.size else 0.0,
         })
     return out
 

@@ -68,6 +68,280 @@ def node_voltage_trace(states: np.ndarray, node_id: int) -> np.ndarray:
     return states[:, node_id]
 
 
+# ---------------------------------------------------------------
+# The kernel's per-sample record of the STAMPED mask
+# ---------------------------------------------------------------
+
+def recorded_switch_states(result, builder=None):
+    """``(states, reason)``: the ``(n_samples, n_switches)`` bool array
+    of the switch / diode mask the solver stamped for each stored
+    sample (``SimulationResult.switch_states``), or ``(None, reason)``
+    when the result carries no usable record — ``reason`` says why,
+    for the fallback's warning.
+
+    The record is validated against the result (one row per sample)
+    and, when ``builder`` is given, against the circuit (one column per
+    switch-kind branch). An unsolved row (``switch_states_unsolved``:
+    a sample 0 seeded from ``initial_state``) is returned as recorded,
+    the bits the solver carried in; they say nothing about the solve
+    that produced its state, so the consumers drop it
+    (:func:`solved_part`)."""
+    try:
+        rec = getattr(result, "switch_states", None)
+    except Exception as exc:  # noqa: BLE001 — a broken property
+        return None, f"reading result.switch_states failed ({exc!r})"
+    if rec is None:
+        if hasattr(result, "states_reduced"):
+            return None, ("result.switch_states is absent — this "
+                          "engine='dsed' run went through the DSED "
+                          "adapter path that records no mask (a "
+                          "Python-mask switch_fn, or no full MNA "
+                          "reconstruction)")
+        return None, ("result.switch_states is absent — a result not "
+                      "produced by a kernel engine, or one whose "
+                      "engine path does not record it")
+    arr = np.asarray(rec, dtype=bool)
+    n = int(np.asarray(result.times).shape[0])
+    if arr.ndim != 2 or arr.shape[0] != n:
+        return None, (f"result.switch_states has shape {arr.shape}, "
+                      f"not ({n}, n_switches)")
+    if builder is not None:
+        try:
+            n_sw = int(builder.graph.num_switches)
+        except Exception:  # noqa: BLE001 — a duck-typed builder
+            n_sw = arr.shape[1]
+        if arr.shape[1] != n_sw:
+            return None, (f"result.switch_states has {arr.shape[1]} "
+                          f"columns but the circuit has {n_sw} "
+                          f"switch-kind branches")
+    return arr, ""
+
+
+def step_start_states(result, states: np.ndarray,
+                      masks: "np.ndarray | None" = None):
+    """``(states_start, masks_start)``: per sample ``k``, the state and
+    mask the step AFTER sample ``k`` starts from.
+
+    A stored sample is the LEFT limit of time ``t[k]``: the state the
+    step that ended there produced, under the recorded mask
+    ``switch_states[k]``. Where an event fired at ``t[k]`` (a DSED
+    gate edge or diode commutation) the next step starts from a
+    different state, the RIGHT limit, under the post-event mask, and a
+    switched branch's current jumps between the two. ``engine='dsed'``
+    stores those right limits (``result.right_limit_index`` /
+    ``right_limit_states`` / ``right_limit_switch_states``); the rows
+    there are replaced. Everywhere else, and on every result without
+    that record (the pwl and trbdf2 engines integrate each step under
+    one mask and store its end), the start of step ``k + 1`` is sample
+    ``k`` itself and the inputs are returned unchanged (no copy).
+
+    A time integral over step ``(t[k-1], t[k]]`` runs from
+    ``states_start[k-1]`` to ``states[k]``; see :func:`pl_integral`."""
+    idx = getattr(result, "right_limit_index", None)
+    rl_st = getattr(result, "right_limit_states", None)
+    if idx is None or rl_st is None:
+        return states, masks
+    idx = np.asarray(idx, dtype=np.int64)
+    rl_st = np.asarray(rl_st, dtype=float)
+    n = states.shape[0]
+    if (idx.size == 0 or idx.ndim != 1 or rl_st.ndim != 2
+            or rl_st.shape != (idx.size, states.shape[1])
+            or idx.min() < 0 or idx.max() >= n):
+        return states, masks
+    st = np.array(states, dtype=float, copy=True)
+    st[idx] = rl_st
+    mk = masks
+    rl_sw = getattr(result, "right_limit_switch_states", None)
+    if masks is not None and rl_sw is not None:
+        rl_sw = np.asarray(rl_sw, dtype=bool)
+        if rl_sw.shape == (idx.size, masks.shape[1]):
+            mk = np.array(masks, dtype=bool, copy=True)
+            mk[idx] = rl_sw
+    return st, mk
+
+
+def pl_integral(times: np.ndarray, y: np.ndarray,
+                y_start: "np.ndarray | None" = None) -> float:
+    """``∫ y dt`` over the run, each step ``(t[k-1], t[k]]`` integrated
+    as the line from ``y_start[k-1]`` (its start, the right limit of
+    sample ``k - 1``) to ``y[k]`` (its end). Equal to the trapezoid
+    when ``y_start`` is ``y``."""
+    t = np.asarray(times, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if t.size < 2:
+        return 0.0
+    a = y[:-1] if y_start is None else np.asarray(y_start, float)[:-1]
+    return float(np.dot(np.diff(t), 0.5 * (a + y[1:])))
+
+
+def pl_integral_product(times: np.ndarray, y: np.ndarray, z: np.ndarray,
+                        y_start: "np.ndarray | None" = None,
+                        z_start: "np.ndarray | None" = None) -> float:
+    """``∫ y·z dt`` of the same per-step lines (:func:`pl_integral`),
+    integrated EXACTLY: ``h·(2·a_y·a_z + a_y·c_z + c_y·a_z +
+    2·c_y·c_z) / 6`` per step, i.e. ``h·(a² + a·c + c²) / 3`` for a
+    square.
+
+    The trapezoid of the squared samples, ``h·(a² + c²) / 2``, is the
+    integral of a different curve: on a current ramp to zero it reads
+    3/2 of the square's integral. The variable-step engines put one or
+    two long steps across a DCM diode's down-ramp, and the trapezoid
+    read that diode's RMS current +7.8 % and its conduction loss +16 %
+    high on ``engine='auto'``; a fixed grid fine enough to bend the
+    ramp hides it. The mean (:func:`pl_integral`) and the RMS now
+    integrate the same piecewise-linear waveform."""
+    t = np.asarray(times, dtype=float)
+    if t.size < 2:
+        return 0.0
+    y = np.asarray(y, dtype=float)
+    z = np.asarray(z, dtype=float)
+    ay = y[:-1] if y_start is None else np.asarray(y_start, float)[:-1]
+    az = z[:-1] if z_start is None else np.asarray(z_start, float)[:-1]
+    cy, cz = y[1:], z[1:]
+    return float(np.dot(np.diff(t), (2.0 * ay * az + ay * cz + cy * az
+                                     + 2.0 * cy * cz) / 6.0))
+
+
+def pl_integral_abs(times: np.ndarray, y: np.ndarray,
+                    y_start: "np.ndarray | None" = None) -> float:
+    """``∫ |y| dt`` of the per-step lines (:func:`pl_integral`), exact
+    where a step's line crosses zero."""
+    t = np.asarray(times, dtype=float)
+    if t.size < 2:
+        return 0.0
+    y = np.asarray(y, dtype=float)
+    a = y[:-1] if y_start is None else np.asarray(y_start, float)[:-1]
+    c = y[1:]
+    h = np.diff(t)
+    same = (a * c) >= 0.0
+    den = np.abs(a) + np.abs(c)
+    cross = np.divide(a * a + c * c, 2.0 * den,
+                      out=np.zeros_like(den), where=den > 0)
+    return float(np.dot(h, np.where(same, 0.5 * (np.abs(a) + np.abs(c)),
+                                    cross)))
+
+
+def first_solved_index(result) -> int:
+    """Index of the first sample produced by a solve under its recorded
+    mask: the number of leading UNSOLVED rows
+    (``switch_states_unsolved``; today only a sample 0 seeded from
+    ``initial_state``, or resumed from a snapshot without
+    ``stamped_mask``). 0 when there are none, or when no row is
+    solved."""
+    n = int(np.asarray(result.times).shape[0])
+    u = recorded_unsolved(result, n)
+    if not u.any():
+        return 0
+    solved = np.nonzero(~u)[0]
+    return int(solved[0]) if solved.size else 0
+
+
+class _SolvedPart:
+    """``result`` from its first solved sample on: the per-sample
+    arrays sliced, everything else read from ``result``."""
+
+    def __init__(self, result, k0: int):
+        self._result = result
+        self._k0 = k0
+        n = int(np.asarray(result.times).shape[0])
+        self.times = np.asarray(result.times, dtype=float)[k0:]
+        self.states = states_as_array(result)[k0:]
+        sw = getattr(result, "switch_states", None)
+        self.switch_states = (None if sw is None
+                              else np.asarray(sw, dtype=bool)[k0:])
+        self.switch_states_unsolved = recorded_unsolved(result, n)[k0:]
+        masks = getattr(result, "_switch_masks", None)
+        if masks is not None:
+            arr = np.asarray(masks)
+            self._switch_masks = (arr[k0:] if arr.ndim == 2
+                                  and arr.shape[0] == n else arr)
+        idx = getattr(result, "right_limit_index", None)
+        if idx is not None:
+            idx = np.asarray(idx, dtype=np.int64)
+            keep = idx >= k0
+            self.right_limit_index = idx[keep] - k0
+            for name in ("right_limit_states",
+                         "right_limit_switch_states"):
+                arr = getattr(result, name, None)
+                if arr is not None:
+                    arr = np.asarray(arr)
+                    setattr(self, name, arr[keep] if arr.shape[:1]
+                            == keep.shape else arr)
+
+    def __getattr__(self, name):
+        return getattr(self._result, name)
+
+
+def solved_part(result):
+    """``result`` without its leading UNSOLVED rows
+    (:func:`first_solved_index`), or ``result`` itself when it has
+    none.
+
+    An unsolved row has no defined branch current: its state came out
+    of a solve this run did not record (a previous run, a hand-made
+    vector), and the recorded bits are only the ones the solver
+    carried in. Neither the carried bits nor the first solve's are
+    safe to read it with: at a gate edge the seeded state is the
+    pre-edge solve while every later mask is post-edge, and a buck
+    seeded there read M1 at g_on · 48 V = 48 kA (i_peak 48023.6 A,
+    P_avg 36× high on trbdf2, 3500× on pwl, no warning) with the
+    first solve's mask. So :func:`pulsim.device_loss_summary` and
+    :func:`pulsim.device_thermal_summary` start at the first solved
+    sample: peaks, RMS, averages, duty and every time integral cover
+    ``[t[k0], t_end]`` (on a fixed grid, one step less than the run),
+    and ``result.i()`` returns the first solved sample's value for a
+    switch or diode there."""
+    k0 = first_solved_index(result)
+    return result if k0 == 0 else _SolvedPart(result, k0)
+
+
+def record_advice(result) -> str:
+    """How to get a result that carries the stamped-mask record."""
+    if hasattr(result, "states_reduced"):
+        return ("run engine='pwl' or engine='auto' (both record the "
+                "stamped mask for every sample), or the native DSED "
+                "path, which records it when the circuit is built with "
+                "CircuitBuilder and switch_fn returns SwitchStateMask.")
+    return ("use a result returned by pulsim.simulate() with "
+            "engine='pwl', 'auto' or 'trbdf2', which record the stamped "
+            "mask for every sample.")
+
+
+def recorded_unsolved(result, n: int) -> np.ndarray:
+    """Per-sample bool: the sample was not produced by a solve under
+    its recorded mask (``SimulationResult.switch_states_unsolved``)."""
+    u = getattr(result, "switch_states_unsolved", None)
+    if u is None:
+        return np.zeros(n, dtype=bool)
+    u = np.asarray(u, dtype=bool)
+    return u if u.shape == (n,) else np.zeros(n, dtype=bool)
+
+
+def switch_bits_by_branch(builder) -> "dict[int, int]":
+    """``{branch_id: SwitchStateMask bit}`` for every switch-kind
+    branch (controlled switches, PWL diodes, MOSFET body diodes — they
+    interleave in builder order). ``switch_index_of(name)`` is the
+    authority; an unnamed branch falls back to its position among the
+    switch / diode components."""
+    out: "dict[int, int]" = {}
+    pos = 0
+    for c in sorted(builder.components(),
+                    key=lambda d: int(d.get("branch_id", -1))):
+        if c.get("kind") not in ("switch", "diode"):
+            continue
+        bid = int(c["branch_id"])
+        bit = pos
+        name = c.get("name")
+        if name:
+            try:
+                bit = int(builder.switch_index_of(name))
+            except Exception:  # noqa: BLE001 — alias / unnamed
+                bit = pos
+        out[bid] = bit
+        pos += 1
+    return out
+
+
 def evaluate_switch_mask_trace(
     switch_fn: Callable[[float], Any],
     times: np.ndarray,
@@ -200,23 +474,65 @@ def resolve_switch_closed_trace(result: Any,
 
     Preference order:
 
-    1. A :class:`SwitchMaskRecorder` passed as ``switch_fn`` (exact
+    1. The kernel's own record of the mask it STAMPED for each sample
+       (``result.switch_states``) — exact on every engine, for
+       stateless and closed-loop switch_fns alike, with no switch_fn
+       call at all.
+    2. A :class:`SwitchMaskRecorder` passed as ``switch_fn`` (exact
        simulate-time history) — or a ``result._switch_masks`` 2-D bool
        array attached by the caller.
-    2. Re-evaluate ``switch_fn(t)`` (faithful for stateless switch_fns)
+    3. Re-evaluate ``switch_fn(t)`` (faithful for stateless switch_fns)
        then apply :func:`_voltage_consistency_guard`.
     """
+    kernel, _ = recorded_switch_states(result)
+    if kernel is not None and 0 <= switch_idx < kernel.shape[1]:
+        return np.asarray(kernel[:, switch_idx], dtype=bool)
+    if switch_fn is None:
+        raise ValueError(
+            f"switch {name!r}: the result carries no record of the "
+            f"stamped switch mask and no switch_fn was given to "
+            f"re-evaluate.")
     rec = getattr(switch_fn, "recorded_mask_trace", None)
+    q = mask_sample_times(result, times)
     if callable(rec):
-        return np.asarray(rec(times, switch_idx), dtype=bool)
+        return np.asarray(rec(q, switch_idx), dtype=bool)
     masks = getattr(result, "_switch_masks", None)
     if masks is not None:
         arr = np.asarray(masks)
         if (arr.ndim == 2 and arr.shape[0] == np.asarray(times).size
                 and 0 <= switch_idx < arr.shape[1]):
             return arr[:, switch_idx].astype(bool)
-    closed = evaluate_switch_mask_trace(switch_fn, times, switch_idx)
+    warnings.warn(
+        f"switch {name!r}: the result carries no record of the stamped "
+        f"switch mask ({recorded_switch_states(result)[1]}), so "
+        f"switch_fn was re-evaluated after the run. That is exact only "
+        f"for a stateless switch_fn; {record_advice(result)}",
+        RuntimeWarning, stacklevel=3)
+    closed = evaluate_switch_mask_trace(switch_fn, q, switch_idx)
     return _voltage_consistency_guard(closed, v_branch, name=name)
+
+
+def mask_sample_times(result: Any, times: np.ndarray) -> np.ndarray:
+    """The time at which the engine evaluated ``switch_fn`` for the
+    step that PRODUCED each stored sample.
+
+    * Fixed-step engine (``engine='pwl'``): the step's end, i.e. the
+      sample time itself (``run_event_iteration(t, ...)`` calls
+      ``switch_fn(t)``).
+    * ``engine='trbdf2'`` / ``'auto'``: the step MIDPOINT
+      (``trbdf2_transient.hpp``: ``mask_step = switch_fn(t + h/2)``).
+      A step that lands on a gate edge is therefore stored with the
+      PRE-edge mask; re-evaluating ``switch_fn`` at the sample time
+      returned the post-edge state, which made a 50 kHz buck's switch
+      read 0.455 duty instead of 0.500 and set off the closed-loop
+      desync warning on a stateless PWM.
+    """
+    t = np.asarray(times, dtype=float)
+    if getattr(result, "engine_used", None) != "trbdf2" or t.size < 2:
+        return t
+    q = t.copy()
+    q[1:] = 0.5 * (t[:-1] + t[1:])
+    return q
 
 
 # ---------------------------------------------------------------
@@ -276,11 +592,14 @@ def resample_uniform(times: np.ndarray, y: np.ndarray,
     return t_u, np.interp(t_u, t, y), float(t_u[1] - t_u[0])
 
 
-def time_weighted_rms(y: np.ndarray, times: np.ndarray) -> float:
-    """RMS over TIME, not over samples: sqrt(∫y² dt / T).
+def time_weighted_rms(y: np.ndarray, times: np.ndarray,
+                      y_start: "np.ndarray | None" = None) -> float:
+    """RMS over TIME, not over samples: sqrt(∫y² dt / T), with ``y``
+    the piecewise-linear waveform of :func:`pl_integral_product`
+    (each step from ``y_start[k-1]``, default ``y[k-1]``, to ``y[k]``).
 
-    Identical to the sample RMS on a uniform grid (to trapezoid
-    error) and the only correct form on an irregular one.
+    Equal to the sample RMS on a uniform grid to discretisation error,
+    and the only correct form on an irregular one.
     """
     y = np.asarray(y, dtype=float)
     t = np.asarray(times, dtype=float)
@@ -291,4 +610,5 @@ def time_weighted_rms(y: np.ndarray, times: np.ndarray) -> float:
     span = float(t[-1] - t[0])
     if not (span > 0):
         return float(np.sqrt(np.mean(y ** 2)))
-    return float(np.sqrt(np.trapezoid(y ** 2, t) / span))
+    sq = pl_integral_product(t, y, y, y_start, y_start)
+    return float(np.sqrt(max(sq, 0.0) / span))

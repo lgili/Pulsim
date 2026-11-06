@@ -86,6 +86,11 @@ struct PEDResultAuto {
     std::vector<Vector> states;
     // v2.0 Phase 3 item 5 — see PEDResult::sample_masks.
     std::vector<MaskT> sample_masks;
+    // See PEDResult::step_masks / pre_event_states. A gate event
+    // never modifies x on this scheduler, so pre_event_* stay empty.
+    std::vector<MaskT> step_masks;
+    std::vector<std::size_t> pre_event_index;
+    std::vector<Vector> pre_event_states;
     std::vector<AutoDispatchEventRecord<MaskT>> event_log;
     std::size_t n_accept = 0;
     std::size_t n_reject = 0;
@@ -173,10 +178,10 @@ public:
         RK45State rk_state;
         BDF2State bdf2_state;
         PEDResultAuto<MaskT> result;
-        result.times.push_back(t);
-        result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+        ped_push_sample(result, t, x, system_.current_mask(),
+                        system_.current_mask(), nullptr);
         std::size_t step_idx = 0;
+        MaskT step_mask = system_.current_mask();
 
         constexpr std::size_t kMaxSteps = 10'000'000;
 
@@ -331,7 +336,10 @@ public:
                 }
             }
 
-            // 3. Commit accepted step
+            // 3. Commit accepted step. Every branch that fires without
+            // stepping `continue`s above, so the mask in force now is
+            // the one this step was integrated under.
+            step_mask = system_.current_mask();
             t += h_use;
             x = std::move(x_new);
             if (choice == IntegratorChoice::DOPRI5) {
@@ -360,16 +368,14 @@ public:
             // 5. Record
             ++step_idx;
             if (step_idx % store_every_ == 0) {
-                result.times.push_back(t);
-                result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+                ped_push_sample(result, t, x, system_.current_mask(),
+                                step_mask, nullptr);
             }
         }
 
         if (result.times.back() != t) {
-            result.times.push_back(t);
-            result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+            ped_push_sample(result, t, x, system_.current_mask(),
+                            step_mask, nullptr);
         }
 
         const auto t1_wall = clock::now();
