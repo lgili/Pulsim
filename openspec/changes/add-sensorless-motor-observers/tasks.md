@@ -21,21 +21,30 @@
 ## 3. Showcase examples — deferred to v1.5.0 final
 
 - [ ] 3.1 `examples/scripts/run_pmsm_foc_sensorless_smo.py` — PMSM-FOC closed loop using SMO for the Park angle. Startup ramp + load step + speed reversal.
+  (Reconciled 2026-11: examples/scripts/run_pmsm_smo_sensorless.py
+  exists but runs the SMO on a synthetic trace, not a closed FOC
+  loop.)
 - [ ] 3.2 `examples/scripts/run_im_ifoc_sensorless_mras.py` — IM-IFOC sensorless using MRAS for slip-frequency estimation.
+  (Reconciled 2026-11: examples/scripts/run_im_sensorless_mras.py
+  exists and calls itself PARTIAL: V/f-driven, not IFOC.)
 
 ## 4. Documentation — deferred to v1.5.0 final
 
-- [ ] 4.1 `docs/v2/motors-sensorless.md` covering SMO and MRAS algorithms, equations, default-gain derivation, failure-mode discussion.
+- [x] 4.1 `docs/v2/motors-sensorless.md` covering SMO and MRAS algorithms, equations, default-gain derivation, failure-mode discussion.
+  (Reconciled 2026-11: docs/motors-sensorless.md.)
 - [ ] 4.2 Cross-link from existing motors index page.
 
 ## 5. Python API surface
 
 - [x] 5.1 Re-export `SlidingModeObserver` and `FluxMRASObserver` from `python/pulsim/__init__.py` (`__all__`).
 - [ ] 5.2 `pulsim.catalog()` discovery entry for both blocks (deferred with the showcases).
+  (Reconciled 2026-11: p.catalog() lists neither observer.)
 
 ## 6. Validation + release
 
 - [x] 6.1 `openspec validate add-sensorless-motor-observers --strict` clean.
 - [x] 6.2 Local pytest passes (4/4). Cross-platform CI pending PR.
-- [ ] 6.3 Bundle in the same release as the IM proposal (1.5.0).
+- [x] 6.3 Bundle in the same release as the IM proposal (1.5.0).
+  (Reconciled 2026-11: the 1.5.0 CHANGELOG entry lists both observers
+  (item 2.3).)
 - [ ] 6.4 Archive: `openspec archive add-sensorless-motor-observers --yes`.

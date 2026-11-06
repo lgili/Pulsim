@@ -40,25 +40,39 @@
 
 ## 3. YAML support — deferred
 
-- [ ] 3.1 Extend the YAML parser for `device_type: induction_motor`.
-- [ ] 3.2 Schema validation + descriptive error when required fields missing.
-- [ ] 3.3 Round-trip test: YAML → builder → simulate → expected steady-state.
+- [x] 3.1 Extend the YAML parser for `device_type: induction_motor`.
+  (Reconciled 2026-11: core/include/pulsim/yaml/loader.hpp, type
+  induction_motor (1.5.0, PR #54).)
+- [x] 3.2 Schema validation + descriptive error when required fields missing.
+  (Reconciled 2026-11: the loader names the missing field;
+  test_yaml_composite_devices.py covers bad leakage and missing
+  phase_nodes.)
+- [x] 3.3 Round-trip test: YAML → builder → simulate → expected steady-state.
+  (Reconciled 2026-11:
+  test_yaml_chain_wiring.py::test_yaml_chain_wires_induction_motor_end_to_end
+  simulates the YAML plant.)
 
 ## 4. Examples
 
 - [x] 4.1 `examples/scripts/run_im_direct_online_start.py` — DOL start at 400 V / 50 Hz, plots stator current / rotor flux / torque / speed. Validated locally: motor reaches synchronous speed (1500 rpm) at 0 % slip with no load in 1.5 s sim time / 0.2 s wall.
 - [ ] 4.2 `examples/yaml/induction_motor_dol.yaml` — equivalent YAML showcase (deferred with task 3).
 - [ ] 4.3 `examples/scripts/run_im_ifoc_closed_loop.py` — indirect FOC with torque-step response using `MixedDomainBlockChain` (deferred for the sensorless-observer change which depends on it).
+  (Reconciled 2026-11: the script exists, but it runs at T_load = 0
+  with no torque step and does not use MixedDomainBlockChain.)
 
 ## 5. Docs — deferred to v1.5.0 final
 
-- [ ] 5.1 New page `docs/v2/motors-induction.md` covering model equations, parameter identification recipe, IFOC tuning.
+- [x] 5.1 New page `docs/v2/motors-induction.md` covering model equations, parameter identification recipe, IFOC tuning.
+  (Reconciled 2026-11: docs/motors-induction.md.)
 - [ ] 5.2 Link from the motors index page; cross-reference PMSM page.
 
 ## 6. Validation + release
 
 - [x] 6.1 Run `openspec validate add-induction-motor-squirrel-cage --strict` after every spec edit — clean.
 - [x] 6.2 pytest passes locally (4/4). Full cross-platform CI pending the PR.
-- [ ] 6.3 Update `__version__` minor bump to 1.5.0 (motor library extension is a feature add, not a patch).
-- [ ] 6.4 PR + merge + tag + publish.
+- [x] 6.3 Update `__version__` minor bump to 1.5.0 (motor library extension is a feature add, not a patch).
+  (Reconciled 2026-11: done; the version is 2.0.0 now.)
+- [x] 6.4 PR + merge + tag + publish.
+  (Reconciled 2026-11: merged in PR #52 and released with v1.6.0; no
+  v1.5.0 tag exists.)
 - [ ] 6.5 Archive the change after deployment: `openspec archive add-induction-motor-squirrel-cage --yes`.

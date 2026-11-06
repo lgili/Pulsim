@@ -18,11 +18,12 @@ before the next starts. User is approver at every gate.
       §IV.5–IV.8 on stiff variable-step methods
 - [ ] 0.5 Read Cardiff matrix-exponential PE paper (Wang/Niu
       EPSR 2020) and the 2024 Krylov refresh
-- [ ] 0.6 Write `notes/DSED_FOUNDATIONS.md` (~1500 words) covering:
+- [x] 0.6 Write `notes/DSED_FOUNDATIONS.md` (~1500 words) covering:
   - Definition of DSED + event predicates
   - Comparison table: DSED vs PLECS variable-step vs trap+PWL
   - Where path-based partial refactor plugs in
   - 3 fixed-target benchmark scenarios (buck CCM, buck DCM, LLC)
+  (Reconciled 2026-11: notes/DSED_FOUNDATIONS.md, about 2000 words.)
 - [ ] 0.7 Extend `design.md` in this OpenSpec with concrete
       formulas for: event predictor Newton step, RK45 Butcher
       tableau, BDF2 update, step controller PI gains.
@@ -412,9 +413,12 @@ pass (zero regressions).
 - [ ] 5.3 Capture CSV in
       `artigos/04_dsed_methods/benchmarks/results/dsed_per_converter.csv`
       — landing when Phase 5.B completes.
-- [ ] 5.4 Generate figure showing speedup vs converter
+- [x] 5.4 Generate figure showing speedup vs converter
       complexity (n_switches, n_state, switching frequency)
       — pandas script over the per-converter CSV.
+      (Reconciled 2026-11:
+      docs/how-pulsim-works/_figures/output/fig161_dsed_topology_sweep.png
+      (6 topologies), from _figures/fig161_dsed_topology_sweep.py.)
 - [ ] 5.5 Honest write-up: where DSED loses (small circuits
       already fast, smooth dynamics) and where it wins —
       lives in TPEL paper §VII once Phase 5.B numbers settle.
@@ -480,13 +484,17 @@ not blocking the algorithmic story).
   - [ ] Section VI — Results (the captured table from Gate 5)
   - [ ] Section VII — Discussion (when DSED loses)
   - [ ] Section VIII — Conclusion
-- [ ] 6.3 Write `docs/how-pulsim-works/11-discrete-state-event-driven.md`
+- [x] 6.3 Write `docs/how-pulsim-works/11-discrete-state-event-driven.md`
       narrative chapter for the docs site
+      (Reconciled 2026-11: as chapters 11-16 of docs/how-pulsim-works/
+      (11-dsed-engine-overview.md onwards).)
 - [ ] 6.4 Update `docs/performance-tuning.md` with DSED guidance
 - [ ] 6.5 Update `docs/quickstart.md` Python example
 - [ ] 6.6 Write `docs/migration-v2.md` migration guide
-- [ ] 6.7 Update `CHANGELOG.md` for v2.0.0 release
-- [ ] 6.8 Tag v2.0.0; GitHub release notes
+- [x] 6.7 Update `CHANGELOG.md` for v2.0.0 release
+  (Reconciled 2026-11: the [2.0.0] entry exists.)
+- [x] 6.8 Tag v2.0.0; GitHub release notes
+  (Reconciled 2026-11: v2.0.0 is tagged.)
 - [ ] 6.9 Update `README.md` headline numbers + features list
 - [ ] 6.10 Cross-reference from v1.4.0 TPEL paper §VIII.D
       "Limitations and future work" to the new paper
@@ -506,9 +514,13 @@ identical output to PWL mode within RMSE tolerance.
 
 ## Post-implementation (archival)
 
-- [ ] 7.1 PR `feat/path-based-dsed-engine` → main
-- [ ] 7.2 Squash + merge after user review
-- [ ] 7.3 Tag v2.0.0 on main
+- [x] 7.1 PR `feat/path-based-dsed-engine` → main
+  (Reconciled 2026-11: PR #62, merged 2026-05-28.)
+- [x] 7.2 Squash + merge after user review
+  (Reconciled 2026-11: merged with a merge commit (841511e5), not
+  squashed.)
+- [x] 7.3 Tag v2.0.0 on main
+  (Reconciled 2026-11: v2.0.0 is tagged (2026-09-09).)
 - [ ] 7.4 Archive this OpenSpec to
       `openspec/changes/archive/YYYY-MM-DD-add-path-based-dsed-engine/`
 - [ ] 7.5 Update `openspec/project.md` to mention the DSED

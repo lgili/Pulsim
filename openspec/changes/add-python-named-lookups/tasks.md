@@ -90,9 +90,10 @@
 
 - [x] 5.1 `openspec validate add-python-named-lookups --strict`
       passes.
-- [ ] 5.2 Existing `python/tests/` pytest suite green (no
+- [x] 5.2 Existing `python/tests/` pytest suite green (no
       regressions in `device_loss_summary`, `node_id_of`, or
-      transient solver behavior).
+      transient solver behavior). (Reconciled 2026-11: the full
+      suite passes with `python/tests/test_named_lookups.py` in it.)
 - [x] 5.3 Build artefacts re-export the new symbols from
       `pulsim.__init__` (`v`, `i`, `power` are methods so no
       module-level exports needed; verify `pulsim.NameNotFoundError`

@@ -15,12 +15,20 @@
 
 ## 1. Kernel device — deferred to a follow-up release
 
-- [ ] 1.1 Create `core/include/pulsim/magnetics/hysteretic_inductor.hpp` with `HystereticInductor` device.
-- [ ] 1.2 Implement simplified Jiles-Atherton `dM/dB` ODE with parameters `Ms`, `a`, `alpha`, `k`, `c`.
+- [x] 1.1 Create `core/include/pulsim/magnetics/hysteretic_inductor.hpp` with `HystereticInductor` device.
+  (Reconciled 2026-11:
+  core/include/pulsim/magnetics/hysteretic_inductor.hpp; the device is
+  a Newton device, CircuitBuilder.add_hysteretic_core_inductor.)
+- [x] 1.2 Implement simplified Jiles-Atherton `dM/dB` ODE with parameters `Ms`, `a`, `alpha`, `k`, `c`.
+  (Reconciled 2026-11: JilesAthertonModel, parameters Ms, a, alpha, k,
+  c.)
 - [ ] 1.3 Tustin integrator (default) + BDF1 path for stiff regimes near saturation.
 - [ ] 1.4 Stamp through the existing inductor branch — flux state already in MNA; magnetization `M` is the extra device state.
 - [ ] 1.5 Output channels: `M`, `B`, `H`, `dM/dH` (instantaneous permeability).
 - [ ] 1.6 GoogleTest unit tests: linear-regime equivalence vs plain `Inductor`, analytical major-loop match within 5 %.
+  (Reconciled 2026-11: core/tests/layer2/test_jiles_atherton_core.cpp
+  tests monotonicity, inversion and parameter refusal, not equivalence
+  with Inductor or a major-loop match.)
 
 ## 2. Python bindings + helpers
 
@@ -32,8 +40,11 @@
 
 ## 3. YAML support — deferred (waiting on the C++ device)
 
-- [ ] 3.1 Extend the YAML parser for `device_type: hysteretic_inductor`.
+- [x] 3.1 Extend the YAML parser for `device_type: hysteretic_inductor`.
+  (Reconciled 2026-11: loader type hysteretic_inductor (1.5.0).)
 - [ ] 3.2 Round-trip test: YAML → builder → simulate → expected hysteresis loop within 5 %.
+  (Reconciled 2026-11: test_yaml_composite_devices.py checks the
+  branches it creates; no test simulates a loop from YAML.)
 
 ## 4. Examples — deferred to v1.5.0 final
 
@@ -50,5 +61,6 @@
 
 - [x] 6.1 `openspec validate add-magnetic-hysteresis-jiles-atherton --strict` clean.
 - [x] 6.2 Local pytest passes (7/7). Cross-platform CI pending PR.
-- [ ] 6.3 Ship in the 1.5.0 release (bundled with the other Phase 2 changes).
+- [x] 6.3 Ship in the 1.5.0 release (bundled with the other Phase 2 changes).
+  (Reconciled 2026-11: the 1.5.0 CHANGELOG entry lists it (item 2.2).)
 - [ ] 6.4 Archive: `openspec archive add-magnetic-hysteresis-jiles-atherton --yes`.

@@ -5,8 +5,9 @@
 > effect and a workaround. This file is the 1.3 catalogue. Its sections
 > were not re-verified for 2.0, except two. The "Transient engines
 > (2.0)" defects still reproduce; the chatter circuit aborts at 10, 5
-> and 2 ns and runs at 50 ns. In the SPICE importer section, `.subckt`
-> is now flattened.
+> and 2 ns and runs at 50 ns. Two entries are out of date: `.subckt`
+> is now flattened, and since 1.4.0 the AC sweep has factorised with
+> the in-house `PulsimComplexSparseLuSolver`, not `Eigen::SparseLU`.
 
 This file catalogues every gap we knowingly ship in **pulsim 1.3.0** —
 deliberately deferred work, partial implementations, and features whose

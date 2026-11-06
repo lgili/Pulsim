@@ -185,7 +185,9 @@
       "in-house complex solver" requirement lands.
 - [x] 7.3 `openspec validate add-pulsim-complex-sparse-lu --strict`
       — passes (`Change 'add-pulsim-complex-sparse-lu' is valid`).
-- [ ] 7.4 Open PR `feat/pulsim-complex-sparse-lu` → main.
+- [x] 7.4 Open PR `feat/pulsim-complex-sparse-lu` → main.
+      (Reconciled 2026-11: shipped in PR #40, the v1.4.0 release,
+      merged 2026-05-25.)
 - [x] 7.5 v1.4.0 release: version bumped to 1.4.0 in
       `pyproject.toml`, `python/pulsim/__init__.py`, `CITATION.cff`.
       Full CHANGELOG entry added covering: AC-sweep migration to
