@@ -1952,6 +1952,65 @@ void init_module(py::module_& m) {
             "Bytes held by the contiguous sample buffer.")
         .def_readonly("event_iteration_count",
                        &SimulationResult::event_iteration_count)
+        // Per-sample record of the STAMPED switch / diode mask
+        // (result.hpp, `switch_state_bits`). Unpacked here into a
+        // (num_steps, num_switches) bool array; column j is bit j of
+        // the SwitchStateMask, i.e. `builder.switch_index_of(name)`.
+        .def_property_readonly("switch_states",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.switch_states_complete()) {
+                    return py::none();
+                }
+                const auto n = static_cast<py::ssize_t>(r.times.size());
+                const auto nb = static_cast<py::ssize_t>(r.num_switch_bits);
+                const Size stride = r.switch_state_stride;
+                py::array_t<bool> out(std::vector<py::ssize_t>{n, nb});
+                auto* ptr = out.mutable_data();
+                const std::uint8_t* src = r.switch_state_bits.data();
+                for (py::ssize_t k = 0; k < n; ++k) {
+                    const std::uint8_t* row =
+                        src + static_cast<std::size_t>(k) * stride;
+                    for (py::ssize_t j = 0; j < nb; ++j) {
+                        ptr[k * nb + j] =
+                            ((row[j / 8] >> (j % 8)) & 1U) != 0U;
+                    }
+                }
+                return std::move(out);
+            },
+            "Per-sample record of the switch / diode mask the solver "
+            "STAMPED for the solve that produced states[k], as a "
+            "(num_steps, num_switches) bool array (column j = "
+            "builder.switch_index_of(name)). A switched branch's "
+            "current is exactly (g_on if bit else g_off) * v_branch. "
+            "None when the result carries no record (a result not "
+            "produced by a kernel engine). Unpacked on each access; "
+            "the kernel stores ceil(num_switches/8) bytes per sample.")
+        .def_property_readonly("switch_states_unsolved",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.switch_states_complete()) {
+                    return py::none();
+                }
+                const auto n = static_cast<py::ssize_t>(r.times.size());
+                py::array_t<bool> out(n);
+                auto* ptr = out.mutable_data();
+                std::fill(ptr, ptr + n, false);
+                for (const Size k : r.switch_state_unsolved) {
+                    if (static_cast<py::ssize_t>(k) < n) {
+                        ptr[k] = true;
+                    }
+                }
+                return std::move(out);
+            },
+            "Per-sample bool: True where states[k] was NOT produced by "
+            "a solve under switch_states[k] — today only a sample 0 "
+            "seeded from initial_state / resume_from, whose mask is "
+            "the bits the solver carried in. None without a record.")
+        .def_property_readonly("switch_states_bytes",
+            [](const SimulationResult& r) {
+                return r.switch_state_bits.size() +
+                       r.switch_state_unsolved.size() * sizeof(Size);
+            },
+            "Bytes held by the stamped-mask record.")
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
         .def_readonly("inductor_guard_actions",

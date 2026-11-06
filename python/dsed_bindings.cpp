@@ -242,6 +242,37 @@ py::array_t<double> reconstruct_full_states(
     return out;
 }
 
+/// Per-sample switch / diode mask as an (n_samples, n_switches) bool
+/// array — the same record `SimulationResult.switch_states` carries
+/// on the pwl / trbdf2 engines. Every DSED sample's full MNA state is
+/// reconstructed THROUGH that sample's mask (reconstruct_full_states),
+/// so i = g(mask)·v holds at every sample by construction. Only the
+/// native SwitchStateMask path has a typed mask; the PyMask path (no
+/// PWL diodes, reduced states only) returns an empty array.
+template <class ResultT>
+py::array_t<bool> sample_masks_to_array(const ResultT& res) {
+    using MaskT = typename decltype(res.sample_masks)::value_type;
+    if constexpr (std::is_same_v<MaskT, PyMask>) {
+        return py::array_t<bool>(std::vector<py::ssize_t>{0, 0});
+    } else {
+        const auto n = static_cast<py::ssize_t>(res.sample_masks.size());
+        if (n == 0 || res.sample_masks.size() != res.times.size()) {
+            return py::array_t<bool>(std::vector<py::ssize_t>{0, 0});
+        }
+        const auto n_sw =
+            static_cast<py::ssize_t>(res.sample_masks[0].size());
+        py::array_t<bool> out(std::vector<py::ssize_t>{n, n_sw});
+        auto* ptr = out.mutable_data();
+        for (py::ssize_t i = 0; i < n; ++i) {
+            const auto& m = res.sample_masks[static_cast<std::size_t>(i)];
+            for (py::ssize_t j = 0; j < n_sw; ++j) {
+                ptr[i * n_sw + j] = m.get(static_cast<pulsim::Size>(j));
+            }
+        }
+        return out;
+    }
+}
+
 template <class MaskT>
 py::dict ped_result_to_dict(
     const pulsim::dsed::PEDResult<MaskT>& res) {
@@ -265,6 +296,7 @@ py::dict ped_result_to_dict(
     py::dict d;
     d["times"] = std::move(times_arr);
     d["states"] = std::move(states_arr);
+    d["switch_states"] = sample_masks_to_array(res);
     d["n_accept"] = res.n_accept;
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
@@ -320,6 +352,7 @@ py::dict ped_result_auto_to_dict(
     py::dict d;
     d["times"] = std::move(times_arr);
     d["states"] = std::move(states_arr);
+    d["switch_states"] = sample_masks_to_array(res);
     d["n_accept"] = res.n_accept;
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;

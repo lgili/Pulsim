@@ -346,6 +346,13 @@ class _PEDSimulationResult:
     * ``cpu_time_seconds`` — wall-clock from the PED scheduler
     * ``event_iteration_count`` / ``commutation_events`` — empty lists
       (PED uses a different event model)
+    * ``switch_states`` — the per-sample mode mask, ``(n, n_switches)``
+      bool, the same record the pwl / trbdf2 engines carry. Each full
+      MNA sample is reconstructed THROUGH that sample's mask, so a
+      switched branch's current is exactly ``g(bit) · v`` there.
+      ``None`` when the kernel returned only reduced states (no node
+      voltages to apply it to) or no typed mask (the Python-adapter
+      path, which never carries PWL diodes).
     """
 
     def __init__(
@@ -354,6 +361,7 @@ class _PEDSimulationResult:
         states: list,
         *,
         states_full=None,
+        switch_states=None,
         n_accept: int = 0,
         n_reject: int = 0,
         n_events: int = 0,
@@ -396,6 +404,16 @@ class _PEDSimulationResult:
         # for API-compat with code that destructures both result types.
         self.event_iteration_count: list = []
         self.commutation_events: list = []
+        sw = None
+        if switch_states is not None and full is not None:
+            sw = _np.asarray(switch_states, dtype=bool)
+            if sw.ndim != 2 or sw.shape[0] != len(times):
+                sw = None
+            else:
+                sw.setflags(write=False)
+        self.switch_states = sw
+        self.switch_states_unsolved = (
+            _np.zeros(len(times), dtype=bool) if sw is not None else None)
 
     @property
     def states_bytes(self) -> int:
@@ -695,6 +713,7 @@ def run_dsed_from_builder(
                 times=times,
                 states=states,
                 states_full=native_res.get("states_full"),
+                switch_states=native_res.get("switch_states"),
                 n_accept=native_res.get("n_accept", 0),
                 n_reject=native_res.get("n_reject", 0),
                 n_events=native_res.get("n_events", 0),
