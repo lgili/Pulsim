@@ -1,8 +1,10 @@
 ## 0. Preconditions
 
-- [ ] 0.1 (Open. Until it lands, the guide's diode charge-balance block
-      carries a strict `doctest: xfail` that fails the suite as soon as the
-      balance closes, forcing the annotation's removal.) Rebase the implementation branch onto the merge of
+- [x] 0.1 (Done 2026-11-06 as a merge of `fix/v2-polish-bucket-a` @
+      93020311, which contains `fix/v2-diode-record`: conflicts in
+      CHANGELOG.md (both sections kept) and topology.py (the base's fuller
+      V_th / V_f text kept). Both xfail blocks then passed, as designed;
+      the annotations are gone and the checks assert. See 11.1.) Rebase the implementation branch onto the merge of
       `fix/v2-diode-record` (the per-sample switch-state record). The
       guide's charge-balance example (4.4) asserts closure for
       `V_th > 0` diodes and must fail without it. Do not weaken the
@@ -201,9 +203,9 @@
 
 - [ ] 8.1 (Partly done: the Linux / 3.12 leg of `python-tests` installs
       matplotlib, so the `requires=matplotlib` blocks run there. The
-      `generate_stubs.py --check` step is not added yet: its byte-for-byte
-      output depends on the pybind11 version of the build environment,
-      which CI does not pin, and it could not be checked on Linux here.)
+      pybind11 version is now pinned (11.2), so `--check` has one
+      expected output; the step is still not added, because stubgen's
+      output on Linux has not been compared with macOS here.)
       `.github/workflows/ci.yml`: add a job, or extend the Linux 3.12
       leg, that installs `.[dev]` plus matplotlib. It runs
       `python scripts/generate_stubs.py --check` and the full pytest, so
@@ -258,8 +260,107 @@ reproduced every friction item.
 - [x] 10.7 `.scratch/` is git-ignored, so an sdist built from a working
       tree does not ship scratch files; the unknown-attribute message no
       longer names pulsim 1.0.0.
-- [ ] 10.8 Library defects found, not fixed in this change:
-      `make_pwm_switch_fn` edge jitter; `res.v` of a ground name;
-      `diode_specs` sampling `V_R` at the commutation instant; the
-      TR-BDF2 `V_th = 0` bridge; `res.i` on a Shockley diode pointing to
-      a summary that omits it; `ThreePhaseVsiResult` not exported.
+- [x] 10.8 Library defects found. Fixed since: `res.v` of a ground name
+      (11.3); `diode_specs` sampling `V_R` at the commutation instant (the
+      record branch reads it one `t_rr` after the turn-off: 0.988 W
+      against the expected ~1 W on the 3.4 buck). The rest are follow-ups
+      in 12.
+
+## 11. Review round 2 (after the naive agents)
+
+- [x] 11.1 Merged base (0.1). Re-measured every number the guide prints
+      on the merged code: only 3.4's diode run loss moved (2.456 ->
+      2.453 W). Re-checked traps: trap 13's TR-BDF2 `V_th = 0` bridge is
+      still half-wave (318.79 V, 12.91 V pp), now with `BR__D1`/`BR__D3`
+      at 0 A and `BR__D2`/`BR__D4` at 0.318 A instead of one diode at
+      299 A; `V_th = 0.7` reads 322.05 V on both engines and every bridge
+      diode 0.161 A; the VSI node-a KCL closes to 2.4e-10 A. The 3.4
+      reverse-recovery block and the 6.1 diode balance (199.4 mC) now
+      assert; the second 6.1 example (the workaround) is gone. Stub
+      regenerated: `switch_states`, `switch_states_bytes`,
+      `switch_states_unsolved`, `SolverSnapshot.stamped_mask`; the overlay
+      types `switch_states` / `switch_states_unsolved` as bool arrays.
+- [x] 11.2 pybind11 3.x. Reproduced in a scratch venv (pybind11 3.1.0,
+      stubgen 3.0.0, build at -j2): 4 stub-test failures and 812 changed
+      lines from `--check`, most of them richer types (design D4.4).
+      Pinned `pybind11>=3.1,<3.2` (`[build-system]`, the three
+      `CIBW_BEFORE_BUILD_*`), FetchContent `v3.1.0`; the stub is
+      generated from 3.1 and records it; `--check` on another generation
+      fails naming both; numeric spellings normalised to `float`/`int`;
+      duplicate enum `__eq__`/`__ne__` overloads merged (mypy rejected
+      them); `_pybind11_conduit_v1_` ignored by the coverage test; the
+      snippet runner compares pybind11's three spellings of `float` as
+      equal. Stub, snippet and guide tests pass on a 2.12 and a 3.1
+      build; `--check` passes on 3.1 and refuses 2.12 with the message.
+      This worktree's extension is now the 3.1 build.
+- [x] 11.3 `res.v(<ground>)` returns zeros of the record's length on the
+      fixed, TR-BDF2 and DSED results (`_result_v`; `AdaptiveResult` has
+      no `v`); `average_power_at_node` at ground is 0.
+      `test_result_v_ground.py`. Trap 14 replaced.
+- [x] 11.4 `switch_specs` soft edges. `losses.py` charges each edge
+      `E_ref * |V_blk|/V_ref * |I|/I_ref` with `V_blk` measured across the
+      OPEN switch (before a turn-on, after a turn-off); the docstrings
+      said "the sample just before the edge". Measured on the VSI of 3.7
+      (4 mJ / 3.5 mJ at 600 V, 50 A, 0-40 ms): with 1 us dead time
+      `HSa` P_sw 11.29 W, soft edges 0.6 mJ of 0.45 J (V_blk median
+      0.82 V); with none 22.64 W, soft edges charged at 599.98 V (the
+      complementary switch takes the current at the same instant). Guide
+      3.4 / 3.7 and both docstrings corrected.
+- [x] 11.5 VSI diodes. Measured (merged code, 1 us dead time, 20-40 ms):
+      `INV__Dha` conducts on 12.9 % of samples, 11.9 % with `HSa` gated
+      on (dead time 2.0 %), carrying 1.96 % of `|i_a|` =
+      R_on/(R_on+R_d); with no dead time 0 %. Guide 3.7 and the
+      `add_three_phase_vsi` docstring corrected.
+- [x] 11.6 RMS of pulsed currents. Buck 48 -> 12 V, D = 0.25, 100 kHz,
+      MOSFET over 4-6 ms: `time_rms` 1.4942 / 1.4993 / 1.5019 A at dt =
+      1e-7 / 5e-8 / 2.5e-8; `sqrt(time_average(i**2))` 1.5044 A at all
+      three; analytic 1.5043 A. No public exact-in-step integral exists
+      (`_result_views.pl_integral_product` is the same linear form, with
+      right limits only on DSED). New trap 14 and a short-version line.
+- [x] 11.7 Minors: `res.i` reference directions, current-source sign and
+      `t` as a sample index (section 4, and the `res.v` docstring);
+      `ripple_pp` on sparse variable grids (6.2); the 17x whole-run
+      factor with its spec (3.4); `TimeStats` fields (3.2);
+      `docs/losses-and-thermal.md` in section 9 and `llms.txt`;
+      `build-tests/` git-ignored; the sliding-mode warning no longer
+      says "in DCM" as the only cause and no longer claims the average
+      is always right (it names the half-wave bridge); the
+      `add_bridge_rectifier` Returns text and garbled diagram replaced.
+      Guide 32505 bytes (budget 32768).
+- [x] 11.8 Validation on the merged tree with the pybind11 3.1 build:
+      full Python suite 1809 passed, 4 skipped, 8 xfailed, 0 failed
+      (329 s); `ruff check python/ scripts/generate_stubs.py` clean;
+      `openspec validate --all --strict` 37 passed; `--check` up to
+      date. The scratch venv and both scratch builds were deleted.
+
+## 12. Library follow-ups (not fixed here)
+
+- [ ] 12.1 `make_pwm_switch_fn` (`core/include/pulsim/sources/pwm_switch_fn.hpp`)
+      compares `fmod(t/T, 1) < duty` in floating point: on a `dt` grid
+      edges jitter by one step (49/50/51 on-steps of 50 at 100 kHz,
+      dt = 1e-7). Snap the phase to the grid (a relative epsilon). Audit
+      `make_dead_time_pwm_pair_fn` too (48/49 at D = 0.5 with 2e-7 dead
+      time). The guide's 3.2 on-step block then prints `[50]` and must be
+      updated.
+- [ ] 12.2 TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
+      runs half-wave (318.79 V, 12.91 V pp against 322.06 V, 6.38 V pp
+      with `dt`). The sliding-mode warning names `engine='auto'` even
+      when `engine='trbdf2'` was requested.
+- [ ] 12.3 `res.i()` on a Shockley diode raises `NotImplementedError`
+      pointing to `device_loss_summary`, which omits Shockley diodes.
+- [ ] 12.4 `device_loss_summary` / `device_thermal_summary` have no
+      `t_from` / `t_to` window (all three naive agents hand-rolled one).
+- [ ] 12.5 `device_loss_summary`'s `i_rms` reads pulsed switch currents
+      low on a fixed grid, like `time_rms` (1.6019 / 1.6074 / 1.6101 A at
+      dt = 1e-7 / 5e-8 / 2.5e-8 against `sqrt(P_avg/R_on)` = 1.6129 A on
+      the 11.6 buck); its `P_avg` is right.
+- [ ] 12.6 `ThreePhaseVsiResult` / `BridgeRectifierResult` are not
+      exported at the top level; the DSED refusal for a floating neutral
+      lists "floating capacitors" and "nonlinear devices" and points to
+      `notes/DSED_BRIDGE_DESIGN.md`, which users cannot see.
+- [ ] 12.7 `simulate(engine='dsed')` with no `switch_fn` warns that it
+      will poll "this plain Python switch_fn".
+- [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
+      bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
+      the 3.7 VSI). Physically the complementary turn-on is the hard
+      one; the soft turn-off should cost about 0.

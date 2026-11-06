@@ -6,7 +6,10 @@ The `pulsim` package SHALL ship a PEP 561 marker file `py.typed` and a
 type stub `_pulsim.pyi` for the native module `pulsim._pulsim`, in the
 wheel and in the `build/python/pulsim` build-tree copy. The stub SHALL
 be generated from the built extension by `scripts/generate_stubs.py`
-using a pinned `pybind11-stubgen` version, SHALL be committed to the
+using a pinned `pybind11-stubgen` version, from an extension built with
+the pybind11 minor that `pyproject.toml` `[build-system]` pins (the same
+minor as the CMake `FetchContent` fallback and the cibuildwheel
+before-build steps), SHALL be committed to the
 repository, and SHALL declare the members the Python layer attaches to
 native classes (at least `SimulationResult.v`, `SimulationResult.i`,
 `SimulationResult.power`, `SimulationResult.engine_used` and
@@ -52,9 +55,16 @@ check the following:
   whether each has a default are the same in the stub as in the
   signature on the first line of the callable's `__doc__`.
 
+That test SHALL pass whichever pybind11 the extension was built with
+(2.x or 3.x): it compares names and parameters, ignores pybind11's own
+interop members (`_pybind11_conduit_v1_`), and accepts a field declared
+either as an attribute or as a property with a setter.
+
 In addition, one designated CI job SHALL run
 `scripts/generate_stubs.py --check`, which regenerates the stub and
-fails on any textual difference or on any stubgen error.
+fails on any textual difference or on any stubgen error. Against an
+extension built with another pybind11 minor it SHALL fail with a message
+naming both versions instead of a diff.
 
 #### Scenario: New binding without a stub update
 - **GIVEN** a commit that adds a method `CircuitBuilder.add_foo` to the
@@ -74,6 +84,14 @@ fails on any textual difference or on any stubgen error.
 - **WHEN** the designated CI job runs `scripts/generate_stubs.py --check`
   on an up-to-date tree
 - **THEN** it exits 0 and reports no difference
+
+#### Scenario: Extension built with another pybind11
+- **GIVEN** the stub generated from the pinned pybind11 3.1 and an
+  extension built with pybind11 2.12
+- **WHEN** the Python test suite runs
+- **THEN** the stub freshness test passes
+- **AND** `scripts/generate_stubs.py --check` exits 1 naming pybind11
+  2.x and 3.1, without printing a diff
 
 ### Requirement: Binding Signatures Render as Valid Python
 
@@ -108,3 +126,4 @@ positional call used in the repository.
 - **WHEN** `scripts/generate_stubs.py` runs `pybind11-stubgen` with
   `--exit-code`
 - **THEN** stubgen reports zero errors and writes the stub
+

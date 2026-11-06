@@ -227,6 +227,28 @@ pybind11 versions:
    frequency=50.0)` must be rejected. The trial did reject it, with
    "did you mean `v_amplitude`?". The check is skipped when mypy is not
    installed, and it runs in the stub-check CI job.
+4. **One pybind11 minor.** The first stub came from a CMake build that
+   fetched pybind11 2.12, while CI and cibuildwheel installed the latest
+   (3.1.0) through the unpinned `pybind11>=2.10`. On a 3.1 build the
+   suite failed 4 tests, and `--check` printed 812 changed lines. Most
+   of that is real type information, not noise: `def_readwrite` fields
+   become property/setter pairs, input lists `collections.abc.Sequence`,
+   Eigen arrays `Annotated[NDArray[float64], "[m, 1]"]`, and tuples get
+   element types. 3.0 and 3.1 also spell a `float` parameter
+   differently (`typing.SupportsFloat`, then `typing.SupportsFloat |
+   typing.SupportsIndex`). A text normaliser between generations would
+   have to throw that information away, so the build pins one minor:
+   `pybind11>=3.1,<3.2` in `[build-system]` and the cibuildwheel
+   before-build steps, and `FetchContent` tag `v3.1.0`. The stub header
+   records the generation, read from stubgen's raw output, and `--check`
+   against another one fails with a message naming both. The script
+   still normalises the numeric spellings to `float` / `int` (626 of
+   them), so the stub stays readable. The dependency-free test passes
+   on 2.12 and 3.1 builds:
+   it ignores `_pybind11_conduit_v1_`, and both spell a field as a
+   property at runtime. The snippet runner compares the three spellings
+   of `float` as equal, so the guide shows the pinned 3.1 line. Measured
+   with pybind11 3.1.0: a 2500-line stub with 590 `def`s.
 
 ### D5. How snippets are executed
 
