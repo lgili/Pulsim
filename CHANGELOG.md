@@ -40,17 +40,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blips (f_sw 720 Hz). A counts-only spec judges against the median
   peak of the material stretches, not the run's peak (a 4 kA inrush
   had dropped 237 light-load recoveries).
-* **Diode chatter is not a turn-off, and is reported.** A gap that
-  never reverse-biases the diode beyond `2·V_th` (step averages) and that
-  no other switch forced is merged into the conduction around it
-  (`n_chatter_gaps`), with a `RuntimeWarning` when the gaps cover 1 %
-  of the conduction time. A `V_th = 0.7` diode with 100 nF across it on
-  `engine='pwl'` counted 4580 turn-offs on a 100 kHz boost (f_sw
-  1.53 MHz, no warning); it now counts 299, as at `V_th = 0`.
+* **Possible diode chatter is reported, not hidden.** A `V_th = 0.7`
+  diode with 100 nF across it on `engine='pwl'` records 4580 turn-offs on
+  a 100 kHz boost (f_sw 1.53 MHz): the trapezoidal rule reflects each ON
+  step against the capacitor. Every diode entry now reports
+  `n_short_blocking_gaps` (blocking gaps of at most 32 steps that never
+  reverse-bias the diode beyond `2·V_th`), and on the fixed-step engine
+  a `RuntimeWarning` says when they make up most of the turn-offs that
+  they may be chatter, which fields that inflates (`n_turn_off_events`,
+  `f_sw_estimate`, `E_sw_total`) and when a smaller dt helps. The counts
+  stay as recorded: merging those gaps into one conduction also merged
+  real source-commutated turn-offs into a small reverse voltage (a
+  100 kHz pulsed charger read 1 turn-off instead of 100, E_sw 100× low),
+  and missed paired diodes that chatter in the same steps.
 * **DSED junction temperature uses the step-start power.** `T_j_trace`
   was built from the left-limit samples only and disagreed with
   `P_cond_avg` by up to 2 % on `engine='dsed'`; it now agrees with
-  the fixed engine to 0.3 %.
+  the fixed engine to 0.3 %. It keeps one value per `result.times`
+  sample, and `T_j_avg` is a time average (not a plain mean over the
+  event-clustered samples).
 * **Reverse-recovery `V_R` is read at a physical instant,
   `t_off + t_rr`.** New `diode_specs` key `t_rr` (default 100 ns). The
   previous window of two MEAN steps after the turn-off was a different
@@ -108,10 +116,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not a solve, and with `store_every > 1` a row is the mask of the last
   solve before the sample, so duties and integrals alias on a decimated
   grid.
-* A sample 0 seeded with `initial_state` is read with the first solve's
-  mask (it reported a conducting diode at 0 A on that one sample); a
-  `resume_from` sample 0 carries its solve's bits and is no longer
-  flagged unsolved.
+* A sample 0 seeded with `initial_state` has no defined switched-branch
+  current (its state came from a solve this run did not record):
+  `result.i()` returns the first solved sample's value for a switch or
+  diode there (every `i0=` / `c0=` run has such a row) and the loss and
+  thermal summaries start at the first solved sample. Reading it with
+  the carried bits reported a conducting diode at 0 A; reading it with
+  the first solve's mask put 48 kA through a buck's MOSFET when the seed
+  sat on a gate edge.
+* A `resume_from` sample 0 records the mask its state was solved under,
+  carried in the new `SolverSnapshot.stamped_mask` (pickled; an older
+  snapshot without it resumes with row 0 flagged unsolved). A TR-BDF2
+  run that ends exactly on a gate edge stores that sample under the
+  pre-edge mask and then re-decides the diodes, so `diode_on` +
+  `switch_fn(t)` labelled the resumed row with the post-edge circuit.
 
 ## [2.0.0] — 2026-09-08
 

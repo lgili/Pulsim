@@ -56,11 +56,16 @@ commutation the stored sample is therefore the state just BEFORE the
 switch flips (a TR-BDF2 landing, a DSED event), and the new mode appears
 from the next sample on. A sample 0 seeded with `initial_state` was not
 solved in the run (`result.switch_states_unsolved`): its recorded bits
-are the mask carried in, and the reports read it with the first solve's
-mask. A `resume_from` sample 0 carries the bits of the solve that
-produced it and is not flagged. The raw `result.switch_states` keeps the
-carried bits on such a row; check `switch_states_unsolved` before reading
-it directly.
+are the mask carried in, which say nothing about the solve that produced
+its state, so a switched branch has no defined current there.
+`result.i()` returns the first solved sample's value for a switch or
+diode on that row (a real current one step late, never a guessed
+`g_on·V`; every `i0=` / `c0=` run has such a row), and the loss
+and thermal summaries start at the first solved sample (one step less
+than the run on a fixed grid). A `resume_from` sample 0 is the previous
+run's last sample and records the mask it was solved under
+(`SolverSnapshot.stamped_mask`); it is flagged only when the snapshot
+lacks that field (hand-built, or pickled before it existed).
 
 Time integrals (`i_avg`, `i_rms`, `P_avg`, `E_total`, the conduction
 model, the forward charge of a recovery) integrate each step as the line
@@ -90,7 +95,7 @@ PSIM-style datasheet annotations add:
 | Field | Source |
 |---|---|
 | `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `E_sw_dropped`, `n_turn_off_events_capped`, `n_turn_off_events_unresolved`, `f_sw_estimate`, `t_rr` | diode + `diode_specs` |
-| `n_chatter_gaps` | every diode (see below) |
+| `n_short_blocking_gaps` | every diode (see below) |
 | `E_sw_on_total`, `E_sw_off_total`, `n_turn_on_events` | switch + `switch_specs` |
 | `P_core_avg`, `E_core_total`, `B_peak` | inductor + `core_loss_specs` |
 
@@ -170,21 +175,28 @@ jumped at the turn-off, so the reading is the plateau. Use a step no
 longer than `t_rr` around the turn-offs (`engine='pwl'` with
 `dt <= t_rr`, or a smaller `dt_max`), or pass the datasheet `t_rr`.
 
-A turn-off is the start of BLOCKING. A gap in a diode's conduction
-across which no step average of `v_D` falls below `−2·V_th`, and that no
-other switch forced (no other bit of the recorded mask flips in it), is
-chatter inside one conduction and is not counted (`n_chatter_gaps`).
-The fixed engine produces it on a `V_th > 0` diode with a capacitor
-across it: the trapezoidal rule reflects each ON step of the 0.1 ns
-`Cs`–`g_on` mode from `+V_th` to about `−V_th`, the stamp drops to OFF,
-and the inductor recharges `Cs` to `V_th` within a few steps, over and
-over. A 100 kHz boost with 100 nF across D1 counted 4580 turn-offs at
-`dt = T/400` (15887 at `T/2000`) instead of 299. The stamped current,
-duty and conduction loss still follow what the solver carried (the
-current detours through `Cs` in each gap), so a `RuntimeWarning` names
-the chatter when the gaps cover 1 % or more of the conduction time. A
-smaller `dt` does not cure it (the gaps covered 28 % of the conduction
-at `T/400` and 56 % at `T/2000`); `engine='auto'` does.
+Every recorded conduction stretch counts: turn-offs, `f_sw_estimate`,
+`Q_F` and `E_rr` are read from the record as the solver stamped it.
+That includes numerical chatter. The fixed engine produces it on a
+`V_th > 0` diode with a capacitor across it (or in a tight loop with
+it): for `dt > 2·τ`, `τ = C·(1/g_on + R_loop)`, the trapezoidal rule
+reflects each ON step from `+V_th` to about `−V_th`, the stamp drops to
+OFF, and the circuit recharges the capacitor to `V_th` within a few
+steps, over and over. A 100 kHz boost with 100 nF across D1 records 4580
+turn-offs at `dt = T/400` (15887 at `T/2000`) instead of 299.
+`n_short_blocking_gaps` counts the gaps that look like it: at most 32
+steps long, with no step average of `v_D` below `−2·V_th`. On the
+fixed-step engine a `RuntimeWarning` fires when they are at least half
+the turn-offs and cover 1 % or more of the conducting time; it says the
+gaps MAY be chatter (a real turn-off into a small reverse voltage
+matches too: a pulsed charger blocking 0.5 V for 5 steps) and that, if
+they are, `n_turn_off_events`, `f_sw_estimate` and `E_sw_total` are
+inflated. A smaller `dt` removes the chatter only once it is about
+`2·τ` or less (a 1000 µF rectifier capacitor, `τ = 5 µs`: chatter at
+`dt >= 16 µs`, none at `<= 12 µs`); for a snubber directly across the
+diode `τ = C/g_on` is 1 ns per µF at `g_on = 1e3`, out of reach, and a
+smaller `dt` multiplies the gaps. `engine='auto'` (TR-BDF2) does not
+reflect it.
 
 Two guards keep immaterial conduction out, and both are reported:
 
@@ -278,8 +290,8 @@ Per-device output:
 | `P_sw_avg` | PSIM-style switching loss (W) — constant offset over the run |
 | `P_core_avg` | Steinmetz / iGSE core loss (inductor only) |
 | `P_total_avg` | `P_cond_avg + P_sw_avg + P_core_avg` |
-| `T_j_trace` | `np.ndarray` — full `T_j(t)` (°C); on `engine='dsed'` built from the step-start (right-limit) power as well, so it agrees with `P_cond_avg` |
-| `T_j_avg`, `T_j_peak` | scalars (°C) |
+| `T_j_trace` | `np.ndarray` — full `T_j(t)` (°C): one value per `result.times` sample on `engine='pwl'` and `'dsed'` (DSED computes it with the step-start (right-limit) power inserted, so it agrees with `P_cond_avg`, and samples it back), on a uniform resample of the run on `'trbdf2'` / `'auto'` |
+| `T_j_avg`, `T_j_peak` | scalars (°C); `T_j_avg` is a time average |
 | `T_ambient_C` | from spec or top-level default |
 | `R_th_total` | `Σ R_th_i` over the Foster stages (K/W) |
 
