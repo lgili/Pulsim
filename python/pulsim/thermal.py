@@ -868,10 +868,10 @@ def device_thermal_summary(
             v_D = d_trace.v
             g_arr = np.where(d_trace.closed, g_on, g_off)
             g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
-            v_w, v_s_w = win.cont(v_D, d_trace.v_start)
-            c_w, c_s_w = win.disc(d_trace.closed, d_trace.closed_start)
-            g_w = np.where(c_w, g_on, g_off)
-            g_s_w = np.where(c_s_w, g_on, g_off)
+            # Cut at the window where the whole-run integral is linear
+            # (current; power on a step that flips the stamp).
+            _, i_w, i_s_w, E_br = _losses._window_conductance(
+                win, v_D, g_arr, d_trace.v_start, g_arr_s)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
@@ -879,12 +879,11 @@ def device_thermal_summary(
                 P_start_t = _losses._conduction_power_offset_slope(
                     d_trace.v_start * g_arr_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
-                    win.times, v_w * g_w, v_s_w * g_s_w, c_spec)
+                    win.times, i_w, i_s_w, c_spec)
             else:
                 P_cond_t = v_D * v_D * g_arr
                 P_start_t = d_trace.v_start * d_trace.v_start * g_arr_s
-                E_cond = _losses._branch_energy(
-                    win.times, v_w, g_w, v_s_w, g_s_w)
+                E_cond = E_br
         elif kind == "switch":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -917,10 +916,8 @@ def device_thermal_summary(
                       - _views.node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
             g_arr_s = np.where(closed_s, g_on, g_off)
-            v_w, v_s_w = win.cont(v_SW, v_SW_s)
-            c_w, c_s_w = win.disc(closed, closed_s)
-            g_w = np.where(c_w, g_on, g_off)
-            g_s_w = np.where(c_s_w, g_on, g_off)
+            _, i_w, i_s_w, E_br = _losses._window_conductance(
+                win, v_SW, g_arr, v_SW_s, g_arr_s)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
@@ -928,12 +925,11 @@ def device_thermal_summary(
                 P_start_t = _losses._conduction_power_offset_slope(
                     v_SW_s * g_arr_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
-                    win.times, v_w * g_w, v_s_w * g_s_w, c_spec)
+                    win.times, i_w, i_s_w, c_spec)
             else:
                 P_cond_t = v_SW * v_SW * g_arr
                 P_start_t = v_SW_s * v_SW_s * g_arr_s
-                E_cond = _losses._branch_energy(
-                    win.times, v_w, g_w, v_s_w, g_s_w)
+                E_cond = E_br
         else:
             # Unsupported kind for the thermal pipeline.
             continue

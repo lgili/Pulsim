@@ -58,9 +58,12 @@ rows = p.device_loss_summary(b, res, conduction_specs=cond, t_from=0.08)
 
 On a 230 V bridge rectifier (0.1 Ω, 470 µF ‖ 1 kΩ, `t_end = 0.1` s) a
 diode's `V_f0 = 0.7, r_on = 0.02` conduction loss is 2.338 W over the
-run and 0.1358 W over 80–100 ms. A bound inside a step is interpolated
-on that step's line, so adjacent windows add up exactly and a
-variable-step grid gives the same answer as a fine fixed one. Gate edges
+run and 0.1358 W over 80–100 ms. A bound inside a step cuts that step's
+own model: the line of its current and, on a step that flips a switch or
+diode, the trapezoid of its end powers. Adjacent windows therefore add
+up to rounding wherever the cuts fall, a bound inside a flip step reads
+like either end of it, and a variable-step grid gives the same answer
+as a fine fixed one. Gate edges
 and diode turn-offs are found on the whole run and count when their step
 starts inside the window. The thermal summary still runs the Foster
 network from t = 0 (`T_j_trace` covers the run); its averages and peaks

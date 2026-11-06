@@ -272,6 +272,7 @@ def _conduction_stats(v: np.ndarray,
                       times: np.ndarray,
                       v_start: "Optional[np.ndarray]" = None,
                       g_start: "Optional[Union[float, np.ndarray]]" = None,
+                      *, branch: "Optional[tuple]" = None,
                       ) -> Dict[str, float]:
     """Compute (i_avg, i_rms, i_peak, P_avg, E_total) for a branch
     whose current trace is ``i = v · g`` and whose instantaneous
@@ -287,6 +288,10 @@ def _conduction_stats(v: np.ndarray,
     The start defaults to the sample before the step; it differs only
     where ``engine='dsed'`` fired an event, whose stored sample is the
     left limit (``_result_views.step_start_states``).
+
+    ``branch``, the ``(times, i, i_start, E)`` of
+    :func:`_window_conductance`, replaces the arrays above: the
+    statistics then cover that window.
     """
     def _arr(x, like):
         if isinstance(x, np.ndarray):
@@ -296,14 +301,17 @@ def _conduction_stats(v: np.ndarray,
     g_arr = _arr(g, v)
     vs = v if v_start is None else np.asarray(v_start, dtype=float)
     gs = g_arr if g_start is None else _arr(g_start, v)
-    i = v * g_arr
-    i_s = vs * gs
+    if branch is not None:
+        times, i, i_s, E = branch
+    else:
+        i = v * g_arr
+        i_s = vs * gs
+        E = _branch_energy(times, v, g_arr, vs, gs)
     T = (times[-1] - times[0]) if times.size > 1 else 1.0
     if T <= 0:
         T = 1.0
     if times.size > 1:
         Q = _views.pl_integral(times, i, i_s)
-        E = _branch_energy(times, v, g_arr, vs, gs)
         i_avg, P_avg, E_total = Q / T, E / T, E
     else:
         p = v * i
@@ -348,6 +356,59 @@ def _branch_energy(times: np.ndarray, v: np.ndarray, g: np.ndarray,
     lin = gc * (a * a + a * c + c * c) / 3.0
     trap = 0.5 * (ga * a * a + gc * c * c)
     return float(np.dot(h, np.where(same, lin, trap)))
+
+
+def _window_conductance(win: "_views.TimeWindow", v: np.ndarray,
+                        g: np.ndarray, v_start: np.ndarray,
+                        g_start: np.ndarray):
+    """``(times, i, i_start, E)`` of a conductance branch (``i = g·v``,
+    whole-run per-sample arrays) restricted to ``win``: the window's
+    times, the branch current at each windowed sample and step start,
+    and ``∫ v·i dt`` over the window.
+
+    Every quantity is cut where the whole-run integral is linear, so
+    the parts of adjacent windows add up to the whole
+    (:func:`_branch_energy`):
+
+    * the current: each step is the line from ``i_start[k-1]`` to
+      ``i[k]`` (:func:`_result_views.pl_integral`), so a bound inside a
+      step takes the interpolated CURRENT;
+    * the energy of a step with one stamp at both ends is
+      ``g·∫v² dt`` of the linear voltage, split at the interpolated
+      voltage;
+    * the energy of a step whose ends carry different stamps (the pwl
+      / trbdf2 step that flips a switch or diode) is the trapezoid of
+      its end powers, split at the interpolated POWER.
+
+    Pairing the interpolated voltage of a flip step with either end's
+    conductance is the defect this avoids: a pwl buck's diode turn-off
+    step interpolated to -12 V and read at ``g_on = 1e3`` S gave the
+    window ``t_from = 1.0095e-3`` an 11.8 kA peak and a 35.5 W
+    diode loss, against 6.375 A and 0.0174 W with the bound on either
+    end of that step."""
+    v = np.asarray(v, dtype=float)
+    g = np.asarray(g, dtype=float)
+    vs = np.asarray(v_start, dtype=float)
+    gs = np.asarray(g_start, dtype=float)
+    i, i_s = v * g, vs * gs
+    if win.whole:
+        return (win.times, i, i_s,
+                _branch_energy(win.times, v, g, vs, gs))
+    t = win.times
+    i_w, i_s_w = win.cont(i, i_s)
+    if t.size < 2:
+        return t, i_w, i_s_w, 0.0
+    v_w, v_s_w = win.cont(v, vs)
+    p_w, p_s_w = win.cont(g * v * v, gs * vs * vs)
+    same = np.ones(v.size, dtype=bool)
+    same[1:] = gs[:-1] == g[1:]
+    same_w = win.step(same)[1:]
+    g_w = win.step(g)[1:]
+    a, c = v_s_w[:-1], v_w[1:]
+    lin = g_w * (a * a + a * c + c * c) / 3.0
+    trap = 0.5 * (p_s_w[:-1] + p_w[1:])
+    E = float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
+    return t, i_w, i_s_w, E
 
 
 def _conduction_model_coeffs(spec: Mapping[str, Any]) -> "tuple[float, float]":
@@ -1485,9 +1546,11 @@ def device_loss_summary(
         It must lie inside the simulated span and have positive width.
         Every average, RMS, peak, duty, energy and ``E_cond_model``
         then covers ``[t_from, t_to]`` and nothing else: a bound inside
-        a step is interpolated on that step's line
-        (``_result_views.TimeWindow``), so the result does not depend
-        on where the grid put its samples. On a variable-step buck
+        a step cuts that step's own model, the line of its current and,
+        on the pwl / trbdf2 step that flips a switch or diode, the
+        trapezoid of its end powers (``_window_conductance``), so
+        adjacent windows add up to the window spanning them to
+        rounding, wherever the cuts fall. On a variable-step buck
         (``engine='auto'``, ``t_from`` 7.7 us into a period, 100
         periods) the diode loss reads 2.4249 W against 2.4248 W on a
         1 ns fixed grid; starting at the first sample after
@@ -1848,11 +1911,16 @@ def device_loss_summary(
                 continue
             d_trace = _diode_state.diode_state_trace(
                 builder, result, bid, switch_fn=switch_fn, stacklevel=3)
-            v_D, v_D_s = win.cont(d_trace.v, d_trace.v_start)
-            c_w, c_s_w = win.disc(d_trace.closed, d_trace.closed_start)
-            g_arr = np.where(c_w, g_on, g_off)
-            g_arr_s = np.where(c_s_w, g_on, g_off)
-            stats = _conduction_stats(v_D, g_arr, times_w, v_D_s, g_arr_s)
+            # The whole run's branch, cut at the window (current and,
+            # on a step that flips the stamp, power; _window_conductance).
+            v_D = np.asarray(d_trace.v, dtype=float)
+            g_D = np.where(d_trace.closed, g_on, g_off)
+            g_D_s = np.where(d_trace.closed_start, g_on, g_off)
+            br = _window_conductance(win, v_D, g_D, d_trace.v_start,
+                                     g_D_s)
+            _, i_D, i_D_s, _ = br
+            stats = _conduction_stats(v_D, g_D, times, d_trace.v_start,
+                                      g_D_s, branch=br)
             cond_d = np.asarray(d_trace.conducting, dtype=bool)
             entry: Dict[str, Any] = {
                 "branch_id": int(bid),
@@ -1886,10 +1954,9 @@ def device_loss_summary(
             # (V_f0 + r_d·I) applied to the actual current trace.
             c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
             if c_spec is not None:
-                i_D = v_D * g_arr
                 V_f0, r_on = _conduction_model_coeffs(c_spec)
                 E_m = _conduction_model_energy(
-                    times_w, i_D, v_D_s * g_arr_s, c_spec)
+                    times_w, i_D, i_D_s, c_spec)
                 entry["P_cond_model_avg"] = (
                     E_m / T if T > 0 and times.size > 1
                     else float(_conduction_power_offset_slope(
@@ -1912,7 +1979,7 @@ def device_loss_summary(
                             if win.a <= ev["t_off"] < win.b]
                 entry.update(
                     _diode_switching_loss(offs, times_w, v_D, d_spec,
-                                          i_D=v_D * g_arr))
+                                          i_D=i_D))
                 entry["t_rr"] = t_rr
                 _warn_recovery_quality(name, entry, t_rr)
             summary.append(entry)
@@ -1954,11 +2021,12 @@ def device_loss_summary(
             i_SW = v_SW * np.where(closed, g_on, g_off)
             i_SW_s = v_SW_s * np.where(closed_s, g_on, g_off)
             # ... and the window (every average, integral and peak).
-            v_w, v_s_w = win.cont(v_SW, v_SW_s)
-            c_w, c_s_w = win.disc(closed, closed_s)
-            g_arr = np.where(c_w, g_on, g_off)
-            g_arr_s = np.where(c_s_w, g_on, g_off)
-            stats = _conduction_stats(v_w, g_arr, times_w, v_s_w, g_arr_s)
+            g_SW = np.where(closed, g_on, g_off)
+            g_SW_s = np.where(closed_s, g_on, g_off)
+            br = _window_conductance(win, v_SW, g_SW, v_SW_s, g_SW_s)
+            _, i_w, i_s_w, _ = br
+            stats = _conduction_stats(v_SW, g_SW, times, v_SW_s, g_SW_s,
+                                      branch=br)
             entry: Dict[str, Any] = {
                 "branch_id": int(bid),
                 "kind": "switch",
@@ -1971,9 +2039,8 @@ def device_loss_summary(
             c_spec = (cond_by_bid.get(bid) or cond_by_name.get(name))
             if c_spec is not None:
                 V_f0, r_on = _conduction_model_coeffs(c_spec)
-                i_w = v_w * g_arr
-                E_m = _conduction_model_energy(times_w, i_w,
-                                               v_s_w * g_arr_s, c_spec)
+                E_m = _conduction_model_energy(times_w, i_w, i_s_w,
+                                               c_spec)
                 entry["P_cond_model_avg"] = (
                     E_m / T if T > 0 and times.size > 1
                     else float(_conduction_power_offset_slope(

@@ -638,6 +638,14 @@ class TimeWindow:
     right limit starts the window, at ``t_to`` its left limit ends it
     (where ``engine='dsed'`` stores both at an event).
 
+    Interpolate only what the whole-run integral treats as a line. On a
+    switched branch that is the CURRENT and, on the step that flips the
+    stamp (pwl / trbdf2 store no right limit, so its start was solved
+    under the other stamp), the POWER, never a voltage paired with one
+    end's conductance: the flip step's interpolated voltage is no
+    on-state voltage, and times ``g_on`` it read a buck diode at 11.8 kA
+    (``pulsim.losses._window_conductance`` does this split).
+
     An instantaneous event of step ``k`` (a gate edge, a diode
     turn-off) belongs to the window when ``t_from <= t[k-1] < t_to``
     (:meth:`starts_inside`), so consecutive windows count every event
@@ -728,29 +736,22 @@ class TimeWindow:
         return (np.concatenate(px).astype(float, copy=False),
                 np.concatenate(ps).astype(float, copy=False))
 
-    def disc(self, m, m_start=None):
-        """``(m_w, m_start_w)`` for a per-sample STATE (a stamp, a
-        conductance) and its step-start values. An interpolated bound
-        takes the state the cut step starts from: equal to the state
-        it ends with except on a step whose stored start was solved
-        under the other stamp (the pwl / trbdf2 step that flips it),
-        where the interpolated voltage is no on-state voltage and must
-        not be multiplied by ``g_on``."""
-        m = np.asarray(m)
-        ms = m if m_start is None else np.asarray(m_start)
+    def step(self, f):
+        """Per windowed sample, the value of the per-STEP quantity ``f``
+        (element ``k`` for step ``(t[k-1], t[k]]``) of the step that
+        ends there: a bound inside a step takes that step's value
+        (element 0 is the step before the window; unused)."""
+        f = np.asarray(f)
         if self.whole:
-            return m, ms
+            return f
         i, j = self._i, self._j
-        pm, ps = [], []
+        parts = []
         if not self._a_on:
-            pm.append(ms[i - 1:i])
-            ps.append(ms[i - 1:i])
-        pm.append(m[self._lo:self._hi + 1])
-        ps.append(ms[self._lo:self._hi + 1])
+            parts.append(f[i:i + 1])
+        parts.append(f[self._lo:self._hi + 1])
         if not self._b_on:
-            pm.append(ms[j - 1:j])
-            ps.append(ms[j - 1:j])
-        return np.concatenate(pm), np.concatenate(ps)
+            parts.append(f[j:j + 1])
+        return np.concatenate(parts)
 
     def overlap(self) -> np.ndarray:
         """Per sample ``k``, the length of step ``(t[k-1], t[k]]``

@@ -207,6 +207,128 @@ def test_gate_edges_are_counted_by_where_their_step_starts(engine):
     assert whole["duty_closed"] == pytest.approx(0.5, abs=0.02)
 
 
+def _flip_steps(res, name_bit, after):
+    """Indices ``k`` of the steps ``(t[k-1], t[k]]`` that turn switch-kind
+    bit ``name_bit``'s recorded stamp OFF (start on, end off), starting
+    after ``after``. There the end voltage is the blocking one and the
+    start conductance g_on."""
+    t = np.asarray(res.times)
+    m = np.asarray(res.switch_states)[:, name_bit]
+    k = np.flatnonzero(m[:-1] & ~m[1:]) + 1
+    return k[t[k - 1] > after]
+
+
+@functools.lru_cache(maxsize=None)
+def _run_buck_1us():
+    b = _buck()
+    pwm = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"),
+                               b.graph.num_switches)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = p.simulate(b, t_end=2e-3, dt=1e-6, engine="pwl",
+                         switch_fn=pwm)
+    return b, res
+
+
+COND_BUCK = {"D1": {"V_f0": 0.7, "r_on": 0.02},
+             "Q1": {"V_f0": 0.1, "r_on": 0.05}}
+
+
+@pytest.mark.parametrize("dev", ["D1", "Q1"])
+def test_a_bound_inside_a_flip_step_cuts_current_and_power(dev):
+    """The pwl step that flips a stamp starts from a sample solved under
+    the other one, so its interpolated voltage is no on-state voltage.
+    Paired with g_on it read D1 at 11850 A and 35.49 W (against 6.375 A
+    and 0.01738 W) for t_from=1.0095e-3, and Q1 at 243 A / 1.601 W
+    (against 0.859 W) for t_from=1.0045e-3. Cut in the current and the
+    power, the bound reads like either end of the step."""
+    b, res = _run_buck_1us()
+    t = np.asarray(res.times)
+    k = int(_flip_steps(res, b.switch_index_of(dev), 1e-3)[0])
+    t_to = 1.9e-3
+
+    def row(a):
+        return _rows(b, res, conduction_specs=COND_BUCK, t_from=a,
+                     t_to=t_to)[dev]
+
+    lo, mid, hi = row(float(t[k - 1])), row(float(0.5 * (t[k - 1] + t[k]))), \
+        row(float(t[k]))
+    for key in ("P_avg", "P_cond_model_avg", "i_avg", "i_rms"):
+        assert mid[key] == pytest.approx(lo[key], rel=2e-3), key
+        assert mid[key] == pytest.approx(hi[key], rel=2e-3), key
+    assert mid["i_peak"] <= max(lo["i_peak"], hi["i_peak"]) + 1e-9
+    assert mid["i_peak"] < 6.4
+
+
+def test_an_ulp_before_a_flip_sample_keeps_peak_and_turn_offs():
+    """A t_from one ulp before the sample that ends a D1 turn-off step
+    read i_peak 23720 A, which then set the count-only turn-off
+    threshold and dropped every turn-off (0 events, f_sw 0)."""
+    b, res = _run_buck("pwl")
+    t = np.asarray(res.times)
+    k = int(_flip_steps(res, b.switch_index_of("D1"), 3e-3)[0])
+    spec = {"D1": {"t_rr": 50e-9}}
+    on = _rows(b, res, diode_specs=spec, t_from=float(t[k]),
+               t_to=4.5e-3)["D1"]
+    ulp = _rows(b, res, diode_specs=spec,
+                t_from=float(np.nextafter(t[k], 0.0)), t_to=4.5e-3)["D1"]
+    assert ulp["i_peak"] == pytest.approx(on["i_peak"], rel=1e-9)
+    assert ulp["n_turn_off_events"] == on["n_turn_off_events"] > 100
+    assert ulp["f_sw_estimate"] == pytest.approx(on["f_sw_estimate"],
+                                                 rel=1e-9)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "auto"])
+def test_windows_cut_inside_flip_steps_add_up(engine):
+    """Cuts at the midpoints of a D1 and a Q1 flip step: the parts were
+    333x (D1) and 14 % (Q1) off the window spanning them on pwl, 311 %
+    (D1) on trbdf2."""
+    b, res = _run_buck(engine)
+    t = np.asarray(res.times)
+    kd = int(_flip_steps(res, b.switch_index_of("D1"), 3.2e-3)[0])
+    kq = int(_flip_steps(res, b.switch_index_of("Q1"), 3.6e-3)[0])
+    cuts = [3e-3, float(0.5 * (t[kd - 1] + t[kd])),
+            float(0.5 * (t[kq - 1] + t[kq])), 4e-3]
+    assert t[kd - 1] < cuts[1] < t[kd] and t[kq - 1] < cuts[2] < t[kq]
+
+    def rows(a, c):
+        return _rows(b, res, conduction_specs=COND_BUCK, t_from=a, t_to=c)
+
+    whole = rows(cuts[0], cuts[-1])
+    parts = [rows(a, c) for a, c in zip(cuts[:-1], cuts[1:])]
+    for dev in ("D1", "Q1"):
+        for key in ("E_total", "E_cond_model"):
+            assert sum(q[dev][key] for q in parts) == pytest.approx(
+                whole[dev][key], rel=1e-12), (dev, key)
+        q_parts = sum(q[dev]["i_avg"] * (c - a)
+                      for q, a, c in zip(parts, cuts[:-1], cuts[1:]))
+        assert q_parts == pytest.approx(
+            whole[dev]["i_avg"] * (cuts[-1] - cuts[0]), rel=1e-12)
+
+
+def test_thermal_conduction_cuts_a_flip_step_like_the_loss_summary():
+    """device_thermal_summary's P_cond_avg used the same voltage-times-
+    g_on pairing at a flip-step bound."""
+    b, res = _run_buck_1us()
+    t = np.asarray(res.times)
+    k = int(_flip_steps(res, b.switch_index_of("D1"), 1e-3)[0])
+    a = float(0.5 * (t[k - 1] + t[k]))
+    ts = {"D1": {"stages": [p.FosterStage(1.0, 5e-5)]},
+          "Q1": {"stages": [p.FosterStage(1.0, 5e-5)]}}
+    for cond in (None, COND_BUCK):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            th = {r["name"]: r for r in p.device_thermal_summary(
+                b, res, thermal_specs=ts, conduction_specs=cond,
+                t_from=a)}
+        loss = _rows(b, res, conduction_specs=cond, t_from=a)
+        key = "P_avg" if cond is None else "P_cond_model_avg"
+        for dev in ("D1", "Q1"):
+            assert th[dev]["P_cond_avg"] == pytest.approx(
+                loss[dev][key], rel=1e-12), (dev, key)
+        assert th["D1"]["P_cond_avg"] < 3.0
+
+
 def test_bad_windows_are_refused():
     b, res = _run_bridge("pwl")
     for kw in ({"t_from": 0.05, "t_to": 0.05}, {"t_from": 0.06, "t_to": 0.05},
