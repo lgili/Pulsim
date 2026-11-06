@@ -248,7 +248,17 @@ def add_three_phase_vsi(builder,
     ``test_newton_stall_and_mask_chatter.py`` — so a bridge feeding a
     Newton-stamped machine may want smooth junctions instead.
 
-    The helper builds no PWM and no dead-time. Wire control via
+    The helper builds no PWM and no dead-time. For open-loop SPWM with a
+    dead time, one call drives all six switches::
+
+        legs = p.ThreePhaseLegIndices(*result.switch_indices)
+        sw_fn = p.make_three_phase_spwm_fn(f_carrier, f_1, m, legs,
+                                           builder.graph.num_switches,
+                                           dead_time)
+
+    The switches are bidirectional: a gated-on switch also carries the
+    freewheel current, so the diodes conduct only during the dead time.
+    For closed-loop control, wire the gates via
     :class:`MixedDomainBlockChain` and one of:
 
       * :meth:`chain.make_multi_pwm_switch_fn(["ga","gb","gc"],

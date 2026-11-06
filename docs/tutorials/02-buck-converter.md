@@ -98,8 +98,14 @@ V_out (steady-state mean) = 12.00 V (target D·V_in = 12.0 V)
 ```
 
 The output filter (100 µH / 47 µF / 10 Ω) is lightly damped (ζ ≈ 0.07), so
-at 2–5 ms it is still ringing: the 2–5 ms window shows ≈ 0.87 V peak-to-peak,
-which decays to ≈ 0.12 V by 9–10 ms. The window mean is already on target.
+at 2–5 ms it is still ringing from the start-up. The window mean is already
+on target, but do not read the ripple from this run: `make_pwm_switch_fn`
+compares a floating-point phase, so on the `dt` grid some gate edges land
+one step early or late, and that duty jitter keeps the filter ringing. At
+9–10 ms of a 10 ms run it still shows ≈ 0.12 V peak-to-peak, where a PWM
+computed in whole steps (`round(t / dt) % 50 < 25`) shows the ≈ 16 mV
+switching ripple that `ΔI / (8 f C)` predicts. See trap 10 and section 3.2
+of `python -m pulsim.guide`.
 
 ## What's going on internally
 

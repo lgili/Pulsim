@@ -3255,6 +3255,5 @@ def __getattr__(name: str):
             f"`python -m pulsim.guide` for the current API.")
     raise AttributeError(
         f"module 'pulsim' has no attribute {name!r}. "
-        f"pulsim 1.0.0 ships only the modern surface — "
-        f"see docs/migration-guide.md if you're porting v1 code, and "
-        f"run `python -m pulsim.guide` for the current API.")
+        f"Run `python -m pulsim.guide` for the current API, and see "
+        f"docs/migration-guide.md if you're porting v1 code.")
