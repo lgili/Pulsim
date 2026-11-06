@@ -52,8 +52,11 @@ Python 3.13, pybind11-stubgen 3.0.0 and mypy 2.4.1.
 - The text is read with
   `importlib.resources.files("pulsim").joinpath("AI_GUIDE.md")`.
   `ai_guide()` prepends one header line,
-  `pulsim <__version__> — <path>`, so the file itself never carries a
-  version number that has to be bumped by hand.
+  `pulsim <__version__> - <path>`, so the file itself never carries a
+  version number that has to be bumped by hand. The header and the
+  guide are ASCII (enforced by a test): `python -m pulsim.guide` must
+  not fail on a console whose encoding cannot print `Ω` or `→`, which
+  is the default on Windows when stdout is a pipe.
 - `python -m pulsim.guide --path` prints the file path only, so an agent
   can open the file directly instead of reading stdout.
 
@@ -98,11 +101,17 @@ tour. Order:
    - A floating DC side with every diode off can make `engine='auto'`
      abort as singular at its first tiny step. Re-measured: a bridge
      rectifier with a floating DC side raised
-     `factorize failed (numerically singular) … dt=4e-14 … node dcn`,
-     and the same circuit with `dcn` tied to ground through 1 MΩ ran on
-     `trbdf2`. Ground or reference one rail.
-   - The fixed engine starts first order from an inconsistent state.
-     Give ICs (`c0=`, `i0=`) or discard the first samples.
+     `factorize failed (numerically singular) … dt=6e-14 … node dcn`.
+     Re-measured on a fresh builder, a 1 MΩ or 1 GΩ resistor from
+     `dcn` to ground did NOT cure it (an earlier run that seemed to was
+     reusing a builder that `auto_regularize` had already tied);
+     `dc_neg="gnd"` runs on `trbdf2`. The guide therefore says: connect
+     one DC rail to ground, or pass `dt`.
+   - The fixed engine starts first order from an inconsistent state,
+     and initial conditions do not change that: an RL decay with
+     `i0=1` has error 1.85e-3 at `dt=1e-5` and 0.92e-3 at `5e-6`, and
+     sample 0 of the node voltage reads 0 V. The guide teaches the
+     `dt`-halving check instead.
 5. **Verify a result physically.** Run as snippets:
    - Charge or energy balance from independent branch currents. For
      example, the capacitor charge `∫ i_C dt` against `C·ΔV`, and the
@@ -251,12 +260,24 @@ pybind11 versions:
   - `<!-- doctest: skip reason="…" -->` requires a non-empty reason.
   - `<!-- doctest: no-output-check -->` keeps execution and drops the
     comparison.
+  - `<!-- doctest: xfail reason="…" -->` marks a block that documents a
+    check which FAILS on this build because of a known open defect. The
+    block must raise `AssertionError` (anything else is a broken block);
+    if it runs clean the test fails, so the annotation is deleted as
+    soon as the defect is fixed. Later blocks still run. It exists for
+    the guide's diode charge balance (task 0.1): until
+    `fix/v2-diode-record` is merged the balance does not close for
+    `V_th > 0`, and the guide must neither hide that nor be weakened to
+    pass. Fences in blockquotes or indented under list items are not
+    collected, so illustrative fragments live there.
 - **CI.** The module is marked `doc_snippets`; the marker is registered
   in `pyproject.toml`. CI's `pytest python/tests` already collects it.
-  The stub-check job installs matplotlib, so the plotting blocks run
-  somewhere and are not skipped everywhere.
+  The Linux / Python 3.12 leg installs matplotlib, so the plotting
+  blocks run somewhere and are not skipped everywhere.
 - **Runtime budget.** Measured 6.2 s for README, getting-started and
-  the six tutorials, of which Tutorial 06 is 5.0 s. Budget: 30 s per CI
+  the six tutorials, of which Tutorial 06 is 5.0 s. Re-measured with the
+  guide on 2026-11-06: 4.9 s for all nine files (Tutorial 06 3.6 s, the
+  guide 0.6 s), so no block needs a "heavy" marker. Budget: 30 s per CI
   leg for all executed docs, guide included, asserted by a session-level
   timing check that warns at 30 s and fails at 60 s.
 

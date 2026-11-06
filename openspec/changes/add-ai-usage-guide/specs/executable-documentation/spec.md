@@ -67,7 +67,7 @@ in `:`, are allowed. Comparison rules:
 ### Requirement: Snippet Annotations
 
 The snippet runner SHALL recognise annotations given as an HTML
-comment on the line directly above a fence. Three forms exist:
+comment on the line directly above a fence. Four forms exist:
 
 - `<!-- doctest: requires=<module>[,<module>] -->` SHALL skip the block,
   and the rest of its file, with the module named in the skip reason,
@@ -75,9 +75,20 @@ comment on the line directly above a fence. Three forms exist:
 - `<!-- doctest: skip reason="<text>" -->` SHALL skip the block. The
   reason SHALL be non-empty;
 - `<!-- doctest: no-output-check -->` SHALL execute the block without
-  output comparison.
+  output comparison;
+- `<!-- doctest: xfail reason="<text>" -->` SHALL require the block to
+  raise `AssertionError`, SHALL fail the test when the block runs
+  without error, and SHALL continue with the following blocks. The
+  reason SHALL be non-empty.
 
-An unrecognised `doctest:` annotation SHALL fail the test.
+An unrecognised `doctest:` annotation SHALL fail the test. Fences inside
+blockquotes or indented under list items SHALL NOT be collected.
+
+#### Scenario: Known defect fixed
+- **GIVEN** a block annotated `doctest: xfail` whose assertion documents
+  an open defect
+- **WHEN** the defect is fixed and the block runs without error
+- **THEN** the test fails, asking for the annotation to be removed
 
 #### Scenario: Optional dependency absent
 - **GIVEN** a block annotated `requires=matplotlib` in an environment
