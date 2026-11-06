@@ -711,12 +711,14 @@ inline SimulationResult run_transient_trbdf2(
     // Mask recorded with sample 0 (SimulationResult::
     // switch_state_bits): the bits the run STARTS from, taken before
     // the settle below re-decides them. A zero IC is consistent with
-    // every mask (v = 0, so i = g·v = 0); a state seeded from
-    // `initial_state` / `resume_from` was solved by no mask in this
-    // run and is flagged unsolved.
+    // every mask (v = 0, so i = g·v = 0). A state seeded from
+    // `initial_state` alone was solved by no mask this row knows and
+    // is flagged unsolved; a `resume_from` snapshot carries the diode
+    // bits of the solve that produced it (the previous run's last
+    // sample), so its row is that solve's stamped mask.
     const SwitchStateMask initial_mask = mask_at(opts.t_start);
     const bool initial_seeded =
-        initial_state.has_value() || resume_from != nullptr;
+        initial_state.has_value() && resume_from == nullptr;
 
     // ---- consistent initial diode bits (zero-time settle) ----
     // A tiny trap step pins every capacitor to its (v, i) and asks

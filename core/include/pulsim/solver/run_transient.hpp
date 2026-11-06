@@ -798,8 +798,14 @@ inline SimulationResult run_transient(
         if (initial_mask_known) {
             result.record_switch_state(initial_mask);
         } else {
+            // Unsolved = seeded by `initial_state` alone. A
+            // `resume_from` snapshot carries the diode bits of the
+            // solve that produced its state (the previous run's last
+            // sample), so that row IS the stamped mask of a solve.
+            // `initial_state` carries no bits: the state may have been
+            // solved with a diode ON that this row records OFF.
             const bool seeded =
-                initial_state != nullptr || resume_snap != nullptr;
+                initial_state != nullptr && resume_snap == nullptr;
             result.record_switch_state(
                 has_diodes
                     ? combine_masks(switch_fn(opts.t_start),

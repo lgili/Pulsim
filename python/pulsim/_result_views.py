@@ -81,12 +81,20 @@ def recorded_switch_states(result, builder=None):
 
     The record is validated against the result (one row per sample)
     and, when ``builder`` is given, against the circuit (one column per
-    switch-kind branch)."""
+    switch-kind branch). An unsolved row (a sample 0 seeded from
+    ``initial_state``) is returned with the mask of the first solve
+    after it (:func:`_borrow_for_unsolved`)."""
     try:
         rec = getattr(result, "switch_states", None)
     except Exception as exc:  # noqa: BLE001 — a broken property
         return None, f"reading result.switch_states failed ({exc!r})"
     if rec is None:
+        if hasattr(result, "states_reduced"):
+            return None, ("result.switch_states is absent — this "
+                          "engine='dsed' run went through the DSED "
+                          "adapter path that records no mask (a "
+                          "Python-mask switch_fn, or no full MNA "
+                          "reconstruction)")
         return None, ("result.switch_states is absent — a result not "
                       "produced by a kernel engine, or one whose "
                       "engine path does not record it")
@@ -104,7 +112,45 @@ def recorded_switch_states(result, builder=None):
             return None, (f"result.switch_states has {arr.shape[1]} "
                           f"columns but the circuit has {n_sw} "
                           f"switch-kind branches")
-    return arr, ""
+    return _borrow_for_unsolved(arr, recorded_unsolved(result, n)), ""
+
+
+def _borrow_for_unsolved(arr: np.ndarray, unsolved: np.ndarray) -> np.ndarray:
+    """Read an UNSOLVED row (``switch_states_unsolved``: a sample 0
+    seeded from ``initial_state``, whose recorded bits are the mask the
+    solver carried in, not the one its state was solved under) with the
+    mask of the first solve after it.
+
+    Measured on an RL half-wave seeded mid-conduction: the carried row
+    had the diode OFF while the seeded state carried 1.259 A through
+    it, a 1.26 A KCL residual at that one sample (every other sample
+    closes to 2e-12); the first solve has it ON, and reading row 0
+    with it closes KCL there too. Continuity is the better guess for a
+    single seeded sample: its state came out of a solve that the next
+    step continues. The flag itself is kept, so the commutation-rule
+    check still exempts the row."""
+    if not unsolved.any():
+        return arr
+    out = arr.copy()
+    solved = np.nonzero(~unsolved)[0]
+    for i in np.nonzero(unsolved)[0]:
+        j = solved[np.searchsorted(solved, i)] if (
+            solved.size and solved[-1] > i) else None
+        if j is not None:
+            out[i] = arr[j]
+    return out
+
+
+def record_advice(result) -> str:
+    """How to get a result that carries the stamped-mask record."""
+    if hasattr(result, "states_reduced"):
+        return ("run engine='pwl' or engine='auto' (both record the "
+                "stamped mask for every sample), or the native DSED "
+                "path, which records it when the circuit is built with "
+                "CircuitBuilder and switch_fn returns SwitchStateMask.")
+    return ("use a result returned by pulsim.simulate() with "
+            "engine='pwl', 'auto' or 'trbdf2', which record the stamped "
+            "mask for every sample.")
 
 
 def recorded_unsolved(result, n: int) -> np.ndarray:
@@ -306,8 +352,7 @@ def resolve_switch_closed_trace(result: Any,
         f"switch {name!r}: the result carries no record of the stamped "
         f"switch mask ({recorded_switch_states(result)[1]}), so "
         f"switch_fn was re-evaluated after the run. That is exact only "
-        f"for a stateless switch_fn; use a result returned by "
-        f"pulsim.simulate(), which records the mask on every engine.",
+        f"for a stateless switch_fn; {record_advice(result)}",
         RuntimeWarning, stacklevel=3)
     closed = evaluate_switch_mask_trace(switch_fn, q, switch_idx)
     return _voltage_consistency_guard(closed, v_branch, name=name)

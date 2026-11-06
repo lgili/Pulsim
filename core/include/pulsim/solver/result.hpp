@@ -235,10 +235,12 @@ struct SimulationResult {
     //
     // `switch_state_unsolved` lists the (few) sample indices whose
     // state was NOT produced by a solve under the recorded mask —
-    // today only a sample 0 seeded from `initial_state` /
-    // `resume_from`, for which the recorded mask is the bits the
-    // solver CARRIED into the run, not a solve. Sparse, so it costs
-    // nothing on a long run.
+    // today only a sample 0 seeded from `initial_state`, for which
+    // the recorded mask is the bits the solver CARRIED into the run,
+    // not a solve (the state may come from a solve with a diode ON
+    // that the carried bits have OFF). A `resume_from` sample 0 is
+    // not listed: the snapshot carries the bits of the solve that
+    // produced its state. Sparse, so it costs nothing on a long run.
     //
     // `has_switch_states` is false on a result no engine recorded
     // (a default-constructed or hand-built result); consumers must

@@ -879,9 +879,12 @@ def _result_i(self, name: str, t=None):
     Switch / diode state. Every engine records, per stored sample,
     the mask it STAMPED for the solve that produced it
     (``result.switch_states``); switch and diode currents read that,
-    with no ``switch_fn`` call. Only a result built another way (no
-    record) needs ``result._switch_fn = your_switch_fn`` for a switch,
-    and then the switch_fn is re-evaluated with a warning.
+    with no ``switch_fn`` call. Row 0 of a run seeded with
+    ``initial_state`` is not a solve in this run
+    (``switch_states_unsolved``) and is read with the first solve's
+    mask. Only a result built another way (no record) needs
+    ``result._switch_fn = your_switch_fn`` for a switch, and then the
+    switch_fn is re-evaluated with a warning.
 
     Not yet supported (deferred to future PRs because their device
     params aren't exposed by ``builder.components()`` today):

@@ -2003,8 +2003,11 @@ void init_module(py::module_& m) {
             },
             "Per-sample bool: True where states[k] was NOT produced by "
             "a solve under switch_states[k] — today only a sample 0 "
-            "seeded from initial_state / resume_from, whose mask is "
-            "the bits the solver carried in. None without a record.")
+            "seeded from initial_state, whose mask is the bits the "
+            "solver carried in (result.i() and the loss / thermal "
+            "summaries read that row with the first solve's mask). A "
+            "resume_from sample 0 carries the bits of the solve that "
+            "produced it and is not flagged. None without a record.")
         .def_property_readonly("switch_states_bytes",
             [](const SimulationResult& r) {
                 return r.switch_state_bits.size() +

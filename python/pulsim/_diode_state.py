@@ -35,8 +35,9 @@ nothing.
 
 ``result.switch_states_unsolved[k]`` flags the rare sample whose state was
 not a solve under its recorded mask (a sample 0 seeded from
-``initial_state`` / ``resume_from``); the recorded mask there is the bits
-the solver carried in, and is used as such.
+``initial_state``); the recorded mask there is the bits the solver carried
+in, so the row is read with the mask of the first solve after it
+(``_result_views._borrow_for_unsolved``).
 
 When a result carries no record (a hand-built result, a stitched
 ``AdaptiveResult`` whose segments lacked it, the DSED Python-adapter path),
@@ -261,8 +262,7 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                 f"0 < v_D < V_th band, where that replay cannot see a "
                 f"turn-on the solver resolved within one step; the "
                 f"reported current, duty and loss there may be wrong. "
-                f"Use a result returned by pulsim.simulate(), which "
-                f"records the stamped mask on every engine.")
+                f"To get the record, {_views.record_advice(result)}")
         # The kernel's own rule, checked against what it stamped. Not a
         # reporting problem — the current above is what the solver
         # carried — but a held-across-the-threshold state means the
