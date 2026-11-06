@@ -72,8 +72,11 @@ bit-identically.
 | **LM** | Pathological residual landscapes; needs robust convergence | More conservative than Newton — can converge to **local** minima of ||f||₂² rather than the global zero (slower on simple problems too) |
 
 For PE workloads:
-- **DC operating point with realistic diode**: use plain
-  Newton with looser tolerances.
+- **DC operating point with realistic diode**: keep the default
+  absolute tolerances and let the DC cascade (gmin / source stepping)
+  or LM do the work. Do not loosen `tol_newton_dx` / `tol_newton_res`:
+  the absolute step test is what keeps Newton off a spurious root (see
+  `docs/gotchas.md` (e)).
 - **Buck/boost with binary `SwitchedDiode`**: no Newton needed
   (PWL solve directly).
 - **Smooth-blend `IdealDiode` (Shockley-flavor)**: try plain

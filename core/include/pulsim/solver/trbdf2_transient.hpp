@@ -144,7 +144,9 @@ struct TrBdf2Options {
     /// the boundary". 0 = no controller ticks.
     Real observer_period = Real{0};
     /// Newton settings, used only when the circuit has nonlinear
-    /// devices. Same knobs and defaults as the fixed engine.
+    /// devices. Same knobs and defaults as the fixed engine. The
+    /// tolerances are absolute; loosening them is not a fix for the
+    /// h_min stall (see SimulationOptions::tol_newton_dx).
     Size max_newton_iterations = Size{50};
     Real tol_newton_dx  = Real{1e-9};
     Real tol_newton_res = Real{1e-9};
@@ -943,7 +945,14 @@ inline SimulationResult run_transient_trbdf2(
                         "run_transient_trbdf2: Newton failed at t = "
                         + std::to_string(t)
                         + " with h already at h_min — "
-                        + newton_last_error);
+                        + newton_last_error
+                        + " If t is just after a hard switching edge, "
+                          "this is the known TR-BDF2 stall at h_min "
+                          "(CHANGELOG 2.0.0, \"TR-BDF2 stalls at "
+                          "h_min\"; KNOWN_LIMITATIONS.md): a "
+                          "step-controller defect, not a tolerance "
+                          "one. Run this circuit on engine='pwl' with "
+                          "an explicit dt.");
                 }
                 h = std::max(h * Real{0.25}, h_min);
                 continue;

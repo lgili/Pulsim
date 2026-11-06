@@ -83,6 +83,29 @@ MOSFETs / IGBTs use sigmoid blending between regions; `kappa` controls how sharp
 
 **Fix:** dial `kappa` down to 10–15. Since v2.0 the DC cascade recovers a 12-diode chain at `kappa = 50` on its own (gmin stepping gets it), but `kappa = 5000` defeats every rung — at that sharpness you are asking a smooth model to be an ideal switch, and `add_diode()` (the PWL switch diode) is the right device instead.
 
+#### (e) Loosening `tol_newton_dx` / `tol_newton_res` — don't
+
+The abort message reports the norms relative to the circuit's own
+scale, and on a stall they often look converged (`dx/|x| ~ 1e-9`).
+That is not permission to loosen the tolerances. They are absolute on
+purpose: an absolute step test is what keeps Newton off a spurious
+root, and loosening it has produced silently wrong answers. Measured:
+the snubbed flyback in `test_saturable_transformer.py` aborts at
+`h_min` on `engine='trbdf2'`; with `tol_newton_dx=1e-5,
+tol_newton_res=1e-4` it completes and reports V_out = 3.53 V, while
+`engine='pwl', dt=1e-8` gives 15.31 V.
+
+**Fix:** look at the device the message names, and cross-check on the
+other engine. An abort at `h_min` right after a hard switching edge on
+TR-BDF2 is a known engine limitation (`KNOWN_LIMITATIONS.md`,
+CHANGELOG 2.0.0 "TR-BDF2 stalls at `h_min`"), not a tolerance problem;
+`engine='pwl'` with an explicit `dt` is the workaround. On the fixed
+engine, do NOT reach for a smaller `dt`: a Newton abort there with PWL
+diodes next to a Newton device is the known diode-mask chatter, which
+gets worse as `dt` shrinks (the PSFB reproducer aborts at 10 ns and
+runs at 50 ns). Use a coarser `dt`, or smooth Shockley junctions
+(`add_shockley_diode`) for those diodes.
+
 ### Symptom: residual oscillates but doesn't shrink
 
 You hit a Newton "limit cycle" — the iterate ping-pongs between two faces of a non-smooth feature.
