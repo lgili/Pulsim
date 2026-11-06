@@ -711,14 +711,26 @@ inline SimulationResult run_transient_trbdf2(
     // Mask recorded with sample 0 (SimulationResult::
     // switch_state_bits): the bits the run STARTS from, taken before
     // the settle below re-decides them. A zero IC is consistent with
-    // every mask (v = 0, so i = g·v = 0). A state seeded from
-    // `initial_state` alone was solved by no mask this row knows and
-    // is flagged unsolved; a `resume_from` snapshot carries the diode
-    // bits of the solve that produced it (the previous run's last
-    // sample), so its row is that solve's stamped mask.
-    const SwitchStateMask initial_mask = mask_at(opts.t_start);
-    const bool initial_seeded =
-        initial_state.has_value() && resume_from == nullptr;
+    // every mask (v = 0, so i = g·v = 0). A `resume_from` state is the
+    // previous run's last solve and records the mask the snapshot
+    // says it was stamped under (`stamped_mask`), NOT mask_at(t_start):
+    // a run that ended exactly on a gate edge stored that sample under
+    // the pre-edge mask, then re-decided the diodes under the
+    // post-edge one, so diode_on + switch_fn(t_start) is the post-edge
+    // circuit (a 48 kA g_on·V phantom through a buck's MOSFET at that
+    // row). A state seeded from `initial_state`, or from a snapshot
+    // without that mask, was solved by no mask this row knows and is
+    // flagged unsolved.
+    SwitchStateMask initial_mask = mask_at(opts.t_start);
+    bool initial_seeded = initial_state.has_value();
+    if (resume_from != nullptr) {
+        initial_seeded = !snapshot_stamped_mask(
+            *resume_from, static_cast<Size>(graph.num_switches()),
+            initial_mask);
+    }
+    // The mask the current x was solved under (final_snapshot).
+    SwitchStateMask x_mask = initial_mask;
+    bool x_mask_known = !initial_seeded;
 
     // ---- consistent initial diode bits (zero-time settle) ----
     // A tiny trap step pins every capacitor to its (v, i) and asks
@@ -1287,6 +1299,8 @@ inline SimulationResult run_transient_trbdf2(
                     // current the solver carried, with no phantom
                     // g_on·V_th from the post-flip bits.
                     result.record_switch_state(mask_step);
+                    x_mask = mask_step;
+                    x_mask_known = true;
                     ++st.n_diode_events;
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
@@ -1342,6 +1356,8 @@ inline SimulationResult run_transient_trbdf2(
                 result.event_iteration_count.push_back(0);
                 // Both TR-BDF2 stages solved under mask_step.
                 result.record_switch_state(mask_step);
+                x_mask = mask_step;
+                x_mask_known = true;
                 ++st.n_accept;
                 if (pending_gate_slot >= 0) {
                     // The h that survived right after this gate
@@ -1426,6 +1442,10 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.history = history.to_flat();
     result.final_snapshot.diode_on = diodes.num_diodes() > 0
         ? diodes.snapshot_on_bits() : std::vector<bool>{};
+    // The mask x was solved under (the record's last row): diode_on
+    // may already be post-edge (see initial_mask above).
+    result.final_snapshot.stamped_mask =
+        x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
     result.final_snapshot.saturable_history = sat.to_flat();
     result.final_snapshot.coss_history = coss.to_flat();
     result.final_snapshot.lauritzen_history = laur.to_flat();

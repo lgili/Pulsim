@@ -135,6 +135,20 @@ struct SolverSnapshot {
     /// Which switched diodes were conducting. Solver-owned bits
     /// that a mask alone cannot reconstruct.
     std::vector<bool> diode_on;
+    /// The switch / diode mask STAMPED for the solve that produced
+    /// `x` — one bit per switch-kind branch, in SwitchStateMask
+    /// order: the record's last row
+    /// (`SimulationResult::switch_state_bits`) whenever that row is
+    /// the sample at `t`. It is not `diode_on` + switch_fn(t): where a
+    /// run ends exactly on a gate edge, the variable-step engine
+    /// stores the edge sample under the PRE-edge mask and then
+    /// re-decides the diodes under the post-edge one, so `diode_on`
+    /// (what the NEXT step starts from) and switch_fn(t) both describe
+    /// the post-edge circuit while `x` is the pre-edge solve. A resume
+    /// records this mask for its row 0, solved; empty when unknown
+    /// (a hand-built or older snapshot), and that row is then flagged
+    /// unsolved.
+    std::vector<bool> stamped_mask;
     /// The five stateful-device histories, each in its own
     /// to_flat() layout; empty when the circuit has none. Before
     /// they were carried, a resume restored x and the linear
@@ -163,6 +177,32 @@ struct SolverSnapshot {
     /// True once populated by a run.
     bool valid = false;
 };
+
+/// `m` as one bool per bit (SolverSnapshot::stamped_mask).
+[[nodiscard]] inline std::vector<bool> mask_bits(
+    const topology::SwitchStateMask& m) {
+    std::vector<bool> out(static_cast<std::size_t>(m.size()));
+    for (Size i = 0; i < m.size(); ++i) {
+        out[static_cast<std::size_t>(i)] = m.get(i);
+    }
+    return out;
+}
+
+/// The snapshot's `stamped_mask` as a mask of `num_switches` bits, or
+/// false when it carries none of that width (a hand-built or older
+/// snapshot).
+[[nodiscard]] inline bool snapshot_stamped_mask(
+    const SolverSnapshot& s, Size num_switches,
+    topology::SwitchStateMask& out) {
+    if (s.stamped_mask.size() != static_cast<std::size_t>(num_switches)) {
+        return false;
+    }
+    out = topology::SwitchStateMask(num_switches);
+    for (Size i = 0; i < num_switches; ++i) {
+        out.set(i, s.stamped_mask[static_cast<std::size_t>(i)]);
+    }
+    return true;
+}
 
 struct SimulationResult {
     std::vector<Real> times;
@@ -239,8 +279,10 @@ struct SimulationResult {
     // the recorded mask is the bits the solver CARRIED into the run,
     // not a solve (the state may come from a solve with a diode ON
     // that the carried bits have OFF). A `resume_from` sample 0 is
-    // not listed: the snapshot carries the bits of the solve that
-    // produced its state. Sparse, so it costs nothing on a long run.
+    // not listed when the snapshot carries `stamped_mask` (the mask of
+    // the solve that produced its state, recorded as that row); one
+    // without it (hand-built, or from before the field) is. Sparse,
+    // so it costs nothing on a long run.
     //
     // Decimation (`SimulationOptions::store_every` > 1): row k is the
     // mask of the LAST solve before sample k, not of the whole stored

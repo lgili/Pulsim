@@ -616,8 +616,10 @@ inline SimulationResult run_transient(
     // switch_state_bits`). A DC operating point was SOLVED under
     // `dc.mask`; a zero IC is consistent with every mask (v = 0, so
     // i = g·v = 0 either way) and records the mask the run starts
-    // with; a state seeded from `initial_state` / `resume_from` was
-    // solved by no mask in this run and is flagged unsolved.
+    // with; a `resume_from` state records the snapshot's
+    // `stamped_mask`; a state seeded from `initial_state` (or a
+    // snapshot without that mask) was solved by no mask this run
+    // knows and is flagged unsolved.
     topology::SwitchStateMask initial_mask(
         static_cast<std::size_t>(graph.num_switches()));
     bool initial_mask_known = false;
@@ -653,6 +655,17 @@ inline SimulationResult run_transient(
         initial_mask = dc.mask;
         initial_mask_known = true;
     }
+    // A resume's x IS the previous run's last solve; the snapshot
+    // carries the mask it was stamped under (not diode_on +
+    // switch_fn(t_start), which at a gate edge is the post-edge
+    // circuit). Without one (hand-built / older snapshot) the row is
+    // flagged unsolved below.
+    if (!initial_mask_known && resume_snap != nullptr &&
+        snapshot_stamped_mask(*resume_snap,
+                              static_cast<Size>(graph.num_switches()),
+                              initial_mask)) {
+        initial_mask_known = true;
+    }
 
     Vector b_extra(static_cast<Index>(state_size));
 
@@ -685,6 +698,10 @@ inline SimulationResult run_transient(
     // each stored sample (SimulationResult::switch_state_bits).
     topology::SwitchStateMask stamped_mask(
         static_cast<std::size_t>(graph.num_switches()));
+    // Whether `stamped_mask` is the mask x was solved under (false
+    // only while x is still a seeded, unsolved sample 0) — what
+    // final_snapshot.stamped_mask carries.
+    bool stamped_known = false;
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
@@ -797,22 +814,24 @@ inline SimulationResult run_transient(
         result.event_iteration_count.push_back(0);
         if (initial_mask_known) {
             result.record_switch_state(initial_mask);
+            stamped_mask = initial_mask;
+            stamped_known = true;
         } else {
-            // Unsolved = seeded by `initial_state` alone. A
-            // `resume_from` snapshot carries the diode bits of the
-            // solve that produced its state (the previous run's last
-            // sample), so that row IS the stamped mask of a solve.
-            // `initial_state` carries no bits: the state may have been
-            // solved with a diode ON that this row records OFF.
+            // Unsolved = a seeded state whose stamp this run does not
+            // know: `initial_state` (it carries no bits; the state may
+            // have been solved with a diode ON that this row records
+            // OFF), or a snapshot without `stamped_mask`. A zero IC
+            // is consistent with every mask.
             const bool seeded =
-                initial_state != nullptr && resume_snap == nullptr;
-            result.record_switch_state(
-                has_diodes
+                initial_state != nullptr || resume_snap != nullptr;
+            stamped_mask = has_diodes
                     ? combine_masks(switch_fn(opts.t_start),
                                     diodes.current_diode_mask(),
                                     diode_owned)
-                    : switch_fn(opts.t_start),
-                /*solved=*/!seeded);
+                    : switch_fn(opts.t_start);
+            stamped_known = !seeded;
+            result.record_switch_state(stamped_mask,
+                                       /*solved=*/!seeded);
         }
 
         // Prime the observer with the initial condition so a
@@ -1002,6 +1021,7 @@ inline SimulationResult run_transient(
                 // stored sample records (a mask cycle breaks out
                 // BEFORE re-solving, so this stays the last solve).
                 stamped_mask = mask;
+                stamped_known = true;
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
@@ -1374,6 +1394,7 @@ inline SimulationResult run_transient(
                         cache.solve_at(
                             mask_post, dt2, b_extra, x);
                         stamped_mask = mask_post;
+                        stamped_known = true;
                         // History commit DEFERRED to after the freeze guard
                         // (below): the guard must be able to snap an
                         // unphysical i_L back BEFORE it is baked into the
@@ -1630,6 +1651,7 @@ inline SimulationResult run_transient(
                     cache.solve(mask, b_extra_user, x);
                 }
                 stamped_mask = mask;
+                stamped_known = true;
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
@@ -1754,6 +1776,10 @@ inline SimulationResult run_transient(
     result.final_snapshot.pmsm_history = pmsm_history.to_flat();
     result.final_snapshot.diode_on =
         has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
+    // The mask x was solved under (the record's last row when the
+    // last step was stored), for a resume's row 0.
+    result.final_snapshot.stamped_mask =
+        stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
     result.final_snapshot.valid = true;
 
     return result;

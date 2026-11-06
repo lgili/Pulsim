@@ -2336,6 +2336,16 @@ void init_module(py::module_& m) {
         .def_readwrite("x", &SolverSnapshot::x)
         .def_readwrite("history", &SolverSnapshot::history)
         .def_readwrite("diode_on", &SolverSnapshot::diode_on)
+        .def_readwrite("stamped_mask", &SolverSnapshot::stamped_mask,
+            "The switch / diode mask stamped for the solve that "
+            "produced ``x`` (one bool per SwitchStateMask bit): the "
+            "previous run's last ``switch_states`` row. A resume "
+            "records it as its row 0. Not ``diode_on`` + "
+            "``switch_fn(t)``: a variable-step run that ends on a gate "
+            "edge stores that sample under the pre-edge mask and only "
+            "then re-decides the diodes. Empty when unknown (a "
+            "hand-built or older snapshot); row 0 is then flagged in "
+            "``switch_states_unsolved``.")
         .def_readwrite("saturable_history", &SolverSnapshot::saturable_history)
         .def_readwrite("coss_history", &SolverSnapshot::coss_history)
         .def_readwrite("lauritzen_history", &SolverSnapshot::lauritzen_history)
@@ -2364,14 +2374,16 @@ void init_module(py::module_& m) {
                     s.t, s.x, s.history, s.diode_on,
                     s.saturable_history, s.coss_history,
                     s.lauritzen_history, s.igbt_tail_history,
-                    s.pmsm_history, s.valid);
+                    s.pmsm_history, s.valid, s.stamped_mask);
             },
             [](py::tuple t) {
-                if (t.size() != 10) {
+                // 10 fields: pickled before `stamped_mask` existed;
+                // it loads with the mask unknown.
+                if (t.size() != 10 && t.size() != 11) {
                     throw std::runtime_error(
                         "SolverSnapshot: pickled state has "
                         + std::to_string(t.size())
-                        + " fields, expected 10");
+                        + " fields, expected 10 or 11");
                 }
                 SolverSnapshot s;
                 s.t = t[0].cast<Real>();
@@ -2384,6 +2396,9 @@ void init_module(py::module_& m) {
                 s.igbt_tail_history = t[7].cast<std::vector<Real>>();
                 s.pmsm_history = t[8].cast<std::vector<Real>>();
                 s.valid = t[9].cast<bool>();
+                if (t.size() == 11) {
+                    s.stamped_mask = t[10].cast<std::vector<bool>>();
+                }
                 return s;
             }));
 
