@@ -3894,6 +3894,11 @@ void init_module(py::module_& m) {
             d["n_forced_accepts"] = st.n_forced_accepts;
             d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
             d["n_newton_retries"] = st.n_newton_retries;
+            d["gate_pulse_min"]   = st.gate_pulse_min;
+            d["n_gate_undersampled"] = st.n_gate_undersampled;
+            d["gate_sample_spacing_max"] = st.gate_sample_spacing_max;
+            d["n_held_diode_redecided"] = st.n_held_diode_redecided;
+            d["probe_floor_used"] = st.probe_floor_used;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

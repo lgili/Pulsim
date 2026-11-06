@@ -2256,42 +2256,7 @@ def simulate(
         # auto return.
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
-        if _stats.get("n_forced_accepts", 0) > 0:
-            import warnings
-            warnings.warn(
-                f"simulate(engine='auto'): "
-                f"{_stats['n_forced_accepts']} step(s) were "
-                "accepted with the error estimate above tolerance "
-                "because h had already reached its floor (usually "
-                "the sliver between two events). The trace is "
-                "still finite, but those steps carry more error "
-                "than rtol promises — inspect "
-                "result._trbdf2_stats and the event times if the "
-                "waveform matters there.",
-                stacklevel=2)
-        # Threshold 3: a single boundary graze at startup is normal
-        # (measured 1 on the hysteresis-banded flyback); a sliding
-        # model produces them every few cycles (5 per 5 ms on the
-        # V_th=0 buck, hundreds on tightened tolerances).
-        if _stats.get("n_chatter_breaks", 0) > 3:
-            import warnings
-            warnings.warn(
-                f"simulate(engine='auto'): a diode rode its "
-                f"conduction boundary on "
-                f"{_stats['n_chatter_breaks']} step(s): its "
-                "current sat at zero while the engine decided its "
-                "state (a SLIDING-MODE model; the usual cause is an "
-                "ideal V_th=0 diode at a zero-current commutation, "
-                "e.g. in DCM). This engine AVERAGES the slide. That "
-                "average was correct to 0.1 mV on a flyback at the "
-                "default rtol, but a tightened rtol can bias it by "
-                "~0.5 %, and a V_th=0 bridge behind a source "
-                "resistance ran HALF-WAVE (reading res.i of its "
-                "diodes then warns of the missed commutation). "
-                "Cross-check with a dt (engine='pwl'), or give the "
-                "diode its physical V_th (that IS the hysteresis "
-                "band).",
-                stacklevel=2)
+        _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
         return res
 
     # ---- engine='pwl' from here on ----
@@ -2936,6 +2901,89 @@ def simulate(
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
     return res
+
+
+def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
+    """The variable-step engine's own confessions, from its stats and
+    its switch-state record. Each one names what the engine could not
+    guarantee and how to cross-check it."""
+    import warnings
+    eng = f"simulate(engine={engine_asked!r})"
+    if stats.get("n_forced_accepts", 0) > 0:
+        warnings.warn(
+            f"{eng}: "
+            f"{stats['n_forced_accepts']} step(s) were "
+            "accepted with the error estimate above tolerance "
+            "because h had already reached its floor (usually "
+            "the sliver between two events). The trace is "
+            "still finite, but those steps carry more error "
+            "than rtol promises — inspect "
+            "result._trbdf2_stats and the event times if the "
+            "waveform matters there.",
+            stacklevel=3)
+    # Threshold 3: a single boundary graze at startup is normal
+    # (measured 1 on the hysteresis-banded flyback); a sliding model
+    # produces them every few cycles (8 in 0.1 s on a V_th = 0 bridge
+    # behind 0.1 ohm).
+    if stats.get("n_chatter_breaks", 0) > 3:
+        warnings.warn(
+            f"{eng}: a diode rode its "
+            f"conduction boundary on "
+            f"{stats['n_chatter_breaks']} step(s): its "
+            "current sat at zero while the engine decided its "
+            "state (a SLIDING-MODE model; the usual cause is an "
+            "ideal V_th=0 diode at a zero-current commutation, "
+            "e.g. in DCM). This engine AVERAGES the slide. That "
+            "average was correct to 0.1 mV on a flyback at the "
+            "default rtol, but a tightened rtol can bias it by "
+            "~0.5 %. Cross-check with a dt (engine='pwl'), or give "
+            "the diode its physical V_th (that IS the hysteresis "
+            "band).",
+            stacklevel=3)
+    # Gate pulses narrower than the switch_fn sampling the engine had
+    # already used: an opaque switch_fn is only seen where it is
+    # called, so a pulse that narrow may have been stepped over before
+    # its width was known (the step is capped at twice the narrowest
+    # pulse from then on).
+    if stats.get("n_gate_undersampled", 0) > 0:
+        w = float(stats.get("gate_pulse_min", 0.0))
+        sp = float(stats.get("gate_sample_spacing_max", 0.0))
+        warnings.warn(
+            f"{eng}: switch_fn produced a gate pulse of {w:.3g} s "
+            f"after the engine had already sampled it {sp:.3g} s "
+            "apart, so pulses that narrow may have been stepped over "
+            "before then (this engine sees a Python switch_fn only "
+            "where it calls it). Pass dt=<at most half the narrowest "
+            "pulse> as the step ceiling (engine='trbdf2'), drive the "
+            "gates with p.NativePwm2Switch, whose edges the engine "
+            "computes, or use engine='pwl' with a dt on the PWM grid.",
+            stacklevel=3)
+    # A diode held in a state its own commutation rule forbids is a
+    # commutation the engine missed: every switched branch after it is
+    # suspect. The record says so per sample (the same check res.i
+    # runs); say it HERE, where the run is, naming the diodes.
+    try:
+        has_pwl_diode = any(c.get("kind") == "diode"
+                            for c in builder.components())
+    except AttributeError:  # pragma: no cover — duck-typed builders
+        has_pwl_diode = False
+    if has_pwl_diode and getattr(res, "switch_states", None) is not None:
+        from . import _diode_state
+        bad = [tr for tr in _diode_state.diode_state_traces(
+                   builder, res).values() if tr.n_rule_violations]
+        if bad:
+            first = min(tr.violation_t_range[0] for tr in bad)
+            names = ", ".join(
+                f"{tr.name!r} ({tr.n_rule_violations} samples, by up to "
+                f"{tr.max_violation_V:.3g} V)" for tr in bad)
+            warnings.warn(
+                f"{eng}: the variable-step engine held diode(s) {names} "
+                f"in a state their commutation rule forbids, from "
+                f"t = {first:.6g} s: a missed commutation, so every "
+                "switched branch from there on is suspect. Rerun with "
+                "engine='pwl' and a fixed dt and compare (res.i of each "
+                "diode says which samples).",
+                RuntimeWarning, stacklevel=3)
 
 
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
