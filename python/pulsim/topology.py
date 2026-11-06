@@ -165,7 +165,10 @@ def add_bridge_rectifier(builder,
     g_off
         Reverse leakage conductance (S). Default 1e-9.
     V_th
-        Forward voltage threshold (V). Default 0.7.
+        Commutation threshold (V) of each diode: the voltage at which it
+        turns on. Default 0.7. It is NOT a forward drop -- once on, a
+        diode is the pure conductance ``g_on`` with no voltage offset
+        (``python -m pulsim.guide``, trap 1).
 
     Returns
     -------
@@ -271,8 +274,10 @@ def add_three_phase_vsi(builder,
     with_freewheel_diodes
         Add the six antiparallel diodes. Default True.
     V_f, R_d
-        Forward drop (V) and series resistance (Ω) of those diodes.
-        Defaults 0.7 V / 50 mΩ.
+        Commutation threshold (V) and on-state resistance (Ω) of those
+        diodes. Defaults 0.7 V / 50 mΩ. ``V_f`` only decides when a
+        diode turns on; it is NOT a forward drop: the on-state is
+        ``R_d`` alone, with no voltage offset.
 
     Returns
     -------
@@ -547,7 +552,9 @@ def add_buck(builder,
         High-side switch on/off conductances. Default 1 kS / 1 nS
         (R_on = 1 mΩ, R_off = 1 GΩ).
     diode_g_on, diode_g_off, V_th
-        Diode parameters. Default 1 kS / 1 µS / 0 V.
+        Diode on/off conductances and commutation threshold. Default
+        1 kS / 1 µS / 0 V. ``V_th`` is the turn-on threshold, NOT a
+        forward drop: the on-state is ``diode_g_on`` alone.
 
     Returns
     -------
@@ -625,6 +632,13 @@ def add_boost(builder,
     inductor node: `{name}__sw`.
 
     Same docstring + same caller contract as :func:`add_buck`.
+
+    Parameters
+    ----------
+    V_th
+        Commutation threshold of the output diode, NOT a forward drop:
+        the on-state is ``diode_g_on`` alone. Other parameters as in
+        :func:`add_buck`.
     """
     if V_in <= 0:
         raise ValueError("add_boost: V_in must be > 0")
@@ -699,6 +713,12 @@ def add_flyback(builder,
     `{name}__LS`, `{name}__D`, `{name}__C`, `{name}__R`.
     Intermediate nodes: `{name}__sw` (primary-switch midpoint),
     `{name}__sec` (secondary-winding midpoint).
+
+    Parameters
+    ----------
+    V_th
+        Commutation threshold of the output diode, NOT a forward drop:
+        the on-state is ``diode_g_on`` alone.
     """
     if V_in <= 0:
         raise ValueError("add_flyback: V_in must be > 0")

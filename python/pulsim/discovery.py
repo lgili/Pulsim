@@ -52,8 +52,10 @@ class _Entry:
 _CATEGORIES: dict[str, list[_Entry]] = {
     "Linear passives": [
         _Entry("add_resistor", "Linear ohm-law resistor",
-               "Always; the building block. Use small (1µΩ) values to "
-               "tie floating subnets to ground."),
+               "Always; the building block. To reference an isolated "
+               "subnet, use a LARGE value (1 MΩ or more): simulate() "
+               "already ties floating subnets with 1 GΩ. A tiny tie is "
+               "a galvanic bond, not a reference."),
         _Entry("add_capacitor", "Linear capacitor with trapezoidal companion",
                "Output filtering, snubbers, AC coupling, DC bus, …"),
         _Entry("add_inductor", "Linear inductor with trapezoidal companion",
