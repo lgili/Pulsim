@@ -55,6 +55,7 @@ import numpy as np
 from . import _diode_state
 from . import _result_views as _views
 from . import losses as _losses
+from ._builder_ergonomics import shockley_params as _shockley_params
 
 
 __all__ = [
@@ -593,6 +594,8 @@ def device_thermal_summary(
     diode_specs=None,
     core_loss_specs=None,
     conduction_specs=None,
+    t_from=None,
+    t_to=None,
 ):
     """End-to-end ``per-device P(t) → T_j(t)`` glue.
 
@@ -645,6 +648,20 @@ def device_thermal_summary(
         ``switch_fn`` is required only when a switch entry is listed
         in ``thermal_specs`` and the result carries no stamped-mask
         record.
+    t_from, t_to : float, optional
+        Window in seconds for the reported averages and peaks
+        (``P_*_avg``, ``T_j_avg``, ``T_j_peak``), default the whole
+        run; same rules as :func:`pulsim.device_loss_summary`. The
+        Foster network still runs from the start of the run, so the
+        junction state inside the window is the physical one, and
+        ``T_j_trace`` keeps covering the whole run. The constant
+        switching / core offset added to the power is the WINDOW's
+        ``P_sw_avg + P_core_avg`` (the steady-state value, not one
+        inflated by start-up events), applied from ``t = 0``. On a
+        100 kHz buck (5 ms, ``t_from=3e-3``, one 50 us Foster stage)
+        ``T_j_avg`` matched ``T_ambient + R_th · P_total_avg`` to
+        1e-3 K on ``engine='pwl'`` and ``'trbdf2'``, and to 8e-3 K on
+        ``'dsed'``.
 
     Returns
     -------
@@ -686,9 +703,12 @@ def device_thermal_summary(
       and folded into ``P_sw_avg`` so the same constant-offset
       assumption applies.
     * Switching loss for diodes (Q_rr / E_rr_ref) and MOSFET / IGBT
-      ideal switches (E_on / E_off) is averaged over the whole run
-      via :func:`pulsim.device_loss_summary` and added to the
-      constant offset.
+      ideal switches (E_on / E_off) is averaged over the window (the
+      whole run by default) via :func:`pulsim.device_loss_summary`
+      and added to the constant offset.
+    * A Shockley diode (``add_shockley_diode``) dissipates
+      ``v_D · i_D`` with ``i_D`` its exponential law at the recorded
+      ``v_D``.
     """
     if not thermal_specs:
         return []
@@ -699,11 +719,19 @@ def device_thermal_summary(
     # (_result_views.solved_part). T_j_trace keeps one sample per
     # result.times: the dropped rows read T_ambient, where the network
     # starts.
-    n_full = int(np.asarray(result.times).shape[0])
+    t_all = np.asarray(result.times, dtype=float)
+    n_full = int(t_all.shape[0])
     result = _views.solved_part(result)
     states = _views.states_as_array(result)
     times = np.asarray(result.times, dtype=float)
     n_lead = n_full - times.size
+    # The window the averages and peaks are taken over (the whole run
+    # by default). The Foster network still runs from the start of the
+    # run, so its state at the window is the physical one.
+    win = _views.TimeWindow(
+        times, t_from, t_to,
+        span=(float(t_all[0]), float(t_all[-1])) if n_full else None,
+        what="device_thermal_summary")
 
     # Resolve thermal_specs into branch_id-keyed mapping.
     try:
@@ -736,6 +764,8 @@ def device_thermal_summary(
         diode_specs=diode_specs,
         switch_specs=switch_specs,
         conduction_specs=conduction_specs,
+        t_from=None if win.whole else win.a,
+        t_to=None if win.whole else win.b,
     )
     loss_by_bid = {int(e["branch_id"]): e for e in loss_entries}
 
@@ -795,14 +825,32 @@ def device_thermal_summary(
                      - _views.node_voltage_trace(states_s, int(to_id)))
             P_cond_t = v_R * v_R / R
             P_start_t = v_R_s * v_R_s / R
-            g_c = np.full_like(v_R, 1.0 / R)
-            E_cond = _losses._branch_energy(times, v_R, g_c, v_R_s, g_c)
+            v_w, v_s_w = win.cont(v_R, v_R_s)
+            g_c = np.full_like(v_w, 1.0 / R)
+            E_cond = _losses._branch_energy(win.times, v_w, g_c, v_s_w, g_c)
         elif kind == "inductor":
             # Ideal inductor — conduction loss is zero. Any thermal
             # rise comes from P_core_avg above.
             P_cond_t = np.zeros_like(times)
             P_start_t = P_cond_t
             E_cond = 0.0
+        elif kind == "shockley_diode":
+            prm = _shockley_params(builder, name)
+            from_id, to_id = desc.get("nodes", (None, None))
+            if prm is None or from_id is None or to_id is None:
+                continue
+            v_D = (_views.node_voltage_trace(states, int(from_id))
+                   - _views.node_voltage_trace(states, int(to_id)))
+            v_D_s = (_views.node_voltage_trace(states_s, int(from_id))
+                     - _views.node_voltage_trace(states_s, int(to_id)))
+            i_D = _diode_state.shockley_current(v_D, prm)
+            i_D_s = _diode_state.shockley_current(v_D_s, prm)
+            P_cond_t = v_D * i_D
+            P_start_t = v_D_s * i_D_s
+            v_w, v_s_w = win.cont(v_D, v_D_s)
+            i_w, i_s_w = win.cont(i_D, i_D_s)
+            E_cond = _views.pl_integral_product(win.times, v_w, i_w,
+                                                v_s_w, i_s_w)
         elif kind == "diode":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -820,6 +868,10 @@ def device_thermal_summary(
             v_D = d_trace.v
             g_arr = np.where(d_trace.closed, g_on, g_off)
             g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
+            v_w, v_s_w = win.cont(v_D, d_trace.v_start)
+            c_w, c_s_w = win.disc(d_trace.closed, d_trace.closed_start)
+            g_w = np.where(c_w, g_on, g_off)
+            g_s_w = np.where(c_s_w, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
@@ -827,12 +879,12 @@ def device_thermal_summary(
                 P_start_t = _losses._conduction_power_offset_slope(
                     d_trace.v_start * g_arr_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
-                    times, v_D * g_arr, d_trace.v_start * g_arr_s, c_spec)
+                    win.times, v_w * g_w, v_s_w * g_s_w, c_spec)
             else:
                 P_cond_t = v_D * v_D * g_arr
                 P_start_t = d_trace.v_start * d_trace.v_start * g_arr_s
                 E_cond = _losses._branch_energy(
-                    times, v_D, g_arr, d_trace.v_start, g_arr_s)
+                    win.times, v_w, g_w, v_s_w, g_s_w)
         elif kind == "switch":
             params = desc.get("params", {})
             g_on = float(params.get("g_on", float("nan")))
@@ -865,6 +917,10 @@ def device_thermal_summary(
                       - _views.node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
             g_arr_s = np.where(closed_s, g_on, g_off)
+            v_w, v_s_w = win.cont(v_SW, v_SW_s)
+            c_w, c_s_w = win.disc(closed, closed_s)
+            g_w = np.where(c_w, g_on, g_off)
+            g_s_w = np.where(c_s_w, g_on, g_off)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
@@ -872,12 +928,12 @@ def device_thermal_summary(
                 P_start_t = _losses._conduction_power_offset_slope(
                     v_SW_s * g_arr_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
-                    times, v_SW * g_arr, v_SW_s * g_arr_s, c_spec)
+                    win.times, v_w * g_w, v_s_w * g_s_w, c_spec)
             else:
                 P_cond_t = v_SW * v_SW * g_arr
                 P_start_t = v_SW_s * v_SW_s * g_arr_s
                 E_cond = _losses._branch_energy(
-                    times, v_SW, g_arr, v_SW_s, g_arr_s)
+                    win.times, v_w, g_w, v_s_w, g_s_w)
         else:
             # Unsupported kind for the thermal pipeline.
             continue
@@ -909,12 +965,21 @@ def device_thermal_summary(
             T_j_avg = float(np.mean(T_j_int))
             T_j_peak = float(np.max(T_j_int))
             on_times = True
+        if not win.whole:
+            # Over the window, on the grid the network ran on.
+            t_net = (t_aug if _views.grid_is_uniform(t_aug)
+                     else _views.resample_uniform(t_aug, p_aug)[0])
+            w_net = _views.TimeWindow(t_net, win.a, win.b,
+                                      what="device_thermal_summary")
+            T_w = w_net.cont(T_j_int)[0]
+            T_j_avg = _views.pl_integral(w_net.times, T_w) / w_net.span
+            T_j_peak = float(np.max(T_w))
         if n_lead and on_times:
             # One value per result.times sample (a resampled
             # variable-step trace is on its own grid and stays so).
             T_j_trace = np.concatenate(
                 (np.full(n_lead, T_amb_dev), T_j_trace))
-        T = (times[-1] - times[0]) if times.size > 1 else 1.0
+        T = win.span if times.size > 1 else 1.0
         P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
                       else float(P_cond_t.mean()))
         out.append({
@@ -930,9 +995,10 @@ def device_thermal_summary(
             "T_j_peak": T_j_peak,
             "T_ambient_C": T_amb_dev,
             "R_th_total": float(sum(s.R_th_K_per_W for s in stages)),
-            # The network's window: from the first solved sample.
-            "t_window_start": float(times[0]) if times.size else 0.0,
-            "t_window_end": float(times[-1]) if times.size else 0.0,
+            # The averages' window: from the first solved sample, or
+            # t_from / t_to.
+            "t_window_start": float(win.a) if times.size else 0.0,
+            "t_window_end": float(win.b) if times.size else 0.0,
         })
     return out
 
