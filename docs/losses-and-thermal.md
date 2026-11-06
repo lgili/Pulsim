@@ -90,6 +90,7 @@ PSIM-style datasheet annotations add:
 | Field | Source |
 |---|---|
 | `E_sw_total`, `P_sw_avg`, `n_turn_off_events`, `n_turn_off_events_dropped`, `E_sw_dropped`, `n_turn_off_events_capped`, `n_turn_off_events_unresolved`, `f_sw_estimate`, `t_rr` | diode + `diode_specs` |
+| `n_chatter_gaps` | every diode (see below) |
 | `E_sw_on_total`, `E_sw_off_total`, `n_turn_on_events` | switch + `switch_specs` |
 | `P_core_avg`, `E_core_total`, `B_peak` | inductor + `core_loss_specs` |
 
@@ -169,11 +170,27 @@ jumped at the turn-off, so the reading is the plateau. Use a step no
 longer than `t_rr` around the turn-offs (`engine='pwl'` with
 `dt <= t_rr`, or a smaller `dt_max`), or pass the datasheet `t_rr`.
 
+A turn-off is the start of BLOCKING. A gap in a diode's conduction
+across which no step average of `v_D` falls below `−2·V_th`, and that no
+other switch forced (no other bit of the recorded mask flips in it), is
+chatter inside one conduction and is not counted (`n_chatter_gaps`).
+The fixed engine produces it on a `V_th > 0` diode with a capacitor
+across it: the trapezoidal rule reflects each ON step of the 0.1 ns
+`Cs`–`g_on` mode from `+V_th` to about `−V_th`, the stamp drops to OFF,
+and the inductor recharges `Cs` to `V_th` within a few steps, over and
+over. A 100 kHz boost with 100 nF across D1 counted 4580 turn-offs at
+`dt = T/400` (15887 at `T/2000`) instead of 299. The stamped current,
+duty and conduction loss still follow what the solver carried (the
+current detours through `Cs` in each gap), so a `RuntimeWarning` names
+the chatter when the gaps cover 1 % or more of the conduction time. A
+smaller `dt` does not cure it (the gaps covered 28 % of the conduction
+at `T/400` and 56 % at `T/2000`); `engine='auto'` does.
+
 Two guards keep immaterial conduction out, and both are reported:
 
 * a stretch whose forward charge `Q_F` is below `1e-3` of the recovery
-  charge the spec asks for (`Q_rr`, `E_rr_ref / V_R_ref`, or
-  `E_rr_curve(I_F) / V_R_ref`) is not a recovery
+  charge the spec asks for (`Q_rr` or `E_rr_ref / V_R_ref`) is not a
+  recovery
   (`n_turn_off_events_dropped`; excluded from `n_turn_off_events`,
   `f_sw_estimate` and the total) — the fixed engine's trapezoidal stiff
   mode can turn a reverse-biased diode ON for single ~µA steps. With the
@@ -183,8 +200,15 @@ Two guards keep immaterial conduction out, and both are reported:
   is the stretch's own charge, not the run's peak current: a 4 kA
   start-up inrush made the old `1e-3 · i_peak` rule drop all 237 light-
   load recoveries of a boost (each above `Q_rr`), `E_sw` 4.9× and
-  `f_sw_estimate` 5× low. A spec without any recovery (counts only)
-  still uses the peak-current rule;
+  `f_sw_estimate` 5× low. An `E_rr_curve` is judged on its own current
+  axis instead: a stretch whose peak forward current is below `1e-3` of
+  the curve's smallest tabulated positive current is dropped. (E_rr is
+  read off the same axis, at the current the diode carries when it is
+  cut off; the charge a curve asks for scales with that current, so a
+  curve through the origin would have asked a 36 µA chatter blip for
+  1e-12 C and counted all of them.) A spec without any recovery (counts
+  only) judges the peak forward current against `1e-3` of the median
+  peak of the stretches that reach `1e-3` of the run's peak current;
 * no event recovers more than its own forward charge: `E_rr` is capped
   at `Q_F · V_R` (`n_turn_off_events_capped`). Capped events usually
   are one-step re-conductions from a ringing the grid does not resolve
@@ -254,7 +278,7 @@ Per-device output:
 | `P_sw_avg` | PSIM-style switching loss (W) — constant offset over the run |
 | `P_core_avg` | Steinmetz / iGSE core loss (inductor only) |
 | `P_total_avg` | `P_cond_avg + P_sw_avg + P_core_avg` |
-| `T_j_trace` | `np.ndarray` — full `T_j(t)` (°C) |
+| `T_j_trace` | `np.ndarray` — full `T_j(t)` (°C); on `engine='dsed'` built from the step-start (right-limit) power as well, so it agrees with `P_cond_avg` |
 | `T_j_avg`, `T_j_peak` | scalars (°C) |
 | `T_ambient_C` | from spec or top-level default |
 | `R_th_total` | `Σ R_th_i` over the Foster stages (K/W) |

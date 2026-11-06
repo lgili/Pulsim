@@ -34,7 +34,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Capped events also raise a `RuntimeWarning`: they are usually
   one-step re-conductions of an unresolved snubber ring, which inflate
   `n_turn_off_events` (235 instead of 200 on a 100 kHz boost at
-  dt = T/50).
+  dt = T/50). An `E_rr_curve` spec is judged on the curve's current
+  axis (peak forward current against 1e-3 of its smallest tabulated
+  current): a curve through the origin had counted all 44 RL half-wave
+  blips (f_sw 720 Hz). A counts-only spec judges against the median
+  peak of the material stretches, not the run's peak (a 4 kA inrush
+  had dropped 237 light-load recoveries).
+* **Diode chatter is not a turn-off, and is reported.** A gap that
+  never reverse-biases the diode beyond `2·V_th` (step averages) and that
+  no other switch forced is merged into the conduction around it
+  (`n_chatter_gaps`), with a `RuntimeWarning` when the gaps cover 1 %
+  of the conduction time. A `V_th = 0.7` diode with 100 nF across it on
+  `engine='pwl'` counted 4580 turn-offs on a 100 kHz boost (f_sw
+  1.53 MHz, no warning); it now counts 299, as at `V_th = 0`.
+* **DSED junction temperature uses the step-start power.** `T_j_trace`
+  was built from the left-limit samples only and disagreed with
+  `P_cond_avg` by up to 2 % on `engine='dsed'`; it now agrees with
+  the fixed engine to 0.3 %.
 * **Reverse-recovery `V_R` is read at a physical instant,
   `t_off + t_rr`.** New `diode_specs` key `t_rr` (default 100 ns). The
   previous window of two MEAN steps after the turn-off was a different
