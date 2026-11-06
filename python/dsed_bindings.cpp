@@ -206,22 +206,54 @@ private:
 // already handles arbitrary attribute access.
 // ---------------------------------------------------------------------------
 
+/// The mask each stored sample is reconstructed and recorded under:
+/// the STAMPED mask, i.e. the one in force over the step that ended
+/// at that sample (PEDResult::step_masks). Falls back to the
+/// post-event sample_masks for a result built without step masks.
+template <class ResultT>
+const auto& stamped_masks_of(const ResultT& res) {
+    return res.step_masks.size() == res.times.size() ? res.step_masks
+                                                     : res.sample_masks;
+}
+
 /// v2.0 Phase 3 item 5 — reconstruct the FULL MNA trajectory from
 /// the reduced samples through the adapter's per-mask recovery map.
 /// Samples are grouped by mask so a run that visits M modes pays M
 /// mask resolutions, not one per sample. Returns an empty array if
 /// the result carries no per-sample masks (a non-builder path).
+///
+/// Each sample is reconstructed through its STAMPED mask (the mask of
+/// the step that produced it), from the state that step ended in. At
+/// a sample where an event fired that is the pre-event (left-limit)
+/// state, the same convention the kernel engines use: a TR-BDF2
+/// landing sample is a solve under the mask from before the flip, and
+/// the new mode first appears on the next sample. Recording the
+/// post-event mask instead booked one whole step per event to the
+/// wrong mode (a DCM boost diode's duty read 0.200 against a true
+/// 0.178 at the default dt_max).
 template <class AdapterT, class ResultT>
 py::array_t<double> reconstruct_full_states(
     AdapterT& adapter, const ResultT& res) {
     const auto n = res.times.size();
-    if (n == 0 || res.sample_masks.size() != n) {
+    const auto& masks = stamped_masks_of(res);
+    if (n == 0 || masks.size() != n) {
         return py::array_t<double>(py::ssize_t{0});
     }
+    const bool have_pre =
+        res.step_masks.size() == n
+        && res.pre_event_index.size() == res.pre_event_states.size();
+    std::size_t next_pre = 0;
+    auto state_of = [&](std::size_t i) -> const pulsim::Vector& {
+        if (have_pre && next_pre < res.pre_event_index.size()
+            && res.pre_event_index[next_pre] == i) {
+            return res.pre_event_states[next_pre++];
+        }
+        return res.states[i];
+    };
     // Probe the width from the first sample.
-    adapter.set_mask(res.sample_masks[0]);
+    adapter.set_mask(masks[0]);
     const pulsim::Vector first =
-        adapter.recover_full(res.times[0], res.states[0]);
+        adapter.recover_full(res.times[0], state_of(0));
     const auto n_mna = static_cast<py::ssize_t>(first.size());
     py::array_t<double> out(
         {static_cast<py::ssize_t>(n), n_mna});
@@ -230,11 +262,11 @@ py::array_t<double> reconstruct_full_states(
         ptr[j] = first[j];
     }
     for (std::size_t i = 1; i < n; ++i) {
-        if (!(res.sample_masks[i] == res.sample_masks[i - 1])) {
-            adapter.set_mask(res.sample_masks[i]);
+        if (!(masks[i] == masks[i - 1])) {
+            adapter.set_mask(masks[i]);
         }
         const pulsim::Vector full =
-            adapter.recover_full(res.times[i], res.states[i]);
+            adapter.recover_full(res.times[i], state_of(i));
         for (py::ssize_t j = 0; j < n_mna; ++j) {
             ptr[static_cast<py::ssize_t>(i) * n_mna + j] = full[j];
         }
@@ -244,9 +276,10 @@ py::array_t<double> reconstruct_full_states(
 
 /// Per-sample switch / diode mask as an (n_samples, n_switches) bool
 /// array — the same record `SimulationResult.switch_states` carries
-/// on the pwl / trbdf2 engines. Every DSED sample's full MNA state is
-/// reconstructed THROUGH that sample's mask (reconstruct_full_states),
-/// so i = g(mask)·v holds at every sample by construction. Only the
+/// on the pwl / trbdf2 engines: row k is the STAMPED mask, the one in
+/// force over (t[k-1], t[k]]. Every DSED sample's full MNA state is
+/// reconstructed THROUGH that mask (reconstruct_full_states), so
+/// i = g(mask)·v holds at every sample by construction. Only the
 /// native SwitchStateMask path has a typed mask; the PyMask path (no
 /// PWL diodes, reduced states only) returns an empty array.
 template <class ResultT>
@@ -255,16 +288,17 @@ py::array_t<bool> sample_masks_to_array(const ResultT& res) {
     if constexpr (std::is_same_v<MaskT, PyMask>) {
         return py::array_t<bool>(std::vector<py::ssize_t>{0, 0});
     } else {
-        const auto n = static_cast<py::ssize_t>(res.sample_masks.size());
-        if (n == 0 || res.sample_masks.size() != res.times.size()) {
+        const auto& masks = stamped_masks_of(res);
+        const auto n = static_cast<py::ssize_t>(masks.size());
+        if (n == 0 || masks.size() != res.times.size()) {
             return py::array_t<bool>(std::vector<py::ssize_t>{0, 0});
         }
         const auto n_sw =
-            static_cast<py::ssize_t>(res.sample_masks[0].size());
+            static_cast<py::ssize_t>(masks[0].size());
         py::array_t<bool> out(std::vector<py::ssize_t>{n, n_sw});
         auto* ptr = out.mutable_data();
         for (py::ssize_t i = 0; i < n; ++i) {
-            const auto& m = res.sample_masks[static_cast<std::size_t>(i)];
+            const auto& m = masks[static_cast<std::size_t>(i)];
             for (py::ssize_t j = 0; j < n_sw; ++j) {
                 ptr[i * n_sw + j] = m.get(static_cast<pulsim::Size>(j));
             }

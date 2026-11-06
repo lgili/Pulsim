@@ -434,3 +434,88 @@ TEST_CASE("PED DCM wall-clock at most reference ×5 (prototype-level Gate 3B)",
     const Real abs_diff = std::abs(ped_final_vout - trap_final_vout);
     REQUIRE(abs_diff / p.V_in <= Real{0.001});
 }
+
+// =============================================================================
+// Stamped-mask record: step_masks[k] is the mode integrated over
+// (t[k-1], t[k]]; sample_masks[k] is the mode after any event at t[k].
+// =============================================================================
+//
+// The Python result's switch_states is step_masks, with each event
+// sample reconstructed from the pre-event state. Recording sample_masks
+// instead booked the step that ENDED at an event to the mode that
+// begins there: a DCM boost diode's duty read 0.200 against a true
+// 0.178 at the default 1 µs step.
+
+TEST_CASE("PED step_masks books every step to the mode integrated over it",
+          "[dsed][gate3][dcm][record]") {
+    BuckDCMParams p;
+    DcmSimBundle bun{p};
+
+    Vector x0(2);
+    x0 << Real{0}, p.V_out_steady();
+
+    PEDSimulator sim(
+        bun.model, bun.switch_fn,
+        bun.controller, bun.predictor,
+        Real{1e-9},
+        p.T_sw() / Real{4},
+        1,
+        make_zcd_projection());
+
+    const auto r = sim.simulate(x0, Real{2e-4});  // 20 cycles
+    const std::size_t n = r.times.size();
+    REQUIRE(r.step_masks.size() == n);
+    REQUIRE(r.sample_masks.size() == n);
+    REQUIRE(r.pre_event_index.size() == r.pre_event_states.size());
+    REQUIRE(!r.pre_event_index.empty());
+    REQUIRE(r.step_masks[0] == r.sample_masks[0]);
+
+    // Every event the scheduler fired at a stored sample: the step that
+    // ended there ran in the event's OLD mode, and integration continues
+    // in the new one.
+    std::size_t n_checked = 0;
+    for (const auto& e : r.event_log) {
+        for (std::size_t k = 1; k < n; ++k) {
+            if (r.times[k] == e.t && r.step_masks[k] != r.sample_masks[k]) {
+                if (r.step_masks[k] == e.old_mask) { ++n_checked; }
+            }
+        }
+    }
+    REQUIRE(n_checked >= 40);  // 20 cycles × (2 gate edges + 1 ZCD)
+
+    // State at the end of each step, before an event at that instant
+    // projected it (the ZCD projection clamps i_L to exactly 0).
+    std::vector<Vector> x_end(r.states.begin(), r.states.end());
+    bool projected = false;
+    for (std::size_t j = 0; j < r.pre_event_index.size(); ++j) {
+        const auto k = r.pre_event_index[j];
+        REQUIRE(k < n);
+        if (j > 0) { REQUIRE(k > r.pre_event_index[j - 1]); }
+        if ((r.pre_event_states[j] - r.states[k]).norm() > 0) {
+            projected = true;
+        }
+        x_end[k] = r.pre_event_states[j];
+    }
+    REQUIRE(projected);
+
+    // The inductor followed the recorded mode over every step:
+    // HS_ON → di_L > 0 (V_in > V_out), LS_CONDUCTING → di_L < 0,
+    // ZERO_CURRENT → i_L stays 0.
+    std::size_t n_on = 0, n_ls = 0, n_zero = 0;
+    for (std::size_t k = 1; k < n; ++k) {
+        if (!(r.times[k] > r.times[k - 1])) { continue; }
+        const Real di = x_end[k](0) - r.states[k - 1](0);
+        switch (r.step_masks[k]) {
+            case BuckMode::HS_ON:
+                REQUIRE(di > Real{0}); ++n_on; break;
+            case BuckMode::LS_CONDUCTING:
+                REQUIRE(di < Real{0}); ++n_ls; break;
+            case BuckMode::ZERO_CURRENT:
+                REQUIRE(std::abs(x_end[k](0)) < Real{1e-9}); ++n_zero;
+                break;
+        }
+    }
+    REQUIRE(n_on > 0);
+    REQUIRE(n_ls > 0);
+    REQUIRE(n_zero > 0);
+}

@@ -102,10 +102,12 @@ public:
 
         BDF2State bdf2_state;
         PEDResult<MaskT> result;
-        result.times.push_back(t);
-        result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+        ped_push_sample(result, t, x, system_.current_mask(),
+                        system_.current_mask(), nullptr);
         std::size_t step_idx = 0;
+        // Mask of the step being taken (PEDResult::step_masks). A
+        // gate event never modifies x here, so no pre-event state.
+        MaskT step_mask = system_.current_mask();
 
         constexpr std::size_t kMaxSteps = 10'000'000;
 
@@ -133,6 +135,7 @@ public:
                 }
                 continue;
             }
+            step_mask = system_.current_mask();
 
             // 3. Pull current A from the system (set by current mask).
             // By REFERENCE (v2.0 Phase 3 item 4 / audit E.4): this
@@ -195,16 +198,14 @@ public:
             // 7. Record
             ++step_idx;
             if (step_idx % store_every_ == 0) {
-                result.times.push_back(t);
-                result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+                ped_push_sample(result, t, x, system_.current_mask(),
+                                step_mask, nullptr);
             }
         }
 
         if (result.times.back() != t) {
-            result.times.push_back(t);
-            result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+            ped_push_sample(result, t, x, system_.current_mask(),
+                            step_mask, nullptr);
         }
 
         const auto t1_wall = clock::now();
