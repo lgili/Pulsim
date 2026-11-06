@@ -374,27 +374,62 @@ def _interp_energy_curve(x_query, curve) -> np.ndarray:
 def _time_fraction(mask: np.ndarray, times: np.ndarray) -> float:
     """Fraction of the run's TIME during which ``mask`` is True.
 
+    ``mask[k]`` is the state of the STEP that produced sample ``k``
+    (the switch mask the engine solved ``(t[k-1], t[k]]`` with, or a
+    diode's stamp — see ``_diode_state.DiodeStateTrace``), so each
+    interval is weighted by the state at its RIGHT end:
+    ``sum(mask[1:] · diff(t)) / (t[-1] − t[0])``.
+
     Time-weighted on purpose: a variable-step engine clusters samples
     at commutations, so a plain ``mask.mean()`` over-weights exactly
-    the instants a device changes state. Identical to the sample mean
-    on a uniform grid."""
+    the instants a device changes state. Right-hold, not trapezoid:
+    the trapezoid credits a long ON step only half its length when
+    the step's other end is an OFF sample — on ``engine='auto'`` an
+    ON step of 1.4 µs followed by a femtosecond turn-off landing lost
+    0.7 µs per cycle. On a uniform grid this differs from the sample
+    mean by at most one sample."""
     m = np.asarray(mask, dtype=float)
     t = np.asarray(times, dtype=float)
     if m.size == 0:
         return 0.0
     if t.size != m.size or t.size < 2 or not (t[-1] > t[0]):
         return float(m.mean())
-    return float(np.trapezoid(m, t) / (t[-1] - t[0]))
+    return float(np.dot(m[1:], np.diff(t)) / (t[-1] - t[0]))
 
 
 def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
     """Turn-off instants of one diode, read from its reconstructed
     conduction-state trace (``pulsim._diode_state``).
 
-    One record per ON→OFF transition of the stamp the solver used:
-    ``t`` is the first sample the diode blocks, ``V_R`` the reverse
-    voltage it blocks there and ``I_F`` the forward current on the
-    last conducting sample.
+    One record per end of a conducting stretch: ``t`` is the first
+    sample the diode blocks, ``I_F`` the forward current on the last
+    conducting sample and ``V_R`` the SETTLED
+    reverse voltage it blocks: the time-weighted mean of ``|v_D|``
+    over the blocking samples within TWO mean steps of the run,
+    ``2 (t_end − t_0) / (n − 1)``, after the first blocking sample
+    (cut short where the diode turns back on; ``|v_D|`` on the first
+    blocking sample itself if it is the only one). Turn-offs are the
+    ends of the diode's CONDUCTING steps
+    (``DiodeStateTrace.conducting``).
+
+    Not simply ``|v_D|`` on the first blocking sample. When the diode
+    turns off at its current zero and leaves a node held only by
+    ``g_off`` (a DCM boost's switch node), the inductor and ``g_off``
+    form a stiff mode (τ ≈ 2·L·g_off ≈ 0.2 ps) that each engine
+    mis-renders differently. Measured on a 12 V → 45.4 V DCM boost,
+    settled ``V_R = V_out − V_in = 34.7 V``:
+
+    * ``engine='auto'`` lands the turn-off and then takes
+      femtosecond steps through the transient: the first blocking
+      sample read 5275 V (``E_rr`` inflated 130×). Those steps carry
+      no time weight; the window does not see them.
+    * ``engine='pwl'`` (trapezoidal) does not damp the stiff mode:
+      the switch node alternates 40.9 V / −16.9 V on every step, so
+      single samples read 5.76 V and 63.56 V. Two steps average the
+      alternation out exactly (34.66 V).
+
+    On a hard-switched turn-off (the node is clamped, no stiff mode)
+    the two windows read the same constant voltage.
 
     Not ``result.commutation_events``: the fixed engine records an
     event only when ``v_D − V_th`` changes sign between two stored
@@ -404,14 +439,44 @@ def _diode_turn_offs(trace, times: np.ndarray) -> List[Dict[str, float]]:
     diode's voltage is ~0 — so ``|v_D(t_event)|`` put ``V_R`` ≈ 1 mV
     into every ``E_rr = Q_rr · V_R`` and the recovery loss read zero
     on a 48 V hard-switched buck."""
-    closed = np.asarray(trace.closed, dtype=bool)
-    if closed.size < 2:
+    # Transitions of the per-step CONDUCTING flag, not of the raw
+    # stamp: a V_th = 0 diode the fixed engine chatters ON/OFF at
+    # ~1e-7 A is not recovering from a forward current each time.
+    closed = np.asarray(trace.conducting, dtype=bool)
+    n = closed.size
+    if n < 2:
         return []
+    t = np.asarray(times, dtype=float)
     ks = np.nonzero(closed[:-1] & ~closed[1:])[0] + 1
-    v = np.asarray(trace.v, dtype=float)
+    v_abs = np.abs(np.asarray(trace.v, dtype=float))
     i = trace.current
-    return [{"t": float(times[k]), "V_R": float(abs(v[k])),
-             "I_F": float(abs(i[k - 1]))} for k in ks]
+    span = float(t[-1] - t[0])
+    window = 2.0 * span / (n - 1) if span > 0 else 0.0
+    # Index of the next ON sample after each turn-off (n if none).
+    on_idx = np.nonzero(closed)[0]
+    ends = np.append(on_idx, n)[np.searchsorted(on_idx, ks)]
+    out: List[Dict[str, float]] = []
+    for k, end in zip(ks.tolist(), ends.tolist()):
+        # The window opens at the first blocking SAMPLE, not at the
+        # last conducting one: the step that produced sample k may be
+        # the long one that carried the current down to its zero
+        # (stored at v_D ≈ 0), and |v_D| ≈ 0 over it is not a
+        # blocked voltage.
+        t_hi = t[k] + window
+        acc = 0.0
+        wsum = 0.0
+        for j in range(k + 1, end):
+            lo = t[j - 1]
+            if lo >= t_hi:
+                break
+            w = min(t[j], t_hi) - lo
+            if w > 0:
+                acc += v_abs[j] * w
+                wsum += w
+        V_R = acc / wsum if wsum > 0 else float(v_abs[k])
+        out.append({"t": float(t[k]), "V_R": float(V_R),
+                    "I_F": float(abs(i[k - 1]))})
+    return out
 
 
 def _diode_switching_loss(turn_offs: List[Dict[str, float]],

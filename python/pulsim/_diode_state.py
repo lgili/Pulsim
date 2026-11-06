@@ -31,9 +31,11 @@ The result does not record the diode bits per sample, so the band is
 resolved here by Kirchhoff's current law: at a node whose every other
 branch current is known (resistors, inductors, voltage sources,
 current sources, switches with a known mask, diodes already decided —
-exact to solver precision — and capacitors, estimated from C·Δv/Δt
-under a stricter acceptance threshold), only one hypothesis for the
-diode closes the current balance. That test is also applied OUTSIDE the band,
+exact to solver precision — and capacitors: exact where KCL at a
+node with no other unknown gives them, e.g. in series with a resistor,
+otherwise estimated from C·Δv/Δt under a stricter acceptance
+threshold), only one hypothesis for the diode closes the current
+balance. Ground is one of those nodes. That test is also applied OUTSIDE the band,
 where it catches samples in which the engine stored a state that
 contradicts its own commutation rule (``engine='auto'`` can carry a
 diode OFF across a forward bias it never sampled a crossing of).
@@ -114,11 +116,45 @@ class DiodeStateTrace:
 
     @property
     def conducting(self) -> np.ndarray:
-        """ON stamp AND forward current. A diode the engine left ON
-        with ``v_D <= 0`` (a sliding V_th=0 boundary rider carries
-        ~-0.3 uA for milliseconds on ``engine='auto'``) is not
-        conducting in any sense a duty cycle should count."""
-        return self.closed & (self.v > 0.0)
+        """Per-STEP conduction flag: element ``k`` describes the step
+        ``(t[k-1], t[k]]`` that produced sample ``k`` (element 0 the
+        initial point), for use with right-hold time weighting
+        (``pulsim.losses._time_fraction``).
+
+        A step conducts when its stamp is ON (``closed[k]``) AND the
+        diode carries a material forward current at EITHER end of it
+        (``g_on·v_D > 1e-6 · i_peak``):
+
+        * either end, because a variable-step engine lands a natural
+          turn-off ON the current zero — the last ON sample of a long
+          conducting step sits at ``v_D ≈ -4e-9 V``; judging the step
+          by that end alone dropped whole ON steps (DCM boost on
+          ``engine='auto'``: duty 0.166 vs 0.223 on ``engine='pwl'``);
+        * a material current, because a diode the engine leaves ON at
+          the boundary is not conducting in any sense a duty cycle
+          should count: ``engine='auto'`` rides a V_th = 0 diode ON at
+          ``v_D ≈ -3e-10 V`` for milliseconds, and the fixed engine
+          chatters a V_th = 0 diode ON/OFF at ``v_D ≈ 1e-10 V``
+          (≈ 1e-7 A) on alternate samples.
+
+        A step that ENDS on a current-zero landing (``g_on·|v_D|``
+        below the same threshold, so ON and OFF stamps carry the same
+        current there and the stored state is immaterial) keeps the
+        state of the step before it: the adaptive engine commits a
+        crossing landing with the pre-flip mask, and the step that
+        brought the current down to zero conducted all the way."""
+        closed = np.asarray(self.closed, dtype=bool)
+        if closed.size == 0:
+            return closed.copy()
+        i_pk = float(np.max(np.abs(self.current)))
+        thr = max(1e-12, 1e-6 * i_pk)
+        i_fwd = self.g_on * np.asarray(self.v, dtype=float)
+        fwd = i_fwd > thr
+        either = fwd.copy()
+        either[1:] |= fwd[:-1]
+        stamp = closed.copy()
+        stamp[1:] |= closed[:-1] & (np.abs(i_fwd[1:]) <= thr)
+        return stamp & either
 
     def warn(self, stacklevel: int = 3) -> None:
         """Emit one ``RuntimeWarning`` per problem found."""
@@ -491,14 +527,42 @@ def _kcl_resolve(builder, result, comps, states, times, sf, V, G,
                                      float(prm.get("g_off", 0.0)))
 
     # node -> list of (bid, sign); sign +1 = current leaves the node.
+    # Ground (every negative id, -1 in practice) is a node like any
+    # other: with every branch listed (guaranteed above — any unlisted
+    # current disables KCL), its balance is exact too, and it is the
+    # only one that decides a diode whose other node is shared with an
+    # undecided partner (a bridge whose AC side is grounded and DC
+    # side floats: D3/D4 meet the source only at ground).
+    _GND = -1
     incid: Dict[int, List[Tuple[int, int]]] = {}
     for c in comps:
         bid = int(c["branch_id"])
         f, t = (int(x) for x in c["nodes"])
-        if f >= 0:
-            incid.setdefault(f, []).append((bid, +1))
-        if t >= 0:
-            incid.setdefault(t, []).append((bid, -1))
+        incid.setdefault(f if f >= 0 else _GND, []).append((bid, +1))
+        incid.setdefault(t if t >= 0 else _GND, []).append((bid, -1))
+
+    # Exact currents for estimated capacitors: a node whose every
+    # other branch is exactly known gives the capacitor's current by
+    # KCL, with no C·Δv/Δt error (a capacitor in series with a
+    # resistor or a source — a Villard doubler's pump capacitor).
+    # Iterated so the exactness propagates along series chains.
+    for _pass in range(len(approx_bids) + 1):
+        upgraded = False
+        for lst in incid.values():
+            pending = [(b, sg) for b, sg in lst
+                       if b in approx_bids or b not in known]
+            if len(pending) != 1 or pending[0][0] not in approx_bids:
+                continue
+            b_c, s_c = pending[0]
+            acc = np.zeros(n)
+            for b, sg in lst:
+                if b != b_c:
+                    acc += sg * known[b]
+            known[b_c] = -s_c * acc
+            approx_bids.discard(b_c)
+            upgraded = True
+        if not upgraded:
+            break
 
     usable: Dict[int, Tuple[np.ndarray, np.ndarray,
                             List[Tuple[int, int]], float]] = {}

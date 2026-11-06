@@ -163,16 +163,19 @@ def test_bridge_v_th_does_not_change_the_reported_charge(engine):
 @pytest.mark.parametrize("V_th", VTHS)
 def test_bridge_duty_agrees_across_engines_or_warns(V_th):
     """Time-weighted duty must not depend on how the engine clusters
-    its samples. Measured at V_th = 0.7: pwl 0.1030 vs auto 0.1021
-    (the old sample-weighted auto figure was 0.0027). At V_th = 0 the
-    auto engine holds D1/D3 OFF while forward-biased by up to 3.4 V
-    for ~1.3 ms (a missed commutation — see _diode_state) and its
-    duty legitimately differs; that run must then SAY so."""
+    its samples. Measured at V_th = 0.7: pwl 0.1030 vs auto 0.1030
+    (D1), 0.0292 vs 0.0293 (D2); the old sample-weighted auto figure
+    was 0.0027. At V_th = 0 the auto engine holds D1/D3 OFF while
+    forward-biased by up to 3.4 V for ~1.3 ms (a missed commutation —
+    see _diode_state) and its duty legitimately differs; that run must
+    then SAY so."""
     _, _, s_pwl, _, _ = _run_bridge(V_th, "pwl")
     _, _, s_auto, _, msgs = _run_bridge(V_th, "auto")
     for name in DIODES:
         d_pwl = _entry(s_pwl, name)["duty_conducting"]
         d_auto = _entry(s_auto, name)["duty_conducting"]
+        if V_th > 0:
+            assert abs(d_pwl - d_auto) < 0.002, (name, d_pwl, d_auto)
         if abs(d_pwl - d_auto) > 0.005:
             assert any("commutation rule forbids" in m for m in msgs), (
                 name, d_pwl, d_auto, msgs)
@@ -414,11 +417,217 @@ def test_trbdf2_switch_mask_is_sampled_at_the_step_midpoint():
 
 def test_time_fraction_weights_by_time_not_samples():
     """Ten samples clustered in the first 1 % of the run must not
-    outvote the long stride after them."""
+    outvote the long stride after them. ``mask[k]`` is the state of
+    the step ENDING at sample k (right-hold): the long last step is
+    OFF, so it contributes nothing — the trapezoid credited it half."""
     t = np.concatenate([np.linspace(0.0, 0.01, 10), [1.0]])
     m = np.array([True] * 10 + [False])
-    assert _time_fraction(m, t) == pytest.approx(0.01 + 0.99 / 2)
+    assert _time_fraction(m, t) == pytest.approx(0.01)
+    assert _time_fraction(~m, t) == pytest.approx(0.99)
     assert m.mean() > 0.9
     tu = np.linspace(0.0, 1.0, 101)
     mu = tu < 0.25
     assert _time_fraction(mu, tu) == pytest.approx(mu.mean(), abs=0.01)
+
+
+# ---------------------------------------------------------------------
+# Boost: recovery voltage and duty on the adaptive grid
+# ---------------------------------------------------------------------
+
+def _boost(R_load: float, V_th: float):
+    """12 V → boost, 100 µH, 100 kHz at D = 0.5, 47 µF. R_load = 20 Ω
+    is CCM in steady state (V_out ≈ 23 V); 500 Ω is DCM (≈ 45.4 V),
+    where the diode turns off at its current zero and leaves the
+    switch node held only by g_off."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L1", "vin", "sw", 100e-6)
+    b.add_switch("Q1", "sw", "gnd", g_on=1e3, g_off=1e-9)
+    b.add_diode("D1", "sw", "out", 1e3, 1e-9, V_th=V_th)
+    b.add_capacitor("C1", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", R_load)
+    T = 1e-5
+    q1 = b.switch_index_of("Q1")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q1, (t % T) < 0.5 * T)
+        return m
+    return b, pwm, T
+
+
+@functools.lru_cache(maxsize=None)
+def _run_boost(R_load: float, V_th: float, engine: str):
+    b, pwm, T = _boost(R_load, V_th)
+    kw = dict(engine="pwl", dt=T / 100) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 3e-3, switch_fn=pwm, **kw)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        s = p.device_loss_summary(b, r, switch_fn=pwm,
+                                  diode_specs={"D1": {"Q_rr": 100e-9}})
+    msgs = [str(w.message) for w in caught
+            if issubclass(w.category, RuntimeWarning)]
+    return b, pwm, r, _entry(s, "D1"), msgs
+
+
+@pytest.mark.parametrize("V_th", VTHS)
+@pytest.mark.parametrize("R_load", (20.0, 500.0))
+def test_boost_recovery_energy_agrees_across_engines(R_load, V_th):
+    """V_R is the SETTLED blocked voltage. Taking |v_D| on the first
+    blocking sample read the femtosecond transient engine='auto'
+    steps through after a current-zero landing (5275 V on a 45 V
+    boost) and inflated E_sw_total 17× (CCM) to 130× (DCM); on
+    engine='pwl' it read one phase of the trapezoidal rule's undamped
+    stiff-mode alternation (5.76 V / 63.56 V around 34.66 V).
+    Measured after the fix: CCM 6.953e-4 J (pwl) vs 6.991e-4 J
+    (auto), DCM 9.913e-4 vs 9.934e-4 J — 2 % covers both."""
+    *_, d_pwl, m_pwl = _run_boost(R_load, V_th, "pwl")
+    *_, d_auto, m_auto = _run_boost(R_load, V_th, "auto")
+    assert not m_pwl and not m_auto, (m_pwl, m_auto)
+    assert d_pwl["n_turn_off_events"] == d_auto["n_turn_off_events"]
+    assert d_auto["E_sw_total"] == pytest.approx(d_pwl["E_sw_total"],
+                                                 rel=0.02)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_boost_dcm_recovery_voltage_is_v_out_minus_v_in(engine):
+    """In DCM the switch node settles at V_in once the inductor current
+    is zero, so the diode blocks V_out − V_in. Every steady-state
+    turn-off must report that (measured 34.66 V pwl, 34.74 V auto),
+    not a transient sample."""
+    from pulsim.losses import _diode_turn_offs
+    b, pwm, r, _, _ = _run_boost(500.0, 0.0, engine)
+    bid = next(c["branch_id"] for c in b.components() if c["name"] == "D1")
+    tr = _diode_state.diode_state_traces(b, r, switch_fn=pwm)[bid]
+    t = np.asarray(r.times)
+    offs = [o for o in _diode_turn_offs(tr, t) if o["t"] > 2e-3]
+    assert len(offs) >= 90
+    v_out = np.asarray(r.v("out"))
+    for o in offs:
+        expect = float(np.interp(o["t"], t, v_out)) - 12.0
+        assert o["V_R"] == pytest.approx(expect, rel=0.01), (o, expect)
+
+
+@pytest.mark.parametrize("V_th", VTHS)
+@pytest.mark.parametrize("R_load", (20.0, 500.0))
+def test_boost_duty_agrees_across_engines(R_load, V_th):
+    """Right-hold weighting of the per-step conducting flag. The old
+    trapezoid credited only half of a long ON step that ended on a
+    current-zero landing stored at v_D ≈ −4e-9 V: DCM duty 0.1679
+    (auto) vs 0.2219 (pwl) at V_th = 0. Measured after the fix:
+    0.2218 vs 0.2219 (DCM), 0.4678 vs 0.4681 (CCM)."""
+    *_, d_pwl, _ = _run_boost(R_load, V_th, "pwl")
+    *_, d_auto, _ = _run_boost(R_load, V_th, "auto")
+    assert abs(d_pwl["duty_conducting"] - d_auto["duty_conducting"]) \
+        < 0.002, (d_pwl["duty_conducting"], d_auto["duty_conducting"])
+
+
+# ---------------------------------------------------------------------
+# V_th = 0 chatter on the fixed engine
+# ---------------------------------------------------------------------
+
+def _half_wave_rl():
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "a", "gnd", v_dc=0.0, v_amplitude=100.0,
+                              frequency=50.0, phase=0.0)
+    b.add_diode("D1", "a", "k", 1e3, 1e-9, V_th=0.0)
+    b.add_resistor("R", "k", "m", 10.0)
+    b.add_inductor("L", "m", "gnd", 50e-3)
+    return b
+
+
+def test_v_th_zero_chatter_is_not_conduction_or_recovery():
+    """An RL-loaded half-wave rectifier: once the inductor current has
+    reached zero the fixed engine chatters the V_th = 0 diode ON/OFF on
+    alternate samples at v_D ≈ 1e-10 V (≈ 1e-7 A). That is not
+    conduction (duty 0.6812 pwl vs 0.6682 auto before; 0.6688 vs
+    0.6690 after) and not 732 reverse recoveries (3 turn-offs in three
+    50 Hz periods on both engines)."""
+    out = {}
+    for engine in ENGINES:
+        b = _half_wave_rl()
+        kw = dict(engine="pwl", dt=1e-6) if engine == "pwl" else {}
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = p.simulate(b, 0.06, **kw)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            s = p.device_loss_summary(b, r,
+                                      diode_specs={"D1": {"Q_rr": 1e-7}})
+        out[engine] = _entry(s, "D1")
+    assert out["pwl"]["n_turn_off_events"] == 3
+    assert out["auto"]["n_turn_off_events"] == 3
+    assert abs(out["pwl"]["duty_conducting"]
+               - out["auto"]["duty_conducting"]) < 0.002
+    assert out["pwl"]["i_rms"] == pytest.approx(out["auto"]["i_rms"],
+                                                rel=1e-3)
+
+
+# ---------------------------------------------------------------------
+# KCL reach: the ground node and series capacitors
+# ---------------------------------------------------------------------
+
+def test_bridge_with_floating_dc_side_resolves_through_ground():
+    """AC side grounded, DC side floating: D3/D4 meet the source only
+    at ground, so without a ground balance their band samples fell
+    back to hysteresis (D3 i_peak 49.68 A, D2 P_avg 0.00076 W, 6
+    warnings). With it, every diode matches the DC-referenced bridge
+    and the charge closes to ~4e-12."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "s", "gnd", v_dc=0.0, v_amplitude=325.0,
+                              frequency=50.0, phase=0.0)
+    b.add_resistor("Rs", "s", "a", 1e-3)
+    p.topology.add_bridge_rectifier(b, "BR", ac_a="a", ac_b="gnd",
+                                    dc_pos="p", dc_neg="n", V_th=0.7)
+    b.add_capacitor("C", "p", "n", C_DC)
+    b.add_resistor("RL", "p", "n", R_LOAD)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, T_END, engine="pwl", dt=1e-6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        s = p.device_loss_summary(b, r)
+        cur = {d: np.asarray(r.i(d)) for d in DIODES}
+    _, _, s_ref, _, _ = _run_bridge(0.7, "pwl")
+    for name in DIODES:
+        assert _entry(s, name)["i_peak"] == pytest.approx(
+            _entry(s_ref, name)["i_peak"], rel=1e-3)
+        assert _entry(s, name)["duty_conducting"] == pytest.approx(
+            _entry(s_ref, name)["duty_conducting"], abs=1e-3)
+    t = np.asarray(r.times)
+    v_dc = np.asarray(r.v("p")) - np.asarray(r.v("n"))
+    q_dc = np.trapezoid(v_dc / R_LOAD, t) + C_DC * (v_dc[-1] - v_dc[0])
+    q_in = np.trapezoid(cur["BR__D1"] + cur["BR__D2"], t)
+    assert abs(q_in - q_dc) <= 1e-9 * q_dc
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_villard_doubler_resolves_through_the_series_capacitor(engine):
+    """Villard doubler at V_th = 0.7: the pump capacitor sits in series
+    with the source resistor, so its current is EXACT by KCL at their
+    shared node — no C·Δv/Δt estimate. Before, D2 had 110-154
+    unresolved samples and a KCL error up to 6.9 A; now the node
+    between C1, D1 and D2 balances to ~1e-10 A, silently."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "s", "gnd", v_dc=0.0, v_amplitude=100.0,
+                              frequency=50.0, phase=0.0)
+    b.add_resistor("Rs", "s", "a", 0.1)
+    b.add_capacitor("C1", "a", "x", 100e-6)
+    b.add_diode("D1", "gnd", "x", 1e3, 1e-9, V_th=0.7)
+    b.add_diode("D2", "x", "o", 1e3, 1e-9, V_th=0.7)
+    b.add_capacitor("C2", "o", "gnd", 100e-6)
+    b.add_resistor("RL", "o", "gnd", 10e3)
+    kw = dict(engine="pwl", dt=1e-6) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 0.1, **kw)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        i1 = np.asarray(r.i("D1"))
+        i2 = np.asarray(r.i("D2"))
+    i_rs = (np.asarray(r.v("s")) - np.asarray(r.v("a"))) / 0.1
+    assert float(np.abs(i_rs).max()) > 5.0
+    assert float(np.abs(i_rs + i1 - i2).max()) <= 1e-6 * float(
+        np.abs(i_rs).max())
