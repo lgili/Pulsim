@@ -172,11 +172,13 @@ def main() -> None:
         error_history = np.zeros(res.num_steps())
 
     # --- Quick KPI ---------------------------------------------------------
-    pre_step  = v_out_arr[(times >= 0.5) & (times < 1.0)]
-    post_step = v_out_arr[(times >= 2.5)]
+    # Time-weighted window means (p.time_average): correct on any grid,
+    # unlike a plain mean over the samples of a variable-step run.
+    pre_step  = p.time_average(res.times, v_out_arr, 0.5e-3, 1.0e-3)
+    post_step = p.time_average(res.times, v_out_arr, t_from=2.5e-3)
     print(f"\n  KPI:")
-    print(f"    V_out @ pre-step  (0.5–1 ms):  mean={pre_step.mean():.3f} V (target 12.0)")
-    print(f"    V_out @ post-step (2.5–3 ms):  mean={post_step.mean():.3f} V (target 14.0)")
+    print(f"    V_out @ pre-step  (0.5–1 ms):  mean={pre_step:.3f} V (target 12.0)")
+    print(f"    V_out @ post-step (2.5–3 ms):  mean={post_step:.3f} V (target 14.0)")
     print(f"    max V_out during transient:    {v_out_arr.max():.3f} V")
     print(f"    min V_out during transient:    {v_out_arr.min():.3f} V")
 

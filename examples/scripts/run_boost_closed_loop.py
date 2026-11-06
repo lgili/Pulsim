@@ -155,13 +155,15 @@ def main() -> None:
     v_sw_arr  = res.v("sw")
 
     # KPI
-    pre_step  = v_out_arr[(times >= 1.0) & (times < T_STEP*1e3)]
-    post_step = v_out_arr[(times >= 3.5)]
+    # Time-weighted window means (p.time_average): correct on any grid,
+    # unlike a plain mean over the samples of a variable-step run.
+    pre_step  = p.time_average(res.times, v_out_arr, 1.0e-3, T_STEP)
+    post_step = p.time_average(res.times, v_out_arr, t_from=3.5e-3)
     rhpz_dip = v_out_arr[(times >= T_STEP*1e3) & (times < T_STEP*1e3 + 0.5)].min()
     print(f"\n  KPI:")
-    print(f"    V_out @ pre-step  (1–{T_STEP*1e3:.0f} ms):    mean={pre_step.mean():.2f} V "
+    print(f"    V_out @ pre-step  (1–{T_STEP*1e3:.0f} ms):    mean={pre_step:.2f} V "
           f"(target {V_REF:.1f})")
-    print(f"    V_out @ post-step (3.5–4 ms):  mean={post_step.mean():.2f} V "
+    print(f"    V_out @ post-step (3.5–4 ms):  mean={post_step:.2f} V "
           f"(target {V_REF_2:.1f})")
     print(f"    RHPZ undershoot just after step: min = {rhpz_dip:.2f} V")
 

@@ -239,12 +239,15 @@ def main():
     i_q_trace = -np.sin(theta_e)*alpha + np.cos(theta_e)*beta
 
     # Look at the 15-25 ms window: post-startup, pre-saturation.
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
     mask = (times >= 15e-3) & (times <= 25e-3)
+    win = (15e-3, 25e-3)
     print(f"\n  KPI (15-25 ms — post-startup, pre-voltage-saturation):")
-    print(f"    ω        = {omega_trace[mask].mean():.2f} rad/s")
+    print(f"    ω        = {p.time_average(times, omega_trace, *win):.2f} rad/s")
     print(f"    θ_m turns= {theta_m_trace[-1]/(2*math.pi):.2f}")
-    print(f"    i_d mean = {i_d_trace[mask].mean():+.3f} A (target 0)")
-    print(f"    i_q mean = {i_q_trace[mask].mean():+.3f} A "
+    print(f"    i_d mean = {p.time_average(times, i_d_trace, *win):+.3f} A (target 0)")
+    print(f"    i_q mean = {p.time_average(times, i_q_trace, *win):+.3f} A "
           f"(target {I_Q_REF})")
     print(f"    |i_a|_peak = {np.abs(i_a[mask]).max():.2f} A")
     T_em_avg = PP * PSI_PM * 1.5 * I_Q_REF  # ideal: 1.5·pp·ψ·i_q

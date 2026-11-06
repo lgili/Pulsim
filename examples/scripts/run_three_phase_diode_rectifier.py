@@ -77,8 +77,10 @@ def main() -> None:
     v_b   = np.array([s[b_idx] for s in res.states])
     v_c   = np.array([s[c_idx] for s in res.states])
 
-    k_skip = int(0.7 * res.num_steps())
-    v_dc_mean = v_dc[k_skip:].mean()
+    # Time-weighted (p.steady_state_stats): correct on any grid, including
+    # the variable-step one simulate() uses when no dt is given -- a plain
+    # mean over the samples is not.
+    v_dc_mean = p.steady_state_stats(res, v_dc, last=0.3 * (t_end - t_start)).mean
     print(f"  V_dc mean ≈ {v_dc_mean:.1f} V (target ≈ 232 V)")
 
     try:

@@ -87,8 +87,9 @@ def main() -> None:
 
     # Quick steady-state check via the v1.5 named accessor.
     v_c = res.v("vc")
-    final_window = v_c[int(0.9 * len(v_c)):]
-    print(f"  V_C (last 10% mean) = {final_window.mean():.3f} V "
+    # Time-weighted mean over the last 10 % of the run (correct on any grid).
+    v_c_final = p.steady_state_stats(res, "vc", last=0.1 * (t_end - t_start)).mean
+    print(f"  V_C (last 10% mean) = {v_c_final:.3f} V "
           f"(target 10.000 V)")
     overshoot = v_c.max() - 10.0
     print(f"  V_C peak overshoot   = {overshoot:.3f} V "

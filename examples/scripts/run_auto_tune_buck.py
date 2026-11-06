@@ -204,12 +204,14 @@ def main() -> None:
                                           tune["Kp"], tune["Ki"])
     times = np.asarray(res.times) * 1e3
     v_out = np.array([s[vout_idx] for s in res.states])
-    k_pre = (times > 1.0) & (times < T_SETPOINT_STEP * 1e3)
-    k_post = times > 2.5
+    # Time-weighted window means (p.time_average): correct on any grid,
+    # unlike a plain mean over the samples of a variable-step run.
+    v_pre = p.time_average(res.times, v_out, 1.0e-3, T_SETPOINT_STEP)
+    v_post = p.time_average(res.times, v_out, t_from=2.5e-3)
     print(f"  V_out pre-step  (1-{T_SETPOINT_STEP*1e3:.1f} ms): "
-          f"mean={v_out[k_pre].mean():.3f} V (target {V_REF:.1f})")
+          f"mean={v_pre:.3f} V (target {V_REF:.1f})")
     print(f"  V_out post-step (>2.5 ms): "
-          f"mean={v_out[k_post].mean():.3f} V (target {V_REF + 2.0:.1f})")
+          f"mean={v_post:.3f} V (target {V_REF + 2.0:.1f})")
 
     # ---- Plot ------------------------------------------------------------
     try:

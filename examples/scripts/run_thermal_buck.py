@@ -150,17 +150,20 @@ def main() -> None:
     else:
         P_avg = P_inst
 
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
     print(f"\n  KPI (last 50 ms):")
-    mask = times >= (T_END - 50e-3)
-    print(f"    V_out mean:  {v_out[mask].mean():.3f} V "
+    t_ss = T_END - 50e-3
+    P_loss = p.time_average(times, P_inst, t_from=t_ss)
+    print(f"    V_out mean:  {p.time_average(times, v_out, t_from=t_ss):.3f} V "
           f"(target {V_DC*DUTY:.1f})")
-    print(f"    I_L mean:    {i_L[mask].mean():.3f} A")
-    print(f"    P_loss avg:  {P_avg[mask].mean():.3f} W")
+    print(f"    I_L mean:    {p.time_average(times, i_L, t_from=t_ss):.3f} A")
+    print(f"    P_loss avg:  {P_loss:.3f} W")
     print(f"    T_j final:   {T_j[-1]:.2f} °C")
     print(f"    T_j rise:    {T_j[-1] - T_AMB_C:.2f} K")
     R_th_total = sum(s.R_th_K_per_W for s in THERMAL_STAGES)
     print(f"    expected rise = P_avg · R_th(∞) = "
-          f"{P_avg[mask].mean() * R_th_total:.2f} K")
+          f"{P_loss * R_th_total:.2f} K")
 
     # Plot.
     try:
