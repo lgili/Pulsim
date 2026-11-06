@@ -1,5 +1,13 @@
 # Known limitations carried into v1.3
 
+> **For Pulsim 2.0, read [`docs/known-limitations.md`](docs/known-limitations.md).**
+> It lists the limitations re-verified on 2.0, each with its measured
+> effect and a workaround. This file is the 1.3 catalogue. Its sections
+> were not re-verified for 2.0, except two. The "Transient engines
+> (2.0)" defects still reproduce; the chatter circuit aborts at 10, 5
+> and 2 ns and runs at 50 ns. In the SPICE importer section, `.subckt`
+> is now flattened.
+
 This file catalogues every gap we knowingly ship in **pulsim 1.3.0** —
 deliberately deferred work, partial implementations, and features whose
 roadmap is open in [`openspec/changes/`](openspec/changes/). Use it as the
@@ -88,8 +96,10 @@ as [`add-schematic-renderer-v2`](openspec/changes/add-schematic-renderer-v2/).
 `V` (DC/SINE/PULSE), `D`, `M` — and the standard engineering suffixes.
 The intentional gaps for v1.3:
 
-* `.subckt` / `.ends` — subcircuit definitions are recognised in the
-  lexer but not flattened into the builder.
+* ~~`.subckt` / `.ends` — subcircuit definitions are recognised in the
+  lexer but not flattened into the builder.~~ Flattened since then
+  (checked on 2.0: an `X` instance of a one-resistor subcircuit loads
+  its node as expected).
 * `Q` (BJT) / `J` (JFET) — device models are not implemented.
 * `K` — coupled inductors are deferred until the magnetics layer
   exposes a stable Python-facing mutual-inductance helper.

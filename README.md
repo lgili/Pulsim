@@ -288,6 +288,8 @@ older and different: it covers the C++ v1-runtime → v2 module split.)
   `allow_synthetic=True`.
 * **Known engine defects are documented, not hidden.** Four are pinned
   by strict xfails that name the mechanism (see the changelog).
+  [`docs/known-limitations.md`](docs/known-limitations.md) lists every
+  known limitation of 2.0 with its measured effect and a workaround.
 
 ---
 
