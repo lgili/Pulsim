@@ -240,6 +240,23 @@ For Monte Carlo, swap `sweep_path_aware` →
 r.uniform(1, 20)}, n_samples=1000, ...)` and get the same ~3.4×
 speedup over the legacy rebuild-per-sample pattern.
 
+### Using Pulsim with AI assistants
+
+The package ships a usage guide written for AI coding assistants (and
+useful to people): the verified 2.x idioms, exact signatures, the traps
+that return a plausible wrong number, and how to check a result. It
+always matches the installed version:
+
+```bash
+python -m pulsim.guide          # print it (also: pulsim.ai_guide())
+python -m pulsim.guide --path   # where the file is
+```
+
+Point your assistant at it, e.g. in `CLAUDE.md`, `AGENTS.md` or
+`.github/copilot-instructions.md`: *"Before writing or changing code that
+uses pulsim, run `python -m pulsim.guide` and follow it."* The docs also
+publish [`llms.txt`](docs/llms.txt), an index for tools that read one.
+
 ---
 
 ## What's new in v2.0

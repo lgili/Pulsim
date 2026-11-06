@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Using Pulsim with AI coding assistants
+
+AI assistants write Pulsim 1.x calls, and other simulators' semantics,
+with full confidence: until this release the tutorials themselves had
+broken calls, and several 2.0 behaviours (a diode `V_th` that is not a
+drop, a `.mean()` that is biased on the variable-step grid, a
+`SwitchStateMask(n)` that takes a size) return a plausible wrong number
+rather than an error.
+
+* **Typed stubs.** `pulsim/_pulsim.pyi` and a PEP 561 `py.typed` ship in
+  the wheel, so IDEs, mypy and assistants see the real signatures of the
+  pybind11 classes (mypy now rejects `add_sine_voltage_source(...,
+  amplitude=10.0)`). `scripts/generate_stubs.py` regenerates them;
+  `python/tests/test_stubs.py` fails when they drift from the bindings.
+* **A usage guide in the package.** `python -m pulsim.guide` prints
+  `pulsim/AI_GUIDE.md` (`--path` prints its location) and
+  `pulsim.ai_guide()` returns it, headed by the installed version. It
+  holds the verified 2.x idioms, the exact signatures of the most used
+  calls, the traps with their measured consequences, and how to verify
+  a result (charge balance, two engines, time-weighted statistics, step
+  convergence). It is also a page of the docs site. The `AttributeError`
+  for an unknown or retired `pulsim.X` now names the guide.
+* **`docs/llms.txt`**, an index of the docs for tools that read one, and
+  a "Using Pulsim with AI assistants" section in the README and the
+  docs.
+* **Executed documentation.** `python/tests/test_doc_snippets.py` runs
+  every `python` block of the guide, the README, getting-started and the
+  six tutorials, in order and outside the repository, and compares
+  printed output with the expected-output blocks (one unit of the last
+  digit). Run against the pre-fix docs, it fails on each broken call
+  and stale number that was fixed by hand for this release, including
+  a tutorial that only ran inside a clone. About 5 s in total.
+* **Docstrings that contradicted the guide.** `add_bridge_rectifier(V_th=)`,
+  `add_three_phase_vsi(V_f=)` and the `V_th` of `add_buck` / `add_boost`
+  / `add_flyback` are now documented as commutation thresholds, not
+  forward drops; `p.catalog()` no longer recommends a 1 µΩ resistor to
+  tie a floating subnet (that is a galvanic bond, not a reference).
+
 ## [2.0.0] — 2026-09-08
 
 ### Release-readiness pass

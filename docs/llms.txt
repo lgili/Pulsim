@@ -1,0 +1,34 @@
+# Pulsim
+
+> Pulsim is a power-electronics circuit simulator: a C++23 kernel with a Python API (`import pulsim as p`; build with `p.CircuitBuilder()`, run with `p.simulate()`). For the API of the version you have INSTALLED, run `python -m pulsim.guide` (or call `pulsim.ai_guide()`): it prints a usage guide matched to that version, and it wins over these links, which follow the main branch and may describe a different release.
+
+Pulsim 2 changed behaviour without changing many names, so code recalled from Pulsim 1.x or from other simulators often runs and returns a plausible wrong number. Read the usage guide before writing Pulsim code, and verify every simulated number with the checks in its section 6.
+
+## Start here
+
+- [AI usage guide](https://raw.githubusercontent.com/lgili/Pulsim/main/python/pulsim/AI_GUIDE.md): the verified 2.x idioms, exact signatures, the semantic traps and how to verify a result. Same text as `python -m pulsim.guide`.
+- [Getting started](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/getting-started.md): install, first transient, reading results by name.
+- [Mental model](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/mental-model.md): what the builder, the switch-state mask and the PWL cache are.
+
+## Tutorials
+
+- [01 RC charging](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/tutorials/01-rc-charging.md): pulse source, fixed versus variable step.
+- [02 Buck converter](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/tutorials/02-buck-converter.md): PWM `switch_fn`, switch bits, YAML.
+- [03 Isolated flyback](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/tutorials/03-flyback-isolated.md): coupled inductors, referencing an isolated secondary.
+- [04 Three-phase VSI](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/tutorials/04-3phase-vsi.md): SPWM, body-diode bits, Fourier analysis.
+- [05 LDO with op-amp feedback](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/tutorials/05-ldo-feedback.md): VCVS and a linear pass device.
+- [06 IGBT boost](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/tutorials/06-igbt-boost.md): IGBT on-state model, steady-state averaging.
+
+## Reference
+
+- [API reference](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/api-reference.md): builder methods and helpers.
+- [Gotchas](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/gotchas.md): failure modes and their fixes.
+- [Troubleshooting](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/troubleshooting.md): refusals and convergence messages.
+- [UX helpers](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/helpers.md): `p.catalog()`, `p.example()`, plotting and monitoring.
+- [Loss and thermal modelling](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/loss-thermal.md): `device_loss_summary`, `device_thermal_summary`, Foster networks.
+
+## Optional
+
+- [How Pulsim works](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/how-pulsim-works/index.md): MNA, trapezoidal companions, the PWL state-space cache, the engines.
+- [Internals](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/internals/README.md): layer-by-layer architecture of the C++ kernel.
+- [Changelog](https://raw.githubusercontent.com/lgili/Pulsim/main/CHANGELOG.md): what changed in each release and why.
