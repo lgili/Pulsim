@@ -52,10 +52,12 @@ of refusing.
   `h_min` on `engine='trbdf2'` (and on `'auto'`), and with
   `tol_newton_dx=1e-5, tol_newton_res=1e-4` it completes and reports
   V_out = 3.53 V against 15.31 V on `engine='pwl', dt=1e-8` — 4.3x
-  low. The message now says so, points at the named device and at
-  `engine='pwl'` with an explicit `dt` as the cross-check, and on a
-  TR-BDF2 abort at `h_min` names the known stall below (see also
-  `KNOWN_LIMITATIONS.md`).
+  low. The message now says so and points at the named device and at
+  the other engine as the cross-check. On a TR-BDF2 abort at `h_min`
+  it names the known stall below and `engine='pwl'` with an explicit
+  `dt` as the workaround. On a fixed-engine Newton failure that
+  survives every dt halving it names the diode-mask chatter below and
+  says a smaller `dt` makes it worse (see also `KNOWN_LIMITATIONS.md`).
 
 
 Pulsim 2.0 is a **breaking** release. It is the result of an audit that

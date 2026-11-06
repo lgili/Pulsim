@@ -96,11 +96,15 @@ tol_newton_res=1e-4` it completes and reports V_out = 3.53 V, while
 `engine='pwl', dt=1e-8` gives 15.31 V.
 
 **Fix:** look at the device the message names, and cross-check on the
-fixed-step engine — `engine='pwl'` with an explicit `dt` (a smaller
-`dt` if that is the engine that failed). An abort at `h_min` right
-after a hard switching edge on TR-BDF2 is a known engine limitation
-(`KNOWN_LIMITATIONS.md`, CHANGELOG 2.0.0 "TR-BDF2 stalls at `h_min`"),
-not a tolerance problem; `engine='pwl'` is the workaround.
+other engine. An abort at `h_min` right after a hard switching edge on
+TR-BDF2 is a known engine limitation (`KNOWN_LIMITATIONS.md`,
+CHANGELOG 2.0.0 "TR-BDF2 stalls at `h_min`"), not a tolerance problem;
+`engine='pwl'` with an explicit `dt` is the workaround. On the fixed
+engine, do NOT reach for a smaller `dt`: a Newton abort there with PWL
+diodes next to a Newton device is the known diode-mask chatter, which
+gets worse as `dt` shrinks (the PSFB reproducer aborts at 10 ns and
+runs at 50 ns). Use a coarser `dt`, or smooth Shockley junctions
+(`add_shockley_diode`) for those diodes.
 
 ### Symptom: residual oscillates but doesn't shrink
 

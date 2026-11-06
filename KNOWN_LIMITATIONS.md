@@ -207,6 +207,29 @@ characterised, and one tempting fix refuted*).
 after an event landing, or a row-equilibrated Jacobian — not a
 tolerance change.
 
+### Fixed engine: diode-mask chatter inside Newton at a small `dt`
+
+With PWL diodes (`add_diode`) in the same circuit as a Newton device
+(saturable or hysteretic magnetics, a smooth junction),
+`engine='pwl'` can abort with a Newton failure that survives every dt
+halving (`run_transient: the step ending at t = ... could not be
+taken`). The diode mask is re-decided inside every Newton iteration,
+and at a stiff step no single mask is self-consistent: the iterate
+bounces while the residual sits near zero (at `dt = 10 ns`, after 64
+sub-steps: `||dx|| = 1.46 V` at `vout` against a residual of
+1.9e-9). Reproducer: the PSFB rectifier in
+`python/tests/test_newton_stall_and_mask_chatter.py` (strict xfail
+`test_a_newton_device_survives_a_stiff_step`).
+
+**A smaller `dt` makes it worse, not better**: that circuit aborts at
+`dt` = 10, 5 and 2 ns and runs at 50 ns. Loosening the Newton
+tolerances is not the remedy either (see the section above).
+
+**Workarounds.** A coarser `dt`, or smooth Shockley junctions
+(`add_shockley_diode`) for those diodes — with the four rectifier
+diodes swapped, the same circuit runs at 10 ns and agrees with the
+linear reference to 0.13 %.
+
 ---
 
 ## Open OpenSpec proposals as of v1.3.0
