@@ -459,7 +459,13 @@ except ImportError:  # pragma: no cover
 # ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
 from .plot import scope  # noqa: E402,F811
 
+# The usage guide (AI_GUIDE.md). Only the accessor is imported here, never
+# the ``pulsim.guide`` CLI module: importing it eagerly would make
+# ``python -m pulsim.guide`` warn that the module is already loaded.
+from ._ai_guide import ai_guide  # noqa: E402
+
 __all__ = [
+    "ai_guide",
     "CircuitBuilder",
     "Graph",
     "DevicePool",
@@ -3245,8 +3251,10 @@ def __getattr__(name: str):
             f"pulsim.{name} was a v1 symbol and is no longer "
             f"available (pulsim 1.0.0 retired the legacy kernel). "
             f"Migration hint: {hint}. See "
-            f"docs/migration-guide.md for the full mapping.")
+            f"docs/migration-guide.md for the full mapping, and run "
+            f"`python -m pulsim.guide` for the current API.")
     raise AttributeError(
         f"module 'pulsim' has no attribute {name!r}. "
         f"pulsim 1.0.0 ships only the modern surface — "
-        f"see docs/migration-guide.md if you're porting v1 code.")
+        f"see docs/migration-guide.md if you're porting v1 code, and "
+        f"run `python -m pulsim.guide` for the current API.")
