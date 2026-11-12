@@ -146,7 +146,7 @@ Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device
 | Method | Signature |
 |---|---|
 | `add_switch` | `(name, n_pos, n_neg, g_on, g_off)` |
-| `add_diode` | `(name, anode, cathode, g_on, g_off, V_th=0)` — binary switched diode; `V_th` is the commutation threshold, not a forward drop (the ON state is the bare conductance `g_on`) |
+| `add_diode` | `(name, anode, cathode, g_on, g_off, V_th=0, V_f=0)` — binary switched diode; `V_f` is the forward drop while ON (PSIM's diode voltage drop: `v = V_f + i/g_on`), `V_th` the turn-on threshold (effectively `max(V_th, V_f)`), not a drop |
 | `add_nonlinear_diode` | `(name, anode, cathode, params: IdealDiodeParams)` |
 
 ### Nonlinear actives

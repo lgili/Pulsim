@@ -352,6 +352,21 @@ motor = p.add_pmsm(builder, **pmsm_kwargs)
 This is intentional — no parallel `*Params` data structure to keep
 in sync with the kwarg list.
 
+## After 2.0.0 — PWL diode forward drop (PSIM `V_f`)
+
+`add_diode` gained `V_f` (default 0): the PSIM "Diode Voltage Drop",
+`v = V_f + i/g_on` while ON, so the diode dissipates `V_f·i + i²/g_on`.
+Omitting it changes nothing. `V_th` stays the turn-on threshold.
+
+**Breaking:** `add_three_phase_vsi(V_f=0.7)` now passes `V_f` as that
+drop (it was the turn-on threshold `V_th` and added no loss). The
+freewheel diodes' conduction loss rises by `V_f·I_avg`, they no longer
+share current with a gated-on switch below `R_on·|i| = V_f`, and the
+leg-output voltage during dead time shifts by `V_f`. For the old
+behaviour pass `V_f=0.0, V_th=0.7`. `add_bridge_rectifier` gained a
+`V_f=0.0` drop; its `V_th=0.7` threshold is unchanged. `add_mosfet`'s
+`V_F` stays a body-diode threshold.
+
 ## See also
 
 - `examples/scripts/` — 20 runnable reference scripts.

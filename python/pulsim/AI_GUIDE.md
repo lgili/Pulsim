@@ -21,7 +21,7 @@ Short version:
   a fixed grid: `np.sqrt(p.time_average(t, i**2))` (trap 14).
 - Switch bits come from `b.switch_index_of(name)`; mask size from
   `b.graph.num_switches`. `p.SwitchStateMask(n)` is a SIZE.
-- PWL diode `V_th` is a commutation threshold, not a forward drop.
+- PWL diode `V_th` is a turn-on threshold; `V_f` is the forward drop.
   Without `dt`, rerun with `dt` on any `simulate` warning (trap 13).
 - Loss and thermal summaries average the WHOLE run, start-up included
   (3.4).
@@ -66,8 +66,8 @@ add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: s
   Pulsim assembles a modified nodal analysis (MNA) system from them.
 - **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
   and `add_diode` are two-state branches: a conductance `g_on` (or
-  `1/R_on`) when on, `g_off` when off, no voltage offset in either
-  state. Each one owns a bit in the switch-state mask. Controlled
+  `1/R_on`) when on, `g_off` when off; only `add_diode(V_f=)` adds a
+  series drop, while on. Each one owns a bit in the switch-state mask. Controlled
   switches follow `switch_fn(t) -> SwitchStateMask`; diodes commutate
   on their own. Smooth devices (`add_shockley_diode`, `add_mosfet_level1`,
   saturable magnetics) are nonlinear and are solved with Newton.
@@ -397,7 +397,7 @@ b.add_current_source(name, n_pos, n_neg, I)
 b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
 b.add_pulse_voltage_source(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0.0, rise_time=0.0, fall_time=0.0)
 b.add_pwm_voltage_source(name, n_pos, n_neg, v_high, v_low, frequency, duty, phase=0.0)
-b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0)
+b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0, V_f=0.0)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on, g_off)
 b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
@@ -416,8 +416,8 @@ res.i(name, t=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
-p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7)
-p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05)
+p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0)
+p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0)
 p.load_yaml_string(yaml_text)
 p.load_yaml_file(path)
 p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, verbose=True, **simulate_kwargs)
@@ -446,7 +446,7 @@ Each row was measured on this version. The fix column is what to write.
 
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
-| 1 | `V_th` of `add_diode` (and `add_bridge_rectifier(V_th=)`, `add_three_phase_vsi(V_f=)`, `add_mosfet(V_F=)` body diode) is a forward drop | It is the voltage at which the diode commutates. On-state is `I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike | Model a real drop with `b.add_shockley_diode` (`res.i` and both summaries evaluate its exponential law), or post-process losses with `conduction_specs={"D": {"V_f0": ..., "r_on": ...}}` |
+| 1 | `V_th` of `add_diode` / `add_bridge_rectifier`, or `add_mosfet(V_F=)` (body diode), is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` IS a drop | Pass `V_f` (PSIM's diode drop; losses include `V_f*I`), or `b.add_shockley_diode` for an exponential law. Never also a `conduction_specs` `V_f0` |
 | 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. On the rectifier of 6.2 `.mean()` reads 5.007 V against 6.330 V (-21 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
@@ -458,18 +458,18 @@ Each row was measured on this version. The fix column is what to write.
 | 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid. Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 6.24 V with `dt=2e-7` (on-time 12.5 steps, run as 13), 6.00 V with `dt=1e-7` | Make `D/f_sw` a whole number of steps; the helpers then hold it exactly (3.2) |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | Pulsim 2 refuses instead of guessing (unsupported model, invalid snapshot, singular circuit). A broad except turns that into a silent wrong answer | Let it raise; read the message, it names the device and the fix |
-| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or was held in a state "its commutation rule forbids" (a missed commutation; named, and `res.i` repeats it), a `switch_fn` pulse narrower than its sampling. No warning is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else at most `t_end/1000`) can be skipped silently (2 us in 20 ms: 11 of 20 phases) | Rerun with `dt` and compare (6.2); `dt` at most 4x the narrowest pulse |
+| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or was held in a state "its commutation rule forbids" (a missed commutation; named, and `res.i` repeats it), a `switch_fn` pulse narrower than its sampling. No warning is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else at most `t_end/1000`) can be skipped silently (2 us in 20 ms: 11 of 20 phases). `dsed` can refuse a zero-current turn-on of a `V_th <= V_f` diode | Rerun with `dt` and compare (6.2); `dt` at most 4x the narrowest pulse; `dsed`: `V_th = V_f + 1e-3` |
 | 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | It joins samples with lines, so each hard edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, analytic 1.5044 A. Same for `device_loss_summary`'s `i_rms` (not its `P_avg`) | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three. Keep `time_rms` for smooth or variable-grid traces; halve `dt` to check |
 
 Traps 1, 3 and 4, executed:
 
 ```python
-for vth in (0.0, 0.7):
+for vth, vf in ((0.0, 0.0), (0.7, 0.0), (0.0, 0.7)):
     b = p.CircuitBuilder()
     b.add_current_source("I1", "a", "gnd", 10.0)   # 10 A out of "a"
-    b.add_diode("D1", "a", "gnd", 20.0, 1e-9, V_th=vth)
+    b.add_diode("D1", "a", "gnd", 20.0, 1e-9, V_th=vth, V_f=vf)
     r = p.simulate(b, t_end=1e-5, dt=1e-6)
-    print(f"V_th = {vth}: V(a) = {r.v('a')[-1]:.3f} V")
+    print(f"V_th = {vth}, V_f = {vf}: V(a) = {r.v('a')[-1]:.3f} V")
 
 m = p.SwitchStateMask(1)
 print("SwitchStateMask(1):", m.size, "bit, bit 0 on:", m.get(0))
@@ -484,8 +484,9 @@ print({n: b.switch_index_of(n) for n in ("Q1", "Q1_body", "D1", "Q2", "Q2_body")
 ```
 
 ```text
-V_th = 0.0: V(a) = 0.500 V
-V_th = 0.7: V(a) = 0.500 V
+V_th = 0.0, V_f = 0.0: V(a) = 0.500 V
+V_th = 0.7, V_f = 0.0: V(a) = 0.500 V
+V_th = 0.0, V_f = 0.7: V(a) = 1.200 V
 SwitchStateMask(1): 1 bit, bit 0 on: False
 {'Q1': 0, 'Q1_body': 1, 'D1': 2, 'Q2': 3, 'Q2_body': 4}
 ```

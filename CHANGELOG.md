@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### PWL diode forward drop (PSIM `V_f`)
+
+* **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the
+  PSIM "Diode Voltage Drop". While ON the diode is `g_on` in series with
+  `V_f` (`v = V_f + i/g_on`); OFF stays a plain `g_off`. It turns on at
+  `max(V_th, V_f)` (`V_th` alone when `V_f = 0`) and off at zero current
+  (`v = V_f`); `V_th > V_f` is a hysteresis band. Every engine (pwl, DC
+  operating point, trbdf2/auto, dsed) decides through the one
+  `SwitchedDiode` law, and `res.i`, `device_loss_summary` (new key
+  `V_f`) and `device_thermal_summary` use `i = g_on·(v − V_f)`, so the
+  loss includes `V_f·i`. 10 A into `g_on = 20 S` with `V_f = 0.7` reads
+  1.200 V and 12.0 W. A negative or non-finite `V_f` is refused, naming
+  the diode. `components()` reports `V_f`.
+* **Added** `add_bridge_rectifier(..., V_f=0.0)` (a drop, passed through);
+  its `V_th=0.7` default is unchanged. `add_three_phase_vsi(..., V_th=0.0)`
+  for a hysteresis band.
+* **Changed (BREAKING)** `add_three_phase_vsi(V_f=0.7)` is now a real
+  conduction drop (it was passed as the turn-on threshold `V_th` and
+  added no loss). Freewheel-diode conduction loss rises by `V_f·I_avg`,
+  a diode no longer shares current with its gated-on switch while
+  `R_on·|i| < V_f` (the old 2 % share is gone; it conducts in the dead
+  time), and dead-time leg voltages shift by `V_f`. `V_f=0.0, V_th=0.7`
+  restores the old behaviour.
+* **Note** `engine='dsed'` cannot settle a zero-current turn-on of a
+  diode with `V_f > 0` and `V_th <= V_f` (no band); give it
+  `V_th = V_f + 1e-3`. The error now says so. `add_mosfet(V_F=)`, the
+  Level-1 body diode and the IGBT freewheel diode keep `V_F` as a
+  turn-on threshold (docstrings corrected). Older builds silently ignore
+  a YAML diode `V_f:` key.
+
 ### Fixes after the 2.0 readiness review
 
 #### Variable-step engines (`auto` / `trbdf2`)
