@@ -115,6 +115,7 @@ simulation: {t_end: 1.0e-3, dt: 1.0e-6}
 
 
 def test_empty_builder_renders(tmp_path):
+    pytest.importorskip("networkx")    # no template fits; the layout needs it
     assert sch.render(p.CircuitBuilder(), tmp_path / "e.svg").exists()
 
 
