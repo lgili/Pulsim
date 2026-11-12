@@ -340,6 +340,8 @@ class CircuitBuilder:
         """
     def add_shockley_diode(self, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, G_min: float = 1e-12, BV: float = 0.0) -> CircuitBuilder:
         """
+        add_shockley_diode(self: pulsim._pulsim.CircuitBuilder, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, G_min: float = 1e-12, BV: float = 0.0) -> pulsim._pulsim.CircuitBuilder
+
         Add an EXPONENTIAL (Shockley) diode: i = I_S*(exp(v/(n*V_T)) - 1) + v*G_min. Unlike `add_diode` (binary PWL) and the smooth-blend nonlinear diode, the forward drop is not fixed: a real junction's V_F rises ~60 mV per decade of current, so the same device drops 0.53 V at 1 mA and 0.77 V at 10 A. Use `thermal_voltage(T_kelvin)` for a junction temperature other than ~300 K. `BV` is a POSITIVE breakdown magnitude (0 disables it) — give 5.1 for a 5.1 V Zener. No series-resistance parameter on purpose: put a resistor in series, which is exact.
         """
     def add_sine_voltage_source(self, name: str, n_pos: str, n_neg: str, v_dc: float, v_amplitude: float, frequency: float, phase: float = 0.0) -> CircuitBuilder:
@@ -1256,6 +1258,11 @@ class SimulationResult:
         | ``switch``                 | ``(V_from − V_to)·G`` where             |
         |                            | ``G = g_on`` when the recorded stamped  |
         |                            | mask bit is set, ``g_off`` otherwise    |
+        | ``shockley_diode``         | ``I_S·(exp(v_D/(n·V_T)) − 1)``          |
+        |                            | ``+ v_D·G_min`` (minus the mirrored     |
+        |                            | breakdown branch when ``BV > 0``): the  |
+        |                            | kernel's law, ``add_shockley_diode``    |
+        |                            | parameters                              |
         +----------------------------+-----------------------------------------+
 
         Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -1282,14 +1289,14 @@ class SimulationResult:
         ``result._switch_fn = your_switch_fn`` for a switch, and then the
         switch_fn is re-evaluated with a warning.
 
-        Not yet supported (deferred to future PRs because their device
-        params aren't exposed by ``builder.components()`` today):
-        ``mosfet_level1``, ``igbt_level1``, ``nonlinear_diode``,
-        ``vcvs``, ``saturable_inductor``. Calls on those kinds raise
-        :class:`NotImplementedError` pointing at
-        :func:`pulsim.losses.device_loss_summary`, which already
-        implements per-step nonlinear stamp evaluation for the loss
-        summary.
+        Not yet supported (their device params aren't exposed by
+        ``builder.components()`` today): ``mosfet_level1``,
+        ``igbt_level1``, ``nonlinear_diode``, ``lauritzen_diode``,
+        ``nonlinear_capacitor``, ``vcvs``, ``saturable_inductor``. Calls
+        on those kinds raise :class:`NotImplementedError` with the
+        recipe that works: a small series resistor (1 mOhm) whose
+        ``res.i()`` is the device current. ``device_loss_summary`` does
+        not report them either.
 
         Sign convention. Current is positive flowing from the ``from``
         terminal to the ``to`` terminal of the ``add_*`` call (matches
@@ -1380,7 +1387,7 @@ class SimulationResult:
         Walks ``builder.components()`` and calls :meth:`i` on every branch
         whose kind has a reconstruction implementation (inductor,
         voltage_source family, resistor, capacitor, current_source, diode,
-        switch). When ``skip_unsupported`` is True (default), kinds without
+        shockley_diode, switch). When ``skip_unsupported`` is True (default), kinds without
         a Python-side reconstruction
         (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
         ``saturable_inductor``) are silently omitted from the result —

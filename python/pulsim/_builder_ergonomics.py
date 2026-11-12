@@ -48,6 +48,10 @@ the next call shouldn't fire.
 from __future__ import annotations
 
 import warnings
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._pulsim import CircuitBuilder
 
 
 class Cancelled(RuntimeError):
@@ -383,8 +387,10 @@ def _recording_shockley(native):
     native call runs first (it validates); the parameters are then
     stored by device name in ``builder._shockley_params`` and read
     back by :func:`shockley_params`."""
-    def add_shockley_diode(self, name, anode, cathode, I_S=1e-12, n=1.0,
-                           V_T=0.025852, G_min=1e-12, BV=0.0):
+    def add_shockley_diode(self, name: str, anode: str, cathode: str,
+                           I_S: float = 1e-12, n: float = 1.0,
+                           V_T: float = 0.025852, G_min: float = 1e-12,
+                           BV: float = 0.0) -> CircuitBuilder:
         out = native(self, name, anode, cathode, I_S, n, V_T, G_min, BV)
         table = getattr(self, "_shockley_params", None)
         if table is None:

@@ -89,7 +89,8 @@ def test_opaque_pwm_on_a_long_run_lands_every_edge():
 
 def test_opaque_three_phase_spwm_matches_the_fixed_engine():
     """10 kHz SPWM with 1 µs dead time behind a Python wrapper, 20 ms:
-    1599 mask changes (counted by sampling the wrapper every 10 ns) and
+    1600 mask changes (counted by sampling the wrapper every 10 ns; the
+    grid-exact SPWM puts the last edge exactly on t_end) and
     I_a 17.702 A rms against 17.700 A at dt = 1e-7."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vdc", "dcp", "gnd", 600.0)
@@ -103,7 +104,7 @@ def test_opaque_three_phase_spwm_matches_the_fixed_engine():
         b.graph.num_switches, 1e-6)
     r, _ = _run(b, 20e-3, switch_fn=lambda t: spwm(t))
     t = np.asarray(r.times)
-    assert r._trbdf2_stats["n_gate_events"] == 1599
+    assert r._trbdf2_stats["n_gate_events"] == 1600
     assert p.time_rms(t, r.i("La"), t_from=15e-3) == pytest.approx(
         17.700, abs=0.01)
 
