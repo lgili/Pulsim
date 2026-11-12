@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1948,19 +1969,40 @@
 <span class="p">)</span>
 </code></pre></div>
 <h2 id="run">Run<a class="headerlink" href="#run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">2e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-8</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">T_END</span> <span class="o">=</span> <span class="mf">12e-3</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">T_END</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-8</span><span class="p">)</span>
 <span class="c1"># Newton refresh auto-enabled thanks to the IGBT.</span>
 
 <span class="n">vout_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">)</span>
-<span class="n">v_mean</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="n">vout_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">)</span><span class="o">//</span><span class="mi">2</span><span class="p">:])</span> <span class="o">/</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">)</span><span class="o">//</span><span class="mi">2</span><span class="p">)</span>
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+<span class="n">v</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">s</span><span class="p">[</span><span class="n">vout_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">])</span>
+<span class="n">m</span> <span class="o">=</span> <span class="n">t</span> <span class="o">&gt;=</span> <span class="n">T_END</span> <span class="o">/</span> <span class="mi">2</span>                  <span class="c1"># second half, time-weighted</span>
+<span class="n">v_mean</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">m</span><span class="p">],</span> <span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
 <span class="n">boost_ideal</span> <span class="o">=</span> <span class="n">V_IN</span> <span class="o">/</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">DUTY</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_out (steady-state mean) = </span><span class="si">{</span><span class="n">v_mean</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V"</span>
       <span class="sa">f</span><span class="s2">" (ideal boost: </span><span class="si">{</span><span class="n">boost_ideal</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V)"</span><span class="p">)</span>
 </code></pre></div>
 <p>Expected:
-<div class="highlight"><pre><span></span><code>V_out (steady-state mean) = 18.45 V (ideal boost: 20.00 V)
+<div class="highlight"><pre><span></span><code>V_out (steady-state mean) = 18.67 V (ideal boost: 20.00 V)
 </code></pre></div></p>
-<p>The shortfall is due to <code>V_CE_sat ≈ 2 V</code> IGBT drop plus the diode V_F ≈ 0.7 V — the <strong>dominant losses</strong> in IGBT-based converters, exactly why IGBTs lose to SiC MOSFETs at high frequencies.</p>
+<p>The run needs about 10 ms: the 220 µH / 47 µF output stage rings
+at roughly <code>(1 − D) / (2π·√(L·C)) ≈ 0.9 kHz</code> and is lightly damped by the
+20 Ω load. Over the
+second half of a 2 ms run the mean is still 18.39 V, and the last
+0.5 ms of that run averages 19.45 V — neither is steady state. A 6 ms
+run is close but still ringing: second-half mean 18.65 V, last 0.5 ms
+18.54 V. At 12 ms the two agree (18.67 V and 18.67 V).</p>
+<p>The shortfall from 20 V is the IGBT's <code>V_CE_sat = 2 V</code>. During the
+on-time the inductor sees <code>V_in − V_CE_sat</code> instead of <code>V_in</code>, so the
+volt-second balance gives <code>V_out = (V_in − D · V_CE_sat) / (1 − D) =
+(12 − 0.8) / 0.6 = 18.67 V</code>, which the run reproduces. Re-run with
+<code>V_CE_sat=0.0</code> and the mean is 20.01 V. The diode contributes nothing:
+its <code>V_th = 0.7</code> is the voltage at which it commutates, not a forward
+drop (re-running with <code>V_th=0.0</code> gives the same 18.67 V). A saturation
+voltage that does not shrink with current is exactly why IGBTs lose to
+SiC MOSFETs at low voltage and high frequency.</p>
 <h2 id="the-convergence-story-why-this-isnt-trivial">The convergence story (why this isn't trivial)<a class="headerlink" href="#the-convergence-story-why-this-isnt-trivial" title="Permanent link">&para;</a></h2>
 <p>A naive boost-with-IGBT setup using:
 - <code>add_pulse_voltage_source</code> with <code>rise_time = fall_time = 0</code> (instant edges)

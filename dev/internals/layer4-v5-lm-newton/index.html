@@ -455,6 +455,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1816,8 +1837,11 @@ bit-identically.</p>
 </tbody>
 </table>
 <p>For PE workloads:
-- <strong>DC operating point with realistic diode</strong>: use plain
-  Newton with looser tolerances.
+- <strong>DC operating point with realistic diode</strong>: keep the default
+  absolute tolerances and let the DC cascade (gmin / source stepping)
+  or LM do the work. Do not loosen <code>tol_newton_dx</code> / <code>tol_newton_res</code>:
+  the absolute step test is what keeps Newton off a spurious root (see
+  <code>docs/gotchas.md</code> (e)).
 - <strong>Buck/boost with binary <code>SwitchedDiode</code></strong>: no Newton needed
   (PWL solve directly).
 - <strong>Smooth-blend <code>IdealDiode</code> (Shockley-flavor)</strong>: try plain

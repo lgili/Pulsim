@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1881,16 +1902,23 @@ Vstep         vc ────┤├── gnd
 <p>Expected:
 <div class="highlight"><pre><span></span><code>τ = 1.0 ms
 k·τ |  v_sim    v_exp
-  1  |  6.321    6.321
-  2  |  8.647    8.647
+  1  |  6.319    6.321
+  2  |  8.646    8.647
   3  |  9.502    9.502
 </code></pre></div></p>
-<p>The match is exact to several digits — there is no discretisation error from the trapezoidal companion for first-order responses.</p>
+<p>The simulation trails the exponential by 1.8 mV at <code>t = τ</code> (0.7 mV at 2τ).
+That gap is not integration error in the RC: the source jumps 0 → 10 V
+at <code>t = 0</code>, and the trapezoidal rule, which only sees the source at the
+samples <code>t = 0</code> and <code>t = dt</code>, treats the first step as a ramp. The
+response is therefore the exact exponential delayed by half a step,
+<code>dt / 2 = 0.5 µs</code>: compared with <code>V · (1 − exp(−(t − dt/2)/τ))</code> the
+error drops to ~1.5e-7 V. Divide <code>dt</code> by 10 and the gap at <code>t = τ</code>
+shrinks tenfold, to 0.18 mV.</p>
 <h2 id="what-just-happened">What just happened<a class="headerlink" href="#what-just-happened" title="Permanent link">&para;</a></h2>
 <ol>
 <li><code>add_pulse_voltage_source</code> registered a <code>PulseVoltageSource</code>-kind branch with <code>v_initial = 0</code>, <code>v_pulsed = 10</code>. The MNA system is stamped with <code>V = 0</code> baseline; the time-varying value lives in the <code>b_extra</code> overlay built by <code>run_transient</code>.</li>
-<li><code>simulate(...)</code> called <code>cache.build(dt=1e-6)</code>. Since there are no switches, exactly one PWL cache entry is created and KLU-factorized.</li>
-<li>Each <code>dt</code>-step retrieves that single cached entry and performs a back-substitution against the current <code>b_extra</code>. With 5000 steps over 5 ms, the whole sim runs in well under a millisecond.</li>
+<li>Because an explicit <code>dt</code> was passed, <code>simulate(...)</code> chose the fixed-step PWL engine (<code>res.engine_used == "pwl"</code>) and built a lazy PWL cache at <code>dt = 1e-6</code>. Since there are no switches, exactly one cache entry exists; it is LU-factorized once, on the first step.</li>
+<li>Each <code>dt</code>-step retrieves that single cached entry and performs a back-substitution against the current <code>b_extra</code>. With 5000 steps over 5 ms, the whole <code>simulate()</code> call takes a few milliseconds (≈ 2 ms measured on an Apple-silicon laptop, including the Python-side setup).</li>
 </ol>
 <h2 id="try-this-next">Try this next<a class="headerlink" href="#try-this-next" title="Permanent link">&para;</a></h2>
 <ul>

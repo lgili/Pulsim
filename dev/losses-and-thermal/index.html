@@ -455,6 +455,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../mental-model/" class="md-nav__link">
         
   
@@ -1820,10 +1841,58 @@ recognises. Common fields:</p>
 <tr>
 <td><code>duty_closed</code></td>
 <td>float ∈ [0, 1]</td>
-<td>switch (needs <code>switch_fn=</code>)</td>
+<td>switch</td>
 </tr>
 </tbody>
 </table>
+<p>Switch and diode states are not inferred. Every engine records, with
+each stored sample, the switch / diode mask it <strong>stamped</strong> for the solve
+that produced it (<code>result.switch_states</code>, one bool column per
+<code>builder.switch_index_of(name)</code>), so a switched branch's current is
+exactly <code>(g_on if closed else g_off) · v</code>. A PWL diode needs this: its ON
+state is a pure conductance, so a diode carrying 48 A at <code>g_on = 1e3</code>
+sits at 48 mV — inside <code>0 &lt; v_D &lt; V_th</code>, where the voltage alone cannot
+say whether it conducts. <code>switch_fn=</code> is only needed for a result built
+without the record (it is then re-evaluated, with a warning). Duties are
+time-weighted per step, so a variable-step grid does not bias them.</p>
+<p>Row <code>k</code> of the record is the mask in force over the step
+<code>(t[k-1], t[k]]</code>, and the sample's state is the solve under it. At a
+commutation the stored sample is therefore the state just BEFORE the
+switch flips (a TR-BDF2 landing, a DSED event), and the new mode appears
+from the next sample on. A sample 0 seeded with <code>initial_state</code> was not
+solved in the run (<code>result.switch_states_unsolved</code>): its recorded bits
+are the mask carried in, which say nothing about the solve that produced
+its state, so a switched branch has no defined current there.
+<code>result.i()</code> returns the first solved sample's value for a switch or
+diode on that row (a real current one step late, never a guessed
+<code>g_on·V</code>; every <code>i0=</code> / <code>c0=</code> run has such a row), and the loss
+and thermal summaries start at the first solved sample (one step less
+than the run on a fixed grid; every entry's <code>t_window_start</code> is then
+<code>t[1]</code>, and an energy or charge total leaves out <code>[t[0], t[1]]</code>). A <code>resume_from</code> sample 0 is the previous
+run's last sample and records the mask it was solved under
+(<code>SolverSnapshot.stamped_mask</code>); it is flagged only when the snapshot
+lacks that field (hand-built, or pickled before it existed).</p>
+<p>Time integrals (<code>i_avg</code>, <code>i_rms</code>, <code>P_avg</code>, <code>E_total</code>, the conduction
+model, the forward charge of a recovery) integrate each step as the line
+from its START to its end sample, exactly: <code>h·(a + c)/2</code> for a current,
+<code>h·(a² + a·c + c²)/3</code> for a square. The start of a step is the sample
+before it, except at a DSED event: the stored sample is the left limit
+there, and <code>engine='dsed'</code> also stores the right limit the next step
+starts from (<code>result.right_limit_index</code> / <code>right_limit_states</code> /
+<code>right_limit_switch_states</code>). Without it a freewheel diode's turn-on
+jump was drawn as a ramp over the whole next step, and a DCM boost
+diode's <code>i_avg</code> read 0.0234 A against 0.0535 A (−56 %), with no warning.
+The same right limit gives a switch's <code>E_on</code> its current AT the edge.
+Integrating <code>np.trapezoid(result.i(name), result.times)</code> yourself on a
+DSED result keeps that error (first order in the step); read the summary,
+or start each step from the right limit. A step whose two ends carry
+different conductances (a fixed-step or TR-BDF2 commutation step, which
+has no stored right limit) keeps the trapezoid of its two end powers.</p>
+<p>With <code>store_every &gt; 1</code> a recorded row is the mask of the LAST solve
+before the sample, not of the whole stored interval, so duties and
+integrals alias on a decimated grid (a buck switch's duty read 0.554
+instead of 0.500 at <code>store_every = 67</code>). Keep <code>store_every = 1</code> for loss
+work.</p>
 <p>PSIM-style datasheet annotations add:</p>
 <table>
 <thead>
@@ -1834,8 +1903,16 @@ recognises. Common fields:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>E_sw_total</code>, <code>P_sw_avg</code>, <code>n_turn_off_events</code>, <code>f_sw_estimate</code></td>
+<td><code>E_sw_total</code>, <code>P_sw_avg</code>, <code>n_turn_off_events</code>, <code>n_turn_off_events_dropped</code>, <code>E_sw_dropped</code>, <code>n_turn_off_events_capped</code>, <code>n_turn_off_events_unresolved</code>, <code>f_sw_estimate</code>, <code>t_rr</code></td>
 <td>diode + <code>diode_specs</code></td>
+</tr>
+<tr>
+<td><code>n_possible_chatter_gaps</code></td>
+<td>every diode (see below)</td>
+</tr>
+<tr>
+<td><code>t_window_start</code>, <code>t_window_end</code></td>
+<td>every entry: the window the statistics were taken over</td>
 </tr>
 <tr>
 <td><code>E_sw_on_total</code>, <code>E_sw_off_total</code>, <code>n_turn_on_events</code></td>
@@ -1881,10 +1958,93 @@ E_off_event = E_off_ref · ...
 
 <span class="c1"># Datasheet energy + reference voltage (fast/soft recovery):</span>
 <span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"E_rr_ref"</span><span class="p">:</span> <span class="mf">30e-6</span><span class="p">,</span> <span class="s2">"V_R_ref"</span><span class="p">:</span> <span class="mf">600.0</span><span class="p">}}</span>
+
+<span class="c1"># Either form takes the recovery time (default 100 ns):</span>
+<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"Q_rr"</span><span class="p">:</span> <span class="mf">50e-9</span><span class="p">,</span> <span class="s2">"t_rr"</span><span class="p">:</span> <span class="mf">35e-9</span><span class="p">}}</span>
 </code></pre></div>
-<p>For every turn-off event in <code>result.commutation_events</code> matching the
-branch, Pulsim interpolates <code>|V_R(t_event)|</code> from the trace and
-accumulates <code>E_rr = Q_rr · V_R</code> or <code>E_rr = E_rr_ref · (V_R / V_R_ref)</code>.</p>
+<p>A turn-off is the end of a conducting stretch of the diode's recorded
+state, at <code>t_off</code> (the end of its last conducting step). Pulsim reads
+the reverse voltage <code>V_R = max(−v_D, 0)</code> one recovery time later, at
+<code>t_off + t_rr</code> — a physical instant, the same on every engine and step
+size — and accumulates <code>E_rr = Q_rr · V_R</code> or
+<code>E_rr = E_rr_ref · (V_R / V_R_ref)</code>. <code>v_D</code> is read from the blocking
+samples paired into step midpoints, which cancels the fixed engine's
+trapezoidal alternation around a node held only by <code>g_off</code>. A
+hard-switched diode blocks its full voltage at once; a naturally
+commutated one (a line rectifier, a DCM turn-off) recovers against the
+little voltage that has built up after its current zero, so its <code>E_rr</code>
+is small — as it is in hardware.</p>
+<p>When the step that carries a turn-off is longer than <code>t_rr</code>, the grid
+cannot show how <code>v_D</code> rose inside it and <code>E_rr</code> depends on the step size.
+Those turn-offs are counted in <code>n_turn_off_events_unresolved</code> and a
+<code>RuntimeWarning</code> names the diode. The exception is a FORCED turn-off
+(another switch flips on the same step while the diode still carries
+current) whose blocking voltage is flat after the step: the voltage
+jumped at the turn-off, so the reading is the plateau. Use a step no
+longer than <code>t_rr</code> around the turn-offs (<code>engine='pwl'</code> with
+<code>dt &lt;= t_rr</code>, or a smaller <code>dt_max</code>), or pass the datasheet <code>t_rr</code>.</p>
+<p>Every recorded conduction stretch counts: turn-offs, <code>f_sw_estimate</code>,
+<code>Q_F</code> and <code>E_rr</code> are read from the record as the solver stamped it.
+That includes numerical chatter. The fixed engine produces it on a
+<code>V_th &gt; 0</code> diode with a capacitor across it (or in a tight loop with
+it): for <code>dt &gt; 2·τ</code>, <code>τ = C·(1/g_on + R_loop)</code>, the trapezoidal rule
+reflects each ON step from <code>+V_th</code> to about <code>−V_th</code>, the stamp drops to
+OFF, and the circuit recharges the capacitor to <code>V_th</code> within a few
+steps, over and over. A 100 kHz boost with 100 nF across D1 records 4580
+turn-offs at <code>dt = T/400</code> (15887 at <code>T/2000</code>) instead of 299; a 100 µF
+transformer rectifier (<code>τ = 0.5 µs</code>) records 360 instead of 5 at
+<code>dt = 2 µs</code>, with gaps of 40 to 187 steps.
+<code>n_possible_chatter_gaps</code> counts the gaps that look like it: the
+reflected ON step lasts one step, so a gap counts when at least two of
+the three runs around it (the conducting stretch before, the gap, the
+stretch after) last at most 2 steps, and no step average of <code>v_D</code> in it
+falls below <code>−2·V_th</code>. The gap length is not used: chatter gaps measured
+1 to 237 steps, and real short blocking intervals are as short (a
+100 kHz pulsed charger blocking 0.5 V: 5 steps at 1 µs, between
+conducting stretches of 5 steps, not reported). On the fixed-step engine
+a <code>RuntimeWarning</code> fires when they are at least half the turn-offs and
+cover 1 % or more of the conducting time; it says the gaps MAY be
+chatter and that, if they are, <code>n_turn_off_events</code>, <code>f_sw_estimate</code> and
+<code>E_sw_total</code> are inflated. A smaller <code>dt</code> removes the chatter only once it is about
+<code>2·τ</code> or less (a 1000 µF rectifier capacitor, <code>τ = 5 µs</code>: chatter at
+<code>dt &gt;= 16 µs</code>, none at <code>&lt;= 12 µs</code>); for a snubber directly across the
+diode <code>τ = C/g_on</code> is 1 ns per µF at <code>g_on = 1e3</code>, out of reach, and a
+smaller <code>dt</code> multiplies the gaps. To check, compare with
+<code>engine='trbdf2'</code> (or <code>engine='auto'</code> without <code>dt</code>; with <code>dt</code> it runs
+the fixed-step engine), which does not reflect this mode, and treat a
+disagreement as unresolved rather than taking either as the reference:
+TR-BDF2 has errors of its own on a stiff snubbed circuit (that same
+boost ends at 27.6 V on <code>'auto'</code> against 54.5 V on <code>'pwl'</code> at <code>T/400</code>
+and <code>T/4000</code>).</p>
+<p>Two guards keep immaterial conduction out, and both are reported:</p>
+<ul>
+<li>a stretch whose forward charge <code>Q_F</code> is below <code>1e-3</code> of the recovery
+  charge the spec asks for (<code>Q_rr</code> or <code>E_rr_ref / V_R_ref</code>) is not a
+  recovery
+  (<code>n_turn_off_events_dropped</code>; excluded from <code>n_turn_off_events</code>,
+  <code>f_sw_estimate</code> and the total) — the fixed engine's trapezoidal stiff
+  mode can turn a reverse-biased diode ON for single ~µA steps. With the
+  cap below, a dropped stretch could add at most 1e-3 of one event's
+  energy; <code>E_sw_dropped</code> reports what they would add together, and a
+  <code>RuntimeWarning</code> fires if that exceeds 1 % of <code>E_sw_total</code>. The test
+  is the stretch's own charge, not the run's peak current: a 4 kA
+  start-up inrush made the old <code>1e-3 · i_peak</code> rule drop all 237 light-
+  load recoveries of a boost (each above <code>Q_rr</code>), <code>E_sw</code> 4.9× and
+  <code>f_sw_estimate</code> 5× low. An <code>E_rr_curve</code> is judged on its own current
+  axis instead: a stretch whose peak forward current is below <code>1e-3</code> of
+  the curve's smallest tabulated positive current is dropped. (E_rr is
+  read off the same axis, at the current the diode carries when it is
+  cut off; the charge a curve asks for scales with that current, so a
+  curve through the origin would have asked a 36 µA chatter blip for
+  1e-12 C and counted all of them.) A spec without any recovery (counts
+  only) judges the peak forward current against <code>1e-3</code> of the median
+  peak of the stretches that reach <code>1e-3</code> of the run's peak current;</li>
+<li>no event recovers more than its own forward charge: <code>E_rr</code> is capped
+  at <code>Q_F · V_R</code> (<code>n_turn_off_events_capped</code>). Capped events usually
+  are one-step re-conductions from a ringing the grid does not resolve
+  (a snubber faster than <code>dt</code>), which also inflate <code>n_turn_off_events</code>
+  and <code>f_sw_estimate</code>, so a <code>RuntimeWarning</code> reports them.</li>
+</ul>
 <p>The <code>SwitchedDiode</code> kernel model has no physical recovery charge — this
 is a datasheet annotation pass, matching the LTspice "ideal-diode-with-Qrr"
 option and the PSIM diode loss panel.</p>
@@ -1958,11 +2118,11 @@ option and the PSIM diode loss panel.</p>
 </tr>
 <tr>
 <td><code>T_j_trace</code></td>
-<td><code>np.ndarray</code> — full <code>T_j(t)</code> (°C)</td>
+<td><code>np.ndarray</code> — full <code>T_j(t)</code> (°C): one value per <code>result.times</code> sample on <code>engine='pwl'</code> and <code>'dsed'</code> (DSED computes it with the step-start (right-limit) power inserted, so it agrees with <code>P_cond_avg</code>, and samples it back for every device), on a uniform resample of the run on <code>'trbdf2'</code> / <code>'auto'</code></td>
 </tr>
 <tr>
 <td><code>T_j_avg</code>, <code>T_j_peak</code></td>
-<td>scalars (°C)</td>
+<td>scalars (°C); <code>T_j_avg</code> is a time average, on a variable grid over a linear resample of the power (−0.50 K of a 182 K rise on a DSED boost, +0.83 K on <code>'auto'</code>, against the exact single-stage value)</td>
 </tr>
 <tr>
 <td><code>T_ambient_C</code></td>
@@ -1971,6 +2131,10 @@ option and the PSIM diode loss panel.</p>
 <tr>
 <td><code>R_th_total</code></td>
 <td><code>Σ R_th_i</code> over the Foster stages (K/W)</td>
+</tr>
+<tr>
+<td><code>t_window_start</code>, <code>t_window_end</code></td>
+<td>the window the network ran over (from the first solved sample)</td>
 </tr>
 </tbody>
 </table>

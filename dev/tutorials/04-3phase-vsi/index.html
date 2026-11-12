@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1866,7 +1887,7 @@
 <h1 id="tutorial-04-three-phase-voltage-source-inverter-spwm">Tutorial 04 — Three-phase voltage-source inverter (SPWM)<a class="headerlink" href="#tutorial-04-three-phase-voltage-source-inverter-spwm" title="Permanent link">&para;</a></h1>
 <p><strong>Goal.</strong> Build a 6-switch 3-leg VSI driving a balanced RL load with sinusoidal PWM. Verify that the three line-to-line voltages have the correct 120° relative phase and equal magnitude.</p>
 <p><strong>Concepts introduced:</strong>
-- 6-switch enumeration in <code>SwitchStateMask</code> (<code>num_switches = 6</code> → 64 cache entries).
+- Switch-bit bookkeeping in <code>SwitchStateMask</code>: 6 MOSFETs with body diodes are 12 switching branches (<code>num_switches = 12</code> → 4096 possible masks).
 - <code>make_three_phase_spwm_fn</code> + <code>ThreePhaseLegIndices</code> (Layer 2 V8).
 - Why the cache stays manageable even with many switches (only states reachable from the schedule are built).</p>
 <p><strong>Reference YAML:</strong> <a href="https://github.com/lgili/Pulsim/blob/main/examples/three_phase_inverter.yaml"><code>examples/three_phase_inverter.yaml</code></a>.</p>
@@ -1901,55 +1922,97 @@
 <span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q3_H"</span><span class="p">,</span> <span class="s2">"dc_pos"</span><span class="p">,</span> <span class="s2">"c"</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q3_L"</span><span class="p">,</span> <span class="s2">"c"</span><span class="p">,</span>      <span class="s2">"gnd"</span><span class="p">)</span>
 
-<span class="c1"># Wye load (3 × (R + L) to neutral n).</span>
+<span class="c1"># Wye load (3 × (R + L) to neutral n). The neutral floats, as in a</span>
+<span class="c1"># real motor or wye load: do NOT tie it to gnd. gnd is the DC-bus</span>
+<span class="c1"># negative rail, so a neutral-to-gnd tie gives every phase a 300 V</span>
+<span class="c1"># (V_DC/2) common-mode bias and drives ~60 A of DC through each</span>
+<span class="c1"># phase resistor. The node is still referenced: it reaches the rails</span>
+<span class="c1"># through the load and the switches.</span>
 <span class="k">for</span> <span class="n">phase</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"a"</span><span class="p">,</span> <span class="s2">"b"</span><span class="p">,</span> <span class="s2">"c"</span><span class="p">):</span>
     <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="sa">f</span><span class="s2">"R_</span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="n">phase</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">_int"</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">)</span>
     <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="sa">f</span><span class="s2">"L_</span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">_int"</span><span class="p">,</span> <span class="s2">"n"</span><span class="p">,</span> <span class="mf">5e-3</span><span class="p">)</span>
-<span class="c1"># Neutral pinned to gnd by a small resistor (numerical convenience).</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R_n"</span><span class="p">,</span> <span class="s2">"n"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="spwm-driver">SPWM driver<a class="headerlink" href="#spwm-driver" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">legs</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">ThreePhaseLegIndices</span><span class="p">(</span>
-    <span class="n">a_high</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">a_low</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
-    <span class="n">b_high</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">b_low</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
-    <span class="n">c_high</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">c_low</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># add_mosfet() adds each switch AND its body diode (`&lt;name&gt;_body`),</span>
+<span class="c1"># and both are switching branches, so the six MOSFETs land on bits</span>
+<span class="c1"># 0, 2, 4, 6, 8, 10 -- not 0..5. Ask the builder; never count by hand.</span>
+<span class="n">legs</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">ThreePhaseLegIndices</span><span class="p">(</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1_H"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1_L"</span><span class="p">),</span>   <span class="c1"># hs_a, ls_a</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q2_H"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q2_L"</span><span class="p">),</span>   <span class="c1"># hs_b, ls_b</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q3_H"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q3_L"</span><span class="p">),</span>   <span class="c1"># hs_c, ls_c</span>
 <span class="p">)</span>
 <span class="n">spwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_three_phase_spwm_fn</span><span class="p">(</span>
-    <span class="n">leg_indices</span><span class="o">=</span><span class="n">legs</span><span class="p">,</span>
-    <span class="n">carrier_frequency</span><span class="o">=</span><span class="n">F_CARRIER</span><span class="p">,</span>
-    <span class="n">modulating_frequency</span><span class="o">=</span><span class="n">F_MOD</span><span class="p">,</span>
-    <span class="n">modulation_index</span><span class="o">=</span><span class="n">M</span><span class="p">,</span>
-    <span class="n">phase</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">F_CARRIER</span><span class="p">,</span>               <span class="c1"># carrier_frequency</span>
+    <span class="n">F_MOD</span><span class="p">,</span>                   <span class="c1"># modulation_frequency</span>
+    <span class="n">M</span><span class="p">,</span>                       <span class="c1"># modulation_index</span>
+    <span class="n">legs</span><span class="p">,</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">,</span>    <span class="c1"># 12: six switches + six body diodes</span>
+    <span class="mf">0.0</span><span class="p">,</span>                     <span class="c1"># dead_time [s]</span>
 <span class="p">)</span>
 </code></pre></div>
-<p>The helper emits a <code>SwitchStateMask(6)</code> that:
-- Compares a triangular carrier at <code>F_CARRIER</code> with three sinusoidal modulators at <code>F_MOD</code>, each phase-shifted by 120°.
-- Drives each leg's HS-LS pair complementarily.</p>
+<p>The helper returns a <code>t -&gt; SwitchStateMask(12)</code> callable that:
+- Compares one carrier at <code>F_CARRIER</code> with three sinusoidal references at <code>F_MOD</code> (0°, −120°, −240° on legs A/B/C).
+- Drives each leg's HS-LS pair complementarily, with the requested symmetric dead time (shoot-through is prevented by construction).
+- Leaves the body-diode bits OFF; event detection turns them on when they must conduct.</p>
+<p><code>dead_time = 0</code> here because the fixed-step engine evaluates <code>switch_fn</code>
+on the <code>dt = 2 µs</code> grid: a dead time shorter than <code>dt</code> is not
+representable. To study dead-time distortion, shrink <code>dt</code> well below
+the dead time first.</p>
 <h2 id="run-analyse">Run + analyse<a class="headerlink" href="#run-analyse" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">100e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-6</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">spwm</span><span class="p">)</span>
 
 <span class="n">a_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)</span>
 <span class="n">b_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"b"</span><span class="p">)</span>
 <span class="n">c_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"c"</span><span class="p">)</span>
-<span class="n">v_ab</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="n">a_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="p">[</span><span class="n">b_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">]</span>
-<span class="n">v_bc</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="n">b_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="p">[</span><span class="n">c_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">]</span>
-<span class="n">v_ca</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="n">c_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="p">[</span><span class="n">a_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">]</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
-<span class="c1"># After ~3 cycles, extract one full fundamental period.</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
-<span class="n">T_mod</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">F_MOD</span>
-<span class="n">k0</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mf">50e-3</span> <span class="o">/</span> <span class="mf">2e-6</span><span class="p">)</span>
-<span class="n">k1</span> <span class="o">=</span> <span class="n">k0</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">T_mod</span> <span class="o">/</span> <span class="mf">2e-6</span><span class="p">)</span>
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+<span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">)</span>
+<span class="n">v_ab</span> <span class="o">=</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">a_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">b_idx</span><span class="p">]</span>
+<span class="n">v_bc</span> <span class="o">=</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">b_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">c_idx</span><span class="p">]</span>
+<span class="n">v_ca</span> <span class="o">=</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">c_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">a_idx</span><span class="p">]</span>
 
-<span class="c1"># Fundamental RMS via mean(v²)·2.</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">rms</span><span class="p">(</span><span class="n">samples</span><span class="p">):</span>
-    <span class="k">return</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">v</span><span class="o">*</span><span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">samples</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">samples</span><span class="p">))</span>
+<span class="c1"># One full fundamental period after the start-up transient (from 50 ms).</span>
+<span class="n">win</span> <span class="o">=</span> <span class="p">(</span><span class="n">t</span> <span class="o">&gt;=</span> <span class="mf">50e-3</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">t</span> <span class="o">&lt;=</span> <span class="mf">50e-3</span> <span class="o">+</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">F_MOD</span><span class="p">)</span>
+<span class="n">tw</span>  <span class="o">=</span> <span class="n">t</span><span class="p">[</span><span class="n">win</span><span class="p">]</span>
+<span class="n">T</span>   <span class="o">=</span> <span class="n">tw</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">tw</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_ab fundamental RMS ≈ </span><span class="si">{</span><span class="n">rms</span><span class="p">(</span><span class="n">v_ab</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">])</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V (target ~</span><span class="si">{</span><span class="mf">0.612</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">M</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">V_DC</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> V)"</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fundamental</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""RMS and phase [deg] of the F_MOD Fourier component (time-weighted)."""</span>
+    <span class="n">vw</span> <span class="o">=</span> <span class="n">v</span><span class="p">[</span><span class="n">win</span><span class="p">]</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">/</span> <span class="n">T</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">vw</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">F_MOD</span> <span class="o">*</span> <span class="n">tw</span><span class="p">),</span> <span class="n">tw</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">/</span> <span class="n">T</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">vw</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">F_MOD</span> <span class="o">*</span> <span class="n">tw</span><span class="p">),</span> <span class="n">tw</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">math</span><span class="o">.</span><span class="n">hypot</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="n">math</span><span class="o">.</span><span class="n">degrees</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">atan2</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span>
+
+<span class="n">target</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">M</span> <span class="o">*</span> <span class="n">V_DC</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">"V_ab"</span><span class="p">,</span> <span class="n">v_ab</span><span class="p">),</span> <span class="p">(</span><span class="s2">"V_bc"</span><span class="p">,</span> <span class="n">v_bc</span><span class="p">),</span> <span class="p">(</span><span class="s2">"V_ca"</span><span class="p">,</span> <span class="n">v_ca</span><span class="p">)):</span>
+    <span class="n">rms1</span><span class="p">,</span> <span class="n">ph</span> <span class="o">=</span> <span class="n">fundamental</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: fundamental </span><span class="si">{</span><span class="n">rms1</span><span class="si">:</span><span class="s2">6.1f</span><span class="si">}</span><span class="s2"> V rms at </span><span class="si">{</span><span class="n">ph</span><span class="si">:</span><span class="s2">+6.1f</span><span class="si">}</span><span class="s2"> deg (target </span><span class="si">{</span><span class="n">target</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V)"</span><span class="p">)</span>
+<span class="n">total</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">v_ab</span><span class="p">[</span><span class="n">win</span><span class="p">]</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">tw</span><span class="p">)</span> <span class="o">/</span> <span class="n">T</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_ab total RMS (fundamental + PWM harmonics) = </span><span class="si">{</span><span class="n">total</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
 </code></pre></div>
-<p>For <code>M = 0.85</code> and <code>V_DC = 600</code>, expected fundamental line-to-line RMS is <code>(√3/2) · M · V_DC / √2 ≈ 312 V</code> (sinusoidal modulation, not third-harmonic-injected).</p>
+<p>Expected output:
+<div class="highlight"><pre><span></span><code>V_ab: fundamental  313.3 V rms at  +30.1 deg (target 312.3 V)
+V_bc: fundamental  313.0 V rms at  -90.0 deg (target 312.3 V)
+V_ca: fundamental  312.5 V rms at +150.1 deg (target 312.3 V)
+V_ab total RMS (fundamental + PWM harmonics) = 411.2 V
+</code></pre></div></p>
+<p>The three line voltages have equal fundamentals within 0.3 % and sit
+120° apart (V_ab leads its phase-A reference by the textbook 30°). The
+target is <code>(√3/2) · M · V_DC / √2 ≈ 312 V</code> for plain sinusoidal PWM
+(no third-harmonic injection). Note the total RMS: a PWM line voltage
+is a train of ±600 V pulses, so its RMS (411 V) is far above the
+fundamental — take the Fourier component, not <code>sqrt(mean(v²))</code>, when
+you want the fundamental.</p>
 <h2 id="cache-size">Cache size<a class="headerlink" href="#cache-size" title="Permanent link">&para;</a></h2>
-<p>This circuit has <strong>6 switches → 64 possible masks</strong>. The cache is built lazily — only masks actually reached by the SPWM scheduler are factored, which is usually ~12-16 of the 64. You can check <code>cache.dt()</code> and the runtime stamping cost stays bounded.</p>
+<p>This circuit has <strong>12 switching branches → 4096 possible masks</strong>. The cache is built lazily — only the masks the run actually reaches are factored. Pass <code>on_cache=</code> to <code>simulate()</code> to get the cache back and count them:</p>
+<div class="highlight"><pre><span></span><code><span class="n">caches</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">100e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-6</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">spwm</span><span class="p">,</span> <span class="n">on_cache</span><span class="o">=</span><span class="n">caches</span><span class="o">.</span><span class="n">append</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"factored masks: </span><span class="si">{</span><span class="n">caches</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">num_built_segments</span><span class="p">()</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="mi">2</span><span class="w"> </span><span class="o">**</span><span class="w"> </span><span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+</code></pre></div>
+<p>Expected: <code>factored masks: 8 of 4096</code> — the 2³ leg states. The body
+diodes never conduct here because, with zero dead time, the opposite
+switch of each leg always carries the reversed load current.</p>
 <h2 id="try-this-next">Try this next<a class="headerlink" href="#try-this-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Three-harmonic injection.</strong> Replace the pure-sine modulator with <code>sin + (1/6)·sin(3·)</code>, the classic technique to lift <code>V_phase_max</code> from <code>0.5 · V_DC</code> to <code>0.577 · V_DC</code> without overmodulating.</li>

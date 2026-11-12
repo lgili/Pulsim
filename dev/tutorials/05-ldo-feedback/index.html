@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1922,7 +1943,7 @@
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_out (final) = </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="n">vout_idx</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V (target 4.0 V)"</span><span class="p">)</span>
 </code></pre></div>
 <p>Expected:
-<div class="highlight"><pre><span></span><code>V_out (final) = 3.998 V (target 4.0 V)
+<div class="highlight"><pre><span></span><code>V_out (final) = 4.000 V (target 4.0 V)
 </code></pre></div></p>
 <h2 id="what-the-closed-loop-is-doing">What the closed loop is doing<a class="headerlink" href="#what-the-closed-loop-is-doing" title="Permanent link">&para;</a></h2>
 <p>The VCVS enforces <code>V_gate − 0 = 10⁵ · (V_ref − V_fb)</code>. With enough gain, even a tiny mismatch between <code>V_ref</code> and <code>V_fb</code> drives the gate to whatever voltage the MOSFET needs to deliver exactly the right <code>V_out</code>. In steady state, <code>V_fb = V_ref</code> (the virtual short), so <code>V_out = V_ref · (R1+R2)/R2</code>.</p>
@@ -1936,7 +1957,7 @@
 <h2 id="try-this-next">Try this next<a class="headerlink" href="#try-this-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Step load.</strong> Add a switch in parallel with <code>R_L</code> that doubles the load at <code>t = 1 ms</code>. Watch the output dip and recover.</li>
-<li><strong>Bode plot.</strong> Once the <a href="https://github.com/lgili/Pulsim/blob/main/openspec/changes/add-pulsim-ac-analysis/proposal.md">AC analysis proposal</a> ships, sweep the loop gain from 10 Hz to 1 MHz and verify the crossover frequency.</li>
+<li><strong>Bode plot.</strong> AC analysis has shipped (<code>p.run_ac_sweep</code>, <code>p.plot_bode</code>, <code>p.stability_margins</code>): sweep the loop gain from 10 Hz to 1 MHz and read off the crossover frequency.</li>
 <li><strong>Replace the VCVS with two cascaded VCVSs.</strong> Models a 2-stage op-amp; lets you add a dominant pole between stages.</li>
 </ul>
 <h2 id="going-to-tutorial-06">Going to <a href="../06-igbt-boost/">Tutorial 06</a><a class="headerlink" href="#going-to-tutorial-06" title="Permanent link">&para;</a></h2>

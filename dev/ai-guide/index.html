@@ -1,0 +1,2954 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/ai-guide/">
+      
+      
+        <link rel="prev" href="../getting-started/">
+      
+      
+        <link rel="next" href="../mental-model/">
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Using Pulsim with AI Assistants - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#pulsim-2x-usage-guide-for-ai-coding-assistants" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Using Pulsim with AI Assistants
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href=".." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../how-pulsim-works/" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-ask-the-installed-package-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Ask the installed package first
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-mental-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Mental model
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-canonical-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Canonical examples
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Canonical examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-rc-step-the-minimal-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 RC step: the minimal script
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-buck-converter-with-a-pwm-switch_fn" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 Buck converter with a PWM switch_fn
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-bridge-rectifier-from-pulsimtopology" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.3 Bridge rectifier from pulsim.topology
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-losses-and-junction-temperature" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.4 Losses and junction temperature
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-yaml-netlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.5 YAML netlist
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-parameter-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.6 Parameter sweep
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-three-phase-inverter-with-sinusoidal-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.7 Three-phase inverter with sinusoidal PWM
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-exact-signatures-of-the-most-used-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Exact signatures of the most used calls
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-traps" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Traps
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-how-to-verify-a-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. How to verify a result
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. How to verify a result">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-charge-and-energy-balance-from-independent-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.1 Charge and energy balance from independent branches
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-two-engines-agree" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.2 Two engines agree
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-step-size-convergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.3 Step-size convergence
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-when-simulate-raises" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.4 When simulate raises
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-coming-from-pulsim-1x-or-pre-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Coming from Pulsim 1.x or pre-1.0
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-paste-this-into-your-projects-assistant-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. Paste this into your project's assistant config
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-where-to-read-more" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Where to read more
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../loss-thermal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../c-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Custom Code Blocks (C / C++ / Python)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-ask-the-installed-package-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Ask the installed package first
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-mental-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Mental model
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-canonical-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Canonical examples
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Canonical examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-rc-step-the-minimal-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 RC step: the minimal script
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-buck-converter-with-a-pwm-switch_fn" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 Buck converter with a PWM switch_fn
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-bridge-rectifier-from-pulsimtopology" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.3 Bridge rectifier from pulsim.topology
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-losses-and-junction-temperature" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.4 Losses and junction temperature
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-yaml-netlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.5 YAML netlist
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-parameter-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.6 Parameter sweep
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-three-phase-inverter-with-sinusoidal-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.7 Three-phase inverter with sinusoidal PWM
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-exact-signatures-of-the-most-used-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Exact signatures of the most used calls
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-traps" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Traps
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-how-to-verify-a-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. How to verify a result
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. How to verify a result">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-charge-and-energy-balance-from-independent-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.1 Charge and energy balance from independent branches
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-two-engines-agree" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.2 Two engines agree
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-step-size-convergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.3 Step-size convergence
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-when-simulate-raises" class="md-nav__link">
+    <span class="md-ellipsis">
+      6.4 When simulate raises
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-coming-from-pulsim-1x-or-pre-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Coming from Pulsim 1.x or pre-1.0
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-paste-this-into-your-projects-assistant-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. Paste this into your project's assistant config
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-where-to-read-more" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Where to read more
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/ai-guide.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/ai-guide.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<!-- This page includes python/pulsim/AI_GUIDE.md, the guide that ships in
+the package (`python -m pulsim.guide`). Edit that file, not this one. -->
+
+<h1 id="pulsim-2x-usage-guide-for-ai-coding-assistants">Pulsim 2.x usage guide (for AI coding assistants)<a class="headerlink" href="#pulsim-2x-usage-guide-for-ai-coding-assistants" title="Permanent link">&para;</a></h1>
+<p>This file ships inside the <code>pulsim</code> package and describes the version it
+ships with. <code>python -m pulsim.guide</code> prints it with the installed version
+on the first line; <code>pulsim.ai_guide()</code> returns the same text. When this
+guide and your memory of Pulsim disagree, the guide wins: models are
+trained on Pulsim 1.x and on other simulators, and Pulsim 2 changed
+behaviour without changing many names. Every <code>python</code> block below is
+executed by the test suite, and every printed number is the one it
+prints.</p>
+<p>Short version:</p>
+<ul>
+<li>Build with <code>p.CircuitBuilder()</code>, run with <code>p.simulate(b, t_end, dt=None)</code>,
+  read with <code>res.v("node")</code>, <code>res.i("branch")</code>, <code>res.times</code>.</li>
+<li>Pass <code>dt</code> for PWM-driven converters (fixed-step <code>pwl</code>), with every
+  gate edge on the <code>dt</code> grid (3.2). Without <code>dt</code> the default
+  <code>engine='auto'</code> usually picks the variable-step TR-BDF2.</li>
+<li>Never <code>.mean()</code> a waveform. Use <code>p.steady_state_stats</code>, <code>p.time_average</code>,
+  <code>p.time_rms</code> or <code>np.trapezoid</code>. RMS of a switched (pulsed) current on
+  a fixed grid: <code>np.sqrt(p.time_average(t, i**2))</code> (trap 14).</li>
+<li>Switch bits come from <code>b.switch_index_of(name)</code>; mask size from
+  <code>b.graph.num_switches</code>. <code>p.SwitchStateMask(n)</code> is a SIZE.</li>
+<li>PWL diode <code>V_th</code> is a commutation threshold, not a forward drop.
+  Without <code>dt</code>, give PWL diodes <code>V_th &gt; 0</code> and heed <code>res.i</code> warnings
+  (trap 13).</li>
+<li>Loss and thermal summaries average the WHOLE run, start-up included
+  (3.4).</li>
+<li>Check every result physically (section 6) before reporting it.</li>
+<li>A Pulsim exception is a refusal with a reason. Read it; do not catch
+  it, and do not loosen <code>tol_newton_dx</code> / <code>tol_newton_res</code> to get past it.</li>
+</ul>
+<h2 id="1-ask-the-installed-package-first">1. Ask the installed package first<a class="headerlink" href="#1-ask-the-installed-package-first" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python -m pulsim.guide</code> (this text) and <code>python -m pulsim.guide --path</code>.</li>
+<li>The native classes are pybind11 builtins: <code>inspect.signature</code> fails on
+  them. The real signature is the first line of <code>__doc__</code>, and the
+  package ships type stubs (<code>pulsim/_pulsim.pyi</code>, PEP 561) that IDEs and
+  mypy read.</li>
+<li><code>p.catalog()</code> lists every builder method and helper by category;
+  <code>p.example("buck")</code> prints a runnable snippet (<code>"rc"</code>, <code>"boost"</code>,
+  <code>"yaml"</code>, <code>"bode"</code>, ...).</li>
+<li><code>res.v(name)</code> / <code>res.i(name)</code> with a misspelled name raise
+  <code>p.NameNotFoundError</code> with close matches. An attribute that does not
+  exist on <code>pulsim</code> raises <code>AttributeError</code>, with a migration hint for
+  retired 1.x names.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="o">.</span><span class="n">add_sine_voltage_source</span><span class="o">.</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, v_dc: typing.SupportsFloat | typing.SupportsIndex, v_amplitude: typing.SupportsFloat | typing.SupportsIndex, frequency: typing.SupportsFloat | typing.SupportsIndex, phase: typing.SupportsFloat | typing.SupportsIndex = 0.0) -&gt; pulsim._pulsim.CircuitBuilder
+</code></pre></div>
+<p><code>typing.SupportsFloat | typing.SupportsIndex</code> is pybind11's spelling of
+<code>float</code> (the stub writes <code>float</code>). <code>v_dc</code> comes before <code>v_amplitude</code>, and
+<code>phase</code> is in radians.</p>
+<h2 id="2-mental-model">2. Mental model<a class="headerlink" href="#2-mental-model" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Netlist by name.</strong> Nodes are strings; <code>"gnd"</code>, <code>"GND"</code> and <code>"0"</code> are
+  ground. Every <code>b.add_*</code> call adds a branch between two nodes; the
+  first argument is the branch name used later by <code>res.i(name)</code>.
+  Pulsim assembles a modified nodal analysis (MNA) system from them.</li>
+<li><strong>Piecewise-linear switching.</strong> <code>add_switch</code>, <code>add_mosfet</code>, <code>add_igbt</code>
+  and <code>add_diode</code> are two-state branches: a conductance <code>g_on</code> (or
+  <code>1/R_on</code>) when on, <code>g_off</code> when off, no voltage offset in either
+  state. Each one owns a bit in the switch-state mask. Controlled
+  switches follow <code>switch_fn(t) -&gt; SwitchStateMask</code>; diodes commutate
+  on their own. Smooth devices (<code>add_shockley_diode</code>, <code>add_mosfet_level1</code>,
+  saturable magnetics) are nonlinear and are solved with Newton.</li>
+<li><strong>Engines</strong> (<code>p.simulate(..., engine=...)</code>):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>engine</th>
+<th>step</th>
+<th>use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>'auto'</code> (default)</td>
+<td>routes: <code>dt</code> given -&gt; <code>pwl</code>; no <code>dt</code> -&gt; TR-BDF2 when the circuit qualifies</td>
+<td>most runs</td>
+</tr>
+<tr>
+<td><code>'pwl'</code></td>
+<td>fixed <code>dt</code> (required), trapezoidal, cached factorisation per switch state</td>
+<td>PWM converters, bit-exact reruns</td>
+</tr>
+<tr>
+<td><code>'trbdf2'</code></td>
+<td>variable, error-controlled; <code>dt</code> is a ceiling</td>
+<td>accuracy on smooth or diode-commutated circuits</td>
+</tr>
+<tr>
+<td><code>'dsed'</code></td>
+<td>variable, event-driven; refuses Newton devices and floating subnets (reference a star neutral with 1 MOhm)</td>
+<td>cross-checks of PWL circuits</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>res.engine_used</code> says which engine ran; <code>res.engine_route_reason</code>
+  says why, when <code>auto</code> did not take the variable-step engine.</li>
+<li><strong>Pass <code>dt</code></strong> when a <code>switch_fn</code> drives the circuit, when you need a
+  uniform grid, or when you compare runs bit for bit. Every on-time
+  must be a whole number of steps, and every edge on the grid (3.2).</li>
+<li><strong>Omit <code>dt</code></strong> for passive and source-driven circuits, for circuits
+  whose PWL diodes have <code>V_th &gt; 0</code> (trap 13), and as the second engine
+  in a cross-check.</li>
+</ul>
+<h2 id="3-canonical-examples">3. Canonical examples<a class="headerlink" href="#3-canonical-examples" title="Permanent link">&para;</a></h2>
+<h3 id="31-rc-step-the-minimal-script">3.1 RC step: the minimal script<a class="headerlink" href="#31-rc-step-the-minimal-script" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+
+<span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"n0"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R"</span><span class="p">,</span> <span class="s2">"n0"</span><span class="p">,</span> <span class="s2">"vc"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vc"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">)</span>          <span class="c1"># tau = 1 ms</span>
+
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">)</span>                  <span class="c1"># no dt: engine='auto'</span>
+<span class="n">v_tau</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vc"</span><span class="p">))</span>  <span class="c1"># grid is non-uniform</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"v_C(tau) = </span><span class="si">{</span><span class="n">v_tau</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V [</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">engine_used</span><span class="si">}</span><span class="s2">], "</span>
+      <span class="sa">f</span><span class="s2">"exact </span><span class="si">{</span><span class="mi">5</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>v_C(tau) = 3.161 V [trbdf2], exact 3.161 V
+</code></pre></div>
+<h3 id="32-buck-converter-with-a-pwm-switch_fn">3.2 Buck converter with a PWM <code>switch_fn</code><a class="headerlink" href="#32-buck-converter-with-a-pwm-switch_fn" title="Permanent link">&para;</a></h3>
+<p>A <code>switch_fn</code> maps <code>t</code> to a <code>SwitchStateMask</code>. On the fixed-step engine
+gate edges can only fall on the <code>dt</code> grid, so compute the PWM in steps:</p>
+<div class="highlight"><pre><span></span><code><span class="n">DT</span> <span class="o">=</span> <span class="mf">1e-7</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">grid_pwm</span><span class="p">(</span><span class="n">f_sw</span><span class="p">,</span> <span class="n">duty</span><span class="p">,</span> <span class="n">bit</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""PWM whose edges sit exactly on the dt grid (trap 10)."""</span>
+    <span class="n">n_per</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="n">f_sw</span> <span class="o">*</span> <span class="n">dt</span><span class="p">))</span>           <span class="c1"># steps per period</span>
+    <span class="n">n_on</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">duty</span> <span class="o">*</span> <span class="n">n_per</span><span class="p">)</span>               <span class="c1"># steps per on-time</span>
+    <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">n_per</span> <span class="o">*</span> <span class="n">f_sw</span> <span class="o">*</span> <span class="n">dt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="nb">abs</span><span class="p">(</span><span class="n">n_on</span> <span class="o">-</span> <span class="n">duty</span> <span class="o">*</span> <span class="n">n_per</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">1e-6</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"period and on-time must be whole numbers of dt"</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">switch_fn</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span><span class="p">(</span><span class="n">n_sw</span><span class="p">)</span>          <span class="c1"># all OFF</span>
+        <span class="n">m</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">bit</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">t</span> <span class="o">/</span> <span class="n">dt</span><span class="p">)</span> <span class="o">%</span> <span class="n">n_per</span> <span class="o">&lt;</span> <span class="n">n_on</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">m</span>
+    <span class="k">return</span> <span class="n">switch_fn</span>
+
+<span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">)</span>              <span class="c1"># also adds diode "Q1_body"</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>    <span class="c1"># g_on, g_off; V_th = 0</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">100e-6</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
+
+<span class="n">q1</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>                 <span class="c1"># never count bits by hand</span>
+<span class="n">n_sw</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span>                  <span class="c1"># Q1, Q1_body, D1 -&gt; 3</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">grid_pwm</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">q1</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">)</span>
+
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">s</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">steady_state_stats</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">8e-3</span><span class="p">)</span>
+<span class="n">il</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">steady_state_stats</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="s2">"L"</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">8e-3</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s2">"i"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"bits Q1=</span><span class="si">{</span><span class="n">q1</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">n_sw</span><span class="si">}</span><span class="s2">; V_out = </span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">mean</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V, ripple "</span>
+      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">ripple_pp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> mV pp, I_L </span><span class="si">{</span><span class="n">il</span><span class="o">.</span><span class="n">ripple_pp</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> A pp [</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">engine_used</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"analytic: dI = </span><span class="si">{</span><span class="mi">12</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">5e-6</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">100e-6</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> A, dV = dI/(8 f C) = "</span>
+      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="mf">0.6</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mi">8</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">100e3</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">47e-6</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> mV"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>bits Q1=0 of 3; V_out = 11.999 V, ripple 16.8 mV pp, I_L 0.589 A pp [pwl]
+analytic: dI = 0.600 A, dV = dI/(8 f C) = 16.0 mV
+</code></pre></div>
+<p><code>steady_state_stats</code> returns <code>.mean .rms .min .max .ripple_pp .t_from
+.t_to</code>. <code>p.make_pwm_switch_fn(frequency, duty, bit, n_sw)</code> means the same, but
+it compares a floating-point phase, so on a <code>dt</code> grid some edges land a
+step early or late. The duty jitter keeps the LC filter ringing: 67 mV
+pp here instead of 17 mV, with the mean unchanged. Use it without <code>dt</code>,
+or count its on-steps first:</p>
+<div class="highlight"><pre><span></span><code><span class="n">mk</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">q1</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">)</span>
+<span class="n">on</span> <span class="o">=</span> <span class="p">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">mk</span><span class="p">(</span><span class="n">k</span> <span class="o">*</span> <span class="n">DT</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">q1</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">j</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span> <span class="n">j</span> <span class="o">*</span> <span class="mi">100</span> <span class="o">+</span> <span class="mi">100</span><span class="p">))</span>
+      <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">600</span><span class="p">)}</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"on-steps per period:"</span><span class="p">,</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">on</span><span class="p">))</span>    <span class="c1"># 50 asked</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>on-steps per period: [49, 50, 51]
+</code></pre></div>
+<p>For a half bridge, <code>p.make_dead_time_pwm_pair_fn</code> drives the high- and
+low-side bits with a dead time; for a three-phase bridge see 3.7.</p>
+<h3 id="33-bridge-rectifier-from-pulsimtopology">3.3 Bridge rectifier from <code>pulsim.topology</code><a class="headerlink" href="#33-bridge-rectifier-from-pulsimtopology" title="Permanent link">&para;</a></h3>
+<p>Topology helpers are module-level functions that take the builder first
+and keyword-only node names. The diodes are named <code>&lt;name&gt;__D1</code> ...
+<code>&lt;name&gt;__D4</code>. Ground one DC rail (trap 8).</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_sine_voltage_source</span><span class="p">(</span><span class="s2">"Vac"</span><span class="p">,</span> <span class="s2">"ac1"</span><span class="p">,</span> <span class="s2">"ac2"</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">)</span>
+<span class="n">br</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">add_bridge_rectifier</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="s2">"BR"</span><span class="p">,</span> <span class="n">ac_a</span><span class="o">=</span><span class="s2">"ac1"</span><span class="p">,</span> <span class="n">ac_b</span><span class="o">=</span><span class="s2">"ac2"</span><span class="p">,</span>
+                            <span class="n">dc_pos</span><span class="o">=</span><span class="s2">"dc"</span><span class="p">,</span> <span class="n">dc_neg</span><span class="o">=</span><span class="s2">"gnd"</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"dc"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"dc"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">)</span>
+
+<span class="n">rect</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">0.06</span><span class="p">)</span>
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+<span class="n">v_dc</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">rect</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"dc"</span><span class="p">),</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">0.04</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">br</span><span class="o">.</span><span class="n">diode_names</span><span class="si">}</span><span class="s2">; V_dc = </span><span class="si">{</span><span class="n">v_dc</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V [</span><span class="si">{</span><span class="n">rect</span><span class="o">.</span><span class="n">engine_used</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>['BR__D1', 'BR__D2', 'BR__D3', 'BR__D4']; V_dc = 92.83 V [trbdf2]
+</code></pre></div>
+<p>It may warn that a step was accepted above tolerance at an event. Run
+the balance of 6.1 before you use any diode current from it.</p>
+<h3 id="34-losses-and-junction-temperature">3.4 Losses and junction temperature<a class="headerlink" href="#34-losses-and-junction-temperature" title="Permanent link">&para;</a></h3>
+<p><code>p.device_loss_summary</code> returns one dict per branch. Switching
+energies come from <code>switch_specs</code>: each gate edge costs
+<code>E_ref * (|V_blk| / V_ref) * (|I| / I_ref)</code>, with <code>V_blk</code> measured across
+the open switch (before a turn-on, after a turn-off) and <code>I</code> through the
+closed one, so a soft edge costs what its measured voltage says (3.7).
+An offset-plus-slope conduction model <code>V_f0*|i| + r_on*i^2</code> comes from
+<code>conduction_specs</code>. <code>p.device_thermal_summary</code> adds a Foster network per
+device (<code>p.FosterStage(R_th_K_per_W, tau_s)</code>). Both average over the
+WHOLE record, start-up included, with no window argument: on the bridge
+of trap 13 (<code>t_end = 0.1 s</code>, <code>V_f0 = 0.7</code>, <code>r_on = 0.02</code>) the diode
+conduction loss reads 17x its 80-100 ms value. For steady state, apply
+the same model to <code>res.i(name)</code> over a window yourself. <code>T_j</code> starts at
+<code>T_ambient_C</code> and settles only after several of the largest <code>tau</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="n">R_on</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">100e-6</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">grid_pwm</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+
+<span class="n">sw</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"Q1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"E_on_ref"</span><span class="p">:</span> <span class="mf">20e-6</span><span class="p">,</span> <span class="s2">"E_off_ref"</span><span class="p">:</span> <span class="mf">30e-6</span><span class="p">,</span> <span class="s2">"V_ref"</span><span class="p">:</span> <span class="mf">24.0</span><span class="p">,</span>
+             <span class="s2">"I_ref"</span><span class="p">:</span> <span class="mf">6.0</span><span class="p">}}</span>
+<span class="n">cond</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"V_f0"</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span> <span class="s2">"r_on"</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">}}</span>
+<span class="n">rows</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]:</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_specs</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">conduction_specs</span><span class="o">=</span><span class="n">cond</span><span class="p">)}</span>
+<span class="n">i_q</span><span class="p">,</span> <span class="n">i_d</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Q1 cond </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="s1">'Q1'</span><span class="p">][</span><span class="s1">'P_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (run), "</span>
+      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mf">0.05</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">i_q</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (3-5 ms); "</span>
+      <span class="sa">f</span><span class="s2">"sw </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="s1">'Q1'</span><span class="p">][</span><span class="s1">'P_sw_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (run)"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"D1 cond </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="s1">'D1'</span><span class="p">][</span><span class="s1">'P_cond_model_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (run), "</span>
+      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mf">0.7</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nb">abs</span><span class="p">(</span><span class="n">i_d</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">0.02</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">i_d</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (3-5 ms)"</span><span class="p">)</span>
+
+<span class="n">th</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_thermal_summary</span><span class="p">(</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_specs</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">T_ambient_C</span><span class="o">=</span><span class="mf">40.0</span><span class="p">,</span>
+    <span class="n">thermal_specs</span><span class="o">=</span><span class="p">{</span><span class="s2">"Q1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">),</span>
+                                     <span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2e-2</span><span class="p">)]}})</span>
+<span class="n">P</span> <span class="o">=</span> <span class="n">th</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">"P_total_avg"</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Q1: P = </span><span class="si">{</span><span class="n">P</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> W, T_j peak = </span><span class="si">{</span><span class="n">th</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'T_j_peak'</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> C at 5 ms; "</span>
+      <span class="sa">f</span><span class="s2">"settles near 40 + 1.5 K/W * P = </span><span class="si">{</span><span class="mi">40</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.5</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">P</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> C"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>Q1 cond 0.905 W (run), 0.878 W (3-5 ms); sw 5.034 W (run)
+D1 cond 2.453 W (run), 2.425 W (3-5 ms)
+Q1: P = 5.94 W, T_j peak = 44.2 C at 5 ms; settles near 40 + 1.5 K/W * P = 48.9 C
+</code></pre></div>
+<p><code>P_avg</code> of a diode is <code>v^2 * g_on</code> only: the PWL diode has no forward
+drop (trap 1). Diode losses are only as good as the diode current;
+check it with the charge balance of section 6.1 first.</p>
+<p><code>diode_specs</code> (reverse recovery) charges <code>E_rr_ref * V_R / V_R_ref</code> per
+turn-off, with <code>V_R</code> read one <code>t_rr</code> (default 100 ns) after it:</p>
+<div class="highlight"><pre><span></span><code><span class="n">rr</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]:</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">diode_specs</span><span class="o">=</span><span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"E_rr_ref"</span><span class="p">:</span> <span class="mf">10e-6</span><span class="p">,</span> <span class="s2">"V_R_ref"</span><span class="p">:</span> <span class="mf">24.0</span><span class="p">}})}</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"P_rr = </span><span class="si">{</span><span class="n">rr</span><span class="p">[</span><span class="s1">'D1'</span><span class="p">][</span><span class="s1">'P_sw_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W, </span><span class="si">{</span><span class="n">rr</span><span class="p">[</span><span class="s1">'D1'</span><span class="p">][</span><span class="s1">'n_turn_off_events'</span><span class="p">]</span><span class="si">}</span><span class="s2"> "</span>
+      <span class="s2">"turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>P_rr = 0.988 W, 500 turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)
+</code></pre></div>
+<h3 id="35-yaml-netlist">3.5 YAML netlist<a class="headerlink" href="#35-yaml-netlist" title="Permanent link">&para;</a></h3>
+<p><code>p.load_yaml_string</code> / <code>p.load_yaml_file</code> return a <code>LoadedCircuit</code> with
+<code>.builder</code> and <code>.options</code>. The gate drive is not in the YAML: build
+the <code>switch_fn</code> from the loaded builder.</p>
+<div class="highlight"><pre><span></span><code><span class="n">lc</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">"""</span>
+<span class="s2">circuit:</span>
+<span class="s2">  devices:</span>
+<span class="s2">    - {type: voltage_source, name: V1, from: in, to: gnd, V: 10.0}</span>
+<span class="s2">    - {type: resistor, name: R1, from: in, to: out, R: 1.0e3}</span>
+<span class="s2">    - {type: capacitor, name: C1, from: out, to: gnd, C: 1.0e-6}</span>
+<span class="s2">simulation:</span>
+<span class="s2">  t_end: 5.0e-3</span>
+<span class="s2">  dt: 1.0e-6</span>
+<span class="s2">"""</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">lc</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">lc</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">lc</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"v_out(end) = </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s1">'out'</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>v_out(end) = 9.933 V
+</code></pre></div>
+<h3 id="36-parameter-sweep">3.6 Parameter sweep<a class="headerlink" href="#36-parameter-sweep" title="Permanent link">&para;</a></h3>
+<p><code>p.sweep</code> calls a builder factory per point (Cartesian product of
+<code>params</code>), forwards <code>**simulate_kwargs</code> to every run, and calls
+<code>kpi_fn(res, params)</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">make_buck</span><span class="p">(</span><span class="n">R_load</span><span class="p">):</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">100e-6</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="n">R_load</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">b</span>
+
+<span class="n">ref</span> <span class="o">=</span> <span class="n">make_buck</span><span class="p">(</span><span class="mf">10.0</span><span class="p">)</span>                        <span class="c1"># same topology -&gt; same bits</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">grid_pwm</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">ref</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">sweep</span><span class="p">(</span><span class="n">make_buck</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">"R_load"</span><span class="p">:</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">]},</span>
+              <span class="n">kpi_fn</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">,</span> <span class="n">prm</span><span class="p">:</span> <span class="p">{</span><span class="s2">"vout"</span><span class="p">:</span> <span class="n">p</span><span class="o">.</span><span class="n">steady_state_stats</span><span class="p">(</span>
+                  <span class="n">r</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">8e-3</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">},</span>
+              <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="k">assert</span> <span class="ow">not</span> <span class="n">out</span><span class="o">.</span><span class="n">failed</span><span class="p">,</span> <span class="n">out</span><span class="o">.</span><span class="n">failed</span>
+<span class="k">for</span> <span class="n">R</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s2">"R_load"</span><span class="p">],</span> <span class="n">out</span><span class="o">.</span><span class="n">kpis</span><span class="p">[</span><span class="s2">"vout"</span><span class="p">]):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"R_load = </span><span class="si">{</span><span class="n">R</span><span class="si">:</span><span class="s2">5.1f</span><span class="si">}</span><span class="s2"> ohm -&gt; V_out = </span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>R_load =   5.0 ohm -&gt; V_out = 12.00 V
+R_load =  10.0 ohm -&gt; V_out = 12.00 V
+R_load = 100.0 ohm -&gt; V_out = 15.79 V
+</code></pre></div>
+<p>At 100 ohm the inductor current reaches zero each cycle (discontinuous
+conduction), so <code>V_out</code> rises above <code>D * V_in</code>. That is physics, not an
+error. For R/L/C-only sweeps on one topology, <code>p.sweep_path_aware</code>
+reuses the factorisation across points.</p>
+<h3 id="37-three-phase-inverter-with-sinusoidal-pwm">3.7 Three-phase inverter with sinusoidal PWM<a class="headerlink" href="#37-three-phase-inverter-with-sinusoidal-pwm" title="Permanent link">&para;</a></h3>
+<p><code>add_three_phase_vsi</code> returns <code>switch_indices</code> in the order
+<code>p.ThreePhaseLegIndices</code> takes them (HSa, LSa, HSb, LSb, HSc, LSc);
+<code>p.make_three_phase_spwm_fn</code> drives all six with a dead time.</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vdc"</span><span class="p">,</span> <span class="s2">"dcp"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">600.0</span><span class="p">)</span>
+<span class="n">vsi</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">add_three_phase_vsi</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="s2">"INV"</span><span class="p">,</span> <span class="n">vdc_pos</span><span class="o">=</span><span class="s2">"dcp"</span><span class="p">,</span> <span class="n">vdc_neg</span><span class="o">=</span><span class="s2">"gnd"</span><span class="p">,</span>
+                            <span class="n">out_a</span><span class="o">=</span><span class="s2">"a"</span><span class="p">,</span> <span class="n">out_b</span><span class="o">=</span><span class="s2">"b"</span><span class="p">,</span> <span class="n">out_c</span><span class="o">=</span><span class="s2">"c"</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">ph</span> <span class="ow">in</span> <span class="s2">"abc"</span><span class="p">:</span>                             <span class="c1"># star load, neutral "n" floats</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="sa">f</span><span class="s2">"R</span><span class="si">{</span><span class="n">ph</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="n">ph</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"m</span><span class="si">{</span><span class="n">ph</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="sa">f</span><span class="s2">"L</span><span class="si">{</span><span class="n">ph</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"m</span><span class="si">{</span><span class="n">ph</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="s2">"n"</span><span class="p">,</span> <span class="mf">5e-3</span><span class="p">)</span>
+<span class="n">legs</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">ThreePhaseLegIndices</span><span class="p">(</span><span class="o">*</span><span class="n">vsi</span><span class="o">.</span><span class="n">switch_indices</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">dead</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">):</span>                     <span class="c1"># f_carrier, f_1, m, legs, size, dead time</span>
+    <span class="n">spwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_three_phase_spwm_fn</span><span class="p">(</span><span class="mf">10e3</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">,</span> <span class="n">legs</span><span class="p">,</span>
+                                      <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">,</span> <span class="n">dead</span><span class="p">)</span>
+    <span class="n">inv</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">40e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">spwm</span><span class="p">)</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">inv</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+    <span class="n">w</span> <span class="o">=</span> <span class="n">t</span> <span class="o">&gt;=</span> <span class="mf">20e-3</span>                           <span class="c1"># one whole 50 Hz period</span>
+    <span class="n">c1</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">((</span><span class="n">inv</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)</span> <span class="o">-</span> <span class="n">inv</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"b"</span><span class="p">))[</span><span class="n">w</span><span class="p">]</span>
+                          <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="n">j</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="mi">50</span> <span class="o">*</span> <span class="n">t</span><span class="p">[</span><span class="n">w</span><span class="p">]),</span> <span class="n">t</span><span class="p">[</span><span class="n">w</span><span class="p">])</span> <span class="o">/</span> <span class="mf">20e-3</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"dead </span><span class="si">{</span><span class="n">dead</span><span class="si">:</span><span class="s2">.0e</span><span class="si">}</span><span class="s2"> s: V_LL1 = </span><span class="si">{</span><span class="nb">abs</span><span class="p">(</span><span class="n">c1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V rms, "</span>
+          <span class="sa">f</span><span class="s2">"I_a = </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_rms</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">inv</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s1">'La'</span><span class="p">),</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> A rms, "</span>
+          <span class="sa">f</span><span class="s2">"P_dc = </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mi">600</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">inv</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s1">'Vdc'</span><span class="p">),</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> W"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"ideal V_LL1 = sqrt(3/8) * m * V_dc = </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">3</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.8</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">600</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>dead 0e+00 s: V_LL1 = 293.9 V rms, I_a = 16.77 A rms, P_dc = -8435 W
+dead 1e-06 s: V_LL1 = 284.6 V rms, I_a = 16.24 A rms, P_dc = -7912 W
+ideal V_LL1 = sqrt(3/8) * m * V_dc = 293.9 V
+</code></pre></div>
+<p>The dead time costs <code>4/pi * V_dc * t_d * f_sw * sqrt(3/2)</code> = 9.4 V of
+<code>V_LL1</code>; <code>P_dc &lt; 0</code> is the source sign convention (section 4). In the
+dead time the antiparallel PWL diode takes the freewheel current, and it
+turns off only when its current reverses: once the switch is gated on
+(the switches conduct both ways) the diode stays on in parallel with
+<code>R_on / (R_on + R_d)</code> = 2 % of it. With 1 us dead time <code>INV__Dha</code>
+conducts on 12.9 % of samples, 11.9 % with <code>HSa</code> on; with none, never.
+Read both branches before attributing conduction loss. <code>switch_specs</code>
+on <code>HSa</code> (<code>E_on_ref</code> 4 mJ, <code>E_off_ref</code> 3.5 mJ at 600 V, 50 A) gives
+11.3 W with the dead time (soft edges see the diode's 0.8 V: about 0 J)
+and 22.6 W without (soft edges block 600 V and are charged like hard
+ones). Model the dead time.</p>
+<h2 id="4-exact-signatures-of-the-most-used-calls">4. Exact signatures of the most used calls<a class="headerlink" href="#4-exact-signatures-of-the-most-used-calls" title="Permanent link">&para;</a></h2>
+<p><code>b</code> is a <code>CircuitBuilder</code>, <code>res</code> a <code>SimulationResult</code>. These lines are
+checked against the installed package by the test suite. <code>...</code> marks
+further keyword-only options; see <code>help()</code>.</p>
+<div class="highlight"><pre><span></span><code>p.CircuitBuilder()
+b.add_resistor(name, n_pos, n_neg, R_ohms)
+b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None)
+b.add_inductor(name, n_pos, n_neg, L_henries, i0=None)
+b.add_voltage_source(name, n_pos, n_neg, V)
+b.add_current_source(name, n_pos, n_neg, I)
+b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
+b.add_pulse_voltage_source(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0.0, rise_time=0.0, fall_time=0.0)
+b.add_pwm_voltage_source(name, n_pos, n_neg, v_high, v_low, frequency, duty, phase=0.0)
+b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0)
+b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
+b.add_switch(name, n_pos, n_neg, g_on, g_off)
+b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
+b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0)
+b.add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k=1.0)
+b.node_id_of(name)
+b.switch_index_of(name)
+p.SwitchStateMask(num_switches=0)
+p.make_pwm_switch_fn(frequency, duty, switch_idx, num_switches, phase=0.0)
+p.make_dead_time_pwm_pair_fn(frequency, duty, hs_switch_idx, ls_switch_idx, num_switches, dead_time, phase=0.0)
+p.make_three_phase_spwm_fn(carrier_frequency, modulation_frequency, modulation_index, legs, num_switches, dead_time, modulation_phase=0.0, carrier_phase=0.0)
+p.ThreePhaseLegIndices(hs_a, ls_a, hs_b, ls_b, hs_c, ls_c)
+p.simulate(builder, t_end, dt=None, *, engine='auto', rtol=None, atol=None, ...)
+res.v(name, t=None)
+res.i(name, t=None)
+p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
+p.time_average(t, y, t_from=None, t_to=None)
+p.time_rms(t, y, t_from=None, t_to=None)
+p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7)
+p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05)
+p.load_yaml_string(yaml_text)
+p.load_yaml_file(path)
+p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, verbose=True, **simulate_kwargs)
+p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None)
+p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None)
+p.scope(builder, result, *, signals=None, title=None, save=None, stack=True, show=False, tight_lw=False)
+</code></pre></div>
+<p>Notes: <code>res.i(name)</code> is positive from a device's first node to its
+second, through it: <code>add_mosfet</code> drain to source, <code>&lt;name&gt;_body</code> source
+to drain, VSI diode <code>INV__Dha</code> from <code>out_a</code> to <code>vdc_pos</code>. So
+<code>res.i(&lt;voltage source&gt;)</code> is negative when it delivers power (1 V into
+1 ohm reads -1 A). <code>add_current_source</code> drives <code>I</code> OUT of <code>n_pos</code> into
+the circuit, and <code>res.i</code> of it reads <code>I</code>. <code>t</code> in <code>res.v(name, t)</code> is a
+sample INDEX; at a time, use <code>np.interp(t, res.times, res.v(name))</code>.
+A ground name gives zeros. <code>phase</code> of the two PWM helpers and <code>carrier_phase</code>
+are time shifts in SECONDS (<code>t - phase</code>); <code>modulation_phase</code> and the
+<code>phase</code> of <code>add_sine_voltage_source</code> are radians.
+<code>add_capacitor(c0=)</code> / <code>add_inductor(i0=)</code> set initial conditions.
+Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code>t_start</code>,
+<code>store_every</code>, <code>auto_regularize</code>, <code>progress</code>.</p>
+<h2 id="5-traps">5. Traps<a class="headerlink" href="#5-traps" title="Permanent link">&para;</a></h2>
+<p>Each row was measured on this version. The fix column is what to write.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Wrong assumption</th>
+<th>What actually happens</th>
+<th>Do this instead</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>V_th</code> of <code>add_diode</code> (and <code>add_bridge_rectifier(V_th=)</code>, <code>add_three_phase_vsi(V_f=)</code>, <code>add_mosfet(V_F=)</code> body diode) is a forward drop</td>
+<td>It is the voltage at which the diode commutates. On-state is <code>I/g_on</code>: 10 A into <code>g_on = 20 S</code> gives 0.500 V for <code>V_th = 0</code> and <code>0.7</code> alike</td>
+<td>Model a real drop with <code>b.add_shockley_diode</code> (<code>res.i</code> does not reconstruct its current and <code>device_loss_summary</code> omits it: put a 1 mOhm resistor in series and read <code>res.i("Rsense")</code>), or post-process losses with <code>conduction_specs={"D": {"V_f0": ..., "r_on": ...}}</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>v.mean()</code> over a result is the average</td>
+<td>The default grid is variable-step and clusters at events. On the rectifier of 6.2 <code>.mean()</code> reads 5.007 V against 6.330 V (-21 %)</td>
+<td><code>p.steady_state_stats</code>, <code>p.time_average</code>, <code>p.time_rms</code>, <code>np.trapezoid(y, t) / (t[-1] - t[0])</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>p.SwitchStateMask(1)</code> sets bit 0</td>
+<td>It is a mask of SIZE 1, all OFF</td>
+<td><code>m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>MOSFET k is switch bit k</td>
+<td><code>add_mosfet</code> adds <code>&lt;name&gt;_body</code>, so bits interleave with diodes (below)</td>
+<td><code>b.switch_index_of(name)</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Loosening <code>tol_newton_dx</code> / <code>tol_newton_res</code> fixes a Newton abort</td>
+<td>Both are absolute on purpose. On a snubbed flyback, <code>tol_newton_dx=1e-5, tol_newton_res=1e-4</code> let <code>auto</code> finish at 3.53 V; the fixed engine gives 15.31 V. No error, no warning</td>
+<td>Keep the defaults; read the abort; run <code>engine='pwl'</code> with a <code>dt</code>; fix gate edges, body diodes, initial state</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>p.scope</code> is a module</td>
+<td><code>p.scope(b, res, signals=[...])</code> is the plotting function (needs matplotlib)</td>
+<td><code>from pulsim.scope import LiveScope</code> (needs pyqtgraph); <code>import pulsim.scope as m</code> gives you the function</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Tie an isolated secondary or a floating neutral to ground with a tiny resistor</td>
+<td>A milliohm tie is a galvanic bond. On the VSI of Tutorial 04 a 1 mOhm neutral-to-rail tie drove 58.8 A of DC through every phase (0.0 A floating or with 1 MOhm)</td>
+<td>Leave it to <code>auto_regularize</code> (default on): it ties each floating subnet with 1 GOhm and warns. Your own tie: 1 MOhm or larger</td>
+</tr>
+<tr>
+<td>8</td>
+<td>A rectifier's DC side can float</td>
+<td>With every diode off at t = 0, <code>engine='auto'</code> aborts: <code>factorize failed (numerically singular) ... dt=6e-14 ... node dcn</code>. A 1 MOhm or 1 GOhm rail-to-ground resistor did NOT cure it</td>
+<td>Connect one DC rail to <code>"gnd"</code> (as in 3.3), or pass <code>dt</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td>A fixed-step run is second order from t = 0</td>
+<td>It starts from an inconsistent state and is first order globally, ICs included: RL decay with <code>i0=1</code>, error at 1 ms 1.85e-3 at <code>dt=1e-5</code>, 0.92e-3 at <code>5e-6</code>; sample 0 of node voltages reads 0 V</td>
+<td>Halve <code>dt</code> and compare (6.3); discard the start-up; or omit <code>dt</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td>Any <code>dt</code> works with PWM</td>
+<td>Gate edges land on the <code>dt</code> grid. Buck D = 0.25 at 100 kHz with <code>make_pwm_switch_fn</code>: 5.84 V with <code>dt=2e-7</code> (on-time = 12.5 steps), 5.99 V with <code>dt=1e-7</code>. <code>make_pwm_switch_fn</code> still puts edges one step off (3.2)</td>
+<td>Make <code>D/f_sw</code> a whole number of steps; compute the PWM in steps (<code>grid_pwm</code>, 3.2)</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Omitting <code>switch_fn</code> leaves switches open</td>
+<td>With <code>dt</code>, undriven controlled switches are ALL CLOSED and <code>simulate</code> only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without <code>dt</code>, <code>auto</code> refuses</td>
+<td>Always pass <code>switch_fn</code> when the circuit has controlled switches</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>except Exception:</code> around <code>simulate</code> keeps a script robust</td>
+<td>Pulsim 2 refuses instead of guessing (unsupported model, invalid snapshot, singular circuit). A broad except turns that into a silent wrong answer</td>
+<td>Let it raise; read the message, it names the device and the fix</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>V_th = 0</code> diodes are fine on any engine</td>
+<td>Without <code>dt</code>, a <code>V_th = 0</code> bridge behind 0.1 ohm (230 V rms, 470 uF, 1 kOhm) ran half-wave: 318.8 V, 12.9 V pp, <code>BR__D1</code> and <code>BR__D3</code> never conducting; with <code>dt=1e-6</code>, 322.1 V, 6.4 V pp. <code>simulate</code> warns a diode "rode its conduction boundary"; <code>res.i</code> warns it was held "OFF while forward-biased" (a missed commutation). <code>V_th &gt; 0</code> is no guarantee: with 1 mH of line and <code>V_th = 0.7</code>, TR-BDF2 missed one commutation (V_dc still within 0.04 V of <code>dt</code>)</td>
+<td>With <code>V_th = 0</code> pass <code>dt</code> (0.7: 322.1 V on both engines). On either warning, rerun with <code>dt</code> (6.2)</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>p.time_rms</code> (and <code>.rms</code>) of a switched current is exact on a fixed grid</td>
+<td>It joins samples with lines, so each hard edge is a one-step ramp: low by about <code>h / (3 t_on)</code> in <code>i^2</code>. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at <code>dt</code> = 1e-7 / 5e-8 / 2.5e-8, analytic 1.5044 A. Same for <code>device_loss_summary</code>'s <code>i_rms</code> (not its <code>P_avg</code>)</td>
+<td><code>np.sqrt(p.time_average(t, i**2, t_from=...))</code>: 1.5044 A at all three. Keep <code>time_rms</code> for smooth or variable-grid traces; halve <code>dt</code> to check</td>
+</tr>
+</tbody>
+</table>
+<p>Traps 1, 3 and 4, executed:</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span> <span class="n">vth</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">):</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_current_source</span><span class="p">(</span><span class="s2">"I1"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>   <span class="c1"># 10 A out of "a"</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="n">vth</span><span class="p">)</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_th = </span><span class="si">{</span><span class="n">vth</span><span class="si">}</span><span class="s2">: V(a) = </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s1">'a'</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+
+<span class="n">m</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"SwitchStateMask(1):"</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="s2">"bit, bit 0 on:"</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+
+<span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"V"</span><span class="p">,</span> <span class="s2">"in"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"in"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q2"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">)</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">({</span><span class="n">n</span><span class="p">:</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"Q1_body"</span><span class="p">,</span> <span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"Q2"</span><span class="p">,</span> <span class="s2">"Q2_body"</span><span class="p">)})</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>V_th = 0.0: V(a) = 0.500 V
+V_th = 0.7: V(a) = 0.500 V
+SwitchStateMask(1): 1 bit, bit 0 on: False
+{'Q1': 0, 'Q1_body': 1, 'D1': 2, 'Q2': 3, 'Q2_body': 4}
+</code></pre></div>
+<h2 id="6-how-to-verify-a-result">6. How to verify a result<a class="headerlink" href="#6-how-to-verify-a-result" title="Permanent link">&para;</a></h2>
+<p>A number is not a result until one of these checks passes. Treat 0 A,
++-1e7 V or more, and a perfectly flat trace as a setup error until proven
+otherwise (a reversed source, an open switch, a floating node).</p>
+<h3 id="61-charge-and-energy-balance-from-independent-branches">6.1 Charge and energy balance from independent branches<a class="headerlink" href="#61-charge-and-energy-balance-from-independent-branches" title="Permanent link">&para;</a></h3>
+<p>KCL holds over time: the charge a source delivers must reappear in the
+branches it feeds. Compare branches that are computed independently.
+On the rectifier of 3.3, every coulomb from the AC source must flow
+through the diodes and end up in <code>RL</code> or <code>C</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+<span class="n">q_src</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"Vac"</span><span class="p">)),</span> <span class="n">t</span><span class="p">)</span>
+<span class="n">q_load</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">),</span> <span class="n">t</span><span class="p">)</span>
+          <span class="o">+</span> <span class="mf">1e-3</span> <span class="o">*</span> <span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"dc"</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">rect</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"dc"</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>   <span class="c1"># C * dV</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"source </span><span class="si">{</span><span class="n">q_src</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> mC, load </span><span class="si">{</span><span class="n">q_load</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> mC"</span><span class="p">)</span>
+<span class="k">assert</span> <span class="nb">abs</span><span class="p">(</span><span class="n">q_load</span> <span class="o">-</span> <span class="n">q_src</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-3</span> <span class="o">*</span> <span class="n">q_src</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>source 199.4 mC, load 199.4 mC
+</code></pre></div>
+<p>The diode branch currents must close the same balance (<code>D1</code>, <code>D2</code> feed
+the DC node):</p>
+<div class="highlight"><pre><span></span><code><span class="n">q_diodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"BR__D1"</span><span class="p">)</span> <span class="o">+</span> <span class="n">rect</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"BR__D2"</span><span class="p">),</span> <span class="n">t</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"diodes </span><span class="si">{</span><span class="n">q_diodes</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> mC"</span><span class="p">)</span>
+<span class="k">assert</span> <span class="nb">abs</span><span class="p">(</span><span class="n">q_diodes</span> <span class="o">-</span> <span class="n">q_src</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-3</span> <span class="o">*</span> <span class="n">q_src</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>diodes 199.4 mC
+</code></pre></div>
+<p>If a balance does not close, do not use any switch or diode branch
+current from that run, nor any loss or temperature derived from one:
+cross-check with a <code>dt</code> (6.2), then update pulsim or report the circuit.</p>
+<p>For a converter, check the energy too: input energy
+<code>np.trapezoid(v_in * i_in, t)</code> equals output energy plus losses plus the
+change of stored energy (<code>C*v**2/2</code>, <code>L*i**2/2</code>). Over a window
+<code>[t0, t1]</code> on a variable grid, take the end values with
+<code>np.interp(t0, t, v)</code>, not the first sample after <code>t0</code>.</p>
+<h3 id="62-two-engines-agree">6.2 Two engines agree<a class="headerlink" href="#62-two-engines-agree" title="Permanent link">&para;</a></h3>
+<p>Run the same circuit with <code>dt</code> (fixed step) and without (variable step)
+and compare time-weighted statistics, never sample means:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">ldrc</span><span class="p">():</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_sine_voltage_source</span><span class="p">(</span><span class="s2">"V"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"Lc"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"m"</span><span class="p">,</span> <span class="mf">111e-6</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D"</span><span class="p">,</span> <span class="s2">"m"</span><span class="p">,</span> <span class="s2">"o"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R"</span><span class="p">,</span> <span class="s2">"o"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"o"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">10e-6</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">b</span>
+
+<span class="n">fixed</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">ldrc</span><span class="p">(),</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">)</span>
+<span class="n">var</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">ldrc</span><span class="p">(),</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="p">(</span><span class="n">fixed</span><span class="p">,</span> <span class="n">var</span><span class="p">):</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"o"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">engine_used</span><span class="si">:</span><span class="s2">6s</span><span class="si">}</span><span class="s2"> time-weighted </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">v</span><span class="p">,</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">2e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V, "</span>
+          <span class="sa">f</span><span class="s2">"sample mean </span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="n">t</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>pwl    time-weighted 6.331 V, sample mean 6.330 V
+trbdf2 time-weighted 6.330 V, sample mean 5.007 V
+</code></pre></div>
+<p>The engines agree; the sample mean on the variable grid does not.
+When two engines disagree, check the metric before blaming an engine.
+Compare ripple and RMS too: the buck of 3.2 on <code>make_pwm_switch_fn</code>
+reads 11.998 V on both engines, but 67 mV pp with <code>dt</code>, 15 mV without.
+Neither is right: <code>min</code>, <code>max</code> and <code>ripple_pp</code> are sample extremes,
+and the variable grid (about 20 samples per period here) misses the
+peaks (analytic 16.0 mV; <code>grid_pwm</code> with <code>dt</code>, 16.8 mV). Read ripple
+from a fixed-<code>dt</code> run, or <code>np.interp</code> onto a uniform grid first.</p>
+<h3 id="63-step-size-convergence">6.3 Step-size convergence<a class="headerlink" href="#63-step-size-convergence" title="Permanent link">&para;</a></h3>
+<p>Halve <code>dt</code> and rerun. A figure that moves by more than you need is not
+converged. The fixed engine is first order from the start (trap 9):</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">rl</span><span class="p">():</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">,</span> <span class="n">i0</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>            <span class="c1"># tau = 1 ms</span>
+    <span class="k">return</span> <span class="n">b</span>
+
+<span class="k">for</span> <span class="n">dt</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">1e-5</span><span class="p">,</span> <span class="mf">5e-6</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">rl</span><span class="p">(),</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">2e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">dt</span><span class="p">)</span>
+    <span class="n">err</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">times</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"L"</span><span class="p">))</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"dt = </span><span class="si">{</span><span class="n">dt</span><span class="si">:</span><span class="s2">.0e</span><span class="si">}</span><span class="s2">: i_L(tau) error </span><span class="si">{</span><span class="n">err</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2"> A"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>dt = 1e-05: i_L(tau) error 1.85e-03 A
+dt = 5e-06: i_L(tau) error 9.21e-04 A
+</code></pre></div>
+<h3 id="64-when-simulate-raises">6.4 When <code>simulate</code> raises<a class="headerlink" href="#64-when-simulate-raises" title="Permanent link">&para;</a></h3>
+<p>The message names the device, node or option involved (trap 12). If
+you change engine to get past a refusal, confirm the answer with 6.2.
+Typical refusals: a singular matrix (a floating node, trap 8), a Newton
+abort (trap 5), a part file without provenance, a mismatched snapshot.</p>
+<h2 id="7-coming-from-pulsim-1x-or-pre-10">7. Coming from Pulsim 1.x or pre-1.0<a class="headerlink" href="#7-coming-from-pulsim-1x-or-pre-10" title="Permanent link">&para;</a></h2>
+<p>Retired names still raise <code>AttributeError</code> with a hint (for example
+<code>Circuit</code>, <code>Simulator</code>, <code>YamlParser</code>, <code>Preset</code>, <code>PulseParams</code> from
+pre-1.0; the <code>v2</code> sub-namespace of 0.10). The 2.0 changes that keep
+names but change results:</p>
+<table>
+<thead>
+<tr>
+<th>1.x habit</th>
+<th>2.x</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Circuit()</code> + device objects</td>
+<td><code>p.CircuitBuilder()</code> + <code>b.add_*</code> methods</td>
+</tr>
+<tr>
+<td><code>Simulator(...).run_transient(...)</code></td>
+<td><code>p.simulate(b, t_end, dt=None, ...)</code></td>
+</tr>
+<tr>
+<td><code>YamlParser(...).load(path)</code></td>
+<td><code>p.load_yaml_file(path)</code> / <code>p.load_yaml_string(text)</code></td>
+</tr>
+<tr>
+<td><code>simulate</code> implied the fixed-step engine</td>
+<td><code>engine='auto'</code>: <code>dt</code> gives a fixed step; no <code>dt</code> usually gives TR-BDF2</td>
+</tr>
+<tr>
+<td><code>add_mosfet</code> was one switch bit</td>
+<td>it is two (<code>&lt;name&gt;_body</code>); use <code>b.switch_index_of</code></td>
+</tr>
+<tr>
+<td>an IGBT conducted in reverse</td>
+<td><code>b.add_igbt_level1</code> blocks it (<code>with_fwd=True</code> adds the freewheel diode). The PWL <code>b.add_igbt</code> is still a bidirectional switch: gated on, -10 A gives -0.1 V</td>
+</tr>
+<tr>
+<td><code>add_three_phase_vsi</code> built six bare switches</td>
+<td>it adds six freewheel diodes (<code>with_freewheel_diodes=True</code>)</td>
+</tr>
+<tr>
+<td><code>p.add_hysteretic_inductor</code> + <code>p.make_hysteretic_inductor_observer</code></td>
+<td>the inductor is solved inside Newton; drop the observer, whose factory now raises</td>
+</tr>
+<tr>
+<td><code>p.add_pmsm</code> (observer, one average L)</td>
+<td>still there; <code>b.add_pmsm_mna</code> stamps the machine with full saliency</td>
+</tr>
+<tr>
+<td>parts in <code>pulsim.lib</code> resolved by part number</td>
+<td>they are synthetic; pass <code>allow_synthetic=True</code> to use them</td>
+</tr>
+</tbody>
+</table>
+<h2 id="8-paste-this-into-your-projects-assistant-config">8. Paste this into your project's assistant config<a class="headerlink" href="#8-paste-this-into-your-projects-assistant-config" title="Permanent link">&para;</a></h2>
+<p>For <code>CLAUDE.md</code>, <code>AGENTS.md</code>, <code>.github/copilot-instructions.md</code> or
+<code>.cursorrules</code>:</p>
+<div class="highlight"><pre><span></span><code>Before writing or changing code that uses pulsim, run
+`python -m pulsim.guide` and follow it. Verify every simulated number
+with the checks in its section 6 before reporting it.
+</code></pre></div>
+<h2 id="9-where-to-read-more">9. Where to read more<a class="headerlink" href="#9-where-to-read-more" title="Permanent link">&para;</a></h2>
+<p>Paths are relative to the repository root; the documentation site
+mirrors <code>docs/</code>.</p>
+<ul>
+<li><code>docs/getting-started.md</code>; <code>docs/tutorials/01-rc-charging.md</code> ...
+  <code>06-igbt-boost.md</code> (executed, end-to-end converters).</li>
+<li><code>docs/api-reference.md</code>, <code>docs/gotchas.md</code>, <code>docs/troubleshooting.md</code>,
+  <code>docs/losses-and-thermal.md</code> (how each loss is computed),
+  <code>docs/loss-thermal.md</code>, <code>docs/mental-model.md</code>, <code>docs/how-pulsim-works/</code>.</li>
+<li><code>CHANGELOG.md</code>: what changed in each release and why.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../getting-started/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Getting Started">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Getting Started
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../mental-model/" class="md-footer__link md-footer__link--next" aria-label="Next: Mental Model">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Mental Model
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../mental-model/" class="md-nav__link">
         
   
@@ -889,6 +910,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#e-loosening-tol_newton_dx-tol_newton_res-dont" class="md-nav__link">
+    <span class="md-ellipsis">
+      (e) Loosening tol_newton_dx / tol_newton_res — don't
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -964,6 +994,15 @@
   <a href="#symptom-wall-clock-time-too-long" class="md-nav__link">
     <span class="md-ellipsis">
       Symptom: wall-clock time too long
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#symptom-the-average-changes-when-i-drop-dt" class="md-nav__link">
+    <span class="md-ellipsis">
+      Symptom: the average changes when I drop dt
     </span>
   </a>
   
@@ -2005,6 +2044,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#e-loosening-tol_newton_dx-tol_newton_res-dont" class="md-nav__link">
+    <span class="md-ellipsis">
+      (e) Loosening tol_newton_dx / tol_newton_res — don't
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2080,6 +2128,15 @@
   <a href="#symptom-wall-clock-time-too-long" class="md-nav__link">
     <span class="md-ellipsis">
       Symptom: wall-clock time too long
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#symptom-the-average-changes-when-i-drop-dt" class="md-nav__link">
+    <span class="md-ellipsis">
+      Symptom: the average changes when I drop dt
     </span>
   </a>
   
@@ -2280,6 +2337,26 @@
 <h4 id="d-sharp-sigmoid-kappa-too-high">(d) Sharp sigmoid (<code>kappa</code> too high)<a class="headerlink" href="#d-sharp-sigmoid-kappa-too-high" title="Permanent link">&para;</a></h4>
 <p>MOSFETs / IGBTs use sigmoid blending between regions; <code>kappa</code> controls how sharp. A <code>kappa = 50</code> is more accurate at the boundary but makes the Jacobian condition number worse.</p>
 <p><strong>Fix:</strong> dial <code>kappa</code> down to 10–15. Since v2.0 the DC cascade recovers a 12-diode chain at <code>kappa = 50</code> on its own (gmin stepping gets it), but <code>kappa = 5000</code> defeats every rung — at that sharpness you are asking a smooth model to be an ideal switch, and <code>add_diode()</code> (the PWL switch diode) is the right device instead.</p>
+<h4 id="e-loosening-tol_newton_dx-tol_newton_res-dont">(e) Loosening <code>tol_newton_dx</code> / <code>tol_newton_res</code> — don't<a class="headerlink" href="#e-loosening-tol_newton_dx-tol_newton_res-dont" title="Permanent link">&para;</a></h4>
+<p>The abort message reports the norms relative to the circuit's own
+scale, and on a stall they often look converged (<code>dx/|x| ~ 1e-9</code>).
+That is not permission to loosen the tolerances. They are absolute on
+purpose: an absolute step test is what keeps Newton off a spurious
+root, and loosening it has produced silently wrong answers. Measured:
+the snubbed flyback in <code>test_saturable_transformer.py</code> aborts at
+<code>h_min</code> on <code>engine='trbdf2'</code>; with <code>tol_newton_dx=1e-5,
+tol_newton_res=1e-4</code> it completes and reports V_out = 3.53 V, while
+<code>engine='pwl', dt=1e-8</code> gives 15.31 V.</p>
+<p><strong>Fix:</strong> look at the device the message names, and cross-check on the
+other engine. An abort at <code>h_min</code> right after a hard switching edge on
+TR-BDF2 is a known engine limitation (<code>KNOWN_LIMITATIONS.md</code>,
+CHANGELOG 2.0.0 "TR-BDF2 stalls at <code>h_min</code>"), not a tolerance problem;
+<code>engine='pwl'</code> with an explicit <code>dt</code> is the workaround. On the fixed
+engine, do NOT reach for a smaller <code>dt</code>: a Newton abort there with PWL
+diodes next to a Newton device is the known diode-mask chatter, which
+gets worse as <code>dt</code> shrinks (the PSFB reproducer aborts at 10 ns and
+runs at 50 ns). Use a coarser <code>dt</code>, or smooth Shockley junctions
+(<code>add_shockley_diode</code>) for those diodes.</p>
 <h3 id="symptom-residual-oscillates-but-doesnt-shrink">Symptom: residual oscillates but doesn't shrink<a class="headerlink" href="#symptom-residual-oscillates-but-doesnt-shrink" title="Permanent link">&para;</a></h3>
 <p>You hit a Newton "limit cycle" — the iterate ping-pongs between two faces of a non-smooth feature.</p>
 <p><strong>Fix:</strong> the trust-region Newton (V5) and pseudo-transient continuation (V10) are designed for this. Set <code>opts.max_newton_iterations = 50</code> and let the solver escalate strategies internally.</p>
@@ -2307,6 +2384,13 @@ you build the cache yourself.</p>
 <h3 id="symptom-wall-clock-time-too-long">Symptom: wall-clock time too long<a class="headerlink" href="#symptom-wall-clock-time-too-long" title="Permanent link">&para;</a></h3>
 <p><code>run_transient</code> is linear in <code>N_steps</code>. If a 100 µs simulation at <code>dt = 1 ns</code> takes too long, you have 100,000 steps — even at 10 µs per step, that's a second.</p>
 <p><strong>Fix:</strong> profile to confirm where time is spent. The cache lookup is O(1); the trap solve is O(state_size) for a triangular back-sub. Newton refresh dominates for nonlinear circuits.</p>
+<h3 id="symptom-the-average-changes-when-i-drop-dt">Symptom: the average changes when I drop <code>dt</code><a class="headerlink" href="#symptom-the-average-changes-when-i-drop-dt" title="Permanent link">&para;</a></h3>
+<p>Without <code>dt</code> the grid is variable-step: samples cluster around events,
+so <code>v[t &gt; t0].mean()</code> over-weights them (an L–D–RC rectifier reads
+3.04 V instead of 6.33 V on TR-BDF2). The circuit did not change; the
+metric did. Use <code>p.steady_state_stats(res, "out", t_from=t0)</code> or
+<code>p.time_average(res.times, v, t0)</code> — see
+<a href="../api-reference/#statistics-over-a-result-time-weighted">Statistics over a result</a>.</p>
 <h2 id="builder-api-pitfalls">Builder / API pitfalls<a class="headerlink" href="#builder-api-pitfalls" title="Permanent link">&para;</a></h2>
 <h3 id="symptom-branch_id-n-is-not-a-resistor">Symptom: "branch_id N is not a Resistor"<a class="headerlink" href="#symptom-branch_id-n-is-not-a-resistor" title="Permanent link">&para;</a></h3>
 <p>You called the wrong typed accessor on <code>DevicePool</code>. The <code>kind_of(b_id)</code> casts the variant index directly to <code>StoredKind</code>.</p>
@@ -2333,7 +2417,7 @@ need a BOND rather than a reference.</p>
 <p>If you hit something not listed here, the best signals are:</p>
 <ol>
 <li><strong>Minimum repro YAML or 10-line Python snippet.</strong></li>
-<li><strong><code>opts.max_newton_iterations = 50; print(res.commutations)</code></strong> — the event log shows which switch flipped when, often pointing at the root cause.</li>
+<li><strong><code>opts.max_newton_iterations = 50; print(res.commutation_events)</code></strong> — the event log shows which switch flipped when, often pointing at the root cause.</li>
 <li><strong><code>cache.dt()</code> value</strong> — confirms you didn't accidentally pass <code>dt = 0</code> (static-only cache).</li>
 </ol>
 <p>Open an issue with those three pieces of evidence and we can usually pinpoint the problem in one round-trip.</p>

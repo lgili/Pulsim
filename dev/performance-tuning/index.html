@@ -461,6 +461,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../mental-model/" class="md-nav__link">
         
   
@@ -1921,8 +1942,10 @@ just work. This guide is for the cases that don't.</p>
 
 <span class="c1"># Newton solver tolerances + iteration cap.</span>
 <span class="n">opts</span><span class="o">.</span><span class="n">max_newton_iterations</span> <span class="o">=</span> <span class="mi">50</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">tol_newton_dx</span>  <span class="o">=</span> <span class="mf">1e-9</span>       <span class="c1"># |Δx|∞ termination</span>
-<span class="n">opts</span><span class="o">.</span><span class="n">tol_newton_res</span> <span class="o">=</span> <span class="mf">1e-9</span>       <span class="c1"># |F(x)|∞ termination</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">tol_newton_dx</span>  <span class="o">=</span> <span class="mf">1e-9</span>       <span class="c1"># |Δx|∞ termination (absolute)</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">tol_newton_res</span> <span class="o">=</span> <span class="mf">1e-9</span>       <span class="c1"># |F(x)|∞ termination (absolute)</span>
+<span class="c1"># Not a speed knob, and not a way past a Newton abort: loosening them</span>
+<span class="c1"># has produced silently wrong operating points (docs/gotchas.md (e)).</span>
 
 <span class="c1"># Globalization strategies (off by default; turn on for stiff</span>
 <span class="c1"># converters that diverge from a cold start).</span>

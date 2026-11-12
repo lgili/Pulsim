@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1919,7 +1940,7 @@
 <tr>
 <td><code>D1</code></td>
 <td>SwitchedDiode (gnd → sw)</td>
-<td><code>V_F = 0.7 V</code></td>
+<td><code>g_on = 1 kS</code>, <code>V_th = 0.7 V</code> (commutation threshold)</td>
 </tr>
 <tr>
 <td><code>L</code></td>
@@ -1938,7 +1959,13 @@
 </tr>
 </tbody>
 </table>
-<p>PWM: 100 kHz, 50 % duty → expected steady-state <code>V_out ≈ 0.5 · 24 = 12 V</code> (minus diode drop / R_on losses ≈ 11.6 V).</p>
+<p>PWM: 100 kHz, 50 % duty → expected steady-state <code>V_out ≈ D · V_in = 0.5 · 24 = 12 V</code>.</p>
+<p><code>V_th</code> on a switched diode is the voltage at which it <em>commutates</em>, not a
+forward drop: once ON it is a 1 mΩ conductance (<code>g_on = 1e3</code> S) with no
+offset, and <code>R_on = 1 mΩ</code> on Q1 drops ~1 mV at 1.2 A. The losses are
+therefore negligible and the run lands on <code>D · V_in</code> itself. Model a real
+forward drop with a device that has one (e.g. a Shockley diode) if you
+want to see it in <code>V_out</code>.</p>
 <h2 id="python-build">Python build<a class="headerlink" href="#python-build" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
@@ -1956,54 +1983,78 @@
 </code></pre></div>
 <p>Note: <code>add_mosfet_with_body_diode</code> creates BOTH a Switch branch (drain→source) AND an anti-parallel <code>SwitchedDiode</code>, so the inductor current has somewhere to go during the OFF interval.</p>
 <h2 id="switch-driver">Switch driver<a class="headerlink" href="#switch-driver" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Switch index 0 is the HS MOSFET. Bit 1 is the body diode (handled</span>
-<span class="c1"># automatically by the cache + event detection). The free-wheel</span>
-<span class="c1"># diode D1 is a SwitchedDiode (kind == Switch from a topology view)</span>
-<span class="c1"># — its bit is bit 2.</span>
-<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span>
-    <span class="n">switch_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">frequency</span><span class="o">=</span><span class="n">F_PWM</span><span class="p">,</span> <span class="n">duty</span><span class="o">=</span><span class="n">DUTY</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
-<span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Ask the builder for Q1's bit instead of hard-coding it. Switch bits</span>
+<span class="c1"># follow the builder-call order of every switching branch -- here</span>
+<span class="c1"># Q1 (bit 0), Q1's body diode (bit 1) and the free-wheel diode D1</span>
+<span class="c1"># (bit 2) -- so inserting or reordering a device silently moves the</span>
+<span class="c1"># bit. `graph.num_switches` sizes the mask.</span>
+<span class="n">q1_bit</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>
+<span class="n">n_sw</span>   <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="n">F_PWM</span><span class="p">,</span> <span class="n">DUTY</span><span class="p">,</span> <span class="n">q1_bit</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
 </code></pre></div>
-<p><code>make_pwm_switch_fn</code> returns a <code>t -&gt; SwitchStateMask</code> callable that flips bit 0 ON during the first 50 % of each cycle and OFF for the rest. The body diode and free-wheel diode bits are managed by the event-detection loop inside <code>run_transient</code> (no manual driving needed).</p>
+<p><code>make_pwm_switch_fn</code> returns a <code>t -&gt; SwitchStateMask</code> callable that turns bit <code>q1_bit</code> ON during the first 50 % of each cycle and OFF for the rest. The body diode and free-wheel diode bits are managed by the event-detection loop inside <code>run_transient</code> (no manual driving needed).</p>
 <h2 id="run">Run<a class="headerlink" href="#run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
 
 <span class="n">vout_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">)</span>
-<span class="n">vout_samples</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="n">vout_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">]</span>
-<span class="c1"># Skip the first 2 ms transient and average over the rest.</span>
-<span class="n">k_skip</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mf">2e-3</span> <span class="o">/</span> <span class="mf">2e-7</span><span class="p">)</span>
-<span class="n">v_mean</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">vout_samples</span><span class="p">[</span><span class="n">k_skip</span><span class="p">:])</span> <span class="o">/</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">vout_samples</span><span class="p">)</span> <span class="o">-</span> <span class="n">k_skip</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_out (steady-state mean) = </span><span class="si">{</span><span class="n">v_mean</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V (target 11.5–12.0 V)"</span><span class="p">)</span>
+<span class="n">t</span>    <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+<span class="n">vout</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">s</span><span class="p">[</span><span class="n">vout_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">])</span>
+<span class="c1"># Skip the first 2 ms transient and time-average the rest</span>
+<span class="c1"># (np.trapezoid stays correct if the run is ever variable-step).</span>
+<span class="n">m</span> <span class="o">=</span> <span class="n">t</span> <span class="o">&gt;=</span> <span class="mf">2e-3</span>
+<span class="n">v_mean</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">vout</span><span class="p">[</span><span class="n">m</span><span class="p">],</span> <span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_out (steady-state mean) = </span><span class="si">{</span><span class="n">v_mean</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V (target D·V_in = 12.0 V)"</span><span class="p">)</span>
 </code></pre></div>
 <p>Expected output:
-<div class="highlight"><pre><span></span><code>V_out (steady-state mean) = 11.79 V (target 11.5–12.0 V)
+<div class="highlight"><pre><span></span><code>V_out (steady-state mean) = 12.00 V (target D·V_in = 12.0 V)
 </code></pre></div></p>
+<p>The output filter (100 µH / 47 µF / 10 Ω) is lightly damped (ζ ≈ 0.07), so
+at 2–5 ms it is still ringing from the start-up. The window mean is already
+on target, but do not read the ripple from this run: <code>make_pwm_switch_fn</code>
+compares a floating-point phase, so on the <code>dt</code> grid some gate edges land
+one step early or late, and that duty jitter keeps the filter ringing. At
+9–10 ms of a 10 ms run it still shows ≈ 0.12 V peak-to-peak, where a PWM
+computed in whole steps (<code>round(t / dt) % 50 &lt; 25</code>) shows the ≈ 16 mV
+switching ripple that <code>ΔI / (8 f C)</code> predicts. See trap 10 and section 3.2
+of <code>python -m pulsim.guide</code>.</p>
 <h2 id="whats-going-on-internally">What's going on internally<a class="headerlink" href="#whats-going-on-internally" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>Cache enumeration.</strong> <code>Q1</code> and <code>D1</code> give 2 switches × 2 states = 4 reachable mask combinations. The cache pre-factors 4 MNA matrices.</li>
+<li><strong>Cache.</strong> <code>Q1</code>, its body diode and <code>D1</code> are three switching branches, so there are up to 2³ = 8 mask combinations. The cache is lazy: it factors the MNA matrix of a combination the first time the run reaches it and reuses it on every later visit.</li>
 <li><strong>PWM scheduling.</strong> At each <code>dt</code>, <code>pwm(t)</code> returns the mask for Q1's state. The cache looks up the matching pre-factored entry in O(1).</li>
 <li><strong>Inductor commutation.</strong> When <code>Q1</code> opens, <code>i_L</code> must keep flowing. <code>D1</code> switches ON automatically (event detection on <code>v_D1</code> changing sign) and the integration restarts from the new switch state at the exact bisected commutation time.</li>
 </ol>
 <h2 id="reading-the-yaml">Reading the YAML<a class="headerlink" href="#reading-the-yaml" title="Permanent link">&para;</a></h2>
-<p><a href="https://github.com/lgili/Pulsim/blob/main/examples/buck.yaml"><code>examples/buck.yaml</code></a> declares the same circuit + PWM with:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pwm0</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pwm</span>
-<span class="w">    </span><span class="nt">switch_index</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
-<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100e3</span>
-<span class="w">    </span><span class="nt">duty</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
-
-<span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">voltage_source</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Vin</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">gnd</span><span class="p p-Indicator">,</span><span class="nt"> V</span><span class="p">:</span><span class="w"> </span><span class="nv">24</span><span class="p p-Indicator">}</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">switch</span><span class="p p-Indicator">,</span><span class="nt">         name</span><span class="p">:</span><span class="w"> </span><span class="nv">Q1</span><span class="p p-Indicator">,</span><span class="nt">  from</span><span class="p">:</span><span class="w"> </span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">}</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">diode</span><span class="p p-Indicator">,</span><span class="nt">          name</span><span class="p">:</span><span class="w"> </span><span class="nv">D1</span><span class="p p-Indicator">,</span><span class="nt">  from</span><span class="p">:</span><span class="w"> </span><span class="nv">gnd</span><span class="p p-Indicator">,</span><span class="nt"> to</span><span class="p">:</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="nt"> V_th</span><span class="p">:</span><span class="w"> </span><span class="nv">0.7</span><span class="p p-Indicator">}</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">inductor</span><span class="p p-Indicator">,</span><span class="nt">       name</span><span class="p">:</span><span class="w"> </span><span class="nv">L</span><span class="p p-Indicator">,</span><span class="nt">   from</span><span class="p">:</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="nt">  to</span><span class="p">:</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="nt"> L</span><span class="p">:</span><span class="w"> </span><span class="nv">100e-6</span><span class="p p-Indicator">}</span>
-<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">...</span>
+<p><a href="https://github.com/lgili/Pulsim/blob/main/examples/buck.yaml"><code>examples/buck.yaml</code></a> declares the same power stage (with a 5 Ω load and the free-wheel diode named <code>D_FW</code>). The block below carries that file's content inline, so it runs without a clone of the repository; with a clone, <code>p.load_yaml_file("examples/buck.yaml")</code> (path relative to the repository root) gives the same result.</p>
+<p>The YAML holds the circuit and the run settings, not the gate drive.
+<code>p.load_yaml_string(...)</code> / <code>p.load_yaml_file(...)</code> return a <code>LoadedCircuit</code>
+with <code>.builder</code> and <code>.options</code>; build the PWM from the loaded builder
+exactly as above:</p>
+<div class="highlight"><pre><span></span><code><span class="n">BUCK_YAML</span> <span class="o">=</span> <span class="s2">"""</span>
+<span class="s2">circuit:</span>
+<span class="s2">  devices:</span>
+<span class="s2">    - {type: voltage_source,         name: Vin,  from: vin, to: gnd, V: 24.0}</span>
+<span class="s2">    - {type: mosfet_with_body_diode, name: Q1,   drain: vin, source: sw,</span>
+<span class="s2">       R_on: 1.0e-3, R_off: 1.0e9, V_F: 0.7}</span>
+<span class="s2">    - {type: diode,                  name: D_FW, anode: gnd, cathode: sw,</span>
+<span class="s2">       g_on: 1.0e3, g_off: 1.0e-9, V_th: 0.7}</span>
+<span class="s2">    - {type: inductor,               name: L1,   from: sw, to: vout, L: 100.0e-6}</span>
+<span class="s2">    - {type: capacitor,              name: Cout, from: vout, to: gnd, C: 47.0e-6}</span>
+<span class="s2">    - {type: resistor,               name: R_L,  from: vout, to: gnd, R: 5.0}</span>
+<span class="s2">simulation:</span>
+<span class="s2">  t_start: 0.0</span>
+<span class="s2">  t_end: 5.0e-3</span>
+<span class="s2">  dt: 1.0e-7</span>
+<span class="s2">"""</span>
+<span class="n">lc</span>  <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="n">BUCK_YAML</span><span class="p">)</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">lc</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span>
+                           <span class="n">lc</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">lc</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">lc</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">lc</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
 </code></pre></div>
-<p>Load it from Python with <code>p.load_yaml_file(...)</code>. Both <code>LoadedCircuit.builder</code> and <code>LoadedCircuit.switch_fn</code> are ready to pass straight to <code>simulate()</code>.</p>
 <h2 id="try-this-next">Try this next<a class="headerlink" href="#try-this-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Change duty.</strong> Set <code>DUTY = 0.25</code> → <code>V_out ≈ 6 V</code>. Set <code>DUTY = 0.75</code> → <code>V_out ≈ 18 V</code>. The output tracks <code>D · V_in</code> minus losses.</li>
+<li><strong>Change duty.</strong> Set <code>DUTY = 0.25</code> → <code>V_out ≈ 5.82 V</code>; <code>DUTY = 0.75</code> → <code>V_out ≈ 17.82 V</code> (means over 9–10 ms of a 10 ms run). Both sit 0.18 V below <code>D · V_in</code> because the fixed-step engine evaluates <code>switch_fn</code> on the <code>dt</code> grid: an on-time of <code>0.25 · 10 µs = 2.5 µs</code> is 12.5 steps of 0.2 µs and is not representable. Halve <code>dt</code> to <code>1e-7</code> (25 steps) and the means become 5.99 V and 17.99 V. Pick <code>dt</code> so that <code>D · T</code> is a whole number of steps.</li>
 <li><strong>Vary frequency.</strong> Drop to <code>F_PWM = 20 kHz</code> and watch the output ripple grow.</li>
 <li><strong>Continuous → discontinuous conduction.</strong> Raise the load resistance to 100 Ω. The inductor current goes to zero each cycle; the diode bit switches OFF too. The cache handles this without any code change.</li>
 <li><strong>Add closed-loop control.</strong> Replace the constant <code>DUTY</code> with a duty-cycle command that depends on <code>v_out</code> (via your own switch_fn lambda). Welcome to compensator design.</li>

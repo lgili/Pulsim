@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/mental-model/">
       
       
-        <link rel="prev" href="../getting-started/">
+        <link rel="prev" href="../ai-guide/">
       
       
         <link rel="next" href="../tutorials/01-rc-charging/">
@@ -448,6 +448,27 @@
   
   <span class="md-ellipsis">
     Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
   </span>
   
 
@@ -1913,11 +1934,13 @@
 <p>Diodes and ideal switches change state when a current/voltage crosses zero. The kernel detects the crossing within a sample step and <strong>bisects</strong> to find the exact <code>t_event</code>, then restarts the integration from that instant with the new switch state. This keeps the simulation accurate even when commutations happen between samples.</p>
 <h2 id="yaml-pathway">YAML pathway<a class="headerlink" href="#yaml-pathway" title="Permanent link">&para;</a></h2>
 <p>For circuits that don't need programmatic generation, you can author a YAML file and load it:</p>
-<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/buck.yaml"</span><span class="p">)</span>
-<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">dt</span><span class="p">,</span>
-                 <span class="n">switch_fn</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">switch_fn</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/buck.yaml"</span><span class="p">)</span>   <span class="c1"># path relative to the repo root</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span>
+                           <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span>
+                 <span class="n">dt</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
 </code></pre></div>
-<p>The YAML loader builds a <code>LoadedCircuit</code> containing the populated <code>CircuitBuilder</code>, default time window, and a <code>switch_fn</code> that combines all declared PWM helpers.</p>
+<p>The YAML loader builds a <code>LoadedCircuit</code> with two attributes: <code>.builder</code> (the populated <code>CircuitBuilder</code>) and <code>.options</code> (the <code>simulation:</code> block — <code>t_end</code>, <code>dt</code>, ...). The YAML does not carry the gate drive: build the <code>switch_fn</code> from the loaded builder, asking it for the switch's bit by name.</p>
 <h2 id="how-a-tutorial-walks-through-this">How a tutorial walks through this<a class="headerlink" href="#how-a-tutorial-walks-through-this" title="Permanent link">&para;</a></h2>
 <p>Every tutorial in this guide hits the same three checkpoints:</p>
 <ol>
@@ -1961,7 +1984,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../getting-started/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Getting Started">
+          <a href="../ai-guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Using Pulsim with AI Assistants">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1971,7 +1994,7 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Getting Started
+                Using Pulsim with AI Assistants
               </div>
             </div>
           </a>

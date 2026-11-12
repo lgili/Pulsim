@@ -16,7 +16,7 @@
         <link rel="prev" href="..">
       
       
-        <link rel="next" href="../mental-model/">
+        <link rel="next" href="../ai-guide/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -489,27 +489,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      Install
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#build-the-c-core-python-bindings" class="md-nav__link">
+  <a href="#your-first-transient-an-rc-in-a-few-lines" class="md-nav__link">
     <span class="md-ellipsis">
-      Build the C++ core + Python bindings
+      Your first transient — an RC in a few lines
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#your-first-transient-a-3-line-rc" class="md-nav__link">
+  <a href="#reading-results" class="md-nav__link">
     <span class="md-ellipsis">
-      Your first transient — a 3-line RC
+      Reading results
     </span>
   </a>
   
@@ -525,9 +525,27 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#using-pulsim-with-ai-assistants" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Pulsim with AI assistants
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       Where to go next
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Building from source
     </span>
   </a>
   
@@ -537,6 +555,27 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -1752,27 +1791,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      Install
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#build-the-c-core-python-bindings" class="md-nav__link">
+  <a href="#your-first-transient-an-rc-in-a-few-lines" class="md-nav__link">
     <span class="md-ellipsis">
-      Build the C++ core + Python bindings
+      Your first transient — an RC in a few lines
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#your-first-transient-a-3-line-rc" class="md-nav__link">
+  <a href="#reading-results" class="md-nav__link">
     <span class="md-ellipsis">
-      Your first transient — a 3-line RC
+      Reading results
     </span>
   </a>
   
@@ -1788,9 +1827,27 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#using-pulsim-with-ai-assistants" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Pulsim with AI assistants
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       Where to go next
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Building from source
     </span>
   </a>
   
@@ -1828,31 +1885,63 @@
 
 
 <h1 id="getting-started">Getting started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>pulsim
+</code></pre></div>
+<p>Pulsim ships binary wheels for <strong>CPython 3.10, 3.11, 3.12 and 3.13</strong> on</p>
 <ul>
-<li><strong>macOS or Linux</strong> (Windows is best-effort via WSL2)</li>
-<li><strong>CMake ≥ 3.24</strong>, <strong>Ninja</strong></li>
-<li><strong>Clang 16+</strong> or <strong>GCC 13+</strong> (we use C++23)</li>
-<li><strong>Python 3.11+</strong> with <code>pip</code></li>
-<li>A package manager for the third-party dependencies: KLU (SuiteSparse), Eigen, yaml-cpp, Catch2, pybind11. On macOS, install via Homebrew.</li>
+<li>macOS on Apple silicon (arm64),</li>
+<li>Linux x86_64 (manylinux_2_28),</li>
+<li>Windows x64.</li>
 </ul>
-<div class="highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>cmake<span class="w"> </span>ninja<span class="w"> </span>llvm<span class="w"> </span>suite-sparse<span class="w"> </span>eigen<span class="w"> </span>yaml-cpp<span class="w"> </span>catch2<span class="w"> </span>pybind11
+<p>No compiler is needed. The only runtime dependency is <strong>NumPy</strong>. Optional
+features live in extras, so the base install stays small:</p>
+<table>
+<thead>
+<tr>
+<th>Extra</th>
+<th>Pulls in</th>
+<th>Needed for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pulsim[jupyter]</code></td>
+<td>matplotlib, plotly, ipywidgets</td>
+<td><code>p.scope(...)</code>, <code>p.plot.*</code>, notebook widgets</td>
+</tr>
+<tr>
+<td><code>pulsim[data]</code></td>
+<td>pandas, xarray</td>
+<td><code>SweepResult.to_dataframe()</code></td>
+</tr>
+<tr>
+<td><code>pulsim[lib]</code></td>
+<td>PyYAML</td>
+<td>reading/writing part files in <code>pulsim.lib</code></td>
+</tr>
+<tr>
+<td><code>pulsim[fast]</code></td>
+<td>numba</td>
+<td><code>@p.fast_block</code> JIT-compiled control blocks</td>
+</tr>
+<tr>
+<td><code>pulsim[schematic]</code></td>
+<td>schemdraw, networkx, cairosvg, anthropic</td>
+<td>schematic rendering</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"pulsim[jupyter]"</span><span class="w">          </span><span class="c1"># e.g. to plot</span>
 </code></pre></div>
-<h2 id="build-the-c-core-python-bindings">Build the C++ core + Python bindings<a class="headerlink" href="#build-the-c-core-python-bindings" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/lgili/pulsim
-<span class="nb">cd</span><span class="w"> </span>pulsim
-cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release
-cmake<span class="w"> </span>--build<span class="w"> </span>build
+<p>Check the install:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import pulsim as p; print(p.__version__)"</span>
 </code></pre></div>
-<p>A successful build produces:
-- <code>build/core/pulsim_core_*_tests</code> — Catch2 binaries (run with <code>ctest --output-on-failure</code>).
-- <code>build/python/pulsim/_pulsim.cpython-3X-darwin.so</code> — the Python extension.</p>
-<p>For local Python development without <code>pip install</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/build/python:</span><span class="nv">$PYTHONPATH</span><span class="s2">"</span>
-python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import pulsim as p; print(p.__version__)"</span>
+<div class="highlight"><pre><span></span><code>2.0.0
 </code></pre></div>
-<h2 id="your-first-transient-a-3-line-rc">Your first transient — a 3-line RC<a class="headerlink" href="#your-first-transient-a-3-line-rc" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+<h2 id="your-first-transient-an-rc-in-a-few-lines">Your first transient — an RC in a few lines<a class="headerlink" href="#your-first-transient-an-rc-in-a-few-lines" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"n0"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">)</span>
@@ -1860,37 +1949,108 @@ python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import
 <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span>      <span class="p">(</span><span class="s2">"C"</span><span class="p">,</span>  <span class="s2">"vc"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">)</span>     <span class="c1"># 1 µF; τ = 1 ms</span>
 
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
-<span class="n">vc_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"vc"</span><span class="p">)</span>
 
-<span class="c1"># Print v_C at t = 1τ (should be ≈ V·(1 − 1/e) ≈ 3.16 V).</span>
-<span class="n">k_1tau</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mf">1e-3</span> <span class="o">/</span> <span class="mf">1e-5</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"v_C(1τ) = </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">[</span><span class="n">k_1tau</span><span class="p">][</span><span class="n">vc_idx</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+<span class="c1"># v_C at t = 1τ; the analytical value is V·(1 − 1/e) = 3.161 V.</span>
+<span class="n">v_c</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vc"</span><span class="p">)</span>                      <span class="c1"># numpy array, one value per sample</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"v_C(1τ) = </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span><span class="w"> </span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">,</span><span class="w"> </span><span class="n">v_c</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V  [</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">engine_used</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
 </code></pre></div>
 <p>Expected output:
-<div class="highlight"><pre><span></span><code>v_C(1τ) = 3.162 V
+<div class="highlight"><pre><span></span><code>v_C(1τ) = 3.151 V  [pwl]
 </code></pre></div></p>
-<p>That's the entire flow. <code>simulate()</code> (proposal #3.3) hides:
-1. Building the PWL state-space cache (<code>PwlStateSpaceCache</code>).
-2. Constructing the <code>SimulationOptions</code>.
-3. Defaulting the <code>switch_fn</code> to "all switches closed" (here there are no switches, so it's a no-op).
-4. Auto-detecting nonlinear devices and enabling the Newton refresh if needed.
-5. Calling <code>run_transient</code>.</p>
+<p>Passing <code>dt</code> asks for the <strong>fixed-step</strong> trapezoidal engine (<code>pwl</code>). It
+starts from an all-zero state, so the 5 V source is switched on during
+the first step; the response is the exact exponential delayed by half a
+step (<code>dt/2 = 5 µs</code>), which is the 0.3 % gap to 3.161 V. Shrink <code>dt</code> and
+the gap shrinks with it.</p>
+<p>Leave <code>dt</code> out and the default <code>engine='auto'</code> picks the engine — here
+the variable-step TR-BDF2 engine, which lands on the analytical value:</p>
+<div class="highlight"><pre><span></span><code><span class="n">res_auto</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"v_C(1τ) = </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span><span class="w"> </span><span class="n">res_auto</span><span class="o">.</span><span class="n">times</span><span class="p">,</span><span class="w"> </span><span class="n">res_auto</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s1">'vc'</span><span class="p">))</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span>
+      <span class="sa">f</span><span class="s2">"  [</span><span class="si">{</span><span class="n">res_auto</span><span class="o">.</span><span class="n">engine_used</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>v_C(1τ) = 3.161 V  [trbdf2]
+</code></pre></div>
+<p><code>res.engine_used</code> says which engine ran and <code>res.engine_route_reason</code>
+says why <code>auto</code> did not take the variable-step one. A variable-step run
+has a non-uniform time grid: interpolate with <code>np.interp</code> or average
+with <code>np.trapezoid(y, t) / (t[-1] - t[0])</code> rather than indexing samples
+or taking a plain <code>.mean()</code>.</p>
+<p>That is the entire flow. <code>simulate()</code> hides:</p>
+<ol>
+<li>Choosing the engine (<code>dt</code> given → <code>pwl</code>; otherwise <code>auto</code> routes).</li>
+<li>Building the PWL state-space cache (<code>PwlStateSpaceCache</code>) for the
+   fixed-step engine — lazily, one factorisation per switch state the
+   run actually visits.</li>
+<li>Constructing the <code>SimulationOptions</code>.</li>
+<li>Auto-detecting nonlinear devices and enabling the Newton refresh if
+   needed.</li>
+<li>Running the transient.</li>
+</ol>
+<h2 id="reading-results">Reading results<a class="headerlink" href="#reading-results" title="Permanent link">&para;</a></h2>
+<p><code>res.times</code> is the list of sample times and <code>res.states</code> a read-only
+<code>numpy</code> array of shape <code>(num_samples, state_size)</code>. You rarely need to
+index it by hand: ask by name.</p>
+<div class="highlight"><pre><span></span><code><span class="n">v_c</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vc"</span><span class="p">)</span>      <span class="c1"># node voltage trace</span>
+<span class="n">i_r</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"R"</span><span class="p">)</span>       <span class="c1"># branch current through R, from n0 to vc</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"i_R(0+) = </span><span class="si">{</span><span class="n">i_r</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> mA,  i_R(end) = </span><span class="si">{</span><span class="n">i_r</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e6</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> µA"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>i_R(0+) = 4.975 mA,  i_R(end) = 33.858 µA
+</code></pre></div>
 <h2 id="plotting">Plotting<a class="headerlink" href="#plotting" title="Permanent link">&para;</a></h2>
-<p><code>SimulationResult</code> has parallel <code>times</code> and <code>states</code> arrays. You can hand them to matplotlib:</p>
+<p>Plotting needs the <code>[jupyter]</code> extra (matplotlib). One line plots
+named signals and returns the matplotlib <code>Figure</code> (add <code>show=True</code> to
+open a window, or <code>save="rc.png"</code> to write a file):</p>
+<!-- doctest: requires=matplotlib -->
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">scope</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">signals</span><span class="o">=</span><span class="p">[</span><span class="s2">"vc"</span><span class="p">])</span>
+</code></pre></div>
+<p>Or hand the arrays to matplotlib yourself:</p>
+<!-- doctest: requires=matplotlib -->
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
 
-<span class="n">times</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">times</span>                      <span class="c1"># list[float], length N</span>
-<span class="n">v_c</span>   <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="n">vc_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">]</span>
-<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">times</span><span class="p">,</span> <span class="n">v_c</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vc"</span><span class="p">))</span>
 <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s2">"t [s]"</span><span class="p">);</span> <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s2">"v_C [V]"</span><span class="p">)</span>
 <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
 </code></pre></div>
-<p>For circuits with <strong>branch-current unknowns</strong> (voltage sources, inductors), the corresponding indices are obtained via <code>pool.branch_var_id_for_source(branch_id, graph)</code> or <code>branch_var_id_for_inductor(...)</code>.</p>
+<h2 id="using-pulsim-with-ai-assistants">Using Pulsim with AI assistants<a class="headerlink" href="#using-pulsim-with-ai-assistants" title="Permanent link">&para;</a></h2>
+<p>If an AI coding assistant writes your Pulsim scripts, have it read the
+usage guide that ships with the package first: <code>python -m pulsim.guide</code>
+prints it for the installed version (the same text is on the
+<a href="../ai-guide/">AI assistants page</a>). It lists the exact signatures, the
+traps that return plausible wrong numbers, and the checks that catch
+them. Tools that read an <a href="../llms.txt"><code>llms.txt</code></a> index find one at the
+root of these docs.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../mental-model/">Mental model</a> — what <code>Graph</code>, <code>DevicePool</code>, <code>PwlStateSpaceCache</code> actually are.</li>
-<li><a href="../tutorials/01-rc-charging/">Tutorial 01 — RC charging from a pulse source</a> — same example, but driven by <code>PulseVoltageSource</code> (V12).</li>
+<li><a href="../tutorials/01-rc-charging/">Tutorial 01 — RC charging from a pulse source</a> — same example, but driven by <code>PulseVoltageSource</code>.</li>
+<li><a href="../api-reference/">API reference</a> — every builder method and helper signature.</li>
 </ul>
+<h2 id="building-from-source">Building from source<a class="headerlink" href="#building-from-source" title="Permanent link">&para;</a></h2>
+<p>Only needed if you want to work on the C++ kernel or the bindings.</p>
+<p><strong>Requirements.</strong> A C++23 compiler (AppleClang 15+ / Clang 17+ /
+GCC 13+), CMake ≥ 3.20 and Python ≥ 3.10. Ninja is optional. Nothing
+else has to be installed by hand: Eigen 3.4 is taken from the system if
+CMake finds it and downloaded otherwise; yaml-cpp, Catch2 (tests) and
+pybind11 (if the build environment does not provide it) are fetched at
+configure time.</p>
+<p><strong>Python package, editable.</strong> <code>pip</code> drives the CMake build through
+scikit-build-core:</p>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/lgili/Pulsim.git
+<span class="nb">cd</span><span class="w"> </span>Pulsim
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</code></pre></div>
+<p><strong>Plain CMake</strong> — for the C++ tests, or a build-tree Python package:</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
+cmake<span class="w"> </span>--build<span class="w"> </span>build
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
+</code></pre></div>
+<p><code>PULSIM_BUILD_TESTS</code> (default <code>ON</code>) builds the Catch2 binaries
+<code>build/core/pulsim_core_*_tests</code>. <code>PULSIM_BUILD_PYTHON</code> (default <code>OFF</code>)
+builds the extension into <code>build/python/pulsim/</code>, a full copy of the
+package; use it without installing:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/build/python:</span><span class="nv">$PYTHONPATH</span><span class="s2">"</span>
+python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import pulsim as p; print(p.__version__)"</span>
+</code></pre></div>
 
 
 
@@ -1943,13 +2103,13 @@ python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import
         
         
           
-          <a href="../mental-model/" class="md-footer__link md-footer__link--next" aria-label="Next: Mental Model">
+          <a href="../ai-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Using Pulsim with AI Assistants">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Mental Model
+                Using Pulsim with AI Assistants
               </div>
             </div>
             <div class="md-footer__button md-icon">

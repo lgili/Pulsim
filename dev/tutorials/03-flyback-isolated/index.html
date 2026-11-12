@@ -464,6 +464,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../mental-model/" class="md-nav__link">
         
   
@@ -1891,12 +1912,14 @@
 
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="n">V_IN</span><span class="p">)</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_transformer</span><span class="p">(</span>
-    <span class="s2">"T1"</span><span class="p">,</span>
-    <span class="n">primary_pos</span><span class="o">=</span><span class="s2">"vin"</span><span class="p">,</span> <span class="n">primary_neg</span><span class="o">=</span><span class="s2">"sw_pri"</span><span class="p">,</span>
-    <span class="n">secondary_pos</span><span class="o">=</span><span class="s2">"sec_pos"</span><span class="p">,</span> <span class="n">secondary_neg</span><span class="o">=</span><span class="s2">"sec_gnd"</span><span class="p">,</span>
-    <span class="n">L_p</span><span class="o">=</span><span class="mf">200e-6</span><span class="p">,</span> <span class="n">L_s</span><span class="o">=</span><span class="mf">200e-6</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span>
-<span class="p">)</span>
+<span class="c1"># add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k).</span>
+<span class="c1"># The secondary is wound sec_gnd -&gt; sec_pos: while Q1 is ON the</span>
+<span class="c1"># primary sees +V_in from vin to sw_pri, which drives sec_pos</span>
+<span class="c1"># NEGATIVE and reverse-biases Dout. That is what makes it a flyback</span>
+<span class="c1"># (store while ON, release while OFF). Winding it sec_pos -&gt; sec_gnd</span>
+<span class="c1"># conducts during the ON time -- a forward converter's polarity.</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_transformer</span><span class="p">(</span><span class="s2">"T1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw_pri"</span><span class="p">,</span> <span class="s2">"sec_gnd"</span><span class="p">,</span> <span class="s2">"sec_pos"</span><span class="p">,</span>
+                  <span class="n">L_p</span><span class="o">=</span><span class="mf">200e-6</span><span class="p">,</span> <span class="n">L_s</span><span class="o">=</span><span class="mf">200e-6</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="mf">0.95</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span> <span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"sw_pri"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">)</span>   <span class="c1"># low-side switch on primary</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span>  <span class="p">(</span><span class="s2">"Dout"</span><span class="p">,</span> <span class="s2">"sec_pos"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"Cout"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"sec_gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
@@ -1909,8 +1932,8 @@ reference — so the secondary must be tied to ground <em>somehow</em>.
 Since v2.0 you do not write that tie yourself: <code>simulate()</code> runs a
 topology preflight, spots the unreferenced secondary, inserts a
 1 GΩ tie and tells you exactly which node it anchored to (the
-lowest-numbered node of the subnet — here <code>sec_pos</code>, so the device
-is called <code>R_auto_iso_sec_pos</code>; which node carries the tie does not
+lowest-numbered node of the subnet — here <code>sec_gnd</code>, so the device
+is called <code>R_auto_iso_sec_gnd</code>; which node carries the tie does not
 matter, since all it does is fix the subnet's reference). Inspect it
 with
 <code>result._preflight</code>, or pass <code>auto_regularize=False</code> to get the
@@ -1926,21 +1949,37 @@ does so silently. A 1 GΩ tie draws nanoamps and leaves the physics
 untouched.</p>
 </blockquote>
 <h2 id="switch-driver">Switch driver<a class="headerlink" href="#switch-driver" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span>
-    <span class="n">switch_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">frequency</span><span class="o">=</span><span class="n">F_PWM</span><span class="p">,</span> <span class="n">duty</span><span class="o">=</span><span class="n">DUTY</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
-<span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">q1_bit</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="n">F_PWM</span><span class="p">,</span> <span class="n">DUTY</span><span class="p">,</span> <span class="n">q1_bit</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
 </code></pre></div>
-<p>Switch index 0 is <code>Q1</code>. The diode <code>Dout</code> has its own switch index (1), but the user does NOT drive it — event detection flips it automatically when current tries to flow backward.</p>
+<p><code>add_mosfet</code> adds Q1 <em>and</em> its body diode <code>Q1_body</code>, so the switching
+branches are Q1 (bit 0), <code>Q1_body</code> (bit 1) and <code>Dout</code> (bit 2) — ask
+<code>switch_index_of</code> rather than counting. You do NOT drive the diode
+bits: event detection flips them when their current tries to reverse.</p>
 <h2 id="run">Run<a class="headerlink" href="#run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
-<span class="n">vout_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">)</span>
-<span class="n">v</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="n">vout_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">]</span>
-<span class="n">k_skip</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mf">5e-3</span> <span class="o">/</span> <span class="mf">1e-7</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_out (mean over last half) = "</span>
-      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">k_skip</span><span class="p">:])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">k_skip</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+
+<span class="c1"># Measure the output across its own load: vout relative to sec_gnd.</span>
+<span class="n">vout_idx</span><span class="p">,</span> <span class="n">sgnd_idx</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"sec_gnd"</span><span class="p">)</span>
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
+<span class="n">v</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">s</span><span class="p">[</span><span class="n">vout_idx</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="p">[</span><span class="n">sgnd_idx</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">states</span><span class="p">])</span>
+<span class="n">m</span> <span class="o">=</span> <span class="n">t</span> <span class="o">&gt;=</span> <span class="mf">5e-3</span>                       <span class="c1"># last half, time-weighted</span>
+<span class="n">v_mean</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">m</span><span class="p">],</span> <span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_out (mean over last half) = </span><span class="si">{</span><span class="n">v_mean</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
 </code></pre></div>
-<p>For ideal 1:1 ratio + 40 % duty: <code>V_out ≈ V_in · D / (1 − D) ≈ 16 V</code> (continuous conduction; less in DCM, more with leakage spike).</p>
+<p>Expected output (the run also prints the preflight warning about the
+<code>R_auto_iso_sec_gnd</code> tie described above):
+<div class="highlight"><pre><span></span><code>V_out (mean over last half) = 10.73 V
+</code></pre></div></p>
+<p>For an ideal 1:1 ratio at 40 % duty in continuous conduction,
+<code>V_out = V_in · D / (1 − D) = 16 V</code>. The run lands well below that
+because <code>k = 0.95</code> leaves 5 % of each winding (10 µH) as leakage, and
+nothing clamps it: the leakage energy rings the primary switch node up
+to ≈ 770 V at every turn-off instead of reaching the output. Raise the
+coupling and the output climbs to the ideal value — <code>k = 0.99</code> gives
+14.57 V and <code>k = 0.999</code> gives 15.98 V (same run, mean over 9–10 ms).</p>
 <h2 id="two-switch-states-four-commutations">Two switch states, four commutations<a class="headerlink" href="#two-switch-states-four-commutations" title="Permanent link">&para;</a></h2>
 <p>The flyback alternates between two large-signal states:</p>
 <ol>
