@@ -38,6 +38,37 @@ recognises. Common fields:
 | `P_avg`, `E_total` | float | resistor / diode / switch |
 | `duty_conducting` | float ∈ [0, 1] | diode |
 | `duty_closed` | float ∈ [0, 1] | switch |
+| `t_window_start`, `t_window_end` | float [s] | every device |
+
+A Shockley diode (`add_shockley_diode`, kind `shockley_diode`) gets
+`i_avg`, `i_rms`, `i_peak`, `P_avg` and `E_total` from the kernel's
+exponential law at the recorded `v_D` (the parameters are kept on the
+builder when the diode is added); `result.i()` returns the same current.
+Against a 1 mOhm sense resistor in series it agrees to 3e-12 A.
+
+### Steady state: `t_from` / `t_to`
+
+Every figure covers the whole run, start-up included, unless you pass a
+window in seconds (both `device_loss_summary` and
+`device_thermal_summary`):
+
+```python
+rows = p.device_loss_summary(b, res, conduction_specs=cond, t_from=0.08)
+```
+
+On a 230 V bridge rectifier (0.1 Ω, 470 µF ‖ 1 kΩ, `t_end = 0.1` s) a
+diode's `V_f0 = 0.7, r_on = 0.02` conduction loss is 2.338 W over the
+run and 0.1358 W over 80–100 ms. A bound inside a step cuts that step's
+own model: the line of its current and, on a step that flips a switch or
+diode, the trapezoid of its end powers. Adjacent windows therefore add
+up to rounding wherever the cuts fall, a bound inside a flip step reads
+like either end of it, and a variable-step grid gives the same answer
+as a fine fixed one. Gate edges
+and diode turn-offs are found on the whole run and count when their step
+starts inside the window. The thermal summary still runs the Foster
+network from t = 0 (`T_j_trace` covers the run); its averages and peaks
+cover the window, and the constant switching offset is the window's
+`P_sw_avg`.
 
 Switch and diode states are not inferred. Every engine records, with
 each stored sample, the switch / diode mask it **stamped** for the solve

@@ -242,6 +242,9 @@ from .topology import (
     BuckResult,
     BoostResult,
     FlybackResult,
+    BridgeRectifierResult,
+    ThreePhaseVsiResult,
+    ThreePhaseRLLoadResult,
     add_buck,
     add_boost,
     add_flyback,
@@ -635,6 +638,9 @@ __all__ = [
     "BuckResult",
     "BoostResult",
     "FlybackResult",
+    "BridgeRectifierResult",
+    "ThreePhaseVsiResult",
+    "ThreePhaseRLLoadResult",
     "add_buck",
     "add_boost",
     "add_flyback",
@@ -883,6 +889,11 @@ def _result_i(self, name: str, t=None):
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
     |                            | ``G = g_on`` when the recorded stamped  |
     |                            | mask bit is set, ``g_off`` otherwise    |
+    | ``shockley_diode``         | ``I_S·(exp(v_D/(n·V_T)) − 1)``          |
+    |                            | ``+ v_D·G_min`` (minus the mirrored     |
+    |                            | breakdown branch when ``BV > 0``): the  |
+    |                            | kernel's law, ``add_shockley_diode``    |
+    |                            | parameters                              |
     +----------------------------+-----------------------------------------+
 
     Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -909,14 +920,14 @@ def _result_i(self, name: str, t=None):
     ``result._switch_fn = your_switch_fn`` for a switch, and then the
     switch_fn is re-evaluated with a warning.
 
-    Not yet supported (deferred to future PRs because their device
-    params aren't exposed by ``builder.components()`` today):
-    ``mosfet_level1``, ``igbt_level1``, ``nonlinear_diode``,
-    ``vcvs``, ``saturable_inductor``. Calls on those kinds raise
-    :class:`NotImplementedError` pointing at
-    :func:`pulsim.losses.device_loss_summary`, which already
-    implements per-step nonlinear stamp evaluation for the loss
-    summary.
+    Not yet supported (their device params aren't exposed by
+    ``builder.components()`` today): ``mosfet_level1``,
+    ``igbt_level1``, ``nonlinear_diode``, ``lauritzen_diode``,
+    ``nonlinear_capacitor``, ``vcvs``, ``saturable_inductor``. Calls
+    on those kinds raise :class:`NotImplementedError` with the
+    recipe that works: a small series resistor (1 mOhm) whose
+    ``res.i()`` is the device current. ``device_loss_summary`` does
+    not report them either.
 
     Sign convention. Current is positive flowing from the ``from``
     terminal to the ``to`` terminal of the ``add_*`` call (matches
@@ -1102,6 +1113,25 @@ def _result_i(self, name: str, t=None):
         tr = _diode_trace(builder, self, b_id, stacklevel=3)
         return _finalize(_hold_unsolved(tr.current))
 
+    # ----------------------- Shockley diode --------------------------
+    if kind == "shockley_diode":
+        # Exponential junction: the current is a function of v_D alone,
+        # the kernel's law with the parameters add_shockley_diode
+        # recorded on the builder (components() reports none).
+        from ._builder_ergonomics import shockley_params as _sh_params
+        from ._diode_state import shockley_current as _sh_current
+        prm = _sh_params(builder, name)
+        if prm is None:
+            raise NotImplementedError(
+                f"result.i({name!r}): this Shockley diode's parameters "
+                f"were not recorded (it was added by a path that "
+                f"bypassed `CircuitBuilder.add_shockley_diode`), so its "
+                f"current I_S*(exp(v/(n*V_T))-1) cannot be evaluated. "
+                f"Add it with `b.add_shockley_diode(...)`, or put a "
+                f"small resistor in series (1 mOhm) and read "
+                f"`res.i(<that resistor>)`.")
+        return _finalize(_sh_current(_v_branch(), prm))
+
     # ----------------------- switch ----------------------------------
     if kind == "switch":
         try:
@@ -1142,15 +1172,15 @@ def _result_i(self, name: str, t=None):
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(
         f"branch {name!r} has kind={kind!r}; result.i() does not yet "
-        f"reconstruct currents for this device family. Currently "
+        f"reconstruct currents for this device family, and "
+        f"device_loss_summary does not report it either. Currently "
         f"supported: inductor, voltage_source (incl. pwm / sine / "
         f"pulse variants), resistor, capacitor, current_source, "
-        f"diode, switch. For mosfet_level1 / igbt_level1 / "
-        f"nonlinear_diode / shockley_diode / lauritzen_diode / "
-        f"nonlinear_capacitor / vcvs / saturable_inductor, the per-step "
-        f"nonlinear stamp evaluation lives in "
-        f"`pulsim.losses.device_loss_summary` — use that for now. "
-        f"Lifting these into `result.i()` is tracked as a follow-up.")
+        f"diode, shockley_diode, switch. To measure this device's "
+        f"current, put a small resistor in series with it (1 mOhm) "
+        f"and read `res.i(<that resistor>)`; its loss is then the "
+        f"time average of v_device * i over a window "
+        f"(`pulsim.time_average`).")
 
 
 def _result_power(self, device_name: str) -> float:
@@ -1247,7 +1277,7 @@ def _result_currents(self, *, skip_unsupported: bool = True
     Walks ``builder.components()`` and calls :meth:`i` on every branch
     whose kind has a reconstruction implementation (inductor,
     voltage_source family, resistor, capacitor, current_source, diode,
-    switch). When ``skip_unsupported`` is True (default), kinds without
+    shockley_diode, switch). When ``skip_unsupported`` is True (default), kinds without
     a Python-side reconstruction
     (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
     ``saturable_inductor``) are silently omitted from the result —
@@ -3236,8 +3266,8 @@ _V1_SYMBOL_HINTS = {
     "YamlParser":         "p.load_yaml_file(path) returns a LoadedCircuit",
     "YamlParserOptions":  "no equivalent — load_yaml_file / load_yaml_string take no options",
     "RobustnessProfile":  "no equivalent — use enable_nonlinear_refresh + DC-OP strategies",
-    "codegen":            "no equivalent in 1.0.0",
-    "fmu":                "no equivalent in 1.0.0",
+    "codegen":            "no equivalent",
+    "fmu":                "no equivalent",
     "templates":          "moved to pulsim.schematic.templates",
     # schematic intentionally NOT listed here — `pulsim.schematic` is
     # the restored subpackage (Phase 1-17 of the schematic-renderer-v2
@@ -3285,12 +3315,25 @@ def __getattr__(name: str):
     if name in _V1_SYMBOL_HINTS:
         hint = _V1_SYMBOL_HINTS[name]
         raise AttributeError(
-            f"pulsim.{name} was a v1 symbol and is no longer "
-            f"available (pulsim 1.0.0 retired the legacy kernel). "
-            f"Migration hint: {hint}. See "
+            f"pulsim.{name} was a v1 symbol and is not available in "
+            f"pulsim {__version__} (the legacy kernel was retired in "
+            f"1.0.0). Migration hint: {hint}. See "
             f"docs/migration-guide.md for the full mapping, and run "
             f"`python -m pulsim.guide` for the current API.")
+    if name.startswith("__"):
+        raise AttributeError(
+            f"module 'pulsim' has no attribute {name!r}")
+    # A name that lives in an already-imported submodule: say where.
+    import sys as _sys
+    homes = sorted(
+        mod_name for mod_name, mod in list(_sys.modules.items())
+        if mod_name.startswith("pulsim.") and mod is not None
+        and not mod_name.rsplit(".", 1)[-1].startswith("_")
+        and name in (getattr(mod, "__all__", None) or ()))
+    where = (f" It is defined in {homes[0]}: `from {homes[0]} import "
+             f"{name}`." if homes else "")
     raise AttributeError(
-        f"module 'pulsim' has no attribute {name!r}. "
-        f"Run `python -m pulsim.guide` for the current API, and see "
-        f"docs/migration-guide.md if you're porting v1 code.")
+        f"module 'pulsim' (version {__version__}) has no attribute "
+        f"{name!r}.{where} Run `python -m pulsim.guide` for the "
+        f"current API, and see docs/migration-guide.md if you're "
+        f"porting v1 code.")

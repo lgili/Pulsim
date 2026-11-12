@@ -825,8 +825,14 @@ def test_result_without_record_falls_back_with_a_named_reason():
     e = _entry(s, "D")
     e_rec = _entry(_report(b, r, [])[0], "D")
     assert abs(e["i_avg"]) < 1e-3 * e_rec["i_avg"]
-    with pytest.warns(RuntimeWarning, match=r"diode 'D'"):
+    # Once per result and diode: the summary above already warned
+    # about 'D' on `bare`; another result without the record warns.
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
         p.SimulationResult.i(bare, "D")
+    assert not [w for w in rec if "diode 'D'" in str(w.message)]
+    with pytest.warns(RuntimeWarning, match=r"diode 'D'.*no record"):
+        p.SimulationResult.i(_NoRecord(r), "D")
 
 
 def test_adaptive_result_stitches_the_record():

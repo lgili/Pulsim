@@ -201,11 +201,33 @@ def diode_state_trace(builder, result, branch_id: int, *,
                       switch_fn: Optional[Callable[[float], Any]] = None,
                       warn: bool = True,
                       stacklevel: int = 3) -> DiodeStateTrace:
-    """The :class:`DiodeStateTrace` of one diode; warns if asked."""
+    """The :class:`DiodeStateTrace` of one diode; warns if asked, ONCE
+    per result and diode.
+
+    Python's default filter shows a warning once per call site, so a
+    script that read ``res.i("D1")`` on four lines printed the same
+    missed-commutation warning four times, and a fifth time from
+    ``device_loss_summary``. The diodes already warned about are kept
+    on the result (on the full result, not on the
+    :func:`_result_views.solved_part` view of it); a result that
+    accepts no attributes warns on every call."""
     tr = diode_state_traces(builder, result, switch_fn=switch_fn)[
         int(branch_id)]
-    if warn:
-        tr.warn(stacklevel=stacklevel)
+    if warn and tr._messages:
+        owner = (result._result if isinstance(result, _views._SolvedPart)
+                 else result)
+        seen = getattr(owner, "_diode_warnings_emitted", None)
+        if seen is None:
+            seen = set()
+            try:
+                owner._diode_warnings_emitted = seen
+            except AttributeError:  # pragma: no cover — slotted result
+                seen = None
+        if seen is None or int(branch_id) not in seen:
+            if seen is not None:
+                seen.add(int(branch_id))
+            for msg in tr._messages:
+                warnings.warn(msg, RuntimeWarning, stacklevel=stacklevel)
     return tr
 
 
@@ -367,3 +389,42 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                     f"cross-check with engine='pwl' and a fixed dt.")
         out[bid] = tr
     return out
+
+
+# The kernel's current ceiling above which the Shockley exponential is
+# continued by its tangent (ShockleyDiode::Params::i_lim; the builder
+# does not expose it).
+_SHOCKLEY_I_LIM = 1e6
+
+
+def _shockley_branch(u: np.ndarray, I_S: float, vte: float) -> np.ndarray:
+    """``I_S·(exp(u/vte) − 1)``, continued by its tangent above the
+    voltage where it reaches ``_SHOCKLEY_I_LIM``, as the kernel's
+    ``limited_exp_branch_``."""
+    vl = vte * np.log(_SHOCKLEY_I_LIM / I_S + 1.0)
+    e_l = np.exp(vl / vte)
+    i_l = I_S * (e_l - 1.0)
+    g_l = I_S * e_l / vte
+    exp_part = I_S * np.expm1(np.minimum(u, vl) / vte)
+    return np.where(u > vl, i_l + g_l * (u - vl), exp_part)
+
+
+def shockley_current(v: np.ndarray, params: Dict[str, float]) -> np.ndarray:
+    """Branch current (anode to cathode) of an ``add_shockley_diode``
+    at junction voltage ``v``: the kernel's law
+    (``core/include/pulsim/models/shockley_diode.hpp``)::
+
+        i = I_S·(exp(v/(n·V_T)) − 1) − [BV > 0] I_S·(exp((−BV − v)/(n·V_T)) − 1)
+            + v·G_min
+
+    with each exponential continued by its tangent above 1e6 A. The
+    state holds the node voltages the solver converged to, so this is
+    the current it carried, to its Newton tolerance."""
+    v = np.asarray(v, dtype=float)
+    I_S = float(params["I_S"])
+    vte = float(params["n"]) * float(params["V_T"])
+    i = _shockley_branch(v, I_S, vte)
+    BV = float(params.get("BV", 0.0))
+    if BV > 0.0:
+        i = i - _shockley_branch(-BV - v, I_S, vte)
+    return i + v * float(params.get("G_min", 0.0))

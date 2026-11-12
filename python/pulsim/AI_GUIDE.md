@@ -216,12 +216,13 @@ the open switch (before a turn-on, after a turn-off) and `I` through the
 closed one, so a soft edge costs what its measured voltage says (3.7).
 An offset-plus-slope conduction model `V_f0*|i| + r_on*i^2` comes from
 `conduction_specs`. `p.device_thermal_summary` adds a Foster network per
-device (`p.FosterStage(R_th_K_per_W, tau_s)`). Both average over the
-WHOLE record, start-up included, with no window argument: on the bridge
-of trap 13 (`t_end = 0.1 s`, `V_f0 = 0.7`, `r_on = 0.02`) the diode
-conduction loss reads 17x its 80-100 ms value. For steady state, apply
-the same model to `res.i(name)` over a window yourself. `T_j` starts at
-`T_ambient_C` and settles only after several of the largest `tau`.
+device (`p.FosterStage(R_th_K_per_W, tau_s)`). Both cover the WHOLE
+record unless you pass `t_from=` / `t_to=` (seconds; bounds interpolated
+on any grid, edges counted when they start inside): on the bridge of
+trap 13 (`t_end = 0.1 s`, `V_f0 = 0.7`, `r_on = 0.02`) the run's diode
+conduction loss is 17x its 80-100 ms value. `T_j_trace` starts at
+`T_ambient_C` at t = 0 and settles only after several of the largest
+`tau`; `T_j_avg` / `T_j_peak` cover the window.
 
 ```python
 b = p.CircuitBuilder()
@@ -238,17 +239,15 @@ t = np.asarray(res.times)
 sw = {"Q1": {"E_on_ref": 20e-6, "E_off_ref": 30e-6, "V_ref": 24.0,
              "I_ref": 6.0}}
 cond = {"D1": {"V_f0": 0.7, "r_on": 0.02}}
-rows = {r["name"]: r for r in p.device_loss_summary(
-    b, res, switch_specs=sw, conduction_specs=cond)}
-i_q, i_d = res.i("Q1"), res.i("D1")
-print(f"Q1 cond {rows['Q1']['P_avg']:.3f} W (run), "
-      f"{p.time_average(t, 0.05 * i_q**2, t_from=3e-3):.3f} W (3-5 ms); "
-      f"sw {rows['Q1']['P_sw_avg']:.3f} W (run)")
-print(f"D1 cond {rows['D1']['P_cond_model_avg']:.3f} W (run), "
-      f"{p.time_average(t, 0.7 * abs(i_d) + 0.02 * i_d**2, t_from=3e-3):.3f} W (3-5 ms)")
+for w in (None, 3e-3):
+    rows = {r["name"]: r for r in p.device_loss_summary(
+        b, res, switch_specs=sw, conduction_specs=cond, t_from=w)}
+    q, d = rows["Q1"], rows["D1"]
+    print(f"{'3-5 ms' if w else 'run'}: Q1 cond {q['P_avg']:.3f} W, "
+          f"sw {q['P_sw_avg']:.3f} W; D1 cond {d['P_cond_model_avg']:.3f} W")
 
 th = p.device_thermal_summary(
-    b, res, switch_specs=sw, T_ambient_C=40.0,
+    b, res, switch_specs=sw, T_ambient_C=40.0, t_from=3e-3,
     thermal_specs={"Q1": {"stages": [p.FosterStage(0.5, 1e-3),
                                      p.FosterStage(1.0, 2e-2)]}})
 P = th[0]["P_total_avg"]
@@ -257,9 +256,9 @@ print(f"Q1: P = {P:.2f} W, T_j peak = {th[0]['T_j_peak']:.1f} C at 5 ms; "
 ```
 
 ```text
-Q1 cond 0.905 W (run), 0.878 W (3-5 ms); sw 5.034 W (run)
-D1 cond 2.453 W (run), 2.425 W (3-5 ms)
-Q1: P = 5.94 W, T_j peak = 44.2 C at 5 ms; settles near 40 + 1.5 K/W * P = 48.9 C
+run: Q1 cond 0.905 W, sw 5.034 W; D1 cond 2.453 W
+3-5 ms: Q1 cond 0.878 W, sw 4.987 W; D1 cond 2.422 W
+Q1: P = 5.86 W, T_j peak = 44.2 C at 5 ms; settles near 40 + 1.5 K/W * P = 48.8 C
 ```
 
 `P_avg` of a diode is `v^2 * g_on` only: the PWL diode has no forward
@@ -390,7 +389,7 @@ Read both branches before attributing conduction loss. `switch_specs`
 on `HSa` (`E_on_ref` 4 mJ, `E_off_ref` 3.5 mJ at 600 V, 50 A) gives
 11.3 W with the dead time (soft edges see the diode's 0.8 V: about 0 J)
 and 22.6 W without (soft edges block 600 V and are charged like hard
-ones). Model the dead time.
+ones, on top of `INV__LSa`'s own hard edges). Model the dead time.
 
 ## 4. Exact signatures of the most used calls
 
@@ -432,8 +431,8 @@ p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R
 p.load_yaml_string(yaml_text)
 p.load_yaml_file(path)
 p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, verbose=True, **simulate_kwargs)
-p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None)
-p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None)
+p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None, t_from=None, t_to=None)
+p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None, t_from=None, t_to=None)
 p.scope(builder, result, *, signals=None, title=None, save=None, stack=True, show=False, tight_lw=False)
 ```
 
@@ -457,7 +456,7 @@ Each row was measured on this version. The fix column is what to write.
 
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
-| 1 | `V_th` of `add_diode` (and `add_bridge_rectifier(V_th=)`, `add_three_phase_vsi(V_f=)`, `add_mosfet(V_F=)` body diode) is a forward drop | It is the voltage at which the diode commutates. On-state is `I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike | Model a real drop with `b.add_shockley_diode` (`res.i` does not reconstruct its current and `device_loss_summary` omits it: put a 1 mOhm resistor in series and read `res.i("Rsense")`), or post-process losses with `conduction_specs={"D": {"V_f0": ..., "r_on": ...}}` |
+| 1 | `V_th` of `add_diode` (and `add_bridge_rectifier(V_th=)`, `add_three_phase_vsi(V_f=)`, `add_mosfet(V_F=)` body diode) is a forward drop | It is the voltage at which the diode commutates. On-state is `I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike | Model a real drop with `b.add_shockley_diode` (`res.i` and both summaries evaluate its exponential law), or post-process losses with `conduction_specs={"D": {"V_f0": ..., "r_on": ...}}` |
 | 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. On the rectifier of 6.2 `.mean()` reads 5.007 V against 6.330 V (-21 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |

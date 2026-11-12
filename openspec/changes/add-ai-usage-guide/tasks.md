@@ -351,15 +351,29 @@ reproduced every friction item.
       45.1 V at t = 75.92 ms (one sample), accepted 22 steps above
       tolerance at the step floor and warned of 5 boundary rides; V_dc
       321.807 V against 321.844 V with `dt = 1e-6`.
-- [ ] 12.3 `res.i()` on a Shockley diode raises `NotImplementedError`
+- [x] 12.3 `res.i()` on a Shockley diode raises `NotImplementedError`
       pointing to `device_loss_summary`, which omits Shockley diodes.
-- [ ] 12.4 `device_loss_summary` / `device_thermal_summary` have no
+      (Fixed on `fix/v2-b-loss-api`: `add_shockley_diode` records its
+      law parameters on the builder; `res.i`, `res.currents()` and both
+      summaries evaluate the kernel's law. Against a 1 mOhm sense
+      resistor: 3.2e-12 A max on pwl, 2.4e-12 A on trbdf2. The other
+      unsupported kinds now name the sense-resistor recipe.)
+- [x] 12.4 `device_loss_summary` / `device_thermal_summary` have no
       `t_from` / `t_to` window (all three naive agents hand-rolled one).
+      (Fixed on `fix/v2-b-loss-api`: keyword-only `t_from` / `t_to`,
+      bounds interpolated on each step's line, events counted when their
+      step starts inside. Trap-13 bridge: 2.3384 W over the run, 0.1358 W
+      over 80-100 ms; cut into three windows at arbitrary instants, the
+      energies add up to 2e-16 relative. Section 3.4 uses it.)
 - [ ] 12.5 `device_loss_summary`'s `i_rms` reads pulsed switch currents
       low on a fixed grid, like `time_rms` (1.6019 / 1.6074 / 1.6101 A at
       dt = 1e-7 / 5e-8 / 2.5e-8 against `sqrt(P_avg/R_on)` = 1.6129 A on
       the 11.6 buck); its `P_avg` is right.
-- [ ] 12.6 `ThreePhaseVsiResult` / `BridgeRectifierResult` are not
+- [ ] 12.6 (Export part fixed on `fix/v2-b-loss-api`: the three
+      `pulsim.topology` result types are top-level and in `__all__`, and
+      an unknown attribute names the version and, for an imported
+      submodule's export, its home. The DSED refusal part is open.)
+      `ThreePhaseVsiResult` / `BridgeRectifierResult` are not
       exported at the top level; the DSED refusal for a floating neutral
       lists "floating capacitors" and "nonlinear devices" and points to
       `notes/DSED_BRIDGE_DESIGN.md`, which users cannot see.
@@ -368,11 +382,17 @@ reproduced every friction item.
 - [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
-      one; the soft turn-off should cost about 0.
-- [ ] 12.9 The missed-commutation warning of `res.i` repeats once per
+      one; the soft turn-off should cost about 0. (Documented, not
+      changed, on `fix/v2-b-loss-api`: the `device_loss_summary`
+      docstring gives the per-edge split, 20-40 ms on `INV__HSa`:
+      reverse-current edges cost 0.17 + 0.14 mJ with 1 us dead time and
+      120.6 + 99.9 mJ without, `P_sw_avg` 11.26 W against 22.63 W.)
+- [x] 12.9 The missed-commutation warning of `res.i` repeats once per
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints
-      it many times. Emit it once per result and diode.
+      it many times. Emit it once per result and diode. (Fixed on
+      `fix/v2-b-loss-api`: 5 emissions of the `BR__D1` warning from four
+      `res.i` lines and `device_loss_summary` became 1.)
 
 ## 13. Review round 3
 
