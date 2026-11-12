@@ -62,7 +62,7 @@ jobs:
           # Note: macos-13 (Intel) removed - Apple has transitioned to ARM,
           # and Intel runners frequently timeout in GitHub Actions queue
           - name: "macOS ARM64 (Apple Silicon)"
-            os: macos-14
+            os: macos-15
             compiler: appleclang
             cc: clang
             cxx: clang++
@@ -128,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
