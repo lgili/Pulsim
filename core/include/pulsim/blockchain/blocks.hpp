@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 
 #include <algorithm>
@@ -304,10 +305,17 @@ struct PwmGenerator {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real duty, Real t) const noexcept {
+        if (!(frequency > Real{0})) {
+            // No carrier: the old fmod form read phase 0 here.
+            return (Real{0} < duty) ? Real{1} : Real{0};
+        }
         const Real period = Real{1} / frequency;
-        const Real local = std::fmod(t + phase * period, period);
-        const Real phase_frac = local / period;
-        return (phase_frac < duty) ? Real{1} : Real{0};
+        // `phase` is a fraction of the period here; the period
+        // starts at t = -phase * period. Grid-exact edges (see
+        // pwm_phase.hpp).
+        const auto pos = pwm_phase::cycle_position(
+            t, -phase * period, period);
+        return pwm_phase::reached(pos, duty) ? Real{0} : Real{1};
     }
 };
 

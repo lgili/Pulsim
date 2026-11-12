@@ -430,7 +430,7 @@ _EXAMPLES: dict[str, str] = {
         """,
 
     "PIController": """\
-        import math, pulsim as p
+        import pulsim as p
 
         pi = p.PIController(
             Kp=0.05, Ki=500.0,
@@ -445,9 +445,9 @@ _EXAMPLES: dict[str, str] = {
 
         # switch_fn reads the latest duty.
         def switch_fn(t):
-            phase = math.fmod(t, T_PWM) / T_PWM
             m = p.SwitchStateMask(n_sw)
-            if phase < duty[0]:
+            # grid-exact; (t % T) / T < D jitters edges and flips periods
+            if p.control.pwm_on(t, T_PWM, duty[0]):
                 m.set(0, True)
             return m
 
@@ -468,9 +468,8 @@ _EXAMPLES: dict[str, str] = {
             omega = 2*math.pi*freq
             def sw(t):
                 duty = D_OP + eps*math.sin(omega*t)
-                phase = math.fmod(t, T_PWM)/T_PWM
                 m = p.SwitchStateMask(n_sw)
-                if phase < duty: m.set(0, True)
+                if p.control.pwm_on(t, T_PWM, duty): m.set(0, True)
                 return m
             return sw
 

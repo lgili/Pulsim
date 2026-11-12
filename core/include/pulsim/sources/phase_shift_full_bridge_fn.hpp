@@ -38,19 +38,22 @@
 //   of fractional width (π − φ)/π, surrounded by zero-voltage
 //   intervals where both legs are at the same rail.
 
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
 namespace pulsim::sources {
 
-/// Build a `SwitchScheduleFn` driving a phase-shift full-
-/// bridge: two HS/LS half-bridge legs at 50 % duty each,
+/// Build a `SwitchSchedule` (with `next_edge_after`) driving
+/// a phase-shift full-bridge: two HS/LS half-bridge legs at 50 % duty each,
 /// with leg B lagging leg A by `phase_shift` radians.
 /// Symmetric `dead_time` inserted at each commutation.
 ///
@@ -62,7 +65,7 @@ namespace pulsim::sources {
 ///       /*A_HS=*/0, /*A_LS=*/1,
 ///       /*B_HS=*/2, /*B_LS=*/3,
 ///       /*n_sw=*/4, /*dead_time=*/100e-9);
-[[nodiscard]] inline solver::SwitchScheduleFn
+[[nodiscard]] inline SwitchSchedule
 make_phase_shift_full_bridge_fn(
     Real switching_frequency,
     Real phase_shift,
@@ -72,9 +75,7 @@ make_phase_shift_full_bridge_fn(
     Real dead_time,
     Real carrier_phase = Real{0}) {
     if (switching_frequency <= Real{0}) {
-        return [num_switches](Real /*t*/) {
-            return topology::SwitchStateMask{num_switches};
-        };
+        return constant_schedule(topology::SwitchStateMask{num_switches});
     }
     const Real T_sw = Real{1} / switching_frequency;
     // Convert leg-B phase angle (radians) to a time lag.
@@ -88,42 +89,36 @@ make_phase_shift_full_bridge_fn(
         Real{0}, std::min(dead_time, T_sw * Real{0.5}));
     // Constant 50 % duty per leg: HS region is the first
     // half of each cycle, LS the second half.
-    const Real t_hs_end_a   = T_sw * Real{0.5} - dt_eff;
-    const Real t_ls_start_a = T_sw * Real{0.5};
-    const Real t_ls_end_a   = T_sw - dt_eff;
-    // `dt_eff` is baked into the precomputed boundaries
-    // above — no need to capture it.
-    return [T_sw, t_hs_end_a, t_ls_start_a, t_ls_end_a,
-            t_lag,
-            leg_a_hs_idx, leg_a_ls_idx,
-            leg_b_hs_idx, leg_b_ls_idx,
-            num_switches, carrier_phase](Real t) {
-        topology::SwitchStateMask mask{num_switches};
-
-        // Leg A — standard 50 % duty pair.
-        const Real t_a = t - carrier_phase;
-        Real tc_a = std::fmod(t_a, T_sw);
-        if (tc_a < Real{0}) tc_a += T_sw;
-        if (tc_a < t_hs_end_a) {
-            mask.set(leg_a_hs_idx, true);
-        } else if (tc_a >= t_ls_start_a &&
-                   tc_a <  t_ls_end_a) {
-            mask.set(leg_a_ls_idx, true);
-        }
-
-        // Leg B — same 50 % duty pair but lagged by t_lag.
-        const Real t_b = t_a - t_lag;
-        Real tc_b = std::fmod(t_b, T_sw);
-        if (tc_b < Real{0}) tc_b += T_sw;
-        if (tc_b < t_hs_end_a) {
-            mask.set(leg_b_hs_idx, true);
-        } else if (tc_b >= t_ls_start_a &&
-                   tc_b <  t_ls_end_a) {
-            mask.set(leg_b_ls_idx, true);
-        }
-
-        return mask;
-    };
+    const Real d = dt_eff / T_sw;
+    const detail::PairThresholds th{Real{0.5} - d, Real{0.5},
+                                    Real{1} - d};
+    // Leg B is the same pair, lagged by t_lag.
+    const Real offset_a = carrier_phase;
+    const Real offset_b = carrier_phase + t_lag;
+    return SwitchSchedule{
+        [T_sw, th, offset_a, offset_b,
+         leg_a_hs_idx, leg_a_ls_idx,
+         leg_b_hs_idx, leg_b_ls_idx, num_switches](Real t) {
+            topology::SwitchStateMask mask{num_switches};
+            detail::stamp_leg(
+                mask,
+                detail::pair_state(
+                    pwm_phase::cycle_position(t, offset_a, T_sw), th),
+                leg_a_hs_idx, leg_a_ls_idx);
+            detail::stamp_leg(
+                mask,
+                detail::pair_state(
+                    pwm_phase::cycle_position(t, offset_b, T_sw), th),
+                leg_b_hs_idx, leg_b_ls_idx);
+            return mask;
+        },
+        [T_sw, th, offset_a, offset_b](Real t) {
+            const std::array<Real, 3> thr{th.hs_end, th.ls_start,
+                                          th.ls_end};
+            return std::min(
+                pwm_phase::next_constant_crossing(t, offset_a, T_sw, thr),
+                pwm_phase::next_constant_crossing(t, offset_b, T_sw, thr));
+        }};
 }
 
 }  // namespace pulsim::sources

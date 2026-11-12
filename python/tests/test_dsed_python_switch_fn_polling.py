@@ -128,13 +128,13 @@ def test_python_pwm_switch_fn_produces_correct_trajectory() -> None:
 
 
 def test_python_switch_fn_triggers_polling_warning() -> None:
-    """The dispatcher must emit a ``UserWarning`` recommending the
-    native PWM classes when it wraps a plain Python switch_fn — both
-    for visibility ("your simulation is in the slow polling path")
-    and to give the user an actionable optimisation hint."""
+    """The dispatcher must emit a ``UserWarning`` when it polls a plain
+    Python switch_fn: edges are bisected inside each poll window, but a
+    pulse shorter than the window is missed, and the built-in helpers
+    (which return a SwitchSchedule) avoid the polling entirely."""
     b = _build_buck_resistive_freewheel()
     sf = _pwm_switch_fn(b)
-    with pytest.warns(UserWarning, match="NativePwm2Switch"):
+    with pytest.warns(UserWarning, match="make_pwm_switch_fn"):
         p.simulate(b, t_end=1e-4, engine="dsed", switch_fn=sf)
 
 

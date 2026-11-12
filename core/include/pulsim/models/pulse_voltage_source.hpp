@@ -39,6 +39,7 @@
 // step inputs that V4 cannot express.
 
 #include "pulsim/numeric/concepts.hpp"
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -83,27 +84,35 @@ struct PulseVoltageSource {
             return p.v_initial;
         }
         Real elapsed = t - p.t_start;
+        Real tol = Real{0};
         if (p.period > Real{0}) {
-            elapsed = std::fmod(elapsed, p.period);
-            if (elapsed < Real{0}) elapsed += p.period;
+            // Grid-exact edges (pwm_phase.hpp): fmod put an edge on a
+            // dt grid point a step early or late (29/30 on-steps per
+            // period at period 20 us, width 6 us, dt 0.2 us).
+            const auto pos =
+                pwm_phase::cycle_position(t, p.t_start, p.period);
+            elapsed = pos.u * p.period;
+            tol = pos.tol * p.period;
         }
+        // `elapsed` has not yet reached `x` (within the snap tolerance).
+        const auto before = [&](Real x) { return elapsed < x - tol; };
         // Rising ramp.
         if (p.rise_time > Real{0} &&
-                elapsed < p.rise_time) {
+                before(p.rise_time)) {
             const Real frac = elapsed / p.rise_time;
             return p.v_initial +
                    (p.v_pulsed - p.v_initial) * frac;
         }
         // Steady at v_pulsed.
         const Real t_after_rise = elapsed - p.rise_time;
-        if (t_after_rise < p.pulse_width) {
+        if (before(p.rise_time + p.pulse_width)) {
             return p.v_pulsed;
         }
         // Falling ramp.
         if (p.fall_time > Real{0}) {
             const Real t_into_fall =
                 t_after_rise - p.pulse_width;
-            if (t_into_fall < p.fall_time) {
+            if (before(p.rise_time + p.pulse_width + p.fall_time)) {
                 const Real frac = t_into_fall / p.fall_time;
                 return p.v_pulsed +
                        (p.v_initial - p.v_pulsed) * frac;

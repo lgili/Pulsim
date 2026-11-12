@@ -39,37 +39,67 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
 namespace pulsim::sources {
 
-/// Build a `SwitchScheduleFn` that returns, for each `t`,
+/// Build a `SwitchSchedule` that returns, for each `t`,
 /// the bitwise OR of every sub-callback's mask. All sub-
 /// callbacks are evaluated at `t` and combined.
 ///
 /// `num_switches` is the size of the returned mask; bits
 /// beyond `num_switches` in any sub-mask are ignored.
-[[nodiscard]] inline solver::SwitchScheduleFn
+///
+/// `next_edge_after(t)` is the earliest edge of the sub-
+/// schedules when every non-empty sub-callback is a
+/// `SwitchSchedule` with an edge oracle (all the built-in
+/// helpers); otherwise it is +inf (unknown), and the
+/// variable-step engines search for the edges themselves.
+[[nodiscard]] inline SwitchSchedule
 make_combined_switch_fn(
     Size num_switches,
     std::vector<solver::SwitchScheduleFn> fns) {
-    return [num_switches, fns = std::move(fns)](Real t) {
-        topology::SwitchStateMask result{num_switches};
-        for (const auto& fn : fns) {
-            if (!fn) continue;
-            auto sub = fn(t);
-            const Size sz = std::min(num_switches,
-                                       sub.size());
-            for (Size b = 0; b < sz; ++b) {
-                if (sub.get(b)) result.set(b, true);
+    auto shared = std::make_shared<
+        const std::vector<solver::SwitchScheduleFn>>(std::move(fns));
+    bool all_known = true;
+    for (const auto& fn : *shared) {
+        if (!fn) continue;
+        const auto* sched = as_schedule(fn);
+        if (sched == nullptr || !sched->has_edges()) all_known = false;
+    }
+    std::function<Real(Real)> next_edge;
+    if (all_known) {
+        next_edge = [shared](Real t) {
+            Real best = std::numeric_limits<Real>::infinity();
+            for (const auto& fn : *shared) {
+                if (!fn) continue;
+                best = std::min(best, as_schedule(fn)->next_edge_after(t));
             }
-        }
-        return result;
-    };
+            return best;
+        };
+    }
+    return SwitchSchedule{
+        [num_switches, shared](Real t) {
+            topology::SwitchStateMask result{num_switches};
+            for (const auto& fn : *shared) {
+                if (!fn) continue;
+                auto sub = fn(t);
+                const Size sz = std::min(num_switches,
+                                           sub.size());
+                for (Size b = 0; b < sz; ++b) {
+                    if (sub.get(b)) result.set(b, true);
+                }
+            }
+            return result;
+        },
+        std::move(next_edge)};
 }
 
 }  // namespace pulsim::sources

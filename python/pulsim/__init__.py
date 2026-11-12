@@ -80,6 +80,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
     make_three_phase_spwm_fn,
     make_phase_shift_full_bridge_fn,
     make_combined_switch_fn,
+    # What the helpers above return: mask + analytic next_edge_after.
+    SwitchSchedule,
     # Bridge.12 — native PWM switch_fn classes for the DSED engine.
     # Detected by the C++ scheduler binding and called without GIL
     # roundtrips per scheduler step. ~25× faster per call than the
@@ -499,6 +501,7 @@ __all__ = [
     "make_three_phase_spwm_fn",
     "make_phase_shift_full_bridge_fn",
     "make_combined_switch_fn",
+    "SwitchSchedule",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
     # add-python-named-lookups (v1.5).

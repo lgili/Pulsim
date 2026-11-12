@@ -114,22 +114,11 @@ v_C(tau) = 3.161 V [trbdf2], exact 3.161 V
 ### 3.2 Buck converter with a PWM `switch_fn`
 
 A `switch_fn` maps `t` to a `SwitchStateMask`. On the fixed-step engine
-gate edges can only fall on the `dt` grid, so compute the PWM in steps:
+gate edges can only fall on the `dt` grid, so make the on-time a whole
+number of steps (trap 10):
 
 ```python
 DT = 1e-7
-
-def grid_pwm(f_sw, duty, bit, n_sw, dt=DT):
-    """PWM whose edges sit exactly on the dt grid (trap 10)."""
-    n_per = round(1 / (f_sw * dt))           # steps per period
-    n_on = round(duty * n_per)               # steps per on-time
-    if abs(n_per * f_sw * dt - 1) + abs(n_on - duty * n_per) > 1e-6:
-        raise ValueError("period and on-time must be whole numbers of dt")
-    def switch_fn(t):
-        m = p.SwitchStateMask(n_sw)          # all OFF
-        m.set(bit, round(t / dt) % n_per < n_on)
-        return m
-    return switch_fn
 
 b = p.CircuitBuilder()
 b.add_voltage_source("Vin", "vin", "gnd", 24.0)
@@ -141,7 +130,7 @@ b.add_resistor("RL", "vout", "gnd", 10.0)
 
 q1 = b.switch_index_of("Q1")                 # never count bits by hand
 n_sw = b.graph.num_switches                  # Q1, Q1_body, D1 -> 3
-pwm = grid_pwm(100e3, 0.5, q1, n_sw)
+pwm = p.make_pwm_switch_fn(100e3, 0.5, q1, n_sw)   # f, D, bit, size
 
 res = p.simulate(b, t_end=10e-3, dt=DT, switch_fn=pwm)
 s = p.steady_state_stats(res, "vout", t_from=8e-3)
@@ -158,25 +147,27 @@ analytic: dI = 0.600 A, dV = dI/(8 f C) = 16.0 mV
 ```
 
 `steady_state_stats` returns `.mean .rms .min .max .ripple_pp .t_from
-.t_to`. `p.make_pwm_switch_fn(frequency, duty, bit, n_sw)` means the same, but
-it compares a floating-point phase, so on a `dt` grid some edges land a
-step early or late. The duty jitter keeps the LC filter ringing: 67 mV
-pp here instead of 17 mV, with the mean unchanged. Use it without `dt`,
-or count its on-steps first:
+.t_to`. An edge of the built-in helpers that falls on a `dt` grid point
+takes effect at that point, so the on-time is the same in every period:
 
 ```python
-mk = p.make_pwm_switch_fn(100e3, 0.5, q1, n_sw)
-on = {sum(mk(k * DT).get(q1) for k in range(j * 100, j * 100 + 100))
+on = {sum(pwm(k * DT).get(q1) for k in range(j * 100, j * 100 + 100))
       for j in range(600)}
 print("on-steps per period:", sorted(on))    # 50 asked
 ```
 
 ```text
-on-steps per period: [49, 50, 51]
+on-steps per period: [50]
 ```
 
 For a half bridge, `p.make_dead_time_pwm_pair_fn` drives the high- and
-low-side bits with a dead time; for a three-phase bridge see 3.7.
+low-side bits with a dead time; for a three-phase bridge see 3.7. The
+helpers also name their edges (`pwm.next_edge_after(t)`), so the
+variable-step engines land on them. A plain callable has no edges:
+`trbdf2` can step over a short pulse or dead time silently (D = 0.03:
+0.17 V vs 1.20 V) and `dsed` bisects only changes it sees at its
+`dt_max / 10` polls (and warns). Use a helper or pass `dt`. Both call
+it out of time order: keep it a pure function of `t`.
 
 ### 3.3 Bridge rectifier from `pulsim.topology`
 
@@ -230,7 +221,7 @@ b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
 b.add_inductor("L", "sw", "vout", 100e-6)
 b.add_capacitor("C", "vout", "gnd", 47e-6)
 b.add_resistor("RL", "vout", "gnd", 2.0)
-pwm = grid_pwm(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
+pwm = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
 res = p.simulate(b, t_end=5e-3, dt=DT, switch_fn=pwm)
 t = np.asarray(res.times)
 
@@ -320,7 +311,7 @@ def make_buck(R_load):
     return b
 
 ref = make_buck(10.0)                        # same topology -> same bits
-pwm = grid_pwm(100e3, 0.5, ref.switch_index_of("Q1"), ref.graph.num_switches)
+pwm = p.make_pwm_switch_fn(100e3, 0.5, ref.switch_index_of("Q1"), ref.graph.num_switches)
 out = p.sweep(make_buck, params={"R_load": [5.0, 10.0, 100.0]},
               kpi_fn=lambda r, prm: {"vout": p.steady_state_stats(
                   r, "vout", t_from=8e-3).mean},
@@ -463,7 +454,7 @@ Each row was measured on this version. The fix column is what to write.
 | 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. On the VSI of Tutorial 04 a 1 mOhm neutral-to-rail tie drove 58.8 A of DC through every phase (0.0 A floating or with 1 MOhm) | Leave it to `auto_regularize` (default on): it ties each floating subnet with 1 GOhm and warns. Your own tie: 1 MOhm or larger |
 | 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. A bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V on both engines. Without `dt` it warns the rails "reach the rest of the circuit only through switches/diodes"; with 10 mF: 323.94 V, 324.51 V with `dt` | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
 | 9 | A fixed-step run is second order from t = 0 | It starts from an inconsistent state and is first order globally, ICs included: RL decay with `i0=1`, error at 1 ms 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6`; sample 0 of node voltages reads 0 V | Halve `dt` and compare (6.3); discard the start-up; or omit `dt` |
-| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid. Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 5.84 V with `dt=2e-7` (on-time = 12.5 steps), 5.99 V with `dt=1e-7`. `make_pwm_switch_fn` still puts edges one step off (3.2) | Make `D/f_sw` a whole number of steps; compute the PWM in steps (`grid_pwm`, 3.2) |
+| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid. Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 6.24 V with `dt=2e-7` (on-time 12.5 steps, run as 13), 6.00 V with `dt=1e-7` | Make `D/f_sw` a whole number of steps; the helpers then hold it exactly (3.2) |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | Pulsim 2 refuses instead of guessing (unsupported model, invalid snapshot, singular circuit). A broad except turns that into a silent wrong answer | Let it raise; read the message, it names the device and the fix |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or was held in a state "its commutation rule forbids" (a missed commutation; named, and `res.i` repeats it), a `switch_fn` pulse narrower than its sampling. No warning is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else at most `t_end/1000`) can be skipped silently (2 us in 20 ms: 11 of 20 phases) | Rerun with `dt` and compare (6.2); `dt` at most 4x the narrowest pulse |
@@ -578,12 +569,12 @@ trbdf2 time-weighted 6.330 V, sample mean 5.007 V
 
 The engines agree; the sample mean on the variable grid does not.
 When two engines disagree, check the metric before blaming an engine.
-Compare ripple and RMS too: the buck of 3.2 on `make_pwm_switch_fn`
-reads 11.998 V on both engines, but 67 mV pp with `dt`, 15 mV without.
-Neither is right: `min`, `max` and `ripple_pp` are sample extremes,
-and the variable grid (about 20 samples per period here) misses the
-peaks (analytic 16.0 mV; `grid_pwm` with `dt`, 16.8 mV). Read ripple
-from a fixed-`dt` run, or `np.interp` onto a uniform grid first.
+Compare ripple and RMS too: the buck of 3.2 reads 11.999 V on both
+engines, but 16.8 mV pp with `dt` and 15.4 mV without (analytic
+16.0 mV): `min`, `max` and `ripple_pp` are sample extremes, and the
+variable grid (about 20 samples per period here) misses the peaks.
+Read ripple from a fixed-`dt` run, or `np.interp` onto a uniform grid
+first.
 
 ### 6.3 Step-size convergence
 

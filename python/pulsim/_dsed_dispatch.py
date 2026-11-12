@@ -42,6 +42,7 @@ from typing import Any, Callable, Literal, Optional, cast
 from ._pulsim import (  # type: ignore[import-not-found]
     NativeMultiMaskPwm,
     NativePwm2Switch,
+    SwitchSchedule,
 )
 
 
@@ -473,6 +474,15 @@ class _PEDSimulationResult:
         )
 
 
+def _has_edge_oracle(sf) -> bool:
+    """Whether the DSED scheduler can ask ``sf`` for its next gate edge."""
+    if isinstance(sf, (NativePwm2Switch, NativeMultiMaskPwm)):
+        return True
+    if isinstance(sf, SwitchSchedule):
+        return bool(sf.has_edges)
+    return hasattr(sf, "next_edge_after")
+
+
 def run_dsed_from_builder(
     *,
     builder: Any,                          # pulsim.CircuitBuilder
@@ -633,24 +643,30 @@ def run_dsed_from_builder(
         builder=builder, cache=cache, switch_fn=sf,
         b_extra_fn=b_extra_fn)
 
-    # Performance hint for plain Python switch_fns. The C++ scheduler
-    # detects the `next_edge_after` ∞ return at runtime and falls back
-    # to polling at `dt_max/10` — correct but slower than the
-    # analytical fast path. Surface that to the user once per call so
-    # PWM-heavy workloads can opt in to NativePwm2Switch /
-    # NativeMultiMaskPwm explicitly.
-    if (not isinstance(sf, (
-            NativePwm2Switch, NativeMultiMaskPwm))
-            and not hasattr(sf, "next_edge_after")):
+    # A switch_fn that cannot name its next edge is sampled every
+    # dt_max/10 (the "poll"), and each change found is bisected to the
+    # edge (dsed_bindings.cpp::EdgeSearch). Before the bisection every
+    # edge moved onto the poll grid: at the default dt_max a 100 ns
+    # dead time vanished (a synchronous buck's body diodes never
+    # conducted) and D = 0.25 ran as 0.30 (14.28 V against 11.49 V).
+    # A pulse that starts and ends between two polls is still missed,
+    # so say so. The built-in helpers return a SwitchSchedule, whose
+    # edges the scheduler lands on directly. The default all-closed
+    # mask (no switch_fn given) is constant: nothing to warn about.
+    if opts.switch_fn is not None and not _has_edge_oracle(sf):
+        poll = opts.dt_max / 10
         warnings.warn(
-            "simulate(engine='dsed'): the C++ scheduler will poll "
-            f"this plain Python switch_fn every {opts.dt_max / 10:.3g} "
-            "s (= dt_max/10) for mask changes — correct but slower "
-            "than the analytical fast path. For best performance on "
-            "PWM-driven simulations, wrap your switch logic in "
-            "`pulsim.NativePwm2Switch` or `pulsim.NativeMultiMaskPwm`, "
-            "which expose `next_edge_after` analytically so the "
-            "scheduler skips directly to the next gate edge.",
+            "simulate(engine='dsed'): this switch_fn has no "
+            "next_edge_after(t), so the scheduler samples it every "
+            f"{poll:.3g} s (= dt_max/10) and bisects each change it "
+            "finds to the edge. A pulse that starts and ends between "
+            f"two samples (shorter than {poll:.3g} s) is missed. The "
+            "built-in helpers (make_pwm_switch_fn, "
+            "make_dead_time_pwm_pair_fn, make_spwm_pair_fn, "
+            "make_phase_shift_full_bridge_fn, make_three_phase_spwm_fn) "
+            "return a SwitchSchedule whose edges the scheduler lands "
+            "on exactly; otherwise pass a smaller dt or give the "
+            "callable a next_edge_after(t) method.",
             UserWarning,
             stacklevel=3,
         )

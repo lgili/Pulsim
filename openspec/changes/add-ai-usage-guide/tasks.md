@@ -335,13 +335,27 @@ reproduced every friction item.
 
 ## 12. Library follow-ups (not fixed here)
 
-- [ ] 12.1 `make_pwm_switch_fn` (`core/include/pulsim/sources/pwm_switch_fn.hpp`)
+- [x] 12.1 `make_pwm_switch_fn` (`core/include/pulsim/sources/pwm_switch_fn.hpp`)
       compares `fmod(t/T, 1) < duty` in floating point: on a `dt` grid
       edges jitter by one step (49/50/51 on-steps of 50 at 100 kHz,
       dt = 1e-7). Snap the phase to the grid (a relative epsilon). Audit
       `make_dead_time_pwm_pair_fn` too (48/49 at D = 0.5 with 2e-7 dead
       time). The guide's 3.2 on-step block then prints `[50]` and must be
       updated.
+      Done (fix/v2-b-pwm-dsed): every built-in generator
+      (`make_pwm_switch_fn`, the dead-time pair, SPWM pair, three-phase
+      SPWM, phase-shift bridge, `NativePwm2Switch`, `NativeMultiMaskPwm`,
+      `PWMVoltageSource`, the PULSE source, the block-chain and
+      `pulsim.control` `PwmGenerator`, and `bind_pi_to_switch` via the
+      new `pulsim.control.pwm_on`) uses `pwm_phase::cycle_position` or
+      its Python twin: an edge within 64 ulp of a grid point takes
+      effect at it (`bind_pi_to_switch` read 50/51 of 50, now 50). Not
+      changed: the internal test model `dsed::BuckDCMSwitchFn`
+      (`core/include/pulsim/dsed/buck_dcm_model.hpp`) still uses
+      `fmod(t / T, 1)`. On-steps
+      now exactly D*T/dt at six (f, D, dt); the pair reads 48/48. The
+      guide drops `grid_pwm`, prints `[50]`, and trap 10 reads 6.24 /
+      6.00 V (was 5.84 / 5.99; ripple 12.6 mV, was 279 mV at 2e-7).
 - [x] 12.2 (Closed on `fix/v2-b-engine-robustness`: the crossing
       detector read each step's start from the committed solve, which
       after a zero-time cascade was solved under the PRE-cascade bits,
@@ -399,8 +413,18 @@ reproduced every friction item.
       exported at the top level; the DSED refusal for a floating neutral
       lists "floating capacitors" and "nonlinear devices" and points to
       `notes/DSED_BRIDGE_DESIGN.md`, which users cannot see.
-- [ ] 12.7 `simulate(engine='dsed')` with no `switch_fn` warns that it
-      will poll "this plain Python switch_fn".
+- [x] 12.7 `simulate(engine='dsed')` with no `switch_fn` warns that it
+      will poll "this plain Python switch_fn". Done
+      (fix/v2-b-pwm-dsed): no warning without a `switch_fn`. The same
+      branch fixed the DSED dead-time loss: the helpers return a
+      `SwitchSchedule` whose edges DSED lands on, and a plain callable's
+      changes are bisected inside each `dt_max / 10` poll. Synchronous
+      buck (48 V, D = 0.25, 100 kHz, 100 ns dead time), default DSED:
+      `QL_body` conducting 76 % (was 0 %), `QL` 7.19 mW (was 1.27 W),
+      Vout 11.474 V (was 14.28 V) against `pwl` 11.490 V / 76 % /
+      7.20 mW. The 0.14 % is the trapezoid mean over ~4 samples per
+      period: the DSED waveform matches `pwl` pointwise (0.02 mV,
+      1.7 mA), and `dt = 1e-7` reads 11.4899 V.
 - [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
@@ -455,6 +479,15 @@ reproduced every friction item.
       compares the gates with those the diodes were last decided under
       and re-settles (`n_gate_boundary_settles`): 0 violations on both
       tests, which now assert the warning is absent.
+- [ ] 12.13 A plain callable `switch_fn` (no `next_edge_after`) on
+      `engine='trbdf2'` steps over sub-step pulses and dead times with
+      no warning (sync buck D = 0.03, 50 ns dead time: 0.169 V, QH on
+      0.3 %, against 1.199 V / 2.5 % on `pwl`); `dsed` warns but still
+      misses a pulse inside one `dt_max / 10` poll. Warn on `trbdf2`
+      too, or refuse. Both engines call the `switch_fn` out of time
+      order (DSED probes the end of a poll window, then bisects), so a
+      stateful `switch_fn` keyed on `int(t / T)` changing runs about
+      10x too many updates; document or detect.
 
 ## 13. Review round 3
 

@@ -71,6 +71,7 @@
 #include "pulsim/sources/pwm_switch_fn.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
+#include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/streaming/live_ring.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -2135,16 +2136,51 @@ void init_module(py::module_& m) {
               py::arg("t"))
         .def_readonly("T_sw", &sources::NativeMultiMaskPwm::T_sw);
 
+    py::class_<sources::SwitchSchedule>(m, "SwitchSchedule",
+        "A switch_fn that knows its own gate edges: returned by "
+        "make_pwm_switch_fn, make_dead_time_pwm_pair_fn, "
+        "make_spwm_pair_fn, make_phase_shift_full_bridge_fn, "
+        "make_three_phase_spwm_fn and make_combined_switch_fn. "
+        "Call it with t for the SwitchStateMask. "
+        "`next_edge_after(t)` is the first gate edge strictly "
+        "after t (inf when unknown), so the variable-step engines "
+        "(engine='trbdf2', 'dsed') land their steps ON the edges "
+        "instead of sampling for them; every engine evaluates it "
+        "in C++ without the GIL. Edges that fall on a dt grid "
+        "point take effect at that point.")
+        .def("__call__",
+              [](const sources::SwitchSchedule& self, Real t) {
+                  return self(t);
+              },
+              py::arg("t"),
+              "Return the switch mask at time `t`.")
+        .def("next_edge_after",
+              &sources::SwitchSchedule::next_edge_after,
+              py::arg("t"),
+              "First gate-edge time strictly greater than `t`; inf "
+              "when the schedule does not know it (a combination "
+              "with a plain Python callable). An edge may be a no-op "
+              "(same mask on both sides), never a missed one.")
+        .def_property_readonly("has_edges",
+              &sources::SwitchSchedule::has_edges,
+              "False when the schedule cannot name its edges (a "
+              "make_combined_switch_fn with a plain Python callable "
+              "in it); the variable-step engines then search for "
+              "them by sampling.");
+
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
         py::arg("frequency"), py::arg("duty"),
         py::arg("switch_idx"), py::arg("num_switches"),
         py::arg("phase") = 0.0,
-        "Build a SwitchScheduleFn that toggles `switch_idx` "
+        "Build a SwitchSchedule that toggles `switch_idx` "
         "ON during the first `duty · T` fraction of each "
-        "period (T = 1 / frequency) and OFF for the rest. "
-        "All other switch bits stay OFF. Returns a Python "
-        "callable usable as `switch_fn=` in run_transient.");
+        "period (T = 1 / frequency) and OFF for the rest; "
+        "`phase` is a time offset in seconds. All other switch "
+        "bits stay OFF. Edges on a dt grid point take effect "
+        "at that point, so an on-time of a whole number of "
+        "steps is exactly that many steps in every period. "
+        "Usable as `switch_fn=` in simulate / run_transient.");
 
     m.def("make_dead_time_pwm_pair_fn",
         &sources::make_dead_time_pwm_pair_fn,
@@ -2152,7 +2188,7 @@ void init_module(py::module_& m) {
         py::arg("hs_switch_idx"), py::arg("ls_switch_idx"),
         py::arg("num_switches"), py::arg("dead_time"),
         py::arg("phase") = 0.0,
-        "Build a SwitchScheduleFn driving a complementary "
+        "Build a SwitchSchedule driving a complementary "
         "HS/LS half-bridge pair at `frequency` with `duty` "
         "and symmetric `dead_time` inserted at each "
         "commutation. Shoot-through is prevented by "
@@ -2168,7 +2204,7 @@ void init_module(py::module_& m) {
         py::arg("num_switches"), py::arg("dead_time"),
         py::arg("carrier_phase") = 0.0,
         py::arg("modulation_phase") = 0.0,
-        "Build a SwitchScheduleFn driving a HS/LS half-"
+        "Build a SwitchSchedule driving a HS/LS half-"
         "bridge with naturally-sampled SPWM: instantaneous "
         "duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). "
         "Symmetric `dead_time` is inserted at each "
@@ -2203,13 +2239,34 @@ void init_module(py::module_& m) {
             &sources::ThreePhaseLegIndices::ls_c);
 
     m.def("make_combined_switch_fn",
-        &sources::make_combined_switch_fn,
+        [](Size num_switches, const std::vector<py::object>& fns) {
+            // A SwitchSchedule goes in by value, so the combination
+            // keeps its edge oracle (and its C++ call path); any
+            // other callable goes through pybind11's std::function
+            // adapter, which makes the combined edges unknown.
+            std::vector<SwitchScheduleFn> cpp_fns;
+            cpp_fns.reserve(fns.size());
+            for (const auto& fn : fns) {
+                if (fn.is_none()) {
+                    cpp_fns.emplace_back();
+                } else if (py::isinstance<sources::SwitchSchedule>(fn)) {
+                    cpp_fns.emplace_back(
+                        fn.cast<sources::SwitchSchedule>());
+                } else {
+                    cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
+                }
+            }
+            return sources::make_combined_switch_fn(
+                num_switches, std::move(cpp_fns));
+        },
         py::arg("num_switches"), py::arg("fns"),
-        "Compose multiple SwitchScheduleFn callbacks into a "
-        "single one whose mask is the bitwise OR of all "
+        "Compose multiple switch_fn callbacks into a single "
+        "SwitchSchedule whose mask is the bitwise OR of all "
         "sub-masks. Useful for combining e.g. a primary-"
         "side PWM helper with a sync-rectifier helper "
-        "where each drives different switch indices.");
+        "where each drives different switch indices. Its "
+        "`next_edge_after` is the earliest edge of the parts "
+        "when every part is a SwitchSchedule, else inf.");
 
     m.def("make_phase_shift_full_bridge_fn",
         &sources::make_phase_shift_full_bridge_fn,
@@ -2219,7 +2276,7 @@ void init_module(py::module_& m) {
         py::arg("leg_b_hs_idx"), py::arg("leg_b_ls_idx"),
         py::arg("num_switches"), py::arg("dead_time"),
         py::arg("carrier_phase") = 0.0,
-        "Build a SwitchScheduleFn driving a phase-shift "
+        "Build a SwitchSchedule driving a phase-shift "
         "full-bridge: two HS/LS half-bridge legs at 50 %% "
         "duty each, with leg B lagging leg A by "
         "`phase_shift` radians. φ=0 → synchronous (no power); "
@@ -2237,7 +2294,7 @@ void init_module(py::module_& m) {
         py::arg("dead_time"),
         py::arg("modulation_phase") = 0.0,
         py::arg("carrier_phase") = 0.0,
-        "Build a SwitchScheduleFn driving a 3-phase 2-level "
+        "Build a SwitchSchedule driving a 3-phase 2-level "
         "VSI with SPWM: common carrier, sine modulation "
         "references at 0°/-120°/-240° on legs A/B/C, "
         "symmetric dead-time. Shoot-through prevented on "
@@ -2425,6 +2482,13 @@ void init_module(py::module_& m) {
             {
                 sources::NativePwm2Switch* native_pwm2 = nullptr;
                 sources::NativeMultiMaskPwm* native_multi = nullptr;
+                if (py::isinstance<sources::SwitchSchedule>(
+                        switch_fn_obj)) {
+                    // Built-in PWM helper: copy the C++ schedule, no
+                    // Python round-trip per step.
+                    switch_fn = switch_fn_obj.cast<
+                        sources::SwitchSchedule>();
+                }
                 try {
                     native_pwm2 = switch_fn_obj.cast<
                         sources::NativePwm2Switch*>();
@@ -2447,7 +2511,7 @@ void init_module(py::module_& m) {
                     switch_fn = [native_multi, keepalive](Real t) {
                         return (*native_multi)(t);
                     };
-                } else {
+                } else if (!switch_fn) {
                     // Generic Python callable — pybind11 wraps as
                     // std::function via its automatic converter.
                     switch_fn = switch_fn_obj.cast<SwitchScheduleFn>();
@@ -3840,7 +3904,19 @@ void init_module(py::module_& m) {
                     native = switch_fn_obj.cast<
                         sources::NativePwm2Switch*>();
                 } catch (const py::cast_error&) {}
-                if (native) {
+                if (py::isinstance<sources::SwitchSchedule>(
+                        switch_fn_obj)) {
+                    // Built-in PWM helper: C++ mask function and,
+                    // when it has one, its analytic edge oracle.
+                    const auto sched = switch_fn_obj.cast<
+                        sources::SwitchSchedule>();
+                    switch_fn = sched;
+                    if (sched.has_edges()) {
+                        next_edge_fn = [sched](Real t) {
+                            return sched.next_edge_after(t);
+                        };
+                    }
+                } else if (native) {
                     switch_fn = [native](Real t) {
                         return (*native)(t);
                     };
