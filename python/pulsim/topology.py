@@ -126,6 +126,7 @@ def add_bridge_rectifier(builder,
                             g_on: float = 1e3,
                             g_off: float = 1e-9,
                             V_th: float = 0.7,
+                            V_f: float = 0.0,
                             ) -> BridgeRectifierResult:
     """Add a four-diode full-wave bridge rectifier to the builder.
 
@@ -156,20 +157,26 @@ def add_bridge_rectifier(builder,
     V_th
         Turn-on (commutation) threshold (V). Default 0.7.
 
-        This is NOT a forward voltage drop. The PWL ``SwitchedDiode``
-        is a pure conductance in both states: OFF -> ON when
-        ``v_D >= V_th``, ON -> OFF when its current reverses, and while
-        ON it drops only ``i / g_on`` (48 A at ``g_on = 1e3`` is 48 mV,
-        for ``V_th = 0`` and ``0.7`` alike). ``V_th`` therefore adds no
-        conduction loss, and because the diode's voltage collapses
-        from ``V_th`` to ``i / g_on`` the instant it turns on, a
-        non-zero ``V_th`` in a low-impedance loop (a capacitor-input
-        bridge) injects a turn-on current spike of roughly
-        ``V_th / R_loop`` that the ``V_th = 0`` circuit does not have.
-        For datasheet conduction loss use
+        This is NOT a forward voltage drop (that is ``V_f``). The PWL
+        ``SwitchedDiode`` turns OFF -> ON when ``v_D >= max(V_th,
+        V_f)``, ON -> OFF when its current reverses, and while ON it
+        drops ``V_f + i / g_on`` (at the default ``V_f = 0``, 48 A at
+        ``g_on = 1e3`` is 48 mV, for ``V_th = 0`` and ``0.7`` alike).
+        ``V_th`` therefore adds no conduction loss, and because the
+        diode's voltage collapses from ``V_th`` to ``V_f + i / g_on``
+        the instant it turns on, a ``V_th`` above ``V_f`` in a
+        low-impedance loop (a capacitor-input bridge) injects a
+        turn-on current spike of roughly ``(V_th − V_f) / R_loop``.
+        ``V_th > V_f`` is also the hysteresis band the ``'dsed'``
+        engine needs to settle a zero-current turn-on.
+    V_f
+        Forward voltage drop while ON (V), PSIM's "Diode Voltage Drop":
+        each diode is ``g_on`` in series with ``V_f``, so it conducts
+        ``V_f·i + i²/g_on`` of loss. Default 0 (no drop, the behaviour
+        before ``V_f`` existed). For a datasheet ``V_f0·|i| + r_on·i²``
+        estimate on the simulated current instead, use
         ``device_loss_summary(..., conduction_specs={name: {"V_f0": ...,
-        "r_on": ...}})``, which applies ``V_f0·|i| + r_on·i²`` to the
-        simulated current.
+        "r_on": ...}})`` — not both, or ``V_f`` is counted twice.
 
     Returns
     -------
@@ -189,7 +196,8 @@ def add_bridge_rectifier(builder,
     ):
         bid = builder.graph.num_branches
         diode_name = f"{name}__{tag}"
-        builder.add_diode(diode_name, frm, to, g_on, g_off, V_th=V_th)
+        builder.add_diode(diode_name, frm, to, g_on, g_off, V_th=V_th,
+                          V_f=V_f)
         out.diode_branch_ids.append(int(bid))
         out.diode_names.append(diode_name)
     return out
@@ -212,6 +220,7 @@ def add_three_phase_vsi(builder,
                             with_freewheel_diodes: bool = True,
                             V_f: float = 0.7,
                             R_d: float = 0.05,
+                            V_th: float = 0.0,
                             ) -> ThreePhaseVsiResult:
     """Add the power stage of a 3-phase voltage source inverter: three
     half-bridges, each an upper and a lower switch WITH its
@@ -257,13 +266,14 @@ def add_three_phase_vsi(builder,
                                            builder.graph.num_switches,
                                            dead_time)
 
-    The switches are bidirectional: a gated-on switch carries most of
-    the freewheel current. A PWL diode turns off only when its current
-    reverses, so after the dead time the antiparallel diode stays on in
-    parallel with its switch and carries ``R_on / (R_on + R_d)`` of
-    that current (2 % at the defaults) until the opposite switch turns
-    on. With no dead time the diodes never conduct. Read the split
-    with ``res.i(f"{name}__HSa")`` and ``res.i(f"{name}__Dha")``.
+    The switches are bidirectional: a gated-on switch carries the
+    freewheel current. Each diode is ``R_d`` in series with its forward
+    drop ``V_f``, so once its switch is gated on it shares the current
+    only while ``R_on·|i| > V_f``, carrying
+    ``(R_on·|i| − V_f) / (R_on + R_d)`` (nothing at the defaults below
+    700 A); otherwise it turns off and conducts only in the dead time.
+    With no dead time the diodes never conduct. Read the split with
+    ``res.i(f"{name}__HSa")`` and ``res.i(f"{name}__Dha")``.
     For closed-loop control, wire the gates via
     :class:`MixedDomainBlockChain` and one of:
 
@@ -290,15 +300,20 @@ def add_three_phase_vsi(builder,
     with_freewheel_diodes
         Add the six antiparallel diodes. Default True.
     V_f, R_d
-        ``V_f`` is passed to each diode as its ``V_th`` — a turn-on
-        (commutation) THRESHOLD, not a forward voltage drop: the PWL
-        diode is a pure conductance ``1 / R_d`` while ON, so it drops
-        ``R_d · i`` and ``V_f`` adds no conduction loss (see
-        :func:`add_bridge_rectifier`'s ``V_th``). For a datasheet
-        ``V_f0 + r_d · I`` conduction loss use
-        ``device_loss_summary(..., conduction_specs={diode_name:
-        {"V_f0": ..., "r_on": ...}})``. ``R_d`` is the diode's ON
-        resistance (Ω). Defaults 0.7 V / 50 mΩ.
+        Each diode's forward voltage DROP (V) and ON resistance (Ω),
+        PSIM-style: while ON the diode drops ``V_f + R_d·i`` and
+        dissipates ``V_f·i + R_d·i²`` (``add_diode``'s ``V_f``).
+        Defaults 0.7 V / 50 mΩ. (Before this release ``V_f`` was
+        passed as the turn-on threshold ``V_th`` and added no
+        conduction loss.) Do not also put a ``V_f0`` in
+        ``device_loss_summary``'s ``conduction_specs`` for these
+        diodes, or the drop is counted twice.
+    V_th
+        Turn-on threshold of each diode (V), effectively
+        ``max(V_th, V_f)``. Default 0 (pure PSIM: turn on at ``V_f``).
+        ``V_th > V_f`` (e.g. ``V_f + 1e-3``) gives a hysteresis band,
+        which the ``'dsed'`` engine needs to settle a zero-current
+        turn-on.
 
     Returns
     -------
@@ -347,7 +362,8 @@ def add_three_phase_vsi(builder,
         g_d_on = 1.0 / R_d if R_d > 0 else 1e3
         for tag, frm, to in legs:
             d_name = f"{name}__D{tag[0].lower()}{tag[2]}"
-            builder.add_diode(d_name, to, frm, g_d_on, g_off, V_th=V_f)
+            builder.add_diode(d_name, to, frm, g_d_on, g_off, V_th=V_th,
+                              V_f=V_f)
             out.diode_names.append(d_name)
     return out
 

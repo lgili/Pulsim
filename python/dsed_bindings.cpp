@@ -922,8 +922,9 @@ void init_module(py::module_& m) {
             // about which switches are diodes. For each diode, two
             // predicates on v_D reconstructed through the recovery
             // map: turn-ON armed while the bit is OFF
-            // (g = v_D − V_th), turn-OFF armed while ON
-            // (g = v_D — the i_D = g_on·v_D zero-cross). Firing
+            // (g = v_D − V_on), turn-OFF armed while ON
+            // (g = v_D − V_f — the i_D = g_on·(v_D − V_f) zero-cross),
+            // both SwitchedDiode::crossing_signal. Firing
             // flips the bit inside the scheduler; the zero-time
             // cascade settles instantaneous consequences (a buck's
             // freewheel diode at gate-off).
@@ -941,13 +942,17 @@ void init_module(py::module_& m) {
                         const NativeAdapter* ad = &adapter;
                         const pulsim::Index from = d.from;
                         const pulsim::Index to = d.to;
-                        const Real vth = d.V_th;
+                        const auto prm = d.params();
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns ON",
-                            .fn = [ad, from, to, vth](
+                            .fn = [ad, from, to, prm](
                                       Real t, const Vector& x) {
-                                return ad->node_pair_voltage(
-                                           from, to, t, x) - vth;
+                                return pulsim::models::SwitchedDiode::
+                                    crossing_signal(
+                                        false,
+                                        ad->node_pair_voltage(
+                                            from, to, t, x),
+                                        prm);
                             },
                             .type = pulsim::dsed::PredicateType::DiodeOn,
                             .priority = pulsim::dsed::
@@ -959,10 +964,14 @@ void init_module(py::module_& m) {
                         });
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns OFF",
-                            .fn = [ad, from, to](
+                            .fn = [ad, from, to, prm](
                                       Real t, const Vector& x) {
-                                return ad->node_pair_voltage(
-                                           from, to, t, x);
+                                return pulsim::models::SwitchedDiode::
+                                    crossing_signal(
+                                        true,
+                                        ad->node_pair_voltage(
+                                            from, to, t, x),
+                                        prm);
                             },
                             .type = pulsim::dsed::PredicateType::DiodeOff,
                             .priority = pulsim::dsed::
@@ -975,7 +984,7 @@ void init_module(py::module_& m) {
                         sched_diodes.push_back(
                             pulsim::dsed::SchedulerDiode{
                                 d.switch_idx, d.from, d.to,
-                                d.g_on, d.g_off, d.V_th,
+                                d.g_on, d.g_off, d.V_th, d.V_f,
                                 std::move(label)});
                     }
                 }

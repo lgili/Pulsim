@@ -134,3 +134,38 @@ TEST_CASE("combine_masks: overlays diode bits, keeps user bits",
     REQUIRE(combined.get(2) == true);   // user bit, unchanged
     REQUIRE(combined.get(3) == false);  // user bit, unchanged
 }
+
+TEST_CASE("DiodeEventState: forward drop — census, turn-on at V_on, "
+          "hold/drop at V_f ± eps",
+          "[v2][layer5_v2][diode_event_state][forward_drop]") {
+    constexpr Real eps = 1e-9;
+    struct Row { Real V_th, V_f, V_on; };
+    for (const Row r : {Row{0.0, 0.7, 0.7}, Row{0.75, 0.7, 0.75}}) {
+        INFO("V_th=" << r.V_th << " V_f=" << r.V_f);
+        Graph g;
+        g.add_node("n0");
+        g.add_branch(0, g.ground(), BranchKind::Switch);
+        DevicePool pool;
+        pool.add_diode(0, 20.0, 1e-9, r.V_th, r.V_f);
+
+        DiodeEventState diodes(g, pool);
+        REQUIRE(diodes.entries()[0].V_f == r.V_f);
+        REQUIRE(diodes.entries()[0].params().V_f == r.V_f);
+        Vector x(1);
+        // OFF stays OFF just below V_on, even above V_f.
+        x[0] = r.V_on - eps;
+        REQUIRE_FALSE(diodes.update_from_state(x));
+        x[0] = r.V_on;
+        REQUIRE(diodes.update_from_state(x));
+        REQUIRE(diodes.current_diode_mask().get(0));
+        // ON: i = g_on·(v − V_f) > 0 holds just above V_f ...
+        x[0] = r.V_f + eps;
+        REQUIRE_FALSE(diodes.update_from_state(x));
+        REQUIRE(diodes.current_diode_mask().get(0));
+        // ... and drops just below it, though g_on·v would still be
+        // a large forward current (the trap a hand-coded i = g·v hides).
+        x[0] = r.V_f - eps;
+        REQUIRE(diodes.update_from_state(x));
+        REQUIRE_FALSE(diodes.current_diode_mask().get(0));
+    }
+}

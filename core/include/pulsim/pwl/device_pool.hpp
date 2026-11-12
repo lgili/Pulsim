@@ -127,11 +127,11 @@ public:
     /// to the graph with `BranchKind::Switch` (the diode IS a
     /// switch from the topology's perspective). Default V_th = 0
     /// for a perfectly ideal diode; pass 0.7 for a Si-behavioral
-    /// model.
+    /// model. `V_f` is the PSIM-style forward drop while ON.
     void add_diode(Index branch_id, Real g_on, Real g_off,
-                    Real V_th = Real{0}) {
-        entries_[branch_id] = Entry{
-            models::SwitchedDiode::Params{g_on, g_off, V_th}};
+                    Real V_th = Real{0}, Real V_f = Real{0}) {
+        entries_[branch_id] = Entry{models::SwitchedDiode::Params{
+            .g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f}};
         diode_branches_.push_back(branch_id);
     }
 

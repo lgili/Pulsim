@@ -78,7 +78,7 @@ device entry's `type:` field selects the schema:
 | `resistor` | `from`, `to`, `R` (Ω) | — |
 | `capacitor` | `from`, `to`, `C` (F) | — |
 | `inductor` | `from`, `to`, `L` (H) | — |
-| `diode` | `anode`, `cathode`, `g_on`, `g_off` | `V_th` (default 0) |
+| `diode` | `anode`, `cathode`, `g_on`, `g_off` | `V_th` (default 0), `V_f` forward drop (default 0) |
 | `nonlinear_diode` | `anode`, `cathode` | `V_F0` (0.7), `R_d` (0.01), `G_off` (1e-9), `kappa` (20) |
 | `switch` | `from`, `to`, `g_on`, `g_off` | — |
 | `mosfet` | `drain`, `source` | `R_on` (1mΩ), `R_off` (1GΩ) |

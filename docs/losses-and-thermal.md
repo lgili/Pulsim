@@ -74,10 +74,13 @@ Switch and diode states are not inferred. Every engine records, with
 each stored sample, the switch / diode mask it **stamped** for the solve
 that produced it (`result.switch_states`, one bool column per
 `builder.switch_index_of(name)`), so a switched branch's current is
-exactly `(g_on if closed else g_off) · v`. A PWL diode needs this: its ON
-state is a pure conductance, so a diode carrying 48 A at `g_on = 1e3`
-sits at 48 mV — inside `0 < v_D < V_th`, where the voltage alone cannot
-say whether it conducts. `switch_fn=` is only needed for a result built
+exactly `(g_on if closed else g_off) · v` (for an ON PWL diode with a
+forward drop, `g_on · (v − V_f)`). A PWL diode needs this: its ON
+state is `V_f + i/g_on`, so a diode carrying 48 A at `g_on = 1e3`
+sits at `V_f` + 48 mV — inside `V_f < v_D < V_th`, where the voltage
+alone cannot say whether it conducts. Its loss is `V_f·i + i²/g_on`, so
+`P_avg` already contains the drop: a `conduction_specs` `V_f0` for the
+same diode is a separate estimate, not an addition. `switch_fn=` is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.
 
@@ -223,7 +226,8 @@ transformer rectifier (`τ = 0.5 µs`) records 360 instead of 5 at
 reflected ON step lasts one step, so a gap counts when at least two of
 the three runs around it (the conducting stretch before, the gap, the
 stretch after) last at most 2 steps, and no step average of `v_D` in it
-falls below `−2·V_th`. The gap length is not used: chatter gaps measured
+falls below `−2·V_th` (with a forward drop, `v_D − V_f` against
+`−2·(V_on − V_f)`). The gap length is not used: chatter gaps measured
 1 to 237 steps, and real short blocking intervals are as short (a
 100 kHz pulsed charger blocking 0.5 V: 5 steps at 1 µs, between
 conducting stretches of 5 steps, not reported). On the fixed-step engine

@@ -212,7 +212,7 @@ def test_the_v_th_0_engine_defect_is_reported_not_hidden():
 
 
 # ---------------------------------------------------------------------
-# Three-phase VSI freewheel diodes (V_f is passed as V_th)
+# Three-phase VSI freewheel diodes (V_f is a forward drop)
 # ---------------------------------------------------------------------
 
 def _vsi(V_f: float):
@@ -274,17 +274,25 @@ def test_vsi_freewheel_diode_carries_the_inductor_current(V_f, engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_vsi_v_f_is_a_threshold_not_a_drop(engine):
-    """V_f = 0.7 vs 0: the ON diode is 1/R_d either way, so the
-    freewheel current and its conduction loss agree (measured identical
-    to 1e-6 on pwl; the threshold only shifts the turn-on instant by
-    the time ua needs to swing 0.7 V)."""
+def test_vsi_v_f_is_a_drop(engine):
+    """V_f is the diode's PSIM forward drop (it was passed as the
+    turn-on threshold V_th before): the ON diode is R_d in series with
+    V_f, so its loss is V_f·i_avg + R_d·i_rms², and the drop adds about
+    V_f·i_avg over the V_f = 0 run (measured 28.56 vs 19.12 W on pwl,
+    28.67 vs 19.23 W on auto). The identity is exact on same-stamp
+    steps; the fixed engine's gate-edge flip steps are trapezoids of
+    their end powers while i_avg / i_rms integrate them as a current
+    ramp: measured 4.5e-3 on pwl (dt = 2 us), 2.7e-5 on auto."""
     *_, s7, _ = _run_vsi(0.7, engine)
     *_, s0, _ = _run_vsi(0.0, engine)
     e7 = _entry(s7, "INV__Dla")
     e0 = _entry(s0, "INV__Dla")
-    assert e7["i_rms"] == pytest.approx(e0["i_rms"], rel=1e-3)
-    assert e7["P_avg"] == pytest.approx(e0["P_avg"], rel=2e-3)
+    assert e7["V_f"] == 0.7 and e7["V_th"] == 0.0
+    assert e7["P_avg"] == pytest.approx(
+        0.7 * e7["i_avg"] + 0.05 * e7["i_rms"] ** 2,
+        rel=1e-2 if engine == "pwl" else 1e-4)
+    assert e7["P_avg"] - e0["P_avg"] == pytest.approx(
+        0.7 * e7["i_avg"], rel=0.05)
 
 
 # ---------------------------------------------------------------------

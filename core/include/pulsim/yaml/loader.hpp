@@ -278,7 +278,8 @@ inline void load_device(
             require_string(dev, idx, type, "cathode"),
             require_real(dev, idx, type, "g_on"),
             require_real(dev, idx, type, "g_off"),
-            real_or(dev, "V_th", Real{0}));
+            real_or(dev, "V_th", Real{0}),
+            real_or(dev, "V_f", Real{0}));
     } else if (type == "nonlinear_diode") {
         models::IdealDiode::Params p{
             .V_F0  = real_or(dev, "V_F0", Real{0.7}),

@@ -178,7 +178,7 @@ def test_simulate_dsed_runs_on_buck_ccm_without_scipy() -> None:
 
 def test_simulate_dsed_faster_than_pwl_on_buck_ccm() -> None:
     """End-to-end speedup check: on the canonical buck CCM benchmark
-    with PWL at dt=100ns, DSED auto must be at least 5× faster.
+    with PWL at dt=100ns, DSED auto must be at least 2× faster.
 
     This pins the headline claim — if a regression makes the
     dispatcher take the Python fallback (e.g. another top-level
@@ -219,8 +219,11 @@ def test_simulate_dsed_faster_than_pwl_on_buck_ccm() -> None:
         dsed_times.append(time.perf_counter() - t0)
 
     speedup = min(pwl_times) / min(dsed_times)
-    assert speedup > 5.0, (
+    # 2x, not 5x: the native path measures 5.5x on an idle Mac and 4.0x
+    # on a busy CI runner, while the Python fallback it guards against is
+    # slower than PWL (< 1x).
+    assert speedup > 2.0, (
         f"DSED/PWL speedup on buck CCM was only {speedup:.1f}× — "
-        f"expected >>5×. PWL best={min(pwl_times)*1000:.1f} ms, "
+        f"expected >2×. PWL best={min(pwl_times)*1000:.1f} ms, "
         f"DSED best={min(dsed_times)*1000:.1f} ms. The dispatcher "
         f"may have silently fallen into a Python fallback.")

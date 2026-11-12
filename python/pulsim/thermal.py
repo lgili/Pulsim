@@ -860,7 +860,7 @@ def device_thermal_summary(
                     or from_id is None or to_id is None:
                 continue
             # Same recorded stamp as device_loss_summary / result.i()
-            # (a PWL diode's ON drop is i/g_on, not V_th — see
+            # (a PWL diode's ON drop is V_f + i/g_on, not V_th — see
             # pulsim._diode_state). The loss summary above already
             # warned about this diode, so stay quiet here.
             d_trace = _diode_state.diode_state_trace(
@@ -868,18 +868,27 @@ def device_thermal_summary(
             v_D = d_trace.v
             g_arr = np.where(d_trace.closed, g_on, g_off)
             g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
+            # The forward drop V_f (i = g_on·(v − V_f) while ON); None
+            # keeps the V_f = 0 arithmetic bit-identical.
+            o_D, o_D_s = ((d_trace.v_off, d_trace.v_off_start)
+                          if d_trace.V_f else (None, None))
             # Cut at the window where the whole-run integral is linear
             # (current; power on a step that flips the stamp).
             _, i_w, i_s_w, E_br = _losses._window_conductance(
-                win, v_D, g_arr, d_trace.v_start, g_arr_s)
+                win, v_D, g_arr, d_trace.v_start, g_arr_s, o_D, o_D_s)
+            i_D, i_D_s = d_trace.current, d_trace.current_start
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
-                    v_D * g_arr, c_spec)
+                    i_D, c_spec)
                 P_start_t = _losses._conduction_power_offset_slope(
-                    d_trace.v_start * g_arr_s, c_spec)
+                    i_D_s, c_spec)
                 E_cond = _losses._conduction_model_energy(
                     win.times, i_w, i_s_w, c_spec)
+            elif d_trace.V_f:
+                P_cond_t = v_D * i_D
+                P_start_t = d_trace.v_start * i_D_s
+                E_cond = E_br
             else:
                 P_cond_t = v_D * v_D * g_arr
                 P_start_t = d_trace.v_start * d_trace.v_start * g_arr_s

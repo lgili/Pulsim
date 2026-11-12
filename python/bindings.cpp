@@ -828,10 +828,15 @@ void init_module(py::module_& m) {
               py::arg("name"), py::arg("anode"),
               py::arg("cathode"), py::arg("g_on"),
               py::arg("g_off"), py::arg("V_th") = 0.0,
+              py::arg("V_f") = 0.0,
               py::return_value_policy::reference,
               "Add a binary switched diode (V2's "
-              "SwitchedDiode). g_on/g_off in siemens, "
-              "V_th in volts.")
+              "SwitchedDiode). g_on/g_off in siemens. "
+              "V_f: forward drop while ON (PSIM's diode voltage "
+              "drop), in volts: v = V_f + i/g_on; must be finite "
+              "and >= 0. V_th: turn-on threshold in volts, "
+              "effectively max(V_th, V_f) when V_f > 0; V_th > V_f "
+              "is a hysteresis band. OFF is plain g_off.")
         .def("add_nonlinear_diode",
               &builder::CircuitBuilder::add_nonlinear_diode,
               py::arg("name"), py::arg("anode"),
@@ -867,7 +872,9 @@ void init_module(py::module_& m) {
               "`body_diode=False` for an eGaN HEMT (which "
               "conducts in reverse through the channel, not a "
               "p-n junction) or for a bare switch. Defaults: "
-              "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V.")
+              "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the "
+              "body diode's turn-on THRESHOLD (add_diode's V_th), "
+              "not a conduction drop.")
         .def("add_mosfet_with_body_diode",
               &builder::CircuitBuilder::add_mosfet_with_body_diode,
               py::arg("name"), py::arg("drain"),
@@ -881,7 +888,9 @@ void init_module(py::module_& m) {
               "Add an n-channel power MOSFET WITH "
               "intrinsic anti-parallel body diode. Adds "
               "TWO branches: switch (drain→source) + "
-              "diode (source→drain).")
+              "diode (source→drain). V_F is the body diode's "
+              "turn-on THRESHOLD (add_diode's V_th), not a "
+              "conduction drop.")
         .def("add_igbt",
               &builder::CircuitBuilder::add_igbt,
               py::arg("name"), py::arg("collector"),
@@ -1092,6 +1101,7 @@ void init_module(py::module_& m) {
                               params["g_on"]  = p.g_on;
                               params["g_off"] = p.g_off;
                               params["V_th"]  = p.V_th;
+                              params["V_f"]   = p.V_f;
                               break;
                           }
                           case K::NonlinearDiode: {
@@ -1982,7 +1992,8 @@ void init_module(py::module_& m) {
             "STAMPED for the solve that produced states[k], as a "
             "(num_steps, num_switches) bool array (column j = "
             "builder.switch_index_of(name)). A switched branch's "
-            "current is exactly (g_on if bit else g_off) * v_branch. "
+            "current is exactly (g_on if bit else g_off) * v_branch, "
+            "less g_on * V_f for an ON diode with a forward drop V_f. "
             "None when the result carries no record (a result not "
             "produced by a kernel engine). Raw: where "
             "switch_states_unsolved[k] is True (a sample 0 seeded from "

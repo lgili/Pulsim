@@ -283,8 +283,8 @@ def test_signature_check_catches_swapped_and_wrong_defaults(guide_text, stub_ind
         "b.add_sine_voltage_source(name, n_pos, n_neg, v_amplitude, v_dc,")
     assert swapped != guide_text
     assert any("add_sine_voltage_source" in p for p in signature_problems(swapped, stub_index))
-    wrong = guide_text.replace("b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0)",
-                               "b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.7)")
+    wrong = guide_text.replace("b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0,",
+                               "b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.7,")
     assert wrong != guide_text
     assert any("add_diode" in p for p in signature_problems(wrong, stub_index))
 
@@ -314,7 +314,8 @@ def _param_paragraph(doc: str, param: str) -> str:
 
 @pytest.mark.parametrize("func,param", [
     ("add_bridge_rectifier", "V_th"),
-    ("add_three_phase_vsi", "V_f"),
+    # The VSI's V_f became a real drop (PSIM); its threshold is V_th.
+    ("add_three_phase_vsi", "V_th"),
     ("add_buck", "V_th"),
     ("add_boost", "V_th"),
     ("add_flyback", "V_th"),
@@ -323,6 +324,13 @@ def test_diode_threshold_parameters_are_not_called_a_drop(func, param):
     text = _param_paragraph(inspect.getdoc(getattr(pulsim, func)), param)
     assert "threshold" in text.lower(), text
     assert not re.search(r"(?<!not a )forward (drop|voltage)", text, re.I), text
+
+
+@pytest.mark.parametrize("func", ["add_bridge_rectifier",
+                                  "add_three_phase_vsi"])
+def test_diode_v_f_parameters_are_called_a_drop(func):
+    text = _param_paragraph(inspect.getdoc(getattr(pulsim, func)), "V_f")
+    assert re.search(r"drop", text, re.I), text
 
 
 def test_catalogue_does_not_recommend_a_micro_ohm_reference():
