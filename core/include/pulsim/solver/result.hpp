@@ -32,7 +32,10 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -132,6 +135,20 @@ struct SolverSnapshot {
     /// Which switched diodes were conducting. Solver-owned bits
     /// that a mask alone cannot reconstruct.
     std::vector<bool> diode_on;
+    /// The switch / diode mask STAMPED for the solve that produced
+    /// `x` — one bit per switch-kind branch, in SwitchStateMask
+    /// order: the record's last row
+    /// (`SimulationResult::switch_state_bits`) whenever that row is
+    /// the sample at `t`. It is not `diode_on` + switch_fn(t): where a
+    /// run ends exactly on a gate edge, the variable-step engine
+    /// stores the edge sample under the PRE-edge mask and then
+    /// re-decides the diodes under the post-edge one, so `diode_on`
+    /// (what the NEXT step starts from) and switch_fn(t) both describe
+    /// the post-edge circuit while `x` is the pre-edge solve. A resume
+    /// records this mask for its row 0, solved; empty when unknown
+    /// (a hand-built or older snapshot), and that row is then flagged
+    /// unsolved.
+    std::vector<bool> stamped_mask;
     /// The five stateful-device histories, each in its own
     /// to_flat() layout; empty when the circuit has none. Before
     /// they were carried, a resume restored x and the linear
@@ -160,6 +177,32 @@ struct SolverSnapshot {
     /// True once populated by a run.
     bool valid = false;
 };
+
+/// `m` as one bool per bit (SolverSnapshot::stamped_mask).
+[[nodiscard]] inline std::vector<bool> mask_bits(
+    const topology::SwitchStateMask& m) {
+    std::vector<bool> out(static_cast<std::size_t>(m.size()));
+    for (Size i = 0; i < m.size(); ++i) {
+        out[static_cast<std::size_t>(i)] = m.get(i);
+    }
+    return out;
+}
+
+/// The snapshot's `stamped_mask` as a mask of `num_switches` bits, or
+/// false when it carries none of that width (a hand-built or older
+/// snapshot).
+[[nodiscard]] inline bool snapshot_stamped_mask(
+    const SolverSnapshot& s, Size num_switches,
+    topology::SwitchStateMask& out) {
+    if (s.stamped_mask.size() != static_cast<std::size_t>(num_switches)) {
+        return false;
+    }
+    out = topology::SwitchStateMask(num_switches);
+    for (Size i = 0; i < num_switches; ++i) {
+        out.set(i, s.stamped_mask[static_cast<std::size_t>(i)]);
+    }
+    return true;
+}
 
 struct SimulationResult {
     std::vector<Real> times;
@@ -202,6 +245,117 @@ struct SimulationResult {
     /// or no flips occurred.
     std::vector<CommutationEvent> commutation_events;
 
+    // -----------------------------------------------------------------
+    // Per-sample record of the STAMPED switch / diode mask.
+    // -----------------------------------------------------------------
+    //
+    // `switch_state_bits` holds, for every stored sample k, the
+    // SwitchStateMask the solver STAMPED for the solve that produced
+    // `states[k]` — the mask whose conductances are consistent with
+    // the stored vector, so a switched branch's current is exactly
+    //     i_k = (bit ? g_on : g_off) · v_k.
+    // It is NOT the mask the step after it starts with: a PWL diode
+    // whose voltage crosses V_th in the last solve of a step is
+    // re-decided by `update_from_state` AFTER that solve, and on the
+    // variable-step engine an event landing is committed under the
+    // PRE-commutation mask before the bits flip. The voltage alone
+    // cannot recover it (a conducting diode with g_on = 1e3 carrying
+    // 48 A sits at 48 mV, inside 0 < v_D < V_th, where ON and OFF
+    // are both self-consistent), which is why it is recorded here.
+    //
+    // Layout: flat, `switch_state_stride` = ceil(n/8) BYTES per
+    // sample, bit i of the mask in byte i/8 at bit i%8 (LSB first —
+    // numpy's unpackbits(bitorder='little')). Bit i is the
+    // SwitchStateMask index `switch_index_of` returns (Switch-kind
+    // branches in builder order; a MOSFET's body diode is its own
+    // bit, interleaved with the switches). Parallel to `times`:
+    // bits.size() == times.size() * stride. Byte-packed rather than
+    // word-packed so a converter with a handful of switches pays one
+    // byte per sample, not eight.
+    //
+    // `switch_state_unsolved` lists the (few) sample indices whose
+    // state was NOT produced by a solve under the recorded mask —
+    // today only a sample 0 seeded from `initial_state`, for which
+    // the recorded mask is the bits the solver CARRIED into the run,
+    // not a solve (the state may come from a solve with a diode ON
+    // that the carried bits have OFF). A `resume_from` sample 0 is
+    // not listed when the snapshot carries `stamped_mask` (the mask of
+    // the solve that produced its state, recorded as that row); one
+    // without it (hand-built, or from before the field) is. Sparse,
+    // so it costs nothing on a long run.
+    //
+    // Decimation (`SimulationOptions::store_every` > 1): row k is the
+    // mask of the LAST solve before sample k, not of the whole stored
+    // interval (t[k-1], t[k]], which spans several solves. KCL against
+    // the record stays exact at every stored sample, but a time
+    // fraction (duty) or a time integral over the stored grid then
+    // aliases: a 50 kHz buck at dt = T/200 read M1 duty 0.5537 and
+    // P_avg +14 % with store_every = 67 (0.5001 at store_every = 1).
+    //
+    // `has_switch_states` is false on a result no engine recorded
+    // (a default-constructed or hand-built result); consumers must
+    // then fall back and say so.
+    std::vector<std::uint8_t> switch_state_bits;
+    Size switch_state_stride = 0;
+    Size num_switch_bits = 0;
+    std::vector<Size> switch_state_unsolved;
+    bool has_switch_states = false;
+
+    /// Start the record for a circuit with `num_switches` mask bits.
+    /// Call once, before the first sample is stored.
+    void begin_switch_state_record(Size num_switches, Size n_reserve = 0) {
+        num_switch_bits = num_switches;
+        switch_state_stride = (num_switches + 7) / 8;
+        switch_state_bits.clear();
+        switch_state_unsolved.clear();
+        if (n_reserve > 0 && switch_state_stride > 0) {
+            switch_state_bits.reserve(n_reserve * switch_state_stride);
+        }
+        has_switch_states = true;
+    }
+
+    /// Append the mask stamped for the sample just pushed onto
+    /// `times` / `states`. `solved = false` marks a sample whose
+    /// state is not a solve under `m` (see `switch_state_unsolved`).
+    void record_switch_state(const topology::SwitchStateMask& m,
+                             bool solved = true) {
+        if (!has_switch_states) {
+            return;
+        }
+        const Size nw = m.num_words();
+        for (Size b = 0; b < switch_state_stride; ++b) {
+            const Size w = b / 8;
+            const std::uint64_t word = w < nw ? m.word(w) : 0ULL;
+            switch_state_bits.push_back(static_cast<std::uint8_t>(
+                (word >> (8 * (b % 8))) & 0xFFULL));
+        }
+        if (!solved && !times.empty()) {
+            // Index of the sample just recorded (call this right
+            // after pushing onto `times`).
+            switch_state_unsolved.push_back(times.size() - 1);
+        }
+    }
+
+    /// Bit `bit` of the mask stamped for sample `k`.
+    [[nodiscard]] bool switch_state(Size k, Size bit) const {
+        const Size stride = switch_state_stride;
+        if (!has_switch_states || bit >= num_switch_bits ||
+            (k + 1) * stride > switch_state_bits.size()) {
+            throw std::out_of_range(
+                "SimulationResult::switch_state: no recorded mask bit "
+                "for this (sample, switch)");
+        }
+        return ((switch_state_bits[k * stride + bit / 8] >> (bit % 8)) &
+                1U) != 0U;
+    }
+
+    /// True when the record is present and parallel to `times`.
+    [[nodiscard]] bool switch_states_complete() const noexcept {
+        return has_switch_states &&
+               switch_state_bits.size() ==
+                   times.size() * switch_state_stride;
+    }
+
     [[nodiscard]] Size num_steps() const noexcept {
         return times.size();
     }
@@ -220,6 +374,9 @@ struct SimulationResult {
         times.reserve(n);
         states.reserve(n);
         event_iteration_count.reserve(n);
+        if (switch_state_stride > 0) {
+            switch_state_bits.reserve(n * switch_state_stride);
+        }
     }
 
     void reserve(Size n, Index state_size) {
@@ -233,6 +390,8 @@ struct SimulationResult {
         return states.bytes() +
                times.size() * sizeof(Real) +
                event_iteration_count.size() * sizeof(Size) +
+               switch_state_bits.size() +
+               switch_state_unsolved.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
                event_iteration_breaches.size() *
                    sizeof(EventIterationBreach) +

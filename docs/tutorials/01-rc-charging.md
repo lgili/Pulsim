@@ -65,18 +65,25 @@ Expected:
 ```
 τ = 1.0 ms
 k·τ |  v_sim    v_exp
-  1  |  6.321    6.321
-  2  |  8.647    8.647
+  1  |  6.319    6.321
+  2  |  8.646    8.647
   3  |  9.502    9.502
 ```
 
-The match is exact to several digits — there is no discretisation error from the trapezoidal companion for first-order responses.
+The simulation trails the exponential by 1.8 mV at `t = τ` (0.7 mV at 2τ).
+That gap is not integration error in the RC: the source jumps 0 → 10 V
+at `t = 0`, and the trapezoidal rule, which only sees the source at the
+samples `t = 0` and `t = dt`, treats the first step as a ramp. The
+response is therefore the exact exponential delayed by half a step,
+`dt / 2 = 0.5 µs`: compared with `V · (1 − exp(−(t − dt/2)/τ))` the
+error drops to ~1.5e-7 V. Divide `dt` by 10 and the gap at `t = τ`
+shrinks tenfold, to 0.18 mV.
 
 ## What just happened
 
 1. `add_pulse_voltage_source` registered a `PulseVoltageSource`-kind branch with `v_initial = 0`, `v_pulsed = 10`. The MNA system is stamped with `V = 0` baseline; the time-varying value lives in the `b_extra` overlay built by `run_transient`.
-2. `simulate(...)` called `cache.build(dt=1e-6)`. Since there are no switches, exactly one PWL cache entry is created and KLU-factorized.
-3. Each `dt`-step retrieves that single cached entry and performs a back-substitution against the current `b_extra`. With 5000 steps over 5 ms, the whole sim runs in well under a millisecond.
+2. Because an explicit `dt` was passed, `simulate(...)` chose the fixed-step PWL engine (`res.engine_used == "pwl"`) and built a lazy PWL cache at `dt = 1e-6`. Since there are no switches, exactly one cache entry exists; it is LU-factorized once, on the first step.
+3. Each `dt`-step retrieves that single cached entry and performs a back-substitution against the current `b_extra`. With 5000 steps over 5 ms, the whole `simulate()` call takes a few milliseconds (≈ 2 ms measured on an Apple-silicon laptop, including the Python-side setup).
 
 ## Try this next
 

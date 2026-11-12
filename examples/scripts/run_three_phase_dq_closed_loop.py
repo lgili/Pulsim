@@ -234,9 +234,12 @@ def main() -> None:
     i_d_ref_arr = np.array([i_d_ref(t) for t in res.times])
     i_q_ref_arr = np.array([i_q_ref(t) for t in res.times])
 
-    pre_d  = i_d_arr[(times > 5)  & (times < T_STEP_D*1e3)].mean()
-    post_d = i_d_arr[(times > T_STEP_D*1e3 + 3) & (times < T_STEP_Q*1e3)].mean()
-    post_q = i_q_arr[(times > T_STEP_Q*1e3 + 3)].mean()
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
+    t_s = res.times
+    pre_d  = p.time_average(t_s, i_d_arr, 5e-3, T_STEP_D)
+    post_d = p.time_average(t_s, i_d_arr, T_STEP_D + 3e-3, T_STEP_Q)
+    post_q = p.time_average(t_s, i_q_arr, t_from=T_STEP_Q + 3e-3)
     print(f"\n  KPI:")
     print(f"    i_d  pre-step  (5–{T_STEP_D*1e3:.0f} ms): mean = {pre_d:.2f} A "
           f"(target {I_D_REF_1:.1f})")

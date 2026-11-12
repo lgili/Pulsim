@@ -62,7 +62,7 @@ jobs:
           # Note: macos-13 (Intel) removed - Apple has transitioned to ARM,
           # and Intel runners frequently timeout in GitHub Actions queue
           - name: "macOS ARM64 (Apple Silicon)"
-            os: macos-14
+            os: macos-15
             compiler: appleclang
             cc: clang
             cxx: clang++
@@ -128,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
@@ -176,6 +176,14 @@ jobs:
           # Use non-editable install in CI to avoid import-time rebuilds with
           # transient pip build-env paths (Windows runner instability).
           pip install ".[dev]"
+
+      # The executed docs (python/tests/test_doc_snippets.py) skip the
+      # blocks annotated `doctest: requires=matplotlib` where it is
+      # missing; this leg installs it so those blocks run somewhere.
+      - name: Install matplotlib (plotting doc snippets)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: |
+          pip install matplotlib
 
       - name: Run Python tests
         run: |

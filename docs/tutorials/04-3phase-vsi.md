@@ -3,7 +3,7 @@
 **Goal.** Build a 6-switch 3-leg VSI driving a balanced RL load with sinusoidal PWM. Verify that the three line-to-line voltages have the correct 120° relative phase and equal magnitude.
 
 **Concepts introduced:**
-- 6-switch enumeration in `SwitchStateMask` (`num_switches = 6` → 64 cache entries).
+- Switch-bit bookkeeping in `SwitchStateMask`: 6 MOSFETs with body diodes are 12 switching branches (`num_switches = 12` → 4096 possible masks).
 - `make_three_phase_spwm_fn` + `ThreePhaseLegIndices` (Layer 2 V8).
 - Why the cache stays manageable even with many switches (only states reachable from the schedule are built).
 
@@ -47,34 +47,47 @@ b.add_mosfet("Q2_L", "b",      "gnd")
 b.add_mosfet("Q3_H", "dc_pos", "c")
 b.add_mosfet("Q3_L", "c",      "gnd")
 
-# Wye load (3 × (R + L) to neutral n).
+# Wye load (3 × (R + L) to neutral n). The neutral floats, as in a
+# real motor or wye load: do NOT tie it to gnd. gnd is the DC-bus
+# negative rail, so a neutral-to-gnd tie gives every phase a 300 V
+# (V_DC/2) common-mode bias and drives ~60 A of DC through each
+# phase resistor. The node is still referenced: it reaches the rails
+# through the load and the switches.
 for phase in ("a", "b", "c"):
     b.add_resistor(f"R_{phase}", phase, f"{phase}_int", 5.0)
     b.add_inductor(f"L_{phase}", f"{phase}_int", "n", 5e-3)
-# Neutral pinned to gnd by a small resistor (numerical convenience).
-b.add_resistor("R_n", "n", "gnd", 1e-3)
 ```
 
 ## SPWM driver
 
 ```python
+# add_mosfet() adds each switch AND its body diode (`<name>_body`),
+# and both are switching branches, so the six MOSFETs land on bits
+# 0, 2, 4, 6, 8, 10 -- not 0..5. Ask the builder; never count by hand.
 legs = p.ThreePhaseLegIndices(
-    a_high=0, a_low=1,
-    b_high=2, b_low=3,
-    c_high=4, c_low=5,
+    b.switch_index_of("Q1_H"), b.switch_index_of("Q1_L"),   # hs_a, ls_a
+    b.switch_index_of("Q2_H"), b.switch_index_of("Q2_L"),   # hs_b, ls_b
+    b.switch_index_of("Q3_H"), b.switch_index_of("Q3_L"),   # hs_c, ls_c
 )
 spwm = p.make_three_phase_spwm_fn(
-    leg_indices=legs,
-    carrier_frequency=F_CARRIER,
-    modulating_frequency=F_MOD,
-    modulation_index=M,
-    phase=0.0,
+    F_CARRIER,               # carrier_frequency
+    F_MOD,                   # modulation_frequency
+    M,                       # modulation_index
+    legs,
+    b.graph.num_switches,    # 12: six switches + six body diodes
+    0.0,                     # dead_time [s]
 )
 ```
 
-The helper emits a `SwitchStateMask(6)` that:
-- Compares a triangular carrier at `F_CARRIER` with three sinusoidal modulators at `F_MOD`, each phase-shifted by 120°.
-- Drives each leg's HS-LS pair complementarily.
+The helper returns a `t -> SwitchStateMask(12)` callable that:
+- Compares one carrier at `F_CARRIER` with three sinusoidal references at `F_MOD` (0°, −120°, −240° on legs A/B/C).
+- Drives each leg's HS-LS pair complementarily, with the requested symmetric dead time (shoot-through is prevented by construction).
+- Leaves the body-diode bits OFF; event detection turns them on when they must conduct.
+
+`dead_time = 0` here because the fixed-step engine evaluates `switch_fn`
+on the `dt = 2 µs` grid: a dead time shorter than `dt` is not
+representable. To study dead-time distortion, shrink `dt` well below
+the dead time first.
 
 ## Run + analyse
 
@@ -84,28 +97,63 @@ res = p.simulate(b, t_end=100e-3, dt=2e-6, switch_fn=spwm)
 a_idx = b.node_id_of("a")
 b_idx = b.node_id_of("b")
 c_idx = b.node_id_of("c")
-v_ab = [s[a_idx] - s[b_idx] for s in res.states]
-v_bc = [s[b_idx] - s[c_idx] for s in res.states]
-v_ca = [s[c_idx] - s[a_idx] for s in res.states]
+import numpy as np
 
-# After ~3 cycles, extract one full fundamental period.
-import math
-T_mod = 1.0 / F_MOD
-k0 = int(50e-3 / 2e-6)
-k1 = k0 + int(T_mod / 2e-6)
+t = np.asarray(res.times)
+X = np.asarray(res.states)
+v_ab = X[:, a_idx] - X[:, b_idx]
+v_bc = X[:, b_idx] - X[:, c_idx]
+v_ca = X[:, c_idx] - X[:, a_idx]
 
-# Fundamental RMS via mean(v²)·2.
-def rms(samples):
-    return math.sqrt(sum(v*v for v in samples) / len(samples))
+# One full fundamental period after the start-up transient (from 50 ms).
+win = (t >= 50e-3) & (t <= 50e-3 + 1.0 / F_MOD)
+tw  = t[win]
+T   = tw[-1] - tw[0]
 
-print(f"V_ab fundamental RMS ≈ {rms(v_ab[k0:k1]):.1f} V (target ~{0.612 * M * V_DC:.0f} V)")
+def fundamental(v):
+    """RMS and phase [deg] of the F_MOD Fourier component (time-weighted)."""
+    vw = v[win]
+    a = 2 / T * np.trapezoid(vw * np.cos(2 * np.pi * F_MOD * tw), tw)
+    b = 2 / T * np.trapezoid(vw * np.sin(2 * np.pi * F_MOD * tw), tw)
+    return math.hypot(a, b) / math.sqrt(2), math.degrees(math.atan2(a, b))
+
+target = math.sqrt(3) / 2 * M * V_DC / math.sqrt(2)
+for name, v in (("V_ab", v_ab), ("V_bc", v_bc), ("V_ca", v_ca)):
+    rms1, ph = fundamental(v)
+    print(f"{name}: fundamental {rms1:6.1f} V rms at {ph:+6.1f} deg (target {target:.1f} V)")
+total = math.sqrt(np.trapezoid(v_ab[win] ** 2, tw) / T)
+print(f"V_ab total RMS (fundamental + PWM harmonics) = {total:.1f} V")
 ```
 
-For `M = 0.85` and `V_DC = 600`, expected fundamental line-to-line RMS is `(√3/2) · M · V_DC / √2 ≈ 312 V` (sinusoidal modulation, not third-harmonic-injected).
+Expected output:
+```
+V_ab: fundamental  313.3 V rms at  +30.1 deg (target 312.3 V)
+V_bc: fundamental  313.0 V rms at  -90.0 deg (target 312.3 V)
+V_ca: fundamental  312.5 V rms at +150.1 deg (target 312.3 V)
+V_ab total RMS (fundamental + PWM harmonics) = 411.2 V
+```
+
+The three line voltages have equal fundamentals within 0.3 % and sit
+120° apart (V_ab leads its phase-A reference by the textbook 30°). The
+target is `(√3/2) · M · V_DC / √2 ≈ 312 V` for plain sinusoidal PWM
+(no third-harmonic injection). Note the total RMS: a PWM line voltage
+is a train of ±600 V pulses, so its RMS (411 V) is far above the
+fundamental — take the Fourier component, not `sqrt(mean(v²))`, when
+you want the fundamental.
 
 ## Cache size
 
-This circuit has **6 switches → 64 possible masks**. The cache is built lazily — only masks actually reached by the SPWM scheduler are factored, which is usually ~12-16 of the 64. You can check `cache.dt()` and the runtime stamping cost stays bounded.
+This circuit has **12 switching branches → 4096 possible masks**. The cache is built lazily — only the masks the run actually reaches are factored. Pass `on_cache=` to `simulate()` to get the cache back and count them:
+
+```python
+caches = []
+p.simulate(b, t_end=100e-3, dt=2e-6, switch_fn=spwm, on_cache=caches.append)
+print(f"factored masks: {caches[0].num_built_segments()} of {2 ** b.graph.num_switches}")
+```
+
+Expected: `factored masks: 8 of 4096` — the 2³ leg states. The body
+diodes never conduct here because, with zero dead time, the opposite
+switch of each leg always carries the reversed load current.
 
 ## Try this next
 

@@ -119,6 +119,7 @@ nav:
   - User Guide:
       - Overview: index.md
       - Getting Started: getting-started.md
+      - 'Using Pulsim with AI Assistants': ai-guide.md
       - Mental Model: mental-model.md
       - 'Tutorial 01 — RC Charging': tutorials/01-rc-charging.md
       - 'Tutorial 02 — Buck Converter': tutorials/02-buck-converter.md

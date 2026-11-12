@@ -145,13 +145,15 @@ def main() -> None:
         mech_replay.integrate(times[k], T_em, DT)
 
     # KPI
-    mask = times >= (T_END - 0.2)
+    # Window means are time-weighted (p.time_average): correct on any
+    # grid, unlike a plain mean over the samples of a variable-step run.
+    t_ss = T_END - 0.2
     print(f"\n  KPI (last 200 ms):")
-    print(f"    ω mean        = {omega_trace[mask].mean():.2f} rad/s  "
+    print(f"    ω mean        = {p.time_average(times, omega_trace, t_from=t_ss):.2f} rad/s  "
           f"(target {OMEGA_REF})")
     print(f"    ω peak (overshoot) = {omega_trace.max():.2f} rad/s "
           f"({100*(omega_trace.max()/OMEGA_REF-1):+.1f} %)")
-    print(f"    i_armature mean = {i_arm[mask].mean():.3f} A")
+    print(f"    i_armature mean = {p.time_average(times, i_arm, t_from=t_ss):.3f} A")
     print(f"    Final mechanical ω = "
           f"{motor.mech.omega_rad_s:.2f} rad/s")
     print(f"    Final θ = {motor.mech.theta_rad:.2f} rad "

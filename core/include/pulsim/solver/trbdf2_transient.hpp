@@ -144,7 +144,9 @@ struct TrBdf2Options {
     /// the boundary". 0 = no controller ticks.
     Real observer_period = Real{0};
     /// Newton settings, used only when the circuit has nonlinear
-    /// devices. Same knobs and defaults as the fixed engine.
+    /// devices. Same knobs and defaults as the fixed engine. The
+    /// tolerances are absolute; loosening them is not a fix for the
+    /// h_min stall (see SimulationOptions::tol_newton_dx).
     Size max_newton_iterations = Size{50};
     Real tol_newton_dx  = Real{1e-9};
     Real tol_newton_res = Real{1e-9};
@@ -706,14 +708,43 @@ inline SimulationResult run_transient_trbdf2(
         return ok;
     };
 
+    // Mask recorded with sample 0 (SimulationResult::
+    // switch_state_bits): the bits the run STARTS from, taken before
+    // the settle below re-decides them. A zero IC is consistent with
+    // every mask (v = 0, so i = g·v = 0). A `resume_from` state is the
+    // previous run's last solve and records the mask the snapshot
+    // says it was stamped under (`stamped_mask`), NOT mask_at(t_start):
+    // a run that ended exactly on a gate edge stored that sample under
+    // the pre-edge mask, then re-decided the diodes under the
+    // post-edge one, so diode_on + switch_fn(t_start) is the post-edge
+    // circuit (a 48 kA g_on·V phantom through a buck's MOSFET at that
+    // row). A state seeded from `initial_state`, or from a snapshot
+    // without that mask, was solved by no mask this row knows and is
+    // flagged unsolved.
+    SwitchStateMask initial_mask = mask_at(opts.t_start);
+    bool initial_seeded = initial_state.has_value();
+    if (resume_from != nullptr) {
+        initial_seeded = !snapshot_stamped_mask(
+            *resume_from, static_cast<Size>(graph.num_switches()),
+            initial_mask);
+    }
+    // The mask the current x was solved under (final_snapshot).
+    SwitchStateMask x_mask = initial_mask;
+    bool x_mask_known = !initial_seeded;
+
     // ---- consistent initial diode bits (zero-time settle) ----
     // A tiny trap step pins every capacitor to its (v, i) and asks
     // the network which diodes conduct; iterate to a fixed point,
     // exactly run_transient's per-step event iteration at t_start.
+    // The gates are read where the first step reads them (sw_now in
+    // the edge clamp, t + h_min / 2): an edge closer than that is not
+    // landed, so settling under mask_at(t_start) left a resume 1 ulp
+    // before a buck's turn-on edge with D1 ON across M1 ON (24 kA).
     if (has_diodes) {
         const Real h_probe = h_probe_floor;
+        const Real t_gates = opts.t_start + Real{0.5} * h_min;
         for (Size it = 0; it < opts.max_event_iterations; ++it) {
-            trap_solve(mask_at(opts.t_start), opts.t_start, h_probe,
+            trap_solve(mask_at(t_gates), opts.t_start, h_probe,
                         x_trial);
             if (!diodes.update_from_state(x_trial)) {
                 break;
@@ -723,9 +754,12 @@ inline SimulationResult run_transient_trbdf2(
 
     SimulationResult result;
     result.times.reserve(4096);
+    result.begin_switch_state_record(
+        static_cast<Size>(graph.num_switches()), 4096);
     result.times.push_back(opts.t_start);
     result.states.push_back(x);
     result.event_iteration_count.push_back(0);
+    result.record_switch_state(initial_mask, !initial_seeded);
 
     // Coupling-aware inductor di/dt for the LTE (a coupled winding's
     // v = L·di/dt + M·di_other/dt, so f ≠ v/L there). Resolved once.
@@ -943,7 +977,14 @@ inline SimulationResult run_transient_trbdf2(
                         "run_transient_trbdf2: Newton failed at t = "
                         + std::to_string(t)
                         + " with h already at h_min — "
-                        + newton_last_error);
+                        + newton_last_error
+                        + " If t is just after a hard switching edge, "
+                          "this is the known TR-BDF2 stall at h_min "
+                          "(CHANGELOG 2.0.0, \"TR-BDF2 stalls at "
+                          "h_min\"; KNOWN_LIMITATIONS.md): a "
+                          "step-controller defect, not a tolerance "
+                          "one. Run this circuit on engine='pwl' with "
+                          "an explicit dt.");
                 }
                 h = std::max(h * Real{0.25}, h_min);
                 continue;
@@ -1255,6 +1296,16 @@ inline SimulationResult run_transient_trbdf2(
                     result.times.push_back(t);
                     result.states.push_back(x);
                     result.event_iteration_count.push_back(0);
+                    // The landing is a REAL trap solve over dt_land
+                    // under the PRE-commutation mask (mask_step); the
+                    // bits flip only after it. It is not an
+                    // interpolation, and the record says which mask
+                    // produced it — so g·v at this sample is the
+                    // current the solver carried, with no phantom
+                    // g_on·V_th from the post-flip bits.
+                    result.record_switch_state(mask_step);
+                    x_mask = mask_step;
+                    x_mask_known = true;
                     ++st.n_diode_events;
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
@@ -1308,6 +1359,10 @@ inline SimulationResult run_transient_trbdf2(
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(0);
+                // Both TR-BDF2 stages solved under mask_step.
+                result.record_switch_state(mask_step);
+                x_mask = mask_step;
+                x_mask_known = true;
                 ++st.n_accept;
                 if (pending_gate_slot >= 0) {
                     // The h that survived right after this gate
@@ -1392,6 +1447,10 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.history = history.to_flat();
     result.final_snapshot.diode_on = diodes.num_diodes() > 0
         ? diodes.snapshot_on_bits() : std::vector<bool>{};
+    // The mask x was solved under (the record's last row): diode_on
+    // may already be post-edge (see initial_mask above).
+    result.final_snapshot.stamped_mask =
+        x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
     result.final_snapshot.saturable_history = sat.to_flat();
     result.final_snapshot.coss_history = coss.to_flat();
     result.final_snapshot.lauritzen_history = laur.to_flat();

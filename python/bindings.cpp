@@ -1952,6 +1952,77 @@ void init_module(py::module_& m) {
             "Bytes held by the contiguous sample buffer.")
         .def_readonly("event_iteration_count",
                        &SimulationResult::event_iteration_count)
+        // Per-sample record of the STAMPED switch / diode mask
+        // (result.hpp, `switch_state_bits`). Unpacked here into a
+        // (num_steps, num_switches) bool array; column j is bit j of
+        // the SwitchStateMask, i.e. `builder.switch_index_of(name)`.
+        .def_property_readonly("switch_states",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.switch_states_complete()) {
+                    return py::none();
+                }
+                const auto n = static_cast<py::ssize_t>(r.times.size());
+                const auto nb = static_cast<py::ssize_t>(r.num_switch_bits);
+                const Size stride = r.switch_state_stride;
+                py::array_t<bool> out(std::vector<py::ssize_t>{n, nb});
+                auto* ptr = out.mutable_data();
+                const std::uint8_t* src = r.switch_state_bits.data();
+                for (py::ssize_t k = 0; k < n; ++k) {
+                    const std::uint8_t* row =
+                        src + static_cast<std::size_t>(k) * stride;
+                    for (py::ssize_t j = 0; j < nb; ++j) {
+                        ptr[k * nb + j] =
+                            ((row[j / 8] >> (j % 8)) & 1U) != 0U;
+                    }
+                }
+                return std::move(out);
+            },
+            "Per-sample record of the switch / diode mask the solver "
+            "STAMPED for the solve that produced states[k], as a "
+            "(num_steps, num_switches) bool array (column j = "
+            "builder.switch_index_of(name)). A switched branch's "
+            "current is exactly (g_on if bit else g_off) * v_branch. "
+            "None when the result carries no record (a result not "
+            "produced by a kernel engine). Raw: where "
+            "switch_states_unsolved[k] is True (a sample 0 seeded from "
+            "initial_state) the row is the bits the solver carried in, "
+            "not a solve, and g(bit) * v does not hold there; result.i() "
+            "and the loss / thermal summaries read that row with the "
+            "mask of the first solve after it. With store_every > 1 a "
+            "row is the mask of the LAST solve before the sample, not of "
+            "the whole stored interval, so duty cycles and time "
+            "integrals over a decimated grid alias. Unpacked on each "
+            "access; the kernel stores ceil(num_switches/8) bytes per "
+            "sample.")
+        .def_property_readonly("switch_states_unsolved",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.switch_states_complete()) {
+                    return py::none();
+                }
+                const auto n = static_cast<py::ssize_t>(r.times.size());
+                py::array_t<bool> out(n);
+                auto* ptr = out.mutable_data();
+                std::fill(ptr, ptr + n, false);
+                for (const Size k : r.switch_state_unsolved) {
+                    if (static_cast<py::ssize_t>(k) < n) {
+                        ptr[k] = true;
+                    }
+                }
+                return std::move(out);
+            },
+            "Per-sample bool: True where states[k] was NOT produced by "
+            "a solve under switch_states[k] — today only a sample 0 "
+            "seeded from initial_state, whose mask is the bits the "
+            "solver carried in (result.i() and the loss / thermal "
+            "summaries read that row with the first solve's mask). A "
+            "resume_from sample 0 carries the bits of the solve that "
+            "produced it and is not flagged. None without a record.")
+        .def_property_readonly("switch_states_bytes",
+            [](const SimulationResult& r) {
+                return r.switch_state_bits.size() +
+                       r.switch_state_unsolved.size() * sizeof(Size);
+            },
+            "Bytes held by the stamped-mask record.")
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
         .def_readonly("inductor_guard_actions",
@@ -2265,6 +2336,16 @@ void init_module(py::module_& m) {
         .def_readwrite("x", &SolverSnapshot::x)
         .def_readwrite("history", &SolverSnapshot::history)
         .def_readwrite("diode_on", &SolverSnapshot::diode_on)
+        .def_readwrite("stamped_mask", &SolverSnapshot::stamped_mask,
+            "The switch / diode mask stamped for the solve that "
+            "produced ``x`` (one bool per SwitchStateMask bit): the "
+            "previous run's last ``switch_states`` row. A resume "
+            "records it as its row 0. Not ``diode_on`` + "
+            "``switch_fn(t)``: a variable-step run that ends on a gate "
+            "edge stores that sample under the pre-edge mask and only "
+            "then re-decides the diodes. Empty when unknown (a "
+            "hand-built or older snapshot); row 0 is then flagged in "
+            "``switch_states_unsolved``.")
         .def_readwrite("saturable_history", &SolverSnapshot::saturable_history)
         .def_readwrite("coss_history", &SolverSnapshot::coss_history)
         .def_readwrite("lauritzen_history", &SolverSnapshot::lauritzen_history)
@@ -2293,14 +2374,16 @@ void init_module(py::module_& m) {
                     s.t, s.x, s.history, s.diode_on,
                     s.saturable_history, s.coss_history,
                     s.lauritzen_history, s.igbt_tail_history,
-                    s.pmsm_history, s.valid);
+                    s.pmsm_history, s.valid, s.stamped_mask);
             },
             [](py::tuple t) {
-                if (t.size() != 10) {
+                // 10 fields: pickled before `stamped_mask` existed;
+                // it loads with the mask unknown.
+                if (t.size() != 10 && t.size() != 11) {
                     throw std::runtime_error(
                         "SolverSnapshot: pickled state has "
                         + std::to_string(t.size())
-                        + " fields, expected 10");
+                        + " fields, expected 10 or 11");
                 }
                 SolverSnapshot s;
                 s.t = t[0].cast<Real>();
@@ -2313,6 +2396,9 @@ void init_module(py::module_& m) {
                 s.igbt_tail_history = t[7].cast<std::vector<Real>>();
                 s.pmsm_history = t[8].cast<std::vector<Real>>();
                 s.valid = t[9].cast<bool>();
+                if (t.size() == 11) {
+                    s.stamped_mask = t[10].cast<std::vector<bool>>();
+                }
                 return s;
             }));
 

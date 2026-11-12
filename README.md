@@ -18,7 +18,7 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599c?logo=cplusplus&logoColor=white)](https://en.cppreference.com/w/cpp/23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Citation](https://img.shields.io/badge/cite-CITATION.cff-orange.svg)](CITATION.cff)
-[![v1.8.0 release](https://img.shields.io/badge/release-v1.8.0-success.svg)](CHANGELOG.md)
+[![v2.0.0 release](https://img.shields.io/badge/release-v2.0.0-success.svg)](CHANGELOG.md)
 
 [**Docs**](https://lgili.github.io/Pulsim/) ·
 [**Tutorials**](docs/tutorials/) ·
@@ -134,15 +134,33 @@ kept explicitly available as a paper-comparison baseline.
 
 ## Quick start
 
-### Prerequisites
+### Install from PyPI
 
-Two native dependencies — everything else is header-only or vendored
-at configure time:
+```bash
+pip install pulsim
+```
+
+Binary wheels for CPython 3.10–3.13 on macOS (Apple silicon), Linux
+(manylinux x86_64) and Windows (x64). The only runtime dependency is
+NumPy. Plotting and DataFrame export are optional extras:
+
+```bash
+pip install "pulsim[jupyter]"   # matplotlib (+ plotly, ipywidgets): p.scope, p.plot.*
+pip install "pulsim[data]"      # pandas (+ xarray): SweepResult.to_dataframe()
+```
+
+### Build from source
+
+Only needed to hack on the C++ kernel. You need a C++23 compiler and
+CMake ≥ 3.20; everything else is header-only or fetched at configure
+time:
 
 | Dependency | Why |
 |---|---|
-| **Eigen 3.4+** | Header-only sparse linear algebra (matrix + vector containers). Pulsim ships its own sparse LU on top. |
 | **C++23 compiler** | AppleClang 15+ / Clang 17+ / GCC 13+ |
+| **CMake ≥ 3.20** | Build system (driven by scikit-build-core under `pip install`). |
+| **Eigen 3.4+** | Header-only sparse linear algebra (matrix + vector containers). Pulsim ships its own sparse LU on top. A system copy is used if found, otherwise CMake downloads Eigen 3.4.0. |
+| yaml-cpp, pybind11 | Fetched by CMake (pybind11 is taken from the build environment when present). |
 
 ```bash
 # macOS (Homebrew)
@@ -154,14 +172,6 @@ sudo apt-get install -y cmake ninja-build libeigen3-dev
 # Fedora
 sudo dnf install cmake ninja-build eigen3-devel
 ```
-
-### Install from PyPI
-
-```bash
-pip install pulsim
-```
-
-### Or build from source
 
 ```bash
 git clone https://github.com/lgili/Pulsim.git
@@ -180,7 +190,15 @@ b.add_resistor      ("R1", "n0", "vc",   1000.0)
 b.add_capacitor     ("C1", "vc", "gnd",  1e-6)
 
 res = p.simulate(b, t_end=5e-3, dt=1e-5)
-p.plot.scope(b, res, signals=["vc"])      # one-line waveform
+print(f"v_C(5 ms) = {res.states[-1][b.node_id_of('vc')]:.3f} V")   # 4.966 V
+```
+
+To see the waveform, install the `[jupyter]` extra (matplotlib) and add
+one line:
+
+<!-- doctest: requires=matplotlib -->
+```python
+p.scope(b, res, signals=["vc"])           # one-line waveform plot
 ```
 
 ### Parametric sweep — exploit the v1.4.0 path-based refactor
@@ -196,19 +214,25 @@ def make_rc(R=5.0, C=10e-6):
     b.add_capacitor     ("C_out", "vout", "gnd", C)
     return b
 
-def steady_state_vout(res, _params):
-    states = np.asarray(res.states)
-    return {"vout": float(states[-1, 1])}
+base = make_rc()
+VOUT = base.node_id_of("vout")              # ask for the node by name
+
+def vout_at_t_end(res, _params):
+    return {"vout": float(res.states[-1][VOUT])}
 
 # Sweep R_load through 100 values. v1.4.0 path-based refactor:
 # build the cache ONCE, then reuse the L+U factors at each point.
 out = p.sweep_path_aware(
-    make_rc(),                               # initial builder
+    base,                                    # initial builder
     params={"R_load": np.linspace(1, 20, 100).tolist()},
-    kpi_fn=steady_state_vout,
-    t_end=5e-3, dt=1e-6,
+    kpi_fn=vout_at_t_end,
+    t_end=50e-6, dt=1e-6,                    # tau = R·C spans 10–200 µs
+    verbose=False,
 )
-print(out.to_dataframe().head())
+assert not out.failed, out.failed            # [(index, error), ...]
+for R, v in zip(out.params["R_load"][:3], out.kpis["vout"][:3]):
+    print(f"R_load = {R:6.3f} Ω  ->  vout = {v:.3f} V")
+# With the [data] extra (pandas): out.to_dataframe() gives one row per run.
 ```
 
 For Monte Carlo, swap `sweep_path_aware` →
@@ -216,55 +240,54 @@ For Monte Carlo, swap `sweep_path_aware` →
 r.uniform(1, 20)}, n_samples=1000, ...)` and get the same ~3.4×
 speedup over the legacy rebuild-per-sample pattern.
 
+### Using Pulsim with AI assistants
+
+The package ships a usage guide written for AI coding assistants (and
+useful to people): the verified 2.x idioms, exact signatures, the traps
+that return a plausible wrong number, and how to check a result. It
+always matches the installed version:
+
+```bash
+python -m pulsim.guide          # print it (also: pulsim.ai_guide())
+python -m pulsim.guide --path   # where the file is
+```
+
+Point your assistant at it, e.g. in `CLAUDE.md`, `AGENTS.md` or
+`.github/copilot-instructions.md`: *"Before writing or changing code that
+uses pulsim, run `python -m pulsim.guide` and follow it."* The docs also
+publish [`llms.txt`](docs/llms.txt), an index for tools that read one.
+
 ---
 
-## What's new in v1.4.0
+## What's new in v2.0
 
-Two algorithmic contributions ship in one release — see
-[`CHANGELOG.md`](CHANGELOG.md) for the full breakdown.
+Pulsim 2.0.0 (2026-09-08) is a **breaking** release. Its rule
+throughout: a named refusal beats a plausible wrong number. The full list
+of breaking changes is the "headline breaks" part of the 2.0.0 entry in
+[`CHANGELOG.md`](CHANGELOG.md); there is no separate 1.x → 2.0 porting
+guide yet. ([`docs/migration-from-v1.md`](docs/migration-from-v1.md) is
+older and different: it covers the C++ v1-runtime → v2 module split.)
 
-### In-house complex sparse LU
-
-`PulsimSparseLuSolver` is now templated on `Scalar`. The new
-`PulsimComplexSparseLuSolver = PulsimSparseLuSolverT<std::complex<Real>>`
-drives the AC-sweep production path — `Eigen::SparseLU<complex>` is
-no longer compiled in. Backward-compat aliases keep the v1.3.0
-real-scalar API source-identical:
-
-```cpp
-using PulsimSparseLuSolver        = PulsimSparseLuSolverT<Real>;
-using PulsimComplexSparseLuSolver = PulsimSparseLuSolverT<std::complex<Real>>;
-using Matrix                      = MatrixT<Real>;
-using Vector                      = VectorT<Real>;
-```
-
-### Multi-bit + parametric path-based update
-
-The v1.3.0 single-bit path-based partial refactor now generalises to
-**three SMPS-relevant use cases**:
-
-| Case                                | Mechanism                  | Speedup |
-|-------------------------------------|----------------------------|--------:|
-| Single-bit switch flip (v1.3.0)     | etree path of one column   | 2.7–2.9× |
-| Multi-bit switch flip (v1.4.0+)     | **union** of etree paths   | 1.3–1.7× |
-| Parametric value sweep (v1.4.0+)    | path of param-affected cols| 3.0–3.7× |
-
-The `MAX_PATH_LENGTH_RATIO = 0.6` gate skips the path-based attempt
-when the union path covers > 60 % of $n$ (the path-walk would cost
-the same as a fresh factorise).
-
-### Python helpers
-
-Drop-in replacements for the legacy sweep / MC APIs:
-
-```python
-import pulsim as p
-p.sweep_path_aware(builder, params={...}, kpi_fn=..., t_end=..., dt=...)
-p.monte_carlo_path_aware(builder, distributions={...}, n_samples=..., ...)
-```
-
-Auto-fallback to the legacy code path when a parameter name isn't
-recognised (warns + delegates) — drop-in safe.
+* **`engine='auto'` is the default, and it routes.** Pass `dt` and you
+  get the fixed-step `pwl` engine exactly as before; omit it and the
+  engine picks, taking the variable-step TR-BDF2 path whenever the
+  circuit qualifies. `result.engine_used` / `result.engine_route_reason`
+  say what ran and why.
+* **Device semantics changed.** `add_mosfet` / `add_mosfet_level1` add
+  the intrinsic body diode `<name>_body` by default (`body_diode=False`
+  / `with_body_diode=False` to opt out), so each MOSFET takes two
+  switch bits — address them with `builder.switch_index_of(name)`. An
+  IGBT can no longer conduct in reverse, and `add_three_phase_vsi`
+  ships its freewheel diodes by default.
+* **Refusals instead of guesses.** A part file without provenance, a
+  PLECS file whose losses are a formula, a SPICE `.MODEL` the mapping
+  cannot honour, a snapshot whose device histories do not match the
+  circuit, and `steady_state` on a circuit whose one-period map is not
+  affine are all refused by name. The parts shipped in `pulsim.lib` are
+  synthetic illustrations and do not resolve by part number unless
+  `allow_synthetic=True`.
+* **Known engine defects are documented, not hidden.** Four are pinned
+  by strict xfails that name the mechanism (see the changelog).
 
 ---
 
@@ -338,11 +361,11 @@ them is on the roadmap.
 | Version | Highlight | Status |
 |---|---|---|
 | **v1.3.0** | In-house real sparse LU (KLU removed) | ✅ shipped |
-| **v1.4.0** | Complex sparse LU + multi-bit + parametric refactor + Python helpers | ✅ shipped (this release) |
-| v1.5.0 | Reachability-based sparse triangular solve (close the n ≥ 64 Eigen gap on AC sweep) | planned |
-| v1.6.0 | AC-sweep symbolic-reuse: amortise `analyze` across all frequencies | planned |
-| v1.7.0 | BTF block-triangular ordering — composes with path-union for an extra ~2× on wide multi-bit transitions | planned |
-| v2.0.0 | TBD — first breaking Python API change since v1.0.0 | TBD |
+| **v1.4.0** | Complex sparse LU + multi-bit + parametric refactor + Python helpers | ✅ shipped |
+| v1.5.0 | Reachability-based sparse triangular solve (close the n ≥ 64 Eigen gap on AC sweep) | not shipped — still open (v1.5.0 was never tagged) |
+| v1.6.0 | AC-sweep symbolic-reuse: amortise `analyze` across all frequencies | not shipped — still open (v1.6–v1.8 shipped other work, see CHANGELOG) |
+| v1.7.0 | BTF block-triangular ordering — composes with path-union for an extra ~2× on wide multi-bit transitions | not shipped — still open (v1.6–v1.8 shipped other work, see CHANGELOG) |
+| **v2.0.0** | Breaking: `engine='auto'` routing, devices that refuse instead of guessing — see [What's new in v2.0](#whats-new-in-v20) | ✅ released 2026-09-08 |
 
 ---
 
@@ -354,7 +377,7 @@ If you use Pulsim in academic work, please cite:
 @software{pulsim,
   author  = {Gili, Luiz Carlos},
   title   = {Pulsim: A piecewise-linear state-space simulator for switched-mode power electronics},
-  version = {1.4.0},
+  version = {2.0.0},
   url     = {https://github.com/lgili/Pulsim},
   year    = {2026},
 }

@@ -360,10 +360,15 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     // The point of BDF1 is robustness on stiff problems, not raw
     // throughput.
 
-    // Sample 0.
+    // Sample 0. BDF1 has no diode event iteration (it sees only
+    // linear circuits), so the stamped mask is switch_fn's.
+    result.begin_switch_state_record(
+        static_cast<Size>(graph.num_switches()),
+        opts.expected_sample_count());
     result.times.push_back(opts.t_start);
     result.states.push_back(x);
     result.event_iteration_count.push_back(0);
+    result.record_switch_state(switch_fn(opts.t_start));
 
     if (step_observer) {
         step_observer(opts.t_start, x);
@@ -420,6 +425,7 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
             result.times.push_back(t);
             result.states.push_back(x);
             result.event_iteration_count.push_back(0);
+            result.record_switch_state(mask);
         }
     }
     return result;

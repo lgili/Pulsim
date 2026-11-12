@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 
 import pulsim as p
 
@@ -67,14 +66,15 @@ def main() -> None:
                      progress=True)
     print(f"  samples: {res.num_steps()}")
 
-    v_gate  = res.v("gate")
-    v_drain = res.v("drain")
-
-    # Steady-state stats over the last 50% of samples.
-    k_skip = len(v_drain) // 2
-    v_drain_dc  = v_drain[k_skip:].mean()
-    v_drain_pp  = np.ptp(v_drain[k_skip:])
-    v_gate_pp   = np.ptp(v_gate[k_skip:])
+    # Steady-state stats over the last 50 % of the run.
+    # Time-weighted (p.steady_state_stats): correct on any grid, including
+    # the variable-step one simulate() uses when no dt is given -- a plain
+    # mean over the samples is not.
+    half = 0.5 * (t_end - t_start)
+    ss_drain    = p.steady_state_stats(res, "drain", last=half)
+    v_drain_dc  = ss_drain.mean
+    v_drain_pp  = ss_drain.ripple_pp
+    v_gate_pp   = p.steady_state_stats(res, "gate", last=half).ripple_pp
     av = -v_drain_pp / v_gate_pp if v_gate_pp > 1e-9 else float("nan")
 
     print(f"  V_drain DC ≈ {v_drain_dc:.3f} V (target 4.55)")

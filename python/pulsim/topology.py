@@ -131,18 +131,7 @@ def add_bridge_rectifier(builder,
 
     Topology
     --------
-    ::
-
-                   ┌─ D1 ─┐         ┌─ D4 ──┐
-            ac_a ──┤       ├── dc_pos       │
-                   └─ D3 ─┘         │       │
-                                    │       │
-                   ┌─ D2 ─┐         │       │
-            ac_b ──┤       ├──┘   D3 ↑    D4 ↑
-                   └─ D4 ─┘
-                                  dc_neg ──┘
-
-    Concretely:
+    Each diode is listed anode → cathode:
       * D1: ac_a → dc_pos (forward when ac_a is the high-side)
       * D2: ac_b → dc_pos
       * D3: dc_neg → ac_b  (return path)
@@ -165,14 +154,29 @@ def add_bridge_rectifier(builder,
     g_off
         Reverse leakage conductance (S). Default 1e-9.
     V_th
-        Forward voltage threshold (V). Default 0.7.
+        Turn-on (commutation) threshold (V). Default 0.7.
+
+        This is NOT a forward voltage drop. The PWL ``SwitchedDiode``
+        is a pure conductance in both states: OFF -> ON when
+        ``v_D >= V_th``, ON -> OFF when its current reverses, and while
+        ON it drops only ``i / g_on`` (48 A at ``g_on = 1e3`` is 48 mV,
+        for ``V_th = 0`` and ``0.7`` alike). ``V_th`` therefore adds no
+        conduction loss, and because the diode's voltage collapses
+        from ``V_th`` to ``i / g_on`` the instant it turns on, a
+        non-zero ``V_th`` in a low-impedance loop (a capacitor-input
+        bridge) injects a turn-on current spike of roughly
+        ``V_th / R_loop`` that the ``V_th = 0`` circuit does not have.
+        For datasheet conduction loss use
+        ``device_loss_summary(..., conduction_specs={name: {"V_f0": ...,
+        "r_on": ...}})``, which applies ``V_f0·|i| + r_on·i²`` to the
+        simulated current.
 
     Returns
     -------
     BridgeRectifierResult
-        Holds the four diode branch IDs (useful for probing per-diode
-        current with :meth:`pool.branch_var_id_for_inductor`-style
-        lookups via the kernel's branch-current accessors).
+        ``diode_names`` (``f"{name}__D1"`` ... ``__D4"``) and
+        ``diode_branch_ids``. Read each diode's current with
+        ``result.i(n) for n in diode_names``.
     """
     out = BridgeRectifierResult()
     # We compute the four branch IDs by reading the graph BEFORE and
@@ -245,7 +249,22 @@ def add_three_phase_vsi(builder,
     ``test_newton_stall_and_mask_chatter.py`` — so a bridge feeding a
     Newton-stamped machine may want smooth junctions instead.
 
-    The helper builds no PWM and no dead-time. Wire control via
+    The helper builds no PWM and no dead-time. For open-loop SPWM with a
+    dead time, one call drives all six switches::
+
+        legs = p.ThreePhaseLegIndices(*result.switch_indices)
+        sw_fn = p.make_three_phase_spwm_fn(f_carrier, f_1, m, legs,
+                                           builder.graph.num_switches,
+                                           dead_time)
+
+    The switches are bidirectional: a gated-on switch carries most of
+    the freewheel current. A PWL diode turns off only when its current
+    reverses, so after the dead time the antiparallel diode stays on in
+    parallel with its switch and carries ``R_on / (R_on + R_d)`` of
+    that current (2 % at the defaults) until the opposite switch turns
+    on. With no dead time the diodes never conduct. Read the split
+    with ``res.i(f"{name}__HSa")`` and ``res.i(f"{name}__Dha")``.
+    For closed-loop control, wire the gates via
     :class:`MixedDomainBlockChain` and one of:
 
       * :meth:`chain.make_multi_pwm_switch_fn(["ga","gb","gc"],
@@ -271,8 +290,15 @@ def add_three_phase_vsi(builder,
     with_freewheel_diodes
         Add the six antiparallel diodes. Default True.
     V_f, R_d
-        Forward drop (V) and series resistance (Ω) of those diodes.
-        Defaults 0.7 V / 50 mΩ.
+        ``V_f`` is passed to each diode as its ``V_th`` — a turn-on
+        (commutation) THRESHOLD, not a forward voltage drop: the PWL
+        diode is a pure conductance ``1 / R_d`` while ON, so it drops
+        ``R_d · i`` and ``V_f`` adds no conduction loss (see
+        :func:`add_bridge_rectifier`'s ``V_th``). For a datasheet
+        ``V_f0 + r_d · I`` conduction loss use
+        ``device_loss_summary(..., conduction_specs={diode_name:
+        {"V_f0": ..., "r_on": ...}})``. ``R_d`` is the diode's ON
+        resistance (Ω). Defaults 0.7 V / 50 mΩ.
 
     Returns
     -------
@@ -547,7 +573,9 @@ def add_buck(builder,
         High-side switch on/off conductances. Default 1 kS / 1 nS
         (R_on = 1 mΩ, R_off = 1 GΩ).
     diode_g_on, diode_g_off, V_th
-        Diode parameters. Default 1 kS / 1 µS / 0 V.
+        Diode on/off conductances and commutation threshold. Default
+        1 kS / 1 µS / 0 V. ``V_th`` is the turn-on threshold, NOT a
+        forward drop: the on-state is ``diode_g_on`` alone.
 
     Returns
     -------
@@ -625,6 +653,13 @@ def add_boost(builder,
     inductor node: `{name}__sw`.
 
     Same docstring + same caller contract as :func:`add_buck`.
+
+    Parameters
+    ----------
+    V_th
+        Commutation threshold of the output diode, NOT a forward drop:
+        the on-state is ``diode_g_on`` alone. Other parameters as in
+        :func:`add_buck`.
     """
     if V_in <= 0:
         raise ValueError("add_boost: V_in must be > 0")
@@ -699,6 +734,12 @@ def add_flyback(builder,
     `{name}__LS`, `{name}__D`, `{name}__C`, `{name}__R`.
     Intermediate nodes: `{name}__sw` (primary-switch midpoint),
     `{name}__sec` (secondary-winding midpoint).
+
+    Parameters
+    ----------
+    V_th
+        Commutation threshold of the output diode, NOT a forward drop:
+        the on-state is ``diode_g_on`` alone.
     """
     if V_in <= 0:
         raise ValueError("add_flyback: V_in must be > 0")

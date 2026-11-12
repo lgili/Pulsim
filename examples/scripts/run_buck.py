@@ -76,13 +76,15 @@ def main() -> None:
     print(f"  samples: {res.num_steps()}")
 
     times = np.asarray(res.times) * 1e3   # ms
-    v_out = res.v("vout")
     v_sw  = res.v("sw")
 
-    # Steady-state stats over the last 10 % of samples.
-    k_skip = int(0.9 * res.num_steps())
-    v_mean   = v_out[k_skip:].mean()
-    v_ripple = float(np.ptp(v_out[k_skip:]))
+    # Steady-state stats over the last 10 % of the run.
+    # Time-weighted (p.steady_state_stats): correct on any grid, including
+    # the variable-step one simulate() uses when no dt is given -- a plain
+    # mean over the samples is not.
+    ss = p.steady_state_stats(res, "vout", last=0.1 * (t_end - t_start))
+    v_mean   = ss.mean
+    v_ripple = ss.ripple_pp
     v_target = 24.0 * DUTY
     print(f"  V_out DC ≈ {v_mean:.3f} V (target {v_target:.1f}, "
           f"ripple {v_ripple*1000:.1f} mV pp)")

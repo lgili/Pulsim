@@ -35,8 +35,10 @@ opts.enable_nonlinear_refresh = True
 
 # Newton solver tolerances + iteration cap.
 opts.max_newton_iterations = 50
-opts.tol_newton_dx  = 1e-9       # |Δx|∞ termination
-opts.tol_newton_res = 1e-9       # |F(x)|∞ termination
+opts.tol_newton_dx  = 1e-9       # |Δx|∞ termination (absolute)
+opts.tol_newton_res = 1e-9       # |F(x)|∞ termination (absolute)
+# Not a speed knob, and not a way past a Newton abort: loosening them
+# has produced silently wrong operating points (docs/gotchas.md (e)).
 
 # Globalization strategies (off by default; turn on for stiff
 # converters that diverge from a cold start).

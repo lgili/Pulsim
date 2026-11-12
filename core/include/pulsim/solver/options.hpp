@@ -80,10 +80,15 @@ struct SimulationOptions {
     Size max_newton_iterations = Size{50};
 
     /// Newton convergence tolerance on ||dx||_inf. Default 1e-9.
+    /// ABSOLUTE on purpose: an absolute step test is what keeps
+    /// Newton off a spurious root (a scale-aware one let the DC
+    /// cascade stop 10.67 V from the right answer). Do not loosen it
+    /// to get past a Newton abort — that has produced silently wrong
+    /// operating points (a flyback at 3.53 V instead of 15.31 V).
     Real tol_newton_dx = Real{1e-9};
 
     /// Newton convergence tolerance on ||residual||_inf.
-    /// Default 1e-9.
+    /// Default 1e-9. Absolute; same caveat as tol_newton_dx.
     Real tol_newton_res = Real{1e-9};
 
     /// Enable backtracking line search inside Newton

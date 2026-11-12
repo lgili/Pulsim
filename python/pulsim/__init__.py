@@ -190,6 +190,7 @@ from .periodic import (
     PeriodicShootingResult,
     run_periodic_shooting,
 )
+from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -446,7 +447,25 @@ try:
 except ImportError:  # pragma: no cover
     _HAS_SCOPE = False
 
+# Importing the ``pulsim.scope`` submodule (above) makes the import
+# system bind the *module* to the package attribute ``scope``, which
+# silently replaced the ``pulsim.scope(builder, result, ...)`` plotting
+# function imported from ``.plot`` -- ``p.scope(...)`` then raised
+# ``TypeError: 'module' object is not callable``. Rebind the function.
+# The submodule stays importable: it is cached in ``sys.modules``, so
+# ``import pulsim.scope`` and ``from pulsim.scope import LiveScope`` keep
+# working and do not re-bind the attribute. (``import pulsim.scope as m``
+# resolves the attribute first and therefore yields the function; use
+# ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
+from .plot import scope  # noqa: E402,F811
+
+# The usage guide (AI_GUIDE.md). Only the accessor is imported here, never
+# the ``pulsim.guide`` CLI module: importing it eagerly would make
+# ``python -m pulsim.guide`` warn that the module is already loaded.
+from ._ai_guide import ai_guide  # noqa: E402
+
 __all__ = [
+    "ai_guide",
     "CircuitBuilder",
     "Graph",
     "DevicePool",
@@ -561,6 +580,12 @@ __all__ = [
     # guide since v1.5; exported as of Phase 0).
     "PeriodicShootingResult",
     "run_periodic_shooting",
+    # Time-weighted statistics (correct on variable-step grids).
+    "TimeStats",
+    "time_window",
+    "time_average",
+    "time_rms",
+    "steady_state_stats",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -763,11 +788,14 @@ def _result_v(self, name: str, t=None):
     ----------
     name : str
         Node name passed to ``CircuitBuilder.add_*`` (or a
-        registered alias when alias support is enabled).
+        registered alias when alias support is enabled). A ground
+        name (``"gnd"``, ``"GND"``, ``"0"``) returns zeros.
     t : int | slice | array-like, optional
-        Step selection. ``None`` (default) returns the full
-        per-sample trace as a ``numpy.ndarray``. An ``int``
-        returns a scalar ``float``.
+        SAMPLE selection (an index into ``times``, not a time).
+        ``None`` (default) returns the full per-sample trace as a
+        ``numpy.ndarray``. An ``int`` returns a scalar ``float``.
+        For the value at a time use
+        ``np.interp(t, res.times, res.v(name))``.
     """
     import numpy as _np
     builder = getattr(self, "_builder", None)
@@ -804,6 +832,12 @@ def _result_v(self, name: str, t=None):
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "node", sugg) from None
     states = _np.asarray(self.states)
+    if idx < 0:
+        # Ground ("gnd", "GND", "0") is the reference, not a state:
+        # node_id_of returns -1 for it, and states[:, -1] is the LAST
+        # state column (a branch current), which this used to return.
+        col = _np.zeros(states.shape[0], dtype=float)
+        return col if t is None else col[t]
     # `states` is a READ-ONLY zero-copy view over the kernel buffer
     # (v2.0). A per-signal trace is small (one column), and v1.x
     # handed back a writable owned array here — so copy the column
@@ -840,12 +874,15 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
-    | ``diode`` (PWL switched)   | ``(V_from − V_to − V_th)·G`` where      |
-    |                            | ``G = g_on`` when forward-biased,       |
-    |                            | ``g_off`` otherwise                     |
+    | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
+    |                            | on samples the solver stamped the diode |
+    |                            | ON, ``g_off`` otherwise (the kernel's   |
+    |                            | per-sample ``switch_states`` record;    |
+    |                            | NOT ``v_D > V_th`` — V_th is a          |
+    |                            | commutation threshold, not a drop)      |
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
-    |                            | ``G = g_on`` when ``switch_fn`` mask    |
-    |                            | bit is set, ``g_off`` otherwise         |
+    |                            | ``G = g_on`` when the recorded stamped  |
+    |                            | mask bit is set, ``g_off`` otherwise    |
     +----------------------------+-----------------------------------------+
 
     Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -854,11 +891,23 @@ def _result_i(self, name: str, t=None):
     ``node_id < 0`` as ``V = 0`` instead of Python's
     negative-indexing into ``states``.
 
-    Switch-fn requirement. Switch-branch reconstruction needs the
-    per-step mask schedule. ``pulsim.simulate(...)`` auto-stashes the
-    composed ``switch_fn`` on ``result._switch_fn``; if you're
-    operating on a result built another way, set ``result._switch_fn
-    = your_switch_fn`` before calling ``.i()``.
+    Switch / diode state. Every engine records, per stored sample,
+    the mask it STAMPED for the solve that produced it
+    (``result.switch_states``); switch and diode currents read that,
+    with no ``switch_fn`` call. Row 0 of a run seeded with
+    ``initial_state`` (including the state ``c0=`` / ``i0=`` build) is
+    not a solve in this run (``switch_states_unsolved``): its state
+    came from a solve whose mask this run does not know, so a switch
+    or diode current there is undefined. Reading it with any guessed
+    mask can invent a ``g_on·V`` current (48 kA through a buck's
+    MOSFET seeded on a gate edge), so that row returns the value of
+    the FIRST SOLVED sample after it instead: a real current, one step
+    late, never a phantom. (NaN would be more literal, but every
+    ``i0=`` / ``c0=`` run has such a row, and plots and sums of
+    ``result.i()`` would break.) The loss and thermal summaries do not
+    use the row at all. Only a result built another way (no record) needs
+    ``result._switch_fn = your_switch_fn`` for a switch, and then the
+    switch_fn is re-evaluated with a warning.
 
     Not yet supported (deferred to future PRs because their device
     params aren't exposed by ``builder.components()`` today):
@@ -970,6 +1019,21 @@ def _result_i(self, name: str, t=None):
     def _finalize(col):
         return col if t is None else col[t]
 
+    def _hold_unsolved(col):
+        # A switched branch has no defined current on an unsolved row
+        # (switch_states_unsolved): it reads the next solved sample's
+        # value (NaN if there is none). See the docstring.
+        from ._result_views import recorded_unsolved as _uns
+        u = _uns(self, int(col.shape[0]))
+        if not u.any():
+            return col
+        col = _np.array(col, dtype=float, copy=True)
+        solved = _np.nonzero(~u)[0]
+        for k in _np.nonzero(u)[0].tolist():
+            j = _np.searchsorted(solved, k)
+            col[k] = col[solved[j]] if j < solved.size else _np.nan
+        return col
+
     # ----------------------- resistor --------------------------------
     if kind == "resistor":
         try:
@@ -1020,27 +1084,23 @@ def _result_i(self, name: str, t=None):
 
     # ----------------------- diode -----------------------------------
     if kind == "diode":
-        # PWL switched diode: closed when v_D > V_th. Use g_on while
-        # forward-biased, g_off while reverse-biased. Mirrors the
-        # convention from `pulsim.losses._conduction_stats(diode)`.
+        # PWL switched diode: a pure conductance in each state (the
+        # ON drop is i/g_on — there is NO V_th offset in the stamp;
+        # V_th only gates OFF→ON). The per-sample state is the
+        # kernel's record of the stamped mask, read through the one
+        # helper shared with device_loss_summary and
+        # device_thermal_summary (`pulsim._diode_state`).
         try:
-            g_on = float(params["g_on"])
-            g_off = float(params["g_off"])
-            V_th = float(params.get("V_th", 0.0))
+            float(params["g_on"])
+            float(params["g_off"])
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"result.i({name!r}): diode params missing "
-                f"`g_on`/`g_off`/`V_th` ({exc!r})") from None
-        v_D = _v_branch()
-        closed = v_D > V_th
-        G_arr = _np.where(closed, g_on, g_off)
-        # The diode stamp models the on-state as a conductance to a
-        # virtual V_th supply: i_D = G·(v_D − V_th) when closed,
-        # i_D = G·v_D when open (g_off is leakage with no threshold).
-        col = _np.where(closed,
-                          G_arr * (v_D - V_th),
-                          G_arr * v_D)
-        return _finalize(col)
+                f"`g_on`/`g_off` ({exc!r})") from None
+        _need_nodes()
+        from ._diode_state import diode_state_trace as _diode_trace
+        tr = _diode_trace(builder, self, b_id, stacklevel=3)
+        return _finalize(_hold_unsolved(tr.current))
 
     # ----------------------- switch ----------------------------------
     if kind == "switch":
@@ -1052,15 +1112,6 @@ def _result_i(self, name: str, t=None):
                 f"result.i({name!r}): switch params missing "
                 f"`g_on`/`g_off` ({exc!r})") from None
         sf = getattr(self, "_switch_fn", None)
-        if sf is None:
-            raise NotImplementedError(
-                f"result.i({name!r}): switch current reconstruction "
-                f"requires the original `switch_fn` to be available on "
-                f"the result. `pulsim.simulate(...)` auto-stashes it "
-                f"on `result._switch_fn`; if you built this result "
-                f"another way, set "
-                f"`result._switch_fn = your_switch_fn` before calling "
-                f"`.i()`.")
         try:
             seq_idx = int(builder.switch_index_of(name))
         except Exception as exc:  # noqa: BLE001 — usage error
@@ -1068,15 +1119,25 @@ def _result_i(self, name: str, t=None):
                 f"result.i({name!r}): switch_index_of failed "
                 f"({exc!r}); make sure {name!r} is a switch added "
                 f"via `builder.add_switch`.") from None
+        from ._result_views import recorded_switch_states as _rec_sw
+        if sf is None and _rec_sw(self, builder)[0] is None:
+            raise NotImplementedError(
+                f"result.i({name!r}): this result carries no record of "
+                f"the stamped switch mask, and switch current "
+                f"reconstruction then needs the original `switch_fn`. "
+                f"`pulsim.simulate(...)` records the mask on every "
+                f"engine; if you built this result another way, set "
+                f"`result._switch_fn = your_switch_fn` before calling "
+                f"`.i()`.")
         times_arr = _ta(self)
         v_sw = _v_branch()
-        # Prefer the recorded mask; else re-evaluate switch_fn with a
-        # voltage-consistency guard (robust to the closed-loop post-hoc
-        # mask desync — see _result_views.resolve_switch_closed_trace).
+        # The kernel's record of the stamped mask; without one, a
+        # recorder, else switch_fn re-evaluated under a
+        # voltage-consistency guard (_result_views).
         closed = _resolve_switch_closed(
             self, sf, times_arr, seq_idx, v_sw, name=name)
         G_arr = _np.where(closed, g_on, g_off)
-        return _finalize(v_sw * G_arr)
+        return _finalize(_hold_unsolved(v_sw * G_arr))
 
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(
@@ -1342,6 +1403,16 @@ class SolverOptions:
 
     When both are given, the flat kwargs override the corresponding
     fields on `solver`.
+
+    ``tol_newton_dx`` / ``tol_newton_res`` are ABSOLUTE (engine
+    default 1e-9) on purpose — an absolute step test is what keeps
+    Newton off a spurious root. Do not loosen them to get past a
+    Newton abort: on the snubbed flyback of
+    ``test_saturable_transformer.py`` that turned a TR-BDF2 abort into
+    a run reporting 3.53 V where ``engine='pwl'`` gives 15.31 V.
+    Cross-check on the other engine instead (``engine='pwl'`` with an
+    explicit ``dt`` after a TR-BDF2 abort); on the fixed engine a
+    smaller ``dt`` is not the remedy (``docs/gotchas.md`` (e)).
     """
     # Newton / nonlinear refresh ------------------------------------
     enable_nonlinear_refresh: Optional[bool] = None
@@ -1524,9 +1595,37 @@ def simulate(
     Decision tree, short version:
 
     * **"Não sei qual escolher"** → pass nothing. That is what
-      ``auto`` is for.
+      ``auto`` is for — but read the next section before you
+      average anything.
     * **"Preciso do grid fixo / reprodutibilidade bit-exata"** →
       pass ``dt``.
+
+    **Statistics over the result.** Without ``dt`` (and always on
+    ``engine='trbdf2'`` / ``'dsed'``) the samples are NOT evenly spaced: the step controller packs them
+    around switching edges and diode events — down to femtosecond
+    steps after a turn-off — and stretches them across quiet
+    intervals. ``result.times`` is that variable grid, so plain sample
+    statistics weight each SAMPLE equally instead of each second:
+
+    * ``v[t > t0].mean()`` is wrong. On an L–D–RC rectifier whose
+      output averages 6.33 V it reads 3.04 V on ``engine='trbdf2'``
+      and 5.01 V with the defaults.
+    * ``np.sqrt((v**2).mean())`` is wrong for the same reason.
+    * ``v.max()`` / ``v.min()`` need no weighting, but they include
+      every event-landing sample, sub-nanosecond excursions too.
+    * Slicing by sample index (``v[int(0.7 * len(v)):]``) does not
+      select the last 30 % of the TIME.
+
+    Use the time-weighted helpers instead, which are exact for the
+    piecewise-linear waveform through the samples on any grid::
+
+        s = pulsim.steady_state_stats(result, "out", last=10 / f_sw)
+        s.mean, s.rms, s.ripple_pp
+        pulsim.time_average(result.times, result.v("out"), t_from=2e-3)
+
+    With an explicit ``dt`` the grid is uniform and ``.mean()`` agrees
+    with them to ~4 significant digits; the helpers are still the
+    form that survives dropping the ``dt``.
 
     Examples
     --------
@@ -1560,10 +1659,14 @@ def simulate(
     t_end
         End time, in seconds.
     dt
-        Fixed time step (engine='pwl', required) OR upper-bound
-        ``dt_max`` (engine='dsed', optional — defaults to 10 µs).
+        ``engine='auto'``: given → fixed step of exactly ``dt``;
+        omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
+        or a ``ValueError`` naming what keeps the circuit off it. ``engine='pwl'``: the fixed step, required.
+        ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
+        defaults to 10 µs); the grid is variable either way.
     engine
-        ``'pwl'`` (default, fixed-step) or ``'dsed'`` (variable-step).
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
+        see above.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
@@ -1596,11 +1699,21 @@ def simulate(
         ``None`` (default) means auto-detect.
     max_newton_iterations, max_event_iterations
         PWL-only: forwarded to :class:`SimulationOptions`.
+    tol_newton_dx, tol_newton_res
+        ABSOLUTE Newton tolerances on ``||dx||_inf`` and
+        ``||residual||_inf``; ``None`` keeps the engine default
+        (1e-9). Do not loosen them to get past a Newton abort — that
+        has produced silently wrong operating points (see
+        :class:`SolverOptions`). Cross-check on the other engine
+        instead (``engine='pwl'`` with an explicit ``dt`` after a
+        TR-BDF2 abort).
 
     Returns
     -------
     SimulationResult
-        The full per-sample state-vector history.
+        The full per-sample state-vector history, on a uniform grid
+        when ``dt`` was given and a variable one otherwise (see
+        *Statistics over the result* above).
 
     Raises
     ------
@@ -2165,18 +2278,19 @@ def simulate(
             warnings.warn(
                 f"simulate(engine='auto'): a diode rode its "
                 f"conduction boundary on "
-                f"{_stats['n_chatter_breaks']} step(s) — the "
-                "signature of an un-hysteresed ideal diode "
-                "(V_th=0) in DCM, which is a SLIDING-MODE model: "
-                "the reference engine chatters ~600 flips per "
-                "period on it. This engine AVERAGES the slide; at "
-                "the default rtol the average is correct (checked "
-                "at 0.1 mV on the flyback), but tightening rtol "
-                "partially resolves the slide and can BIAS the "
-                "mean by ~0.5%. Give the diode its physical V_th "
-                "(that IS the hysteresis band) for "
-                "tolerance-proportional convergence, or use "
-                "engine='pwl'.",
+                f"{_stats['n_chatter_breaks']} step(s): its "
+                "current sat at zero while the engine decided its "
+                "state (a SLIDING-MODE model; the usual cause is an "
+                "ideal V_th=0 diode at a zero-current commutation, "
+                "e.g. in DCM). This engine AVERAGES the slide. That "
+                "average was correct to 0.1 mV on a flyback at the "
+                "default rtol, but a tightened rtol can bias it by "
+                "~0.5 %, and a V_th=0 bridge behind a source "
+                "resistance ran HALF-WAVE (reading res.i of its "
+                "diodes then warns of the missed commutation). "
+                "Cross-check with a dt (engine='pwl'), or give the "
+                "diode its physical V_th (that IS the hysteresis "
+                "band).",
                 stacklevel=2)
         return res
 
@@ -3174,8 +3288,9 @@ def __getattr__(name: str):
             f"pulsim.{name} was a v1 symbol and is no longer "
             f"available (pulsim 1.0.0 retired the legacy kernel). "
             f"Migration hint: {hint}. See "
-            f"docs/migration-guide.md for the full mapping.")
+            f"docs/migration-guide.md for the full mapping, and run "
+            f"`python -m pulsim.guide` for the current API.")
     raise AttributeError(
         f"module 'pulsim' has no attribute {name!r}. "
-        f"pulsim 1.0.0 ships only the modern surface — "
-        f"see docs/migration-guide.md if you're porting v1 code.")
+        f"Run `python -m pulsim.guide` for the current API, and see "
+        f"docs/migration-guide.md if you're porting v1 code.")

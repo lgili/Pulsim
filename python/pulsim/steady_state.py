@@ -118,6 +118,9 @@ def _snapshot_like(base, history):
     s.x = np.asarray(base.x).copy()
     s.history = [float(v) for v in history]
     s.diode_on = list(base.diode_on)
+    # The mask x was stamped under (x is base's, unchanged), so the
+    # resumed record's row 0 stays a solved row.
+    s.stamped_mask = list(getattr(base, "stamped_mask", ()))
     for attr, _w, _n in _STATEFUL_FIELDS:
         setattr(s, attr, [float(v) for v in getattr(base, attr, ())])
     s.valid = True

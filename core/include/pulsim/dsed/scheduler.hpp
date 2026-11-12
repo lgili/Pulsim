@@ -93,12 +93,46 @@ struct PEDResult {
     // reduced states through the per-mask recovery map — including
     // solver-owned diode bits no timeline replay could recover.
     std::vector<MaskT> sample_masks;
+    // The STAMPED-MASK record (the convention every kernel engine's
+    // SimulationResult::switch_state_bits uses): step_masks[k] is the
+    // mask in force over the integration step that ENDED at sample
+    // k, i.e. over (t[k-1], t[k]]. It differs from sample_masks[k]
+    // only at a sample where an event fired, because sample_masks
+    // holds the POST-event mask integration continues in. Row 0 is
+    // the start mask. Weighting step_masks right-hold books every
+    // step to the mode that was actually integrated over it.
+    std::vector<MaskT> step_masks;
+    // Sparse companion: at a sample where an event fired, the state
+    // at the end of the step BEFORE fire_event_ projected it
+    // (pre_event_states[j] belongs to sample pre_event_index[j]).
+    // That is the left limit, the state step_masks[k] produced.
+    std::vector<std::size_t> pre_event_index;
+    std::vector<Vector> pre_event_states;
     std::vector<EventRecord<MaskT>> event_log;
     std::size_t n_accept = 0;
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
     Real cpu_time_seconds = Real{0};
 };
+
+/// Append one sample to a PED result, with both mask conventions.
+/// `step_mask` is the mask the step that produced the sample was
+/// integrated under; `x_pre` (nullable) is that step's end state when
+/// an event at this instant has since modified x.
+template <class ResultT, class MaskT>
+inline void ped_push_sample(ResultT& result, Real t, const Vector& x,
+                            const MaskT& post_mask,
+                            const MaskT& step_mask,
+                            const Vector* x_pre) {
+    result.times.push_back(t);
+    result.states.push_back(x);
+    result.sample_masks.push_back(post_mask);
+    result.step_masks.push_back(step_mask);
+    if (x_pre != nullptr) {
+        result.pre_event_index.push_back(result.times.size() - 1);
+        result.pre_event_states.push_back(*x_pre);
+    }
+}
 
 /// v2.0 Phase 3 — diode commutation support.
 ///
@@ -241,10 +275,15 @@ public:
 
         RK45State rk_state;
         PEDResult<MaskT> result;
-        result.times.push_back(t);
-        result.states.push_back(x);
-        result.sample_masks.push_back(system_.current_mask());
+        ped_push_sample(result, t, x, system_.current_mask(),
+                        system_.current_mask(), nullptr);
         std::size_t step_idx = 0;
+        // Stamped-mask bookkeeping for the step being taken (see
+        // PEDResult::step_masks). Captured after the zero-length
+        // gate-edge branch, which fires without storing a sample.
+        MaskT step_mask = system_.current_mask();
+        bool step_fired = false;
+        Vector x_pre_event;
 
         constexpr std::size_t kMaxSteps = 10'000'000;
 
@@ -273,6 +312,8 @@ public:
                 }
                 continue;
             }
+            step_mask = system_.current_mask();
+            step_fired = false;
 
             // 2b. v2.0 Phase 3 item 2 — EXACT segment stepping.
             //
@@ -304,6 +345,8 @@ public:
                         && evt->t_event < t + h_ex - Real{1e-15}) {
                         t = evt->t_event;
                         x = std::move(evt->x_at_event);
+                        x_pre_event = x;
+                        step_fired = true;
                         fire_event_(t, evt->name, evt->type, x,
                                      rk_state, result,
                                      evt->aux_index);
@@ -311,6 +354,8 @@ public:
                         t += h_ex;
                         x = std::move(x_new);
                         if (t_gate < t_end && near_time(t, t_gate)) {
+                            x_pre_event = x;
+                            step_fired = true;
                             fire_event_(t_gate, "gate_edge",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
@@ -320,10 +365,10 @@ public:
                     ++result.n_accept;
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
-                        result.times.push_back(t);
-                        result.states.push_back(x);
-                        result.sample_masks.push_back(
-                            system_.current_mask());
+                        ped_push_sample(result, t, x,
+                                        system_.current_mask(), step_mask,
+                                        step_fired ? &x_pre_event
+                                                   : nullptr);
                     }
                     continue;
                 }
@@ -469,6 +514,8 @@ public:
                 // Predicate fired strictly inside the step — backtrack.
                 t = *t_pred;
                 x = std::move(x_pred);
+                x_pre_event = x;
+                step_fired = true;
                 fire_event_(t, p_name, p_type, x, rk_state, result,
                              p_aux);
                 // After event: PI is reset, FSAL invalid. Pick a small h
@@ -485,6 +532,8 @@ public:
                 // 7. Did we land on a gate edge?
                 if (t_gate < t_end &&
                     near_time(t, t_gate)) {
+                    x_pre_event = x;
+                    step_fired = true;
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
                                   x, rk_state, result);
                 }
@@ -493,17 +542,17 @@ public:
             // 8. Record
             ++step_idx;
             if (step_idx % store_every_ == 0) {
-                result.times.push_back(t);
-                result.states.push_back(x);
-                result.sample_masks.push_back(system_.current_mask());
+                ped_push_sample(result, t, x, system_.current_mask(),
+                                step_mask,
+                                step_fired ? &x_pre_event : nullptr);
             }
         }
 
         // Final state
         if (result.times.back() != t) {
-            result.times.push_back(t);
-            result.states.push_back(x);
-            result.sample_masks.push_back(system_.current_mask());
+            ped_push_sample(result, t, x, system_.current_mask(),
+                            step_mask,
+                            step_fired ? &x_pre_event : nullptr);
         }
 
         const auto t1_wall = clock::now();
