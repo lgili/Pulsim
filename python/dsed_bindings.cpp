@@ -54,6 +54,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -203,10 +204,26 @@ public:
         // The scheduler sampled the mask just past its last event;
         // match it so an edge-inclusive-left switch_fn is not seen
         // as changing again at t itself.
-        const auto m0 = eval(pulsim::dsed::advance_past(t));
+        // The window end is probed where the scheduler samples after
+        // landing, advance_past(hi): landing there next (the usual
+        // case), that probe IS m0, one Python call per window less.
+        // (Probing AT hi instead broke the common `(t % T) < D * T`
+        // switch_fn, whose fmod reads the wrong side at k * T.)
+        const MaskFn m0 = (last_ && t == last_hi_)
+            ? *last_ : eval(pulsim::dsed::advance_past(t));
         Real lo = t;
         Real hi = t + poll_;
-        if (!(eval(hi) == m0)) {
+        last_hi_ = hi;
+        last_ = eval(pulsim::dsed::advance_past(hi));
+        // No change in the window: the plain poll boundary, uncached,
+        // exactly as before the search existed (a constant switch_fn,
+        // e.g. the default all-closed mask, keeps its step grid).
+        if (*last_ == m0) return hi;
+        // An edge ON the poll boundary (a PWM whose edges sit on the
+        // poll grid) costs one evaluation instead of ~50: the search
+        // made the 100 kHz buck of test_dsed_without_scipy 3.5x
+        // slower (19 -> 68 ms) without it.
+        if (!(eval(hi - pulsim::dsed::time_margin(hi)) == m0)) {
             for (int it = 0; it < 200; ++it) {
                 if (hi - lo <= pulsim::dsed::time_margin(hi)) break;
                 const Real mid = lo + Real{0.5} * (hi - lo);
@@ -226,6 +243,8 @@ public:
 
 private:
     Real poll_ = Real{0};
+    mutable std::optional<MaskFn> last_;
+    mutable Real last_hi_ = Real{0};
     mutable bool valid_ = false;
     mutable Real from_ = Real{0};
     mutable Real edge_ = Real{0};
