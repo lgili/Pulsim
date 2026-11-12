@@ -346,8 +346,13 @@ reproduced every friction item.
       (`make_pwm_switch_fn`, the dead-time pair, SPWM pair, three-phase
       SPWM, phase-shift bridge, `NativePwm2Switch`, `NativeMultiMaskPwm`,
       `PWMVoltageSource`, the PULSE source, the block-chain and
-      `pulsim.control` `PwmGenerator`) uses `pwm_phase::cycle_position`:
-      an edge within 64 ulp of a grid point takes effect at it. On-steps
+      `pulsim.control` `PwmGenerator`, and `bind_pi_to_switch` via the
+      new `pulsim.control.pwm_on`) uses `pwm_phase::cycle_position` or
+      its Python twin: an edge within 64 ulp of a grid point takes
+      effect at it (`bind_pi_to_switch` read 50/51 of 50, now 50). Not
+      changed: the internal test model `dsed::BuckDCMSwitchFn`
+      (`core/include/pulsim/dsed/buck_dcm_model.hpp`) still uses
+      `fmod(t / T, 1)`. On-steps
       now exactly D*T/dt at six (f, D, dt); the pair reads 48/48. The
       guide drops `grid_pwm`, prints `[50]`, and trap 10 reads 6.24 /
       6.00 V (was 5.84 / 5.99; ripple 12.6 mV, was 279 mV at 2e-7).
@@ -379,8 +384,11 @@ reproduced every friction item.
       `SwitchSchedule` whose edges DSED lands on, and a plain callable's
       changes are bisected inside each `dt_max / 10` poll. Synchronous
       buck (48 V, D = 0.25, 100 kHz, 100 ns dead time), default DSED:
-      11.474 V and `QL_body` conducting 76 % (was 14.28 V, 0 %), `QL`
-      7.19 mW (was 1.27 W) against `pwl` 11.490 V / 76 % / 7.20 mW.
+      `QL_body` conducting 76 % (was 0 %), `QL` 7.19 mW (was 1.27 W),
+      Vout 11.474 V (was 14.28 V) against `pwl` 11.490 V / 76 % /
+      7.20 mW. The 0.14 % is the trapezoid mean over ~4 samples per
+      period: the DSED waveform matches `pwl` pointwise (0.02 mV,
+      1.7 mA), and `dt = 1e-7` reads 11.4899 V.
 - [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
@@ -389,6 +397,15 @@ reproduced every friction item.
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints
       it many times. Emit it once per result and diode.
+- [ ] 12.10 A plain callable `switch_fn` (no `next_edge_after`) on
+      `engine='trbdf2'` steps over sub-step pulses and dead times with
+      no warning (sync buck D = 0.03, 50 ns dead time: 0.169 V, QH on
+      0.3 %, against 1.199 V / 2.5 % on `pwl`); `dsed` warns but still
+      misses a pulse inside one `dt_max / 10` poll. Warn on `trbdf2`
+      too, or refuse. Both engines call the `switch_fn` out of time
+      order (DSED probes the end of a poll window, then bisects), so a
+      stateful `switch_fn` keyed on `int(t / T)` changing runs about
+      10x too many updates; document or detect.
 
 ## 13. Review round 3
 

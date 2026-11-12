@@ -445,9 +445,9 @@ _EXAMPLES: dict[str, str] = {
 
         # switch_fn reads the latest duty.
         def switch_fn(t):
-            phase = (t / T_PWM) % 1.0   # divide first: fmod(t, T) / T flips edges
             m = p.SwitchStateMask(n_sw)
-            if phase < duty[0]:
+            # grid-exact; (t % T) / T < D jitters edges and flips periods
+            if p.control.pwm_on(t, T_PWM, duty[0]):
                 m.set(0, True)
             return m
 
@@ -468,9 +468,8 @@ _EXAMPLES: dict[str, str] = {
             omega = 2*math.pi*freq
             def sw(t):
                 duty = D_OP + eps*math.sin(omega*t)
-                phase = (t / T_PWM) % 1.0
                 m = p.SwitchStateMask(n_sw)
-                if phase < duty: m.set(0, True)
+                if p.control.pwm_on(t, T_PWM, duty): m.set(0, True)
                 return m
             return sw
 

@@ -165,9 +165,11 @@ on-steps per period: [50]
 For a half bridge, `p.make_dead_time_pwm_pair_fn` drives the high- and
 low-side bits with a dead time; for a three-phase bridge see 3.7. The
 helpers also name their edges (`pwm.next_edge_after(t)`), so the
-variable-step engines land on them. With `engine='dsed'` a plain
-callable is sampled every `dt_max / 10` and each change is bisected to
-its edge; a pulse shorter than that is missed.
+variable-step engines land on them. A plain callable has no edges:
+`trbdf2` can step over a short pulse or dead time silently (D = 0.03:
+0.17 V vs 1.20 V) and `dsed` bisects only changes it sees at its
+`dt_max / 10` polls (and warns). Use a helper or pass `dt`. Both call
+it out of time order: keep it a pure function of `t`.
 
 ### 3.3 Bridge rectifier from `pulsim.topology`
 

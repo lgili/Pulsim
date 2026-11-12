@@ -81,7 +81,28 @@ __all__ = [
     "loop_gain",
     "phase_margin_from_loop",
     "gain_margin_from_loop",
+    # Grid-exact PWM comparison for hand-written switch_fns.
+    "pwm_on",
 ]
+
+
+def pwm_on(t: float, period: float, duty: float, phase: float = 0.0) -> bool:
+    """``True`` while a carrier of ``period`` (shifted by ``phase``
+    seconds) is in the on part of a ``duty`` cycle at time ``t``.
+
+    Grid-exact, like the C++ helpers (``pwm_phase.hpp``): an edge that
+    sits within 64 ulp of a time-grid point takes effect AT that point,
+    so ``D*T/dt`` whole steps give exactly that many on-steps per
+    period. ``(t % T) / T < D`` puts the edge a step early or late at
+    random (50/51 of 50 at 100 kHz, dt = 1e-7) and inverts the phase
+    at ``k*T``.
+    """
+    x = (t - phase) / period
+    tol = 64 * 2.220446049250313e-16 * max(1.0, (abs(t) + abs(phase)) / period)
+    u = x - math.floor(x)
+    if u >= 1.0 - tol:
+        u = 0.0
+    return u < duty - tol
 
 
 # =============================================================================
@@ -693,13 +714,7 @@ class PwmGenerator:
         # edge that sits on a time-grid point takes effect AT that
         # point instead of a step early or late from the rounding of
         # t / T.
-        x = (t - self.phase) / T
-        tol = 64 * 2.220446049250313e-16 * max(
-            1.0, (abs(t) + abs(self.phase)) / T)
-        u = x - math.floor(x)
-        if u >= 1.0 - tol:
-            u = 0.0
-        self.state = 0.0 if u >= duty - tol else 1.0
+        self.state = 1.0 if pwm_on(t, T, duty, self.phase) else 0.0
         return self.state
 
 
@@ -1177,7 +1192,7 @@ class ClosedLoop:
     switch_fn
         Callable ``t -> SwitchStateMask`` that toggles the bound
         switch's bit according to the PWM phase test
-        ``(t mod T_PWM) / T_PWM < duty``.
+        ``pulsim.control.pwm_on(t, T_PWM, duty)`` (grid-exact).
     step_observer
         Callable ``(t, x)`` that throttles to one PI update per PWM
         period (``T_PWM = 1 / freq``), reads the measured signal via
@@ -1302,8 +1317,7 @@ def bind_pi_to_switch(
 
     def switch_fn(t: float):
         mask = _Mask(n_switches)
-        phase = (t % T_PWM) / T_PWM
-        if phase < duty_state[0]:
+        if pwm_on(t, T_PWM, duty_state[0]):
             mask.set(idx, True)
         return mask
 
@@ -1375,10 +1389,9 @@ def bind_pi_to_duty_callable(
 
         def switch_fn(t):
             mask = ps.SwitchStateMask(builder.num_switches)
-            phase = (t % T_PWM) / T_PWM
-            d = duty_get()
-            mask.set(builder.switch_index_of("Q_HIGH"), phase < d)
-            mask.set(builder.switch_index_of("Q_LOW"),  phase >= d)
+            on = ps.control.pwm_on(t, T_PWM, duty_get())
+            mask.set(builder.switch_index_of("Q_HIGH"), on)
+            mask.set(builder.switch_index_of("Q_LOW"),  not on)
             return mask
 
     Returns

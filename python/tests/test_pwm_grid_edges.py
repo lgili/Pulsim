@@ -95,6 +95,29 @@ def test_control_pwm_generator_is_grid_exact():
     assert n_on == {25.0}
 
 
+@pytest.mark.parametrize("f,duty,dt", GRID_CASES)
+def test_control_pwm_on_is_grid_exact(f, duty, dt):
+    from pulsim.control import pwm_on
+    n = round(1 / (f * dt))
+    per = {sum(pwm_on(k * dt, 1 / f, duty) for k in range(j * n, (j + 1) * n))
+           for j in range(200)}
+    assert per == {round(duty * n)}
+
+
+def test_bind_pi_to_switch_is_grid_exact():
+    """The closed-loop switch_fn used `(t % T) / T`: 50 or 51 on-steps
+    of 50 at 100 kHz, dt = 1e-7."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 10.0)
+    b.add_switch("S", "a", "b", 1e3, 1e-9)
+    b.add_resistor("R", "b", "gnd", 10.0)
+    pi = p.PIController(Kp=0.0, Ki=0.0, output_min=0.0, output_max=1.0)
+    cl = p.control.bind_pi_to_switch(b, pi=pi, measured=lambda x: 0.0,
+                                     setpoint=0.0, switch="S", freq=100e3)
+    assert _on_counts(cl.switch_fn, b.switch_index_of("S"), 100e3, 1e-7,
+                      periods=600) == {50}
+
+
 @pytest.mark.parametrize("period,width,dt", [(2e-5, 6e-6, 2e-7), (1e-5, 2.5e-6, 1e-7)])
 def test_pulse_source_width_is_exact_on_the_fixed_engine(period, width, dt):
     """The periodic PULSE source wrapped its time with fmod: 29 or 30
