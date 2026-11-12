@@ -75,12 +75,17 @@
 ## 6. Benchmarks + examples — deferred to v1.6.0
 
 - [ ] 6.1 ``examples/scripts/run_psfb_adaptive_dopri5.py``.
+  (Reconciled 2026-11: not present;
+  examples/scripts/run_adaptive_rk_speedup.py (van der Pol) and
+  run_adaptive_rl_settle.py demonstrate the integrators instead.)
 - [ ] 6.2 ``examples/scripts/run_stiff_thermal_radau.py``.
 - [ ] 6.3 ``benchmarks/regression/`` wall-clock comparison entry.
 
 ## 7. Docs — deferred to v1.5.1 final cut
 
-- [ ] 7.1 New page ``docs/v2/solvers.md`` covering all four integrators.
+- [x] 7.1 New page ``docs/v2/solvers.md`` covering all four integrators.
+  (Reconciled 2026-11: docs/solvers.md covers Tustin, BDF1, DOPRI5 and
+  Radau IIA.)
 
 ## 8. Validation + release
 

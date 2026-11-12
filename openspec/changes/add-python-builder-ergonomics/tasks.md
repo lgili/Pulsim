@@ -66,10 +66,12 @@
       loop, after each `solve_step()`, invoke
       `if (should_continue && !should_continue()) throw
       Cancelled("compute_dc_op", iteration);`.
-- [x] 3.3 Same for `run_ac_sweep`
+- [ ] 3.3 Same for `run_ac_sweep`
       (`core/include/pulsim/analysis/ac_analysis.hpp`) and
       `run_mna_sweep` (`core/include/pulsim/analysis/mna_sweep.hpp`)
       — call between frequency points / sweep iterations.
+      (Reconciled 2026-11: done for the kernel `run_mna_sweep` only;
+      `run_ac_sweep` has no cancellation check.)
 - [x] 3.4 Same for `compute_temperature` in
       `core/include/pulsim/thermal/foster_network.hpp` — call
       every 1000 convolution samples or every 1 % of the trace,
@@ -80,10 +82,15 @@
       `Cancelled` exception to this Python type with the
       `iteration` / `point_index` / `chunk_index` field exposed
       as an attribute.
-- [x] 3.6 Bind `should_continue=` kwarg on `compute_dc_op`,
+- [ ] 3.6 Bind `should_continue=` kwarg on `compute_dc_op`,
       `run_ac_sweep`, `run_mna_sweep`, `compute_temperature` in
       the existing Python wrappers (`__init__.py`,
       `ac_analysis.py`, `mna_sweep.py`, `thermal.py`).
+      (Reconciled 2026-11: `compute_dc_op` and `compute_temperature`
+      take it; `p.run_ac_sweep` and `p.run_mna_sweep` raise
+      `TypeError: unexpected keyword argument 'should_continue'`.
+      `_builder_ergonomics.wrap_with_cancellation` exists but is never
+      applied.)
 
 ## 4. Tests
 
@@ -103,7 +110,9 @@
       - Alias name colliding with an existing canonical name
         raises `ValueError`.
       - `builder.aliases()` returns the registered map.
-- [x] 4.3 `python/tests/test_cancellation.py`:
+- [ ] 4.3 `python/tests/test_cancellation.py`: (Reconciled 2026-11:
+      the file tests `compute_temperature`, `compute_dc_op` and the
+      kernel `run_mna_sweep_kernel`; nothing tests `run_ac_sweep`.)
       - `compute_dc_op(..., should_continue=)` that returns False
         after N calls raises `pulsim.Cancelled` with the right
         iteration count.
@@ -120,14 +129,22 @@
 
 - [x] 5.1 Update `docs/tutorials/basics.md` to show
       `add_capacitor("Cout", "vout", "gnd", 220e-6, c0=12.0)` as
-      the recommended IC pattern.
-- [x] 5.2 Add or extend `docs/tutorials/gui-integration.md`
+      the recommended IC pattern. (Reconciled 2026-11: that page
+      never existed; the pattern is in `docs/helpers.md` §5.3, with
+      `c0=12.0`, `i0=0.5` and `set_initial`. Kept ticked because the
+      content shipped; 5.2 is unticked because its YAML round-trip
+      did not.)
+- [ ] 5.2 Add or extend `docs/tutorials/gui-integration.md`
       explaining how `set_alias` round-trips GUI human labels
       through pulsim — concrete example with a YAML round-trip.
-- [x] 5.3 Update each long-running entry-point's docstring with
+      (Reconciled 2026-11: `docs/helpers.md` §5.3 shows `set_alias`,
+      with no YAML round-trip; `gui-integration.md` never existed.)
+- [ ] 5.3 Update each long-running entry-point's docstring with
       the `should_continue` kwarg, including a recipe for
       "wrap a `threading.Event` into the callback for GUI
-      Cancel buttons".
+      Cancel buttons". (Reconciled 2026-11: the recipe is in
+      `docs/helpers.md` §5.3; the `compute_dc_op` docstring does not
+      mention `should_continue`.)
 
 ## 6. Validation
 

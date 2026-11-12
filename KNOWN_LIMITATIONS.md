@@ -1,5 +1,15 @@
 # Known limitations carried into v1.3
 
+> **For Pulsim 2.0, read [`docs/known-limitations.md`](docs/known-limitations.md).**
+> It lists the limitations re-verified on 2.0, each with its measured
+> effect and a workaround. This file is the 1.3 catalogue. Its sections
+> were not re-verified for 2.0, except two. The "Transient engines
+> (2.0)" defects still reproduce; the chatter circuit aborts at 20, 10,
+> 5 and 2 ns and runs at 50 ns, 2.4 % low. Its Shockley workaround is a
+> model change: the output falls by 16.6 %. Two entries are out of date: `.subckt`
+> is now flattened, and since 1.4.0 the AC sweep has factorised with
+> the in-house `PulsimComplexSparseLuSolver`, not `Eigen::SparseLU`.
+
 This file catalogues every gap we knowingly ship in **pulsim 1.3.0** —
 deliberately deferred work, partial implementations, and features whose
 roadmap is open in [`openspec/changes/`](openspec/changes/). Use it as the
@@ -88,8 +98,10 @@ as [`add-schematic-renderer-v2`](openspec/changes/add-schematic-renderer-v2/).
 `V` (DC/SINE/PULSE), `D`, `M` — and the standard engineering suffixes.
 The intentional gaps for v1.3:
 
-* `.subckt` / `.ends` — subcircuit definitions are recognised in the
-  lexer but not flattened into the builder.
+* ~~`.subckt` / `.ends` — subcircuit definitions are recognised in the
+  lexer but not flattened into the builder.~~ Flattened since then
+  (checked on 2.0: an `X` instance of a one-resistor subcircuit loads
+  its node as expected).
 * `Q` (BJT) / `J` (JFET) — device models are not implemented.
 * `K` — coupled inductors are deferred until the magnetics layer
   exposes a stable Python-facing mutual-inductance helper.
@@ -228,7 +240,11 @@ tolerances is not the remedy either (see the section above).
 **Workarounds.** A coarser `dt`, or smooth Shockley junctions
 (`add_shockley_diode`) for those diodes — with the four rectifier
 diodes swapped, the same circuit runs at 10 ns and agrees with the
-linear reference to 0.13 %.
+linear reference to 0.13 %. That reference also uses Shockley
+diodes. The swap changes the model: each junction drops about 0.7 V
+and a PWL diode drops none. The output, `v(vout) - v(rect_neg)` over
+1.5-2 ms, is 5.785 V against 6.938 V with PWL diodes (-16.6 %).
+At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 
 ---
 

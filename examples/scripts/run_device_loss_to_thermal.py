@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -160,9 +161,11 @@ def main(argv: list[str] | None = None) -> int:
         ax_t.set_ylabel("Junction T [°C]")
         ax_t.legend(loc="lower right")
 
-        out = "examples/scripts/out/device_loss_to_thermal.png"
+        # out/ is git-ignored (generated), so create it on first use.
+        out = Path(__file__).resolve().parent / "out" / "device_loss_to_thermal.png"
         fig.tight_layout()
         try:
+            out.parent.mkdir(parents=True, exist_ok=True)
             fig.savefig(out, dpi=140)
             print(f"\nPlot saved to {out}")
         except Exception as exc:  # noqa: BLE001

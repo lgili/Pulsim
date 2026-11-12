@@ -1,10 +1,24 @@
+> Reconciled 2026-11: one task is done (2.1, as
+> `circuits/switching/buck/textbook_erickson_buck_ccm.yaml`, which cites
+> section 3.1, eqs. 3.5-3.7 and figure 3.6). A boost file exists
+> (`textbook_erickson_boost_ccm.yaml`), but it covers the section 6.1
+> steady state, not the section 6.2 averaged model. Both are checked
+> against a baseline CSV, not a `published` validation type, which does
+> not exist. Also, none of these benchmark files runs on 2.0: they use
+> `schema: pulsim-v1`, which `p.load_yaml_file` refuses ("missing
+> required top-level key 'circuit:'"), and
+> `benchmarks/tools/benchmark_runner.py` imports
+> `pulsim_python_backend`, deleted in 64837c4c, so each run fails with
+> "Pulsim Python runtime backend unavailable".
+
 ## 1. Published-values validation type
 - [ ] 1.1 Extend the benchmark schema: a YAML may declare `validation: { type: published, source: "Erickson 3rd ed § 3.1", values: { v_out: 12.0, delta_il: 1.6, delta_vc: 0.024 }, tolerance_pct: 2 }`.
 - [ ] 1.2 In `benchmark_runner.py`, implement the `published` validation type: compute the relevant KPI per declared key (delegating to the KPI suite from `add-kpi-measurement-suite`), assert each is within `tolerance_pct` of the declared value.
 - [ ] 1.3 Surface the per-key error in results JSON: `published__v_out_err_pct`, etc.
 
 ## 2. Reference benchmark circuits (Erickson)
-- [ ] 2.1 `textbook_erickson_buck_3_1.yaml`: § 3.1 CCM buck steady-state. Cite figure 3.6, equations 3.5–3.7.
+- [x] 2.1 `textbook_erickson_buck_3_1.yaml`: § 3.1 CCM buck steady-state. Cite figure 3.6, equations 3.5–3.7.
+  (Reconciled 2026-11: as textbook_erickson_buck_ccm.yaml.)
 - [ ] 2.2 `textbook_erickson_boost_6_2.yaml`: § 6.2 boost averaged-model verification.
 - [ ] 2.3 `textbook_erickson_buckboost_6_3.yaml`: § 6.3 inverting buck-boost.
 
