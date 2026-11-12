@@ -373,6 +373,18 @@ reproduced every friction item.
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints
       it many times. Emit it once per result and diode.
+- [ ] 12.10 `pulsim.schematic.render()` defaults to the pure-Python
+      template / force-directed path since the `python_native` (ELK)
+      default raised `AttributeError` on every 2.0 builder (0 of 25
+      examples). `python_native` and `elk` are opt-in and were not run
+      end to end with `elkjs` installed; 16 of the 25 examples match no
+      template and get an overlapping force-directed sketch. Owned by the
+      planned `narrow-schematic-renderer` change.
+- [ ] 12.11 `simulate(LoadedCircuit)` forwards only `t_start`, `t_end`,
+      `dt`, `store_every`; the YAML's Newton tolerances and `integrator`
+      stay on `loaded.options` unforwarded. The loader's key checks are
+      local to `loader.hpp`; the planned `unify-device-schema` change
+      rewrites that dispatch.
 
 ## 13. Review round 3
 
