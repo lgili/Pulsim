@@ -172,7 +172,9 @@ struct TrBdf2Stats {
     /// boundary (a sliding-mode model). The Python layer warns.
     Size n_chatter_breaks = 0;
     /// Steps ACCEPTED with err > 1 because h had already hit
-    /// h_min (typically the sliver between two events). Zero on a
+    /// h_min (typically the sliver between two events), or the
+    /// span*1e-7 floor that holds for span*1e-4 after the chatter
+    /// guard gave up. Zero on a
     /// healthy run; the Python layer warns when it is not.
     Size n_forced_accepts = 0;
     /// Controller ticks fired (should be exactly
@@ -922,6 +924,9 @@ inline SimulationResult run_transient_trbdf2(
     Real chatter_t = opts.t_start - span;
     Size chatter_n = 0;
     Real chatter_short_t = opts.t_start - span;
+    Real chatter_x1_t = opts.t_start - span;
+    Real chatter_exhaust_t = opts.t_start - span;
+    const Real h_chatter = std::max(h_min, span * Real{1e-7});
     // Post-GATE-edge restart memory, one slot per edge parity (a
     // periodic PWM alternates rising/falling, and the two corners
     // want different h). Restarting at the h that survived the
@@ -1068,7 +1073,15 @@ inline SimulationResult run_transient_trbdf2(
                 edge_cache_valid = false;
             }
 
-            h = std::clamp(h, h_min, std::min(h_max, opts.t_end - t));
+            // Shortly after the chatter guard gave up, the LTE may not
+            // walk h below h_chatter: under all-OFF bridge bits a 1 mH
+            // line and g_off make a 1 ps mode whose kink the LTE reads
+            // as error at any h, and h sat at h_min until max_steps.
+            const Real h_lo =
+                (t - chatter_exhaust_t <= Real{1e3} * h_chatter)
+                    ? h_chatter : h_min;
+            h = std::clamp(h, std::min(h_lo, opts.t_end - t),
+                           std::min(h_max, opts.t_end - t));
             // The gates as the step starts (one switch_fn call), and
             // the step cap the narrowest pulse seen so far implies.
             SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
@@ -1341,17 +1354,17 @@ inline SimulationResult run_transient_trbdf2(
                 continue;
             }
 
-            if (err > Real{1} && h <= h_min * Real{1.0001}) {
+            if (err > Real{1} && h <= h_lo * Real{1.0001}) {
                 // Cannot shrink further: accept, but CONFESS —
                 // silence here would be an unbounded-error hole.
                 ++st.n_forced_accepts;
             }
-            if (err > Real{1} && h > h_min * Real{1.0001}) {
+            if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
                 const Real fac = std::clamp(
                     Real{0.9} * std::pow(err, Real{-1.0 / 3.0}),
                     Real{0.1}, Real{0.9});
-                h = std::max(h * fac, h_min);
+                h = std::max(h * fac, h_lo);
                 ++st.n_reject;
                 continue;
             }
@@ -1372,10 +1385,18 @@ inline SimulationResult run_transient_trbdf2(
                     const Real s1 = detail_trbdf2::crossing_signal(
                         diodes, d, x_1);
                     // A crossing exists if the signal changes sign
-                    // anywhere among (t, t+γh, t+h).
+                    // anywhere among (t, t+γh, t+h) and leaves the
+                    // noise floor: an ON bridge diode
+                    // carrying g_off-scale leakage (-1.6e-7 A) was
+                    // re-landed on every step of a floating-rail
+                    // bridge, 318k steps for 40 ms.
+                    const Real tol_d = detail_trbdf2::held_tolerance(
+                        diodes, d, x_1);
                     const bool crossed =
-                        (s0 > Real{0}) != (s1 > Real{0})
-                        || (s0 > Real{0}) != (sg > Real{0});
+                        ((s0 > Real{0}) != (s1 > Real{0})
+                         || (s0 > Real{0}) != (sg > Real{0}))
+                        && std::max({std::abs(s0), std::abs(sg),
+                                     std::abs(s1)}) > tol_d;
                     if (!crossed) {
                         // No sign change, but the diode may sit on the
                         // FORBIDDEN side from the start of the step to
@@ -1390,8 +1411,7 @@ inline SimulationResult run_transient_trbdf2(
                         if (detail_trbdf2::forbidden(diodes, d, s0)
                             && detail_trbdf2::forbidden(diodes, d, s1)
                             && std::max(std::abs(s0), std::abs(s1))
-                                   > detail_trbdf2::held_tolerance(
-                                       diodes, d, x_1)) {
+                                   > tol_d) {
                             held_found = true;
                             if (t < t_star) {
                                 t_star = t;
@@ -1484,13 +1504,30 @@ inline SimulationResult run_transient_trbdf2(
                             // the guard still exhausted and accepts
                             // (once per t: shrinking again on every
                             // retry would walk h down to h_min).
+                            // Decide once from the END of the step,
+                            // as the fixed-step engine does. The
+                            // probes pin the line inductor's current
+                            // at its g_off-scale -1e-7 A, so a bridge
+                            // diode forward-biased by 47 V probed
+                            // OFF again at every t (all-OFF bits, a
+                            // 1 ps L*g_off mode, h stuck at h_min);
+                            // the step's own end state, h of real
+                            // time later, turns it ON for good.
+                            chatter_exhaust_t = t;
+                            if (chatter_x1_t != t) {
+                                chatter_x1_t = t;
+                                ++st.n_chatter_breaks;   // once per t
+                                if (diodes.update_from_state(x_1)) {
+                                    x_sig = x_1;
+                                    continue;
+                                }
+                            }
                             if (chatter_short_t != t) {
                                 chatter_short_t = t;
                                 h = std::max(h * Real{1e-2}, h_min);
                                 ++st.n_reject;
                                 continue;
                             }
-                            ++st.n_chatter_breaks;
                         }
                         // Guard exhausted: fall through and ACCEPT
                         // the step with the bits as they are — the

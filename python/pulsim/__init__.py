@@ -2956,7 +2956,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             f"sampling that gate (at most {sp:.3g} s), so pulses that "
             "narrow may have been stepped over before then (this "
             "engine sees a Python switch_fn only where it calls it). "
-            "Pass dt=<at most half the narrowest "
+            "Pass dt=<at most 4x the narrowest "
             "pulse> as the step ceiling (engine='trbdf2'), drive the "
             "gates with p.NativePwm2Switch, whose edges the engine "
             "computes, or use engine='pwl' with a dt on the PWM grid.",
@@ -3026,14 +3026,21 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
 
 def _floating_subnets(builder) -> list:
     """Node-name groups that reach ground only through switch
-    branches (switches, diodes, body diodes): union-find over every
-    other branch except current sources, which carry no voltage
-    reference. Best effort: [] when the builder cannot be read."""
+    branches (switches, diodes, body diodes) and hold a capacitor or
+    inductor: union-find over every other branch except current
+    sources, which carry no voltage reference. A group with no stored
+    energy is left out: the node between two series switches, or an
+    ideal transformer's primary (no graph branch of its own), is not a
+    floating rail. Best effort: [] when the builder cannot be read."""
     try:
         g = builder.graph
         branches = list(g.branches)
-        current_src = {c.get("branch_id") for c in builder.components()
+        comps = builder.components()
+        current_src = {c.get("branch_id") for c in comps
                        if "current_source" in str(c.get("kind", ""))}
+        storage = {nd for c in comps
+                   if c.get("kind") in ("capacitor", "inductor")
+                   for nd in c.get("nodes", ()) if nd >= 0}
         n = int(g.num_nodes)
     except (AttributeError, TypeError):  # pragma: no cover
         return []
@@ -3060,8 +3067,9 @@ def _floating_subnets(builder) -> list:
     for i in range(n):
         r = find(i)
         if r != gnd:
-            groups.setdefault(r, []).append(g.node_name(i) or f"#{i}")
-    return sorted(groups.values())
+            groups.setdefault(r, []).append(i)
+    return sorted([g.node_name(i) or f"#{i}" for i in grp]
+                  for grp in groups.values() if storage.intersection(grp))
 
 
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,

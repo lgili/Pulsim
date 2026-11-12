@@ -351,7 +351,19 @@ reproduced every friction item.
       322.057 V against 322.059 V, every diode 0.1606 A against
       0.1610 A; the 1 mH case holds no diode against its rule (321.807
       against 321.845 V). The ride warning names the engine asked for,
-      and `simulate` itself names a held diode. Trap 13 rewritten.)
+      and `simulate` itself names a held diode. Trap 13 rewritten.
+      Review round 2: past 0.3 s the 1 mH case ground at h_min on one
+      commutation and aborted on max_steps (0.176 s of 0.35 s, 73 s;
+      V_th = 0 at 0.146 s). With every bridge bit OFF the line
+      inductor sees g_off alone, a 1 ps mode: the probes pinned its
+      -1e-7 A and decided all-OFF again, and the LTE read the mode's
+      kink as error at every h. A guard that gives up now re-decides
+      once from the step's END state, and for span*1e-4 after it the
+      LTE cannot cut h below span*1e-7: 0.5 s in 4.9k steps (V_th 0:
+      321.867 V against 321.870 V at dt = 1e-6), 1.0 s in 8.7k
+      (V_th 0.7: 321.828 against 321.869 V). A sign change that never
+      leaves the noise floor is no longer a crossing: the floating-rail
+      bridge at t_end 0.04 s took 318,068 steps, now 1,103.)
       TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
       runs half-wave (318.79 V, 12.91 V pp against 322.06 V, 6.38 V pp
       with `dt`). The sliding-mode warning names `engine='auto'` even

@@ -225,6 +225,27 @@ def test_line_inductance_bridge_holds_no_diode_against_its_rule():
                                                 abs=0.05)
 
 
+@pytest.mark.parametrize("v_th, ref_v", [(0.7, 321.865), (0.0, 321.870)])
+def test_line_inductance_bridge_completes_a_long_run(v_th, ref_v):
+    """Past 0.3 s the V_th = 0.7 / 1 mH bridge ground at h_min on one
+    commutation (all bridge bits OFF, a 1 ps L*g_off mode the LTE read
+    as error at every h) and aborted on max_steps after 73 s; V_th = 0
+    did the same at 0.146 s. Now 0.5 s takes about 5k steps and lands
+    on dt = 1e-6 (ref_v, measured: 321.865 / 321.870 V) to 0.04 V."""
+    r, _ = _run(_bridge(v_th, l_line=1e-3), 0.5)
+    assert r._trbdf2_stats["n_accept"] < 20_000
+    assert _avg(r, "dc", 0.48) == pytest.approx(ref_v, abs=0.05)
+
+
+def test_v_th_0_line_inductance_bridge_is_not_slow():
+    """V_th = 0 behind 1 mH: 122,597 steps / 64k chatter breaks for
+    0.1 s on the previous revision; now about 1.5k, on dt = 1e-6's
+    321.850 V to 0.003 V."""
+    r, _ = _run(_bridge(0.0, l_line=1e-3), 0.1)
+    assert r._trbdf2_stats["n_accept"] < 5000
+    assert _avg(r, "dc", 0.08) == pytest.approx(321.850, abs=0.05)
+
+
 def _snubbed_boost():
     """24 V boost, 220 µH, Q1 g_on 50 S at 100 kHz D = 0.5, 100 nF
     across D1 (V_th 0.7), 100 µF || 30 ohm."""
@@ -295,6 +316,14 @@ def test_floating_dc_side_runs_without_dt():
     assert vdc(r) == pytest.approx(vdc(ref), abs=0.01)
 
 
+def test_floating_dc_side_leakage_is_not_a_commutation():
+    """At t_end = 0.04 an ON bridge diode carrying g_off-scale leakage
+    (-1.6e-7 A) was re-landed on every step: 318,068 steps, 317,101
+    diode events. Now about 1.1k steps."""
+    r, _ = _run(_floating_dc_bridge(), 0.04)
+    assert r._trbdf2_stats["n_accept"] < 5000
+
+
 def test_grounded_dc_side_raises_no_floating_warning():
     """The control: the same bridge with dc_neg grounded needs no probe
     floor and so names no floating subnet."""
@@ -322,6 +351,18 @@ def test_floating_subnet_finder():
     b.add_diode("D", "gnd", "sw", 1e3, 1e-9)
     b.add_inductor("L", "sw", "o", 1e-4)
     b.add_resistor("R", "o", "gnd", 1.0)
+    assert p._floating_subnets(b) == []
+    # Nodes between series switches and an ideal transformer's primary
+    # hold no stored energy: not floating rails (were all named).
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_diode("D", "a", "b", 1e3, 1e-9)
+    b.add_mosfet("M", "b", "c")
+    b.add_mosfet_with_body_diode("MB", "c", "d")
+    b.add_igbt("Q", "d", "e")
+    b.add_switch("S", "e", "f", 1e3, 1e-9)
+    b.add_ideal_transformer("T", "f", "gnd", "g", "h", 2.0)
+    b.add_resistor("R", "h", "gnd", 1.0)
     assert p._floating_subnets(b) == []
 
 

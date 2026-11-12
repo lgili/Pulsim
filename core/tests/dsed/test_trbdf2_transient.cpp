@@ -456,3 +456,40 @@ TEST_CASE("TR-BDF2: a gate edge at a step boundary re-settles the diodes",
     }
     REQUIRE(shoot_through == 0);
 }
+
+TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
+          "commutation", "[v2][trbdf2][robustness]") {
+    // V_th = 0.7 bridge behind 0.1 ohm + 1 mH, 470 µF || 1 kOhm. With
+    // every bridge bit OFF the line inductor sees g_off alone (a 1 ps
+    // mode); the probes pinned its -1e-7 A and kept deciding all-OFF,
+    // the LTE read the mode's kink as error at every h, and h sat at
+    // h_min until max_steps (abort at t = 0.176 s of 0.35 s, 73 s of
+    // wall time). Now about 5k steps for 0.5 s; the fixed engine gives
+    // 321.865 V (dt = 1e-6).
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "s", "bb", 0.0, 325.27, 50.0, 0.0);
+    b.add_resistor("Rs", "s", "sr", 0.1);
+    b.add_inductor("Lline", "sr", "a", 1e-3);
+    b.add_diode("D1", "a", "dc", 1e3, 1e-9, 0.7);
+    b.add_diode("D2", "bb", "dc", 1e3, 1e-9, 0.7);
+    b.add_diode("D3", "gnd", "bb", 1e3, 1e-9, 0.7);
+    b.add_diode("D4", "gnd", "a", 1e3, 1e-9, 0.7);
+    b.add_capacitor("C", "dc", "gnd", 470e-6);
+    b.add_resistor("RL", "dc", "gnd", 1e3);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    solver::TrBdf2Options o;
+    o.t_end = 0.5;
+    o.max_steps = 200'000;
+    solver::TrBdf2Stats st;
+    solver::SimulationResult res;
+    REQUIRE_NOTHROW(res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st));
+    REQUIRE(res.times.back() == Approx(0.5));
+    REQUIRE(st.n_accept < 20'000);
+    REQUIRE(tail_mean(res, b.node_id_of("dc"), 0.48)
+            == Approx(321.865).margin(0.1));
+}
