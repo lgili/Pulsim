@@ -453,7 +453,10 @@ _CIRCUITS = {
 # whole record (times, states, switch states, every summary field) was
 # bit-identical to V_f = 0.0 on this branch; boost_dcm on dsed refuses on
 # both. Pinned as numbers, not hashes, so that other platforms pass:
-# rel 1e-9 on the fixed grid, 1e-6 where the step sequence can move.
+# rel 1e-9 on the fixed grid, 1e-6 where the step sequence can move, and
+# 1e-3 on dsed — its event times go through libm, and Windows CI moved
+# these ~0.1 mW leakage losses by up to 9e-5. A lost V_f = 0 identity
+# would move them by orders of magnitude, not parts per thousand.
 _V_F0_REF = {
     ("boost_dcm", "auto"): {"S": 0.0452680383528, "D": 0.0649591561202},
     ("boost_dcm", "pwl"): {"S": 0.0452766957162, "D": 0.0649599299511},
@@ -489,7 +492,8 @@ def test_v_f_zero_matches_the_pre_v_f_engine(circuit, engine):
     r = _sim(b, t_end, engine, **skw)
     s = _loss(b, r, **({"switch_fn": skw["switch_fn"]} if switched else {}))
     got = {e["name"]: e["P_avg"] for e in s if e["name"] in ref}
-    assert got == pytest.approx(ref, rel=1e-9 if engine == "pwl" else 1e-6)
+    rel = {"pwl": 1e-9, "dsed": 1e-3}.get(engine, 1e-6)
+    assert got == pytest.approx(ref, rel=rel)
 
 
 # ---------------------------------------------------------------------
