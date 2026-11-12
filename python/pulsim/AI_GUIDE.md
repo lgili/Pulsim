@@ -359,25 +359,28 @@ for dead in (0.0, 1e-6):                     # f_carrier, f_1, m, legs, size, de
     print(f"dead {dead:.0e} s: V_LL1 = {abs(c1) / np.sqrt(2):.1f} V rms, "
           f"I_a = {p.time_rms(t, inv.i('La'), t_from=20e-3):.2f} A rms, "
           f"P_dc = {p.time_average(t, 600 * inv.i('Vdc'), t_from=20e-3):.0f} W")
+    on = (inv.i("INV__Dha") > 1e-3)[w]       # HSa is switch_indices[0]
+    hs = np.asarray(inv.switch_states)[w, vsi.switch_indices[0]]
+    print(f"  INV__Dha on {100 * on.mean():.1f} %, {100 * (on & hs).mean():.1f} % with HSa on")
 print(f"ideal V_LL1 = sqrt(3/8) * m * V_dc = {np.sqrt(3 / 8) * 0.8 * 600:.1f} V")
 ```
 
 ```text
 dead 0e+00 s: V_LL1 = 293.9 V rms, I_a = 16.77 A rms, P_dc = -8435 W
+  INV__Dha on 0.0 %, 0.0 % with HSa on
 dead 1e-06 s: V_LL1 = 284.6 V rms, I_a = 16.24 A rms, P_dc = -7912 W
+  INV__Dha on 1.0 %, 0.0 % with HSa on
 ideal V_LL1 = sqrt(3/8) * m * V_dc = 293.9 V
 ```
 
 The dead time costs `4/pi * V_dc * t_d * f_sw * sqrt(3/2)` = 9.4 V of
 `V_LL1`; `P_dc < 0` is the source sign convention (section 4). In the
-dead time the antiparallel PWL diode takes the freewheel current, and it
-turns off only when its current reverses: once the switch is gated on
-(the switches conduct both ways) the diode stays on in parallel with
-`R_on / (R_on + R_d)` = 2 % of it. With 1 us dead time `INV__Dha`
-conducts on 12.9 % of samples, 11.9 % with `HSa` on; with none, never.
-Read both branches before attributing conduction loss. `switch_specs`
+dead time the antiparallel PWL diode takes the freewheel current and
+drops `V_f + i / g_on` (0.7 V + 0.05 ohm); once `HSa` is gated on, the
+switch takes it all and the diode turns off at zero current: it never
+shares (printed above). `switch_specs`
 on `HSa` (`E_on_ref` 4 mJ, `E_off_ref` 3.5 mJ at 600 V, 50 A) gives
-11.3 W with the dead time (soft edges see the diode's 0.8 V: about 0 J)
+11.3 W with the dead time (soft edges see only the diode's drop: about 0 J)
 and 22.6 W without (soft edges block 600 V and are charged like hard
 ones, on top of `INV__LSa`'s own hard edges). Model the dead time.
 

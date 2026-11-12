@@ -29,7 +29,10 @@ as its forward drop (BREAKING: it was the turn-on threshold), with a new
 #### Scenario: VSI diode loss contains V_f·I_avg
 - **GIVEN** the VSI with `R_d = 50 mΩ`, `V_f = 0.7`
 - **WHEN** the freewheel diode carries an inductor current
-- **THEN** its `P_avg` equals `V_f·i_avg + R_d·i_rms²` within 1e-3
+- **THEN** its `P_avg` equals `V_f·i_avg + R_d·i_rms²` within 1e-4 on
+  `auto`, and within 1e-2 on pwl at `dt = 2 µs` (measured 4.5e-3: the
+  gate-edge flip steps are trapezoids of their end powers, while
+  `i_avg` and `i_rms` integrate them as a current ramp)
 
 #### Scenario: No sharing below V_f
 - **GIVEN** a half bridge with dead time, `R_on·|i| < V_f`

@@ -7,7 +7,9 @@ zero current (``v_D = V_f``). Every engine decides through the one
 ``SwitchedDiode`` law, and ``res.i`` / the loss and thermal summaries
 use the same current. A decision site that missed the law would let an
 ON diode conduct BACKWARDS up to ``g_on·V_f`` with no warning, so most
-tests below also assert ``min(i_D) >= -1e-9``.
+tests below also assert ``min(i_D) >= -(1e-7 + 1e-4·max|i_D|)``
+(``_no_reverse``: OFF leakage plus a variable-step landing just past
+the current zero, far above ``-g_on·V_f``).
 
 Numbers marked "analytic" are closed-form; the others were measured on
 this branch and are pinned with the reason next to them.
@@ -23,7 +25,6 @@ import numpy as np
 import pytest
 
 import pulsim as p
-from pulsim import _result_views as _views
 
 G_ON = 20.0
 V_F = 0.7
@@ -152,6 +153,11 @@ def test_half_wave_pwl_is_the_drop_law_on_every_sample():
     # First / last conducting sample on the 1 us grid (the event
     # iteration turns the diode on in the step after the crossing).
     assert abs(t_on - T_ON) <= 2e-6 and abs(t_off - T_OFF) <= 2e-6
+    # The sub-step watcher of the no-L/C (static) path signals on
+    # v - V_on: on v - V_th, v stays above 0 across both flip steps and
+    # the events vanish. Measured 0.7 ns / 2.7 ns off.
+    ev = sorted(e.t_estimated for e in r.commutation_events)
+    assert ev == pytest.approx([T_ON, T_OFF], abs=1e-6)
     assert float(vk.max()) == pytest.approx(V_PEAK, abs=1e-6)
     assert p.time_average(t, vk) == pytest.approx(V_AVG, abs=1e-5)
     assert _no_reverse(i)
@@ -244,6 +250,11 @@ def test_rl_half_wave_extinguishes_at_zero_current(engine):
         _, t_off = _on_interval(t, i)
         tol = 2e-6 if engine == "pwl" else 2e-4
         assert t_off == pytest.approx(t_ext, abs=tol)
+    if engine == "pwl":
+        # The dynamic path's sub-step watcher (v - V_on, linear in the
+        # step): measured 0.7 ns / 0.47 us off on the 1 us grid.
+        ev = sorted(e.t_estimated for e in r.commutation_events)
+        assert ev == pytest.approx([T_ON, t_ext], abs=1e-6)
     mid = (t > T_ON + 1e-3) & (t < t_ext - 1e-3)
     ref = np.array([i_ref(x) for x in t[mid]])
     assert np.max(np.abs(i[mid] - ref)) <= (1e-4 if engine != "dsed"
@@ -437,41 +448,48 @@ _CIRCUITS = {
 }
 
 
+# P_avg of the switch and the diodes on the parent commit (8935b2a5,
+# before V_f existed), with the diode built WITHOUT V_f. There, the
+# whole record (times, states, switch states, every summary field) was
+# bit-identical to V_f = 0.0 on this branch; boost_dcm on dsed refuses on
+# both. Pinned as numbers, not hashes, so that other platforms pass:
+# rel 1e-9 on the fixed grid, 1e-6 where the step sequence can move.
+_V_F0_REF = {
+    ("boost_dcm", "auto"): {"S": 0.0452680383528, "D": 0.0649591561202},
+    ("boost_dcm", "pwl"): {"S": 0.0452766957162, "D": 0.0649599299511},
+    ("boost_dcm", "trbdf2"): {"S": 0.0452680383528, "D": 0.0649591561202},
+    ("bridge", "auto"): {"BR__D1": 0.000138585164756, "BR__D2": 5.6813204064e-05,
+                         "BR__D3": 0.000138585164754, "BR__D4": 5.68132040543e-05},
+    ("bridge", "dsed"): {"BR__D1": 0.000138571769601, "BR__D2": 5.67576669568e-05,
+                         "BR__D3": 0.000138582323524, "BR__D4": 5.67838168133e-05},
+    ("bridge", "pwl"): {"BR__D1": 0.000138205386016, "BR__D2": 5.66352667669e-05,
+                        "BR__D3": 0.000138205386014, "BR__D4": 5.66352667572e-05},
+    ("bridge", "trbdf2"): {"BR__D1": 0.000138585164756, "BR__D2": 5.6813204064e-05,
+                           "BR__D3": 0.000138585164754, "BR__D4": 5.68132040543e-05},
+    ("buck", "auto"): {"S": 0.0035509287608, "D": 0.00533941662173},
+    ("buck", "dsed"): {"S": 0.00354982022022, "D": 0.00533604800703},
+    ("buck", "pwl"): {"S": 0.00354999944119, "D": 0.00533789852559},
+    ("buck", "trbdf2"): {"S": 0.0035509287608, "D": 0.00533941662173},
+}
+
+
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed", "auto"])
 @pytest.mark.parametrize("circuit", sorted(_CIRCUITS))
-def test_v_f_zero_is_bit_identical(circuit, engine):
+def test_v_f_zero_matches_the_pre_v_f_engine(circuit, engine):
     make, t_end, switched = _CIRCUITS[circuit]
-    out = []
-    for kw in ({}, {"V_f": 0.0}):
-        b = make(**kw)
-        skw = {"switch_fn": _pwm(b)} if switched else {}
-        if engine == "pwl":
-            skw["dt"] = 1e-7 if switched else 1e-6
-        try:
-            r = _sim(b, t_end, engine, **skw)
-        except Exception as exc:  # noqa: BLE001 — both must refuse alike
-            out.append(("raised", type(exc).__name__, str(exc)))
-            continue
-        s = _loss(b, r, **({"switch_fn": skw["switch_fn"]}
-                           if switched else {}))
-        out.append((np.asarray(r.times), _views.states_as_array(r),
-                    r.switch_states, s))
-    a, c = out
-    if isinstance(a[0], str):
-        assert a == c
+    b = make(V_f=0.0)
+    skw = {"switch_fn": _pwm(b)} if switched else {}
+    if engine == "pwl":
+        skw["dt"] = 1e-7 if switched else 1e-6
+    ref = _V_F0_REF.get((circuit, engine))
+    if ref is None:  # refused before V_f too
+        with pytest.raises(RuntimeError, match="did not settle"):
+            _sim(b, t_end, engine, **skw)
         return
-    assert np.array_equal(a[0], c[0])
-    assert np.array_equal(a[1], c[1])
-    assert np.array_equal(np.asarray(a[2]), np.asarray(c[2]))
-    for ea, ec in zip(a[3], c[3]):
-        for k, va in ea.items():
-            vc = ec[k]
-            if isinstance(va, np.ndarray):
-                assert np.array_equal(va, vc), (k, ea["name"])
-            elif isinstance(va, float) and math.isnan(va):
-                assert math.isnan(vc), (k, ea["name"])
-            else:
-                assert va == vc, (k, ea["name"])
+    r = _sim(b, t_end, engine, **skw)
+    s = _loss(b, r, **({"switch_fn": skw["switch_fn"]} if switched else {}))
+    got = {e["name"]: e["P_avg"] for e in s if e["name"] in ref}
+    assert got == pytest.approx(ref, rel=1e-9 if engine == "pwl" else 1e-6)
 
 
 # ---------------------------------------------------------------------
@@ -543,6 +561,22 @@ def test_thermal_conduction_energy_equals_loss_energy():
         assert e["P_avg"] > 0.01
         assert _entry(th, n)["P_cond_avg"] == pytest.approx(
             e["P_avg"], rel=1e-12)
+
+
+@pytest.mark.parametrize("v_d, n_gaps", [(0.5, 0), (0.75, 1)])
+def test_chatter_detector_measures_from_v_f(v_d, n_gaps):
+    """A 2-step gap between two 1-step ON blips is chatter only if its
+    step average does not block: with V_f = 0.7, V_th = 0 the diode at
+    0.5 V blocks (a real gap), at 0.75 V it does not. Measured from
+    v_D = 0 instead, 0.5 V would also read as chatter."""
+    from types import SimpleNamespace
+
+    from pulsim.losses import _chatter_gaps
+    cond = np.array([0, 0, 0, 1, 0, 0, 1, 0, 0, 0], dtype=bool)
+    v = np.full(cond.size, v_d)
+    tr = SimpleNamespace(conducting=cond, v=v, v_start=v, V_th=0.0,
+                         V_f=V_F)
+    assert _chatter_gaps(tr)[1] == n_gaps
 
 
 def test_loss_windows_add_up_to_the_whole_run():

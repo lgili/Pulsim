@@ -30,9 +30,11 @@ the diode without the parameter.
 - **THEN** the diode turns OFF; at `V_f + ε` it stays ON
 
 #### Scenario: Zero drop is unchanged
-- **WHEN** a circuit is built with `V_f` omitted and with `V_f = 0.0`
-- **THEN** the states, switch-state record and loss summary are
-  bit-identical
+- **WHEN** a circuit is built with `V_f = 0.0` and run on every engine
+- **THEN** its states, switch-state record and loss summary are
+  bit-identical to the engine before `V_f` existed (checked once against
+  that build; the suite pins its per-device `P_avg` to 1e-9 on pwl and
+  1e-6 on the variable-step engines)
 
 #### Scenario: Invalid drop refused by name
 - **WHEN** `add_diode("D1", ..., V_f=-0.1)` or `V_f=nan` is called

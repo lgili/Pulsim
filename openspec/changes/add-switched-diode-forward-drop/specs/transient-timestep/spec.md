@@ -19,7 +19,10 @@ cannot converge, its error SHALL suggest a hysteresis band
 - **WHEN** simulated on pwl, trbdf2 and auto
 - **THEN** conduction starts near 223 µs and ends near 9.777 ms, the
   output averages 2.8268 V, and the diode current never falls below
-  −1e-9 A
+  −(1e-7 A + 1e-4·max|i_D|): OFF leakage `g_off·|v|` (1e-8 A on pwl)
+  plus a variable-step landing just past the current zero (−1.6e-7 A on
+  trbdf2 and auto), far above the −g_on·V_f = −14 A a decision site
+  that ignored `V_f` would allow
 
 #### Scenario: DSED needs a band
 - **GIVEN** a circuit whose diode turns on at zero current
