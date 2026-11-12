@@ -251,3 +251,245 @@ TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
             [&](Real) { return all_open(n_sw); }),
         std::invalid_argument);
 }
+
+// -----------------------------------------------------------------------------
+// Engine robustness (v2.0 follow-up): opaque gates, held diodes, a
+// floating DC side.
+// -----------------------------------------------------------------------------
+
+namespace {
+/// Time-weighted mean of node `n` over [t0, t_end] (trapezoid on the
+/// variable grid — a sample mean is biased there).
+Real tail_mean(const solver::SimulationResult& res, Index n, Real t0) {
+    Real acc = 0.0, span = 0.0;
+    for (Size k = 1; k < res.times.size(); ++k) {
+        if (res.times[k - 1] < t0) { continue; }
+        const Real dt = res.times[k] - res.times[k - 1];
+        acc += 0.5 * dt * (res.states[k - 1][n] + res.states[k][n]);
+        span += dt;
+    }
+    return acc / span;
+}
+}  // namespace
+
+TEST_CASE("TR-BDF2: an opaque switch_fn lands every edge of a step "
+          "that spans several", "[v2][trbdf2][robustness]") {
+    // 100 kHz, D = 0.3 PWM from a plain lambda (no edge oracle) with a
+    // step ceiling of 3.5 periods. The edge search used to sample only
+    // t and t + h and bisect [t, t + h] as if it held ONE edge, so a
+    // long step could skip whole pulses or land on a later edge; the
+    // step now samples h/4 .. h and the first sub-interval that
+    // changes, and caps h at twice the narrowest pulse seen (3 µs).
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", 10.0);
+    b.add_switch("S", "in", "x", 1e3, 1e-9);
+    b.add_resistor("R", "x", "y", 10.0);
+    b.add_capacitor("C", "y", "gnd", 1e-6);
+    b.add_resistor("RL", "y", "gnd", 100.0);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    const Real T = 1e-5;
+    auto sf = [&](Real t) {
+        topology::SwitchStateMask m(n_sw);
+        m.set(0, std::fmod(t, T) < 0.3 * T);
+        return m;
+    };
+    solver::TrBdf2Options o;
+    o.t_end = 1e-3;
+    o.h_max = 3.5 * T;
+    o.rtol = 1e-5;
+    o.atol = 1e-8;
+    solver::TrBdf2Stats st;
+    const auto res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st);
+
+    // 100 periods: a falling edge in each, a rising edge in all but
+    // the first (t = 0 starts ON), the run ends on the last rising one.
+    REQUIRE(st.n_gate_events == 199);
+    REQUIRE(st.gate_pulse_min == Approx(3e-6).epsilon(1e-6));
+    REQUIRE(st.n_gate_undersampled == 0);
+    // The fixed engine gives 7.4907 V over the second half (dt = 1e-8
+    // and 5e-9 agree to 2e-5 V).
+    const Real v = tail_mean(res, b.node_id_of("y"), 0.5e-3);
+    REQUIRE(v == Approx(7.4907).margin(2e-3));
+}
+
+TEST_CASE("TR-BDF2: a V_th = 0 bridge conducts on both half-cycles",
+          "[v2][trbdf2][robustness]") {
+    // 230 V rms behind 0.1 ohm, V_th = 0 bridge, 470 µF || 1 kOhm. D1
+    // and D3 cross zero together; the crossing detector read the next
+    // step's start from the PRE-cascade solve (D1 at +eps), saw no sign
+    // change while D1's forward bias grew to 6.9 V, and the bridge ran
+    // HALF-WAVE at 318.79 V. The fixed engine gives 322.059 V
+    // (dt = 1e-6).
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "s", "bb", 0.0, 325.27, 50.0, 0.0);
+    b.add_resistor("Rs", "s", "a", 0.1);
+    b.add_diode("D1", "a", "dc", 1e3, 1e-9, 0.0);
+    b.add_diode("D2", "bb", "dc", 1e3, 1e-9, 0.0);
+    b.add_diode("D3", "gnd", "bb", 1e3, 1e-9, 0.0);
+    b.add_diode("D4", "gnd", "a", 1e3, 1e-9, 0.0);
+    b.add_capacitor("C", "dc", "gnd", 470e-6);
+    b.add_resistor("RL", "dc", "gnd", 1e3);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    solver::TrBdf2Options o;
+    o.t_end = 0.1;
+    o.rtol = 1e-5;
+    o.atol = 1e-8;
+    solver::TrBdf2Stats st;
+    const auto res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st);
+
+    REQUIRE(tail_mean(res, b.node_id_of("dc"), 0.08)
+            == Approx(322.06).margin(0.05));
+    // Every diode stamped ON somewhere in the last cycle.
+    REQUIRE(res.has_switch_states);
+    for (Size bit = 0; bit < n_sw; ++bit) {
+        bool on = false;
+        for (Size k = 0; k < res.times.size(); ++k) {
+            if (res.times[k] < 0.08) { continue; }
+            const auto byte =
+                res.switch_state_bits[k * res.switch_state_stride
+                                      + bit / 8];
+            on = on || ((byte >> (bit % 8)) & 1U);
+        }
+        INFO("diode bit " << bit);
+        REQUIRE(on);
+    }
+}
+
+TEST_CASE("TR-BDF2: a floating DC side runs on a longer probe step",
+          "[v2][trbdf2][robustness]") {
+    // Bridge with ac_b = gnd and the DC side floating (load across
+    // dc_pos / dc_neg only). With every diode OFF, the DC pair hangs
+    // on 4 x g_off = 4e-9 S while the 6e-14 s probe stamps 470 µF as
+    // 1.6e10 S: "factorize failed (numerically singular) ... node dn".
+    // The probe step now grows until the factorization holds.
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 325.0, 50.0, 0.0);
+    b.add_resistor("Rs", "ac", "acx", 1e-3);
+    b.add_diode("D1", "acx", "dp", 1e3, 1e-9, 0.7);
+    b.add_diode("D2", "gnd", "dp", 1e3, 1e-9, 0.7);
+    b.add_diode("D3", "dn", "gnd", 1e3, 1e-9, 0.7);
+    b.add_diode("D4", "dn", "acx", 1e3, 1e-9, 0.7);
+    b.add_capacitor("C", "dp", "dn", 470e-6);
+    b.add_resistor("RL", "dp", "dn", 1e3);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    solver::TrBdf2Options o;
+    o.t_end = 0.06;
+    solver::TrBdf2Stats st;
+    solver::SimulationResult res;
+    REQUIRE_NOTHROW(res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st));
+    REQUIRE(st.probe_floor_used > 0.0);
+    REQUIRE(st.probe_floor_used <= 0.06 * 1e-6);
+    // V(dp) - V(dn) against the fixed engine's 321.85 V (dt = 1e-6).
+    const Index dp = b.node_id_of("dp");
+    const Index dn = b.node_id_of("dn");
+    Real acc = 0.0, span = 0.0;
+    for (Size k = 1; k < res.times.size(); ++k) {
+        if (res.times[k - 1] < 0.04) { continue; }
+        const Real dt = res.times[k] - res.times[k - 1];
+        acc += 0.5 * dt
+               * (res.states[k - 1][dp] - res.states[k - 1][dn]
+                  + res.states[k][dp] - res.states[k][dn]);
+        span += dt;
+    }
+    REQUIRE(acc / span == Approx(321.85).margin(0.05));
+}
+
+TEST_CASE("TR-BDF2: a gate edge at a step boundary re-settles the diodes",
+          "[v2][trbdf2][robustness]") {
+    // 10 kHz buck, D = 0.4, from a plain lambda, with a controller tick
+    // every 50 µs. The tick ends a step exactly on k·T, where the
+    // turn-on edge also sits; t + h rounded to the pre-edge side, so
+    // that step saw no edge and the zero-time cascade a landed edge
+    // gets never ran. The next step solved Q1 ON with D1 still ON:
+    // a 2.1e-11 s sample at v_sw = +6 V across two 1 mOhm stamps.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "vin", "gnd", 12.0);
+    b.add_mosfet_with_body_diode("Q1", "vin", "sw", 1e-3, 1e9, 0.7);
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9, 0.7);
+    b.add_inductor("L1", "sw", "vout", 220e-6);
+    b.add_capacitor("Cout", "vout", "gnd", 220e-6);
+    b.add_resistor("R_L", "vout", "gnd", 8.0);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    const Size q = static_cast<Size>(b.switch_index_of("Q1"));
+    const Size d = static_cast<Size>(b.switch_index_of("D1"));
+    const Real T = 1e-4;
+    auto sf = [&](Real t) {
+        topology::SwitchStateMask m(n_sw);
+        m.set(q, std::fmod(t, T) / T < 0.4);
+        return m;
+    };
+    solver::TrBdf2Options o;
+    o.t_end = 1e-3;
+    o.observer_period = 50e-6;
+    solver::TrBdf2Stats st;
+    Size ticks = 0;
+    const auto res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, [&](Real, const Vector&) { ++ticks; });
+    REQUIRE(ticks == 20);
+    REQUIRE(st.n_gate_boundary_settles >= 1);
+    REQUIRE(res.has_switch_states);
+    Size shoot_through = 0;
+    for (Size k = 0; k < res.times.size(); ++k) {
+        const auto* row =
+            &res.switch_state_bits[k * res.switch_state_stride];
+        const bool q_on = (row[q / 8] >> (q % 8)) & 1U;
+        const bool d_on = (row[d / 8] >> (d % 8)) & 1U;
+        shoot_through += (q_on && d_on) ? 1 : 0;
+    }
+    REQUIRE(shoot_through == 0);
+}
+
+TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
+          "commutation", "[v2][trbdf2][robustness]") {
+    // V_th = 0.7 bridge behind 0.1 ohm + 1 mH, 470 µF || 1 kOhm. With
+    // every bridge bit OFF the line inductor sees g_off alone (a 1 ps
+    // mode); the probes pinned its -1e-7 A and kept deciding all-OFF,
+    // the LTE read the mode's kink as error at every h, and h sat at
+    // h_min until max_steps (abort at t = 0.176 s of 0.35 s, 73 s of
+    // wall time). Now about 5k steps for 0.5 s; the fixed engine gives
+    // 321.865 V (dt = 1e-6).
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "s", "bb", 0.0, 325.27, 50.0, 0.0);
+    b.add_resistor("Rs", "s", "sr", 0.1);
+    b.add_inductor("Lline", "sr", "a", 1e-3);
+    b.add_diode("D1", "a", "dc", 1e3, 1e-9, 0.7);
+    b.add_diode("D2", "bb", "dc", 1e3, 1e-9, 0.7);
+    b.add_diode("D3", "gnd", "bb", 1e3, 1e-9, 0.7);
+    b.add_diode("D4", "gnd", "a", 1e3, 1e-9, 0.7);
+    b.add_capacitor("C", "dc", "gnd", 470e-6);
+    b.add_resistor("RL", "dc", "gnd", 1e3);
+
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    solver::TrBdf2Options o;
+    o.t_end = 0.5;
+    o.max_steps = 200'000;
+    solver::TrBdf2Stats st;
+    solver::SimulationResult res;
+    REQUIRE_NOTHROW(res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st));
+    REQUIRE(res.times.back() == Approx(0.5));
+    REQUIRE(st.n_accept < 20'000);
+    REQUIRE(tail_mean(res, b.node_id_of("dc"), 0.48)
+            == Approx(321.865).margin(0.1));
+}

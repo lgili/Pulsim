@@ -91,7 +91,17 @@ def test_buck_matches_fixed_dt_reference():
     # ~1000 gate edges landed, ~1000 freewheel commutations, and
     # fifty-times fewer accepted steps than the fixed reference.
     assert st["n_gate_events"] >= 998
-    assert st["n_diode_events"] >= 998
+    # In CCM every freewheel commutation is FORCED by a gate edge and
+    # is decided by the zero-time cascade at that edge, so it shows in
+    # the switch-state record (999 DFW toggles), not as a localized
+    # diode event. The ~1000 diode events this used to count were the
+    # crossing detector reading the step-start signal from the
+    # PRE-edge solve and "finding" each commutation a second time (and
+    # 0-5 of them chattered: the false sliding-mode warning).
+    rec = np.asarray(res.switch_states)
+    bit = b.switch_index_of("DFW")
+    assert int(np.sum(rec[1:, bit] != rec[:-1, bit])) >= 998
+    assert st["n_chatter_breaks"] == 0
     assert st["n_accept"] < 20000
 
 
@@ -168,20 +178,36 @@ def test_vth_hysteresis_gives_tolerance_convergence():
 
 
 def test_sliding_mode_diode_confesses():
-    """V_th = 0 in DCM rides the conduction boundary (the fixed
-    reference chatters ~630 flips/period on this circuit). The
-    engine must WARN with the mechanism, not stay silent."""
+    """A diode that rides its conduction boundary is averaged, and the
+    engine must WARN with the mechanism, not stay silent. The circuit
+    is the snubbed boost (100 nF across a V_th = 0.7 diode), whose
+    diode current sits at zero while the snubber rings: 10 chatter
+    breaks in 6 ms, and the average still lands on the fixed engine
+    (last 3 ms: 53.678 V against 53.666 / 53.653 V at dt = 1e-8 /
+    5e-9).
+
+    The V_th = 0 buck this used to run is in CCM and never slid: its
+    5 "boundary rides" were the crossing detector reading the step
+    start from the pre-gate-edge solve (see
+    test_buck_matches_fixed_dt_reference)."""
     b = p.CircuitBuilder()
-    b.add_voltage_source("Vin", "in", "gnd", 48.0)
-    b.add_switch("HS", "in", "sw", 1e3, 1e-9)
-    b.add_diode("DFW", "gnd", "sw", 1e3, 1e-9)   # V_th = 0
-    b.add_inductor("L", "sw", "out", 22e-6)
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_inductor("L", "vin", "sw", 220e-6)
+    b.add_switch("Q1", "sw", "gnd", 50.0, 1e-9)
+    b.add_diode("D1", "sw", "out", 1e3, 1e-9, V_th=0.7)
+    b.add_capacitor("Cs", "sw", "out", 100e-9)
     b.add_capacitor("C", "out", "gnd", 100e-6)
-    b.add_resistor("R", "out", "gnd", 1.0)
-    pwm = p.NativePwm2Switch(10e-6, 0.5, b.graph.num_switches,
-                              True)
+    b.add_resistor("RL", "out", "gnd", 30.0)
+    q, n, T = b.switch_index_of("Q1"), b.graph.num_switches, 1e-5
+
+    def sf(t):
+        m = p.SwitchStateMask(n)
+        m.set(q, (t % T) < 0.5 * T)
+        return m
+
     with pytest.warns(UserWarning, match="conduction boundary"):
-        p.simulate(b, t_end=5e-3, switch_fn=pwm, engine="auto")
+        res = p.simulate(b, t_end=6e-3, switch_fn=sf, engine="auto")
+    assert _mean_tail(res, "out") == pytest.approx(53.66, abs=0.05)
 
 
 def test_gate_edge_lands_on_awkward_instant():

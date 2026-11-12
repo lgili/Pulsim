@@ -10,6 +10,8 @@ is quantized to the grid. `engine='auto'` schedules the tick
 instants and lands them (and the gate edges) exactly.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -150,8 +152,14 @@ def test_setpoint_step_is_tracked():
             m.set(q, True)
         return m
 
-    res = ps.simulate(b, t_end=20e-3, switch_fn=switch_fn,
-                       step_observer=obs, engine="auto")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = ps.simulate(b, t_end=20e-3, switch_fn=switch_fn,
+                           step_observer=obs, engine="auto")
+    # A tick that met a gate edge used to store Q1 ON with D1 ON (36
+    # samples at 6 V, flagged by simulate's held-diode warning).
+    assert not [w for w in caught
+                if "commutation rule forbids" in str(w.message)]
     t = np.asarray(res.times)
     v = np.asarray(res.v("vout"))
     before = float(np.mean(v[(t > 8e-3) & (t < 10e-3)]))
@@ -187,10 +195,18 @@ def test_bare_observer_with_explicit_period():
         m.set(b.switch_index_of("Q1"), (t % T_CTRL) / T_CTRL < 0.4)
         return m
 
-    ps.simulate(b, t_end=1e-3, switch_fn=sf,
-                 step_observer=lambda t, x: seen.append(t),
-                 controller_period=50e-6, engine="auto")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = ps.simulate(b, t_end=1e-3, switch_fn=sf,
+                           step_observer=lambda t, x: seen.append(t),
+                           controller_period=50e-6, engine="auto")
     assert len(seen) == 20
+    # The ticks end steps exactly on the turn-on edges (k * 100 us):
+    # the edge was not landed, so the next step solved Q1 ON with D1
+    # still ON (3 samples, v_sw = +6 V). The step start now re-settles.
+    assert res._trbdf2_stats["n_gate_boundary_settles"] >= 1
+    assert not [w for w in caught
+                if "commutation rule forbids" in str(w.message)]
     assert np.abs(np.diff(seen) - 50e-6).max() < 1e-15
 
 

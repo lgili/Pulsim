@@ -342,7 +342,29 @@ reproduced every friction item.
       `make_dead_time_pwm_pair_fn` too (48/49 at D = 0.5 with 2e-7 dead
       time). The guide's 3.2 on-step block then prints `[50]` and must be
       updated.
-- [ ] 12.2 TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
+- [x] 12.2 (Closed on `fix/v2-b-engine-robustness`: the crossing
+      detector read each step's start from the committed solve, which
+      after a zero-time cascade was solved under the PRE-cascade bits,
+      so a diode left at +eps was never seen to cross; a diode held on
+      the forbidden side through a step is now re-decided, and a
+      chatter guard that gives up takes a 1/100 step. The bridge reads
+      322.057 V against 322.059 V, every diode 0.1606 A against
+      0.1610 A; the 1 mH case holds no diode against its rule (321.807
+      against 321.845 V). The ride warning names the engine asked for,
+      and `simulate` itself names a held diode. Trap 13 rewritten.
+      Review round 2: past 0.3 s the 1 mH case ground at h_min on one
+      commutation and aborted on max_steps (0.176 s of 0.35 s, 73 s;
+      V_th = 0 at 0.146 s). With every bridge bit OFF the line
+      inductor sees g_off alone, a 1 ps mode: the probes pinned its
+      -1e-7 A and decided all-OFF again, and the LTE read the mode's
+      kink as error at every h. A guard that gives up now re-decides
+      once from the step's END state, and for span*1e-4 after it the
+      LTE cannot cut h below span*1e-7: 0.5 s in 4.9k steps (V_th 0:
+      321.867 V against 321.870 V at dt = 1e-6), 1.0 s in 8.7k
+      (V_th 0.7: 321.828 against 321.869 V). A sign change that never
+      leaves the noise floor is no longer a crossing: the floating-rail
+      bridge at t_end 0.04 s took 318,068 steps, now 1,103.)
+      TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
       runs half-wave (318.79 V, 12.91 V pp against 322.06 V, 6.38 V pp
       with `dt`). The sliding-mode warning names `engine='auto'` even
       when `engine='trbdf2'` was requested. `V_th > 0` is not sufficient
@@ -393,6 +415,46 @@ reproduced every friction item.
       it many times. Emit it once per result and diode. (Fixed on
       `fix/v2-b-loss-api`: 5 emissions of the `BR__D1` warning from four
       `res.i` lines and `device_loss_summary` became 1.)
+
+- [x] 12.10 (Found and closed on `fix/v2-b-engine-robustness`.)
+      `engine='auto'` with a Python `switch_fn` sampled the gates at t
+      and t + h only and bisected [t, t + h] as if it held one edge: a
+      100 kHz boost over 20 ms (ceiling 20 us, two periods) landed 112
+      gate events instead of 3999 and ended at 589.97 V against
+      48.04 V. A step now samples h/4 .. h plus a walking fraction,
+      bisects the first sub-interval that changes and is capped at
+      twice the narrowest pulse seen (48.034 V, 3999 events); a pulse
+      landed although narrower than the sampling used while it was
+      open (or before that gate's first edge) is warned about; against
+      the run-wide spacing, 0.2 s of a smooth 10 kHz SPWM raised it on
+      22 pulses with all 16000 edges landed (now 0). Closed for PERIODIC gates only: a one-shot
+      pulse narrower than h_max/4 (5 us on a 20 ms run) that falls
+      between samples is skipped with no warning, since nothing saw
+      it (11 of 20 phases of a 2 us pulse; a 5 us pulse is landed at
+      all 20). Documented in trap 13 and `TrBdf2Options::h_max`; the
+      cure is `dt` (the ceiling) or an oracle-backed `NativePwm2Switch`.
+- [x] 12.11 (Found and closed on `fix/v2-b-engine-robustness`.) The
+      floating-DC-side abort of trap 8 (see design.md): the probe step
+      grows on a singular factorization; trap 8 rewritten. The run is
+      not as robust as `engine='pwl'` on variants (10 mF: 323.94 V
+      against 324.51 V; a 1 mH DC choke: a 76.7 kV common-mode
+      sample), so a learned probe floor now warns, naming the subnet
+      that reaches ground only through switches and the fix (ground a
+      rail). The choke variant learns no floor; its held-diode
+      `RuntimeWarning` names the subnet instead.
+- [x] 12.12 (Found in review and closed on `fix/v2-b-engine-robustness`.)
+      A controller tick that coincides with a gate edge stored a
+      shoot-through sample on TR-BDF2: the 10 kHz buck of
+      `test_engine_auto_closed_loop.py` with `controller_period=50e-6`
+      recorded Q1 ON with D1 ON (v_sw = +6 V across two 1 mOhm stamps)
+      at t = 1.00000002e-4 s; 0 without `controller_period`. The tick
+      ends a step on k*T, t + h rounds to the pre-edge side, so the edge
+      was not landed and its zero-time diode cascade never ran. Present
+      on the base (3 samples; 219 on the setpoint-step test), surfaced
+      by the new held-diode `RuntimeWarning`. The step start now
+      compares the gates with those the diodes were last decided under
+      and re-settles (`n_gate_boundary_settles`): 0 violations on both
+      tests, which now assert the warning is absent.
 
 ## 13. Review round 3
 

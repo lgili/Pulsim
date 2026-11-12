@@ -338,48 +338,66 @@ def test_resume_just_before_a_gate_edge_matches_the_edge(src, k_ulp, seed):
                                                     rel=1e-2), (n, k)
 
 
-def test_landing_outside_the_envelope_is_checked():
-    """The rule check's landing exemption, on a recorded auto buck run
-    whose landings all sit inside the envelope: a D1 landing stored
-    under the ON stamp, edited to the shoot-through the
-    resume above used to store (v_D = -24 V, 24 kA against ~25 A on
-    every other sample) is named; one edited to a reverse current
-    within the run's peak stays exempt."""
-    from pulsim._diode_state import diode_state_traces
+class _Edited:
+    """A recorded result with its states replaced (the rule check reads
+    nothing else)."""
 
-    class _Edited:
-        def __init__(self, r, states):
-            self.times = r.times
-            self.states = states
-            self.switch_states = np.asarray(r.switch_states)
-            self.switch_states_unsolved = np.asarray(
-                r.switch_states_unsolved)
-            self.commutation_events = list(r.commutation_events)
-            self.event_iteration_breaches = []
-            self.engine_used = r.engine_used
+    def __init__(self, r, states):
+        self.times = r.times
+        self.states = states
+        self.switch_states = np.asarray(r.switch_states)
+        self.switch_states_unsolved = np.asarray(r.switch_states_unsolved)
+        self.commutation_events = list(r.commutation_events)
+        self.event_iteration_breaches = []
+        self.engine_used = r.engine_used
 
-    b, pwm, T = _buck()
-    r = _run(b, 4 * T, "auto", switch_fn=pwm)
-    d1 = b.branch_index_of("D1")
-    bit = b.switch_index_of("D1")
+
+def _rl_auto_landing():
+    """(builder, result, sample index of a D turn-off landing stored
+    under the ON stamp, anode row, cathode row) on the RL half-wave.
+
+    This used the 50 kHz buck of ``_buck`` until the TR-BDF2 crossing
+    detector stopped reading the step start from the PRE-gate-edge
+    solve: the buck's D1 landings were that detector "finding" each
+    gate-forced commutation a second time, and a CCM buck now has none
+    (its commutations are decided at the gate edges). The half-wave's
+    turn-off at the current zero is a real landing."""
+    b = _rl_half_wave(0.7)
+    r = _run(b, 4 / 60, "auto")
+    d = b.branch_index_of("D")
+    bit = b.switch_index_of("D")
     t = np.asarray(r.times)
     rec = np.asarray(r.switch_states)
     k = next(int(np.searchsorted(t, ev.t_estimated))
              for ev in r.commutation_events
-             if ev.branch_id == d1
+             if ev.branch_id == d
              and t[np.searchsorted(t, ev.t_estimated)] == ev.t_estimated
              and rec[np.searchsorted(t, ev.t_estimated), bit])
-    sw = next(c for c in b.components() if c["name"] == "D1")["nodes"][1]
+    a, kn = next(c for c in b.components() if c["name"] == "D")["nodes"]
+    return b, r, k, a, kn
+
+
+def test_landing_outside_the_envelope_is_checked():
+    """The rule check's landing exemption, on a recorded auto run whose
+    landings all sit inside the envelope: a turn-off landing stored
+    under the ON stamp, edited to a shoot-through-sized reverse bias
+    (v_D = -24 V, 24 kA against a 6.4 A peak on every other sample) is
+    named; one edited to a reverse current within the run's peak (5 A)
+    stays exempt."""
+    from pulsim._diode_state import diode_state_traces
+
+    b, r, k, a, kn = _rl_auto_landing()
+    d = b.branch_index_of("D")
     S = np.array(r.states, dtype=float)
 
-    def check(v_sw):
+    def check(v_d):
         S2 = S.copy()
-        S2[k, sw] = v_sw
-        return diode_state_traces(b, _Edited(r, S2))[d1]
+        S2[k, kn] = S[k, a] - v_d
+        return diode_state_traces(b, _Edited(r, S2))[d]
 
-    assert check(S[k, sw]).n_rule_violations == 0
-    assert check(0.01).n_rule_violations == 0          # 10 A reverse
-    tr = check(24.0)
+    assert check(S[k, a] - S[k, kn]).n_rule_violations == 0
+    assert check(-0.005).n_rule_violations == 0         # 5 A reverse
+    tr = check(-24.0)
     assert tr.n_rule_violations == 1
     assert tr.max_violation_V == pytest.approx(24.0)
     assert any("commutation landing" in m for m in tr._messages)
@@ -704,16 +722,16 @@ def test_line_inductance_bridge_has_no_phantom_landing_peak(engine):
     inductor's STATE current at every sample (before: 268 A off at one
     landing, D3 reported at 700.5 A with the inductor at 294.1 A).
 
-    The 294 A itself is in the auto trajectory (the pwl run peaks at
-    65 A): engine='auto' holds BR__D2/BR__D4 ON against the commutation
-    rule for 25 samples and discharges the DC capacitor through them —
-    an engine defect, which the report names instead of hiding."""
+    The 294 A was in the auto trajectory (the pwl run peaks at 65 A):
+    engine='auto' held BR__D2/BR__D4 ON against the commutation rule for
+    25 samples and discharged the DC capacitor through them. The engine
+    now re-decides a diode held on the forbidden side and reads each
+    step's start from the solve its bits were decided on: the auto run
+    peaks at 65.32 A (pwl 65.35 A) and nothing is held."""
     b = _bridge_with_line_l(0.7)
     r = _run(b, 0.08, engine, dt=1e-6)
     s, cur, msgs = _report(b, r, BRIDGE)
-    assert all(_RULE in m for m in msgs), msgs
-    if engine == "pwl":
-        assert not msgs, msgs
+    assert not msgs, msgs
     i_l = np.asarray(r.i("Ls"))
     i_pk = float(np.abs(i_l).max())
     assert np.abs(i_l - (cur["BR__D1"] - cur["BR__D4"])).max() \
@@ -1323,19 +1341,44 @@ def test_immaterial_reconductions_are_bounded_by_charge():
 
 
 def test_rule_violation_names_the_actual_violation():
-    """The auto-engine bridge with line inductance holds D2 / D4 ON
-    while reverse-biased. The warning said 'e.g. OFF while
-    forward-biased', the opposite case; it now names what happened and
-    that the whole circuit is suspect from there on."""
+    """The warning used to say 'e.g. OFF while forward-biased' when the
+    auto-engine bridge with line inductance held D2 / D4 ON while
+    reverse-biased; it names what happened and that the whole circuit
+    is suspect from there on. That bridge no longer violates the rule
+    (the crossing detector reads the step start from the solve the
+    bits were decided on, and re-decides a diode held on the forbidden
+    side), so the wording is pinned on edited samples of a recorded
+    run: one ON stamp reverse-biased, one OFF stamp forward-biased."""
+    from pulsim._diode_state import diode_state_traces
+
     b = _bridge_with_line_l(0.7)
-    r = _run(b, 0.08, "auto", dt=1e-6)
+    r = _run(b, 0.08, "auto")
     _, _, msgs = _report(b, r, list(BRIDGE))
-    rule = [m for m in msgs if _RULE in m]
-    assert rule, msgs
-    for m in rule:
-        assert "ON while reverse-biased" in m or "OFF while" in m, m
-        assert "every switched branch" in m, m
-    assert any("ON while reverse-biased" in m for m in rule), rule
+    assert not [m for m in msgs if _RULE in m], msgs
+
+    b, r, k, a, kn = _rl_auto_landing()
+    d = b.branch_index_of("D")
+    bit = b.switch_index_of("D")
+    rec = np.asarray(r.switch_states)
+    t = np.asarray(r.times)
+    ev_t = {ev.t_estimated for ev in r.commutation_events}
+    plain = [j for j in range(1, t.size) if t[j] not in ev_t]
+    j_on = next(j for j in plain if rec[j, bit])
+    j_off = next(j for j in plain if not rec[j, bit])
+    S = np.array(r.states, dtype=float)
+    S[j_on, kn] = S[j_on, a] + 2.0             # ON, 2 V reverse
+    S[j_off, kn] = S[j_off, a] - 5.0           # OFF, 5 V forward
+    tr = diode_state_traces(b, _Edited(r, S))[d]
+    assert tr.n_rule_violations == 2
+    rule = [m for m in tr._messages if _RULE in m]
+    assert len(rule) == 1, tr._messages
+    assert "ON while reverse-biased on 1 samples" in rule[0], rule
+    assert "OFF while forward-biased above V_th = 0.7 V" in rule[0], rule
+    assert "every switched branch" in rule[0], rule
+
+    # simulate() says the same at the end of the run, naming the diode.
+    with pytest.warns(RuntimeWarning, match=r"held diode\(s\) 'D' "):
+        p._trbdf2_warn_stats(_Edited(r, S), b, {}, "auto")
 
 
 # ---------------------------------------------------------------------
