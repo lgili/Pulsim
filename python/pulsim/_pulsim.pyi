@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -1487,6 +1487,23 @@ class NativeMultiMaskPwm:
     @property
     def T_sw(self) -> float:
         ...
+class SwitchSchedule:
+    """
+    A switch_fn that knows its own gate edges: returned by make_pwm_switch_fn, make_dead_time_pwm_pair_fn, make_spwm_pair_fn, make_phase_shift_full_bridge_fn, make_three_phase_spwm_fn and make_combined_switch_fn. Call it with t for the SwitchStateMask. `next_edge_after(t)` is the first gate edge strictly after t (inf when unknown), so the variable-step engines (engine='trbdf2', 'dsed') land their steps ON the edges instead of sampling for them; every engine evaluates it in C++ without the GIL. Edges that fall on a dt grid point take effect at that point.
+    """
+    def __call__(self, t: float) -> SwitchStateMask:
+        """
+        Return the switch mask at time `t`.
+        """
+    def next_edge_after(self, t: float) -> float:
+        """
+        First gate-edge time strictly greater than `t`; inf when the schedule does not know it (a combination with a plain Python callable). An edge may be a no-op (same mask on both sides), never a missed one.
+        """
+    @property
+    def has_edges(self) -> bool:
+        """
+        False when the schedule cannot name its edges (a make_combined_switch_fn with a plain Python callable in it); the variable-step engines then search for them by sampling.
+        """
 class ThreePhaseLegIndices:
     """
     Switch-index assignment for the 6 power devices of a 3-phase 2-level VSI. Caller must add the switches in the same order to the CircuitBuilder.
@@ -2361,29 +2378,29 @@ def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: colle
     """
     Build a switch_fn(t) that sets bit `idx` ON when `chain.channels[channel_name] > 0.5`. `mapping` is a list of (channel_name, switch_idx) pairs.
     """
-def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[collections.abc.Callable[[float], SwitchStateMask]]) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[typing.Any]) -> SwitchSchedule:
     """
-    Compose multiple SwitchScheduleFn callbacks into a single one whose mask is the bitwise OR of all sub-masks. Useful for combining e.g. a primary-side PWM helper with a sync-rectifier helper where each drives different switch indices.
+    Compose multiple switch_fn callbacks into a single SwitchSchedule whose mask is the bitwise OR of all sub-masks. Useful for combining e.g. a primary-side PWM helper with a sync-rectifier helper where each drives different switch indices. Its `next_edge_after` is the earliest edge of the parts when every part is a SwitchSchedule, else inf.
     """
-def make_dead_time_pwm_pair_fn(frequency: float, duty: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_dead_time_pwm_pair_fn(frequency: float, duty: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a complementary HS/LS half-bridge pair at `frequency` with `duty` and symmetric `dead_time` inserted at each commutation. Shoot-through is prevented by construction (HS and LS are never both ON). Other switch bits stay OFF.
+    Build a SwitchSchedule driving a complementary HS/LS half-bridge pair at `frequency` with `duty` and symmetric `dead_time` inserted at each commutation. Shoot-through is prevented by construction (HS and LS are never both ON). Other switch bits stay OFF.
     """
-def make_phase_shift_full_bridge_fn(switching_frequency: float, phase_shift: float, leg_a_hs_idx: int, leg_a_ls_idx: int, leg_b_hs_idx: int, leg_b_ls_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_phase_shift_full_bridge_fn(switching_frequency: float, phase_shift: float, leg_a_hs_idx: int, leg_a_ls_idx: int, leg_b_hs_idx: int, leg_b_ls_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a phase-shift full-bridge: two HS/LS half-bridge legs at 50 %% duty each, with leg B lagging leg A by `phase_shift` radians. φ=0 → synchronous (no power); φ=π → anti-phase (full ±V_bus square wave on v_AB). Used by ZVS full-bridge, DAB, and resonant LLC converters.
+    Build a SwitchSchedule driving a phase-shift full-bridge: two HS/LS half-bridge legs at 50 %% duty each, with leg B lagging leg A by `phase_shift` radians. φ=0 → synchronous (no power); φ=π → anti-phase (full ±V_bus square wave on v_AB). Used by ZVS full-bridge, DAB, and resonant LLC converters.
     """
-def make_pwm_switch_fn(frequency: float, duty: float, switch_idx: int, num_switches: int, phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_pwm_switch_fn(frequency: float, duty: float, switch_idx: int, num_switches: int, phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn that toggles `switch_idx` ON during the first `duty · T` fraction of each period (T = 1 / frequency) and OFF for the rest. All other switch bits stay OFF. Returns a Python callable usable as `switch_fn=` in run_transient.
+    Build a SwitchSchedule that toggles `switch_idx` ON during the first `duty · T` fraction of each period (T = 1 / frequency) and OFF for the rest; `phase` is a time offset in seconds. All other switch bits stay OFF. Edges on a dt grid point take effect at that point, so an on-time of a whole number of steps is exactly that many steps in every period. Usable as `switch_fn=` in simulate / run_transient.
     """
-def make_spwm_pair_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0, modulation_phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_spwm_pair_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0, modulation_phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a HS/LS half-bridge with naturally-sampled SPWM: instantaneous duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). Symmetric `dead_time` is inserted at each commutation; shoot-through is impossible by construction.
+    Build a SwitchSchedule driving a HS/LS half-bridge with naturally-sampled SPWM: instantaneous duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). Symmetric `dead_time` is inserted at each commutation; shoot-through is impossible by construction.
     """
-def make_three_phase_spwm_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, legs: ThreePhaseLegIndices, num_switches: int, dead_time: float, modulation_phase: float = 0.0, carrier_phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_three_phase_spwm_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, legs: ThreePhaseLegIndices, num_switches: int, dead_time: float, modulation_phase: float = 0.0, carrier_phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a 3-phase 2-level VSI with SPWM: common carrier, sine modulation references at 0°/-120°/-240° on legs A/B/C, symmetric dead-time. Shoot-through prevented on every leg by construction.
+    Build a SwitchSchedule driving a 3-phase 2-level VSI with SPWM: common carrier, sine modulation references at 0°/-120°/-240° on legs A/B/C, symmetric dead-time. Shoot-through prevented on every leg by construction.
     """
 def radau_iia3_solve(f: collections.abc.Callable, t0: float, t_end: float, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], rtol: float = 1e-05, atol: float = 1e-08, dt_min: float = 1e-12, dt_max: float = 0.0, safety: float = 0.9, growth_max: float = 5.0, shrink_min: float = 0.2, newton_max_iter: int = 8, newton_tol: float = 1e-08, dt_init: float = -1.0) -> dict[typing.Any, typing.Any]:
     """

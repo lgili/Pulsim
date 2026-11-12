@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/solver/run_transient.hpp"
@@ -137,6 +138,36 @@ TEST_CASE("NativePwm2Switch and PWMVoltageSource — whole-step on-time exact",
     }
 }
 
+TEST_CASE("PulseVoltageSource — periodic pulse width exact on the grid",
+          "[v2][pwm_grid][unit]") {
+    // Before (fmod of the elapsed time): period 20 us, width 6 us,
+    // dt 0.2 us read 29 or 30 grid points at v_pulsed per period.
+    struct C { Real period, width, dt, t_start, rise; };
+    for (const C c : {C{20e-6, 6e-6, 2e-7, 0.0, 0.0},
+                      C{10e-6, 2.5e-6, 1e-7, 0.0, 0.0},
+                      C{20e-6, 6e-6, 2e-7, 13 * 2e-7, 0.0},
+                      C{20e-6, 6e-6, 2e-7, 0.0, 4e-7}}) {
+        models::PulseVoltageSource::Params prm;
+        prm.v_pulsed = 1.0;
+        prm.pulse_width = c.width;
+        prm.period = c.period;
+        prm.t_start = c.t_start;
+        prm.rise_time = c.rise;
+        auto src = [&prm](Real t) {
+            SwitchStateMask m{1};
+            // Strictly above the ramp: only the flat top counts.
+            m.set(0, models::PulseVoltageSource::value_at(prm, t)
+                         > 1.0 - 1e-9);
+            return m;
+        };
+        const long want = std::lround(c.width / c.dt);
+        INFO("period=" << c.period << " width=" << c.width
+             << " t_start=" << c.t_start << " rise=" << c.rise);
+        REQUIRE(on_counts(src, 0, 1 / c.period, c.dt, c.t_start, 300)
+                == std::set<long>{want});
+    }
+}
+
 TEST_CASE("make_phase_shift_full_bridge_fn — grid-exact legs",
           "[v2][pwm_grid][unit]") {
     // 100 kHz, quarter shift (2.5 us lag = 25 steps), 2e-7 dead time.
@@ -229,7 +260,10 @@ TEST_CASE("next_edge_after — three-phase SPWM edges are complete",
           "[v2][pwm_grid][switch_schedule][unit]") {
     ThreePhaseLegIndices legs{0, 1, 2, 3, 4, 5};
     auto sw = make_three_phase_spwm_fn(5e3, 50.0, 0.8, legs, 6, 2e-6);
-    check_edges_complete(sw, 20e-3, 32, 3 * 4 * 100 - 12);
+    // Distinct edge times per carrier period: the period start (every
+    // HS on) and 1 - d (every LS off) are shared by the three legs,
+    // plus each leg's own HS off and LS on: 2 + 3 * 2 = 8.
+    check_edges_complete(sw, 20e-3, 32, 8 * 100 - 8);
 }
 
 TEST_CASE("make_combined_switch_fn — edge oracle is the earliest part",

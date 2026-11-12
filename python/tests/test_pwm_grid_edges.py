@@ -95,6 +95,22 @@ def test_control_pwm_generator_is_grid_exact():
     assert n_on == {25.0}
 
 
+@pytest.mark.parametrize("period,width,dt", [(2e-5, 6e-6, 2e-7), (1e-5, 2.5e-6, 1e-7)])
+def test_pulse_source_width_is_exact_on_the_fixed_engine(period, width, dt):
+    """The periodic PULSE source wrapped its time with fmod: 29 or 30
+    grid points at v_pulsed per period (want 30) at 20 us / 6 us /
+    0.2 us."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("V", "a", "gnd", 0.0, 1.0, 0.0, width, period=period)
+    b.add_resistor("R", "a", "gnd", 1.0)
+    res = p.simulate(b, t_end=300 * period, dt=dt, engine="pwl")
+    v = np.asarray(res.v("a"))
+    n = round(period / dt)
+    per = {int((v[j * n + 1:(j + 1) * n + 1] > 0.5).sum())
+           for j in range((len(v) - 1) // n)}
+    assert per == {round(width / dt)}
+
+
 def test_helpers_return_a_switch_schedule_with_edges():
     sw = p.make_dead_time_pwm_pair_fn(100e3, 0.25, 0, 1, 2, 1e-7)
     assert isinstance(sw, p.SwitchSchedule)
