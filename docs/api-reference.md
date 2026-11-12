@@ -339,7 +339,8 @@ drive yourself (e.g. `make_pwm_switch_fn`) and pass it as `switch_fn=`.
 
 Key checks. The loader accepts only `circuit:` and `simulation:` at the
 top level and only `nodes:` / `devices:` under `circuit:`; anything else
-raises `RuntimeError` naming the key. A `simulation:` block indented
+is ignored with a `UserWarning` naming the key (also listed in
+`loaded.warnings`). A `simulation:` block indented
 under `circuit:` is refused with the fix spelled out (until 2.0.x it was
 ignored and the file loaded with `t_end = dt = 0`). A
 `schema: pulsim-v1` netlist is refused as such. Unknown keys inside

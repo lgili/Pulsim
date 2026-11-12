@@ -588,7 +588,7 @@ simulation:
 }
 
 // -----------------------------------------------------------------------------
-// Key checks (2.0.x): a misplaced or unknown key is refused, not ignored.
+// Key checks (2.0.x): a misplaced key is refused, an unknown one warned.
 // Before, 9 shipped examples indented `simulation:` under `circuit:` and
 // loaded with t_end = dt = 0 and no diagnostic.
 // -----------------------------------------------------------------------------
@@ -622,15 +622,19 @@ TEST_CASE("YAML loader: simulation: nested under circuit: is refused",
     REQUIRE(msg.find("TOP-LEVEL") != std::string::npos);
 }
 
-TEST_CASE("YAML loader: unknown top-level and circuit: keys are refused",
-          "[v2][layer8][yaml][errors][keys]") {
-    const std::string top = load_error(
+TEST_CASE("YAML loader: unknown top-level and circuit: keys are warnings",
+          "[v2][layer8][yaml][keys]") {
+    const auto top = yaml::load_string(
         "circuit:" + kRcDevices + "simulaton:\n  t_end: 1.0e-3\n");
-    REQUIRE(top.find("unknown top-level key 'simulaton'")
+    REQUIRE(top.warnings.size() == 1);
+    REQUIRE(top.warnings[0].find("unknown top-level key 'simulaton'")
             != std::string::npos);
-    const std::string circ = load_error(
+    REQUIRE_FALSE(top.has_simulation);   // the typo'd block was not read
+    const auto circ = yaml::load_string(
         "circuit:" + kRcDevices + "  name: rc\n");
-    REQUIRE(circ.find("unknown circuit: key 'name'") != std::string::npos);
+    REQUIRE(circ.warnings.size() == 1);
+    REQUIRE(circ.warnings[0].find("unknown circuit: key 'name'")
+            != std::string::npos);
 }
 
 TEST_CASE("YAML loader: a v1 netlist is refused by name",

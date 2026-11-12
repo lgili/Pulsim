@@ -133,9 +133,10 @@ def test_nested_simulation_in_a_file_names_the_path(tmp_path):
     ("circuit:\n" + _DEVICES + "chain: []\n", "chain"),
     ("circuit:\n" + _DEVICES + "  device:\n    - {}\n", "device"),
 ])
-def test_unknown_top_level_or_circuit_key_is_refused(text, key):
-    with pytest.raises(RuntimeError, match=f"unknown .* key '{key}'"):
-        p.load_yaml_string(text)
+def test_unknown_top_level_or_circuit_key_warns(text, key):
+    with pytest.warns(UserWarning, match=f"unknown .* key '{key}'"):
+        lc = p.load_yaml_string(text)
+    assert len(lc.warnings) == 1
 
 
 def test_empty_simulation_block_is_refused():

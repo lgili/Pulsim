@@ -37,13 +37,12 @@
 //
 // Key validation (2.0.x): the only top-level keys are `circuit` and
 // `simulation`, and the only `circuit:` keys are `nodes` and
-// `devices`. Anything else is REFUSED with a message naming the key —
-// in particular a `simulation:` block indented under `circuit:`, which
-// used to be ignored silently and left t_end = dt = 0. A legacy
-// `schema: pulsim-v1` netlist is refused by name. Unknown keys INSIDE
-// `simulation:` are not fatal: they are collected in
-// `LoadedCircuit::warnings` (the Python binding re-emits each one as a
-// `UserWarning`).
+// `devices`. Any other key, at those levels or inside `simulation:`,
+// is not fatal: it is collected in `LoadedCircuit::warnings` (the
+// Python binding re-emits each one as a `UserWarning`). REFUSED: a
+// `simulation:` block indented under `circuit:` (it used to be ignored
+// silently and left t_end = dt = 0) and a legacy `schema: pulsim-v1`
+// netlist.
 //
 // See `examples/*.yaml` for working samples.
 
@@ -574,11 +573,13 @@ inline void collect_unknown_simulation_keys(
     }
 }
 
-/// Refuse any key of `map` that is not in `allowed`. `where` names the
-/// map in the message ("top-level", "circuit:").
-inline void refuse_unknown_keys(
+/// Report (in `out`, not fatal) any key of `map` that is not in
+/// `allowed`. `where` names the map in the message ("top-level",
+/// "circuit:"). Owner decision 2026-11-12: a warning, not an error, so a
+/// user YAML carrying extra metadata (e.g. `name:`) still loads.
+inline void warn_unknown_keys(
     const YAML::Node& map, std::initializer_list<std::string_view> allowed,
-    std::string_view where) {
+    std::string_view where, std::vector<std::string>& out) {
     for (const auto& kv : map) {
         if (!kv.first.IsScalar()) {
             throw std::runtime_error(std::format(
@@ -593,11 +594,10 @@ inline void refuse_unknown_keys(
             accepted += a;
         }
         if (!ok) {
-            throw std::runtime_error(std::format(
-                "yaml::load: unknown {} key '{}' (accepted: {}). The "
-                "loader refuses unknown keys instead of ignoring them, "
-                "so a typo or a mis-indented block cannot vanish "
-                "silently.", where, key, accepted));
+            out.push_back(std::format(
+                "unknown {} key '{}' was ignored (accepted: {}); check "
+                "for a typo or a mis-indented block", where, key,
+                accepted));
         }
     }
 }
@@ -681,11 +681,10 @@ namespace detail {
             "docs/migration-from-v1.md.");
     }
 
-    detail::refuse_unknown_keys(root, {"circuit", "simulation"},
-                                "top-level");
-
     LoadedCircuit loaded;
     loaded.source = source;
+    detail::warn_unknown_keys(root, {"circuit", "simulation"},
+                              "top-level", loaded.warnings);
 
     const YAML::Node circuit = root["circuit"];
     if (!circuit || !circuit.IsMap()) {
@@ -704,8 +703,8 @@ namespace detail {
             "'circuit:' — dedent the block. As written, t_end and dt "
             "would not be read and would load as 0.");
     }
-    detail::refuse_unknown_keys(circuit, {"nodes", "devices"},
-                                "circuit:");
+    detail::warn_unknown_keys(circuit, {"nodes", "devices"},
+                              "circuit:", loaded.warnings);
 
     // Optional: pre-declare nodes (auto-created on device
     // reference anyway, but exposing it gives the user

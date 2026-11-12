@@ -1499,7 +1499,7 @@ class LoadedCircuit:
     @property
     def warnings(self) -> list[str]:
         """
-        Non-fatal loader findings (unknown `simulation:` keys), each also emitted as a UserWarning at load time.
+        Non-fatal loader findings (unknown keys), each also emitted as a UserWarning at load time.
         """
 class NativePwm2Switch:
     """
@@ -2423,7 +2423,7 @@ def load_yaml_file(path: str) -> LoadedCircuit:
     """
 def load_yaml_string(yaml_text: str) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Refuses unknown top-level / `circuit:` keys (a `simulation:` block indented under `circuit:` included); warns on unknown `simulation:` keys.
+    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`.
     """
 def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> collections.abc.Callable[[float], SwitchStateMask]:
     """

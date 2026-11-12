@@ -2131,7 +2131,7 @@ void init_module(py::module_& m) {
             [](const yaml::LoadedCircuit& self) {
                 return self.warnings;
             },
-            "Non-fatal loader findings (unknown `simulation:` keys), "
+            "Non-fatal loader findings (unknown keys), "
             "each also emitted as a UserWarning at load time.")
         .def("__repr__",
             [](const yaml::LoadedCircuit& self) {
@@ -2164,10 +2164,9 @@ void init_module(py::module_& m) {
             return lc;
         }, py::arg("yaml_text"),
         "Parse a YAML circuit description from an in-memory "
-        "string. Returns LoadedCircuit(builder, options). Refuses "
-        "unknown top-level / `circuit:` keys (a `simulation:` block "
-        "indented under `circuit:` included); warns on unknown "
-        "`simulation:` keys.");
+        "string. Returns LoadedCircuit(builder, options). Warns on "
+        "unknown top-level / `circuit:` / `simulation:` keys; refuses "
+        "a `simulation:` block indented under `circuit:`.");
     m.def("load_yaml_file",
         [emit_load_warnings](const std::string& path) {
             auto lc = yaml::load_file(path);

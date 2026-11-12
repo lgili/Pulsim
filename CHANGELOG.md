@@ -116,12 +116,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and 3 had none, so all 12 loaded with t_end = dt = 0 and no warning.
   The files are fixed, and a test now loads and runs every shipped
   example.
-* Changed: the YAML loader refuses unknown top-level and `circuit:`
-  keys, naming the key; a `simulation:` block nested under `circuit:` is
-  refused with the fix spelled out. An empty `simulation:` block and a
-  `schema: pulsim-v1` netlist are refused. Unknown `simulation:` keys
-  (e.g. v1 `tstop`) emit a UserWarning and are listed in
-  `LoadedCircuit.warnings`.
+* Changed: the YAML loader warns on unknown top-level, `circuit:` and
+  `simulation:` keys (e.g. v1 `tstop`): each is a UserWarning naming the
+  key and is listed in `LoadedCircuit.warnings`. A `simulation:` block
+  nested under `circuit:` is refused with the fix spelled out, as are an
+  empty `simulation:` block and a `schema: pulsim-v1` netlist.
 * Added: `pulsim.simulate(loaded)` accepts a `LoadedCircuit` and takes
   t_start / t_end / dt / store_every from its `simulation:` block
   (keywords override). An empty run window is a ValueError naming the
