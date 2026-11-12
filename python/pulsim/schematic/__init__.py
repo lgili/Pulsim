@@ -86,12 +86,21 @@ class _CircuitAdapter:
 def _maybe_adapt(circuit):
     """Wrap a flat-namespace builder so the schematic engine sees the
     component-attribute interface. If the object already looks like the
-    expected shape (e.g. a test fixture), it is returned unchanged."""
+    expected shape (e.g. a test fixture), it is returned unchanged.
+
+    A ``LoadedCircuit`` (from ``load_yaml_file``) is unwrapped to its
+    builder. Anything without a ``components()`` method is a
+    ``TypeError`` here, not an ``AttributeError`` deep in a backend."""
     if isinstance(circuit, _CircuitAdapter):
         return circuit
+    if hasattr(circuit, "builder") and hasattr(circuit, "options"):
+        circuit = circuit.builder          # LoadedCircuit
     comps = getattr(circuit, "components", None)
-    if comps is None:
-        return circuit
+    if comps is None or not callable(comps):
+        raise TypeError(
+            "pulsim.schematic expects a CircuitBuilder (or a LoadedCircuit "
+            "from load_yaml_file), i.e. an object with a components() "
+            f"method; got {type(circuit).__name__}.")
     try:
         sample = comps()
         if sample and isinstance(sample[0], dict):

@@ -126,6 +126,21 @@ def _require_node() -> str:
     return node
 
 
+def raise_if_elkjs_missing(stderr: str) -> None:
+    """Turn Node's "Cannot find module 'elkjs'" into an ImportError.
+
+    A pip install ships no ``node_modules``; the ELK layout step then
+    died with a Node stack trace inside a RuntimeError.
+    """
+    if "Cannot find module 'elkjs'" in stderr:
+        raise ImportError(
+            "The ELK schematic layout needs the 'elkjs' Node package, which "
+            "is not installed (`npm install elkjs` at the repo root, or set "
+            "NODE_PATH). Unset PULSIM_SCHEMATIC_BACKEND to use the "
+            "pure-Python layout (topology template / force-directed), which "
+            "needs no Node.js.")
+
+
 # ---------------------------------------------------------------------------
 # Layout step: Pulsim Circuit → ELK graph → laid-out ELK graph
 # ---------------------------------------------------------------------------
@@ -219,6 +234,13 @@ def _resolve_user_hints(circuit: Any) -> dict[str, tuple[float, float]]:
     resolved: dict[str, tuple[float, float]] = {}
     seen_coords: dict[tuple[float, float], str] = {}
     for name, hint in raw.items():
+        # The 2.0 `CircuitBuilder.position_hints()` is a V0 stub that
+        # maps NODE ids to role strings ({0: 'internal', -1: 'ground'}),
+        # not component names to placement hints. Those entries are not
+        # user hints; dereferencing `.x` on them raised AttributeError
+        # for every builder. Only objects carrying the hint fields are.
+        if not all(hasattr(hint, a) for a in ("x", "y", "layer", "slot")):
+            continue
         if hint.x is not None and hint.y is not None:
             xy = (float(hint.x), float(hint.y))
         elif hint.layer is not None or hint.slot is not None:
@@ -590,6 +612,7 @@ def _call_elk(graph: dict[str, Any]) -> dict[str, Any]:
     )
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise_if_elkjs_missing(stderr)
         raise RuntimeError(
             f"elk_bridge.js failed (exit {result.returncode}): {stderr}"
         )

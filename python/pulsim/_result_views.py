@@ -612,3 +612,169 @@ def time_weighted_rms(y: np.ndarray, times: np.ndarray,
         return float(np.sqrt(np.mean(y ** 2)))
     sq = pl_integral_product(t, y, y, y_start, y_start)
     return float(np.sqrt(max(sq, 0.0) / span))
+
+
+class TimeWindow:
+    """The part ``[t_from, t_to]`` of a run, applied to per-sample
+    arrays (``device_loss_summary`` / ``device_thermal_summary``).
+
+    Bounds follow :func:`pulsim.stats.time_window`: ``None`` is the
+    first / last sample, the window must have positive width and lie
+    inside ``span`` (default ``[t[0], t[-1]]``; a bound within 1e-9 of
+    the span past its end is that end, so ``t_to=t_end`` works when the
+    stored last time is an ulp short of it). A ``t_from`` before
+    ``t[0]`` but inside ``span`` (the unsolved row 0 that
+    :func:`solved_part` dropped) starts at ``t[0]``.
+
+    Each step ``(t[k-1], t[k]]`` is the line from ``x_start[k-1]`` to
+    ``x[k]`` (:func:`pl_integral`). A bound that falls inside a step
+    cuts that line, so :meth:`cont` inserts the interpolated value at
+    the bound and every integral, average and peak of the windowed
+    arrays covers the window and nothing else. Taking the first
+    sample at or after ``t_from`` instead shifts the window by up to a
+    whole step, and a variable-step engine takes long ones.
+
+    A bound that falls on a sample uses that sample: at ``t_from`` its
+    right limit starts the window, at ``t_to`` its left limit ends it
+    (where ``engine='dsed'`` stores both at an event).
+
+    Interpolate only what the whole-run integral treats as a line. On a
+    switched branch that is the CURRENT and, on the step that flips the
+    stamp (pwl / trbdf2 store no right limit, so its start was solved
+    under the other stamp), the POWER, never a voltage paired with one
+    end's conductance: the flip step's interpolated voltage is no
+    on-state voltage, and times ``g_on`` it read a buck diode at 11.8 kA
+    (``pulsim.losses._window_conductance`` does this split).
+
+    An instantaneous event of step ``k`` (a gate edge, a diode
+    turn-off) belongs to the window when ``t_from <= t[k-1] < t_to``
+    (:meth:`starts_inside`), so consecutive windows count every event
+    once."""
+
+    def __init__(self, times, t_from=None, t_to=None, *,
+                 span: "tuple[float, float] | None" = None,
+                 what: str = "device_loss_summary"):
+        t = np.asarray(times, dtype=float)
+        self.times_full = t
+        n = int(t.size)
+        if n < 2:
+            if t_from is not None or t_to is not None:
+                raise ValueError(
+                    f"{what}: t_from / t_to need a result with at least "
+                    f"two samples, got {n}")
+            self.whole = True
+            self.a = float(t[0]) if n else 0.0
+            self.b = float(t[-1]) if n else 0.0
+            self.times = t
+            return
+        lo_span, hi_span = ((float(t[0]), float(t[-1])) if span is None
+                            else (float(span[0]), float(span[1])))
+        a = float(t[0]) if t_from is None else float(t_from)
+        b = float(t[-1]) if t_to is None else float(t_to)
+        if not (np.isfinite(a) and np.isfinite(b)):
+            raise ValueError(
+                f"{what}: window bounds must be finite, got "
+                f"t_from={t_from!r}, t_to={t_to!r}")
+        # The stored end time can miss t_end by an ulp
+        # (0.09999999999999999 for t_end=0.1): a bound within 1e-9 of
+        # the span of its end is that end.
+        tol = 1e-9 * max(hi_span - lo_span, 0.0)
+        if lo_span - tol <= a < lo_span:
+            a = lo_span
+        if hi_span < b <= hi_span + tol:
+            b = hi_span
+        if a < lo_span or b > hi_span:
+            raise ValueError(
+                f"{what}: window [{a!r}, {b!r}] s reaches outside the "
+                f"simulated span [{lo_span!r}, {hi_span!r}] s")
+        a = max(a, float(t[0]))
+        if not b > a:
+            raise ValueError(
+                f"{what}: empty time window, t_from={a!r} s must be < "
+                f"t_to={b!r} s (the first solved sample is at "
+                f"{float(t[0])!r} s)")
+        self.a, self.b = a, b
+        self.whole = (a == float(t[0]) and b == float(t[-1]))
+        # t[i-1] <= a < t[i] and t[j-1] < b <= t[j].
+        i = int(np.searchsorted(t, a, side="right"))
+        j = int(np.searchsorted(t, b, side="left"))
+        self._i, self._j = i, j
+        self._a_on = bool(t[i - 1] == a)
+        self._b_on = bool(t[j] == b)
+        self._alpha = 0.0 if self._a_on else (a - t[i - 1]) / (t[i] - t[i - 1])
+        self._beta = 0.0 if self._b_on else (b - t[j - 1]) / (t[j] - t[j - 1])
+        self._lo = i - 1 if self._a_on else i
+        self._hi = j if self._b_on else j - 1
+        self.times = self.cont(t)[0]
+        self.times[0], self.times[-1] = a, b
+
+    @property
+    def span(self) -> float:
+        """Window length ``t_to - t_from`` [s]."""
+        return float(self.b - self.a)
+
+    def cont(self, x, x_start=None):
+        """``(x_w, x_start_w)``: a continuous per-sample quantity (1-D,
+        or 2-D with samples on axis 0) and its step-start values
+        restricted to the window, the bounds interpolated."""
+        x = np.asarray(x)
+        xs = x if x_start is None else np.asarray(x_start)
+        if self.whole:
+            return x, xs
+        i, j = self._i, self._j
+        px, ps = [], []
+        if not self._a_on:
+            v = xs[i - 1] + self._alpha * (x[i] - xs[i - 1])
+            px.append(np.asarray(v)[None])
+            ps.append(np.asarray(v)[None])
+        px.append(x[self._lo:self._hi + 1])
+        ps.append(xs[self._lo:self._hi + 1])
+        if not self._b_on:
+            v = xs[j - 1] + self._beta * (x[j] - xs[j - 1])
+            px.append(np.asarray(v)[None])
+            ps.append(np.asarray(v)[None])
+        return (np.concatenate(px).astype(float, copy=False),
+                np.concatenate(ps).astype(float, copy=False))
+
+    def step(self, f):
+        """Per windowed sample, the value of the per-STEP quantity ``f``
+        (element ``k`` for step ``(t[k-1], t[k]]``) of the step that
+        ends there: a bound inside a step takes that step's value
+        (element 0 is the step before the window; unused)."""
+        f = np.asarray(f)
+        if self.whole:
+            return f
+        i, j = self._i, self._j
+        parts = []
+        if not self._a_on:
+            parts.append(f[i:i + 1])
+        parts.append(f[self._lo:self._hi + 1])
+        if not self._b_on:
+            parts.append(f[j:j + 1])
+        return np.concatenate(parts)
+
+    def overlap(self) -> np.ndarray:
+        """Per sample ``k``, the length of step ``(t[k-1], t[k]]``
+        inside the window (element 0: 0)."""
+        t = self.times_full
+        out = np.zeros(t.size)
+        if t.size > 1:
+            out[1:] = np.clip(np.minimum(t[1:], self.b)
+                              - np.maximum(t[:-1], self.a), 0.0, None)
+        return out
+
+    def fraction(self, mask) -> float:
+        """Time fraction of the window during which the per-STEP flag
+        ``mask`` (element ``k`` for step ``(t[k-1], t[k]]``) is True,
+        right-hold as ``pulsim.losses._time_fraction``."""
+        m = np.asarray(mask, dtype=float)
+        if self.times_full.size < 2 or not self.span > 0:
+            return float(m.mean()) if m.size else 0.0
+        return float(np.dot(self.overlap()[1:], m[1:]) / self.span)
+
+    def starts_inside(self, k) -> np.ndarray:
+        """Whether step ``k`` (an index array, ``k >= 1``) STARTS inside
+        the window: ``t_from <= t[k-1] < t_to``."""
+        k = np.asarray(k, dtype=np.int64)
+        ts = self.times_full[np.clip(k - 1, 0, None)]
+        return (ts >= self.a) & (ts < self.b)

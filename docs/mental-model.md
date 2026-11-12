@@ -99,11 +99,10 @@ For circuits that don't need programmatic generation, you can author a YAML file
 loaded = p.load_yaml_file("examples/buck.yaml")   # path relative to the repo root
 pwm = p.make_pwm_switch_fn(100e3, 0.5, loaded.builder.switch_index_of("Q1"),
                            loaded.builder.graph.num_switches)
-res = p.simulate(loaded.builder, t_end=loaded.options.t_end,
-                 dt=loaded.options.dt, switch_fn=pwm)
+res = p.simulate(loaded, switch_fn=pwm)     # t_end / dt from the file
 ```
 
-The YAML loader builds a `LoadedCircuit` with two attributes: `.builder` (the populated `CircuitBuilder`) and `.options` (the `simulation:` block — `t_end`, `dt`, ...). The YAML does not carry the gate drive: build the `switch_fn` from the loaded builder, asking it for the switch's bit by name.
+The YAML loader builds a `LoadedCircuit` with two attributes: `.builder` (the populated `CircuitBuilder`) and `.options` (the top-level `simulation:` block — `t_end`, `dt`, ...), plus read-only shortcuts (`t_end`, `dt`, `switch_names`, `node_names`, `source`). `simulate(loaded)` reads `t_end` / `dt` from it. The YAML does not carry the gate drive: build the `switch_fn` from the loaded builder, asking it for the switch's bit by name.
 
 ## How a tutorial walks through this
 

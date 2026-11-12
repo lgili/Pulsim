@@ -1,3 +1,11 @@
+> Reconciled 2026-11: these boxes record work done in v0.6.0 on the v1
+> kernel, which was deleted later (fee0681e, 70dac33a). None of it is in
+> the 2.0 code: there is no per-component electrothermal result surface
+> and no YAML thermal-port contract (`thermal.enabled`, `rth`, `cth`).
+> The boxes are left as they were, as a record of that work. Archiving
+> the change as it stands would add `kernel-v1-core` requirements for
+> code that no longer exists.
+
 ## 1. Kernel Electrothermal Contract
 - [x] 1.1 Add a deterministic per-component electrothermal result surface in v1 simulation results.
 - [x] 1.2 Ensure all non-virtual components are represented, including zero-loss entries.

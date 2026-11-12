@@ -48,10 +48,13 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
+#include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -168,8 +171,90 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// Gate-edge search for a switch_fn with no `next_edge_after`.
+//
+// The schedulers fall back to landing every dt_max/10 (the "poll") when
+// the switch_fn cannot name its next edge, and used to take whatever
+// mask they found there: every gate edge moved onto the poll grid. At
+// the default dt_max = 1e-5 that is a 1 us grid, which deleted a 100 ns
+// dead time outright (a synchronous buck's body diodes never conducted)
+// and quantised the duty (D = 0.25 at 100 kHz ran as 0.30: 14.28 V
+// against 11.49 V).
+//
+// The search below samples the mask at the end of the poll window and,
+// when it changed, bisects (mask evaluations only, no solves) down to
+// the time resolution of `time_margin`, returning the first instant
+// that already carries the new mask. A pulse that begins AND ends
+// inside one poll window is still invisible to it; the dispatch warns
+// about that.
+// ---------------------------------------------------------------------------
+template <class MaskFn>
+class EdgeSearch {
+public:
+    void set_poll(Real poll) noexcept { poll_ = poll; }
+
+    template <class Eval>
+    [[nodiscard]] Real next_edge(Real t, Eval&& eval) const {
+        if (!(poll_ > Real{0})) {
+            return std::numeric_limits<Real>::infinity();
+        }
+        // The mask is a function of t: the first change after any
+        // t' in [from_, edge_) is still edge_.
+        if (valid_ && t >= from_ && t < edge_) return edge_;
+        // The scheduler sampled the mask just past its last event;
+        // match it so an edge-inclusive-left switch_fn is not seen
+        // as changing again at t itself.
+        // The window end is probed where the scheduler samples after
+        // landing, advance_past(hi): landing there next (the usual
+        // case), that probe IS m0, one Python call per window less.
+        // (Probing AT hi instead broke the common `(t % T) < D * T`
+        // switch_fn, whose fmod reads the wrong side at k * T.)
+        const MaskFn m0 = (last_ && t == last_hi_)
+            ? *last_ : eval(pulsim::dsed::advance_past(t));
+        Real lo = t;
+        Real hi = t + poll_;
+        last_hi_ = hi;
+        last_ = eval(pulsim::dsed::advance_past(hi));
+        // No change in the window: the plain poll boundary, uncached,
+        // exactly as before the search existed (a constant switch_fn,
+        // e.g. the default all-closed mask, keeps its step grid).
+        if (*last_ == m0) return hi;
+        // An edge ON the poll boundary (a PWM whose edges sit on the
+        // poll grid) costs one evaluation instead of ~50: the search
+        // made the 100 kHz buck of test_dsed_without_scipy 3.5x
+        // slower (19 -> 68 ms) without it.
+        if (!(eval(hi - pulsim::dsed::time_margin(hi)) == m0)) {
+            for (int it = 0; it < 200; ++it) {
+                if (hi - lo <= pulsim::dsed::time_margin(hi)) break;
+                const Real mid = lo + Real{0.5} * (hi - lo);
+                if (!(mid > lo && mid < hi)) break;
+                if (eval(mid) == m0) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+        }
+        from_ = t;
+        edge_ = hi;
+        valid_ = true;
+        return hi;
+    }
+
+private:
+    Real poll_ = Real{0};
+    mutable std::optional<MaskFn> last_;
+    mutable Real last_hi_ = Real{0};
+    mutable bool valid_ = false;
+    mutable Real from_ = Real{0};
+    mutable Real edge_ = Real{0};
+};
+
+// ---------------------------------------------------------------------------
 // PySwitchFn: adapter that holds a Python `switch_fn` callable and an
 // optional `next_edge_after(t)` method. Returns PyMask from operator().
+// Without `next_edge_after`, edges are bisected inside each poll
+// window once `set_poll` was called (see EdgeSearch).
 // ---------------------------------------------------------------------------
 class PySwitchFn {
 public:
@@ -189,14 +274,25 @@ public:
         if (has_nea_) {
             return nea_attr_(t).cast<Real>();
         }
-        return std::numeric_limits<Real>::infinity();
+        return search_.next_edge(
+            t, [this](Real tau) { return (*this)(tau); });
     }
+
+    void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
 private:
     py::object fn_;
     py::object nea_attr_;
     bool has_nea_ = false;
+    EdgeSearch<PyMask> search_;
 };
+
+/// The poll window the schedulers use for a switch_fn without an edge
+/// oracle (scheduler.hpp / scheduler_auto.hpp / scheduler_bdf2.hpp:
+/// one tenth of their step ceiling).
+[[nodiscard]] inline Real poll_window(Real step_ceiling) noexcept {
+    return step_ceiling * Real{0.1};
+}
 
 // ---------------------------------------------------------------------------
 // PEDResult / PEDResultAuto → Python dict converters.
@@ -538,6 +634,7 @@ void init_module(py::module_& m) {
            std::size_t store_every) {
             PySystem sys(std::move(system_obj));
             PySwitchFn sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
             PEDSimulator<PySystem, PySwitchFn> sim(
@@ -572,6 +669,7 @@ void init_module(py::module_& m) {
            std::size_t store_every) {
             PySystem sys(std::move(system_obj));
             PySwitchFn sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<PySystem, PySwitchFn> sim(
                 sys, std::move(sf), h_fixed, store_every);
             auto res = sim.simulate(x0, t_end);
@@ -600,6 +698,7 @@ void init_module(py::module_& m) {
            std::size_t store_every) {
             PySystem sys(std::move(system_obj));
             PySwitchFn sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             StiffnessDetector det(stiffness_threshold);
             PEDSimulatorAuto<PySystem, PySwitchFn> sim(
@@ -678,7 +777,15 @@ void init_module(py::module_& m) {
                     native_multi_ = nullptr;
                 }
             }
-            if (!native_pwm2_ && !native_multi_) {
+            if (!native_pwm2_ && !native_multi_ &&
+                py::isinstance<pulsim::sources::SwitchSchedule>(fn_)) {
+                // Built-in PWM helper (make_pwm_switch_fn & co.):
+                // copy the C++ schedule; mask and edge oracle then
+                // run without the GIL.
+                sched_ = fn_.cast<pulsim::sources::SwitchSchedule>();
+                has_sched_ = true;
+            }
+            if (!native_pwm2_ && !native_multi_ && !has_sched_) {
                 // Fallback path — generic Python callable. Pre-resolve
                 // `next_edge_after` attribute (if any) to avoid the
                 // hasattr cost per call.
@@ -693,6 +800,7 @@ void init_module(py::module_& m) {
             // Bridge.12 native fast path — pure C++, no GIL touch.
             if (native_pwm2_) return (*native_pwm2_)(t);
             if (native_multi_) return (*native_multi_)(t);
+            if (has_sched_) return sched_(t);
             // Generic Python fallback (Bridge.11 path).
             py::gil_scoped_acquire gil;
             return fn_(t).cast<SSM>();
@@ -701,18 +809,28 @@ void init_module(py::module_& m) {
         [[nodiscard]] Real next_edge_after(Real t) const {
             if (native_pwm2_)  return native_pwm2_->next_edge_after(t);
             if (native_multi_) return native_multi_->next_edge_after(t);
-            py::gil_scoped_acquire gil;
+            if (has_sched_ && sched_.has_edges()) {
+                return sched_.next_edge_after(t);
+            }
             if (has_nea_) {
+                py::gil_scoped_acquire gil;
                 return nea_attr_(t).cast<Real>();
             }
-            return std::numeric_limits<Real>::infinity();
+            // No oracle: bisect inside the poll window (EdgeSearch).
+            return search_.next_edge(
+                t, [this](Real tau) { return (*this)(tau); });
         }
+
+        void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
         py::object fn_;
         pulsim::sources::NativePwm2Switch*   native_pwm2_  = nullptr;
         pulsim::sources::NativeMultiMaskPwm* native_multi_ = nullptr;
+        pulsim::sources::SwitchSchedule      sched_;
+        bool       has_sched_ = false;
         py::object nea_attr_;
         bool       has_nea_ = false;
+        EdgeSearch<SSM> search_;
     };
 
     py::class_<NativeAdapter>(m, "_NativeCircuitBuilderAdapter",
@@ -793,6 +911,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool enable_event_projection) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
 
@@ -915,6 +1034,7 @@ void init_module(py::module_& m) {
            Real h_fixed,
            std::size_t store_every) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
                 adapter, std::move(sf), h_fixed, store_every);
             py::gil_scoped_release release;
@@ -947,6 +1067,7 @@ void init_module(py::module_& m) {
            Real stiffness_threshold,
            std::size_t store_every) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             StiffnessDetector det(stiffness_threshold);
             PEDSimulatorAuto<NativeAdapter, PySwitchFnSSM> sim(

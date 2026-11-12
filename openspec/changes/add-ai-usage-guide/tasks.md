@@ -335,14 +335,50 @@ reproduced every friction item.
 
 ## 12. Library follow-ups (not fixed here)
 
-- [ ] 12.1 `make_pwm_switch_fn` (`core/include/pulsim/sources/pwm_switch_fn.hpp`)
+- [x] 12.1 `make_pwm_switch_fn` (`core/include/pulsim/sources/pwm_switch_fn.hpp`)
       compares `fmod(t/T, 1) < duty` in floating point: on a `dt` grid
       edges jitter by one step (49/50/51 on-steps of 50 at 100 kHz,
       dt = 1e-7). Snap the phase to the grid (a relative epsilon). Audit
       `make_dead_time_pwm_pair_fn` too (48/49 at D = 0.5 with 2e-7 dead
       time). The guide's 3.2 on-step block then prints `[50]` and must be
       updated.
-- [ ] 12.2 TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
+      Done (fix/v2-b-pwm-dsed): every built-in generator
+      (`make_pwm_switch_fn`, the dead-time pair, SPWM pair, three-phase
+      SPWM, phase-shift bridge, `NativePwm2Switch`, `NativeMultiMaskPwm`,
+      `PWMVoltageSource`, the PULSE source, the block-chain and
+      `pulsim.control` `PwmGenerator`, and `bind_pi_to_switch` via the
+      new `pulsim.control.pwm_on`) uses `pwm_phase::cycle_position` or
+      its Python twin: an edge within 64 ulp of a grid point takes
+      effect at it (`bind_pi_to_switch` read 50/51 of 50, now 50). Not
+      changed: the internal test model `dsed::BuckDCMSwitchFn`
+      (`core/include/pulsim/dsed/buck_dcm_model.hpp`) still uses
+      `fmod(t / T, 1)`. On-steps
+      now exactly D*T/dt at six (f, D, dt); the pair reads 48/48. The
+      guide drops `grid_pwm`, prints `[50]`, and trap 10 reads 6.24 /
+      6.00 V (was 5.84 / 5.99; ripple 12.6 mV, was 279 mV at 2e-7).
+- [x] 12.2 (Closed on `fix/v2-b-engine-robustness`: the crossing
+      detector read each step's start from the committed solve, which
+      after a zero-time cascade was solved under the PRE-cascade bits,
+      so a diode left at +eps was never seen to cross; a diode held on
+      the forbidden side through a step is now re-decided, and a
+      chatter guard that gives up takes a 1/100 step. The bridge reads
+      322.057 V against 322.059 V, every diode 0.1606 A against
+      0.1610 A; the 1 mH case holds no diode against its rule (321.807
+      against 321.845 V). The ride warning names the engine asked for,
+      and `simulate` itself names a held diode. Trap 13 rewritten.
+      Review round 2: past 0.3 s the 1 mH case ground at h_min on one
+      commutation and aborted on max_steps (0.176 s of 0.35 s, 73 s;
+      V_th = 0 at 0.146 s). With every bridge bit OFF the line
+      inductor sees g_off alone, a 1 ps mode: the probes pinned its
+      -1e-7 A and decided all-OFF again, and the LTE read the mode's
+      kink as error at every h. A guard that gives up now re-decides
+      once from the step's END state, and for span*1e-4 after it the
+      LTE cannot cut h below span*1e-7: 0.5 s in 4.9k steps (V_th 0:
+      321.867 V against 321.870 V at dt = 1e-6), 1.0 s in 8.7k
+      (V_th 0.7: 321.828 against 321.869 V). A sign change that never
+      leaves the noise floor is no longer a crossing: the floating-rail
+      bridge at t_end 0.04 s took 318,068 steps, now 1,103.)
+      TR-BDF2 with `V_th = 0` PWL diodes: a bridge behind 0.1 ohm
       runs half-wave (318.79 V, 12.91 V pp against 322.06 V, 6.38 V pp
       with `dt`). The sliding-mode warning names `engine='auto'` even
       when `engine='trbdf2'` was requested. `V_th > 0` is not sufficient
@@ -351,28 +387,119 @@ reproduced every friction item.
       45.1 V at t = 75.92 ms (one sample), accepted 22 steps above
       tolerance at the step floor and warned of 5 boundary rides; V_dc
       321.807 V against 321.844 V with `dt = 1e-6`.
-- [ ] 12.3 `res.i()` on a Shockley diode raises `NotImplementedError`
+- [x] 12.3 `res.i()` on a Shockley diode raises `NotImplementedError`
       pointing to `device_loss_summary`, which omits Shockley diodes.
-- [ ] 12.4 `device_loss_summary` / `device_thermal_summary` have no
+      (Fixed on `fix/v2-b-loss-api`: `add_shockley_diode` records its
+      law parameters on the builder; `res.i`, `res.currents()` and both
+      summaries evaluate the kernel's law. Against a 1 mOhm sense
+      resistor: 3.2e-12 A max on pwl, 2.4e-12 A on trbdf2. The other
+      unsupported kinds now name the sense-resistor recipe.)
+- [x] 12.4 `device_loss_summary` / `device_thermal_summary` have no
       `t_from` / `t_to` window (all three naive agents hand-rolled one).
+      (Fixed on `fix/v2-b-loss-api`: keyword-only `t_from` / `t_to`,
+      bounds interpolated on each step's line, events counted when their
+      step starts inside. Trap-13 bridge: 2.3384 W over the run, 0.1358 W
+      over 80-100 ms; cut into three windows at arbitrary instants, the
+      energies add up to 2e-16 relative. Section 3.4 uses it.)
 - [ ] 12.5 `device_loss_summary`'s `i_rms` reads pulsed switch currents
       low on a fixed grid, like `time_rms` (1.6019 / 1.6074 / 1.6101 A at
       dt = 1e-7 / 5e-8 / 2.5e-8 against `sqrt(P_avg/R_on)` = 1.6129 A on
       the 11.6 buck); its `P_avg` is right.
-- [ ] 12.6 `ThreePhaseVsiResult` / `BridgeRectifierResult` are not
+- [ ] 12.6 (Export part fixed on `fix/v2-b-loss-api`: the three
+      `pulsim.topology` result types are top-level and in `__all__`, and
+      an unknown attribute names the version and, for an imported
+      submodule's export, its home. The DSED refusal part is open.)
+      `ThreePhaseVsiResult` / `BridgeRectifierResult` are not
       exported at the top level; the DSED refusal for a floating neutral
       lists "floating capacitors" and "nonlinear devices" and points to
       `notes/DSED_BRIDGE_DESIGN.md`, which users cannot see.
-- [ ] 12.7 `simulate(engine='dsed')` with no `switch_fn` warns that it
-      will poll "this plain Python switch_fn".
+- [x] 12.7 `simulate(engine='dsed')` with no `switch_fn` warns that it
+      will poll "this plain Python switch_fn". Done
+      (fix/v2-b-pwm-dsed): no warning without a `switch_fn`. The same
+      branch fixed the DSED dead-time loss: the helpers return a
+      `SwitchSchedule` whose edges DSED lands on, and a plain callable's
+      changes are bisected inside each `dt_max / 10` poll. Synchronous
+      buck (48 V, D = 0.25, 100 kHz, 100 ns dead time), default DSED:
+      `QL_body` conducting 76 % (was 0 %), `QL` 7.19 mW (was 1.27 W),
+      Vout 11.474 V (was 14.28 V) against `pwl` 11.490 V / 76 % /
+      7.20 mW. The 0.14 % is the trapezoid mean over ~4 samples per
+      period: the DSED waveform matches `pwl` pointwise (0.02 mV,
+      1.7 mA), and `dt = 1e-7` reads 11.4899 V.
 - [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
-      one; the soft turn-off should cost about 0.
-- [ ] 12.9 The missed-commutation warning of `res.i` repeats once per
+      one; the soft turn-off should cost about 0. (Documented, not
+      changed, on `fix/v2-b-loss-api`: the `device_loss_summary`
+      docstring gives the per-edge split, 20-40 ms on `INV__HSa`:
+      reverse-current edges cost 0.17 + 0.14 mJ with 1 us dead time and
+      120.6 + 99.9 mJ without, `P_sw_avg` 11.26 W against 22.63 W.)
+- [x] 12.9 The missed-commutation warning of `res.i` repeats once per
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints
-      it many times. Emit it once per result and diode.
+      it many times. Emit it once per result and diode. (Fixed on
+      `fix/v2-b-loss-api`: 5 emissions of the `BR__D1` warning from four
+      `res.i` lines and `device_loss_summary` became 1.)
+
+- [x] 12.10 (Found and closed on `fix/v2-b-engine-robustness`.)
+      `engine='auto'` with a Python `switch_fn` sampled the gates at t
+      and t + h only and bisected [t, t + h] as if it held one edge: a
+      100 kHz boost over 20 ms (ceiling 20 us, two periods) landed 112
+      gate events instead of 3999 and ended at 589.97 V against
+      48.04 V. A step now samples h/4 .. h plus a walking fraction,
+      bisects the first sub-interval that changes and is capped at
+      twice the narrowest pulse seen (48.034 V, 3999 events); a pulse
+      landed although narrower than the sampling used while it was
+      open (or before that gate's first edge) is warned about; against
+      the run-wide spacing, 0.2 s of a smooth 10 kHz SPWM raised it on
+      22 pulses with all 16000 edges landed (now 0). Closed for PERIODIC gates only: a one-shot
+      pulse narrower than h_max/4 (5 us on a 20 ms run) that falls
+      between samples is skipped with no warning, since nothing saw
+      it (11 of 20 phases of a 2 us pulse; a 5 us pulse is landed at
+      all 20). Documented in trap 13 and `TrBdf2Options::h_max`; the
+      cure is `dt` (the ceiling) or an oracle-backed `NativePwm2Switch`.
+- [x] 12.11 (Found and closed on `fix/v2-b-engine-robustness`.) The
+      floating-DC-side abort of trap 8 (see design.md): the probe step
+      grows on a singular factorization; trap 8 rewritten. The run is
+      not as robust as `engine='pwl'` on variants (10 mF: 323.94 V
+      against 324.51 V; a 1 mH DC choke: a 76.7 kV common-mode
+      sample), so a learned probe floor now warns, naming the subnet
+      that reaches ground only through switches and the fix (ground a
+      rail). The choke variant learns no floor; its held-diode
+      `RuntimeWarning` names the subnet instead.
+- [x] 12.12 (Found in review and closed on `fix/v2-b-engine-robustness`.)
+      A controller tick that coincides with a gate edge stored a
+      shoot-through sample on TR-BDF2: the 10 kHz buck of
+      `test_engine_auto_closed_loop.py` with `controller_period=50e-6`
+      recorded Q1 ON with D1 ON (v_sw = +6 V across two 1 mOhm stamps)
+      at t = 1.00000002e-4 s; 0 without `controller_period`. The tick
+      ends a step on k*T, t + h rounds to the pre-edge side, so the edge
+      was not landed and its zero-time diode cascade never ran. Present
+      on the base (3 samples; 219 on the setpoint-step test), surfaced
+      by the new held-diode `RuntimeWarning`. The step start now
+      compares the gates with those the diodes were last decided under
+      and re-settles (`n_gate_boundary_settles`): 0 violations on both
+      tests, which now assert the warning is absent.
+- [ ] 12.13 A plain callable `switch_fn` (no `next_edge_after`) on
+      `engine='trbdf2'` steps over sub-step pulses and dead times with
+      no warning (sync buck D = 0.03, 50 ns dead time: 0.169 V, QH on
+      0.3 %, against 1.199 V / 2.5 % on `pwl`); `dsed` warns but still
+      misses a pulse inside one `dt_max / 10` poll. Warn on `trbdf2`
+      too, or refuse. Both engines call the `switch_fn` out of time
+      order (DSED probes the end of a poll window, then bisects), so a
+      stateful `switch_fn` keyed on `int(t / T)` changing runs about
+      10x too many updates; document or detect.
+- [ ] 12.14 `pulsim.schematic.render()` defaults to the pure-Python
+      template / force-directed path since the `python_native` (ELK)
+      default raised `AttributeError` on every 2.0 builder (0 of 25
+      examples). `python_native` and `elk` are opt-in and were not run
+      end to end with `elkjs` installed; 16 of the 25 examples match no
+      template and get an overlapping force-directed sketch. Owned by the
+      planned `narrow-schematic-renderer` change.
+- [ ] 12.15 `simulate(LoadedCircuit)` forwards only `t_start`, `t_end`,
+      `dt`, `store_every`; the YAML's Newton tolerances and `integrator`
+      stay on `loaded.options` unforwarded. The loader's key checks are
+      local to `loader.hpp`; the planned `unify-device-schema` change
+      rewrites that dispatch.
 
 ## 13. Review round 3
 

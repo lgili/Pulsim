@@ -9,7 +9,7 @@
 #   import pulsim as p
 #   lc = p.load_yaml_file("examples/stress_buck_switching.yaml")
 #   # ... build a switch_fn that toggles indices 0 and 1 ...
-#   res = p.simulate(lc, t_end=0.01, dt=1.25e-7, switch_fn=sw)
+#   res = p.simulate(lc, switch_fn=sw)   # t_end / dt from simulation:
 
 circuit:
   devices:
@@ -100,6 +100,6 @@ circuit:
       to: gnd
       R: 10.0
 
-  simulation:
-    t_end: 0.01
-    dt: 1.25e-7
+simulation:
+  t_end: 0.01
+  dt: 1.25e-7

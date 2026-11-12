@@ -42,6 +42,15 @@ simulation:
   dt: 1e-7
 ```
 
+`simulation:` is a top-level key, a sibling of `circuit:`. The loader
+refuses a `simulation:` block indented under `circuit:` (until 2.0.x
+that was ignored and the file loaded with `t_end = dt = 0`). Any other
+unknown key (top-level, under `circuit:` other than `nodes`/`devices`,
+or inside `simulation:`) is ignored but collected in
+`LoadedCircuit::warnings` and re-emitted by the Python binding as a
+`UserWarning`. `LoadedCircuit::source` records the path (or
+`"<string>"`) and `has_simulation` whether the block was present.
+
 ```python
 import pulsim as p
 

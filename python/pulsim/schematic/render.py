@@ -1,26 +1,27 @@
 """Schematic rendering with pluggable backends.
 
-Default backend is **python_native** (`add-python-schematic-renderer`
-Phase 5) — pure-Python composition over the existing analog SVG skin,
-with elkjs called only for layout. Honors user-supplied position hints
-(`Circuit.set_position(...)`, YAML `position:`) and applies topology-
-aware auto-layouts for recognized sub-circuits (bridge rectifier,
-boost stage, half-bridge).
+The default (``PULSIM_SCHEMATIC_BACKEND`` unset) is the pure-Python
+layout path: :func:`compute_layout` (topology template when one is
+recognised, force-directed placement otherwise) followed by
+:func:`render_layout`. It needs no Node.js.
 
-Other backends available via ``PULSIM_SCHEMATIC_BACKEND`` env var:
+Other backends, selected with the ``PULSIM_SCHEMATIC_BACKEND`` env var:
 
-    python_native  (default)  — pure-Python renderer + elkjs layout
-    netlistsvg     (legacy)   — netlistsvg CLI + analog skin
-                                 (emits DeprecationWarning; scheduled
-                                 for removal in a future release once
-                                 the native path has soaked)
-    elk                       — ELK layered + schemdraw symbols
-    spring                    — legacy force-directed + templates
+    python_native  — pure-Python composition over the analog SVG skin
+                     with elkjs for layout; needs ``node`` + the
+                     ``elkjs`` package (an ImportError names it)
+    netlistsvg     — netlistsvg CLI + analog skin (DeprecationWarning)
+    elk            — ELK layered layout + the layout renderer when no
+                     topology template matches; needs ``node`` +
+                     ``elkjs`` then
+    spring         — force-directed + templates (same as the default)
 
-The `elk` and `spring` backends produce a :class:`SchematicLayout`
-which is still useful when a GUI wants component coordinates. The
-default native backend exposes the same layout via
-``compute_layout(circuit)``.
+Until 2.0.x the default was ``python_native``, which raised
+AttributeError on every 2.0 ``CircuitBuilder``: the builder's V0
+``position_hints()`` stub returns node-role strings that the backend
+dereferenced as hint objects. It is opt-in now; that defect is fixed,
+but the ELK half of the path was not run end to end when the switch
+was made (no elkjs installed), so it is not the default.
 """
 
 from __future__ import annotations
@@ -258,18 +259,27 @@ def render(
 ) -> Path:
     """Render a Pulsim ``Circuit`` to a schematic file.
 
-    The default backend is **python_native** — a pure-Python renderer
-    that reuses the ELK Java bridge for layout. Override via the
+    The default (``PULSIM_SCHEMATIC_BACKEND`` unset) is the pure-Python
+    layout path: :func:`compute_layout` — the topology template when a
+    recogniser matches (RC / RL / RLC filters, buck, flyback,
+    half-bridge, ...), force-directed placement otherwise (needs
+    ``networkx``) — then :func:`render_layout`. SVG is written by the
+    in-tree renderer; PNG needs ``cairosvg`` and the cairo C library;
+    PDF / JPG go through ``schemdraw``. A missing piece is an
+    ``ImportError`` that names it. Override via the
     ``PULSIM_SCHEMATIC_BACKEND`` environment variable:
 
-    - ``python_native`` (default): in-tree ELK layered layout + Python
-      SVG emitter. SVG is native output; PNG is supported via
-      ``cairosvg`` or ``rsvg-convert``.
+    - ``python_native``: ELK layered layout (Node.js + ``elkjs``) +
+      Python SVG emitter over the analog skin. An ``ImportError`` names
+      Node or elkjs when it is not installed.
     - ``netlistsvg`` (deprecated): subprocess to the ``netlistsvg`` CLI
       with the bundled analog skin. Emits a deprecation warning when
       explicitly selected.
-    - ``elk``: in-tree ELK layered layout + schemdraw render.
-    - ``spring``: legacy force-directed + templates + schemdraw.
+    - ``elk``: like the default, with ELK layered layout (Node.js +
+      ``elkjs``) instead of force-directed when no template matches.
+    - ``spring``: force-directed + templates (what the default does).
+
+    Any other value is a ``ValueError``.
 
     The output format is inferred from the path extension (``.svg``,
     ``.png``, ``.pdf``, ``.jpg``) unless ``format=`` is passed.
@@ -303,10 +313,15 @@ def render(
         )
 
     raw_backend = os.environ.get("PULSIM_SCHEMATIC_BACKEND", "").strip().lower()
-    # Phase 5: the default is now python_native. Unset env var → native.
-    backend = raw_backend or "python_native"
+    # 2.0.x: the default is the pure-Python layout path (template /
+    # spring), the only one that renders a 2.0 builder without Node.
+    # An unknown value used to fall back silently; it is refused now.
+    backend = raw_backend or "spring"
     if backend not in ("netlistsvg", "python_native", "elk", "spring"):
-        backend = "python_native"
+        raise ValueError(
+            f"PULSIM_SCHEMATIC_BACKEND={raw_backend!r} is not a schematic "
+            "backend; expected one of 'spring' (the default), 'elk', "
+            "'python_native', 'netlistsvg', or leave it unset.")
 
     # Deprecation warning when the user explicitly selects netlistsvg.
     # Only fires on explicit opt-in — the unset / native paths stay

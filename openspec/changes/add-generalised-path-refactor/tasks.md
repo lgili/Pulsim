@@ -199,7 +199,7 @@
       All bindings smoke-tested end-to-end with `pulsim 1.4.0`
       wheel — `cache.refactor_parametric(b.branch_id_of("r1"),
       10.0)` returns a populated result struct.
-- [ ] 5.2 High-level `pulsim.sweep.sweep_path_aware(builder,
+- [x] 5.2 High-level `pulsim.sweep.sweep_path_aware(builder,
       values_dict, kpi_fn, **simulate_kwargs)` — DEFERRED to a
       focused follow-up commit. The low-level C++ API + pybind11
       bindings are the algorithmic contribution; the high-level
@@ -207,21 +207,28 @@
       separate small PR without rebuilding the v1.4.0 release
       window. Users wanting the speedup today can call
       `cache.refactor_parametric` directly between simulate runs.
-- [ ] 5.3 Auto-fallback wrapper — DEFERRED with 5.2.
-- [ ] 5.4 Python smoke test (`python/tests/test_refactor_parametric.py`)
+      (Reconciled 2026-11: pulsim.sweep.sweep_path_aware, also
+      exported as p.sweep_path_aware.)
+- [x] 5.3 Auto-fallback wrapper — DEFERRED with 5.2.
+  (Reconciled 2026-11: an unknown parameter falls back with a warning
+  (test_sweep_path_aware.py).)
+- [x] 5.4 Python smoke test (`python/tests/test_refactor_parametric.py`)
       — DEFERRED. The C++ tests
       (`test_pwl_cache_parametric.cpp`, 6 cases / 57 assertions)
       cover the API contract; a Python-level test would only
       verify the pybind11 marshalling, which the smoke-test
       session executed manually.
+      (Reconciled 2026-11: as python/tests/test_sweep_path_aware.py (6
+      tests).)
 
 ## 6. Part B — Monte Carlo helper
 
-- [ ] 6.1 `pulsim.sweep.monte_carlo_path_aware(...)` — DEFERRED
+- [x] 6.1 `pulsim.sweep.monte_carlo_path_aware(...)` — DEFERRED
       with 5.2 / 5.3. The C++ `refactor_parametric` API already
       supports arbitrary parameter draws (each sample = one batch
       `refactor_parametric([...], mode=AllActive)` call); only the
       Python wrapping layer + KPI extraction loop is missing.
+      (Reconciled 2026-11: pulsim.sweep.monte_carlo_path_aware.)
 - [ ] 6.2 Comparative Monte Carlo benchmark vs legacy
       `monte_carlo` — DEFERRED. The parametric microbench captured
       above shows 3.0–3.7× per-sweep-point speedup at typical
@@ -230,6 +237,9 @@
       proposal target only at larger n_state (≥ 100, MMC-arm-scale).
       The honest read in PARAMETRIC_RESULTS.md §interpretation
       already captures this.
+      (Reconciled 2026-11: no comparative Monte Carlo benchmark
+      exists; the README's ~3.4x has no script behind it in the
+      repository.)
 
 ## 7. Part C — Benchmarks (Part A scope only)
 
@@ -274,15 +284,18 @@
       (n_switches × n_sweep_points), Pulsim hit distribution
       (zero fallbacks), 4-paragraph interpretation, 5-bullet
       honest limitations, TPEL paper §VI.C mapping.
-- [ ] 8.3 `docs/how-pulsim-works/08-benchmarks.md` extension —
+- [x] 8.3 `docs/how-pulsim-works/08-benchmarks.md` extension —
       DEFERRED to a focused docs-update commit after the v1.4.0
       PR merges. The headline numbers in MULTI_BIT_RESULTS.md
       already cite chapter 8's structure; the actual chapter
       rewrite happens in the docs commit.
-- [ ] 8.4 `docs/how-pulsim-works/07-rank1-partial-refactor.md`
+      (Reconciled 2026-11: section 8.11 of 08-benchmarks.md.)
+- [x] 8.4 `docs/how-pulsim-works/07-rank1-partial-refactor.md`
       §7.7 update — DEFERRED with 8.3.
-- [ ] 8.5 `docs/how-pulsim-works/10-paper-figures-index.md`
+- [x] 8.5 `docs/how-pulsim-works/10-paper-figures-index.md`
       update — DEFERRED with 8.3.
+      (Reconciled 2026-11: the index lists the v1.4.0 multi-bit and
+      parametric figures.)
 - [ ] 8.6 `artigos/02_tpel_methods/paper.md` §VI table — DEFERRED.
       The TPEL paper draft has not yet been written; per the
       v1.4.0 scope decision the headline numbers land in
@@ -305,9 +318,11 @@
       (complex solver) stays as historical.
 - [x] 9.3 `openspec validate add-generalised-path-refactor --strict`
       — passes.
-- [ ] 9.4 Open PR `feat/generalised-path-refactor` (or combined
+- [x] 9.4 Open PR `feat/generalised-path-refactor` (or combined
       `feat/v1.4.0-complex-and-multi-bit`) → main. — pending
       user direction.
+      (Reconciled 2026-11: shipped in PR #40 (release v1.4.0), merged
+      2026-05-25.)
 - [ ] 9.5 Post-merge: archive both
       `add-pulsim-complex-sparse-lu` and
       `add-generalised-path-refactor` to

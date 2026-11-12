@@ -110,6 +110,21 @@ wheel.packages = ["python/pulsim"]
 editable.mode = "redirect"
 editable.rebuild = true
 build-dir = "build/{wheel_tag}"
+# scikit-build-core builds the sdist by walking the working tree and
+# dropping what .gitignore matches; it never asks git what is tracked. So
+# a build tree that is not ignored ships: on main, build-tests/ (86 CMake
+# and ninja artefacts, test binaries included) took the sdist from 1718 to
+# 1804 files and 38 MB to 50 MB. Excluding the build trees here as well
+# keeps them out even if an ignore line is lost. The patterns are anchored
+# with a leading slash on purpose: an unanchored "build*/" also matches
+# core/include/pulsim/builder/ and would ship an sdist that cannot build.
+sdist.exclude = [
+    "/build/",
+    "/build-*/",
+    "/build_*/",
+    "/.scratch/",
+    "/examples/scripts/out/",
+]
 
 [tool.scikit-build.cmake.define]
 CMAKE_BUILD_TYPE = "Release"

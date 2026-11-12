@@ -586,3 +586,97 @@ simulation:
 )YAML";
     REQUIRE_THROWS_AS(yaml::load_string(zero), std::invalid_argument);
 }
+
+// -----------------------------------------------------------------------------
+// Key checks (2.0.x): a misplaced key is refused, an unknown one warned.
+// Before, 9 shipped examples indented `simulation:` under `circuit:` and
+// loaded with t_end = dt = 0 and no diagnostic.
+// -----------------------------------------------------------------------------
+
+namespace {
+
+const std::string kRcDevices = R"YAML(
+  devices:
+    - {type: voltage_source, name: V1, from: a, to: gnd, V: 5.0}
+    - {type: resistor,       name: R1, from: a, to: b,   R: 1.0e3}
+    - {type: capacitor,      name: C1, from: b, to: gnd, C: 1.0e-6}
+)YAML";
+
+std::string load_error(const std::string& yaml_text) {
+    try {
+        (void)yaml::load_string(yaml_text);
+    } catch (const std::runtime_error& e) {
+        return e.what();
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST_CASE("YAML loader: simulation: nested under circuit: is refused",
+          "[v2][layer8][yaml][errors][keys]") {
+    const std::string msg = load_error(
+        "circuit:" + kRcDevices +
+        "  simulation:\n    t_end: 1.0e-3\n    dt: 1.0e-6\n");
+    REQUIRE(msg.find("nested under 'circuit:'") != std::string::npos);
+    REQUIRE(msg.find("TOP-LEVEL") != std::string::npos);
+}
+
+TEST_CASE("YAML loader: unknown top-level and circuit: keys are warnings",
+          "[v2][layer8][yaml][keys]") {
+    const auto top = yaml::load_string(
+        "circuit:" + kRcDevices + "simulaton:\n  t_end: 1.0e-3\n");
+    REQUIRE(top.warnings.size() == 1);
+    REQUIRE(top.warnings[0].find("unknown top-level key 'simulaton'")
+            != std::string::npos);
+    REQUIRE_FALSE(top.has_simulation);   // the typo'd block was not read
+    const auto circ = yaml::load_string(
+        "circuit:" + kRcDevices + "  name: rc\n");
+    REQUIRE(circ.warnings.size() == 1);
+    REQUIRE(circ.warnings[0].find("unknown circuit: key 'name'")
+            != std::string::npos);
+}
+
+TEST_CASE("YAML loader: a v1 netlist is refused by name",
+          "[v2][layer8][yaml][errors][keys]") {
+    const std::string msg = load_error(R"YAML(
+schema: pulsim-v1
+version: 1
+simulation: {tstop: 1.0e-3, dt: 1.0e-6}
+components:
+  - {type: resistor, name: R1, nodes: [a, 0], value: 1.0}
+)YAML");
+    REQUIRE(msg.find("pulsim v1 netlist") != std::string::npos);
+}
+
+TEST_CASE("YAML loader: an empty simulation: block is refused",
+          "[v2][layer8][yaml][errors][keys]") {
+    REQUIRE(load_error("circuit:" + kRcDevices + "simulation:\n")
+                .find("'simulation:' must be a map") != std::string::npos);
+}
+
+TEST_CASE("YAML loader: unknown simulation keys are warnings, not errors",
+          "[v2][layer8][yaml][keys]") {
+    const auto lc = yaml::load_string(
+        "circuit:" + kRcDevices +
+        "simulation:\n  tstop: 1.0e-3\n  dt: 1.0e-6\n  foo: 2\n");
+    REQUIRE(lc.has_simulation);
+    REQUIRE(lc.options.t_end == 0.0);          // tstop is not t_end
+    REQUIRE(lc.options.dt == Approx(1.0e-6));
+    REQUIRE(lc.warnings.size() == 2);
+    REQUIRE(lc.warnings[0].find("'t_end'") != std::string::npos);
+    REQUIRE(lc.warnings[1].find("simulation.foo") != std::string::npos);
+}
+
+TEST_CASE("YAML loader: source and has_simulation record provenance",
+          "[v2][layer8][yaml][keys]") {
+    const auto none = yaml::load_string("circuit:" + kRcDevices);
+    REQUIRE(none.source == "<string>");
+    REQUIRE_FALSE(none.has_simulation);
+    REQUIRE(none.options.t_end == 0.0);
+    REQUIRE(none.warnings.empty());
+    const auto with = yaml::load_string(
+        "circuit:" + kRcDevices + "simulation: {t_end: 1.0e-3, dt: 1.0e-6}\n");
+    REQUIRE(with.has_simulation);
+    REQUIRE(with.options.t_end == Approx(1.0e-3));
+}

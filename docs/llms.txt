@@ -23,6 +23,7 @@ Pulsim 2 changed behaviour without changing many names, so code recalled from Pu
 
 - [API reference](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/api-reference.md): builder methods and helpers.
 - [Gotchas](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/gotchas.md): failure modes and their fixes.
+- [Known limitations](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/known-limitations.md): the defects and gaps 2.0 ships with, each with its measured effect and a workaround.
 - [Troubleshooting](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/troubleshooting.md): refusals and convergence messages.
 - [UX helpers](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/helpers.md): `p.catalog()`, `p.example()`, plotting and monitoring.
 - [Loss and thermal modelling](https://raw.githubusercontent.com/lgili/Pulsim/main/docs/loss-thermal.md): `device_loss_summary`, `device_thermal_summary`, Foster networks.

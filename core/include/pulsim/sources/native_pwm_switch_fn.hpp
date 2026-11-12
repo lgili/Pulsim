@@ -17,9 +17,11 @@
 // version. The DSED dispatch detects the type and uses the native fast
 // path automatically.
 
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -86,22 +88,14 @@ struct NativePwm2Switch {
     operator()(Real t) const noexcept {
         // Return-by-value: SwitchStateMask is a small POD-ish struct
         // (bitset + size). Copy cost is negligible.
-        const Real phase = std::fmod(t / T_sw, Real{1.0});
-        return phase < D ? mask_a : mask_b;
+        // Grid-exact edges (pwm_phase.hpp).
+        const auto p = pwm_phase::cycle_position(t, Real{0}, T_sw);
+        return pwm_phase::reached(p, D) ? mask_b : mask_a;
     }
 
     [[nodiscard]] Real next_edge_after(Real t) const noexcept {
-        const Real k = std::floor(t / T_sw);
-        constexpr Real eps = Real{1e-15};
-        const Real candidates[3] = {
-            k * T_sw + D * T_sw,
-            (k + Real{1}) * T_sw,
-            (k + Real{1}) * T_sw + D * T_sw,
-        };
-        for (Real c : candidates) {
-            if (c > t + eps) return c;
-        }
-        return (k + Real{2}) * T_sw;
+        const std::array<Real, 1> thr{D};
+        return pwm_phase::next_constant_crossing(t, Real{0}, T_sw, thr);
     }
 };
 
@@ -157,23 +151,20 @@ struct NativeMultiMaskPwm {
 
     [[nodiscard]] topology::SwitchStateMask
     operator()(Real t) const noexcept {
-        const Real phase = std::fmod(t / T_sw, Real{1.0});
+        // Grid-exact edges (pwm_phase.hpp).
+        const auto p = pwm_phase::cycle_position(t, Real{0}, T_sw);
         for (std::size_t i = 0; i < phase_boundaries.size(); ++i) {
-            if (phase < phase_boundaries[i]) return masks[i];
+            if (!pwm_phase::reached(p, phase_boundaries[i])) {
+                return masks[i];
+            }
         }
-        return masks.back();   // exactly at phase = 1.0 corner
+        return masks.back();   // unreachable: the last boundary is 1
     }
 
     [[nodiscard]] Real next_edge_after(Real t) const noexcept {
-        const Real k = std::floor(t / T_sw);
-        constexpr Real eps = Real{1e-15};
         // Candidates: each boundary in the current period + next-period 0
-        for (Real b : phase_boundaries) {
-            const Real c = k * T_sw + b * T_sw;
-            if (c > t + eps) return c;
-        }
-        // Past the last boundary — next edge is start of next period
-        return (k + Real{1}) * T_sw;
+        return pwm_phase::next_constant_crossing(t, Real{0}, T_sw,
+                                              phase_boundaries);
     }
 };
 

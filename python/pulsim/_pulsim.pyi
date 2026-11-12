@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -340,6 +340,8 @@ class CircuitBuilder:
         """
     def add_shockley_diode(self, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, G_min: float = 1e-12, BV: float = 0.0) -> CircuitBuilder:
         """
+        add_shockley_diode(self: pulsim._pulsim.CircuitBuilder, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, G_min: float = 1e-12, BV: float = 0.0) -> pulsim._pulsim.CircuitBuilder
+
         Add an EXPONENTIAL (Shockley) diode: i = I_S*(exp(v/(n*V_T)) - 1) + v*G_min. Unlike `add_diode` (binary PWL) and the smooth-blend nonlinear diode, the forward drop is not fixed: a real junction's V_F rises ~60 mV per decade of current, so the same device drops 0.53 V at 1 mA and 0.77 V at 10 A. Use `thermal_voltage(T_kelvin)` for a junction temperature other than ~300 K. `BV` is a POSITIVE breakdown magnitude (0 disables it) — give 5.1 for a 5.1 V Zener. No series-resistance parameter on purpose: put a resistor in series, which is exact.
         """
     def add_sine_voltage_source(self, name: str, n_pos: str, n_neg: str, v_dc: float, v_amplitude: float, frequency: float, phase: float = 0.0) -> CircuitBuilder:
@@ -1256,6 +1258,11 @@ class SimulationResult:
         | ``switch``                 | ``(V_from − V_to)·G`` where             |
         |                            | ``G = g_on`` when the recorded stamped  |
         |                            | mask bit is set, ``g_off`` otherwise    |
+        | ``shockley_diode``         | ``I_S·(exp(v_D/(n·V_T)) − 1)``          |
+        |                            | ``+ v_D·G_min`` (minus the mirrored     |
+        |                            | breakdown branch when ``BV > 0``): the  |
+        |                            | kernel's law, ``add_shockley_diode``    |
+        |                            | parameters                              |
         +----------------------------+-----------------------------------------+
 
         Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -1282,14 +1289,14 @@ class SimulationResult:
         ``result._switch_fn = your_switch_fn`` for a switch, and then the
         switch_fn is re-evaluated with a warning.
 
-        Not yet supported (deferred to future PRs because their device
-        params aren't exposed by ``builder.components()`` today):
-        ``mosfet_level1``, ``igbt_level1``, ``nonlinear_diode``,
-        ``vcvs``, ``saturable_inductor``. Calls on those kinds raise
-        :class:`NotImplementedError` pointing at
-        :func:`pulsim.losses.device_loss_summary`, which already
-        implements per-step nonlinear stamp evaluation for the loss
-        summary.
+        Not yet supported (their device params aren't exposed by
+        ``builder.components()`` today): ``mosfet_level1``,
+        ``igbt_level1``, ``nonlinear_diode``, ``lauritzen_diode``,
+        ``nonlinear_capacitor``, ``vcvs``, ``saturable_inductor``. Calls
+        on those kinds raise :class:`NotImplementedError` with the
+        recipe that works: a small series resistor (1 mOhm) whose
+        ``res.i()`` is the device current. ``device_loss_summary`` does
+        not report them either.
 
         Sign convention. Current is positive flowing from the ``from``
         terminal to the ``to`` terminal of the ``add_*`` call (matches
@@ -1380,7 +1387,7 @@ class SimulationResult:
         Walks ``builder.components()`` and calls :meth:`i` on every branch
         whose kind has a reconstruction implementation (inductor,
         voltage_source family, resistor, capacitor, current_source, diode,
-        switch). When ``skip_unsupported`` is True (default), kinds without
+        shockley_diode, switch). When ``skip_unsupported`` is True (default), kinds without
         a Python-side reconstruction
         (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
         ``saturable_inductor``) are silently omitted from the result —
@@ -1444,12 +1451,56 @@ class SimulationResult:
         ...
 class LoadedCircuit:
     """
-    Result of `load_yaml_*`: a populated `CircuitBuilder` + `SimulationOptions`.
+    Result of `load_yaml_*`: a populated `CircuitBuilder` (`.builder`) + the `simulation:` block (`.options`).
+
+    Read-only conveniences: `source`, `has_simulation`, `t_start`, `t_end`, `dt`, `switch_names`, `node_names`, `warnings`. `pulsim.simulate(loaded, ...)` takes t_start / t_end / dt / store_every from it.
     """
     options: SimulationOptions
+    def __repr__(self) -> str:
+        ...
     @property
     def builder(self) -> CircuitBuilder:
         ...
+    @property
+    def dt(self) -> float:
+        """
+        `simulation.dt` (s); 0.0 when the YAML does not set it (then `simulate(loaded)` runs without a dt, i.e. on the variable-step engine where it qualifies). Same value as `options.dt`.
+        """
+    @property
+    def has_simulation(self) -> bool:
+        """
+        True when the YAML has a top-level `simulation:` block. When False, `t_end` and `dt` are 0.0 (not set) and `simulate(loaded)` refuses until you pass `t_end`.
+        """
+    @property
+    def node_names(self) -> list[str]:
+        """
+        Non-ground node names in node-id order (the names `result.v(name)` accepts). Ground ('gnd' / '0') is not listed.
+        """
+    @property
+    def source(self) -> str:
+        """
+        Where the YAML came from: the path given to `load_yaml_file`, or '<string>' for `load_yaml_string`.
+        """
+    @property
+    def switch_names(self) -> list[str]:
+        """
+        Names of the switching branches in SwitchStateMask bit order: `switch_names[k]` is the device at bit k, i.e. `builder.switch_index_of(switch_names[k]) == k`. Includes the generated ones (a MOSFET's '<name>_body' diode, binary diodes).
+        """
+    @property
+    def t_end(self) -> float:
+        """
+        `simulation.t_end` (s); 0.0 when the YAML does not set it. Same value as `options.t_end`.
+        """
+    @property
+    def t_start(self) -> float:
+        """
+        `simulation.t_start` (s); 0.0 when not set. Same value as `options.t_start`.
+        """
+    @property
+    def warnings(self) -> list[str]:
+        """
+        Non-fatal loader findings (unknown keys), each also emitted as a UserWarning at load time.
+        """
 class NativePwm2Switch:
     """
     Native 2-switch complementary PWM for DSED. Pass directly as `switch_fn=` to `pulsim.simulate(engine='dsed', ...)` — the dispatch detects the type and calls the C++ implementation without GIL roundtrips per scheduler step. ~25× faster per switch_fn call than the equivalent Python class.
@@ -1487,6 +1538,23 @@ class NativeMultiMaskPwm:
     @property
     def T_sw(self) -> float:
         ...
+class SwitchSchedule:
+    """
+    A switch_fn that knows its own gate edges: returned by make_pwm_switch_fn, make_dead_time_pwm_pair_fn, make_spwm_pair_fn, make_phase_shift_full_bridge_fn, make_three_phase_spwm_fn and make_combined_switch_fn. Call it with t for the SwitchStateMask. `next_edge_after(t)` is the first gate edge strictly after t (inf when unknown), so the variable-step engines (engine='trbdf2', 'dsed') land their steps ON the edges instead of sampling for them; every engine evaluates it in C++ without the GIL. Edges that fall on a dt grid point take effect at that point.
+    """
+    def __call__(self, t: float) -> SwitchStateMask:
+        """
+        Return the switch mask at time `t`.
+        """
+    def next_edge_after(self, t: float) -> float:
+        """
+        First gate-edge time strictly greater than `t`; inf when the schedule does not know it (a combination with a plain Python callable). An edge may be a no-op (same mask on both sides), never a missed one.
+        """
+    @property
+    def has_edges(self) -> bool:
+        """
+        False when the schedule cannot name its edges (a make_combined_switch_fn with a plain Python callable in it); the variable-step engines then search for them by sampling.
+        """
 class ThreePhaseLegIndices:
     """
     Switch-index assignment for the 6 power devices of a 3-phase 2-level VSI. Caller must add the switches in the same order to the CircuitBuilder.
@@ -2351,39 +2419,39 @@ def ja_replay(N: float, Ae: float, le: float, lg: float, Ms: float, a: float, al
     """
 def load_yaml_file(path: str) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options).
+    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`.
     """
 def load_yaml_string(yaml_text: str) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options).
+    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`.
     """
 def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> collections.abc.Callable[[float], SwitchStateMask]:
     """
     Build a switch_fn(t) that sets bit `idx` ON when `chain.channels[channel_name] > 0.5`. `mapping` is a list of (channel_name, switch_idx) pairs.
     """
-def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[collections.abc.Callable[[float], SwitchStateMask]]) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[typing.Any]) -> SwitchSchedule:
     """
-    Compose multiple SwitchScheduleFn callbacks into a single one whose mask is the bitwise OR of all sub-masks. Useful for combining e.g. a primary-side PWM helper with a sync-rectifier helper where each drives different switch indices.
+    Compose multiple switch_fn callbacks into a single SwitchSchedule whose mask is the bitwise OR of all sub-masks. Useful for combining e.g. a primary-side PWM helper with a sync-rectifier helper where each drives different switch indices. Its `next_edge_after` is the earliest edge of the parts when every part is a SwitchSchedule, else inf.
     """
-def make_dead_time_pwm_pair_fn(frequency: float, duty: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_dead_time_pwm_pair_fn(frequency: float, duty: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a complementary HS/LS half-bridge pair at `frequency` with `duty` and symmetric `dead_time` inserted at each commutation. Shoot-through is prevented by construction (HS and LS are never both ON). Other switch bits stay OFF.
+    Build a SwitchSchedule driving a complementary HS/LS half-bridge pair at `frequency` with `duty` and symmetric `dead_time` inserted at each commutation. Shoot-through is prevented by construction (HS and LS are never both ON). Other switch bits stay OFF.
     """
-def make_phase_shift_full_bridge_fn(switching_frequency: float, phase_shift: float, leg_a_hs_idx: int, leg_a_ls_idx: int, leg_b_hs_idx: int, leg_b_ls_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_phase_shift_full_bridge_fn(switching_frequency: float, phase_shift: float, leg_a_hs_idx: int, leg_a_ls_idx: int, leg_b_hs_idx: int, leg_b_ls_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a phase-shift full-bridge: two HS/LS half-bridge legs at 50 %% duty each, with leg B lagging leg A by `phase_shift` radians. φ=0 → synchronous (no power); φ=π → anti-phase (full ±V_bus square wave on v_AB). Used by ZVS full-bridge, DAB, and resonant LLC converters.
+    Build a SwitchSchedule driving a phase-shift full-bridge: two HS/LS half-bridge legs at 50 %% duty each, with leg B lagging leg A by `phase_shift` radians. φ=0 → synchronous (no power); φ=π → anti-phase (full ±V_bus square wave on v_AB). Used by ZVS full-bridge, DAB, and resonant LLC converters.
     """
-def make_pwm_switch_fn(frequency: float, duty: float, switch_idx: int, num_switches: int, phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_pwm_switch_fn(frequency: float, duty: float, switch_idx: int, num_switches: int, phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn that toggles `switch_idx` ON during the first `duty · T` fraction of each period (T = 1 / frequency) and OFF for the rest. All other switch bits stay OFF. Returns a Python callable usable as `switch_fn=` in run_transient.
+    Build a SwitchSchedule that toggles `switch_idx` ON during the first `duty · T` fraction of each period (T = 1 / frequency) and OFF for the rest; `phase` is a time offset in seconds. All other switch bits stay OFF. Edges on a dt grid point take effect at that point, so an on-time of a whole number of steps is exactly that many steps in every period. Usable as `switch_fn=` in simulate / run_transient.
     """
-def make_spwm_pair_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0, modulation_phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_spwm_pair_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0, modulation_phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a HS/LS half-bridge with naturally-sampled SPWM: instantaneous duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). Symmetric `dead_time` is inserted at each commutation; shoot-through is impossible by construction.
+    Build a SwitchSchedule driving a HS/LS half-bridge with naturally-sampled SPWM: instantaneous duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). Symmetric `dead_time` is inserted at each commutation; shoot-through is impossible by construction.
     """
-def make_three_phase_spwm_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, legs: ThreePhaseLegIndices, num_switches: int, dead_time: float, modulation_phase: float = 0.0, carrier_phase: float = 0.0) -> collections.abc.Callable[[float], SwitchStateMask]:
+def make_three_phase_spwm_fn(carrier_frequency: float, modulation_frequency: float, modulation_index: float, legs: ThreePhaseLegIndices, num_switches: int, dead_time: float, modulation_phase: float = 0.0, carrier_phase: float = 0.0) -> SwitchSchedule:
     """
-    Build a SwitchScheduleFn driving a 3-phase 2-level VSI with SPWM: common carrier, sine modulation references at 0°/-120°/-240° on legs A/B/C, symmetric dead-time. Shoot-through prevented on every leg by construction.
+    Build a SwitchSchedule driving a 3-phase 2-level VSI with SPWM: common carrier, sine modulation references at 0°/-120°/-240° on legs A/B/C, symmetric dead-time. Shoot-through prevented on every leg by construction.
     """
 def radau_iia3_solve(f: collections.abc.Callable, t0: float, t_end: float, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], rtol: float = 1e-05, atol: float = 1e-08, dt_min: float = 1e-12, dt_max: float = 0.0, safety: float = 0.9, growth_max: float = 5.0, shrink_min: float = 0.2, newton_max_iter: int = 8, newton_tol: float = 1e-08, dt_init: float = -1.0) -> dict[typing.Any, typing.Any]:
     """

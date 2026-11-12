@@ -6,6 +6,160 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixes after the 2.0 readiness review
+
+#### Variable-step engines (`auto` / `trbdf2`)
+
+* **Fixed** `engine='auto'`/`'trbdf2'` with an opaque Python `switch_fn`
+  no longer steps over the pulses of a periodic gate on long runs. The
+  engine samples the gate every h/4 inside a step, lands each edge it
+  finds, and caps the step at twice the narrowest pulse it has seen. The
+  24 V boost at 20 ms read 589.97 V and now reads 48.03 V (pwl 48.04 V).
+  If a pulse is landed although it was narrower than the sampling,
+  `simulate` warns. A one-shot pulse narrower than a quarter of the step
+  ceiling can still be missed with no warning: pass `dt` (the ceiling)
+  or use `NativePwm2Switch`.
+* **Fixed** TR-BDF2 missed diode commutations: a `V_th=0` bridge behind
+  0.1 ohm ran half-wave (318.8 V) and now reads 322.06 V (pwl 322.06 V).
+  A diode left in a state its rule forbids is re-decided, and the
+  phantom 294 A landing peak on the line-inductance bridge is gone (65.3
+  A, pwl 65.35 A).
+* **Fixed** TR-BDF2 stored a shoot-through sample (Q1 and D1 both ON, 6
+  V across two 1 mOhm stamps) when a controller tick landed on a gate
+  edge; the diodes are now re-settled at gate edges that fall on a step
+  boundary.
+* **Fixed** `engine='auto'` no longer aborts with 'factorize failed
+  (numerically singular)' on a rectifier whose DC side floats; dp-dn
+  averages 321.85 V on both engines. When it needs the longer probe
+  step, `simulate` warns and names the subnet that reaches ground only
+  through switches; grounding a DC rail is still the better circuit (10
+  mF: 323.94 V floating vs 324.51 V pwl; grounded, both 324.52 V).
+* **Added** `simulate` raises a `RuntimeWarning` naming the diode, and
+  any floating subnet, and suggesting `engine='pwl'` with a fixed `dt`
+  when TR-BDF2's recorded diode states still break the commutation rule.
+* **Added** TR-BDF2 stats keys `gate_pulse_min`, `n_gate_undersampled`,
+  `gate_sample_spacing_max`, `n_held_diode_redecided`,
+  `n_gate_boundary_settles`, `probe_floor_used`.
+* TR-BDF2 (`engine='auto'`/`'trbdf2'`) no longer gets stuck at h_min on
+  a line-inductance rectifier commutation. A bridge behind 1 mH used to
+  abort on max_steps after 70+ s on runs of 0.35 s or longer; it now
+  runs 0.5 s in about 5k steps and lands within 0.04 V of
+  `engine='pwl'`.
+* TR-BDF2 no longer counts a diode's sign change inside the noise floor
+  as a commutation: a floating-DC-rail bridge over 40 ms went from 318k
+  steps to 1.1k.
+* The floating-subnet hint names only subnets that hold a capacitor or
+  inductor, and the gate-pulse warning's `dt` advice now matches the
+  guide (at most 4x the narrowest pulse).
+
+#### PWM edges and DSED dead time
+
+* Fixed: built-in PWM generators (make_pwm_switch_fn,
+  make_dead_time_pwm_pair_fn, make_spwm_pair_fn,
+  make_three_phase_spwm_fn, make_phase_shift_full_bridge_fn,
+  NativePwm2Switch, NativeMultiMaskPwm, PWM and PULSE voltage sources,
+  PwmGenerator blocks, control.bind_pi_to_switch) put an edge that falls
+  on a dt grid point a step early or late at random: 49, 50 or 51
+  on-steps where 50 are wanted at 100 kHz, dt=1e-7. An edge within 64
+  ulp of a grid point now takes effect at that point, so a whole-step
+  on-time is exact in every period (guide buck ripple 67 mV -> 16.8 mV).
+* Fixed: engine='dsed' moved every gate edge of a switch_fn without
+  next_edge_after onto its dt_max/10 poll grid, which deleted the dead
+  time. A 48 V synchronous buck (D=0.25, 100 ns dead time) read 14.28 V,
+  its body diodes never conducted, and the low-side switch lost 1.27 W
+  (pwl: 11.49 V, body diodes conducting 76 % of the time, 7.2 mW). The
+  helpers now return pulsim.SwitchSchedule with an analytic
+  next_edge_after that DSED and TR-BDF2 land on, and DSED bisects a
+  plain callable's changes inside each poll window. Pulses shorter than
+  dt_max/10 are still missed, and simulate warns.
+* Added: pulsim.SwitchSchedule (callable mask + next_edge_after(t) +
+  has_edges), returned by the built-in PWM helpers;
+  make_combined_switch_fn keeps the edge oracle when every part has one.
+* Added: pulsim.control.pwm_on(t, period, duty, phase=0.0), a grid-exact
+  PWM comparison for hand-written switch_fns, to use in place of `(t %
+  T) / T < D`.
+* Fixed: simulate(engine='dsed') without a switch_fn no longer warns
+  about polling "this plain Python switch_fn".
+
+#### Loss and thermal summaries
+
+* `device_loss_summary` and `device_thermal_summary` take keyword-only
+  `t_from` / `t_to` (seconds) to report a window instead of the whole
+  run, start-up included. A bound inside a step cuts that step's own
+  model: its current line and, on a step that switches a device on or
+  off, the trapezoid of its end powers. Adjacent windows therefore add
+  up to rounding wherever the cuts fall. Gate edges and diode turn-offs
+  count when their step starts inside the window. On a 230 V bridge a
+  diode's conduction loss reads 2.338 W over the run and 0.1358 W over
+  80-100 ms. The thermal network still runs from t = 0; its averages and
+  peaks cover the window.
+* `result.i()`, `result.currents()` and both loss/thermal summaries now
+  support `add_shockley_diode`, using the kernel's exponential diode
+  equation. The current agrees with a 1 mOhm sense resistor to 3e-12 A.
+  Device kinds that are still unsupported now suggest a series sense
+  resistor.
+* The diode warnings from `result.i()` (missed commutation, no
+  stamped-mask record) are emitted once per result and diode instead of
+  once per call site.
+* `ThreePhaseVsiResult`, `BridgeRectifierResult` and
+  `ThreePhaseRLLoadResult` can now be imported from `pulsim` directly.
+  Unknown-attribute errors show the installed version and point to the
+  defining submodule.
+* Docs: `device_loss_summary` now documents how `switch_specs` charges
+  soft and hard edges, with and without dead time (no-dead-time soft
+  edges are charged at the full bus voltage, which counts the leg's
+  switching loss twice).
+
+#### YAML netlists and schematics
+
+* Fixed: 9 shipped example YAMLs nested `simulation:` under `circuit:`
+  and 3 had none, so all 12 loaded with t_end = dt = 0 and no warning.
+  The files are fixed, and a test now loads and runs every shipped
+  example.
+* Changed: the YAML loader warns on unknown top-level, `circuit:` and
+  `simulation:` keys (e.g. v1 `tstop`): each is a UserWarning naming the
+  key and is listed in `LoadedCircuit.warnings`. A `simulation:` block
+  nested under `circuit:` is refused with the fix spelled out, as are an
+  empty `simulation:` block and a `schema: pulsim-v1` netlist.
+* Added: `pulsim.simulate(loaded)` accepts a `LoadedCircuit` and takes
+  t_start / t_end / dt / store_every from its `simulation:` block
+  (keywords override). An empty run window is a ValueError naming the
+  YAML file, and `t_end` must be greater than `t_start` for any builder.
+* Added: read-only `LoadedCircuit` properties `source`,
+  `has_simulation`, `t_start`, `t_end`, `dt`, `switch_names`
+  (SwitchStateMask bit order), `node_names` and `warnings`, plus a repr.
+* Fixed: `pulsim.schematic.render()` raised AttributeError for every 2.0
+  CircuitBuilder (0 of 25 examples rendered). The default is now the
+  pure-Python template/force-directed layout, and all 25 render.
+  `python_native` / `elk` are opt-in and name a missing elkjs; an
+  unknown PULSIM_SCHEMATIC_BACKEND is a ValueError; a missing cairo C
+  library for PNG is an ImportError naming it; `render()` accepts a
+  LoadedCircuit.
+* Fixed: `pulsim.example('yaml')` and `list_topologies()` pointed at the
+  nonexistent `examples/v2/`.
+
+#### Repository and docs
+
+* **Repository hygiene.** `build-tests/` (86 CMake/ninja artefacts, 22
+  of them test executables, 36 MB), committed by mistake in ebf2e1c4,
+  and six generated MMC plots in `examples/scripts/out/` are no longer
+  tracked. `pyproject.toml` sets `sdist.exclude` for the build trees,
+  `.scratch/` and `examples/scripts/out/`, so a lost ignore line can no
+  longer ship them. The sdist is 1712 files / 37.1 MB, against 1804 /
+  49.5 MB on 2.0.0's ignore rules. `run_fast_block_pi_buck.py` and
+  `run_device_loss_to_thermal.py` now create their output folder.
+* **Docs: "Known limitations of Pulsim 2.0"**
+  (`docs/known-limitations.md`). Twenty limitations, each re-measured on
+  this release and given one workaround. Among them: the TR-BDF2 h_min
+  stall, the femtosecond landing step, and missed PWL-diode commutations
+  on bridges and a snubbed boost; a SIGSEGV on `trbdf2`/`auto` on a
+  circuit they cannot start; the fixed engine's first-order start and
+  its diode-mask chatter (50 ns reads 2.4 % low, and swapping in
+  Shockley diodes changes the model); DSED skipping gate intervals
+  shorter than its polling period; PWM edge jitter; and loss summaries
+  with no time window. Linked from the README, the docs nav and
+  `llms.txt`.
+
 ### Using Pulsim with AI coding assistants
 
 AI assistants write Pulsim 1.x calls, and other simulators' semantics,

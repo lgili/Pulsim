@@ -1,3 +1,15 @@
+> Reconciled 2026-11: one task is done (4.1, as
+> `circuits/switching/buck/buck_hard_switching_reference.yaml`). No ZVS
+> or ZCS KPI exists (`compute_zvs_fraction`, `compute_zcs_fraction`,
+> `compute_switching_loss` are absent). Neither ZVS bench exists;
+> `isolated/ll11_llc_resonant_converter.yaml` is an LLC with no ZVS
+> KPI. Also, none of these benchmark files runs on 2.0: they use
+> `schema: pulsim-v1`, which `p.load_yaml_file` refuses ("missing
+> required top-level key 'circuit:'"), and
+> `benchmarks/tools/benchmark_runner.py` imports
+> `pulsim_python_backend`, deleted in 64837c4c, so each run fails with
+> "Pulsim Python runtime backend unavailable".
+
 ## 1. ZVS / ZCS detection KPIs
 - [ ] 1.1 Add `compute_zvs_fraction(switch_state, v_ds_samples, threshold, lookback)` to `benchmarks/kpi/`.
 - [ ] 1.2 Add `compute_zcs_fraction(switch_state, i_d_samples, threshold, lookback)`.
@@ -14,7 +26,8 @@
 - [ ] 3.2 KPI: per-switch ZVS fraction (leading-leg ≈ 100 %, lagging-leg ≈ 100 % at full load).
 
 ## 4. Hard-switched reference
-- [ ] 4.1 Create `buck_hard_switching_loss_reference.yaml`: standard buck where ZVS is not achieved.
+- [x] 4.1 Create `buck_hard_switching_loss_reference.yaml`: standard buck where ZVS is not achieved.
+  (Reconciled 2026-11: as buck_hard_switching_reference.yaml.)
 - [ ] 4.2 KPI: ZVS fraction near 0 %, document the average switching loss.
 
 ## 5. Documentation + smoke-run

@@ -68,8 +68,8 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 
 | Arg | Type | Default | Meaning |
 |---|---|---|---|
-| `builder` | `CircuitBuilder` | required | The populated builder. |
-| `t_end` | `float` | required | End time, seconds. |
+| `builder` | `CircuitBuilder` or `LoadedCircuit` | required | The populated builder, or a `LoadedCircuit` from the YAML loader (then `t_end`, `dt`, `t_start` and `store_every` default to its `simulation:` block; see *YAML loader*). |
+| `t_end` | `float` | required with a builder | End time, seconds; must be greater than `t_start` (a `ValueError` otherwise). |
 | `dt` | `float` or `None` | `None` | Fixed time step, seconds. Passing it selects the fixed-step `pwl` engine; omit it to let `engine='auto'` pick the engine and step. |
 | `t_start` | `float` | `0.0` | Start time. |
 | `switch_fn` | `Callable[[float], SwitchStateMask]` | all closed | Switch driver. |
@@ -316,11 +316,36 @@ simulation:
 """)
 loaded.builder              # CircuitBuilder
 loaded.options              # SimulationOptions (t_start, t_end, dt, ...)
+loaded.source               # the path, or '<string>'
+loaded.has_simulation       # True: the YAML has a top-level simulation:
+loaded.t_start, loaded.t_end, loaded.dt     # read-only, from options
+loaded.node_names           # ['in', 'out'] (ground not listed)
+loaded.switch_names         # switching branches in SwitchStateMask bit order
+loaded.warnings             # non-fatal loader findings (also UserWarnings)
+
+res = p.simulate(loaded)    # t_end / dt from the file; keywords override
 ```
 
-Pass it to `simulate(loaded.builder, loaded.options.t_end, loaded.options.dt)`.
+`simulate(loaded)` takes `t_end`, `dt` (when the file sets one),
+`t_start` and `store_every` from the `simulation:` block; any keyword
+you pass wins. The other `simulation:` fields (Newton tolerances,
+`integrator`, ...) stay on `loaded.options` for you to forward. A
+`LoadedCircuit` with no top-level `simulation:` block (or no `t_end` in
+it) is refused with a `ValueError` naming the file, unless you pass
+`t_end=`.
+
 The YAML describes the circuit and run settings only — build any gate
 drive yourself (e.g. `make_pwm_switch_fn`) and pass it as `switch_fn=`.
+
+Key checks. The loader accepts only `circuit:` and `simulation:` at the
+top level and only `nodes:` / `devices:` under `circuit:`; anything else
+is ignored with a `UserWarning` naming the key (also listed in
+`loaded.warnings`). A `simulation:` block indented
+under `circuit:` is refused with the fix spelled out (until 2.0.x it was
+ignored and the file loaded with `t_end = dt = 0`). A
+`schema: pulsim-v1` netlist is refused as such. Unknown keys inside
+`simulation:` (e.g. the v1 spelling `tstop`) are not fatal: each is a
+`UserWarning` and an entry of `loaded.warnings`.
 
 ## Parts library — `pulsim.lib`
 

@@ -203,6 +203,8 @@ def _call_elk(graph: dict[str, Any]) -> dict[str, Any]:
     )
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        from .native_backend import raise_if_elkjs_missing
+        raise_if_elkjs_missing(stderr)
         raise RuntimeError(
             f"elk_bridge.js failed (exit {result.returncode}): {stderr}"
         )

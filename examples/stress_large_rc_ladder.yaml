@@ -4000,7 +4000,7 @@ circuit:
     from: n399
     to: gnd
     C: 1.0e-09
-  simulation:
-    t_start: 0.0
-    t_end: 0.0005
-    dt: 1.0e-06
+simulation:
+  t_start: 0.0
+  t_end: 0.0005
+  dt: 1.0e-06
