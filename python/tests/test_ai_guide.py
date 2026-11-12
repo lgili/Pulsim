@@ -95,7 +95,8 @@ def test_importing_pulsim_does_not_import_the_cli_module():
 
 
 def test_guide_fits_the_budget_and_is_ascii(guide_text):
-    size = GUIDE.stat().st_size
+    # LF-normalised: a Windows checkout converts the guide to CRLF.
+    size = len(GUIDE.read_bytes().replace(b"\r\n", b"\n"))
     assert size <= MAX_BYTES, f"AI_GUIDE.md is {size} bytes (> {MAX_BYTES})"
     # ASCII keeps `python -m pulsim.guide` safe on any console encoding.
     bad = [(n, ln) for n, ln in enumerate(guide_text.splitlines(), 1)

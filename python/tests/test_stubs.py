@@ -467,7 +467,9 @@ def _mypy(tmp_path: Path, cache: Path, *targets: str) -> subprocess.CompletedPro
 
 
 def test_mypy_accepts_the_stub(tmp_path, mypy_cache):
-    proc = _mypy(tmp_path, mypy_cache, str(STUB_PATH))
+    # By module name: a site-packages file path makes mypy treat
+    # site-packages as a source root (typing_extensions "shadows" errors).
+    proc = _mypy(tmp_path, mypy_cache, "-m", "pulsim._pulsim")
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
