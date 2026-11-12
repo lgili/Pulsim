@@ -40,11 +40,12 @@ where it should be ON. Nothing reports it — the run just
 integrates a different converter. Dividing first,
 `(t / T) % 1.0 < D`, is exact at those points, and
 `pulsim.NativePwm2Switch` already does that (verified at twelve
-boundaries). The built-in helpers (`make_pwm_switch_fn` & co.) and
-`NativePwm2Switch` also snap an edge that sits on a `dt` grid point
-to that point, so a whole-step on-time is the same in every period. It is worth knowing here because a steady state
-computed over one period and then used for a long run is exactly
-the setup that exposes it.
+boundaries). The built-in helpers (`make_pwm_switch_fn` & co.)
+and `NativePwm2Switch` also snap an edge that sits on a `dt` grid
+point to that point, so a whole-step on-time is the same in every
+period. It is worth knowing here because a steady state computed
+over one period and then used for a long run is exactly the setup
+that exposes it.
 """
 
 from __future__ import annotations

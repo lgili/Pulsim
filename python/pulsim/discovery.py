@@ -430,7 +430,7 @@ _EXAMPLES: dict[str, str] = {
         """,
 
     "PIController": """\
-        import math, pulsim as p
+        import pulsim as p
 
         pi = p.PIController(
             Kp=0.05, Ki=500.0,
@@ -445,7 +445,7 @@ _EXAMPLES: dict[str, str] = {
 
         # switch_fn reads the latest duty.
         def switch_fn(t):
-            phase = math.fmod(t, T_PWM) / T_PWM
+            phase = (t / T_PWM) % 1.0   # divide first: fmod(t, T) / T flips edges
             m = p.SwitchStateMask(n_sw)
             if phase < duty[0]:
                 m.set(0, True)
@@ -468,7 +468,7 @@ _EXAMPLES: dict[str, str] = {
             omega = 2*math.pi*freq
             def sw(t):
                 duty = D_OP + eps*math.sin(omega*t)
-                phase = math.fmod(t, T_PWM)/T_PWM
+                phase = (t / T_PWM) % 1.0
                 m = p.SwitchStateMask(n_sw)
                 if phase < duty: m.set(0, True)
                 return m
