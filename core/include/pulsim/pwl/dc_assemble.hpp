@@ -28,6 +28,7 @@
 #include "pulsim/models/voltage_source.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/pwl/assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/gmin.hpp"
 #include "pulsim/pwl/preflight.hpp"
@@ -247,19 +248,9 @@ inline void dc_assemble(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Switch: {
-            const bool closed = mask.get(switch_idx);
-            Real g_on, g_off;
-            const auto k = pool.kind_of(branch.id);
-            if (k == DevicePool::StoredKind::Diode) {
-                const auto& p = pool.diode_params(branch.id);
-                g_on  = p.g_on;
-                g_off = p.g_off;
-            } else {
-                g_on  = pool.switch_g_on(branch.id);
-                g_off = pool.switch_g_off(branch.id);
-            }
-            stamping::stamp_switch_fixed(J, b, x, coord, closed,
-                                          g_on, g_off);
+            detail::stamp_switch_branch(pool, branch.id,
+                                        mask.get(switch_idx), J, b, x,
+                                        coord);
             ++switch_idx;
             break;
         }

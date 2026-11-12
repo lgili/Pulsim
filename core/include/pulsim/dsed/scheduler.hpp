@@ -181,7 +181,12 @@ struct SchedulerDiode {
     Real g_on;
     Real g_off;
     Real V_th;
+    Real V_f;                 // forward drop while ON
     std::string label;        // named, Phase-1 style
+
+    [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
+        return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};
+    }
 };
 
 /// Whether ``SwitchFn`` has a ``next_edge_after`` fast path.
@@ -895,7 +900,9 @@ private:
                 "the consistent-reinitialization projection that "
                 "removes it is Phase-3 item 2. Use the default "
                 "engine (engine='pwl'), whose implicit fixed-step "
-                "solver holds DCM correctly.");
+                "solver holds DCM correctly. A diode with a forward "
+                "drop V_f and V_th <= V_f has no hysteresis band; "
+                "V_th = V_f + 1e-3 gives it one.");
         }
     }
 
@@ -923,14 +930,10 @@ private:
                     diode_bits_.get(d.switch_idx);
                 const Real v_d = system_.node_pair_voltage(
                     d.from, d.to, t, x);
-                const Real g = on ? d.g_on : d.g_off;
-                const models::SwitchedDiode::Params params{
-                    d.g_on, d.g_off, d.V_th};
                 // The pwl engine's exact decision rule — the two
                 // engines must not drift on what "conducting" means.
                 const bool next =
-                    models::SwitchedDiode::decide_next_state(
-                        on, v_d, g * v_d, params);
+                    models::SwitchedDiode::decide(on, v_d, d.params());
                 if (next != on) {
                     diode_bits_.set(d.switch_idx, next);
                     flipped = true;
@@ -950,7 +953,8 @@ private:
                     "settle after 64 rounds at t = "
                     + std::to_string(t) + " (diodes: " + culprits
                     + ") — a pair is fighting over the same node; "
-                    "add a small hysteresis band or an RC snubber");
+                    "add a small hysteresis band (e.g. V_th = V_f + "
+                    "1e-3 on add_diode) or an RC snubber");
             }
             const MaskT candidate =
                 mask.overlay(diode_bits_, diode_owned_);

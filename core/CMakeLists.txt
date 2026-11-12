@@ -360,6 +360,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v2/test_integration_half_wave_rectifier.cpp
         tests/layer5_v2/test_integration_boost.cpp   # V2.1 fix
         tests/layer5_v2/test_commutation_events.cpp  # V2.2 substep
+        tests/layer5_v2/test_switched_diode_forward_drop.cpp  # PSIM V_f
     )
     target_link_libraries(pulsim_core_layer5_v2_tests
         PRIVATE

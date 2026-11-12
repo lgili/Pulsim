@@ -50,12 +50,12 @@
 //     the fixed-trap engine. h_max bounds the blind window the way
 //     dt does there.
 //   * Diode crossings: after an LTE-accepted step, each diode's
-//     per-direction signal (ON→OFF watches v_D, whose zero is the
-//     current zero; OFF→ON watches v_D − V_th) is checked at the
+//     per-direction signal (ON→OFF watches v_D − V_f, whose zero is
+//     the current zero; OFF→ON watches v_D − V_on) is checked at the
 //     stage and end points. A crossing is localized by Illinois
 //     (regula falsi with endpoint halving) on trial TRAP solves at
 //     dt* = t* − t, the step is committed at t*, the diode flips
-//     there (`SwitchedDiode::decide_next_state`), and the
+//     there (`SwitchedDiode::decide`), and the
 //     controller restarts small — the one-step method needs
 //     nothing else.
 //
@@ -218,23 +218,24 @@ struct TrBdf2Stats {
 namespace detail_trbdf2 {
 
 /// Per-direction diode crossing signal at a solved state. The
-/// existing post-hoc watcher in run_transient uses v_D − V_th for
-/// BOTH directions, which biases turn-OFF by V_th (its own doc
-/// comment admits i_D is the right signal); with i_D = g·v_D the
-/// ON→OFF zero is v_D = 0, so this watches v_D for ON and
-/// v_D − V_th for OFF.
+/// existing post-hoc watcher in run_transient uses v_D − V_on for
+/// BOTH directions, which biases turn-OFF by the V_th − V_f band (its
+/// own doc comment admits i_D is the right signal); with
+/// i_D = g_on·(v_D − V_f) the ON→OFF zero is v_D = V_f, so this
+/// watches v_D − V_f for ON and v_D − V_on for OFF
+/// (`SwitchedDiode::crossing_signal`).
 inline Real crossing_signal(const pwl::DiodeEventState& diodes,
                              Size entry_idx, const Vector& x) {
     const auto& e = diodes.entries()[entry_idx];
     const Real v_d = stamping::read_node_voltage(x, e.from)
                      - stamping::read_node_voltage(x, e.to);
-    return e.is_on ? v_d : (v_d - e.V_th);
+    return models::SwitchedDiode::crossing_signal(e.is_on, v_d, e.params());
 }
 
 /// True when `s` (the diode's crossing_signal) puts it on the side its
 /// own commutation rule would leave — `SwitchedDiode::
-/// decide_next_state`: ON stays iff g_on·v_D > 0, OFF stays iff
-/// v_D < V_th.
+/// decide`: ON stays iff g_on·(v_D − V_f) > 0, OFF stays iff
+/// v_D < V_on.
 inline bool forbidden(const pwl::DiodeEventState& diodes,
                       Size entry_idx, Real s) {
     return diodes.entries()[entry_idx].is_on ? (s <= Real{0})
@@ -242,14 +243,14 @@ inline bool forbidden(const pwl::DiodeEventState& diodes,
 }
 
 /// What counts as numerical noise in a forbidden-side signal: 1e-8 of
-/// the diode's terminal voltages (plus V_th and 1 V). A V_th = 0 diode
+/// the diode's terminal voltages (plus V_th, V_f and 1 V). A V_th = 0 diode
 /// riding its zero-current boundary sits there (the chatter guard owns
 /// that case); a missed commutation leaves it volts away.
 inline Real held_tolerance(const pwl::DiodeEventState& diodes,
                            Size entry_idx, const Vector& x) {
     const auto& e = diodes.entries()[entry_idx];
     return Real{1e-8}
-           * (Real{1} + std::abs(e.V_th)
+           * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
               + std::abs(stamping::read_node_voltage(x, e.from))
               + std::abs(stamping::read_node_voltage(x, e.to)));
 }
@@ -812,7 +813,9 @@ inline SimulationResult run_transient_trbdf2(
     // Mask recorded with sample 0 (SimulationResult::
     // switch_state_bits): the bits the run STARTS from, taken before
     // the settle below re-decides them. A zero IC is consistent with
-    // every mask (v = 0, so i = g·v = 0). A `resume_from` state is the
+    // every mask whose diodes are OFF (v = 0, so i = g·v = 0; an ON
+    // diode with a forward drop would carry −g_on·V_f) — and every
+    // diode starts OFF. A `resume_from` state is the
     // previous run's last solve and records the mask the snapshot
     // says it was stamped under (`stamped_mask`), NOT mask_at(t_start):
     // a run that ended exactly on a gate edge stored that sample under
@@ -1677,7 +1680,7 @@ inline SimulationResult run_transient_trbdf2(
                     // interpolation, and the record says which mask
                     // produced it — so g·v at this sample is the
                     // current the solver carried, with no phantom
-                    // g_on·V_th from the post-flip bits.
+                    // g_on·(v − V_f) from the post-flip bits.
                     result.record_switch_state(mask_step);
                     x_mask = mask_step;
                     x_mask_known = true;

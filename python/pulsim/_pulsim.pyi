@@ -237,9 +237,9 @@ class CircuitBuilder:
         """
         Add a DC current source. I in amperes. EE convention: I flows OUT of `n_pos` (the + terminal) into the external circuit, back to `n_neg`. Does NOT add a branch-current unknown — the current is fixed at I.
         """
-    def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0) -> CircuitBuilder:
+    def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0, V_f: float = 0.0) -> CircuitBuilder:
         """
-        Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens, V_th in volts.
+        Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
     def add_gapped_core_inductor(self, name: str, n_pos: str, n_neg: str, N: float, Ae: float, le: float, lg: float, mu_r0: float = 2000.0, B_sat: float = 0.35, knots: int = 128) -> CircuitBuilder:
         """
@@ -278,7 +278,7 @@ class CircuitBuilder:
         """
     def add_mosfet(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, body_diode: bool = True, V_F: float = 0.7) -> CircuitBuilder:
         """
-        Add an n-channel power MOSFET: a controlled switch (drain → source) PLUS its intrinsic anti-parallel body diode (source → drain), named `<name>_body`, which is on by DEFAULT. No vertical power MOSFET exists without one, and a gate-off device in an inductive path has no freewheeling route without it. Pass `body_diode=False` for an eGaN HEMT (which conducts in reverse through the channel, not a p-n junction) or for a bare switch. Defaults: R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V.
+        Add an n-channel power MOSFET: a controlled switch (drain → source) PLUS its intrinsic anti-parallel body diode (source → drain), named `<name>_body`, which is on by DEFAULT. No vertical power MOSFET exists without one, and a gate-off device in an inductive path has no freewheeling route without it. Pass `body_diode=False` for an eGaN HEMT (which conducts in reverse through the channel, not a p-n junction) or for a bare switch. Defaults: R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the body diode's turn-on THRESHOLD (add_diode's V_th), not a conduction drop.
         """
     def add_mosfet_level1(self, name: str, drain: str, source: str, gate: str, K: float, V_T: float, lambda_: float = 0.02, kappa: float = 15.0, with_body_diode: bool = True) -> CircuitBuilder:
         """
@@ -286,7 +286,7 @@ class CircuitBuilder:
         """
     def add_mosfet_with_body_diode(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, V_F: float = 0.7, g_on_diode: float = 1000.0, g_off_diode: float = 1e-09) -> CircuitBuilder:
         """
-        Add an n-channel power MOSFET WITH intrinsic anti-parallel body diode. Adds TWO branches: switch (drain→source) + diode (source→drain).
+        Add an n-channel power MOSFET WITH intrinsic anti-parallel body diode. Adds TWO branches: switch (drain→source) + diode (source→drain). V_F is the body diode's turn-on THRESHOLD (add_diode's V_th), not a conduction drop.
         """
     def add_multi_winding_transformer(self, name: str, windings: collections.abc.Sequence[tuple[str, str, float]], k_matrix: collections.abc.Sequence[collections.abc.Sequence[float]] = []) -> CircuitBuilder:
         """
@@ -1249,12 +1249,13 @@ class SimulationResult:
         | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
         | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
         | ``current_source``         | constant ``I`` from params              |
-        | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
-        |                            | on samples the solver stamped the diode |
-        |                            | ON, ``g_off`` otherwise (the kernel's   |
-        |                            | per-sample ``switch_states`` record;    |
-        |                            | NOT ``v_D > V_th`` — V_th is a          |
-        |                            | commutation threshold, not a drop)      |
+        | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
+        |                            | samples the solver stamped the diode    |
+        |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
+        |                            | (the kernel's per-sample                |
+        |                            | ``switch_states`` record; NOT           |
+        |                            | ``v_D > V_th`` — V_th is a commutation  |
+        |                            | threshold, V_f the forward drop)        |
         | ``switch``                 | ``(V_from − V_to)·G`` where             |
         |                            | ``G = g_on`` when the recorded stamped  |
         |                            | mask bit is set, ``g_off`` otherwise    |
@@ -1318,7 +1319,7 @@ class SimulationResult:
     @property
     def switch_states(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None:
         """
-        Per-sample record of the switch / diode mask the solver STAMPED for the solve that produced states[k], as a (num_steps, num_switches) bool array (column j = builder.switch_index_of(name)). A switched branch's current is exactly (g_on if bit else g_off) * v_branch. None when the result carries no record (a result not produced by a kernel engine). Raw: where switch_states_unsolved[k] is True (a sample 0 seeded from initial_state) the row is the bits the solver carried in, not a solve, and g(bit) * v does not hold there; result.i() and the loss / thermal summaries read that row with the mask of the first solve after it. With store_every > 1 a row is the mask of the LAST solve before the sample, not of the whole stored interval, so duty cycles and time integrals over a decimated grid alias. Unpacked on each access; the kernel stores ceil(num_switches/8) bytes per sample.
+        Per-sample record of the switch / diode mask the solver STAMPED for the solve that produced states[k], as a (num_steps, num_switches) bool array (column j = builder.switch_index_of(name)). A switched branch's current is exactly (g_on if bit else g_off) * v_branch, less g_on * V_f for an ON diode with a forward drop V_f. None when the result carries no record (a result not produced by a kernel engine). Raw: where switch_states_unsolved[k] is True (a sample 0 seeded from initial_state) the row is the bits the solver carried in, not a solve, and g(bit) * v does not hold there; result.i() and the loss / thermal summaries read that row with the mask of the first solve after it. With store_every > 1 a row is the mask of the LAST solve before the sample, not of the whole stored interval, so duty cycles and time integrals over a decimated grid alias. Unpacked on each access; the kernel stores ceil(num_switches/8) bytes per sample.
         """
         ...
     @property

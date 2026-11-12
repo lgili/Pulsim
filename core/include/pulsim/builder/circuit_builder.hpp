@@ -1079,16 +1079,26 @@ public:
     /// `SwitchedDiode`). The branch uses
     /// `BranchKind::Switch` (the diode behaves as a switch
     /// from the topology's perspective).
+    ///
+    /// `V_f` is the PSIM-style forward drop: while ON the diode is
+    /// `g_on` in series with `V_f` (v = V_f + i/g_on). `V_th` is the
+    /// turn-on threshold, effectively max(V_th, V_f) when V_f > 0;
+    /// V_th > V_f gives a hysteresis band. OFF is plain `g_off`.
     CircuitBuilder& add_diode(
         std::string_view name, std::string_view anode,
         std::string_view cathode, Real g_on, Real g_off,
-        Real V_th = Real{0}) {
+        Real V_th = Real{0}, Real V_f = Real{0}) {
+        if (!(V_f >= Real{0}) || !std::isfinite(V_f)) {
+            throw std::invalid_argument(std::format(
+                "add_diode(\"{}\"): forward drop V_f must be a finite "
+                "number >= 0 V (got {}).", name, V_f));
+        }
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(
             name, a_idx, k_idx,
             topology::BranchKind::Switch);
-        pool_.add_diode(b_id, g_on, g_off, V_th);
+        pool_.add_diode(b_id, g_on, g_off, V_th, V_f);
         return *this;
     }
 
@@ -1170,6 +1180,9 @@ public:
     ///
     /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ, body V_F = 0.7 V
     /// (typical for modern Si MOSFETs in SMPS applications).
+    /// `V_F` is the body diode's TURN-ON THRESHOLD (`add_diode`'s
+    /// V_th), not a conduction drop: once on it conducts as g_on
+    /// with no series offset.
     CircuitBuilder& add_mosfet(
         std::string_view name, std::string_view drain,
         std::string_view source,
@@ -1189,8 +1202,9 @@ public:
     /// Add an n-channel power MOSFET WITH its intrinsic
     /// anti-parallel body diode. Adds two branches:
     ///   1. switch (drain → source) with R_on / R_off
-    ///   2. SwitchedDiode (source → drain) with V_F drop
-    ///      that conducts during freewheeling intervals
+    ///   2. SwitchedDiode (source → drain) with turn-on
+    ///      threshold V_F (V_th, NOT a forward drop) that
+    ///      conducts during freewheeling intervals
     /// Defaults model a typical Si MOSFET: R_on = 1 mΩ,
     /// R_off = 1 GΩ, body-diode V_F = 0.7 V.
     CircuitBuilder& add_mosfet_with_body_diode(

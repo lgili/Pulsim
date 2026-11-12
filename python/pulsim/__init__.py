@@ -883,12 +883,13 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
-    | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
-    |                            | on samples the solver stamped the diode |
-    |                            | ON, ``g_off`` otherwise (the kernel's   |
-    |                            | per-sample ``switch_states`` record;    |
-    |                            | NOT ``v_D > V_th`` — V_th is a          |
-    |                            | commutation threshold, not a drop)      |
+    | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
+    |                            | samples the solver stamped the diode    |
+    |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
+    |                            | (the kernel's per-sample                |
+    |                            | ``switch_states`` record; NOT           |
+    |                            | ``v_D > V_th`` — V_th is a commutation  |
+    |                            | threshold, V_f the forward drop)        |
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
     |                            | ``G = g_on`` when the recorded stamped  |
     |                            | mask bit is set, ``g_off`` otherwise    |
@@ -1098,9 +1099,9 @@ def _result_i(self, name: str, t=None):
 
     # ----------------------- diode -----------------------------------
     if kind == "diode":
-        # PWL switched diode: a pure conductance in each state (the
-        # ON drop is i/g_on — there is NO V_th offset in the stamp;
-        # V_th only gates OFF→ON). The per-sample state is the
+        # PWL switched diode: g_on in series with the forward drop V_f
+        # while ON (v_D = V_f + i/g_on), plain g_off while OFF; V_th
+        # only gates OFF→ON. The per-sample state is the
         # kernel's record of the stamped mask, read through the one
         # helper shared with device_loss_summary and
         # device_thermal_summary (`pulsim._diode_state`).
@@ -3039,8 +3040,8 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             "average was correct to 0.1 mV on a flyback at the "
             "default rtol, but a tightened rtol can bias it by "
             "~0.5 %. Cross-check with a dt (engine='pwl'), or give "
-            "the diode its physical V_th (that IS the hysteresis "
-            "band).",
+            "the diode a V_th above its V_f (V_th - V_f IS the "
+            "hysteresis band).",
             stacklevel=3)
     # A gate pulse landed although narrower than the switch_fn
     # sampling used while it was open (or before that bit's first
@@ -3462,7 +3463,7 @@ _V1_SYMBOL_HINTS = {
     "Inductor":           "b.add_inductor(...)",
     "VoltageSource":      "b.add_voltage_source(...)",
     "CurrentSource":      "b.add_current_source(...)",
-    "Diode":              "b.add_diode(name, anode, cathode, g_on, g_off, V_th)",
+    "Diode":              "b.add_diode(name, anode, cathode, g_on, g_off, V_th, V_f)",
     "MOSFET":             "b.add_mosfet_with_body_diode(...)",
     "IGBT":               "b.add_igbt(...)",
     "Preset":             "no longer exposed — pass an explicit SimulationOptions",
