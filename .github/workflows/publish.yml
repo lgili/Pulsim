@@ -34,7 +34,7 @@ jobs:
             cibw_archs: AMD64
 
           # macOS Apple Silicon
-          - os: macos-14
+          - os: macos-15
             arch: arm64
             cibw_archs: arm64
 
