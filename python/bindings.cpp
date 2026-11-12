@@ -2048,8 +2048,12 @@ void init_module(py::module_& m) {
     // stage (V1 add-on).
     // ---- YAML loader (Layer 8) -------------------------------------------
     py::class_<yaml::LoadedCircuit>(m, "LoadedCircuit",
-        "Result of `load_yaml_*`: a populated "
-        "`CircuitBuilder` + `SimulationOptions`.")
+        "Result of `load_yaml_*`: a populated `CircuitBuilder` "
+        "(`.builder`) + the `simulation:` block (`.options`).\n\n"
+        "Read-only conveniences: `source`, `has_simulation`, "
+        "`t_start`, `t_end`, `dt`, `switch_names`, `node_names`, "
+        "`warnings`. `pulsim.simulate(loaded, ...)` takes t_start / "
+        "t_end / dt / store_every from it.")
         // `builder` is move-only (Graph has deleted copy)
         // so we expose by-reference. The LoadedCircuit
         // OWNS the builder; this view stays valid as
@@ -2061,16 +2065,119 @@ void init_module(py::module_& m) {
             },
             py::return_value_policy::reference_internal)
         .def_readwrite("options",
-                        &yaml::LoadedCircuit::options);
+                        &yaml::LoadedCircuit::options)
+        .def_property_readonly("source",
+            [](const yaml::LoadedCircuit& self) { return self.source; },
+            "Where the YAML came from: the path given to "
+            "`load_yaml_file`, or '<string>' for `load_yaml_string`.")
+        .def_property_readonly("has_simulation",
+            [](const yaml::LoadedCircuit& self) {
+                return self.has_simulation;
+            },
+            "True when the YAML has a top-level `simulation:` block. "
+            "When False, `t_end` and `dt` are 0.0 (not set) and "
+            "`simulate(loaded)` refuses until you pass `t_end`.")
+        .def_property_readonly("t_start",
+            [](const yaml::LoadedCircuit& self) {
+                return self.options.t_start;
+            },
+            "`simulation.t_start` (s); 0.0 when not set. Same value "
+            "as `options.t_start`.")
+        .def_property_readonly("t_end",
+            [](const yaml::LoadedCircuit& self) {
+                return self.options.t_end;
+            },
+            "`simulation.t_end` (s); 0.0 when the YAML does not set "
+            "it. Same value as `options.t_end`.")
+        .def_property_readonly("dt",
+            [](const yaml::LoadedCircuit& self) {
+                return self.options.dt;
+            },
+            "`simulation.dt` (s); 0.0 when the YAML does not set it "
+            "(then `simulate(loaded)` runs without a dt, i.e. on the "
+            "variable-step engine where it qualifies). Same value as "
+            "`options.dt`.")
+        .def_property_readonly("switch_names",
+            [](const yaml::LoadedCircuit& self) {
+                const auto& g = self.builder.graph();
+                std::vector<std::string> names;
+                for (Index i = 0; i < g.num_branches(); ++i) {
+                    if (g.branch(i).kind
+                            == topology::BranchKind::Switch) {
+                        names.emplace_back(g.branch_name(i));
+                    }
+                }
+                return names;
+            },
+            "Names of the switching branches in SwitchStateMask bit "
+            "order: `switch_names[k]` is the device at bit k, i.e. "
+            "`builder.switch_index_of(switch_names[k]) == k`. "
+            "Includes the generated ones (a MOSFET's '<name>_body' "
+            "diode, binary diodes).")
+        .def_property_readonly("node_names",
+            [](const yaml::LoadedCircuit& self) {
+                const auto& g = self.builder.graph();
+                std::vector<std::string> names;
+                names.reserve(static_cast<std::size_t>(g.num_nodes()));
+                for (Index i = 0; i < g.num_nodes(); ++i) {
+                    names.push_back(g.node(i).name);
+                }
+                return names;
+            },
+            "Non-ground node names in node-id order (the names "
+            "`result.v(name)` accepts). Ground ('gnd' / '0') is not "
+            "listed.")
+        .def_property_readonly("warnings",
+            [](const yaml::LoadedCircuit& self) {
+                return self.warnings;
+            },
+            "Non-fatal loader findings (unknown `simulation:` keys), "
+            "each also emitted as a UserWarning at load time.")
+        .def("__repr__",
+            [](const yaml::LoadedCircuit& self) {
+                return std::format(
+                    "LoadedCircuit(source='{}', has_simulation={}, "
+                    "t_end={}, dt={}, nodes={}, switches={})",
+                    self.source, self.has_simulation ? "True" : "False",
+                    self.options.t_end, self.options.dt,
+                    self.builder.graph().num_nodes(),
+                    self.builder.graph().num_switches());
+            });
+
+    // Re-emit the loader's non-fatal findings as Python UserWarnings.
+    // Under `-W error` PyErr_WarnEx returns -1 and the warning becomes
+    // the exception, as Python users expect.
+    const auto emit_load_warnings = [](const yaml::LoadedCircuit& lc) {
+        for (const auto& w : lc.warnings) {
+            const std::string msg = std::format(
+                "load_yaml ({}): {}", lc.source, w);
+            if (PyErr_WarnEx(PyExc_UserWarning, msg.c_str(), 1) != 0) {
+                throw py::error_already_set();
+            }
+        }
+    };
 
     m.def("load_yaml_string",
-        &yaml::load_string, py::arg("yaml_text"),
+        [emit_load_warnings](const std::string& yaml_text) {
+            auto lc = yaml::load_string(yaml_text);
+            emit_load_warnings(lc);
+            return lc;
+        }, py::arg("yaml_text"),
         "Parse a YAML circuit description from an in-memory "
-        "string. Returns LoadedCircuit(builder, options).");
+        "string. Returns LoadedCircuit(builder, options). Refuses "
+        "unknown top-level / `circuit:` keys (a `simulation:` block "
+        "indented under `circuit:` included); warns on unknown "
+        "`simulation:` keys.");
     m.def("load_yaml_file",
-        &yaml::load_file, py::arg("path"),
+        [emit_load_warnings](const std::string& path) {
+            auto lc = yaml::load_file(path);
+            emit_load_warnings(lc);
+            return lc;
+        }, py::arg("path"),
         "Parse a YAML circuit description from disk. "
-        "Returns LoadedCircuit(builder, options).");
+        "Returns LoadedCircuit(builder, options); errors and "
+        "warnings name the path. Same key checks as "
+        "`load_yaml_string`.");
 
     // ---- PWM switch_fn helper (Layer 2 V5) -------------------------------
     //

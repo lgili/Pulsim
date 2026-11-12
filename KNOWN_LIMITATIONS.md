@@ -70,6 +70,30 @@ linear-scaling `*_specs` shape.
 
 ## Schematic renderer
 
+### Default backend and layout quality
+
+`pulsim.schematic.render(builder, path)` uses the pure-Python layout
+path by default: a topology template when a recogniser matches (RC /
+RL / RLC filters, buck with `add_switch` + `add_diode`, flyback,
+half-bridge, phase-shift full bridge, ...), force-directed placement
+otherwise. Until 2.0.x the default was the `python_native` ELK backend,
+which raised `AttributeError` on every 2.0 `CircuitBuilder` (0 of 25 v2
+examples rendered); it is opt-in now (`PULSIM_SCHEMATIC_BACKEND=python_native`,
+needs Node.js and `elkjs`) and was not exercised end to end when the
+default changed, because no elkjs was installed.
+
+Limits measured on the 25 v2 examples (all render to SVG):
+
+- 9 of them match a template and lay out like a textbook drawing. The
+  other 16 (MOSFET-with-body-diode bucks and boosts, three-phase
+  stages, the op-amp LDO, ...) go through force-directed placement:
+  symbols can overlap and a switch symbol's leads do not always touch
+  its wires. Treat that output as a connectivity sketch.
+- PNG needs `cairosvg` and the cairo C library; without the library an
+  `ImportError` names it (the SVG is still written).
+- The Tier-2 topology classifier calls the Anthropic API when
+  `ANTHROPIC_API_KEY` is set, unless `PULSIM_LLM_LAYOUT_HINTS=0`.
+
 ### Per-cell position hints
 
 `pulsim.schematic.render(...)` no longer exposes a `position_hints=`

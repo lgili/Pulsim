@@ -15,6 +15,6 @@ circuit:
     from: vout
     to: gnd
     R: 10000.0
-  simulation:
-    t_end: 0.001
-    dt: 1.0e-06
+simulation:
+  t_end: 0.001
+  dt: 1.0e-06

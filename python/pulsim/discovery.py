@@ -499,16 +499,13 @@ _EXAMPLES: dict[str, str] = {
     "yaml": """\
         import pulsim as p
 
-        loaded = p.load_yaml_file("examples/v2/buck.yaml")
+        loaded = p.load_yaml_file("examples/buck.yaml")
         pwm = p.make_pwm_switch_fn(
             frequency=100e3, duty=0.5,
-            switch_idx=0,
+            switch_idx=loaded.builder.switch_index_of("Q1"),
             num_switches=loaded.builder.graph.num_switches,
         )
-        res = p.simulate(loaded.builder,
-                         t_end=loaded.options.t_end,
-                         dt=loaded.options.dt,
-                         switch_fn=pwm)
+        res = p.simulate(loaded, switch_fn=pwm)   # t_end / dt from the file
         p.scope(loaded.builder, res, signals=["vout"])
         """,
 }
@@ -604,7 +601,7 @@ def tour() -> None:
    b.add_resistor       ("R",  "n0", "vc",  1000.0)
    b.add_capacitor      ("C",  "vc", "gnd", 1e-6)
 
-   # … or:  loaded = p.load_yaml_file("examples/v2/buck.yaml")
+   # … or:  loaded = p.load_yaml_file("examples/buck.yaml")
 
 2. SIMULATE (one call, everything auto)
 
@@ -651,12 +648,12 @@ def tour() -> None:
 
 
 def list_topologies() -> None:
-    """Print the ready-to-run examples in `examples/v2/scripts/`."""
+    """Print the ready-to-run examples in `examples/scripts/`."""
     print("""
-Ready-to-run scripts in examples/v2/scripts/
+Ready-to-run scripts in examples/scripts/
 ============================================
 
-Open-loop transient (one per YAML in examples/v2/):
+Open-loop transient (one per YAML in examples/):
   run_rlc_step_response.py            RLC step, ringing
   run_half_wave_rectifier.py          60 Hz sine + diode + R
   run_common_source_amplifier.py      SH1 MOSFET CS amp
@@ -691,5 +688,5 @@ Diagnostic:
 
 Run with:
     export PYTHONPATH="$(pwd)/python:$PYTHONPATH"
-    python3 examples/v2/scripts/run_buck.py
+    python3 examples/scripts/run_buck.py
 """)
