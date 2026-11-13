@@ -2715,6 +2715,15 @@ def simulate(
     # returns an (observer, b_extra) pair that composes with the
     # user's own.
     if on_cache is not None:
+        if discontinuity_restart:
+            # Measured: R 1 -> 100 ohm through refactor_parametric, the
+            # next edge's restart steps still ramped toward 10 A.
+            raise ValueError(
+                "simulate(on_cache=..., discontinuity_restart=True): the "
+                "restart steps solve on a second factor cache (at "
+                "2*gamma*dt) that the hook never sees, so a parameter "
+                "written through cache.refactor_parametric would not "
+                "reach them. Drop one of the two.")
         _hooked = on_cache(cache)
         if _hooked is not None:
             try:

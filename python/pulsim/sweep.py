@@ -853,7 +853,7 @@ def _make_options(t_end: float, dt: float, **simulate_kwargs):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:
             setattr(opts, k, float(simulate_kwargs[k]))
     for k in ("enable_newton_line_search", "enable_newton_lm",
-                "enable_substep_state_correction"):
+                "enable_substep_state_correction", "discontinuity_restart"):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:
             setattr(opts, k, bool(simulate_kwargs[k]))
     # review finding PY-1: without this, sweeps could neither opt back

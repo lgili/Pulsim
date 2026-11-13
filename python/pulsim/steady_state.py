@@ -125,6 +125,9 @@ def _snapshot_like(base, history):
     # The mask x was stamped under (x is base's, unchanged), so the
     # resumed record's row 0 stays a solved row.
     s.stamped_mask = list(getattr(base, "stamped_mask", ()))
+    # An unfinished discontinuity_restart window (the steps after an
+    # edge just before the boundary) is part of the period map's state.
+    s.restart_steps_left = int(getattr(base, "restart_steps_left", 0))
     for attr, _w, _n in _STATEFUL_FIELDS:
         setattr(s, attr, [float(v) for v in getattr(base, attr, ())])
     s.valid = True
