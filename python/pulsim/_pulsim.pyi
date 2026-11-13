@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'ControlGraphBuildError', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -2548,6 +2548,8 @@ class CxxInputRef:
     @staticmethod
     def time() -> CxxInputRef:
         ...
+class ControlGraphBuildError(ValueError):
+    pass
 class CxxBlockChain:
     """
     C++ block chain executor. Build via add_<block>(...) methods, bind nodes, then pass make_step_observer(dt) to simulate().
@@ -2560,6 +2562,10 @@ class CxxBlockChain:
         ...
     def add_dc_motor(self, J: float, B: float, T_load: float, R_a: float, L_a: float, Ke: float, Kt: float, armature_branch_var_idx: int, bemf_source_idx: int, omega_channel: str, theta_channel: str) -> None:
         ...
+    def add_delay(self, samples: int, initial_value: float, x: CxxInputRef, output: str) -> None:
+        """
+        y[k] = x[k - samples]; not direct feedthrough, so it breaks an algebraic loop.
+        """
     def add_differentiator(self, filter_alpha: float, x: CxxInputRef, dt: CxxInputRef, output: str) -> None:
         ...
     def add_first_order_lpf(self, tau: float, input_value: CxxInputRef, dt: CxxInputRef, output: str) -> None:
@@ -2636,6 +2642,10 @@ class CxxBlockChain:
         """
         Clear all recorded histories (keeps the registered names). Call between simulations to get a fresh trace.
         """
+    def compile(self) -> None:
+        """
+        Order the blocks (direct-feedthrough topological order, ties by insertion); raises ControlGraphBuildError on an algebraic loop.
+        """
     def get_channel(self, name: str) -> float:
         ...
     def get_channel_history(self, name: str) -> numpy.typing.NDArray[numpy.float64]:
@@ -2654,12 +2664,24 @@ class CxxBlockChain:
         """
         Return a step_observer(t, x) callable that the kernel uses to invoke the chain each step.
         """
+    def name_last(self, name: str, kind: str = '') -> None:
+        """
+        Name (and kind) of the most recently added block.
+        """
     def record_channel(self, name: str, reserve_n: int = 0) -> None:
         """
         Register a channel name for per-step logging. After simulate() returns, fetch the trace via get_channel_history(name).
         """
+    def reorders(self) -> list[str]:
+        """
+        Pairs whose evaluation order differs from insertion order.
+        """
     def reset(self) -> None:
         ...
+    def schedule(self) -> list[str]:
+        """
+        Block names in evaluation order.
+        """
     def set_b_extra(self, idx: int, value: float) -> None:
         """
         Diagnostic — directly set a b_extra entry. Most users should add motor blocks instead.
@@ -2667,6 +2689,12 @@ class CxxBlockChain:
     def set_channel(self, name: str, value: float) -> None:
         ...
     def size(self) -> int:
+        ...
+    @property
+    def n_block_evals(self) -> int:
+        ...
+    @property
+    def n_evals(self) -> int:
         ...
 class _MmcSubmoduleType:
     """

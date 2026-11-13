@@ -48,6 +48,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # device-kind capability table it is raised from.
     UnsupportedError,
     engine_capabilities,
+    # add-compiled-control-graph: algebraic loop / two writers / unknown
+    # block kind, raised when a control graph is built.
+    ControlGraphBuildError,
     # Builder API (Layer 6).
     CircuitBuilder,
     # Topology / device handles (opaque — produced by the
@@ -530,6 +533,7 @@ __all__ = [
     "RetiredDeviceError",
     "SimulationAborted",
     "UnsupportedError",
+    "ControlGraphBuildError",
     "engine_capabilities",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",

@@ -21,15 +21,15 @@ Closed forms used below.
 - [x] 1.3 Count Python calls per run for a C++ chain, a `ClosedLoop` and a C block (baseline for the gate in 9.2)
 
 ## 2. Index slots and typed inputs
-- [ ] 2.1 Signals as slots in a flat array; `Input = Signal | Const | Probe | Time`; names kept in the builder only
-- [ ] 2.2 State arrays `xd`, `xc`; blocks hold slices
-- [ ] 2.3 Test: results bit-identical to the string-keyed chain on the existing blockchain tests
+- [x] 2.1 Signals as slots in a flat array; `Input = Signal | Const | Probe | Time`; names kept in the builder only
+- [x] 2.2 State arrays `xd`, `xc`; blocks hold slices (state stays in each block's POD, owned by the graph; flat `xd`/`xc` arrays wait for the snapshot work of 6.1 — DECISIONS G5)
+- [x] 2.3 Test: results bit-identical to the string-keyed chain on the existing blockchain tests
 
 ## 3. Schedule
-- [ ] 3.1 Direct-feedthrough table per block kind and input
-- [ ] 3.2 Kahn order with deterministic ties; two-phase execution (outputs, then updates)
-- [ ] 3.3 Tarjan SCC; build error naming the loop's blocks
-- [ ] 3.4 Tests: any insertion order of the task 1.1 chain gives bit-identical results; `Gain → Sum → Gain → (back)` raises naming the three blocks, and runs once a `DelayBlock` is inserted; the build lists pairs whose order differs from insertion
+- [x] 3.1 Direct-feedthrough table per block kind and input
+- [x] 3.2 Kahn order with deterministic ties; two-phase execution (outputs, then updates)
+- [x] 3.3 Tarjan SCC; build error naming the loop's blocks
+- [x] 3.4 Tests: any insertion order of the task 1.1 chain gives bit-identical results; `Gain → Sum → Gain → (back)` raises naming the three blocks, and runs once a `DelayBlock` is inserted; the build lists pairs whose order differs from insertion
 
 ## 4. Rates
 - [ ] 4.1 `Rate` on groups; inheritance for stateless blocks; error for a stateful block with no rate

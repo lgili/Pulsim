@@ -96,6 +96,25 @@ class _InputSource:
         raise ValueError(f"Unrecognised input spec: {spec!r}")
 
 
+def _k_build_error():
+    from ._pulsim import ControlGraphBuildError  # type: ignore[import-not-found]
+    return ControlGraphBuildError
+
+
+def _warn_reorders(cxx_chain) -> None:
+    """Report, once per build, every consumer that the schedule now
+    runs after its producer although it was inserted before it: in the
+    insertion-order chain each such pair was a one-step delay."""
+    pairs = list(cxx_chain.reorders())
+    if pairs:
+        import warnings
+        warnings.warn(
+            "control graph: evaluation order differs from insertion "
+            "order (each was a one-step delay before the schedule): "
+            + "; ".join(pairs) + ". Insert a DelayBlock to keep a delay.",
+            UserWarning, stacklevel=4)
+
+
 # =============================================================================
 # BlockSpec — one entry in the chain
 # =============================================================================
@@ -271,6 +290,8 @@ class MixedDomainBlockChain:
                 observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
                 observer._chain_dt = float(dt)  # type: ignore[attr-defined]
                 return observer
+            except _k_build_error():
+                raise
             except Exception as exc:  # pragma: no cover — graceful fallback
                 import warnings
                 warnings.warn(
@@ -379,8 +400,8 @@ class MixedDomainBlockChain:
                     output=output)
             elif cls_name == "Limiter":
                 cxx_chain.add_limiter(
-                    min_v=float(block.min),
-                    max_v=float(block.max),
+                    min_v=float(block.output_min),
+                    max_v=float(block.output_max),
                     x=ref("x"), output=output)
             elif cls_name == "MovingAverageFilter":
                 cxx_chain.add_moving_average(
@@ -440,13 +461,21 @@ class MixedDomainBlockChain:
                     dt=ref("dt"),
                     output_theta=output[0], output_omega=output[1],
                     output_freq=output[2])
+            elif cls_name == "DelayBlock":
+                cxx_chain.add_delay(
+                    samples=int(block.samples),
+                    initial_value=float(block.initial_value),
+                    x=ref("x"), output=output)
             else:
                 raise ValueError(
                     f"block type {cls_name!r} not yet supported by "
                     f"C++ backend")
+            cxx_chain.name_last(spec.name, cls_name)
 
-        # Bind node references.
-        cxx_chain.bind_nodes(builder.node_id_of)
+        # Schedule: direct-feedthrough topological order; an algebraic
+        # loop raises ControlGraphBuildError naming its blocks.
+        cxx_chain.compile()
+        _warn_reorders(cxx_chain)
         return cxx_chain
 
     def make_pwm_switch_fn(self, channel: str, *,

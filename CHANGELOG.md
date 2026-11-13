@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Compiled control graph, part 1 (add-compiled-control-graph, 2026-11-13)
+
+* **Changed (BREAKING where a chain relied on it)** a
+  `MixedDomainBlockChain` / `CxxBlockChain` no longer runs its blocks in
+  insertion order: they run in the topological order of the
+  direct-feedthrough graph (ties by insertion), so a block inserted
+  before the block that feeds it no longer reads last step's value (or
+  0 on the first step). The build warns once with every such pair; a
+  `DelayBlock` keeps a delay explicitly. Chains already in order are
+  bit-identical.
+* **Added** `pulsim.ControlGraphBuildError` (a `ValueError`): an
+  algebraic loop (named by its blocks), a block reading its own output,
+  a signal written by two blocks.
+* **Added** `DelayBlock` in the kernel chain (two-phase: it breaks a
+  loop).
+* **Fixed** a `Gain` reading a node and any `Limiter` made the C++ chain
+  build fail and the whole chain ran on the Python evaluator behind a
+  warning; both compile now (same numbers).
+* **Changed** signals are integer slots in the kernel chain (no string
+  hashing per step); `CxxBlockChain` gains `schedule()`, `reorders()`,
+  `n_evals`, `n_block_evals`.
+
 ### Examples audit × integration merge (2026-11-13)
 
 * **Fixed** `examples/scripts/run_adversarial_sweep.py`, case "substep

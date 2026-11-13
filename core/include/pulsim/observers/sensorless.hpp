@@ -89,20 +89,17 @@ inline void add_sliding_mode_observer_to_chain(
         kTwoPi * params.f_init_hz;
 
     auto step = [state, params,
-                    v_alpha_channel = std::move(v_alpha_channel),
-                    v_beta_channel  = std::move(v_beta_channel),
-                    i_alpha_channel = std::move(i_alpha_channel),
-                    i_beta_channel  = std::move(i_beta_channel),
-                    theta_hat_channel = std::move(theta_hat_channel),
-                    omega_hat_channel = std::move(omega_hat_channel),
-                    e_alpha_hat_channel = std::move(e_alpha_hat_channel),
-                    e_beta_hat_channel  = std::move(e_beta_hat_channel),
-                    low_speed_flag_channel = std::move(low_speed_flag_channel)]
+                    v_alpha_channel = chain.in_slot(v_alpha_channel),
+                    v_beta_channel  = chain.in_slot(v_beta_channel),
+                    i_alpha_channel = chain.in_slot(i_alpha_channel),
+                    i_beta_channel  = chain.in_slot(i_beta_channel),
+                    theta_hat_channel = chain.out(theta_hat_channel),
+                    omega_hat_channel = chain.out(omega_hat_channel),
+                    e_alpha_hat_channel = chain.out(e_alpha_hat_channel),
+                    e_beta_hat_channel  = chain.out(e_beta_hat_channel),
+                    low_speed_flag_channel = chain.out(low_speed_flag_channel)]
                    (ChainContext& ctx) {
-        auto read = [&](const std::string& key) -> Real {
-            auto it = ctx.channels.find(key);
-            return (it == ctx.channels.end()) ? Real{0} : it->second;
-        };
+        auto read = [&](Index s) -> Real { return ctx.at(s); };
         const Real v_alpha = read(v_alpha_channel);
         const Real v_beta  = read(v_beta_channel);
         const Real i_alpha = read(i_alpha_channel);
@@ -144,19 +141,18 @@ inline void add_sliding_mode_observer_to_chain(
         }
 
         // 4. Outputs.
-        ctx.channels[theta_hat_channel] = state->theta_hat;
-        ctx.channels[omega_hat_channel] = state->omega_hat;
-        if (!e_alpha_hat_channel.empty()) {
-            ctx.channels[e_alpha_hat_channel] = state->e_hat_alpha;
+        ctx.put(theta_hat_channel, state->theta_hat);
+        ctx.put(omega_hat_channel, state->omega_hat);
+        if (e_alpha_hat_channel >= 0) {
+            ctx.put(e_alpha_hat_channel, state->e_hat_alpha);
         }
-        if (!e_beta_hat_channel.empty()) {
-            ctx.channels[e_beta_hat_channel] = state->e_hat_beta;
+        if (e_beta_hat_channel >= 0) {
+            ctx.put(e_beta_hat_channel, state->e_hat_beta);
         }
-        if (!low_speed_flag_channel.empty()) {
+        if (low_speed_flag_channel >= 0) {
             const Real e_mag = std::hypot(
                 state->e_hat_alpha, state->e_hat_beta);
-            ctx.channels[low_speed_flag_channel] =
-                (e_mag < params.low_speed_threshold) ? Real{1} : Real{0};
+            ctx.put(low_speed_flag_channel, (e_mag < params.low_speed_threshold) ? Real{1} : Real{0});
         }
     };
     auto reset = [state, params]() {
@@ -237,20 +233,17 @@ inline void add_flux_mras_observer_to_chain(
     const Real leak = params.voltage_model_hpf_omega;
 
     auto step = [state, params, L_sigma_s, inv_Tr, scale, leak,
-                    v_alpha_channel = std::move(v_alpha_channel),
-                    v_beta_channel  = std::move(v_beta_channel),
-                    i_alpha_channel = std::move(i_alpha_channel),
-                    i_beta_channel  = std::move(i_beta_channel),
-                    omega_hat_channel    = std::move(omega_hat_channel),
-                    psi_adj_alpha_channel = std::move(psi_adj_alpha_channel),
-                    psi_adj_beta_channel  = std::move(psi_adj_beta_channel),
-                    psi_ref_alpha_channel = std::move(psi_ref_alpha_channel),
-                    psi_ref_beta_channel  = std::move(psi_ref_beta_channel)]
+                    v_alpha_channel = chain.in_slot(v_alpha_channel),
+                    v_beta_channel  = chain.in_slot(v_beta_channel),
+                    i_alpha_channel = chain.in_slot(i_alpha_channel),
+                    i_beta_channel  = chain.in_slot(i_beta_channel),
+                    omega_hat_channel    = chain.out(omega_hat_channel),
+                    psi_adj_alpha_channel = chain.out(psi_adj_alpha_channel),
+                    psi_adj_beta_channel  = chain.out(psi_adj_beta_channel),
+                    psi_ref_alpha_channel = chain.out(psi_ref_alpha_channel),
+                    psi_ref_beta_channel  = chain.out(psi_ref_beta_channel)]
                    (ChainContext& ctx) {
-        auto read = [&](const std::string& key) -> Real {
-            auto it = ctx.channels.find(key);
-            return (it == ctx.channels.end()) ? Real{0} : it->second;
-        };
+        auto read = [&](Index s) -> Real { return ctx.at(s); };
         const Real v_alpha = read(v_alpha_channel);
         const Real v_beta  = read(v_beta_channel);
         const Real i_alpha = read(i_alpha_channel);
@@ -303,18 +296,18 @@ inline void add_flux_mras_observer_to_chain(
         state->omega_hat = params.Kp_mras * eps + state->mras_integ;
 
         // Outputs.
-        ctx.channels[omega_hat_channel] = state->omega_hat;
-        if (!psi_adj_alpha_channel.empty()) {
-            ctx.channels[psi_adj_alpha_channel] = state->psi_r_alpha_adj;
+        ctx.put(omega_hat_channel, state->omega_hat);
+        if (psi_adj_alpha_channel >= 0) {
+            ctx.put(psi_adj_alpha_channel, state->psi_r_alpha_adj);
         }
-        if (!psi_adj_beta_channel.empty()) {
-            ctx.channels[psi_adj_beta_channel] = state->psi_r_beta_adj;
+        if (psi_adj_beta_channel >= 0) {
+            ctx.put(psi_adj_beta_channel, state->psi_r_beta_adj);
         }
-        if (!psi_ref_alpha_channel.empty()) {
-            ctx.channels[psi_ref_alpha_channel] = state->psi_r_alpha_ref;
+        if (psi_ref_alpha_channel >= 0) {
+            ctx.put(psi_ref_alpha_channel, state->psi_r_alpha_ref);
         }
-        if (!psi_ref_beta_channel.empty()) {
-            ctx.channels[psi_ref_beta_channel] = state->psi_r_beta_ref;
+        if (psi_ref_beta_channel >= 0) {
+            ctx.put(psi_ref_beta_channel, state->psi_r_beta_ref);
         }
     };
     auto reset = [state]() {

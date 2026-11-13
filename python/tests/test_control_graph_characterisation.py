@@ -3,8 +3,9 @@
 
 What these tests pin:
 
-* evaluation order: the chain (``MixedDomainBlockChain``) runs its blocks
-  in INSERTION order; a channel read before any block wrote it reads 0;
+* evaluation order: the chain ran its blocks in INSERTION order and a
+  channel read before any block wrote it read 0 (task 3 flipped these:
+  the tests now pin the scheduled order and keep the old numbers);
 * tick counts per engine for one loop and for two rates;
 * how many Python functions the kernel calls back during one run of a
   C++ chain, of a ``ClosedLoop`` and of a C block (the baseline of the
@@ -90,34 +91,29 @@ def _run_chain(order, n=200):
     return np.asarray(cxx.get_channel_history("y")), meas
 
 
-def test_insertion_order_changes_the_result_today():
-    y_fwd, meas = _run_chain(["err", "gain", "half"])
-    y_rev, _ = _run_chain(["half", "gain", "err"])
+def _run_quiet(order, n=200):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")      # the reorder report
+        return _run_chain(order, n)
+
+
+def test_insertion_order_no_longer_changes_the_result():
+    # Before the schedule (task 3): the reversed chain ran two steps late
+    # (y_rev[k] = y_fwd[k-2]), largest difference 1.0 on this sequence.
+    y_fwd, meas = _run_quiet(["err", "gain", "half"])
+    y_rev, _ = _run_quiet(["half", "gain", "err"])
     np.testing.assert_array_equal(y_fwd, 0.5 * (2.0 * (1.0 - meas)))
-    # Reverse order: each read-before-write is one step of delay, so the
-    # last gain sees the measurement two steps late.
-    np.testing.assert_array_equal(y_rev[2:], y_fwd[:-2])
-    diff = float(np.max(np.abs(y_fwd - y_rev)))
-    assert diff == pytest.approx(1.0)          # y_rev[0] = 0 vs y_fwd[0] = 1
+    assert y_rev.tobytes() == y_fwd.tobytes()
 
 
-def test_a_channel_read_before_it_is_written_reads_zero_today():
-    y_rev, _ = _run_chain(["half", "gain", "err"], n=3)
-    assert y_rev[0] == 0.0 and y_rev[1] == 0.0
+def test_a_channel_is_written_before_it_is_read():
+    # Before: the reversed chain read 0 on its first two evaluations.
+    y_rev, meas = _run_quiet(["half", "gain", "err"], n=3)
+    assert y_rev[0] == 1.0 - meas[0]
 
 
-@pytest.mark.parametrize("block,inputs", [
-    (p.Gain(k=2.0), dict(x="out")),                         # node input
-    (p.Limiter(output_min=0.0, output_max=1.0), dict(x="out")),
-])
-def test_some_chains_fall_back_to_the_python_evaluator_today(block, inputs):
-    b = p.CircuitBuilder()
-    b.add_resistor("R", "out", "gnd", 1.0)
-    ch = p.MixedDomainBlockChain()
-    ch.add("blk", block, inputs=inputs, output="u")
-    with pytest.warns(UserWarning, match="falling back to Python"):
-        ch.make_step_observer(b, dt=1e-6)
-    assert ch._cxx_chain is None
+# The C++ build no longer falls back for a node Gain or a Limiter:
+# test_control_graph.py::test_node_gain_and_limiter_compile_to_the_kernel.
 
 
 # ---------------------------------------------------------------------------

@@ -233,10 +233,10 @@ inline void add_hysteretic_inductor_to_chain(
 
     auto step = [model, m_prev, psi_coupling, H_per_amp,
                     inductor_branch_var_idx, bemf_source_idx,
-                    M_channel  = std::move(M_channel),
-                    B_channel  = std::move(B_channel),
-                    H_channel  = std::move(H_channel),
-                    vm_channel = std::move(vm_channel)]
+                    M_channel  = chain.out(M_channel),
+                    B_channel  = chain.out(B_channel),
+                    H_channel  = chain.out(H_channel),
+                    vm_channel = chain.out(vm_channel)]
                    (ChainContext& ctx) {
         if (!ctx.x) return;
         const Index n_state = static_cast<Index>(ctx.x->size());
@@ -254,10 +254,10 @@ inline void add_hysteretic_inductor_to_chain(
                           * (dM / std::max(ctx.dt, Real{1e-18}));
 
         // Diagnostic channels.
-        if (!M_channel.empty()) ctx.channels[M_channel] = model->M;
-        if (!B_channel.empty()) ctx.channels[B_channel] = model->B;
-        if (!H_channel.empty()) ctx.channels[H_channel] = model->H;
-        if (!vm_channel.empty()) ctx.channels[vm_channel] = v_M;
+        if (M_channel >= 0) ctx.put(M_channel, model->M);
+        if (B_channel >= 0) ctx.put(B_channel, model->B);
+        if (H_channel >= 0) ctx.put(H_channel, model->H);
+        if (vm_channel >= 0) ctx.put(vm_channel, v_M);
 
         // +v_M injection — matches the Python observer's sign after
         // the v1.5 fix (see PR #51 in pulsim history). Both the L₀

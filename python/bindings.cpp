@@ -36,6 +36,7 @@
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/blockchain/block_adapters.hpp"
 #include "pulsim/blockchain/chain.hpp"
+#include "pulsim/blockchain/ported_blocks.hpp"
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/mmc/arm.hpp"
 #include "pulsim/motors/mechanical.hpp"
@@ -3969,6 +3970,11 @@ void init_module(py::module_& m) {
         .def_static("time",        &InputRef::from_time)
         .def_static("dt",          &InputRef::from_dt);
 
+    // add-compiled-control-graph: an algebraic loop, a signal with two
+    // writers, an unknown block kind. A ValueError subclass.
+    py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
+        m, "ControlGraphBuildError", PyExc_ValueError);
+
     py::class_<BlockChain>(m, "CxxBlockChain",
         "C++ block chain executor. Build via add_<block>(...) "
         "methods, bind nodes, then pass make_step_observer(dt) to "
@@ -3976,10 +3982,23 @@ void init_module(py::module_& m) {
         .def(py::init<>())
         .def("size", &BlockChain::size)
         .def("reset", &BlockChain::reset)
+        .def("name_last", &BlockChain::name_last, py::arg("name"),
+            py::arg("kind") = std::string{},
+            "Name (and kind) of the most recently added block.")
+        .def("compile", &BlockChain::compile,
+            "Order the blocks (direct-feedthrough topological order, "
+            "ties by insertion); raises ControlGraphBuildError on an "
+            "algebraic loop.")
+        .def("schedule", &BlockChain::schedule,
+            "Block names in evaluation order.")
+        .def("reorders", &BlockChain::reorders,
+            "Pairs whose evaluation order differs from insertion order.")
+        .def_property_readonly("n_evals", &BlockChain::n_evals)
+        .def_property_readonly("n_block_evals", &BlockChain::n_block_evals)
         .def("get_channel", &BlockChain::get_channel, py::arg("name"))
         .def("set_channel", [](BlockChain& self, const std::string& name,
                                    Real value) {
-            self.channels()[name] = value;
+            self.set_channel(name, value);
         }, py::arg("name"), py::arg("value"))
         .def("bind_nodes", [](BlockChain& self,
                                 const std::function<Index(const std::string&)>&
@@ -4038,8 +4057,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Index idx, Real value) {
                 // No public accessor — go through ctx; the user
                 // typically sets via motor adapters, not directly.
-                self.channels()["__noop"] = value;  // placeholder
-                (void)idx;
+                (void)self; (void)idx; (void)value;  // placeholder
             }, py::arg("idx"), py::arg("value"),
             "Diagnostic — directly set a b_extra entry. Most "
             "users should add motor blocks instead.")
@@ -4048,16 +4066,13 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Real k, InputRef x, std::string out) {
                 auto blk = std::make_shared<Gain>();
                 blk->k = k;
-                auto p = make_gain_step(blk, x, out);
-                if (x.kind == InputRef::Kind::Node) {
-                    self.register_node_ref(&x);
-                }
+                auto p = make_gain_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("k"), py::arg("x"), py::arg("output"))
         .def("add_subtract",
             [](BlockChain& self, InputRef a, InputRef b, std::string out) {
                 auto blk = std::make_shared<Subtract>();
-                auto p = make_subtract_step(blk, a, b, out);
+                auto p = make_subtract_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("a"), py::arg("b"), py::arg("output"))
         .def("add_sum",
@@ -4066,7 +4081,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<Sum>();
                 blk->w0 = w0; blk->w1 = w1; blk->w2 = w2;
-                auto p = make_sum_step(blk, a, b, c, out);
+                auto p = make_sum_step(self, blk, a, b, c, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("w0") = 1.0, py::arg("w1") = 1.0,
                 py::arg("w2") = 0.0,
@@ -4086,7 +4101,7 @@ void init_module(py::module_& m) {
                 else if (op == "sqrt") blk->op = MathBlock::Op::Sqrt;
                 else if (op == "pow2") blk->op = MathBlock::Op::Pow2;
                 else throw std::runtime_error("unknown MathBlock op: " + op);
-                auto p = make_math_block_step(blk, a, b, out);
+                auto p = make_math_block_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("op"), py::arg("a"), py::arg("b"),
                 py::arg("output"))
@@ -4098,7 +4113,7 @@ void init_module(py::module_& m) {
                 auto blk = std::make_shared<PIController>();
                 blk->Kp = Kp; blk->Ki = Ki;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_pi_controller_step(blk, setpoint, measured,
+                auto p = make_pi_controller_step(self, blk, setpoint, measured,
                                                        dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("Kp"), py::arg("Ki"),
@@ -4114,7 +4129,7 @@ void init_module(py::module_& m) {
                 blk->Kp = Kp; blk->Ki = Ki; blk->Kd = Kd;
                 blk->tau_d = tau_d;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_pid_controller_step(blk, setpoint, measured,
+                auto p = make_pid_controller_step(self, blk, setpoint, measured,
                                                         dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("Kp"), py::arg("Ki"), py::arg("Kd"),
@@ -4127,7 +4142,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<FirstOrderLowPass>();
                 blk->tau = tau;
-                auto p = make_first_order_lpf_step(blk, input_value,
+                auto p = make_first_order_lpf_step(self, blk, input_value,
                                                          dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("tau"), py::arg("input_value"), py::arg("dt"),
@@ -4139,7 +4154,7 @@ void init_module(py::module_& m) {
                 auto blk = std::make_shared<Integrator>();
                 blk->gain = gain;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_integrator_step(blk, x, dt_ref, out);
+                auto p = make_integrator_step(self, blk, x, dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("gain"), py::arg("output_min"),
                 py::arg("output_max"), py::arg("x"), py::arg("dt"),
@@ -4149,7 +4164,7 @@ void init_module(py::module_& m) {
                 InputRef x, InputRef dt_ref, std::string out) {
                 auto blk = std::make_shared<Differentiator>();
                 blk->filter_alpha = filter_alpha;
-                auto p = make_differentiator_step(blk, x, dt_ref, out);
+                auto p = make_differentiator_step(self, blk, x, dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("filter_alpha"), py::arg("x"), py::arg("dt"),
                 py::arg("output"))
@@ -4158,7 +4173,7 @@ void init_module(py::module_& m) {
                 InputRef x, std::string out) {
                 auto blk = std::make_shared<Limiter>();
                 blk->min_v = min_v; blk->max_v = max_v;
-                auto p = make_limiter_step(blk, x, out);
+                auto p = make_limiter_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("min_v"), py::arg("max_v"),
                 py::arg("x"), py::arg("output"))
@@ -4167,7 +4182,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<MovingAverageFilter>();
                 blk->window = window;
-                auto p = make_moving_average_step(blk, x, out);
+                auto p = make_moving_average_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("window"), py::arg("x"), py::arg("output"))
         .def("add_pwm_generator",
@@ -4175,7 +4190,7 @@ void init_module(py::module_& m) {
                 InputRef duty, InputRef t_ref, std::string out) {
                 auto blk = std::make_shared<PwmGenerator>();
                 blk->frequency = frequency; blk->phase = phase;
-                auto p = make_pwm_generator_step(blk, duty, t_ref, out);
+                auto p = make_pwm_generator_step(self, blk, duty, t_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("frequency"), py::arg("phase") = 0.0,
                 py::arg("duty"), py::arg("t"), py::arg("output"))
@@ -4185,7 +4200,7 @@ void init_module(py::module_& m) {
                 std::string da, std::string db, std::string dc) {
                 auto blk = std::make_shared<SpaceVectorModulator>();
                 blk->v_dc = v_dc;
-                auto p = make_svm_step(blk, v_alpha, v_beta, da, db, dc);
+                auto p = make_svm_step(self, blk, v_alpha, v_beta, da, db, dc);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("v_dc"), py::arg("v_alpha"), py::arg("v_beta"),
                 py::arg("output_a"), py::arg("output_b"),
@@ -4194,7 +4209,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef a, InputRef b, InputRef c,
                 std::string alpha, std::string beta, std::string zero) {
                 auto blk = std::make_shared<ClarkeTransform>();
-                auto p = make_clarke_step(blk, a, b, c, alpha, beta, zero);
+                auto p = make_clarke_step(self, blk, a, b, c, alpha, beta, zero);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("a"), py::arg("b"), py::arg("c"),
                 py::arg("output_alpha"), py::arg("output_beta"),
@@ -4203,7 +4218,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef alpha, InputRef beta,
                 InputRef zero, std::string a, std::string b, std::string c) {
                 auto blk = std::make_shared<InverseClarkeTransform>();
-                auto p = make_inverse_clarke_step(blk, alpha, beta, zero,
+                auto p = make_inverse_clarke_step(self, blk, alpha, beta, zero,
                                                         a, b, c);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"),
@@ -4214,7 +4229,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef alpha, InputRef beta,
                 InputRef theta, std::string d, std::string q) {
                 auto blk = std::make_shared<ParkTransform>();
-                auto p = make_park_step(blk, alpha, beta, theta, d, q);
+                auto p = make_park_step(self, blk, alpha, beta, theta, d, q);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"), py::arg("theta"),
                 py::arg("output_d"), py::arg("output_q"))
@@ -4222,7 +4237,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef d, InputRef q, InputRef theta,
                 std::string alpha, std::string beta) {
                 auto blk = std::make_shared<InverseParkTransform>();
-                auto p = make_inverse_park_step(blk, d, q, theta,
+                auto p = make_inverse_park_step(self, blk, d, q, theta,
                                                       alpha, beta);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("d"), py::arg("q"), py::arg("theta"),
@@ -4233,13 +4248,27 @@ void init_module(py::module_& m) {
                 std::string theta, std::string omega, std::string freq) {
                 auto blk = std::make_shared<PLL>();
                 blk->f_nominal = f_nominal; blk->Kp = Kp; blk->Ki = Ki;
-                auto p = make_pll_step(blk, v_alpha, v_beta, dt_ref,
+                auto p = make_pll_step(self, blk, v_alpha, v_beta, dt_ref,
                                             theta, omega, freq);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("f_nominal"), py::arg("Kp"), py::arg("Ki"),
                 py::arg("v_alpha"), py::arg("v_beta"), py::arg("dt"),
                 py::arg("output_theta"), py::arg("output_omega"),
                 py::arg("output_freq"))
+
+        // ---- Ported from pulsim.control (add-compiled-control-graph) ----
+        .def("add_delay",
+            [](BlockChain& self, Size samples, Real initial_value,
+                InputRef x, std::string out) {
+                auto blk = std::make_shared<DelayBlock>();
+                blk->samples = samples; blk->initial_value = initial_value;
+                auto p = make_delay_step(self, blk, x, out);
+                self.add(std::move(p.step), std::move(p.reset),
+                         std::move(p.update));
+            }, py::arg("samples"), py::arg("initial_value"),
+                py::arg("x"), py::arg("output"),
+            "y[k] = x[k - samples]; not direct feedthrough, so it breaks "
+            "an algebraic loop.")
 
         // ---- Motor blocks (Phase D / C++ port) ----
         .def("add_dc_motor",
