@@ -33,8 +33,24 @@ nothing refused) or `passive_reciprocal`. Numbers do not change. A diode
 bridge behind an ideal transformer (n = 0.5) runs on the dsed default at
 31.876241228 V against pwl 31.876241232 V. A rectifier fed by coupled
 inductors is still refused by the dsed extractor
-(`UnsupportedError('dsed', 'extraction')`). Known: `mode_selection='lcp'`
-is wrong on that bridge (11.73 V; KNOWN_LIMITATIONS).
+(`UnsupportedError('dsed', 'extraction')`). `mode_selection='lcp'` on
+that bridge: see the port-model fix below.
+
+### dsed `mode_selection='lcp'`: the port model no longer decides by rounding (fix)
+
+The diode-port problem of the LCP was solved in history form,
+`J·s = (C/h_e)·x(t⁻) − b`, which puts `C·v_C/h_e` (1.6e6 A for 100 µF at
+32 V and `h_e` = 2 ns) on both nodes of a capacitor. On a DC bus held
+only by 1 MΩ ties and `g_off` leaks its rounding (2e-10 A over a 1 µS
+pivot, 2e-4 V) exceeded the 3.1e-5 V a turn-on gap moves in `h_e`, so
+rounding chose the mode: a bridge behind an ideal transformer (or a
+floating sine source) ended at 11.726610 V under `'lcp'` with D2 and D3
+never conducting and D2 blocking +49.86 V. The problem is now solved for
+the increment, `J·δ = −(G·x(t⁻) + b(t + h_e))`. That bridge ends at
+31.876241228 V for `H_E_REL` = 1e-10 … 1e-4 (pwl at 0.1 µs:
+31.876241232 V), bit-identical to the default at the default `h_e`.
+All 90 runs of the mode-selection surveys and the 36 arrays of
+`bit_identity.py` (`pwl`, `trbdf2`, `dsed`) are bit-identical.
 
 ### dsed: a diode predicate starting a step at exactly zero is located (fix)
 

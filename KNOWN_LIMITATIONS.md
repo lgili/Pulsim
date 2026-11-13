@@ -266,16 +266,6 @@ are still skipped for the step. The guard repairs only the modes it
 judges inconsistent over `1e4·h_e`; a mode consistent that long and
 wrong later is not caught.
 
-### `mode_selection='lcp'` on a bridge whose DC bus floats on leak resistors
-
-A four-diode bridge fed from a floating secondary (an ideal transformer,
-or a sine source between two non-ground nodes) whose DC bus is held only
-by 1 MΩ ties and the diodes' `g_off` runs wrong under `'lcp'`: two diodes
-never conduct and one blocks +49.86 V (11.73 V against 31.88 V). The
-result flips with the `h_e` ratio, and the default (settle + guard) is
-right (add-complementarity-mode-selection DECISIONS #21). `'lcp'` is
-opt-in; use the default there.
-
 ### Many-diode rectifiers with line inductance on dsed
 
 Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter

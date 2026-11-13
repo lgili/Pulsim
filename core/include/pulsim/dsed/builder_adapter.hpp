@@ -743,30 +743,32 @@ public:
         diode_port_problem_full(mask, t, xf, h, ports, Z, u);
     }
 
-    /// Same, from a full-MNA vector at t⁻ (capacitor branch voltages and
-    /// inductor currents are read from it; the rest is ignored).
+    /// Same, from a full-MNA vector at t⁻ (only capacitor branch voltages
+    /// and inductor currents decide the answer).
+    ///
+    /// Solved for the increment δ = s − x(t⁻): J·δ = −(G·x + b(t + h)),
+    /// u = v(x) + v(δ). The history form J·s = (C/h)·x − b puts C·v_C/h
+    /// (1.6e6 A for 100 µF, 32 V, h = 2 ns) on both nodes of a capacitor;
+    /// on an island held by weak ties (1 MΩ, g_off) its rounding, 2e-10 A,
+    /// is 2e-4 V of common mode — more than a turn-on gap moves in h_e, so
+    /// rounding chose the mode (DECISIONS #21: a bridge on a floating
+    /// source, D2 never ON).
     void diode_port_problem_full(
         const MaskT& mask, Real t, const Vector& xf, Real h,
         const std::vector<std::pair<Index, Index>>& ports, DenseMatrix& Z,
         Vector& u) const {
-        if (!port_C_set_) {
-            sparse::Matrix G;
-            Vector b;
-            pwl::assemble_segment_split(graph_, pool_, mask, G, port_C_, b);
-            port_C_set_ = true;
-        }
-        auto it = port_b_.find(mask);
-        if (it == port_b_.end()) {
+        auto it = port_gb_.find(mask);
+        if (it == port_gb_.end()) {
             sparse::Matrix G, C;
             Vector b;
             pwl::assemble_segment_split(graph_, pool_, mask, G, C, b);
-            it = port_b_.emplace(mask, std::move(b)).first;
+            it = port_gb_.emplace(mask, std::pair{std::move(G), std::move(b)}).first;
         }
-        const Vector& b_c = it->second;
-        const Real dt = Real{2} * h;
-        // BE history −(C_phys/h)·x(t⁻) = −(C_coef/(2h))·x(t⁻); sources at t + h
+        const Vector& b_c = it->second.second;
+        const Real dt = Real{2} * h;   // J(2h) = G + C_phys/h: backward Euler at h
+        // solve_at: J·δ = −(b_c + rhs), rhs = G·x(t⁻) + sources at t + h
         Vector& rhs = port_rhs_;
-        rhs = (Real{-1} / dt) * (port_C_ * xf);
+        rhs = it->second.first * xf;
         if (has_dynamic_sources_) {
             rhs += build_time_varying_b_extra_(t + h);
         }
@@ -779,7 +781,10 @@ public:
         };
         u.resize(k);
         Z.resize(k, k);
-        for (Eigen::Index j = 0; j < k; ++j) u[j] = vp(sol, static_cast<std::size_t>(j));
+        for (Eigen::Index j = 0; j < k; ++j) {
+            const auto ju = static_cast<std::size_t>(j);
+            u[j] = vp(xf, ju) + vp(sol, ju);
+        }
         for (Eigen::Index j = 0; j < k; ++j) {
             // J·s = −(b_c + b_extra) with b_extra = E_j − b_c: J·s = −E_j
             rhs = -b_c;
@@ -964,9 +969,7 @@ public:
     }
 
 private:
-    mutable std::unordered_map<MaskT, Vector> port_b_;
-    mutable sparse::Matrix port_C_;
-    mutable bool port_C_set_ = false;
+    mutable std::unordered_map<MaskT, std::pair<sparse::Matrix, Vector>> port_gb_;   // (G, b_c)
     mutable Vector port_x_full_, port_rhs_, port_sol_;
     mutable std::size_t n_port_solves_ = 0;
 

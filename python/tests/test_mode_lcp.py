@@ -235,3 +235,44 @@ def test_guard_leaves_consistent_runs_bit_identical(fam, vth, t_end):
     g = r_on.diagnostics["mode_guard"]
     assert g["repairs"] == 0 and g["checks"] == r_on.n_events + 1
     assert "mode_guard" not in (getattr(r_off, "diagnostics", None) or {})
+
+
+def _floating_bridge(source):
+    """A four-diode bridge whose AC side floats (1 Mohm to ground) and whose DC bus is tied to it
+    by 1 Mohm and the g_off leaks only: the bus common mode is an island with a 1 uS pivot."""
+    b = p.CircuitBuilder()
+    if source == "sine":
+        b.add_sine_voltage_source("V", "s", "r", 0.0, 50.0, 50.0)
+    else:
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
+        b.add_ideal_transformer("T1", "a", "gnd", "s", "r", 0.5)
+    b.add_resistor("Rr", "r", "gnd", 1e6)
+    for name, an, ca in (("D1", "s", "p"), ("D2", "n", "s"), ("D3", "r", "p"), ("D4", "n", "r")):
+        b.add_diode(name, an, ca, GON, GOFF)
+    b.add_capacitor("C", "p", "n", 100e-6)
+    b.add_resistor("R", "p", "n", 100.0)
+    b.add_resistor("Rn", "n", "r", 1e6)
+    return b, {"D1": ("s", "p"), "D2": ("n", "s"), "D3": ("r", "p"), "D4": ("n", "r")}
+
+
+@pytest.mark.parametrize("source", ["sine", "transformer"])
+@pytest.mark.parametrize("h_e_rel", [1e-7, 1e-9, 1e-10])
+def test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding(source, h_e_rel, monkeypatch):
+    """DECISIONS.md #21: 'lcp' ended at 11.726610 V with D2 and D3 never ON and D2 blocking
+    +49.86 V, and the answer flipped with H_E_REL (wrong at 1e-10, 1e-9, 1e-7). The port model's
+    history term C*v_C/h_e (1.6e6 A) left 2e-10 A of rounding on the island's 1 uS pivot: 2e-4 V
+    on D2's gap at its turn-on root, where h_e moves it 3e-5 V. Reference: pwl at dt = 1e-7,
+    31.876241232 V; the default (settle + guard) 31.876241228 V."""
+    monkeypatch.setattr(DD, "H_E_REL", h_e_rel)
+    b, pairs = _floating_bridge(source)
+    r = _sim(b, 0.04, mode_selection="lcp")
+    assert _end(r, "p-n") == pytest.approx(31.876241232, abs=2e-8)     # measured -4e-9
+    sw = np.asarray(r.switch_states).astype(bool)
+    for d, (a, c) in pairs.items():
+        on = sw[:, b.switch_index_of(d)]
+        v = np.asarray(r.v(a)) - np.asarray(r.v(c))
+        assert on.any(), d                                              # D2 and D3 never conducted
+        assert v[~on].max() < 1e-9, d                                   # D2 blocked +49.86 V
+    if h_e_rel == DD.H_E_REL == 1e-7:
+        r0 = _sim(b, 0.04)
+        assert np.array_equal(np.asarray(r.states), np.asarray(r0.states))

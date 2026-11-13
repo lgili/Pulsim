@@ -51,8 +51,8 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
         vd = np.asarray(r.v(an)) - np.asarray(r.v(ca))
         assert on.any() and (1e3 * vd[on]).min() > -1e-9      # each diode conducts, never in reverse
         assert vd[~on].max() < 1e-9                             # and blocks only reverse voltage
-    # the class is a build-time property: 'lcp' reports the same (its numbers on this circuit are
-    # DECISIONS #21's open defect, not asserted here)
+    # the class is a build-time property: 'lcp' reports the same (its numbers on this circuit:
+    # test_mode_lcp.py::test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding)
     r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
     assert r_lcp.diagnostics["mode_selection"]["passivity"] == cls
 

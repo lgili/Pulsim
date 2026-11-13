@@ -250,7 +250,7 @@ choices it did not pin.
     exercised by the Catch2 test only. → Reverse: `passivity()` back to
     the slice-2 loop.
 
-    **Finding (open, not a passivity matter):** `mode_selection='lcp'`
+    **Finding (closed by #22, not a passivity matter):** `mode_selection='lcp'`
     is wrong on that bridge — 11.726610 V, D2 and D3 never conduct and
     D2 blocks +49.86 V — and identically with the transformer replaced
     by a floating sine source between the secondary nodes (n = 0.5 /
@@ -260,5 +260,38 @@ choices it did not pin.
     D2 at its turn-on event as +2.3e-4 V (reverse) where the exact
     trajectory rises 0.31 V in 1e4·h_e: the port model's `q` at a
     turn-on event on a bus whose common mode is set by 1 MΩ and g_off
-    leaks. The default (settle + guard) is right on all six. Recorded in
-    KNOWN_LIMITATIONS; 'lcp' stays opt-in.
+    leaks. The default (settle + guard) is right on all six.
+
+22. **Port model solved for the increment (fixes the #21 finding).**
+    `diode_port_problem_full` solved the backward-Euler companion in
+    history form, `J·s = (C/h)·x(t⁻) − b(t + h)`. The history term puts
+    `C·v_C/h_e` on both nodes of a capacitor (100 µF, 31.9 V, 2 ns:
+    1.6e6 A); the common mode of an island held by weak ties is their
+    sum, where that term cancels, and its rounding (~2e-10 A) over the
+    island's pivot (1 µS) is ~2e-4 V. At D2's turn-on root the gap moves
+    `h_e·dv/dt` = 3.1e-5 V in `h_e`, so rounding chose the sign: +2.3e-4 V
+    read as OFF with zero pivots, decided, never widened. The error grows
+    as `1/h_e` and its sign is arbitrary — the flips with `H_E_REL`. Now
+    `J·δ = −(G·x(t⁻) + b(t + h))`, `u = v(x) + v(δ)`: the same equation,
+    no `1/h` on the right-hand side; `G` per mask is cached next to
+    `b_c` (the cached `C` is gone). A numpy replica of the all-OFF
+    companion gives, for `H_E_REL` = 1e-10 … 1e-4, history-form gaps of
+    +2.8e-1, +6.9e-3, −1.9e-3, −3.3e-5, −3.4e-4, −3.1e-3, −3.1e-2 V
+    against the algebraic −3.1e-8 … −3.1e-2 V; the increment form
+    matches to four digits at every one. → Measured: the bridge under
+    'lcp' ends at 31.876241228 V for `H_E_REL` = 1e-10 … 1e-4, floating
+    sine and ideal transformer alike, bit-identical to the default at
+    1e-7 (pwl at 0.1 µs: 31.876241232 V); D2's turn-on is a tie, widened
+    (and a judged leak pin at 1e-9, 1e-10), as D5 intends. Shadow
+    disagreements on it 6 → 2, both guard repairs where the settle fails
+    the judge. `survey_bit_identity.py`: 90 runs bit-identical, 0
+    changed. `test_mode_selector.py::LEAK_PINS['bridge1_vf0']` 3 → 2:
+    that count is which series-pair turn-offs carry a pA residual on the
+    judge-less probe surface, rounding by its own description. Not
+    removed: the factor `G + C/h` still cancels on the island's pivot
+    (relative error ~eps·(C/h)/G_tie = 5e-6 at the default `h_e`), which
+    now scales the increment, not the state. Checked on a scratch build
+    with the history form back (everything else as committed): the new
+    test fails in all six cases at 11.726609512 V and
+    `test_mode_selector.py[bridge1_vf0]` reads 3 pins. → Reverse: the
+    history right-hand side in `diode_port_problem_full`.

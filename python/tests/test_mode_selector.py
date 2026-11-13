@@ -90,8 +90,11 @@ MODEL_DIFFERENCE = {"boost_50": 1, "boost_500": 1}
 # probe surface has no judge, so every pin stands. bridge3_cfilter: every turn-off; conductance-form
 # physics (the leak divider forward-biases an OFF diode by volts), the ideal reference has a gauge
 # instead. bridge1: series-pair turn-offs where event-location residuals (pA) look like pins; on dsed
-# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges).
-LEAK_PINS = {"bridge1_vf07": 2, "bridge1_vf0": 3, "bridge3_cfilter": 12}
+# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges). Which bridge1 turn-offs
+# carry such a residual is rounding: the count was 3 on bridge1_vf0 with the port model's history-form
+# right-hand side, 2 with the increment form (DECISIONS.md #22); the other turn-offs are all-OFF with
+# equal gaps (9.88e-4 V twice), as the prototype has them.
+LEAK_PINS = {"bridge1_vf07": 2, "bridge1_vf0": 2, "bridge3_cfilter": 12}
 
 
 @pytest.mark.parametrize("name", list(B.FAMILIES))
