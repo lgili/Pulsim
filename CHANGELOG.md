@@ -533,7 +533,11 @@ once, above the engine dispatch, and both engines consume that plan.
   rebuilt every iteration). Factors, states and iteration counts are
   bit-identical (`update-newton-persistent-solver`, stage A1; A2 and B
   not included). Eigen heap allocations per Newton iteration on a
-  Shockley-diode buck: 47.7 → 20.4.
+  Shockley-diode buck: 47.7 → 20.4. The workspace's line-search / LM
+  refresh target is compressed after every refill: on Eigen 3.4.x
+  (Ubuntu 24.04's `libeigen3-dev`) it otherwise grew over the run and
+  every insert copied it, which made Newton runs with line search
+  ~100–300× slower (Eigen 5 was not affected).
 
 ### TR-BDF2 event solvers: byte budget and allocation-free refactor (performance, bit-identical)
 

@@ -82,7 +82,15 @@ struct NewtonWorkspace {
 
     sparse::Matrix J;                    // combined Jacobian
     sparse::Matrix J_nl;                 // refresh target
-    sparse::Matrix J_nl_trial;           // line-search / LM refresh target
+    // Line-search / LM refresh target. Compressed after every refresh,
+    // like J_nl. On Eigen 3.4.x, inserting into an emptied compressed
+    // matrix (resize / setZero) hands all its spare capacity to the first
+    // column, and an out-of-order insert then reallocates to that
+    // capacity plus a few entries: a persistent target that is never
+    // squeezed grows on every refill and is copied whole on every
+    // insert (120 s CI timeout on Ubuntu's 3.4.0; Eigen 5 is immune).
+    // makeCompressed squeezes the storage back to nnz.
+    sparse::Matrix J_nl_trial;
     Vector f_nl, f_nl_trial, jx, f, neg_f, dx, x_trial, f_trial;
     std::unique_ptr<sparse::DirectSolver> solver;   // analysed for J
     std::vector<Real> ls, ns;            // operands scattered on J
@@ -392,6 +400,7 @@ private:
                 x_trial = x + dx;
                 (void)refresh(x_trial, J_nl_trial, f_nl_trial,
                                graph, pool);
+                sparse::compress_in_place(J_nl_trial);   // see J_nl_trial
                 Vector& f_trial = w.f_trial;
                 f_trial =
                     seg.J * x_trial + seg.b_constant +
@@ -472,6 +481,7 @@ private:
                     x_trial = x + alpha * dx;
                     (void)refresh(x_trial, J_nl_trial, f_nl_trial,
                                    graph, pool);
+                    sparse::compress_in_place(J_nl_trial);   // see J_nl_trial
                     Vector& f_trial = w.f_trial;
                     f_trial =
                         seg.J * x_trial + seg.b_constant +

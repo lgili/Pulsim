@@ -94,3 +94,39 @@ Format: question → option taken → why → how to reverse.
     in-house LU with an allocation-free `factorize`) is the proposal's
     next lever. The n = 1503 rectifier is not in the golden set; n = 483
     stands in for it.
+
+11. **What the hard gate missed (found 2026-11-13, CI on PR #147).**
+    The gate (decision 2) ran on Eigen 5.0.1 only, and its C++ test
+    called the workspace with line search and LM off. Ubuntu 24.04's
+    `libeigen3-dev` is 3.4.0, and there three Newton showcases went from
+    0.83 / 0.61 / 0.56 s to a 120 s timeout / 80 s / 66 s. Not SparseLU
+    and not Newton: Newton counters were identical on 3.4.0 and 5.0.1
+    (saturable boost: 50 996 solves, 169 641 iterations, 1 analysis,
+    0 LM attempts, 0 dt retries) and the states byte-equal. The cost was
+    `SparseMatrix::insert` → `reserveInnerVectors` → buffer copy in the
+    refresher, writing into the workspace's persistent `J_nl_trial`.
+    Each line-search entry empties `J_nl_trial` (`resize` + `setZero`)
+    and the refresher refills it with `coeffRef`. On Eigen 3.4.x (3.4.1
+    too) an insert into an emptied compressed matrix hands all its spare
+    capacity to the first column, and an out-of-order insert (a column,
+    then a lower one, as MOSFET / IGBT stamps do) then reallocates to
+    that capacity plus a few entries and copies the buffer: capacity
+    grows on every refill unless squeezed. `J_nl` was safe because it is
+    compressed (squeezed) after every refresh, and the old code built
+    `J_nl_trial` fresh per iteration; the workspace made it persistent
+    and never compressed it: 2.2 M allocated entries for nnz = 7 at the
+    end of the saturable run. (A2's `zero_keep_pattern`, which resizes
+    only on a size change, happens to avoid the growth: `setZero` on an
+    uncompressed matrix does not leak. Measured 0.26 / 0.22 / 0.19 s at
+    0e6b4e31 on the same Linux image. Keep the compress when A2 is
+    merged: then `J_nl_trial` stays compressed, `zero_keep_pattern`
+    keeps its pattern, and the refill inserts nothing.) → Fixed by compressing
+    `J_nl_trial` after each line-search / LM refresh, as `J_nl` is (its
+    values are never read, so results are unchanged). Bisect: c7b5c86b
+    fast, 6fb5f21a (the merge that brought A1) slow. → The test "the
+    line-search refresh target does not grow over a run" bounds both
+    targets' capacity by n × n with line search on a circuit with an
+    out-of-order stamp. On unfixed 3.4.0 it fails on the first solve
+    (170 > 64) in milliseconds, instead of a 120 s timeout. → Any gate
+    on Eigen behaviour must also run on the oldest Eigen CI installs
+    (3.4.0), and must cover every globalisation path the workspace has.
