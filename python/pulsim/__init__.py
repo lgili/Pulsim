@@ -508,6 +508,7 @@ __all__ = [
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
     "Cancelled",
+    "RetiredDeviceError",
     "SimulationAborted",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
@@ -749,6 +750,7 @@ if _HAS_SCOPE:
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
+RetiredDeviceError = _berg.RetiredDeviceError
 
 
 

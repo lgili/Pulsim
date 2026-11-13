@@ -98,7 +98,7 @@ results are dataclasses. No hidden state on a "circuit" object.
 | ---------------------------------------- | -------------------------------------------------------------------- |
 | `add_switch(...)`                        | `b.add_switch(name, from, to, g_on, g_off)`                          |
 | `add_diode(...)` (PWL)                   | `b.add_diode(name, anode, cathode, g_on, g_off, V_th)`               |
-| `add_nonlinear_diode(...)` (smooth)      | `b.add_nonlinear_diode(name, anode, cathode, V_F0, R_d, ...)`        |
+| `add_nonlinear_diode(...)` (smooth)      | retired: `b.add_shockley_diode(name, anode, cathode, I_S, n)` or `b.add_diode(..., V_f=)` |
 | `add_mosfet(...)`                        | `b.add_mosfet(name, drain, source, R_on, R_off)`                     |
 | `add_mosfet_with_body_diode(...)`        | `b.add_mosfet_with_body_diode(...)`                                  |
 | `add_mosfet_level1(...)` (Shichman)      | `b.add_mosfet_level1(...)`                                           |

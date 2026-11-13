@@ -298,9 +298,11 @@ class CircuitBuilder:
 
         What decides ZVS is the CHARGE Q(V) = int C dv, not the small-signal C a datasheet quotes at the operating point: for C0 = 2 nF, V0 = 25 V, m = 0.5 at 400 V those differ by 1.61x, which is the difference between a dead time that reads as clean ZVS and one that leaves the node at 209 V when the switch turns on (17 uJ per edge). m = 0 gives an ordinary linear capacitor, exactly — useful for the A/B.
         """
-    def add_nonlinear_diode(self, name: str, anode: str, cathode: str, params: IdealDiodeParams) -> CircuitBuilder:
+    def add_nonlinear_diode(self, name: str, anode: str, cathode: str, params: IdealDiodeParams, *, allow_non_passive: bool = False) -> CircuitBuilder:
         """
-        Add a smooth-blend nonlinear diode (V3's IdealDiode, AD-driven).
+        Retired. Raises RetiredDeviceError unless allow_non_passive=True.
+
+        add_nonlinear_diode is retired: its smooth-blend law logistic(kappa*(v - V_F0))*(v - V_F0)/R_d is negative for 0 < v < V_F0, so the device sources power below its knee (-1.39 A out of a forward-biased anode at +0.636 V with the default IdealDiodeParams). Use add_diode(name, anode, cathode, g_on, g_off, V_f=...) for a PWL diode with a forward drop, or add_shockley_diode(name, anode, cathode, ...) for a smooth junction. Pass allow_non_passive=True to build the legacy device anyway (hostile-circuit test fixtures).
         """
     def add_op_amp_ideal(self, name: str, in_pos: str, in_neg: str, out: str, gain: float = 100000.0) -> CircuitBuilder:
         """

@@ -31,7 +31,7 @@ p.CircuitBuilder()
   .add_multi_winding_transformer(...)   # N windings, no ceiling
   .add_saturable_transformer_n(...)     # N secondaries on one gapped core
   .add_diode(...)
-  .add_nonlinear_diode(...)
+  .add_shockley_diode(...)
   .add_switch(...)
   .add_mosfet(...)
   .add_mosfet_with_body_diode(...)
@@ -147,7 +147,7 @@ Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device
 |---|---|
 | `add_switch` | `(name, n_pos, n_neg, g_on, g_off)` |
 | `add_diode` | `(name, anode, cathode, g_on, g_off, V_th=0, V_f=0)` — binary switched diode; `V_f` is the forward drop while ON (PSIM's diode voltage drop: `v = V_f + i/g_on`), `V_th` the turn-on threshold (effectively `max(V_th, V_f)`), not a drop |
-| `add_nonlinear_diode` | `(name, anode, cathode, params: IdealDiodeParams)` |
+| `add_nonlinear_diode` | **retired** — raises `RetiredDeviceError`: its law sources power for `0 < v < V_F0` (−1.39 A out of the anode at +0.636 V). Use `add_diode(..., V_f=)` or `add_shockley_diode`. `allow_non_passive=True` builds the legacy device (test fixtures only); YAML `type: nonlinear_diode` needs `allow_non_passive: true` |
 
 ### Nonlinear actives
 
@@ -419,7 +419,7 @@ capacitor or inductor. Settle with a transient run and use its
 
 `.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`
 with RS as a series resistor (BV mapped to the kernel's knee at IBV),
-LTspice `D(Ron Roff Vfwd)` → `add_nonlinear_diode`, LEVEL-1 `NMOS`
+LTspice `D(Ron Roff Vfwd)` → `add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0, V_f = Vfwd)`, LEVEL-1 `NMOS`
 → `add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)`
 with RD/RS series resistors and an explicit body diode when the card
 gives IS/JS, LTspice `VDMOS` → the same with K = KP/2, Rds, and the

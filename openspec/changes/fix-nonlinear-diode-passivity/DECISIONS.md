@@ -1,4 +1,24 @@
-# fix-nonlinear-diode-passivity — implementation stopped (2026-11-12)
+# fix-nonlinear-diode-passivity — decisions
+
+## 2026-11-12, owner decision: retire the device
+
+The softplus law below was stopped. The owner then decided to **retire**
+`add_nonlinear_diode` instead of changing its law; proposal.md,
+design.md, tasks.md and the spec deltas now describe the retirement.
+`implementation-attempt.patch` stays as the record of the law attempt
+and is not applied.
+
+| Question | Option taken | Why | How to reverse |
+|---|---|---|---|
+| Where to refuse | Python wrapper installed by `_builder_ergonomics.install` (like `add_shockley_diode`'s), not the binding | The binding and C++ builder stay unchanged, so the C++ tests and stubs do not move; Python is the public surface | Delete the wrapper in `install` |
+| Error type | New `pulsim.RetiredDeviceError(ValueError)` | A named error; `ValueError` as for `ProvenanceError` (the `allow_synthetic` refusal) | — |
+| Opt-in name | `allow_non_passive=True` (Python), `allow_non_passive: true` (YAML) | Names the hazard the caller accepts, like `allow_synthetic` | rename in both places |
+| YAML refusal type | the loader's `std::runtime_error` (Python `RuntimeError`) | Every other YAML refusal uses it; same message text as the Python refusal | — |
+| Existing fixtures | The 11 Python test files that build the device on purpose pass the opt-in; C++ tests call the C++ builder (unchanged) and need nothing; the YAML round-trip test sets the key | Owner: keep their premise, do not rewrite them | — |
+| Library users | `discovery.catalog()` lists `add_shockley_diode`; notebooks 05 and 07 use `add_shockley_diode` (their outputs cleared, the 07 operating point moves to the Shockley drop); notebook 15 (one snippet per YAML kind) sets the opt-in | Shockley is the documented smooth replacement | — |
+| Kernel users | `IdealDiode` stays for the DC continuation, `nonlinear_refresh_diode.hpp` and the MOSFET Level-1 body diode (`nonlinear_diode_params`); none goes through the public builder method | Not public entry points | — |
+
+## Earlier: the passive-law attempt (stopped)
 
 **Status: not implemented.** The law was implemented exactly as proposed
 and every number of proposal.md reproduced, but the change breaks 27

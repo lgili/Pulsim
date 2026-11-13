@@ -290,7 +290,7 @@ def test_node_behind_a_nonlinear_device_is_not_mistaken_for_grounded():
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b.add_nonlinear_diode("D1", "vin", "out",
-                          p.IdealDiodeParams())
+                          p.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("Cout", "out", "gnd", 10e-6)
 
     report = b.run_preflight()
@@ -341,7 +341,7 @@ def blocking_diode_chain(n=20, g_off=1e-9):
         q = p.IdealDiodeParams()
         q.G_off = g_off
         anode = "gnd" if i == n - 1 else f"n{i+1}"
-        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q)
+        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q, allow_non_passive=True)
     return b
 
 
@@ -355,7 +355,7 @@ def mains_rectifier(vpk=400.0, kappa=100.0):
     b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, vpk, 60.0)
     q = p.IdealDiodeParams()
     q.kappa = kappa
-    b.add_nonlinear_diode("D", "ac", "vout", q)
+    b.add_nonlinear_diode("D", "ac", "vout", q, allow_non_passive=True)
     b.add_resistor("R", "vout", "gnd", 50.0)
     b.add_capacitor("C", "vout", "gnd", 100e-6)
     return b

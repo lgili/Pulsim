@@ -20,7 +20,7 @@ def _rect(vpk=400.0, kappa=100.0):
     b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, vpk, 60.0)
     q = p.IdealDiodeParams()
     q.kappa = kappa
-    b.add_nonlinear_diode("D", "ac", "vout", q)
+    b.add_nonlinear_diode("D", "ac", "vout", q, allow_non_passive=True)
     b.add_resistor("R", "vout", "gnd", 50.0)
     b.add_capacitor("C", "vout", "gnd", 100e-6)
     return b

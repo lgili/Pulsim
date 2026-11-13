@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `add_nonlinear_diode` is retired
+
+* **Changed (BREAKING)** `CircuitBuilder.add_nonlinear_diode` raises
+  `pulsim.RetiredDeviceError` (a `ValueError`). Its smooth-blend law
+  `logistic(κ(v − V_F0))·(v − V_F0)/R_d` is negative for
+  `0 < v < V_F0`: at the default `IdealDiodeParams` it pushes −1.39 A out
+  of a forward-biased anode at +0.636 V, a 20 V / 1 kHz clamp aborts on
+  `engine='pwl'` at `dt = 1 µs`, and on `trbdf2` it reads RMS 9.634 V
+  where the PWL and Shockley diodes give 10.01 V. Use
+  `add_diode(..., V_f=)` (PWL diode with a forward drop) or
+  `add_shockley_diode` (smooth junction). `allow_non_passive=True`
+  still builds the unchanged legacy device (hostile-circuit fixtures).
+* **Changed (BREAKING)** YAML `type: nonlinear_diode` is refused unless
+  the device sets `allow_non_passive: true`.
+* **Changed (BREAKING)** the SPICE importer maps an LTspice
+  `D(Ron Roff Vfwd)` diode to `add_diode(g_on = area/Ron,
+  g_off = area/Roff, V_th = 0, V_f = Vfwd)` instead of the retired
+  device: `Ron=0.05 Roff=1Meg Vfwd=0.7` at 10 A reads 1.2 V and 12.0 W,
+  and the device is a PWL branch (`kind == "diode"`).
+
 ### Kernel AC sweep answers only for the circuit it models
 
 * **Fixed** `run_mna_sweep(freqs=, v_in_branch_id=)` (kernel path) took

@@ -9,6 +9,8 @@
 > model change: the output falls by 16.6 %. Two entries are out of date: `.subckt`
 > is now flattened, and since 1.4.0 the AC sweep has factorised with
 > the in-house `PulsimComplexSparseLuSolver`, not `Eigen::SparseLU`.
+> `add_nonlinear_diode` is retired (its law sources power below
+> `V_F0`); see the 2.0 page.
 
 This file catalogues every gap we knowingly ship in **pulsim 1.3.0** —
 deliberately deferred work, partial implementations, and features whose

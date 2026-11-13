@@ -40,6 +40,12 @@ their messages are covered in [Gotchas](gotchas.md).
 |---|---|---|
 | **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, sources, and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `ValueError` naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
 
+## Devices
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`add_nonlinear_diode` is retired.** Its law `logistic(κ(v − V_F0))·(v − V_F0)/R_d` sources power for `0 < v < V_F0`. It now raises `RetiredDeviceError` unless called with `allow_non_passive=True` (YAML: `allow_non_passive: true`). | Default parameters, 0.636 V forced: −1.3923 A. 20 V / 1 kHz sine clamp through 10 Ω: `pwl` at `dt = 1 µs` aborts; `trbdf2` RMS 9.634 V against 10.01 V for the PWL and Shockley diodes. | `add_diode(..., V_f=)` or `add_shockley_diode`. |
+
 ## Switching helpers
 
 | Limitation | Measured | Workaround |

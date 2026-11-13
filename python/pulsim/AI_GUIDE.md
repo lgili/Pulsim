@@ -72,7 +72,7 @@ add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: s
   series drop, while on. Each one owns a bit in the switch-state mask. Controlled
   switches follow `switch_fn(t) -> SwitchStateMask`; diodes commutate
   on their own. Smooth devices (`add_shockley_diode`, `add_mosfet_level1`,
-  saturable magnetics) are nonlinear and are solved with Newton.
+  saturable magnetics) are solved with Newton; `add_nonlinear_diode` is retired.
 - **Engines** (`p.simulate(..., engine=...)`):
 
 | engine | step | use it for |
