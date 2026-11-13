@@ -175,6 +175,10 @@ struct SolverSnapshot {
     std::vector<Real> igbt_tail_history;
     /// 9 per machine: lambda_abc, i_abc, v_abc (MNA PMSM).
     std::vector<Real> pmsm_history;
+    /// Restart steps still owed (discontinuity_restart): the rule takes
+    /// the step of a discontinuity and the next two as SDIRK(2,2)
+    /// steps, so a run stopped inside that window resumes it. 0 = none.
+    Size restart_steps_left = 0;
     /// True once populated by a run.
     bool valid = false;
 };
@@ -205,8 +209,24 @@ struct SolverSnapshot {
     return true;
 }
 
+/// Newton linear-algebra counters of one run
+/// (update-newton-persistent-solver). Zero on a run without Newton.
+struct NewtonCounters {
+    std::uint64_t solves            = 0;  ///< Newton calls
+    std::uint64_t iterations        = 0;  ///< Newton iterations
+    std::uint64_t analyses          = 0;  ///< symbolic analyses
+    std::uint64_t factorizations    = 0;  ///< full numeric factorisations
+    std::uint64_t partial_refactors = 0;  ///< low-rank refactors (stage B)
+    std::uint64_t lm_attempts       = 0;  ///< LM factorisation attempts
+    /// Iterations of each Newton call, in call order (saturates at 65535).
+    std::vector<std::uint16_t> iterations_per_solve;
+};
+
 struct SimulationResult {
     std::vector<Real> times;
+
+    /// Newton counters of the run (update-newton-persistent-solver).
+    NewtonCounters newton;
 
     /// v2.0 Phase 4 — the run's final state, complete enough to
     /// resume from exactly (`simulate(resume_from=...)`).
@@ -219,6 +239,13 @@ struct SimulationResult {
     /// v2.0 Phase 2 — steps re-taken at a reduced dt. Empty on a run
     /// that never needed one.
     std::vector<DtRetry> dt_retries;
+
+    /// Steps taken as SDIRK(2,2) restart steps
+    /// (SimulationOptions::discontinuity_restart). 0 with the rule off.
+    Size n_restart_steps = 0;
+    /// Factorisations made for the restart stages (one per mask at
+    /// 2γ·dt, more only if the segment byte budget evicts). 0 off.
+    Size n_restart_factorizations = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or
@@ -401,6 +428,7 @@ struct SimulationResult {
                times.size() * sizeof(Real) +
                event_iteration_count.size() * sizeof(Size) +
                switch_state_bits.size() +
+               newton.iterations_per_solve.size() * sizeof(std::uint16_t) +
                switch_state_unsolved.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
                event_iteration_breaches.size() *

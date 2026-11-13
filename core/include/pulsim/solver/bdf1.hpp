@@ -47,6 +47,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/solver/run_transient.hpp"   // SwitchScheduleFn / BExtraFn / StepObserverFn typedefs
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -289,31 +290,17 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
 
     // v2.0 Phase 2 (B.2). This driver has no Newton loop and no
     // NonlinearRefreshFn — `dc_assemble` skips BranchKind::Nonlinear
-    // as an open circuit, and nothing here ever stamps it back. A
-    // circuit with a smooth diode / MOSFET / IGBT would therefore run
-    // to completion and report the waveforms of a DIFFERENT circuit.
-    // Refuse instead: a clear "use the trapezoidal engine" beats a
-    // plausible wrong answer.
-    if (pool.has_nonlinear_devices()) {
-        throw std::invalid_argument(
-            "run_transient_bdf1: this circuit has nonlinear devices "
-            "(smooth diode / MOSFET / IGBT / saturable inductor) and "
-            "the BDF1 driver has no Newton iteration, so it would "
-            "silently simulate them as open circuits. Use the "
-            "trapezoidal engine (the default) instead.");
-    }
-    // Same refusal for the PWL switch diode. It is a Switch branch,
-    // not a Nonlinear one, so `has_nonlinear_devices()` does not see
-    // it — but this driver has no DiodeEventState and no event
-    // iteration either, so a diode's bit is frozen at whatever
-    // `switch_fn` happens to return for it, which for every caller
-    // that does not know to drive it by hand means permanently OFF.
-    // A rectifier would run with no rectification and report it as
-    // fact.
-    {
-        pwl::DiodeEventState probe{graph, pool};
-        if (probe.num_diodes() > 0) {
-            throw std::invalid_argument(std::format(
+    // as an open circuit — and no DiodeEventState, so a PWL diode's
+    // bit would be frozen at whatever `switch_fn` returns (normally
+    // OFF). Either way the run would report the waveforms of a
+    // DIFFERENT circuit. Which kinds it runs is the capability table's
+    // `Bdf1` column (pwl/device_pool.hpp), not a list kept here.
+    if (const auto bad = find_unsupported(graph, pool, pwl::Engine::Bdf1)) {
+        if (pwl::kind_caps(pool.kind_of(*bad)).cls
+                == pwl::SolveClass::PwlDiode) {
+            pwl::DiodeEventState probe{graph, pool};
+            throw unsupported_device(graph, pool, pwl::Engine::Bdf1, *bad,
+                std::format(
                 "run_transient_bdf1: this circuit has {} PWL diode(s) "
                 "and the BDF1 driver has no diode event iteration, so "
                 "their on/off state would be frozen at whatever "
@@ -321,6 +308,25 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
                 "Use the trapezoidal engine (the default), which "
                 "commutates them.", probe.num_diodes()));
         }
+        throw unsupported_device(graph, pool, pwl::Engine::Bdf1, *bad,
+            std::format(
+            "run_transient_bdf1: this circuit has nonlinear devices "
+            "('{}', a {}) and the BDF1 driver has no Newton iteration, "
+            "so it would silently simulate them as open circuits. Use "
+            "the trapezoidal engine (the default) instead.",
+            graph.branch_name(*bad),
+            pwl::stored_kind_name(pool.kind_of(*bad))));
+    }
+    // Mutual inductance is not stamped by this driver: coupled
+    // windings would run as two independent inductors (measured: a
+    // 0.9-coupled pair read 9.4 V off on an 18 V span).
+    if (!pool.transformer_couplings().empty()) {
+        throw UnsupportedError("bdf1", "coupled_inductors", "", "",
+            "run_transient_bdf1: this circuit has coupled inductors "
+            "(add_transformer / add_inductor_coupling) and the BDF1 "
+            "driver does not stamp mutual inductance, so the windings "
+            "would run uncoupled. Use the trapezoidal engine (the "
+            "default).");
     }
     const Size state_size = pool.state_size(graph);
     const Size n_steps = opts.expected_step_count();

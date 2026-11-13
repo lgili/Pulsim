@@ -86,6 +86,7 @@
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
@@ -97,6 +98,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -149,6 +151,11 @@ struct TrBdf2Options {
     /// samples on, instead of "whichever step happened to cross
     /// the boundary". 0 = no controller ticks.
     Real observer_period = Real{0};
+    /// Several controller rates (fix-control-tick-semantics): source
+    /// j ticks at t_start + k*observer_periods[j], ceil(span/T_j)
+    /// times, through `tick_fn(j, t, x)`; sources due at one instant
+    /// fire in index order. Non-empty overrides `observer_period`.
+    std::vector<Real> observer_periods;
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -212,11 +219,11 @@ struct TrBdf2Stats {
     /// guard gave up. Zero on a
     /// healthy run; the Python layer warns when it is not.
     Size n_forced_accepts = 0;
-    /// Controller ticks fired (should be exactly
-    /// floor(span / T_ctrl) + 1 — the fixed engine's throttled
-    /// observer DRIFTS and loses ticks: measured 198 of 200 on a
-    /// 10 kHz loop at dt = 2 µs).
+    /// Controller ticks fired, all sources: ceil(span / T_j) per
+    /// source (tick 0 at t_start, none at t_end).
     Size n_ctrl_ticks = 0;
+    /// Per-source tick counts, in source order.
+    std::vector<Size> ctrl_tick_counts;
     /// Steps retaken at a smaller h because Newton did not
     /// converge — the variable-step engine's answer to a hard
     /// nonlinear step, where the fixed one can only abort.
@@ -354,7 +361,10 @@ inline SimulationResult run_transient_trbdf2(
     /// dynamic device, and the diode bits. To the run's own
     /// tolerance, not bit-exact: the step controller's state is not
     /// in the snapshot, so the segment restarts from h_init.
-    const SolverSnapshot* resume_from = nullptr) {
+    const SolverSnapshot* resume_from = nullptr,
+    /// Multi-rate ticks: called as tick_fn(j, t, x) for source j of
+    /// opts.observer_periods. Takes the place of observer_fn there.
+    const std::function<void(Size, Real, const Vector&)>& tick_fn = {}) {
     using topology::SwitchStateMask;
 
     if (!(opts.t_end > opts.t_start)) {
@@ -377,34 +387,14 @@ inline SimulationResult run_transient_trbdf2(
     // fixed — the state is now λ(i) with a derived BDF2 stage, and
     // the history snapshots like the other four — so the refusal is
     // gone rather than relaxed.
-    bool has_nonlinear = false;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind
-            == topology::BranchKind::Nonlinear) {
-            has_nonlinear = true;
-            break;
-        }
-    }
-    // A charge-based Coss brings its own refresh (wired below), so
-    // it does not need one from the caller; every other nonlinear
-    // device does.
-    bool has_only_coss = has_nonlinear;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind
-                == topology::BranchKind::Nonlinear
-            && pool.kind_of(b_id)
-                != pwl::DevicePool::StoredKind::NonlinearCapacitor) {
-            has_only_coss = false;
-            break;
-        }
-    }
-    if (has_nonlinear && !nl_refresh && !has_only_coss) {
-        throw std::invalid_argument(
-            "run_transient_trbdf2: the circuit has nonlinear "
-            "devices but no nonlinear-refresh callback was "
-            "supplied — the stages would solve the linear "
-            "skeleton and silently return the wrong answer.");
-    }
+    // The static Newton chain (smooth / Shockley diodes, MOSFET,
+    // IGBT) is the kernel's: a caller that supplies none gets the
+    // standard one, so the stages never solve the linear skeleton.
+    // The stateful kinds bring their own wrappers below.
+    const pwl::NonlinearRefreshFn nl_static =
+        (nl_refresh || !pool.requires_static_refresh())
+            ? nl_refresh
+            : pwl::make_combined_diode_mosfet_refresh();
 
     const Real span  = opts.t_end - opts.t_start;
     // Default step ceiling. span/1000 alone is a TRAP on a long
@@ -476,6 +466,25 @@ inline SimulationResult run_transient_trbdf2(
                 }
             }
             corners.push_back(c);
+            break;
+        }
+        // add-controlled-source-set: the same caps for the current
+        // sources (their corners are also landed on, below).
+        case pwl::DevicePool::StoredKind::SineCurrentSource: {
+            const Real f = pool.sine_current_source_params(b_id).w.frequency;
+            if (f > Real{0}) {
+                h_default = std::min(h_default, Real{1} / (Real{20} * f));
+            }
+            break;
+        }
+        case pwl::DevicePool::StoredKind::PulseCurrentSource: {
+            const auto& up = pool.pulse_current_source_params(b_id).w;
+            if (up.period > Real{0}) {
+                h_default = std::min(h_default, up.period / Real{20});
+            }
+            if (up.pulse_width > Real{0}) {
+                h_default = std::min(h_default, up.pulse_width / Real{3});
+            }
             break;
         }
         default: break;
@@ -573,6 +582,9 @@ inline SimulationResult run_transient_trbdf2(
     }
     Vector be_pwm, be_sine, be_pulse, b_src, b_stage, x_g, x_1,
         x_trial;
+    const bool has_iwave =
+        sources::has_current_waveform_sources(pool, graph);
+    Vector be_iwave;
 
     // Source-only overlay at time `at_t` (no history terms).
     auto accumulate_sources = [&](Real at_t, Vector& out) {
@@ -593,6 +605,11 @@ inline SimulationResult run_transient_trbdf2(
             sources::compute_pulse_b_extra(pool, graph, at_t,
                                             be_pulse);
             out += be_pulse;
+        }
+        if (has_iwave) {
+            sources::compute_current_waveform_b_extra(pool, graph, at_t,
+                                                      be_iwave);
+            out += be_iwave;
         }
     };
 
@@ -683,10 +700,10 @@ inline SimulationResult run_transient_trbdf2(
     auto dev_stage = pwl::TrBdf2Stage::Trapezoidal;
     Real dev_h = Real{0};
 
-    pwl::NonlinearRefreshFn nl_effective = nl_refresh;
+    pwl::NonlinearRefreshFn nl_effective = nl_static;
     if (has_coss) {
         nl_effective =
-            [user = nl_refresh, &coss, &q_gamma, &coss_stage,
+            [user = nl_static, &coss, &q_gamma, &coss_stage,
              &coss_h](const Vector& xx, sparse::Matrix& J_nl,
                         Vector& f_nl, const topology::Graph& g,
                         const pwl::DevicePool& pp) -> Real {
@@ -694,7 +711,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(
@@ -714,7 +731,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(m, pwl::refresh_lauritzen_diodes(
@@ -732,7 +749,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(m, pwl::refresh_igbt_tails(
@@ -750,7 +767,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(m, pwl::refresh_pmsm_mna(
@@ -768,7 +785,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 Real mx = Real{0};
@@ -791,6 +808,7 @@ inline SimulationResult run_transient_trbdf2(
     Real ro_omega_max = 0;
     Index ro_row = kInvalidIndex;
     pwl::PwlSegment nl_seg;
+    pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
     Real nl_seg_dt = Real{-1};
     topology::SwitchStateMask nl_seg_mask(
         static_cast<std::size_t>(graph.num_switches()));
@@ -824,7 +842,7 @@ inline SimulationResult run_transient_trbdf2(
                 b_ex, opts.max_newton_iterations,
                 opts.tol_newton_dx, opts.tol_newton_res,
                 opts.enable_newton_line_search,
-                opts.enable_newton_lm, &newton_roundoff);
+                opts.enable_newton_lm, &newton_ws, &newton_roundoff);
             if (newton_roundoff.accepted) {
                 ++ro_accepts;
                 if (newton_roundoff.omega >= ro_omega_max) {
@@ -1106,12 +1124,30 @@ inline SimulationResult run_transient_trbdf2(
     // Controller-tick schedule. Absolute k·T from t_start (never
     // accumulated) so the cadence cannot drift — the whole point
     // of scheduling it instead of throttling on elapsed time.
-    const Real t_ctrl = opts.observer_period;
-    const bool has_ticks = observer_fn && t_ctrl > Real{0};
-    Size tick_k = 0;
+    // One entry per source; the single observer_period is source 0.
+    const bool multi_rate = !opts.observer_periods.empty();
+    const std::vector<Real> t_ctrl =
+        multi_rate ? opts.observer_periods
+        : (opts.observer_period > Real{0}
+               ? std::vector<Real>{opts.observer_period}
+               : std::vector<Real>{});
+    const bool has_ticks =
+        (multi_rate ? static_cast<bool>(tick_fn)
+                    : static_cast<bool>(observer_fn))
+        && !t_ctrl.empty();
+    for (const Real T : t_ctrl) {
+        if (!(T > Real{0}) || !std::isfinite(T)) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2: every controller period must be "
+                "a positive finite number of seconds");
+        }
+    }
+    std::vector<Size> tick_k(t_ctrl.size(), 0);
+    std::vector<Real> t_next_src(t_ctrl.size(), opts.t_start);
     Real t_next_tick = opts.t_start;
     TrBdf2Stats local_stats;
     TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
+    st.ctrl_tick_counts.assign(t_ctrl.size(), 0);
     st.h_max_basis = opts.h_max > Real{0} ? Size{2}
         : (h_default < span / Real{1000} ? Size{1} : Size{0});
     // Earliest source corner strictly after t (+inf when none).
@@ -1137,6 +1173,13 @@ inline SimulationResult run_transient_trbdf2(
                     break;
                 }
             }
+        }
+        // The waveform current sources' corners (pulse edges, table
+        // knots): landed, read at their left limit and restarted like
+        // the voltage sources' (add-controlled-source-set).
+        if (has_iwave) {
+            best = std::min(best,
+                sources::next_current_waveform_breakpoint(pool, graph, after));
         }
         return best;
     };
@@ -1404,11 +1447,24 @@ inline SimulationResult run_transient_trbdf2(
             // ---- controller tick: fire AT the scheduled instant,
             //      before this step's mask is sampled ----
             if (has_ticks && t >= t_next_tick - h_min) {
-                observer_fn(t, x);
-                ++st.n_ctrl_ticks;
-                ++tick_k;
-                t_next_tick = opts.t_start
-                              + static_cast<Real>(tick_k) * t_ctrl;
+                // Every due source, in source order.
+                for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
+                    if (t < t_next_src[j] - h_min) {
+                        continue;
+                    }
+                    if (multi_rate) {
+                        tick_fn(j, t, x);
+                    } else {
+                        observer_fn(t, x);
+                    }
+                    ++st.n_ctrl_ticks;
+                    ++st.ctrl_tick_counts[j];
+                    ++tick_k[j];
+                    t_next_src[j] = opts.t_start
+                        + static_cast<Real>(tick_k[j]) * t_ctrl[j];
+                }
+                t_next_tick = *std::min_element(t_next_src.begin(),
+                                                t_next_src.end());
                 // A controller just moved its duty, so switch_fn
                 // has a DIFFERENT shape from here on and any
                 // bisected edge time is stale. Closed-loop runs
@@ -1464,12 +1520,11 @@ inline SimulationResult run_transient_trbdf2(
                 && t_next_tick - t < h) {
                 h = std::max(t_next_tick - t, h_min);
             }
-
             // ---- source-breakpoint landing ----
             bool landed_on_bp = false;
             Real bp_t = Real{0};
             const Real h_pre_bp = h;
-            if (!corners.empty()) {
+            if (!corners.empty() || has_iwave) {
                 bp_t = next_breakpoint_after(t);
                 if (bp_t <= t + h) {
                     h = std::max(bp_t - t, h_min);
@@ -2366,6 +2421,7 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.igbt_tail_history = tail.to_flat();
     result.final_snapshot.pmsm_history = pmsm.to_flat();
     result.final_snapshot.valid = true;
+    result.newton = newton_ws.take_counters();
     return result;
 }
 

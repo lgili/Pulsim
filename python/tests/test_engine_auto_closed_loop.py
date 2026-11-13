@@ -210,13 +210,18 @@ def test_bare_observer_with_explicit_period():
     assert np.abs(np.diff(seen) - 50e-6).max() < 1e-15
 
 
-def test_fixed_engine_semantics_are_unchanged():
-    """The throttled observer and its history are exactly what
-    they were — the new `.tick` is an added entry point, not a
-    behaviour change."""
+def test_fixed_engine_ticks_on_the_schedule():
+    """fix-control-tick-semantics: an observer carrying `.period` is a
+    tick source on the fixed engine too, run through `.tick` at
+    k * 100 us. Its elapsed-time throttle drifted and lost 2 of 200
+    ticks (198, tail mean 4.985423 V); the schedule fires all
+    ceil(20 ms / 100 us) = 200, the first at t = 0, and the tail mean
+    moves to 4.989752 V (one PI update more per 100 periods)."""
     b, sf, obs, hist = _pi_buck()
     res = ps.simulate(b, t_end=20e-3, dt=2e-6, switch_fn=sf,
                        step_observer=obs)
     assert _tail_mean(res, "vout", 15e-3) == pytest.approx(
-        4.985423, abs=1e-4)
-    assert len(hist) == 198        # the drift, still there
+        4.989752, abs=1e-4)
+    assert len(hist) == 200 and hist[0][0] == 0.0
+    assert list(res.control_tick_counts) == [200]
+    assert res.control_tick_jitter_max == 0.0

@@ -1,0 +1,21 @@
+A. RL edge on the grid, err at te + 0.5 ms [A] (shift in dt)
+   dt=4e-06: +1.210e-02 (+0.499 dt)
+   dt=2e-06: +6.057e-03 (+0.500 dt)
+   dt=1e-06: +3.030e-03 (+0.500 dt)
+   order 1.00 1.00
+B. buck CCM err iL at period 40: +1.18e-02 +5.88e-03 +2.94e-03 +1.47e-03 +7.35e-04  order 1.00 1.00 1.00 1.00
+            err vC            : -8.81e-04 -4.48e-04 -2.26e-04 -1.13e-04 -5.67e-05  order 0.98 0.99 0.99 1.00
+B'. buck DCM err iL at period 40: +1.27e-02 -1.06e-03 -3.30e-04 -2.77e-04 +2.06e-04  order 3.58 1.69 0.25 0.43
+             err vC            : -4.61e-03 -4.09e-03 -1.80e-03 -7.22e-04 +2.04e-04  order 0.17 1.18 1.32 1.82
+C. DCM idle T/100: v(sw) 0.483 .. 26.143 V, v_out 13.312 V, worst 96.38 %
+C. DCM idle T/400: v(sw) 0.377 .. 26.269 V, v_out 13.316 V, worst 97.27 %
+D. cap loop dt=1e-08: on-state i_S -9.826 .. +29.816 A, i2R 0.1968 W
+D. cap loop dt=1e-09: on-state i_S -79.319 .. +98.960 A, i2R 0.1460 W
+E. RC pulse on the grid, max err tau/10, /20, /40: 4.762e-01 2.439e-01 1.235e-01  order 0.97 0.98
+F. RL i0    rel err: 1.997e-03 9.993e-04 4.998e-04 2.500e-04  order 1.00 1.00 1.00
+F. RC c0    rel err: 1.997e-03 9.993e-04 4.998e-04 2.500e-04  order 1.00 1.00 1.00
+F. RL step  rel err: 1.355e-05 6.779e-06 3.391e-06 1.696e-06  order 1.00 1.00 1.00
+F. RC step  rel err: 1.355e-05 6.779e-06 3.391e-06 1.696e-06  order 1.00 1.00 1.00
+F. RL sine  rel err: 4.276e-07 1.069e-07 2.672e-08 6.681e-09  order 2.00 2.00 2.00
+G. Coss Q/(I t) at samples 1, 2, 11, 40: 0.500000 0.750000 0.954545 0.987500
+H. saturable edge err (ref 8.969231254 A): +2.138e-02 +1.072e-02 +5.370e-03 +2.687e-03  order 1.00 1.00 1.00

@@ -77,7 +77,7 @@ For these devices, each time step runs a Newton loop:
 x_k+1 = x_k - (J_linear + J_nonlinear(x_k))⁻¹ · (f_linear(x_k) + f_nonlinear(x_k))
 ```
 
-The "linear" Jacobian is the cached PWL one; the nonlinear refresh function (`refresh_smooth_diodes`, `refresh_mosfets_level1`, etc.) only rebuilds the contributions from the nonlinear branches each iteration. The combined nonlinear refresh is what `simulate(...)` auto-enables when `pool.has_nonlinear_devices()` returns True.
+The "linear" Jacobian is the cached PWL one; the nonlinear refresh function (`refresh_smooth_diodes`, `refresh_mosfets_level1`, etc.) only rebuilds the contributions from the nonlinear branches each iteration. The transient kernels build the combined nonlinear refresh themselves when `pool.requires_static_refresh()` is true and the caller passed none; the stateful devices (junction capacitor, Lauritzen diode, IGBT tail, PMSM, saturable inductor) bring their own wrappers.
 
 The Newton loop is hardened with:
 - **Line search globalization** (V4)

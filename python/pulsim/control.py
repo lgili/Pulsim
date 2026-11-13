@@ -1211,14 +1211,12 @@ class ClosedLoop:
     step_observer: "Callable[[float, object], None]"
     duty_history: "list[tuple[float, float]]"
     error_history: "list[tuple[float, float]]"
-    #: Controller sample period T_ctrl = 1/freq [s]. The fixed-step
-    #: engine only THROTTLES on it (the tick lands on whichever
-    #: step first crosses the boundary, and the phase drifts with
-    #: the grid — measured 198 ticks instead of 200 over 20 ms at
-    #: 10 kHz). `engine='auto'` reads this and SCHEDULES a step
-    #: boundary on every k·T_ctrl, which is the cadence a digital
-    #: controller actually samples on — and makes `pi.update(
-    #: dt=T_PWM)` true rather than nominal.
+    #: Controller sample period T_ctrl = 1/freq [s]. `simulate()`
+    #: schedules `step_observer.tick` at t_start + k·T_ctrl,
+    #: ceil(span/T_ctrl) times, on both engines: `trbdf2` lands a
+    #: step on every instant, `pwl` delivers it at the first grid
+    #: point at or after it (exact when T_ctrl is a multiple of dt).
+    #: That makes `pi.update(dt=T_PWM)` true rather than nominal.
     period: float = 0.0
 
 
@@ -1258,7 +1256,11 @@ def bind_pi_to_switch(
         Either a device name (resolved via
         ``builder.switch_index_of``) or an integer bit position.
     freq
-        PWM carrier frequency in Hz. The PI is throttled to one
+        PWM carrier frequency in Hz. Passed as ``closed_loops=[loop]``,
+        ``simulate()`` runs one PI update at every
+        ``t_start + k / freq`` (``ceil(span * freq)`` updates, the
+        first at ``t_start``) on ``pwl`` and ``trbdf2``. Calling
+        ``loop.step_observer`` yourself every step throttles it to one
         update per ``T_PWM = 1 / freq``.
     t_start
         Simulation start time, used to align the throttle's first

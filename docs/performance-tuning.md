@@ -80,9 +80,10 @@ Key properties:
   are never factored. Cold-start cost ≈ (num reached configs) ×
   (single LU cost).
 - **Event-dt solves.** Sub-step event correction solves at
-  interpolated fractions of `dt` through a small pool of reusable
-  event solvers (≤ 8 masks resident); a new event `dt` is a cheap
-  in-place numeric refactor (`J = G + (1/dt)·C` on a shared
+  interpolated fractions of `dt` (and TR-BDF2 solves every stage)
+  through a table of reusable event solvers, one per mask, bounded by
+  the same byte budget as the segments; a new `dt` is an in-place,
+  allocation-free numeric refactor (`J = G + (1/dt)·C` on a shared
   symbolic analysis), never a permanently cached factor.
 
 For circuits with many switches (3-φ VSI with 6 IGBTs has 64
@@ -105,6 +106,22 @@ actually binding.
 Bounding output memory is usually the bigger lever on a long run:
 `simulate(..., store_every=m)` records every m-th step on a uniform
 `m·dt` grid, cutting the result buffer by m.
+
+## Parallel sweeps
+
+`p.sweep(..., parallel=True)` / `p.monte_carlo(..., parallel=True)` pick
+a backend from the first job (`backend="auto"`): threads when its step
+loop is native, processes when it calls Python. Threads have no start-up
+cost and need nothing to pickle; each worker process pays a full
+`import pulsim` and pickles its arguments, which made an 8-job buck sweep
+27× slower than serial in the 2026-11 review. So for speed, drive the
+switches with the native schedules (`make_pwm_switch_fn`,
+`make_dead_time_pwm_pair_fn`, …) and keep Python out of the step loop;
+check `res.step_loop_python_callbacks == ()` on one run.
+`backend="process"` restores separate processes when `builder_factory`
+or `kpi_fn` is not thread-safe. `import pulsim` no longer loads the
+LiveScope GUI stack (pyqtgraph / Qt); it is imported on first use of
+`pulsim.LiveScope`.
 
 ## DC operating-point seeding
 

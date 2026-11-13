@@ -124,6 +124,12 @@ public:
                 const Real den = k.c1 / h + Real{1} / e.params.tau_tail;
                 e.k1 = e.params.k_tail / den;
                 e.k0 = -(k.c2 * e.q_gamma + k.c3 * e.q_prev) / h / den;
+            } else if (stage == TrBdf2Stage::BackwardEuler) {
+                // Q(1 + h/tau) = Q_n + h k i_ss: the trapezoidal pair
+                // at 2h without the stored derivative f_n.
+                const Real den = Real{1} + h / e.params.tau_tail;
+                e.k1 = (h * e.params.k_tail) / den;
+                e.k0 = e.q_prev / den;
             } else {
                 const Real den =
                     Real{1} + h / (Real{2} * e.params.tau_tail);
@@ -167,6 +173,15 @@ public:
                            - q / e.params.tau_tail;
             }
             e.q_prev = q;
+        }
+    }
+
+    /// SDIRK restart: pseudo previous Q from the stage-1 solve, by
+    /// the affine relation stage 1 solved with.
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real q = e.k0 + e.k1 * steady_state_at(e, x1);
+            e.q_prev += c * (q - e.q_prev);
         }
     }
 

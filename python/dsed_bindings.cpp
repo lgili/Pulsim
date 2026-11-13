@@ -52,6 +52,7 @@
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
+#include "switch_fn_adapter.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -361,10 +362,21 @@ py::array_t<double> reconstruct_full_states(
         if (!(masks[i] == masks[i - 1])) {
             adapter.set_mask(masks[i]);
         }
-        const pulsim::Vector full =
-            adapter.recover_full(res.times[i], state_of(i));
-        for (py::ssize_t j = 0; j < n_mna; ++j) {
-            ptr[static_cast<py::ssize_t>(i) * n_mna + j] = full[j];
+        double* row = ptr + static_cast<py::ssize_t>(i) * n_mna;
+        if constexpr (requires {
+                          adapter.recover_full_into(
+                              Real{0}, state_of(i),
+                              Eigen::Map<pulsim::Vector>(row, n_mna));
+                      }) {
+            adapter.recover_full_into(
+                res.times[i], state_of(i),
+                Eigen::Map<pulsim::Vector>(row, n_mna));
+        } else {
+            const pulsim::Vector full =
+                adapter.recover_full(res.times[i], state_of(i));
+            for (py::ssize_t j = 0; j < n_mna; ++j) {
+                row[j] = full[j];
+            }
         }
     }
     return out;
@@ -501,9 +513,24 @@ py::array_t<bool> sample_masks_to_array(const ResultT& res) {
     }
 }
 
+/// Event times and predicate types as arrays (cheap, always present).
+template <class ResultT>
+void event_arrays(const ResultT& res, py::dict& d) {
+    const auto m = static_cast<py::ssize_t>(res.event_log.size());
+    py::array_t<double> et(m);
+    py::array_t<int> ty(m);
+    for (py::ssize_t i = 0; i < m; ++i) {
+        const auto& e = res.event_log[static_cast<std::size_t>(i)];
+        et.mutable_data()[i] = e.t;
+        ty.mutable_data()[i] = static_cast<int>(e.type);
+    }
+    d["event_times"] = std::move(et);
+    d["event_types"] = std::move(ty);
+}
+
 template <class MaskT>
 py::dict ped_result_to_dict(
-    const pulsim::dsed::PEDResult<MaskT>& res) {
+    const pulsim::dsed::PEDResult<MaskT>& res, bool event_log = true) {
     // Convert times + states to numpy arrays
     const auto n_steps = static_cast<py::ssize_t>(res.times.size());
     const auto n_state = res.states.empty()
@@ -528,11 +555,17 @@ py::dict ped_result_to_dict(
     d["n_accept"] = res.n_accept;
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
+    d["n_exact_steps"] = res.n_exact_steps;
+    d["n_predicate_evals"] = res.n_predicate_evals;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
+    event_arrays(res, d);
     // Event log: skip the MaskT objects (they're py::object wrappers
-    // around Python objects that we just hand back).
+    // around Python objects that we just hand back). event_log=False
+    // (the simulate() path) skips the per-event dicts and their two
+    // mask objects each: a 2000-period buck has 4000 events.
     py::list events;
     for (const auto& e : res.event_log) {
+        if (!event_log) break;
         py::dict ed;
         ed["t"] = e.t;
         ed["name"] = e.name;
@@ -560,7 +593,7 @@ py::dict ped_result_to_dict(
 
 template <class MaskT>
 py::dict ped_result_auto_to_dict(
-    const pulsim::dsed::PEDResultAuto<MaskT>& res) {
+    const pulsim::dsed::PEDResultAuto<MaskT>& res, bool event_log = true) {
     const auto n_steps = static_cast<py::ssize_t>(res.times.size());
     const auto n_state = res.states.empty()
         ? py::ssize_t{0}
@@ -586,9 +619,12 @@ py::dict ped_result_auto_to_dict(
     d["n_events"] = res.n_events;
     d["n_rk45_steps"] = res.n_rk45_steps;
     d["n_bdf2_steps"] = res.n_bdf2_steps;
+    d["n_exact_steps"] = res.n_exact_steps;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
+    event_arrays(res, d);
     py::list events;
     for (const auto& e : res.event_log) {
+        if (!event_log) break;
         py::dict ed;
         ed["t"] = e.t;
         ed["name"] = e.name;
@@ -614,6 +650,33 @@ py::dict ped_result_auto_to_dict(
 //   run_auto_native(system, switch_fn, x0, t_end, rtol, atol, dt_init,
 //                    dt_max, h_bdf2, stiffness_threshold)
 // ---------------------------------------------------------------------------
+/// D10 — the exact propagator's per-mask tier record and counters.
+template <class AdapterT>
+py::dict exact_report_dict(const AdapterT& adapter,
+                           std::size_t n_predicate_evals) {
+    py::list masks;
+    for (const auto& r : adapter.exact_report()) {
+        py::list bits;
+        for (pulsim::Size i = 0; i < r.mask.size(); ++i) {
+            bits.append(static_cast<bool>(r.mask.get(i)));
+        }
+        py::dict row;
+        row["mask"] = bits;
+        row["tier"] = r.tier;
+        row["kappa"] = r.kappa;
+        row["norm_Ah"] = r.norm_Ah;
+        row["reason"] = r.reason;
+        masks.append(row);
+    }
+    py::dict d;
+    d["masks"] = masks;
+    d["n_eig"] = adapter.n_eig();
+    d["n_pade"] = adapter.n_pade();
+    d["n_phi_cache_hits"] = adapter.n_pade_hits();
+    d["n_predicate_evals"] = n_predicate_evals;
+    return d;
+}
+
 void init_module(py::module_& m) {
     using pulsim::dsed::PEDSimulator;
     using pulsim::dsed::PEDSimulatorBDF2;
@@ -759,59 +822,31 @@ void init_module(py::module_& m) {
     struct PySwitchFnSSM {
         explicit PySwitchFnSSM(py::object fn)
             : fn_{std::move(fn)} {
-            // Try to detect the native PWM types first. py::cast<T*>
-            // returns the C++ pointer if the py::object holds an
-            // instance of the bound type; throws py::cast_error
-            // otherwise.
-            try {
-                native_pwm2_ =
-                    fn_.cast<pulsim::sources::NativePwm2Switch*>();
-            } catch (const py::cast_error&) {
-                native_pwm2_ = nullptr;
-            }
-            if (!native_pwm2_) {
-                try {
-                    native_multi_ =
-                        fn_.cast<pulsim::sources::NativeMultiMaskPwm*>();
-                } catch (const py::cast_error&) {
-                    native_multi_ = nullptr;
-                }
-            }
-            if (!native_pwm2_ && !native_multi_ &&
-                py::isinstance<pulsim::sources::SwitchSchedule>(fn_)) {
-                // Built-in PWM helper (make_pwm_switch_fn & co.):
-                // copy the C++ schedule; mask and edge oracle then
-                // run without the GIL.
-                sched_ = fn_.cast<pulsim::sources::SwitchSchedule>();
-                has_sched_ = true;
-            }
-            if (!native_pwm2_ && !native_multi_ && !has_sched_) {
-                // Fallback path — generic Python callable. Pre-resolve
-                // `next_edge_after` attribute (if any) to avoid the
-                // hasattr cost per call.
-                if (py::hasattr(fn_, "next_edge_after")) {
-                    nea_attr_ = fn_.attr("next_edge_after");
-                    has_nea_  = true;
-                }
+            // The native schedules (SwitchSchedule, NativePwm2Switch,
+            // NativeMultiMaskPwm) are recognised by the adapter every
+            // engine binding shares; they run without the GIL.
+            if (py::isinstance<pulsim::sources::SwitchSchedule>(fn_)
+                || py::isinstance<pulsim::sources::NativePwm2Switch>(fn_)
+                || py::isinstance<pulsim::sources::NativeMultiMaskPwm>(fn_)) {
+                native_ = pulsim_bindings_common::adapt_switch_fn(fn_);
+                is_native_ = true;
+            } else if (py::hasattr(fn_, "next_edge_after")) {
+                // Generic Python callable: pre-resolve the attribute
+                // to avoid the hasattr cost per call.
+                nea_attr_ = fn_.attr("next_edge_after");
+                has_nea_  = true;
             }
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            // Bridge.12 native fast path — pure C++, no GIL touch.
-            if (native_pwm2_) return (*native_pwm2_)(t);
-            if (native_multi_) return (*native_multi_)(t);
-            if (has_sched_) return sched_(t);
+            if (is_native_) return native_.fn(t);
             // Generic Python fallback (Bridge.11 path).
             py::gil_scoped_acquire gil;
             return fn_(t).cast<SSM>();
         }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
-            if (native_pwm2_)  return native_pwm2_->next_edge_after(t);
-            if (native_multi_) return native_multi_->next_edge_after(t);
-            if (has_sched_ && sched_.has_edges()) {
-                return sched_.next_edge_after(t);
-            }
+            if (is_native_ && native_.next_edge) return native_.next_edge(t);
             if (has_nea_) {
                 py::gil_scoped_acquire gil;
                 return nea_attr_(t).cast<Real>();
@@ -824,10 +859,8 @@ void init_module(py::module_& m) {
         void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
         py::object fn_;
-        pulsim::sources::NativePwm2Switch*   native_pwm2_  = nullptr;
-        pulsim::sources::NativeMultiMaskPwm* native_multi_ = nullptr;
-        pulsim::sources::SwitchSchedule      sched_;
-        bool       has_sched_ = false;
+        pulsim_bindings_common::SwitchFnAdapter native_;
+        bool       is_native_ = false;
         py::object nea_attr_;
         bool       has_nea_ = false;
         EdgeSearch<SSM> search_;
@@ -885,6 +918,15 @@ void init_module(py::module_& m) {
             &NativeAdapter::rhs,
             py::arg("t"), py::arg("x"),
             "Continuous-time RHS: dx/dt = A·x + b(t).")
+        .def("node_pair_voltage",
+            &NativeAdapter::node_pair_voltage,
+            py::arg("from_node"), py::arg("to_node"),
+            py::arg("t"), py::arg("x"),
+            "v(from_node) − v(to_node) recovered from the reduced "
+            "state `x` under the active mask (−1 is ground). The "
+            "quantity a PWL diode predicate evaluates; affine in "
+            "`x`, so its gradient is the predicate's recovery row "
+            "(used by pulsim.periodic_steady_state for saltation).")
         .def_property_readonly("n_state",
             &NativeAdapter::n_state,
             "Number of continuous-time state variables for the "
@@ -894,6 +936,17 @@ void init_module(py::module_& m) {
             &NativeAdapter::has_dynamic_sources,
             "Whether any time-varying source is present. Determined "
             "once at construction by probing compute_*_b_extra.")
+        .def("reduced_initial_state",
+            [](const NativeAdapter& ad,
+               const pulsim::builder::CircuitBuilder& b) {
+                return ad.reduced_initial_state(b.initial_conditions());
+            },
+            py::arg("builder"),
+            "add-exact-propagator-strategy D5: the reduced state of the "
+            "current mask from a full-MNA initial vector "
+            "(the builder's c0= / i0= / set_initial), and the largest capacitor-voltage "
+            "adjustment the charge-conserving projection made (0 when the "
+            "declared values are consistent).")
         .def_property_readonly("num_cached_masks",
             &NativeAdapter::num_cached_masks,
             "Number of distinct masks resolved (and thus cached) "
@@ -909,7 +962,8 @@ void init_module(py::module_& m) {
            Real dt_init,
            Real dt_max,
            std::size_t store_every,
-           bool enable_event_projection) {
+           bool enable_event_projection,
+           bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1007,7 +1061,8 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            auto d = ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res, event_log);
+            d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             // v2.0 Phase 3 item 5 — the unified result: full MNA
             // trajectory reconstructed per recorded sample.
             d["states_full"] = reconstruct_full_states(adapter, res);
@@ -1024,6 +1079,7 @@ void init_module(py::module_& m) {
         py::arg("dt_max")      = Real{1e-5},
         py::arg("store_every") = std::size_t{1},
         py::arg("enable_event_projection") = true,
+        py::arg("event_log") = true,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
@@ -1041,7 +1097,8 @@ void init_module(py::module_& m) {
            Vector x0,
            Real t_end,
            Real h_fixed,
-           std::size_t store_every) {
+           std::size_t store_every,
+           bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
@@ -1049,7 +1106,7 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            auto d = ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res, event_log);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
             return d;
@@ -1060,6 +1117,7 @@ void init_module(py::module_& m) {
         py::arg("t_end"),
         py::arg("h_fixed")     = Real{1e-6},
         py::arg("store_every") = std::size_t{1},
+        py::arg("event_log") = true,
         "Bridge.11 — native PEDSimulatorBDF2 over a "
         "NativeCircuitBuilderAdapter (implicit BDF2 + CN bootstrap).");
 
@@ -1074,7 +1132,8 @@ void init_module(py::module_& m) {
            Real dt_max,
            Real h_bdf2,
            Real stiffness_threshold,
-           std::size_t store_every) {
+           std::size_t store_every,
+           bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1086,7 +1145,8 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            auto d = ped_result_auto_to_dict(res);
+            auto d = ped_result_auto_to_dict(res, event_log);
+            d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
             return d;
@@ -1102,6 +1162,7 @@ void init_module(py::module_& m) {
         py::arg("h_bdf2")              = Real{1e-6},
         py::arg("stiffness_threshold") = Real{10.0},
         py::arg("store_every")          = std::size_t{1},
+        py::arg("event_log") = true,
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 }

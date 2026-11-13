@@ -182,3 +182,130 @@ TEST_CASE("Exact: PWM or pulse sources decline the exact path",
     ad.set_mask(m);
     REQUIRE_FALSE(ad.has_exact_step());
 }
+
+// -----------------------------------------------------------------
+// add-exact-propagator-strategy — the kernel states its accuracy.
+// -----------------------------------------------------------------
+
+TEST_CASE("Exact: phi1 is accurate to 1e-14 at every |s|",
+          "[v2][dsed][exact_lti][phi]") {
+    // Reference: the Taylor series below |s| = 1 (40 terms, no
+    // cancellation), the direct form above (no cancellation there).
+    const auto ref = [](std::complex<Real> s) {
+        if (std::abs(s) < 1.0) {
+            std::complex<Real> term = 1.0, sum = 1.0;
+            for (int k = 2; k < 40; ++k) {
+                term *= s / Real(k);
+                sum += term;
+            }
+            return sum;
+        }
+        return (std::exp(s) - 1.0) / s;
+    };
+    const std::complex<Real> dirs[] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0.70710678118654752, 0.70710678118654752},
+        {-0.6, 0.8}};
+    for (const Real mag : {1e-12, 1e-9, 0.99e-6, 1e-6, 1.01e-6, 3e-6,
+                           1e-4, 1e-2, 0.3, 0.999, 1.0, 3.0, 10.0, 50.0}) {
+        for (const auto dir : dirs) {
+            const std::complex<Real> s = mag * dir;
+            const Real err = std::abs(phi1(s) - ref(s)) / std::abs(ref(s));
+            INFO("s = " << s);
+            REQUIRE(err <= 1e-14);
+        }
+    }
+    REQUIRE(phi1({0, 0}) == std::complex<Real>{1, 0});
+}
+
+namespace {
+// Series RLC, x = [i_L, v_C], 10 V step, x0 = [0.3 A, 2 V], advanced
+// by one natural period h = 2π·√(LC); references from 50-digit mpmath
+// on the same doubles (probes/dsed_baseline.py's circuit).
+struct RlcCase { Real R, i_ref, v_ref; };
+Real energy_rel_err(const Vector& x, Real i_ref, Real v_ref,
+                    Real L, Real C) {
+    const Real di = std::sqrt(L) * (x[0] - i_ref);
+    const Real dv = std::sqrt(C) * (x[1] - v_ref);
+    return std::hypot(di, dv)
+           / std::hypot(std::sqrt(L) * i_ref, std::sqrt(C) * v_ref);
+}
+}  // namespace
+
+TEST_CASE("Exact: critically damped RLC within 1e-10 through the tiers",
+          "[v2][dsed][exact_lti][tier]") {
+    const Real L = 100e-6, C = 100e-9, h = 1.98691765315922e-05;
+    const RlcCase cases[] = {
+        {63.30879875657095, 1.984050586612746999e-5, 10.002034882998897815},
+        {63.24555326661315, 8.550154551382151842e-6, 10.002506195702407315},
+        {63.24555320337391, 8.5501432690247946968e-6, 10.002506196172187995},
+        {63.24555320336759, 8.5501432678978433567e-6, 10.00250619617223492},
+    };
+    Vector d(2);
+    d << std::sqrt(L), std::sqrt(C);
+    Vector x0(2);
+    x0 << 0.3, 2.0;
+    for (const auto& c : cases) {
+        DenseMatrix A(2, 2);
+        A << -c.R / L, -1.0 / L, 1.0 / C, 0.0;
+        Vector b(2);
+        b << 10.0 / L, 0.0;
+        const auto e = make_exact_lti(A, b, d, h);
+        INFO("R = " << c.R << " tier " << e.tier << " kappa " << e.kappa);
+        REQUIRE(e.valid);
+        // The stated bound holds for whichever tier was taken.
+        if (e.tier == 1) {
+            REQUIRE(kExactRoundoff * e.kappa <= kExactTierBound);
+        } else {
+            REQUIRE(kExactRoundoff * e.norm_A1 * h <= kExactTierBound);
+        }
+        const Vector x = exact_advance(e, x0, h);
+        REQUIRE(energy_rel_err(x, c.i_ref, c.v_ref, L, C) <= 1e-10);
+    }
+    // R = R_crit exactly: the basis is "invertible" but kappa ~ 1e8+;
+    // it must not be accepted on tier 1 (the modal form was 1.1e-6
+    // off component-wise on the untouched kernel).
+    DenseMatrix A(2, 2);
+    A << -cases[3].R / L, -1.0 / L, 1.0 / C, 0.0;
+    Vector b(2);
+    b << 10.0 / L, 0.0;
+    const auto e = make_exact_lti(A, b, d, h);
+    REQUIRE(e.tier == 2);
+    REQUIRE_FALSE(e.reason.empty());
+    // Tier 2 caches the exponential per h.
+    (void)exact_advance(e, x0, h);
+    (void)exact_advance(e, x0, h);
+    REQUIRE(e.n_pade == 1);
+    REQUIRE(e.n_pade_hits == 1);
+}
+
+TEST_CASE("Exact: stiff buck idle mode stays on tier 1 to 1e-14",
+          "[v2][dsed][exact_lti][tier]") {
+    // Switch and diode both open (g_off = 1e-9 each): λ ≈ −5e12,
+    // ‖A·h‖₁ ≈ 1e7 at h = 2 µs. Padé would lose 8e-11 here; the
+    // eigenbasis in energy coordinates is near-orthogonal.
+    const Real L = 100e-6, C = 47e-6, R = 50.0;
+    const Real k = 1.0 / (1e-9 + 1e-9);
+    DenseMatrix A(2, 2);
+    A << -k / L, -1.0 / L, 1.0 / C, -1.0 / (R * C);
+    Vector d(2);
+    d << std::sqrt(L), std::sqrt(C);
+    const auto e = make_exact_lti(A, Vector::Zero(2), d, 2e-6);
+    REQUIRE(e.tier == 1);
+    Vector x(2);
+    x << 0.0, 1.0;
+    const Vector y = exact_advance(e, x, 2e-6);
+    REQUIRE(std::abs(y[1] - 0.99914929813728287694) <= 1e-14);
+}
+
+TEST_CASE("Exact: stiff and near-defective is tier 3, with the reason",
+          "[v2][dsed][exact_lti][tier]") {
+    // A Jordan block scaled to 1e12 (off-diagonal 1e12 too: with 1.0
+    // it is normal to rounding, kappa2 = 4.5e3, a legitimate tier 1).
+    // kappa2 = 3e15 and ||A*h||_1 = 2e7: neither bound holds.
+    DenseMatrix A(2, 2);
+    A << -1e12, 1e12, 0.0, -1e12;
+    const auto e = make_exact_lti(A, Vector::Zero(2), Vector{}, 1e-5);
+    REQUIRE_FALSE(e.valid);
+    REQUIRE(e.tier == 3);
+    REQUIRE(e.reason.find("stiff") != std::string::npos);
+}

@@ -120,6 +120,12 @@ public:
                 e.k1 = (Real{1} / e.params.T_M) / den;
                 e.k0 = -(k.c2 * e.q_m_gamma + k.c3 * e.q_m_prev)
                        / h / den;
+            } else if (stage == TrBdf2Stage::BackwardEuler) {
+                // q_M(1 + hA) = q_M,n + h q_E/T_M: the trapezoidal
+                // pair at 2h without the stored derivative f_n.
+                const Real den = Real{1} + h * A;
+                e.k1 = (h / e.params.T_M) / den;
+                e.k0 = e.q_m_prev / den;
             } else {
                 const Real den = Real{1} + h * A / Real{2};
                 e.k1 = (h / (Real{2} * e.params.T_M)) / den;
@@ -177,6 +183,19 @@ public:
                 e.f_prev = q_e / e.params.T_M - A * q_m;
             }
             e.q_m_prev = q_m;
+        }
+    }
+
+    /// SDIRK restart: pseudo previous q_M from the stage-1 solve, by
+    /// the same affine relation stage 1 solved with (K0/K1 of that
+    /// stage, as `capture_gamma`).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            const Real q_m = e.k0 + e.k1 *
+                models::LauritzenDiode::junction_charge<Real>(v, e.params);
+            e.q_m_prev += c * (q_m - e.q_m_prev);
         }
     }
 

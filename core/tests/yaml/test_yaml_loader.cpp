@@ -260,6 +260,7 @@ circuit:
       name: D2
       anode: a
       cathode: c
+      allow_non_passive: true
       V_F0: 0.7
       R_d: 0.01
       G_off: 1e-9
@@ -269,6 +270,28 @@ circuit:
     REQUIRE(loaded.builder.num_branches() == 1);
     REQUIRE(loaded.builder.pool().kind_of(0) ==
               DevicePool::StoredKind::NonlinearDiode);
+}
+
+TEST_CASE("YAML loader: retired nonlinear_diode needs the opt-in",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: nonlinear_diode
+      name: D2
+      anode: a
+      cathode: c
+)YAML";
+    try {
+        (void)yaml::load_string(yaml);
+        FAIL("nonlinear_diode without allow_non_passive was accepted");
+    } catch (const std::runtime_error& e) {
+        const std::string msg = e.what();
+        REQUIRE(msg.find("D2") != std::string::npos);
+        REQUIRE(msg.find("retired") != std::string::npos);
+        REQUIRE(msg.find("allow_non_passive") != std::string::npos);
+        REQUIRE(msg.find("add_shockley_diode") != std::string::npos);
+    }
 }
 
 TEST_CASE("YAML loader: mosfet round-trip",
@@ -679,4 +702,45 @@ TEST_CASE("YAML loader: source and has_simulation record provenance",
         "circuit:" + kRcDevices + "simulation: {t_end: 1.0e-3, dt: 1.0e-6}\n");
     REQUIRE(with.has_simulation);
     REQUIRE(with.options.t_end == Approx(1.0e-3));
+}
+
+TEST_CASE("YAML loader: capacitor/inductor parasitics and dc_machine",
+          "[v2][layer8][yaml][passives][machines]") {
+    const auto lc = yaml::load_string(R"YAML(
+circuit:
+  devices:
+    - {type: voltage_source, name: V, from: a, to: gnd, V: 10.0}
+    - {type: capacitor, name: C1, from: a, to: gnd, C: 1.0e-6, esr: 0.05, esl: 1.0e-9}
+    - {type: inductor, name: L1, from: a, to: b, L: 1.0e-4, esr: 0.1, c_par: 1.0e-11}
+    - {type: resistor, name: R, from: b, to: gnd, R: 1.0}
+    - {type: dc_machine, name: M, a_pos: a, a_neg: gnd, omega_node: w,
+       R_a: 0.5, L_a: 1.0e-3, K: 0.1, J: 1.0e-5, T_load: 0.2}
+)YAML");
+    const auto& b = lc.builder;
+    for (const char* n : {"C1.esr", "C1.esl", "C1", "L1.esr", "L1",
+                          "L1.cpar", "M.ra", "M.la", "M.em", "M.j",
+                          "M.tl"}) {
+        INFO(n);
+        REQUIRE_NOTHROW(b.branch_id_of(n));
+    }
+    REQUIRE_THROWS(b.branch_id_of("M.b"));     // B = 0 adds nothing
+
+    // Zero parasitics add nothing.
+    const auto plain = yaml::load_string(
+        "circuit:\n  devices:\n"
+        "    - {type: capacitor, name: C, from: a, to: gnd, C: 1.0e-6, esr: 0.0}\n");
+    REQUIRE(plain.builder.graph().num_branches() == 1);
+
+    REQUIRE(load_error("circuit:\n  devices:\n"
+                       "    - {type: capacitor, name: C9, from: a, to: gnd, "
+                       "C: 1.0e-6, esr: -1.0}\n")
+                .find("capacitor 'C9': esr") != std::string::npos);
+    REQUIRE(load_error("circuit:\n  devices:\n"
+                       "    - {type: inductor, name: L9, from: a, to: gnd, "
+                       "L: 1.0e-6, rac: [1, 2]}\n")
+                .find("'rac' is not read") != std::string::npos);
+    REQUIRE(load_error("circuit:\n  devices:\n"
+                       "    - {type: dc_machine, name: M9, a_pos: a, a_neg: gnd, "
+                       "omega_node: w, L_a: 1.0e-3, K: 0.0, J: 1.0e-5}\n")
+                .find("dc_machine 'M9': K") != std::string::npos);
 }

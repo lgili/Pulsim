@@ -53,6 +53,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <format>
 #include <fstream>
 #include <initializer_list>
@@ -60,6 +61,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace pulsim::yaml {
@@ -153,6 +155,85 @@ namespace detail {
     return default_value;
 }
 
+/// add-controlled-source-set: the new types are strict — a key outside
+/// `allowed` (plus `type` / `name`) is an error naming the device.
+inline void require_only_keys(const YAML::Node& dev, std::size_t idx,
+                              const std::string& type,
+                              std::initializer_list<std::string_view> allowed) {
+    for (const auto& kv : dev) {
+        const std::string key = kv.first.as<std::string>();
+        bool ok = key == "type" || key == "name";
+        for (const auto a : allowed) ok = ok || key == a;
+        if (!ok) {
+            std::string accepted;
+            for (const auto a : allowed) {
+                accepted += accepted.empty() ? "" : ", ";
+                accepted += a;
+            }
+            throw std::runtime_error(std::format(
+                "yaml::load: device {} has unknown key '{}' (accepted: "
+                "type, name, {})", device_label(dev, idx, type), key,
+                accepted));
+        }
+    }
+}
+
+[[nodiscard]] inline std::vector<Real> require_real_list(
+    const YAML::Node& dev, std::size_t idx, const std::string& type,
+    const std::string& field) {
+    if (!dev[field] || !dev[field].IsSequence()) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {} needs '{}' as a list of numbers",
+            device_label(dev, idx, type), field));
+    }
+    return dev[field].as<std::vector<Real>>();
+}
+
+/// A two-column table (t, i) from a text file: comma or whitespace
+/// separated, blank lines and lines starting with '#' skipped. A
+/// relative path is taken from the working directory.
+inline void read_table_file(const std::string& path, const std::string& who,
+                            std::vector<Real>& t, std::vector<Real>& v) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: cannot open table file '{}'", who, path));
+    }
+    std::string line;
+    for (std::size_t n = 1; std::getline(in, line); ++n) {
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos || line[first] == '#') continue;
+        for (char& c : line) {
+            if (c == ',' || c == ';') c = ' ';
+        }
+        std::istringstream row(line);
+        Real a = 0, b = 0;
+        std::string rest;
+        if (!(row >> a >> b) || (row >> rest)) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: line {} of '{}' is not two numbers",
+                who, n, path));
+        }
+        t.push_back(a);
+        v.push_back(b);
+    }
+}
+
+/// A non-negative finite parameter (default 0); refused by name
+/// otherwise. Used by the parasitic keys of `capacitor` / `inductor`
+/// and by `dc_machine` (add-realistic-passives, add-mna-native-machines).
+[[nodiscard]] inline Real nonneg_or_zero(
+    const YAML::Node& node, const std::string& type,
+    const std::string& name, const std::string& field) {
+    const Real v = real_or(node, field, Real{0});
+    if (!std::isfinite(v) || v < Real{0}) {
+        throw std::runtime_error(std::format(
+            "yaml::load: {} '{}': {} must be finite and >= 0 (got {})",
+            type, name, field, v));
+    }
+    return v;
+}
+
 /// Parse a single device entry; dispatches by `type`.
 inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
@@ -219,7 +300,9 @@ inline void load_device(
             require_real(dev, idx, type, "K"),
             require_real(dev, idx, type, "V_T"),
             real_or(dev, "lambda", Real{0.02}),
-            real_or(dev, "kappa",  Real{15.0}));
+            real_or(dev, "kappa",  Real{15.0}),
+            bool_or(dev, "with_body_diode", true),
+            real_or(dev, "V_F",    Real{0.7}));
     } else if (type == "vcvs") {
         b.add_vcvs(
             name,
@@ -228,6 +311,79 @@ inline void load_device(
             require_string(dev, idx, type, "out_pos"),
             require_string(dev, idx, type, "out_neg"),
             require_real(dev, idx, type, "gain"));
+    } else if (type == "vccs") {
+        require_only_keys(dev, idx, type,
+                          {"in_pos", "in_neg", "from", "to", "gm"});
+        b.add_vccs(name, require_string(dev, idx, type, "in_pos"),
+                   require_string(dev, idx, type, "in_neg"),
+                   require_string(dev, idx, type, "from"),
+                   require_string(dev, idx, type, "to"),
+                   require_real(dev, idx, type, "gm"));
+    } else if (type == "ccvs") {
+        require_only_keys(dev, idx, type,
+                          {"control", "out_pos", "out_neg", "rm"});
+        b.add_ccvs(name, require_string(dev, idx, type, "control"),
+                   require_string(dev, idx, type, "out_pos"),
+                   require_string(dev, idx, type, "out_neg"),
+                   require_real(dev, idx, type, "rm"));
+    } else if (type == "cccs") {
+        require_only_keys(dev, idx, type, {"control", "from", "to", "gain"});
+        b.add_cccs(name, require_string(dev, idx, type, "control"),
+                   require_string(dev, idx, type, "from"),
+                   require_string(dev, idx, type, "to"),
+                   require_real(dev, idx, type, "gain"));
+    } else if (type == "gyrator") {
+        require_only_keys(dev, idx, type,
+                          {"p1_pos", "p1_neg", "p2_pos", "p2_neg", "g"});
+        b.add_gyrator(name, require_string(dev, idx, type, "p1_pos"),
+                      require_string(dev, idx, type, "p1_neg"),
+                      require_string(dev, idx, type, "p2_pos"),
+                      require_string(dev, idx, type, "p2_neg"),
+                      require_real(dev, idx, type, "g"));
+    } else if (type == "sine_current_source") {
+        require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",
+                                           "frequency", "phase"});
+        b.add_sine_current_source(
+            name, require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "i_dc"),
+            require_real(dev, idx, type, "i_amplitude"),
+            require_real(dev, idx, type, "frequency"),
+            real_or(dev, "phase", Real{0}));
+    } else if (type == "pulse_current_source") {
+        require_only_keys(dev, idx, type,
+                          {"from", "to", "i_initial", "i_pulsed", "t_start",
+                           "pulse_width", "period", "rise_time", "fall_time"});
+        b.add_pulse_current_source(
+            name, require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "i_initial"),
+            require_real(dev, idx, type, "i_pulsed"),
+            require_real(dev, idx, type, "t_start"),
+            require_real(dev, idx, type, "pulse_width"),
+            real_or(dev, "period", Real{0}),
+            real_or(dev, "rise_time", Real{0}),
+            real_or(dev, "fall_time", Real{0}));
+    } else if (type == "pwl_current_source") {
+        require_only_keys(dev, idx, type,
+                          {"from", "to", "t", "i", "file", "periodic"});
+        std::vector<Real> t, v;
+        if (dev["file"]) {
+            if (dev["t"] || dev["i"]) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {} gives both 'file' and 't'/'i'; "
+                    "use one", device_label(dev, idx, type)));
+            }
+            read_table_file(require_string(dev, idx, type, "file"),
+                            device_label(dev, idx, type), t, v);
+        } else {
+            t = require_real_list(dev, idx, type, "t");
+            v = require_real_list(dev, idx, type, "i");
+        }
+        b.add_pwl_current_source(name, require_string(dev, idx, type, "from"),
+                                 require_string(dev, idx, type, "to"),
+                                 std::move(t), std::move(v),
+                                 bool_or(dev, "periodic", false));
     } else if (type == "op_amp_ideal") {
         b.add_op_amp_ideal(
             name,
@@ -252,7 +408,11 @@ inline void load_device(
             real_or(dev, "V_CE_sat", Real{1.5}),
             real_or(dev, "R_CE_sat", Real{0.05}),
             real_or(dev, "V_T",      Real{5.0}),
-            real_or(dev, "kappa",    Real{10.0}));
+            real_or(dev, "kappa",    Real{10.0}),
+            real_or(dev, "v_knee",   Real{0.01}),
+            bool_or(dev, "with_fwd", false),
+            Real{0}, Real{0},
+            real_or(dev, "V_F",      Real{0.7}));
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -260,17 +420,86 @@ inline void load_device(
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "R"));
     } else if (type == "capacitor") {
+        // esr / esl: series composite, the same expansion as the
+        // Python keywords (python/pulsim/passives.py); zero adds nothing.
+        const Real esr = nonneg_or_zero(dev, type, name, "esr");
+        const Real esl = nonneg_or_zero(dev, type, name, "esl");
+        std::string from = require_string(dev, idx, type, "from");
+        if (esr > Real{0}) {
+            b.add_resistor(name + ".esr", from, name + ".esr_n", esr);
+            from = name + ".esr_n";
+        }
+        if (esl > Real{0}) {
+            b.add_inductor(name + ".esl", from, name + ".esl_n", esl);
+            from = name + ".esl_n";
+        }
         b.add_capacitor(
             name,
-            require_string(dev, idx, type, "from"),
+            from,
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "C"));
     } else if (type == "inductor") {
-        b.add_inductor(
-            name,
-            require_string(dev, idx, type, "from"),
-            require_string(dev, idx, type, "to"),
-            require_real(dev, idx, type, "L"));
+        if (dev["rac"]) {
+            throw std::runtime_error(std::format(
+                "yaml::load: inductor '{}': 'rac' is not read from YAML "
+                "yet; build the ladder in Python "
+                "(pulsim.passives.fit_rac_ladder, add_inductor(rac=)).",
+                name));
+        }
+        const Real esr = nonneg_or_zero(dev, type, name, "esr");
+        const Real c_par = nonneg_or_zero(dev, type, name, "c_par");
+        const std::string from = require_string(dev, idx, type, "from");
+        const std::string to = require_string(dev, idx, type, "to");
+        std::string a = from;
+        if (esr > Real{0}) {
+            b.add_resistor(name + ".esr", a, name + ".esr_n", esr);
+            a = name + ".esr_n";
+        }
+        b.add_inductor(name, a, to, require_real(dev, idx, type, "L"));
+        if (c_par > Real{0}) {
+            b.add_capacitor(name + ".cpar", from, to, c_par);
+        }
+    } else if (type == "dc_machine") {
+        // add-mna-native-machines: the composite of
+        // CircuitBuilder.add_dc_machine (python/pulsim/machines.py).
+        const Real R_a = nonneg_or_zero(dev, type, name, "R_a");
+        const Real L_a = require_real(dev, idx, type, "L_a");
+        const Real K = require_real(dev, idx, type, "K");
+        const Real J = require_real(dev, idx, type, "J");
+        const Real B = nonneg_or_zero(dev, type, name, "B");
+        const Real T_load = real_or(dev, "T_load", Real{0});
+        for (const auto& [label, v] : {std::pair{"L_a", L_a},
+                                       std::pair{"K", K},
+                                       std::pair{"J", J}}) {
+            if (!std::isfinite(v) || v <= Real{0}) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: dc_machine '{}': {} must be finite and "
+                    "> 0 (got {})", name, label, v));
+            }
+        }
+        if (!std::isfinite(T_load)) {
+            throw std::runtime_error(std::format(
+                "yaml::load: dc_machine '{}': T_load must be finite",
+                name));
+        }
+        const std::string a_pos = require_string(dev, idx, type, "a_pos");
+        const std::string a_neg = require_string(dev, idx, type, "a_neg");
+        const std::string omega = require_string(dev, idx, type, "omega_node");
+        const std::string emf = name + ".emf";
+        std::string l_from = a_pos;
+        if (R_a > Real{0}) {
+            l_from = name + ".ra_la";
+            b.add_resistor(name + ".ra", a_pos, l_from, R_a);
+        }
+        b.add_inductor(name + ".la", l_from, emf, L_a);
+        b.add_ideal_transformer(name + ".em", omega, "gnd", emf, a_neg, K);
+        b.add_capacitor(name + ".j", omega, "gnd", J, Real{0});
+        if (B > Real{0}) {
+            b.add_resistor(name + ".b", omega, "gnd", Real{1} / B);
+        }
+        if (T_load != Real{0}) {
+            b.add_current_source(name + ".tl", "gnd", omega, T_load);
+        }
     } else if (type == "diode") {
         b.add_diode(
             name,
@@ -281,6 +510,21 @@ inline void load_device(
             real_or(dev, "V_th", Real{0}),
             real_or(dev, "V_f", Real{0}));
     } else if (type == "nonlinear_diode") {
+        // Retired (fix-nonlinear-diode-passivity): the law sources
+        // power below V_F0. Same text as the Python refusal.
+        if (!bool_or(dev, "allow_non_passive", false)) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: nonlinear_diode is retired: its "
+                "smooth-blend law logistic(kappa*(v - V_F0))*(v - V_F0)/R_d "
+                "is negative for 0 < v < V_F0, so the device sources power "
+                "below its knee (-1.39 A out of a forward-biased anode at "
+                "+0.636 V with the default parameters). Use type: diode "
+                "with V_f (a PWL diode with a forward drop), or build the "
+                "circuit in Python with add_shockley_diode (a smooth "
+                "junction). Set allow_non_passive: true to build the "
+                "legacy device anyway.",
+                device_label(dev, idx, type)));
+        }
         models::IdealDiode::Params p{
             .V_F0  = real_or(dev, "V_F0", Real{0.7}),
             .R_d   = real_or(dev, "R_d",  Real{0.01}),
@@ -305,7 +549,9 @@ inline void load_device(
             require_string(dev, idx, type, "drain"),
             require_string(dev, idx, type, "source"),
             real_or(dev, "R_on",  Real{1e-3}),
-            real_or(dev, "R_off", Real{1e9}));
+            real_or(dev, "R_off", Real{1e9}),
+            /*body_diode=*/true,
+            real_or(dev, "V_F",   Real{0.7}));
     } else if (type == "mosfet_with_body_diode") {
         b.add_mosfet_with_body_diode(
             name,
@@ -509,6 +755,110 @@ inline void load_device(
             require_string(dev, idx, type, "to"),
             N_turns, A_core, l_m, real_or(dev, "l_gap", Real{0}), ja,
             /*substeps_min=*/8, real_or(dev, "M0", Real{0}));
+    } else if (type == "power_mosfet") {
+        // add-power-mosfet-datasheet-device. Strict keys: a misspelt
+        // parameter would otherwise silently take its default.
+        auto strict = [&](const YAML::Node& node, const std::string& where,
+                          std::initializer_list<std::string_view> keys) {
+            for (const auto& kv : node) {
+                const auto k = kv.first.as<std::string>();
+                bool ok = false;
+                for (auto a : keys) ok = ok || k == a;
+                if (!ok) {
+                    throw std::runtime_error(std::format(
+                        "yaml::load: device {}: unknown key '{}' in {}",
+                        device_label(dev, idx), k, where));
+                }
+            }
+        };
+        strict(dev, "power_mosfet",
+               {"type", "name", "drain", "source", "gate", "K", "V_T",
+                "lambda", "kappa", "R_d", "C_gs", "C_gd", "C_ds", "R_g",
+                "L_s", "body_diode", "T_j", "rds_tc1", "rds_tc2", "vt_tc"});
+        auto reals = [&](const YAML::Node& n, const std::string& f) {
+            if (!n[f] || !n[f].IsSequence()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: '{}' must be a list of numbers",
+                    device_label(dev, idx), f));
+            }
+            return n[f].as<std::vector<Real>>();
+        };
+        auto cap = [&](const std::string& f) -> models::PowerMosfet::Capacitance {
+            const YAML::Node n = dev[f];
+            if (!n) return Real{0};
+            if (n.IsScalar()) return n.as<Real>();
+            const std::string law = n["law"] ? n["law"].as<std::string>() : "";
+            if (law == "junction") {
+                strict(n, f, {"law", "C0", "V0", "m", "v_floor"});
+                return models::NonlinearCapacitor::junction(
+                    require_real(n, idx, type + "." + f, "C0"),
+                    require_real(n, idx, type + "." + f, "V0"),
+                    real_or(n, "m", Real{0.5}), real_or(n, "v_floor", Real{-0.9}));
+            }
+            if (law == "vdmos_cgd") {
+                strict(n, f, {"law", "cgd_max", "cgd_min", "a"});
+                return models::NonlinearCapacitor::vdmos_cgd(
+                    require_real(n, idx, type + "." + f, "cgd_max"),
+                    require_real(n, idx, type + "." + f, "cgd_min"),
+                    require_real(n, idx, type + "." + f, "a"));
+            }
+            if (law == "table") {
+                strict(n, f, {"law", "v", "Q", "C"});
+                const std::string what = std::format("{}.{}", name, f);
+                auto t = n["Q"]
+                    ? models::ChargeTable(reals(n, "v"), reals(n, "Q"), reals(n, "C"), what)
+                    : models::ChargeTable::from_capacitance(reals(n, "v"), reals(n, "C"), what);
+                return models::NonlinearCapacitor::from_table(
+                    std::make_shared<const models::ChargeTable>(std::move(t)));
+            }
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: {} must be a number (linear, F) or a "
+                "map with law: junction | vdmos_cgd | table (got law '{}')",
+                device_label(dev, idx), f, law));
+        };
+        models::PowerMosfet::Params p;
+        p.K = require_real(dev, idx, type, "K");
+        p.V_T = require_real(dev, idx, type, "V_T");
+        p.lambda = real_or(dev, "lambda", Real{0});
+        p.kappa = real_or(dev, "kappa", Real{15});
+        p.R_d = real_or(dev, "R_d", Real{0});
+        p.C_gs = require_real(dev, idx, type, "C_gs");
+        p.C_gd = cap("C_gd");
+        p.C_ds = cap("C_ds");
+        p.R_g = real_or(dev, "R_g", Real{0});
+        p.L_s = real_or(dev, "L_s", Real{0});
+        p.T_j = real_or(dev, "T_j", Real{25});
+        p.rds_tc1 = real_or(dev, "rds_tc1", Real{0});
+        p.rds_tc2 = real_or(dev, "rds_tc2", Real{0});
+        p.vt_tc = real_or(dev, "vt_tc", Real{0});
+        if (const YAML::Node bd = dev["body_diode"]; bd && !bd.IsNull()) {
+            const std::string model = bd["model"] ? bd["model"].as<std::string>() : "";
+            if (model == "lauritzen") {
+                strict(bd, "body_diode", {"model", "I_S", "n", "V_T", "tau", "T_M", "G_min"});
+                p.body = models::PowerMosfet::BodyDiode::Lauritzen;
+                auto& L = p.lauritzen;
+                L.I_S = real_or(bd, "I_S", L.I_S); L.n = real_or(bd, "n", L.n);
+                L.V_T = real_or(bd, "V_T", L.V_T); L.tau = real_or(bd, "tau", L.tau);
+                L.T_M = real_or(bd, "T_M", L.T_M); L.G_min = real_or(bd, "G_min", L.G_min);
+            } else if (model == "shockley") {
+                strict(bd, "body_diode", {"model", "I_S", "n", "V_T", "G_min", "BV"});
+                p.body = models::PowerMosfet::BodyDiode::Shockley;
+                auto& S = p.shockley;
+                S.I_S = real_or(bd, "I_S", S.I_S); S.n = real_or(bd, "n", S.n);
+                S.V_T = real_or(bd, "V_T", S.V_T); S.G_min = real_or(bd, "G_min", S.G_min);
+                S.BV = real_or(bd, "BV", S.BV);
+            } else {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: body_diode.model must be "
+                    "'lauritzen' or 'shockley' (got '{}')",
+                    device_label(dev, idx), model));
+            }
+        }
+        b.add_power_mosfet(
+            name,
+            require_string(dev, idx, type, "drain"),
+            require_string(dev, idx, type, "source"),
+            require_string(dev, idx, type, "gate"), p);
     } else {
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +
@@ -517,11 +867,14 @@ inline void load_device(
             "pwm_voltage_source, sine_voltage_source, "
             "pulse_voltage_source, resistor, capacitor, "
             "inductor, saturable_inductor, hysteretic_inductor, "
-            "diode, nonlinear_diode, switch, "
+            "diode, nonlinear_diode (retired; needs allow_non_passive), switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "igbt, igbt_level1, vcvs, op_amp_ideal, "
+            "power_mosfet, igbt, igbt_level1, vcvs, vccs, ccvs, cccs, gyrator, "
+            "sine_current_source, pulse_current_source, "
+            "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
-            "ideal_transformer, saturable_transformer, induction_motor");
+            "ideal_transformer, saturable_transformer, induction_motor, "
+            "dc_machine");
     }
 }
 

@@ -198,9 +198,11 @@ def test_dsed_integrator_bdf2_runs_end_to_end():
           f"events: {res.n_events}")
 
 
-def test_dsed_integrator_auto_picks_rk45_on_non_stiff_buck():
-    """`integrator='auto'` on a non-stiff buck CCM should route to
-    RK45 (the dispatcher correctly classifies the buck as non-stiff)."""
+def test_dsed_integrator_auto_takes_the_exact_stepper_on_buck():
+    """`integrator='auto'` on a buck CCM takes the exact stepper: every
+    mode is LTI with a constant source, so neither numeric integrator
+    runs (fix-dsed-auto-integrator-selection; before, 'auto' asked the
+    stiffness detector first and ran RK45 here)."""
     import pulsim as p
     b = _make_buck_ccm()
     sf = _pwm_switch_fn(T_sw=1.0 / 100e3, D=0.5)
@@ -211,14 +213,14 @@ def test_dsed_integrator_auto_picks_rk45_on_non_stiff_buck():
         rtol=1e-6, switch_fn=sf,
     )
     assert not res.empty()
-    assert res.n_rk45_steps > 0
-    # Buck CCM at standard params is NOT stiff → BDF2 should never fire
+    assert res.n_exact_steps > 0
     assert res.n_bdf2_steps == 0
     # Should match the RK45-only result (V_out = D·V_in = 12V exactly)
     final_vc = float(res.states_reduced[-1][0])
     assert abs(final_vc - 12.0) / 24.0 < 0.05    # within 5% of V_out_expected
     print(f"  Auto final v_C: {final_vc:.4f} V, "
-          f"rk45={res.n_rk45_steps}, bdf2={res.n_bdf2_steps}, "
+          f"exact={res.n_exact_steps}, rk45={res.n_rk45_steps}, "
+          f"bdf2={res.n_bdf2_steps}, "
           f"events={res.n_events}")
 
 

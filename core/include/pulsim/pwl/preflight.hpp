@@ -70,6 +70,7 @@
 
 #include <format>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -215,8 +216,13 @@ private:
     switch (branch.kind) {
         case topology::BranchKind::PassiveLinear:
             return pool.kind_of(branch.id) != SK::Capacitor;
-        case topology::BranchKind::Source:
-            return pool.kind_of(branch.id) != SK::CurrentSource;
+        case topology::BranchKind::Source: {
+            // A current OUTPUT is no DC path (add-controlled-source-set).
+            const auto k = pool.kind_of(branch.id);
+            return k != SK::CurrentSource && k != SK::VCCS &&
+                   k != SK::CCCS && k != SK::SineCurrentSource &&
+                   k != SK::PulseCurrentSource && k != SK::PwlCurrentSource;
+        }
         case topology::BranchKind::Nonlinear:
             // A saturable inductor is a short at DC (v = dλ/dt = 0),
             // exactly like a linear one; the other Newton devices
@@ -234,12 +240,17 @@ private:
 /// deterministic and the report is reproducible.
 template <class EdgePredicate>
 [[nodiscard]] inline std::vector<std::vector<Index>>
-components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
+components_without_ground(
+    const topology::Graph& graph, EdgePredicate edge_ok,
+    const std::vector<std::pair<Index, Index>>& extra_ties = {}) {
     GroundUnionFind uf{graph.num_nodes()};
     for (Index b = 0; b < graph.num_branches(); ++b) {
         const auto& br = graph.branch(b);
         if (!edge_ok(br)) continue;
         uf.unite(uf.slot_of(br.from), uf.slot_of(br.to));
+    }
+    for (const auto& [a, b] : extra_ties) {
+        uf.unite(uf.slot_of(a), uf.slot_of(b));
     }
 
     // Bucket nodes by representative, skipping anything grounded.
@@ -283,9 +294,24 @@ components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
     const PreflightOptions& opts = {}) {
     PreflightReport report;
 
+    // An ideal transformer's primary is a pair of node references,
+    // not a graph branch, yet its constraint fixes v_p_from − v_p_to
+    // = v_s/n at DC and in every transient build. Without these ties
+    // a node reached only through a primary (a DC machine's speed
+    // node, add-mna-native-machines) was reported floating and given
+    // a needless 1 GΩ bleeder.
+    std::vector<std::pair<Index, Index>> primary_ties;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (pool.is_registered(b) &&
+            pool.kind_of(b) == DevicePool::StoredKind::IdealTransformer) {
+            primary_ties.push_back(pool.ideal_transformer_primary_nodes(b));
+        }
+    }
+
     // ---- 1. Galvanically isolated subnets ------------------------
     const auto isolated = detail::components_without_ground(
-        graph, [](const topology::Branch&) { return true; });
+        graph, [](const topology::Branch&) { return true; },
+        primary_ties);
 
     for (const auto& comp : isolated) {
         if (comp.empty()) continue;
@@ -325,7 +351,7 @@ components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
     const auto dc_floating = detail::components_without_ground(
         graph, [&pool](const topology::Branch& br) {
             return detail::conducts_at_dc(pool, br);
-        });
+        }, primary_ties);
 
     // A component that is ALSO galvanically isolated is already
     // described by finding 1 at the same anchor; reporting the same

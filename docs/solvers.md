@@ -23,12 +23,39 @@ Pulsim's transient kernel supports two **fixed-step** integrators
 - 2nd-order, A-stable, NOT L-stable.
 - Cheap: 1 sparse solve per step.
 - Used for the bread-and-butter PWM-switched-mode workflow.
+- `discontinuity_restart=True` (off by default): the step containing a
+  mask change, diode flip, source jump (or a `b_extra_fn` jump declared
+  through `next_jump_after(t)`) or inconsistent start, and the next two,
+  are Alexander SDIRK(2,2) steps (γ = 1 − 1/√2, L-stable). Each is two
+  backward-Euler-like stages of γ·dt on one factor per mask at 2γ·dt.
+  The result is order 2 across edges on the grid instead of 1, with no
+  alternation after them, and resonant modes keep their energy. The
+  gate is sampled at the step start, and a source reads its left limit
+  at a jump on the step end. `engine='trbdf2'` and `'dsed'` refuse it,
+  and so does `enable_substep_state_correction`.
 
 ### BDF1 (implicit Euler)
 
 - 1st-order, L-stable.
 - Used for stiff systems where Tustin would oscillate at large `dt`.
 - Enabled by `opts.advanced.timestep.integrator = Bdf1`.
+
+### Newton on nonlinear devices (`pwl` and `trbdf2`)
+
+Circuits with Newton devices (Shockley diodes, MOSFET Level-1,
+saturable magnetics) solve `J_lin + J_nl` each iteration. Each run keeps
+one Newton workspace: the combined Jacobian is written in place on the
+union pattern of the two operands, and one sparse-LU analysis is reused
+for as long as that pattern holds (checked after every device refresh;
+a switch state with another pattern, or the static `dt = 0` system,
+analyses again). Results are bit-identical to analysing every
+iteration (`update-newton-persistent-solver`, stage A1). Since stage
+A2 the factorisation is the in-house sparse LU, refactorised in place
+with no allocation per iteration; the DC operating point keeps
+`Eigen::SparseLU`. `result.newton` reports the run's counters
+(`iterations`, `analyses`, `factorizations`, …) and the iteration count
+of every Newton call (`iterations_per_solve`). The Levenberg-Marquardt
+fallback still factorises from scratch.
 
 ## Adaptive Runge-Kutta integrators (Phase 2.4, standalone)
 

@@ -70,7 +70,7 @@ TEST_CASE("Roundoff acceptance: a limit cycle without net contraction "
         const Cycle cyc;
         const Vector x = solve_with_newton_b_extra(
             seg, cyc, g, pool, Vector::Zero(seg.state_size),
-            Vector::Zero(seg.state_size), iters, 1e-9, 1e-9, false, false,
+            Vector::Zero(seg.state_size), iters, 1e-9, 1e-9, false, false, nullptr,
             &ro);
         REQUIRE(ro.accepted);
         REQUIRE(ro.omega <= ro.omega_max);

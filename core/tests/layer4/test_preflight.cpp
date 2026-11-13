@@ -211,3 +211,28 @@ TEST_CASE("The tie is high-impedance: it must not load the node",
     REQUIRE(b.pool().kind_of(before) ==
              DevicePool::StoredKind::Resistor);
 }
+
+TEST_CASE("Preflight counts an ideal transformer primary as a DC path",
+          "[v2][layer4][preflight]") {
+    // add-mna-native-machines: a DC machine's speed node `w` is
+    // reached only through the transformer primary and the inertia
+    // capacitor. The constraint v_e − v_aneg = K·v_w fixes it, so the
+    // circuit is well posed and must not get a bleeder.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "a", "gnd", 10.0);
+    b.add_resistor("M.ra", "a", "m", 0.5);
+    b.add_inductor("M.la", "m", "e", 1e-3);
+    b.add_ideal_transformer("M.em", "w", "gnd", "e", "gnd", 0.1);
+    b.add_capacitor("M.j", "w", "gnd", 1e-5);
+    b.add_current_source("M.tl", "gnd", "w", 0.2);
+    const auto report = analyze_preflight(b.graph(), b.pool());
+    REQUIRE(report.findings.empty());
+
+    // Control: without the transformer the same node IS DC-floating.
+    builder::CircuitBuilder c;
+    c.add_capacitor("J", "w", "gnd", 1e-5);
+    c.add_current_source("T", "gnd", "w", 0.2);
+    c.add_resistor("R", "w", "x", 1.0);
+    c.add_capacitor("C2", "x", "gnd", 1e-6);
+    REQUIRE_FALSE(analyze_preflight(c.graph(), c.pool()).findings.empty());
+}

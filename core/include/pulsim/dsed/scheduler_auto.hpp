@@ -97,6 +97,7 @@ struct PEDResultAuto {
     std::size_t n_events = 0;
     std::size_t n_rk45_steps = 0;
     std::size_t n_bdf2_steps = 0;
+    std::size_t n_exact_steps = 0;   // closed-form LTI propagator
     Real cpu_time_seconds = Real{0};
 };
 
@@ -166,6 +167,9 @@ public:
 
         Vector x = x0;
         Real t = Real{0};
+        if constexpr (requires { system_.set_max_step(dt_max_); }) {
+            system_.set_max_step(dt_max_);
+        }
         Real h_rk45 = dt_init_;
 
         MaskT mask = switch_fn_(t);
@@ -218,7 +222,52 @@ public:
                 ? std::min(t_gate_raw, t_end)
                 : std::min(t + dt_max_ * kPollFractionOfDtMax, t_end);
 
-            // 2. Take one step using the current mode's integrator
+            // 2a. Exact stepper first. A mode with a closed-form
+            //     propagator (LTI, supported sources, non-defective
+            //     eigenbasis) is advanced exactly for any h; the
+            //     stiffness detector only chooses between the two
+            //     NUMERIC integrators for modes without one. Before,
+            //     a stiff mode went to BDF2 at h_bdf2 = 1 µs and a
+            //     tau = 10 ns node read 196 V for a 100 V source.
+            //     Steps are capped at dt_max and the next gate edge,
+            //     as on the RK45 scheduler.
+            if constexpr (HasExactStep<System>) {
+                const Real h_ex = std::min(dt_max_, t_gate - t);
+                if (h_ex > Real{0} && system_.has_exact_step()) {
+                    step_mask = system_.current_mask();
+                    if constexpr (requires {
+                                      system_.exact_advance_state_into(
+                                          t, x, h_ex, x_ex_);
+                                  }) {
+                        system_.exact_advance_state_into(t, x, h_ex, x_ex_);
+                        x.swap(x_ex_);
+                    } else {
+                        x = system_.exact_advance_state(t, x, h_ex);
+                    }
+                    t += h_ex;
+                    rk_state.invalidate();
+                    bdf2_state.invalidate();
+                    ++result.n_accept;
+                    ++result.n_exact_steps;
+                    if (t_gate < t_end && near_time(t, t_gate)) {
+                        const IntegratorChoice prev_choice = choice;
+                        fire_gate_event_(t_gate, x, rk_state, bdf2_state,
+                                            prev_choice, result);
+                        choice = detector_.select(
+                            resolve_mode_id(system_, system_.current_mask()),
+                            system_.A_matrix(), dt_max_);
+                        h_rk45 = dt_init_;
+                    }
+                    ++step_idx;
+                    if (step_idx % store_every_ == 0) {
+                        ped_push_sample(result, t, x, system_.current_mask(),
+                                        step_mask, nullptr);
+                    }
+                    continue;
+                }
+            }
+
+            // 2b. Otherwise one step of the detector's integrator
             Real h_use;
             Vector x_new;
             bool accepted = true;
@@ -430,6 +479,7 @@ private:
     StiffnessDetector detector_;
     Real dt_init_;
     Real dt_max_;
+    Vector x_ex_;   // exact-step workspace
     Real h_bdf2_;
     std::size_t store_every_;
     // T1.3 — consecutive RK45 NaN/Inf streak counter (BDF2 throws on

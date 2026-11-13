@@ -28,55 +28,47 @@ device (`python/pulsim/spice_import.py:645`), so an imported netlist with
 a piecewise-linear diode inherits the defect. LTspice's model is an
 ideal switch with a series drop, which is exactly the PWL
 `SwitchedDiode` with `V_f` added by `add-switched-diode-forward-drop`.
-The defect is not listed in `docs/known-limitations.md`.
+
+A passive softplus law was implemented first and kept in
+`implementation-attempt.patch`; it moved every mA-level operating point
+by 0.35–0.4 V and removed the premise of 27 hostile-circuit fixtures
+(`DECISIONS.md`). The owner decided (2026-11-12) to **retire** the
+device instead of changing its law.
 
 ## What Changes
 
-- **`IdealDiode::current` becomes passive and monotone**, in softplus
-  form:
-  `i(v) = [sp(κ·(v − V_F0)) − sp(−κ·V_F0)]/(κ·R_d) + G_off·v`,
-  `sp(x) = ln(1 + eˣ)` evaluated without overflow. Then `i(0) = 0`,
-  `di/dv = logistic(κ·(v − V_F0))/R_d + G_off > 0`, `i·v ≥ 0`, and the
-  forward asymptote is still `(v − V_F0)/R_d`. Parameters and their names
-  are unchanged.
-- `numeric::softplus` (scalar and AD) beside `numeric::logistic`.
-- **The SPICE importer maps `Ron/Roff/Vfwd` diodes to
-  `add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0, V_f = Vfwd)`**
-  instead of `add_nonlinear_diode`. The device becomes a PWL switch
-  branch: no Newton iteration, accepted by `engine='dsed'`, visible to
-  `res.i` and `device_loss_summary`.
-- `docs/known-limitations.md`, `KNOWN_LIMITATIONS.md` and
-  `AI_GUIDE.md` state what the smooth diode is (a soft-knee diode with a
-  reverse floor of `sp(−κ·V_F0)/(κ·R_d)`, 4.2 µA at the defaults) and
-  when to prefer `add_diode(V_f=)` or `add_shockley_diode`.
-- **BREAKING (numbers):** every circuit with `add_nonlinear_diode`
-  changes near the knee. At the defaults the current at 0.636 V goes
-  from −1.392 A to +1.227 A, at `V_F0` from 0 A to 3.466 A
-  (`ln 2/(κ·R_d)`), at 1.0 V from 29.93 A to 30.01 A. The clamp above is
-  expected at RMS 10.010 V (static-law value 10.0096 V).
-- **BREAKING (import):** imported PWL diodes change device kind
-  (`StoredKind.NonlinearDiode` → `StoredKind.Diode`) and conduct with a
-  sharp knee at `Vfwd`.
+- **The law is not changed.** `IdealDiode` stays in the kernel, used by
+  the DC continuation strategies, the MOSFET Level-1 body diode and the
+  C++ tests.
+- **BREAKING:** `CircuitBuilder.add_nonlinear_diode` (Python) raises
+  `pulsim.RetiredDeviceError` (a `ValueError`). The message names the
+  device, quotes −1.39 A at +0.636 V and names the replacements:
+  `add_diode(..., V_f=)` (PWL diode with a forward drop) and
+  `add_shockley_diode` (smooth junction). The keyword
+  `allow_non_passive=True` (in the style of `allow_synthetic=True` for
+  parts) still builds the legacy device; the hostile-circuit test
+  fixtures pass it.
+- **BREAKING:** YAML `type: nonlinear_diode` is refused unless the
+  device sets `allow_non_passive: true`.
+- **BREAKING (import):** the SPICE importer maps `Ron/Roff/Vfwd` diodes
+  to `add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0,
+  V_f = Vfwd)`. Imported PWL diodes change kind
+  (`StoredKind.NonlinearDiode` → `StoredKind.Diode`).
+- `pulsim.catalog()`, the API reference, the migration guide, the
+  notebooks and `AI_GUIDE.md` stop offering the device and name it
+  retired. `CHANGELOG.md` and `docs/known-limitations.md` record it.
 
 ## Impact
 
 - Affected specs: `device-models`, `python-bindings`.
-- Affected code: `core/include/pulsim/models/ideal_diode.hpp`,
-  `core/include/pulsim/numeric/` (new `softplus.hpp`),
-  `python/pulsim/spice_import.py`,
-  `python/pulsim/__init__.py` (the smooth-diode branch of the `res.i`
-  reconstruction, if it re-implements the law), C++ tests under
-  `core/tests/layer4_v3`, `layer5_v4`, `layer2`, `layer5` that pin the
-  old law, `python/tests`, docs, CHANGELOG. No binding signature
-  changes, so stubs are unchanged.
+- Affected code: `python/pulsim/_builder_ergonomics.py`,
+  `python/pulsim/__init__.py`, `python/pulsim/spice_import.py`,
+  `python/pulsim/discovery.py`, `core/include/pulsim/yaml/loader.hpp`,
+  the Python tests that build the device on purpose (opt-in added),
+  `core/tests/yaml/test_yaml_loader.cpp`, docs, notebooks, CHANGELOG.
+  The C++ `CircuitBuilder::add_nonlinear_diode` and the binding
+  signature are unchanged, so stubs are unchanged.
 - Dependencies: `add-switched-diode-forward-drop` (the `V_f` parameter
-  the importer now uses) is already implemented on this branch. No
-  dependency on other roadmap changes. `add-engine-conformance-matrix`
-  lists `NonlinearDiode` on `pwl` as supported and relies on this fix
-  for the clamp cell.
-- Users affected: direct callers of `add_nonlinear_diode` / YAML
-  `nonlinear_diode` (39 files under `python/`, `core/tests`, `examples` and `docs`
-  mention it), and anyone
-  importing LTspice netlists with `Ron/Roff/Vfwd` diode models.
-  Migration: none needed for the importer; for the smooth diode, results
-  move toward the physical ones and no parameter needs to change.
+  the importer now uses) is already implemented on this branch.
+- Users affected: Python and YAML callers of `add_nonlinear_diode`;
+  LTspice netlists with `Ron/Roff/Vfwd` diode models.

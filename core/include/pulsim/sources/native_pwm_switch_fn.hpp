@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace pulsim::sources {
@@ -162,9 +163,18 @@ struct NativeMultiMaskPwm {
     }
 
     [[nodiscard]] Real next_edge_after(Real t) const noexcept {
-        // Candidates: each boundary in the current period + next-period 0
-        return pwm_phase::next_constant_crossing(t, Real{0}, T_sw,
-                                              phase_boundaries);
+        // A phase boundary between two EQUAL masks (e.g. the period
+        // wrap of [hi, lo, hi]) is not an edge: skip it, or an engine
+        // that lands edges counts and restarts on a non-event.
+        for (std::size_t i = 0; i <= phase_boundaries.size(); ++i) {
+            const Real e = pwm_phase::next_constant_crossing(
+                t, Real{0}, T_sw, phase_boundaries);
+            if (!((*this)(Real{0.5} * (t + e)) == (*this)(e))) {
+                return e;
+            }
+            t = e;
+        }
+        return std::numeric_limits<Real>::infinity();  // one constant mask
     }
 };
 

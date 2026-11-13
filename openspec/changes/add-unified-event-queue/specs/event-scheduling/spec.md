@@ -201,3 +201,31 @@ SHALL cost one time comparison.
   engine before and after the change
 - **THEN** solves per step are equal and ns/step is not above the
   previous value (best of five, same machine)
+
+### Requirement: Output Samples Are Queue Events
+
+Recorded output samples SHALL be time events of the queue with the
+lowest priority at an instant; a sample SHALL record the state and
+SHALL NOT change a mode, arm a restart or alter the steps or segments
+taken between other events.
+
+#### Scenario: Output grid does not change the run
+- **GIVEN** the DCM buck on the exact strategy over 100 periods
+- **WHEN** it is simulated with `dt_out = T/7` and with `dt_out = T`
+- **THEN** both runs have the same number of non-sample events and
+  agree at the common sample times within 1e-12
+
+### Requirement: One Mode Selection Per Event Instant
+
+When the complementarity mode selection is in effect the kernel SHALL
+call it exactly once per event instant, after the instant's state
+events, ticks, gate edges and source breakpoints are applied and
+before its samples, and SHALL call the re-initialisation service
+after it.
+
+#### Scenario: Gate edge and diode crossing together
+- **GIVEN** the boost (12 V, 100 µH, 47 µF, 500 Ω, D = 0.5) in DCM
+  with a gate edge placed at a located diode turn-off
+- **WHEN** the instant is handled
+- **THEN** one selection is made for both, and the mode after the
+  instant is the one that selection returned

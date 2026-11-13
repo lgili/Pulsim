@@ -89,6 +89,7 @@ def run_mna_sweep(builder,
                     switch_fn=None,
                     enable_nonlinear_refresh: Optional[bool] = None,
                     use_kernel: bool = True,
+                    mask=None,
                     verbose: bool = False,
                     ) -> MnaSweepResult:
     """Fast frequency sweep via impulse response + FFT.
@@ -124,6 +125,25 @@ def run_mna_sweep(builder,
         If provided, passed through to `simulate(...)`. Useful for
         SMPS plants where the duty cycle is held at the average
         operating point.
+    use_kernel
+        With ``freqs`` and ``v_in_branch_id`` given, the sweep is solved
+        directly in the frequency domain by the kernel:
+        ``(jw*E + G) x = e_in`` with ``(G, E)`` from the transient
+        assembler. It covers R, L, C, coupled and multi-winding
+        transformers, ideal transformers, VCVS, sources, and switches /
+        PWL diodes held at ``mask``. It refuses (``ValueError`` naming the
+        branch and its kind) any Newton device (smooth, Shockley and
+        Lauritzen diodes, level-1 MOSFET/IGBT, saturable inductor,
+        junction capacitor, PMSM): it does not linearise them, so use
+        :func:`run_ac_sweep`, :func:`pulsim.fra.run_fra`,
+        :func:`frequency_response`, or this function with
+        ``use_kernel=False`` (impulse-FFT, needs ``dt`` and ``t_end``).
+        Kernel errors propagate; there is no silent fallback.
+    mask
+        :class:`SwitchStateMask` holding every switch and PWL diode at its
+        operating-point state, for the kernel path. Required when the
+        circuit has any; the kernel path refuses rather than assume them
+        all open.
 
     Returns
     -------
@@ -137,41 +157,46 @@ def run_mna_sweep(builder,
     # Fast path: direct C++ kernel MNA sweep.
     # ---------------------------------------------------------------
     if use_kernel and freqs is not None and v_in_branch_id is not None:
-        try:
-            from . import _pulsim as _k  # type: ignore[import-not-found]
-            mask = _k.SwitchStateMask(builder.graph.num_switches)
-            src_idx = builder.pool.branch_var_id_for_source(
-                v_in_branch_id, builder.graph)
-            freqs_arr = np.asarray(freqs, dtype=float)
-            res = _k.run_mna_sweep_kernel(
-                builder.graph, builder.pool, mask,
-                list(map(float, freqs_arr)),
-                int(src_idx), int(output_idx))
-            H = np.asarray(res.H, dtype=complex)
-            mag_dB = 20.0 * np.log10(np.maximum(np.abs(H), 1e-300))
-            phase_deg = _wrap_phase_deg(np.degrees(np.angle(H)))
-            if verbose:
-                print(f"  run_mna_sweep [kernel]: {len(freqs_arr)} "
-                       f"frequencies via Eigen complex SparseLU")
-            return MnaSweepResult(
-                freqs=freqs_arr, H=H,
-                mag_dB=mag_dB, phase_deg=phase_deg,
-                times=np.array([]), y_impulse=np.array([]),
-            )
-        except Exception as exc:
-            if verbose:
-                print(f"  run_mna_sweep: kernel path failed "
-                       f"({type(exc).__name__}), falling back to "
-                       f"impulse-FFT")
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        n_sw = builder.graph.num_switches
+        if mask is None:
+            if n_sw > 0:
+                names = [c["name"] for c in builder.components()
+                         if c["kind"] in ("switch", "diode")]
+                raise ValueError(
+                    "run_mna_sweep: the circuit has switch branches "
+                    f"{names} and no `mask=` was given. The kernel sweep "
+                    "holds every switch and PWL diode at a fixed state; "
+                    "pass mask=SwitchStateMask with each one set to its "
+                    "operating-point state (it no longer assumes all OFF).")
+            mask = _k.SwitchStateMask(n_sw)
+        src_idx = builder.pool.branch_var_id_for_source(
+            v_in_branch_id, builder.graph)
+        freqs_arr = np.asarray(freqs, dtype=float)
+        res = _k.run_mna_sweep_kernel(
+            builder.graph, builder.pool, mask,
+            list(map(float, freqs_arr)),
+            int(src_idx), int(output_idx))
+        H = np.asarray(res.H, dtype=complex)
+        mag_dB = 20.0 * np.log10(np.maximum(np.abs(H), 1e-300))
+        phase_deg = _wrap_phase_deg(np.degrees(np.angle(H)))
+        if verbose:
+            print(f"  run_mna_sweep [kernel]: {len(freqs_arr)} "
+                   "frequencies via the complex sparse LU")
+        return MnaSweepResult(
+            freqs=freqs_arr, H=H,
+            mag_dB=mag_dB, phase_deg=phase_deg,
+            times=np.array([]), y_impulse=np.array([]),
+        )
 
     # ---------------------------------------------------------------
     # Fallback: impulse-FFT (LTI-equivalent via time-domain).
     # ---------------------------------------------------------------
     if dt is None or t_end is None:
         raise ValueError(
-            "run_mna_sweep: kernel path was disabled or unavailable, "
-            "but `dt` and `t_end` weren't provided for the impulse-"
-            "FFT fallback. Pass them explicitly.")
+            "run_mna_sweep: the impulse-FFT path (use_kernel=False, or "
+            "no `freqs` / `v_in_branch_id`) needs `dt` and `t_end`. "
+            "Pass them explicitly.")
 
     n_samples = int(round(t_end / dt))
     if n_samples < 16:

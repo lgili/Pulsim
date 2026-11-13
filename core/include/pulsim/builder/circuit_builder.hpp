@@ -29,7 +29,9 @@
 #include "pulsim/models/inductor.hpp"
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
+#include "pulsim/models/power_mosfet.hpp"
 #include "pulsim/models/vcvs.hpp"
+#include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
 #include "pulsim/models/sine_voltage_source.hpp"
@@ -166,7 +168,9 @@ public:
         Real K, Real V_T,
         Real lambda = Real{0.02},
         Real kappa  = Real{15.0},
-        bool with_body_diode = true) {
+        bool with_body_diode = true,
+        Real V_F = Real{0.7}) {
+        if (with_body_diode) require_diode_drop_("add_mosfet_level1", name, V_F);
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         const Index gate_idx   = resolve_node_(gate);
@@ -188,7 +192,9 @@ public:
         // when the GATE IS OFF, where the channel correctly
         // blocks and an inductive load would otherwise have no
         // path at all. Pass `with_body_diode = false` for an
-        // eGaN HEMT, which has no p-n body diode.
+        // eGaN HEMT, which has no p-n body diode. `V_F` is the
+        // diode's conduction DROP (v = V_F + i/g_on while on, PSIM
+        // style); it also turns on at V_F.
         if (with_body_diode) {
             const std::string body_name = std::string{name} + "_body";
             const Index body_b = add_branch_(
@@ -197,7 +203,7 @@ public:
             pool_.add_diode(body_b,
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
-                /*V_th=*/Real{0.5});
+                /*V_th=*/Real{0}, /*V_f=*/V_F);
         }
         return *this;
     }
@@ -221,6 +227,137 @@ public:
         pool_.add_vcvs(
             b_id, inp_idx, inn_idx,
             models::VCVS::Params{.gain = gain});
+        return *this;
+    }
+
+    // ---- add-controlled-source-set --------------------------------------
+    //
+    // Linear controlled sources and waveform current sources
+    // (models/controlled_sources.hpp). A current output follows
+    // `add_current_source`: a positive value leaves at `n_pos` into the
+    // external circuit and returns at `n_neg`.
+
+    /// VCCS: i = gm·(V(in_pos) − V(in_neg)) out of `n_pos` [S].
+    CircuitBuilder& add_vccs(std::string_view name, std::string_view in_pos,
+                             std::string_view in_neg, std::string_view n_pos,
+                             std::string_view n_neg, Real gm) {
+        require_finite_("add_vccs", name, "gm", gm);
+        const Index cp = resolve_node_(in_pos);
+        const Index cn = resolve_node_(in_neg);
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_vccs(b_id, cp, cn, models::VCCS::Params{.gm = gm});
+        return *this;
+    }
+
+    /// CCVS: V(out_pos) − V(out_neg) = rm·i(control) [Ω]; `control` names
+    /// a branch with a current unknown, added before this one.
+    CircuitBuilder& add_ccvs(std::string_view name, std::string_view control,
+                             std::string_view out_pos,
+                             std::string_view out_neg, Real rm) {
+        require_finite_("add_ccvs", name, "rm", rm);
+        const Index c = sensed_branch_("add_ccvs", name, control);
+        const Index b_id = add_branch_(name, resolve_node_(out_pos),
+                                       resolve_node_(out_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_ccvs(b_id, c, models::CCVS::Params{.rm = rm});
+        return *this;
+    }
+
+    /// CCCS: i = gain·i(control) out of `n_pos`.
+    CircuitBuilder& add_cccs(std::string_view name, std::string_view control,
+                             std::string_view n_pos, std::string_view n_neg,
+                             Real gain) {
+        require_finite_("add_cccs", name, "gain", gain);
+        const Index c = sensed_branch_("add_cccs", name, control);
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_cccs(b_id, c, models::CCCS::Params{.gain = gain});
+        return *this;
+    }
+
+    /// Gyrator: i_1 = g·v_2, i_2 = −g·v_1 [S], currents INTO p1_pos and
+    /// p2_pos. Lossless; Z at one port appears as 1/(g²·Z) at the other.
+    /// `res.i(name)` is i_2 (port 2 is the branch).
+    CircuitBuilder& add_gyrator(std::string_view name, std::string_view p1_pos,
+                                std::string_view p1_neg,
+                                std::string_view p2_pos,
+                                std::string_view p2_neg, Real g) {
+        require_finite_("add_gyrator", name, "g", g);
+        const Index a = resolve_node_(p1_pos);
+        const Index c = resolve_node_(p1_neg);
+        const Index b_id = add_branch_(name, resolve_node_(p2_pos),
+                                       resolve_node_(p2_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_gyrator(b_id, a, c, models::Gyrator::Params{.g = g});
+        return *this;
+    }
+
+    /// i(t) = i_dc + i_amplitude·sin(2π·frequency·t + phase) out of
+    /// `n_pos`; `phase` in radians.
+    CircuitBuilder& add_sine_current_source(
+        std::string_view name, std::string_view n_pos,
+        std::string_view n_neg, Real i_dc, Real i_amplitude, Real frequency,
+        Real phase = Real{0}) {
+        for (const auto& [k, v] : {std::pair{"i_dc", i_dc},
+                                   std::pair{"i_amplitude", i_amplitude},
+                                   std::pair{"frequency", frequency},
+                                   std::pair{"phase", phase}}) {
+            require_finite_("add_sine_current_source", name, k, v);
+        }
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_sine_current_source(
+            b_id, models::SineCurrentSource::Params{
+                      {.v_dc = i_dc, .v_amplitude = i_amplitude,
+                       .frequency = frequency, .phase = phase}});
+        return *this;
+    }
+
+    /// The trapezoid of `add_pulse_voltage_source` as a current out of
+    /// `n_pos` (same parameters and edge rules).
+    CircuitBuilder& add_pulse_current_source(
+        std::string_view name, std::string_view n_pos,
+        std::string_view n_neg, Real i_initial, Real i_pulsed, Real t_start,
+        Real pulse_width, Real period = Real{0}, Real rise_time = Real{0},
+        Real fall_time = Real{0}) {
+        for (const auto& [k, v] :
+             {std::pair{"i_initial", i_initial}, std::pair{"i_pulsed", i_pulsed},
+              std::pair{"t_start", t_start}, std::pair{"pulse_width", pulse_width},
+              std::pair{"period", period}, std::pair{"rise_time", rise_time},
+              std::pair{"fall_time", fall_time}}) {
+            require_finite_("add_pulse_current_source", name, k, v);
+        }
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_pulse_current_source(
+            b_id, models::PulseCurrentSource::Params{
+                      {.v_initial = i_initial, .v_pulsed = i_pulsed,
+                       .t_start = t_start, .pulse_width = pulse_width,
+                       .period = period, .rise_time = rise_time,
+                       .fall_time = fall_time}});
+        return *this;
+    }
+
+    /// Piecewise-linear table current out of `n_pos`: linear between the
+    /// knots (t[k], i[k]), i[0] before t[0], then i[last] — or the table
+    /// repeated with period t[last] − t[0] when `periodic`.
+    CircuitBuilder& add_pwl_current_source(
+        std::string_view name, std::string_view n_pos,
+        std::string_view n_neg, std::vector<Real> t, std::vector<Real> i,
+        bool periodic = false) {
+        models::PwlWaveform w{std::move(t), std::move(i), periodic};
+        models::PwlWaveform::validate(
+            w, std::format("add_pwl_current_source(\"{}\")", name));
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_pwl_current_source(
+            b_id, models::PwlCurrentSource::Params{std::move(w)});
         return *this;
     }
 
@@ -512,7 +649,9 @@ public:
         Real v_knee   = Real{0.01},
         bool with_fwd = false,
         Real tau_tail = Real{0},
-        Real k_tail   = Real{0}) {
+        Real k_tail   = Real{0},
+        Real V_F      = Real{0.7}) {
+        if (with_fwd) require_diode_drop_("add_igbt_level1", name, V_F);
         if (!(R_CE_sat > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_igbt_level1(\"{}\"): R_CE_sat must be > 0 (got {}); a "
@@ -570,7 +709,7 @@ public:
         // during freewheeling without this — the solve fails
         // rather than quietly running the current backwards
         // through the transistor, which is the trade this model
-        // makes on purpose.
+        // makes on purpose. `V_F` is its conduction drop.
         if (with_fwd) {
             const std::string fwd_name = std::string{name} + "_fwd";
             const Index fwd_b = add_branch_(
@@ -579,7 +718,7 @@ public:
             pool_.add_diode(fwd_b,
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
-                /*V_th=*/Real{0.5});
+                /*V_th=*/Real{0}, /*V_f=*/V_F);
         }
         return *this;
     }
@@ -788,8 +927,9 @@ public:
     }
 
     /// Add a constant DC current source (Layer 2 V3).
-    /// `I` (amperes) flows FROM `from` TO `to`. Positive `I`
-    /// means conventional current direction.
+    /// Positive `I` (amperes) leaves the source at `from` and
+    /// returns at `to`: `add_current_source("I", "a", "gnd", 1)`
+    /// into 1 Ohm gives v(a) = +1 V. (SPICE `I a 0` is the reverse.)
     ///
     /// Unlike voltage sources, current sources do NOT add a
     /// branch-current unknown to the state vector — the
@@ -1180,9 +1320,9 @@ public:
     ///
     /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ, body V_F = 0.7 V
     /// (typical for modern Si MOSFETs in SMPS applications).
-    /// `V_F` is the body diode's TURN-ON THRESHOLD (`add_diode`'s
-    /// V_th), not a conduction drop: once on it conducts as g_on
-    /// with no series offset.
+    /// `V_F` is the body diode's CONDUCTION DROP (`add_diode`'s
+    /// V_f, PSIM style): while on, v_SD = V_F + i/g_on. It turns
+    /// on at V_F. Before 2.1 it was a turn-on threshold only.
     CircuitBuilder& add_mosfet(
         std::string_view name, std::string_view drain,
         std::string_view source,
@@ -1202,9 +1342,9 @@ public:
     /// Add an n-channel power MOSFET WITH its intrinsic
     /// anti-parallel body diode. Adds two branches:
     ///   1. switch (drain → source) with R_on / R_off
-    ///   2. SwitchedDiode (source → drain) with turn-on
-    ///      threshold V_F (V_th, NOT a forward drop) that
-    ///      conducts during freewheeling intervals
+    ///   2. SwitchedDiode (source → drain) with conduction
+    ///      drop V_F (add_diode's V_f; v = V_F + i/g_on_diode)
+    ///      that conducts during freewheeling intervals
     /// Defaults model a typical Si MOSFET: R_on = 1 mΩ,
     /// R_off = 1 GΩ, body-diode V_F = 0.7 V.
     CircuitBuilder& add_mosfet_with_body_diode(
@@ -1215,6 +1355,7 @@ public:
         Real V_F         = Real{0.7},
         Real g_on_diode  = Real{1e3},
         Real g_off_diode = Real{1e-9}) {
+        require_diode_drop_("add_mosfet_with_body_diode", name, V_F);
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
@@ -1230,7 +1371,7 @@ public:
             body_name, source_idx, drain_idx,
             topology::BranchKind::Switch);
         pool_.add_diode(b_body, g_on_diode,
-                          g_off_diode, V_F);
+                          g_off_diode, /*V_th=*/Real{0}, /*V_f=*/V_F);
         (void)name;
         return *this;
     }
@@ -1353,6 +1494,95 @@ public:
             topology::BranchKind::Nonlinear);
         pool_.add_nonlinear_capacitor(b_id, params);
         return *this;
+    }
+
+    // ---- add-power-mosfet-datasheet-device -----------------------------
+    /// A charge-based nonlinear capacitor with an explicit law (junction,
+    /// `ChargeTable`, or the VDMOS C_gd closed form) — Python binds it as
+    /// the `add_nonlinear_capacitor(name, n_pos, n_neg, law)` overload; see
+    /// models/nonlinear_capacitor.hpp. Same device kind as the junction
+    /// overload above — same history, same stamp, same engines.
+    CircuitBuilder& add_nonlinear_capacitor_law(
+        std::string_view name,
+        std::string_view from, std::string_view to,
+        const models::NonlinearCapacitor::Params& law) {
+        try {
+            models::NonlinearCapacitor::validate(law);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_nonlinear_capacitor(\"{}\"): {}", name, e.what()));
+        }
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx, topology::BranchKind::Nonlinear);
+        pool_.add_nonlinear_capacitor(b_id, law);
+        return *this;
+    }
+
+    /// Datasheet power MOSFET as a composite (models/power_mosfet.hpp):
+    /// Level-1 channel, R_d, C_gs, C_gd(v_gd), C_ds(v_ds), R_g, optional
+    /// L_s and a Shockley or Lauritzen body diode, at a run-constant T_j.
+    /// Pins in the house order (drain, source, gate), as add_mosfet_level1.
+    CircuitBuilder& add_power_mosfet(
+        std::string_view name,
+        std::string_view drain, std::string_view source,
+        std::string_view gate,
+        const models::PowerMosfet::Params& p) {
+        using PM = models::PowerMosfet;
+        PM::validate(p, name);
+        const std::string n{name};
+        const Real r = PM::r_of_T(p);
+        PM::Record rec;
+        rec.name = n;
+        rec.drain = std::string{drain};
+        rec.source = std::string{source};
+        rec.gate = std::string{gate};
+        rec.params = p;
+        rec.K_eff = p.K / r;
+        rec.V_T_eff = PM::V_T_of_T(p);
+        rec.R_d_eff = p.R_d * r;
+        const std::string dn = p.R_d > Real{0} ? n + ".d" : std::string{drain};
+        const std::string gn = p.R_g > Real{0} ? n + ".g" : std::string{gate};
+        const std::string sn = p.L_s > Real{0} ? n + ".s" : std::string{source};
+        auto sub = [&](std::string s_) { rec.sub_elements.push_back(s_); return s_; };
+        if (p.R_d > Real{0}) add_resistor(sub(n + ".rd"), drain, dn, rec.R_d_eff);
+        if (p.R_g > Real{0}) add_resistor(sub(n + ".rg"), gate, gn, p.R_g);
+        if (p.L_s > Real{0}) add_inductor(sub(n + ".ls"), sn, source, p.L_s);
+        add_mosfet_level1(sub(n), dn, sn, gn, rec.K_eff, rec.V_T_eff,
+                          p.lambda, p.kappa, /*with_body_diode=*/false);
+        const Index channel = branch_id_of(n);
+        if (p.C_gs > Real{0}) add_capacitor(sub(n + ".cgs"), gn, sn, p.C_gs);
+        auto add_cap = [&](const PM::Capacitance& c, const std::string& cn,
+                           const std::string& a, const std::string& b) {
+            if (const Real* x = std::get_if<Real>(&c)) {
+                if (*x > Real{0}) add_capacitor(sub(cn), a, b, *x);
+            } else {
+                add_nonlinear_capacitor_law(
+                    sub(cn), a, b,
+                    std::get<models::NonlinearCapacitor::Params>(c));
+            }
+        };
+        add_cap(p.C_gd, n + ".cgd", gn, dn);
+        add_cap(p.C_ds, n + ".cds", dn, sn);
+        if (p.body == PM::BodyDiode::Shockley) {
+            const auto& d = p.shockley;
+            add_shockley_diode(sub(n + "_body"), sn, dn,
+                               d.I_S, d.n, d.V_T, d.G_min, d.BV);
+        } else if (p.body == PM::BodyDiode::Lauritzen) {
+            const auto& d = p.lauritzen;
+            add_lauritzen_diode(sub(n + "_body"), sn, dn,
+                                d.I_S, d.n, d.V_T, d.tau, d.T_M, d.G_min);
+        }
+        power_mosfets_.emplace(channel, std::move(rec));
+        return *this;
+    }
+
+    /// The power-MOSFET record whose channel is `branch_id`, or nullptr.
+    [[nodiscard]] const models::PowerMosfet::Record*
+    power_mosfet_record(Index branch_id) const {
+        const auto it = power_mosfets_.find(branch_id);
+        return it == power_mosfets_.end() ? nullptr : &it->second;
     }
 
     CircuitBuilder& add_saturable_inductor(
@@ -1768,6 +1998,16 @@ public:
     }
 
 private:
+    /// The composite builders' body / freewheeling-diode drop.
+    static void require_diode_drop_(std::string_view fn,
+                                    std::string_view name, Real V_F) {
+        if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): diode conduction drop V_F must be a finite "
+                "number >= 0 V (got {}).", fn, name, V_F));
+        }
+    }
+
     [[nodiscard]] static constexpr bool is_ground_alias_(
         std::string_view name) noexcept {
         return name == "gnd" || name == "GND" || name == "0";
@@ -1839,6 +2079,39 @@ private:
     /// kernel, so every solver diagnostic could speak only in
     /// integer ids and mask bitstrings; now a singular factorization
     /// or a stalled Newton can name the offending device.
+    // add-controlled-source-set helpers.
+    static void require_finite_(std::string_view method,
+                                std::string_view name, std::string_view key,
+                                Real v) {
+        if (!std::isfinite(v)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): {} must be finite (got {})", method, name,
+                key, v));
+        }
+    }
+
+    /// The branch a CCCS / CCVS senses: it must exist and carry a
+    /// current unknown.
+    [[nodiscard]] Index sensed_branch_(std::string_view method,
+                                       std::string_view name,
+                                       std::string_view control) const {
+        const auto hit = branch_index_.find(control);
+        if (hit == branch_index_.end() ||
+            !(pool_.is_voltage_source(hit->second) ||
+              pool_.is_inductor(hit->second))) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): control \"{}\" {}; sense through a 0 V "
+                "voltage source (any voltage-source kind), an inductor, a "
+                "VCVS, a CCVS or an ideal-transformer secondary, added "
+                "before \"{}\"", method, name, control,
+                hit == branch_index_.end()
+                    ? "names no branch added so far"
+                    : "carries no current unknown",
+                name));
+        }
+        return hit->second;
+    }
+
     Index add_branch_(std::string_view component_name,
                       Index from, Index to,
                       topology::BranchKind kind) {
@@ -1895,6 +2168,8 @@ private:
     // Alias storage. Mutable through `set_alias`; consulted by the
     // canonical lookups (`node_id_of`, `branch_id_of`).
     std::unordered_map<std::string, AliasTarget> aliases_;
+    // add-power-mosfet-datasheet-device: channel branch id -> composite.
+    std::unordered_map<Index, models::PowerMosfet::Record> power_mosfets_;
 };
 
 }  // namespace pulsim::builder

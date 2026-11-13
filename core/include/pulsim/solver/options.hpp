@@ -153,6 +153,20 @@ struct SimulationOptions {
     /// Default `false` to preserve V2.2 behaviour.
     bool enable_substep_state_correction = false;
 
+    /// Discontinuity restart (add-discontinuity-restart-rule). The step
+    /// containing a discontinuity — a change of the stamped mask, a
+    /// diode flip inside the step, a source jump (or a b_extra_fn jump
+    /// declared through its next-jump oracle), the first step of a run
+    /// that does not start consistent — and the next two are taken as
+    /// Alexander SDIRK(2,2) steps (γ = 1 − 1/√2, L-stable) instead of
+    /// trapezoidal ones: second order across events on the grid, no
+    /// Nyquist alternation after them, resonant modes kept. It also makes the gate mask of the
+    /// step (t_{k-1}, t_k] switch_fn(t_{k-1}) (start-sampled) and
+    /// evaluates a pulse/PWM source at its LEFT limit on a jump that
+    /// coincides with the step end. Off = the engine before the rule,
+    /// bit for bit.
+    bool discontinuity_restart = false;
+
     /// Floating-inductor freeze (post-solve guard).
     ///
     /// THIS DOES NOT SOLVE ANYTHING. It replaces a current the

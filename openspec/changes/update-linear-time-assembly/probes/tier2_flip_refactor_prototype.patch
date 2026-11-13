@@ -1,0 +1,183 @@
+diff --git a/core/include/pulsim/pwl/cache.hpp b/core/include/pulsim/pwl/cache.hpp
+index 943c91f9..3f738865 100644
+--- a/core/include/pulsim/pwl/cache.hpp
++++ b/core/include/pulsim/pwl/cache.hpp
+@@ -106,6 +106,14 @@ struct CacheMetrics {
+                                               // (shared: ≤ 1 per regime)
+     std::uint64_t symbolic_fallbacks    = 0;  // shared analysis refused
+                                               // (pattern mismatch) → private
++
++    // ---- update-linear-time-assembly tier 2 ----
++    std::uint64_t flip_partial_refactors = 0;  // first visits factored by
++                                               // partial_refactor on a
++                                               // neighbour's factor
++    std::uint64_t flip_fallbacks         = 0;  // tried, then a full
++                                               // factorisation (path too
++                                               // long or pivot fault)
+ };
+ 
+ /// Result of `PwlStateSpaceCache::refactor_parametric` (v1.4.0,
+@@ -1450,6 +1458,10 @@ public:
+                 std::memory_order_relaxed),
+             .symbolic_fallbacks = symbolic_fallbacks_.load(
+                 std::memory_order_relaxed),
++            .flip_partial_refactors = flip_partial_refactors_.load(
++                std::memory_order_relaxed),
++            .flip_fallbacks = flip_fallbacks_.load(
++                std::memory_order_relaxed),
+         };
+     }
+ 
+@@ -1486,6 +1498,12 @@ public:
+     static constexpr std::size_t kDefaultSegmentBudgetBytes =
+         std::size_t{1} << 30;
+ 
++    /// Tier 2 switch (update-linear-time-assembly): a lazy first visit is
++    /// factored by `partial_refactor` on the nearest resident mask's
++    /// factor. Off gives the tier 1 factors bit for bit.
++    void set_flip_refactor(bool on) noexcept { flip_refactor_ = on; }
++    [[nodiscard]] bool flip_refactor() const noexcept { return flip_refactor_; }
++
+     /// Set the lazy segment cache budget in bytes. `0` disables
+     /// eviction entirely (the pre-v2.0 unbounded behaviour).
+     void set_segment_budget_bytes(std::size_t bytes) noexcept {
+@@ -1695,7 +1713,18 @@ private:
+         // (Eigen baseline) is now kept only for the showcase /
+         // sanity-check tests that pin the Eigen behaviour for
+         // paper-comparison purposes.
+-        auto solver = sparse::make_default_solver(
++        // Tier 2: a lazy first visit next to a resident mask.
++        auto solver = lazy_mode_ && dt == dt_ ? try_flip_refactor_(mask, J)
++                                              : nullptr;
++        if (solver) {
++            PwlSegment seg;
++            seg.J = std::move(J);
++            seg.b_constant = std::move(b);
++            seg.solver = std::move(solver);
++            seg.state_size = pool_.state_size(graph_);
++            return seg;
++        }
++        solver = sparse::make_default_solver(
+             pool_.state_size(graph_), sparse::Backend::Auto);
+         if (!analyze_shared_(*solver, J, dt > Real{0})) {
+             return std::unexpected(make_cache_error_(
+@@ -2100,6 +2129,64 @@ private:
+     mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_static_;
+     mutable std::atomic<std::uint64_t> symbolic_analyses_{0};
+     mutable std::atomic<std::uint64_t> symbolic_fallbacks_{0};
++    mutable std::atomic<std::uint64_t> flip_partial_refactors_{0};
++    mutable std::atomic<std::uint64_t> flip_fallbacks_{0};
++    bool flip_refactor_ = true;   // tier 2 on lazy misses
++
++    /// Tier 2: factor `J` (a first visit of `mask`) by `partial_refactor`
++    /// on a copy of the nearest resident segment's factor (Hamming
++    /// distance; ties: most recently used). Only the columns whose values
++    /// differ are re-eliminated, with the neighbour's row order. Returns
++    /// nullptr — and the caller factorises on the shared analysis — when
++    /// there is no usable neighbour, the elimination path is longer than
++    /// `MAX_PATH_LENGTH_RATIO · n`, or `partial_refactor` reports a pivot
++    /// or pattern fault.
++    [[nodiscard]] std::unique_ptr<sparse::DirectSolver>
++    try_flip_refactor_(const topology::SwitchStateMask& mask,
++                       const sparse::Matrix& J) {
++        if (!flip_refactor_ || segments_.empty() || !J.isCompressed()) {
++            return nullptr;
++        }
++        const PwlSegment* nb = nullptr;
++        Size best = 0;
++        for (const auto& [m, seg] : segments_) {
++            const Size d = mask.hamming_distance(m);
++            if (nb == nullptr || d < best ||
++                (d == best && seg.tick() > nb->tick())) {
++                nb = &seg;
++                best = d;
++            }
++        }
++        const auto* lu =
++            dynamic_cast<const sparse::PulsimSparseLuSolver*>(nb->solver.get());
++        const sparse::Matrix& A = nb->J;
++        if (lu == nullptr || !lu->is_factorized() || !A.isCompressed() ||
++            A.rows() != J.rows() || A.nonZeros() != J.nonZeros() ||
++            !std::equal(A.outerIndexPtr(), A.outerIndexPtr() + A.outerSize() + 1,
++                        J.outerIndexPtr()) ||
++            !std::equal(A.innerIndexPtr(), A.innerIndexPtr() + A.nonZeros(),
++                        J.innerIndexPtr())) {
++            return nullptr;   // another regime or pattern: not a neighbour
++        }
++        std::vector<Index> cols;
++        for (Index j = 0; j < J.outerSize(); ++j) {
++            for (Index p = J.outerIndexPtr()[j]; p < J.outerIndexPtr()[j + 1]; ++p) {
++                if (A.valuePtr()[p] != J.valuePtr()[p]) {
++                    cols.push_back(j);
++                    break;
++                }
++            }
++        }
++        auto c = lu->clone();
++        if (static_cast<Real>(c->partial_refactor_count_path(cols)) <=
++                sparse::MAX_PATH_LENGTH_RATIO * static_cast<Real>(J.rows()) &&
++            c->partial_refactor(J, cols)) {
++            flip_partial_refactors_.fetch_add(1, std::memory_order_relaxed);
++            return c;
++        }
++        flip_fallbacks_.fetch_add(1, std::memory_order_relaxed);
++        return nullptr;
++    }
+ 
+     /// Analyse `J` on `solver`, adopting the regime's shared analysis
+     /// when `J` has its pattern. Returns `analyze`'s verdict.
+diff --git a/core/include/pulsim/sparse/pulsim_lu_solver.hpp b/core/include/pulsim/sparse/pulsim_lu_solver.hpp
+index acd10b31..6971a598 100644
+--- a/core/include/pulsim/sparse/pulsim_lu_solver.hpp
++++ b/core/include/pulsim/sparse/pulsim_lu_solver.hpp
+@@ -842,6 +842,31 @@ public:
+                 return true;
+     }
+ 
++    /// A copy of this solver — analysis, factor and row order — for a
++    /// `partial_refactor` that must leave the original untouched
++    /// (update-linear-time-assembly tier 2). O(nnz(L + U)). The path
++    /// cache is not copied.
++    [[nodiscard]] std::unique_ptr<PulsimSparseLuSolverT> clone() const {
++        auto c = std::make_unique<PulsimSparseLuSolverT>();
++        c->n_ = n_;
++        c->Pcol_ = Pcol_;
++        c->Pinv_col_ = Pinv_col_;
++        c->etree_parent_ = etree_parent_;
++        c->l_col_ptr_ = l_col_ptr_;
++        c->l_row_idx_ = l_row_idx_;
++        c->u_col_ptr_ = u_col_ptr_;
++        c->u_row_idx_ = u_row_idx_;
++        c->l_values_ = l_values_;
++        c->u_values_ = u_values_;
++        c->Prow_ = Prow_;
++        c->Pinv_row_ = Pinv_row_;
++        c->analyzed_ = analyzed_;
++        c->factorized_ = factorized_;
++        c->numeric_singular_ = numeric_singular_;
++        c->ordering_ = ordering_;
++        return c;
++    }
++
+     /// Test-only: how many times has `compute_path_()` been invoked?
+     /// Used by 5.7.2 to verify path caching across identical
+     /// changed_cols calls.
+diff --git a/python/bindings.cpp b/python/bindings.cpp
+index 5f1f8e3b..8a880839 100644
+--- a/python/bindings.cpp
++++ b/python/bindings.cpp
+@@ -1536,6 +1536,14 @@ void init_module(py::module_& m) {
+                        &pwl::CacheMetrics::symbolic_analyses,
+                        "Symbolic analyses run: one per assembly regime, "
+                        "shared by every switch state.")
++        .def_readonly("flip_partial_refactors",
++                       &pwl::CacheMetrics::flip_partial_refactors,
++                       "Tier 2: lazy first visits factored by "
++                       "partial_refactor on a neighbour's factor.")
++        .def_readonly("flip_fallbacks",
++                       &pwl::CacheMetrics::flip_fallbacks,
++                       "Tier 2: first visits that fell back to a full "
++                       "factorisation (path too long or pivot fault).")
+         .def_readonly("symbolic_fallbacks",
+                        &pwl::CacheMetrics::symbolic_fallbacks,
+                        "Matrices whose pattern refused the shared "

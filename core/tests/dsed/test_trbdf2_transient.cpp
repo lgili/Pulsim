@@ -235,8 +235,11 @@ TEST_CASE("TR-BDF2: half-wave rectifier localizes diode edges",
     REQUIRE(worst_on < 2e-2);
 }
 
-TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
+TEST_CASE("TR-BDF2: nonlinear devices are stamped without a callback",
           "[v2][trbdf2]") {
+    // add-engine-conformance-matrix: the kernel owns the static Newton
+    // chain. This call used to be refused (and the raw fixed engine ran
+    // the diode as an open circuit, 5.000 V); now the diode clamps.
     builder::CircuitBuilder b;
     b.add_voltage_source("V", "in", "gnd", 5.0);
     b.add_resistor("R", "in", "n1", 1e3);
@@ -246,11 +249,12 @@ TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
     solver::TrBdf2Options o;
     o.t_end = 1e-3;
     const Size n_sw = b.graph().num_switches();
-    REQUIRE_THROWS_AS(
-        solver::run_transient_trbdf2(
-            cache, b.graph(), b.pool(), o,
-            [&](Real) { return all_open(n_sw); }),
-        std::invalid_argument);
+    const auto r = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); });
+    const Real v = r.states.back()[b.node_id_of("n1")];
+    REQUIRE(v > 0.3);
+    REQUIRE(v < 1.0);
 }
 
 // -----------------------------------------------------------------------------
@@ -456,6 +460,42 @@ TEST_CASE("TR-BDF2: a gate edge at a step boundary re-settles the diodes",
         shoot_through += (q_on && d_on) ? 1 : 0;
     }
     REQUIRE(shoot_through == 0);
+}
+
+TEST_CASE("TR-BDF2: controller sources at three rates tick at their "
+          "own instants", "[v2][trbdf2][control]") {
+    // fix-control-tick-semantics: before, one observer_period served
+    // every source, so a 1 kHz and a 4 kHz controller both ticked at
+    // 4 kHz. Source j ticks at k*T_j, ceil(span/T_j) times, and
+    // sources due at one instant fire in index order.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "in", "gnd", 1.0);
+    b.add_resistor("R1", "in", "o", 1e3);
+    b.add_capacitor("C1", "o", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto sf = [n_sw](Real) { return topology::SwitchStateMask(n_sw); };
+    solver::TrBdf2Options o;
+    o.t_end = 10e-3;
+    o.observer_periods = {1e-3, 0.5e-3, 0.25e-3};
+    solver::TrBdf2Stats st;
+    std::vector<std::pair<Size, Real>> ticks;
+    solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr,
+        [&](Size j, Real t, const Vector&) { ticks.emplace_back(j, t); });
+    REQUIRE(st.ctrl_tick_counts == std::vector<Size>{10, 20, 40});
+    REQUIRE(st.n_ctrl_ticks == 70);
+    std::vector<Size> k(3, 0);
+    for (const auto& [j, t] : ticks) {
+        const Real want = static_cast<Real>(k[j]++) * o.observer_periods[j];
+        REQUIRE(std::abs(t - want) <= 1e-9 * o.observer_periods[j]);
+    }
+    // At t = 0 and every 1 ms all three are due: index order.
+    REQUIRE(ticks[0].first == 0);
+    REQUIRE(ticks[1].first == 1);
+    REQUIRE(ticks[2].first == 2);
 }
 
 TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
