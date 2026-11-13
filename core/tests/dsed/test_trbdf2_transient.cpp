@@ -11,6 +11,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 
 #include <cmath>
@@ -551,5 +552,55 @@ TEST_CASE("TR-BDF2: derivative slots are refreshed after a gate edge",
                 }
             }
         }
+    }
+}
+
+TEST_CASE("TR-BDF2: a failed Newton probe at a gate edge is retried, "
+          "never read",
+          "[v2][trbdf2][post-event]") {
+    // A saturable inductor as a buck's inductor. At a turn-off edge the
+    // cascade's probe (a 2e-16 s trap step) puts one ulp of inductor
+    // current far above Newton's absolute tolerances (2L/h = 1e12 ohm).
+    // Without roundoff acceptance that probe fails; its out_x was the
+    // warm start, the cascade decided the diode bits on it, never
+    // turned the freewheeling diode on, and one step under all-OFF bits
+    // cut the 10 A to zero: v_out 7.68 V against 12.85 V on pwl. The
+    // probe now climbs 100x per failure (a longer probe is still a
+    // probe), and a cascade with no converged probe refuses by name.
+    for (const bool roundoff : {false, true}) {
+        builder::CircuitBuilder b;
+        b.add_voltage_source("Vin", "vin", "gnd", 24.0);
+        b.add_switch("S", "vin", "sw", 1e3, 1e-9);
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9);
+        b.add_saturable_inductor("L", "sw", "out", 100e-6, 20.0, 10e-6);
+        b.add_capacitor("C", "out", "gnd", 47e-6);
+        b.add_resistor("RL", "out", "gnd", 2.0);
+        pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+        cache.build_lazy(1e-6);
+        const Size n_sw = b.graph().num_switches();
+        const auto k = static_cast<Size>(b.switch_index_of("S"));
+        const Real T = 1e-5;
+        auto sf = [&](Real t) {
+            topology::SwitchStateMask m(n_sw);
+            const Real ph = t / T - std::floor(t / T + 1e-9);
+            m.set(k, ph < 0.5 - 1e-9);
+            return m;
+        };
+        solver::TrBdf2Options o;
+        o.t_end = 20 * T;
+        o.rtol = 1e-5;
+        o.atol = 1e-8;
+        o.newton_roundoff_acceptance = roundoff;
+        solver::TrBdf2Stats st;
+        const auto res = solver::run_transient_trbdf2(
+            cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st,
+            {}, {}, {}, pwl::make_combined_diode_mosfet_refresh());
+        REQUIRE(st.n_gate_events >= 38);
+        if (!roundoff) {
+            REQUIRE(st.n_probe_newton_retries > 0);
+        }
+        // engine='pwl' at T/400: 12.8491 V; trbdf2 12.8507 V.
+        const Real v = tail_mean(res, b.node_id_of("out"), 10 * T);
+        REQUIRE(v == Approx(12.849).epsilon(1e-3));
     }
 }

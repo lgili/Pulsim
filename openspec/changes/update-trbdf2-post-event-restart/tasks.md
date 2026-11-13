@@ -24,7 +24,7 @@
 - [x] 4.5 (diode events have no memory and no refresh; the bridge and the MOSFET half bridge are bit-for-bit unchanged) The flyback's diode-event count does not grow (diode events still have no memory)
 
 ## 5. The stall (reported, not promised)
-- [x] 5.1 Re-run 1.4. Report: does it still abort, at which step size, and with which `||dx||` and residual. Delete the known-limitations row and un-xfail the test only if it passes — still aborts, now at t = 10 µs at h_min (last steps 4.13e-9 s, then rejected to 1e-14 s), `||dx||` = 2.286e-7 at T1.pm, residual 7.6e-6 on T1.m (1.2e-15 relative); row and xfail kept
+- [x] 5.1 Re-run 1.4. Report: does it still abort, at which step size, and with which `||dx||` and residual. Delete the known-limitations row and un-xfail the test only if it passes — still aborts, now at t = 10 µs at h_min (last steps 4.13e-9 s, then rejected to 1e-14 s), `||dx||` = 2.286e-7 at T1.pm, residual 7.6e-6 on T1.m (1.2e-15 relative); row and xfail kept; follow-up: completes (15.3104 V vs 15.31 V) once failed cascade probes are handled (DECISIONS 8); row deleted, xfail flipped
 
 ## 6. Documentation
 - [x] 6.1 `CHANGELOG.md` **BREAKING (step sequence)** with the before/after table

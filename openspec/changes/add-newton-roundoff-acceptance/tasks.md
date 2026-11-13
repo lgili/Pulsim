@@ -25,7 +25,7 @@
 - [ ] 4.4 (not done, DECISIONS 3) Test: two series 10 mH inductors and a Shockley diode on `engine='trbdf2'` — no committed step below 4e-13 s, the run completes, and a 1 H / 100 A / 400 V circuit keeps a floor below 2e-10 s
 
 ## 5. The documented stall (reported, not promised)
-- [x] 5.1 Re-run 1.3 with the change. If it completes: un-xfail `test_engines_agree_below_saturation`, delete the "TR-BDF2 stalls at `h_min`" row of `docs/known-limitations.md`, and update the abort message at `trbdf2_transient.hpp:1268-1280`. If it does not: leave all three and write down what was measured — does not complete: runs to 494 µs (213 accepts), then a roundoff limit cycle (DECISIONS 5); all three left
+- [x] 5.1 Re-run 1.3 with the change. If it completes: un-xfail `test_engines_agree_below_saturation`, delete the "TR-BDF2 stalls at `h_min`" row of `docs/known-limitations.md`, and update the abort message at `trbdf2_transient.hpp:1268-1280`. If it does not: leave all three and write down what was measured — does not complete: runs to 494 µs (213 accepts), then a roundoff limit cycle (DECISIONS 5); all three left; follow-up: completes once failed cascade probes are handled (DECISIONS 7) — 15.3104 V vs 15.31 V; xfail flipped, row deleted, message updated
 
 ## 6. Documentation
 - [x] 6.1 `CHANGELOG.md`: transient Newton accepts an iterate at roundoff level and reports it; step floor; the DC cascade and the tolerances are unchanged

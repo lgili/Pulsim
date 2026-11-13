@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2 event handling follow-up (update-trbdf2-post-event-restart)
+
+* **Fixed (silent wrong answer)** `engine='trbdf2'` / `'auto'`: a zero-time
+  diode cascade decided the diode bits on a probe whose Newton solve had
+  failed (its state was the warm start). A saturable inductor as a
+  buck's inductor then lost its current at a turn-off edge (7.68 V
+  reported against 12.85 V on `pwl`; 11.13 V measured with roundoff
+  acceptance off). A probe whose Newton solve fails is now retaken at
+  100x the step up to the probe cap; a cascade with no converged probe
+  raises `SimulationAborted` naming the event and the row. A failed
+  Newton solve on a diode-event landing rejects the step (it was
+  committed); a failed localisation trial ends the refinement.
+  `TrBdf2Stats::n_probe_newton_retries` counts the retries. Baseline
+  table: only the Level-1 MOSFET half bridge moves (54 breakpoint
+  probes that failed now refresh: 1692 → 1555 steps, error 3.12e-4 →
+  4.66e-4 V at rtol 1e-5; at rtol 5e-6 it is 1.54e-4 V in 1575 steps,
+  so the work–precision curve improved; rtol 1e-7 aborted at h_min at
+  t = 5 µs and now completes with tw error 1.0e-4 V).
+* **Fixed** the documented TR-BDF2 `h_min` stall (snubbed 48 V flyback
+  with a saturable transformer, `test_engines_agree_below_saturation`,
+  a strict xfail since 2.0.0): it aborted at t = 4–24 µs, then at
+  494 µs with roundoff acceptance. With the failed cascade probes
+  handled (15 retaken in the run) it completes: V_out 15.3104 V against
+  15.31 V on `engine='pwl', dt=1e-8` (109979 accepted steps, smallest
+  1e-15 s, 6 forced accepts). The known-limitations row is deleted and
+  the xfail is a test (tolerance 3 % → 0.3 %); the `h_min` abort
+  message no longer points at it. The Lauritzen gated buck that stalled
+  at the default tolerances runs at them again.
+
 ### Newton roundoff acceptance (add-newton-roundoff-acceptance)
 
 * **Added** transient Newton solves (`engine='pwl'` dynamic path,

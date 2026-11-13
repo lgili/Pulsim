@@ -168,6 +168,11 @@ struct TrBdf2Options {
     /// stores the controller's proposal instead of the accepted step.
     /// `false` reproduces the previous step sequence exactly.
     bool refresh_after_event = true;
+    /// Transient Newton roundoff acceptance (add-newton-roundoff-
+    /// acceptance) on every solve of this engine. C++ only: a test and
+    /// bisect handle (`false` = abort or reject at an exhausted budget,
+    /// as before that change).
+    bool newton_roundoff_acceptance = true;
 };
 
 struct TrBdf2Stats {
@@ -240,6 +245,9 @@ struct TrBdf2Stats {
     /// Steps clamped to a source breakpoint (a pulse or PWM-source
     /// corner) and landed on it.
     Size n_source_breakpoints = 0;
+    /// Probe solves retaken at 100x the step because Newton did not
+    /// converge (see `probe_solve`).
+    Size n_probe_newton_retries = 0;
 };
 
 namespace detail_trbdf2 {
@@ -754,7 +762,7 @@ inline SimulationResult run_transient_trbdf2(
     // transient solve here: stages, probes, landings. Copied to the
     // result at the end.
     pwl::NewtonRoundoffAcceptance newton_roundoff;
-    newton_roundoff.enabled = true;
+    newton_roundoff.enabled = opts.newton_roundoff_acceptance;
     Size ro_accepts = 0;
     Real ro_omega_max = 0;
     Index ro_row = kInvalidIndex;
@@ -870,31 +878,64 @@ inline SimulationResult run_transient_trbdf2(
     // reads the capacitor current back through this step).
     Real last_probe_dt = Real{0};
     bool last_probe_ok = false;
+    Size n_probe_newton_retries = 0;
     auto is_singular_error = [](const std::runtime_error& e) {
         return std::string(e.what()).find("numerically singular")
                != std::string::npos;
     };
+    // A probe whose NEWTON solve fails (a flux row's 2L/h at a 1e-16 s
+    // probe puts one ulp of current far above the absolute tolerances)
+    // climbs the same ladder: its out_x is the warm start, not a
+    // solution, and deciding diode bits on it was a silent wrong answer
+    // (a saturable buck inductor lost 10 A at a turn-off edge: the
+    // cascade never turned the freewheeling diode on). A probe that
+    // still fails at the cap returns false; no caller may read out_x.
     auto probe_solve = [&](const SwitchStateMask& m, Real t0, Real dt,
                             Vector& out_x) -> bool {
         Real dt_try = std::max(dt, h_probe_learned);
         const Real dt_cap = std::max(
             dt_try, span_ref * Real{1e-6});
+        const Vector x_warm = out_x;
+        bool learn_next = false;
         for (;;) {
+            bool ok = false, singular = false;
             try {
-                const bool ok = trap_solve(m, t0, dt_try, out_x);
-                if (dt_try > h_probe_learned && dt_try > dt) {
+                ok = trap_solve(m, t0, dt_try, out_x);
+                // Only a singular factor is learned: it is a property
+                // of the mask and the companion size; a Newton failure
+                // depends on the state and is retried per probe.
+                if (ok && learn_next && dt_try > h_probe_learned) {
                     h_probe_learned = dt_try;
                 }
-                last_probe_dt = dt_try;
-                last_probe_ok = ok;
-                return ok;
             } catch (const std::runtime_error& e) {
                 if (!is_singular_error(e) || dt_try >= dt_cap) {
                     throw;
                 }
-                dt_try = std::min(dt_try * Real{100}, dt_cap);
+                singular = true;
             }
+            last_probe_dt = dt_try;
+            last_probe_ok = ok;
+            if (ok || dt_try >= dt_cap) {
+                return ok;
+            }
+            if (!singular) ++n_probe_newton_retries;
+            learn_next = singular;
+            out_x = x_warm;
+            dt_try = std::min(dt_try * Real{100}, dt_cap);
         }
+    };
+    // A zero-time cascade whose probe failed at every step up to the cap
+    // has no state to decide the diode bits on: refuse by name.
+    auto require_probe = [&](bool ok, const char* where, Real at_t) {
+        if (ok) return;
+        throw std::runtime_error(
+            std::string("run_transient_trbdf2: the zero-time diode cascade "
+                        "at ") + where + " t = " + std::to_string(at_t)
+            + " has no converged probe solve (Newton failed at every "
+              "probe step up to " + std::to_string(last_probe_dt)
+            + " s): " + newton_last_error
+            + " The diode bits cannot be decided at this event; run "
+              "this circuit on engine='pwl' with an explicit dt.");
     };
 
     // Mask recorded with sample 0 (SimulationResult::
@@ -1321,8 +1362,9 @@ inline SimulationResult run_transient_trbdf2(
                 for (Size it = 0; it < opts.max_event_iterations;
                      ++it) {
                     gates_decided = mask_at(t + Real{0.5} * h_min);
-                    probe_solve(gates_decided, t, h_probe_floor,
-                                x_trial);
+                    require_probe(probe_solve(gates_decided, t,
+                                              h_probe_floor, x_trial),
+                                  "a gate edge at a step boundary,", t);
                     x_sig = x_trial;
                     if (!diodes.update_from_state(x_trial)) {
                         settled = true;
@@ -1520,13 +1562,9 @@ inline SimulationResult run_transient_trbdf2(
                         + std::to_string(t)
                         + " with h already at h_min — "
                         + newton_last_error
-                        + " If t is just after a hard switching edge, "
-                          "this is the known TR-BDF2 stall at h_min "
-                          "(CHANGELOG 2.0.0, \"TR-BDF2 stalls at "
-                          "h_min\"; KNOWN_LIMITATIONS.md): a "
-                          "step-controller defect, not a tolerance "
-                          "one. Run this circuit on engine='pwl' with "
-                          "an explicit dt.");
+                        + " Newton did not converge even at the "
+                          "smallest step; cross-check this circuit on "
+                          "engine='pwl' with an explicit dt.");
                 }
                 h = std::max(h * Real{0.25}, h_min);
                 continue;
@@ -1726,9 +1764,10 @@ inline SimulationResult run_transient_trbdf2(
                                  ++it2) {
                                 // Probe, not a committed step.
                                 gates_decided = mask_at(t);
-                                probe_solve(gates_decided, t,
-                                            h_probe_floor,
-                                            x_trial);
+                                require_probe(
+                                    probe_solve(gates_decided, t,
+                                                h_probe_floor, x_trial),
+                                    "a diode event,", t);
                                 x_sig = x_trial;
                                 if (!diodes.update_from_state(
                                         x_trial)) {
@@ -1820,7 +1859,10 @@ inline SimulationResult run_transient_trbdf2(
                         }
                         bool trial_ok = true;
                         try {
-                            trap_solve(mask_step, t, dts, x_trial);
+                            // A failed Newton trial leaves x_trial at
+                            // its warm start: never read it.
+                            trial_ok = trap_solve(mask_step, t, dts,
+                                                  x_trial);
                         } catch (const std::runtime_error& e) {
                             // A singular trial (see probe_solve) is
                             // ill-conditioned like a non-finite one.
@@ -1857,7 +1899,23 @@ inline SimulationResult run_transient_trbdf2(
                     // signal), commit the trap sub-step there.
                     const Real dt_land =
                         std::max(tb - t, dt_floor);
-                    trap_solve(mask_step, t, dt_land, x_trial);
+                    if (!trap_solve(mask_step, t, dt_land, x_trial)) {
+                        // Newton failed on the landing sub-step: x_trial
+                        // is its warm start, not a state. Reject and
+                        // retake shorter (it was committed before).
+                        ++st.n_reject;
+                        ++st.n_newton_retries;
+                        if (h <= h_min * Real{1.0001}) {
+                            throw std::runtime_error(
+                                "run_transient_trbdf2: Newton failed on "
+                                "the diode-event landing at t = "
+                                + std::to_string(t + dt_land)
+                                + " with h already at h_min — "
+                                + newton_last_error);
+                        }
+                        h = std::max(Real{0.5} * dt_land, h_min);
+                        continue;
+                    }
                     if (!x_trial.allFinite()) {
                         throw std::runtime_error(
                             "run_transient_trbdf2: event landing at "
@@ -1910,8 +1968,10 @@ inline SimulationResult run_transient_trbdf2(
                              it2 < opts.max_event_iterations;
                              ++it2) {
                             gates_decided = mask_at(t);
-                            probe_solve(gates_decided, t, h_zero,
-                                        x_trial);
+                            require_probe(
+                                probe_solve(gates_decided, t, h_zero,
+                                            x_trial),
+                                "a diode event landing,", t);
                             x_sig = x_trial;
                             if (!diodes.update_from_state(
                                     x_trial)) {
@@ -2038,8 +2098,10 @@ inline SimulationResult run_transient_trbdf2(
                              it < opts.max_event_iterations;
                              ++it) {
                             gates_decided = mask_at(t + h_probe);
-                            probe_solve(gates_decided, t,
-                                        h_probe, x_trial);
+                            require_probe(
+                                probe_solve(gates_decided, t, h_probe,
+                                            x_trial),
+                                "a gate edge,", t);
                             x_sig = x_trial;
                             if (!diodes.update_from_state(
                                     x_trial)) {
@@ -2107,6 +2169,7 @@ inline SimulationResult run_transient_trbdf2(
         }
         st.gate_sample_spacing_max = gate_spacing_max;
         st.probe_floor_used = h_probe_learned;
+        st.n_probe_newton_retries = n_probe_newton_retries;
     } catch (const SimulationAborted&) {
         throw;
     } catch (const std::runtime_error& e) {

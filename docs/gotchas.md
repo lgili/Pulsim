@@ -106,10 +106,7 @@ declines, the abort message says why (the row's backward error, the
 step ceiling, whether `||dx||` stagnated).
 
 **Fix:** look at the device the message names, and cross-check on the
-other engine. An abort at `h_min` right after a hard switching edge on
-TR-BDF2 is a known engine limitation (`KNOWN_LIMITATIONS.md`,
-CHANGELOG 2.0.0 "TR-BDF2 stalls at `h_min`"), not a tolerance problem;
-`engine='pwl'` with an explicit `dt` is the workaround. On the fixed
+other engine (`engine='pwl'` with an explicit `dt`). On the fixed
 engine, do NOT reach for a smaller `dt`: a Newton abort there with PWL
 diodes next to a Newton device is the known diode-mask chatter, which
 gets worse as `dt` shrinks (the PSFB reproducer aborts at 10 ns and

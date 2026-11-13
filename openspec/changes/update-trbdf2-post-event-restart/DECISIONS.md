@@ -81,3 +81,22 @@ The open questions of `design.md` had no answer and none was marked
    toggle at the edge. (b) A controller tick inside the probe would
    fire `h_probe` late (9e-12 s); the engine falls back to the
    slot-only refresh when a tick or `t_end` lies within the probe.
+
+## Follow-up (maintainer decisions, 2026-11-13)
+
+8. **Every probe failure is handled (silent wrong answer ended).** The
+   zero-time cascades (gate edge, boundary settle, diode event, diode
+   landing) ignored `probe_solve`'s result; a failed Newton probe left
+   `x_trial` at its warm start and the diode bits were decided on it.
+   `probe_solve` now retakes a Newton failure at 100x the step up to the
+   probe cap (only a singular factor is learned as the run's probe
+   floor: a Newton failure depends on the state), and a cascade with no
+   converged probe throws a named error (`SimulationAborted`). The
+   landing sub-step rejects on a Newton failure; a localisation trial
+   that fails ends the refinement. The initial settle keeps its bits on
+   failure (the start state is consistent with them) and the restart
+   keeps the old slots. Measured: saturable buck inductor, roundoff
+   acceptance off: 11.13 V → 12.85 V (pwl 12.849 V); with acceptance on
+   both builds are right (probes/sat_buck.py). C++-only
+   `TrBdf2Options::newton_roundoff_acceptance` (default true) exists to
+   run that test.

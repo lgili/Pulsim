@@ -44,3 +44,13 @@ conservative option was taken.
 6. **Characterisation and fix in one commit.** The p7b port fails
    without the change (every "aborted before" case raises) and passes
    with it; it was not committed separately as a strict xfail first.
+
+## Follow-up (maintainer decisions, 2026-11-13)
+
+7. **The documented stall is cured, by the probe handling, not by the
+   acceptance.** With every failed Newton probe of the zero-time diode
+   cascades retaken or refused (update-trbdf2-post-event-restart
+   DECISIONS 8), `probes/hmin_stall.py` completes: 15.3104 V against
+   15.31 V on pwl at 1e-8 s. The strict xfail is now a test (0.3 %),
+   the known-limitations row is deleted and the `h_min` abort message
+   no longer cites it (task 5.1). See 8 for the criterion change.
