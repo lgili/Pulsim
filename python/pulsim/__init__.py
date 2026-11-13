@@ -2280,6 +2280,8 @@ def simulate(
                     b_extra_fn=b_extra_fn))
         except AttributeError:  # pragma: no cover
             pass
+        _auto_check_voltage_sanity(_dsed_res, builder,
+                                    voltage_sanity_factor)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:
@@ -3434,9 +3436,16 @@ def _auto_check_voltage_sanity(res, builder, factor):
     """
     try:
         from . import _pulsim as _k  # type: ignore[import-not-found]
-        volt = _k.find_implausible_voltage(
-            builder.graph, builder.pool, res,
-            100.0 if factor is None else float(factor))
+        f = 100.0 if factor is None else float(factor)
+        if isinstance(res, _k.SimulationResult):
+            volt = _k.find_implausible_voltage(builder.graph,
+                                               builder.pool, res, f)
+        else:   # the dsed result: full-MNA samples as arrays
+            import numpy as _np
+            volt = _k.find_implausible_voltage(
+                builder.graph, builder.pool,
+                list(_np.asarray(res.times, dtype=float)),
+                _np.asarray(res.states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:

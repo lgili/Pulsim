@@ -18,6 +18,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of 0.159 V for a sine current into 1 µF ∥ 1 TΩ). It now
   stops on the Newton step or after one step from a converged residual;
   the buck results and run counts are unchanged.
+* **Fixed** `simulate(engine="dsed")` skipped the implausible-voltage
+  check and ignored `voltage_sanity_factor`.
 * **Changed** `sweep` / `monte_carlo`: a job that raises is recorded in
   `failed` on every backend (the process backend used to raise); a
   configuration refusal (`UnsupportedError`, `RetiredDeviceError`)

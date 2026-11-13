@@ -2308,6 +2308,22 @@ void init_module(py::module_& m) {
         py::arg("factor") = Real{100},
         "Scan a finished run for a node voltage the circuit's "
         "sources cannot account for. Reads only; changes nothing.");
+    // The same scan on a trace that is not a native SimulationResult
+    // (the dsed engine's): `states` rows are full-MNA samples at `times`.
+    m.def("find_implausible_voltage",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool,
+            const std::vector<Real>& times,
+            const Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic,
+                                Eigen::RowMajor>& states, Real factor) {
+            solver::SimulationResult r;
+            r.times = times;
+            for (Eigen::Index k = 0; k < states.rows(); ++k) {
+                r.states.push_back(states.row(k).transpose());
+            }
+            return solver::find_implausible_voltage(graph, pool, r, factor);
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("times"),
+        py::arg("states"), py::arg("factor") = Real{100});
 
     m.def("describe_implausible_voltage",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,

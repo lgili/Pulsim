@@ -864,3 +864,14 @@ def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
             [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
     assert ei.value.engine == "ac_sweep"
     assert ei.value.device == cell[2]
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
+def test_voltage_sanity_factor_honoured_on_every_engine(engine):
+    # A 10 V node against a bound of 0.5 x 10 V: every engine's trace is
+    # scanned (dsed returned without the scan, ignoring the keyword).
+    kw = {"dt": 1e-6} if engine == "pwl" else {}
+    with pytest.warns(UserWarning, match="largest voltage"):
+        r = p.simulate(_rc(), 1e-3, engine=engine,
+                       voltage_sanity_factor=0.5, **kw)
+    assert r._implausible_voltage.peak == pytest.approx(10.0)

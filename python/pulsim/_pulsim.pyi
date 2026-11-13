@@ -2650,10 +2650,14 @@ def engine_capabilities() -> dict[typing.Any, typing.Any]:
     """
     The kernel's device-kind capability table: {kind: {'class': solve class, 'pwl'|'trbdf2'|'dsed'|'bdf1'|'ac_sweep': bool}}. An engine marked False refuses the kind with UnsupportedError.
     """
+@typing.overload
 def find_implausible_voltage(graph: Graph, pool: DevicePool, result: SimulationResult, factor: float = 100.0) -> ImplausibleVoltage:
     """
     Scan a finished run for a node voltage the circuit's sources cannot account for. Reads only; changes nothing.
     """
+@typing.overload
+def find_implausible_voltage(graph: Graph, pool: DevicePool, times: collections.abc.Sequence[float], states: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], factor: float = 100.0) -> ImplausibleVoltage:
+    ...
 def ja_evaluate(N: float, Ae: float, le: float, lg: float, Ms: float, a: float, alpha: float, c: float, k: float, H_n: float, M_n: float, n_sub: int, hint: float, i: float) -> tuple[float, float, float, float, float]:
     """
     One in-loop Jiles-Atherton evaluation at a trial current from a given step-start state: (H, M, lambda, L, dM_dH). A probe for tests and diagnostics.
