@@ -185,3 +185,58 @@ cascade untouched.
 
     Most of the gain over A1 is the allocation and supernodal-setup
     overhead of `Eigen::SparseLU::factorize` on small matrices.
+
+17. **Stage B (low-rank update)** → measured, **not landed**. Decided by
+    the maintainer on 2026-11-13: take the rounding-changing stages now,
+    behind these gates, re-baselining the Newton goldens once. Neither
+    variant passes both the gate and the speed bar (≥ 1.3× over A2 on
+    the small and the large case), so tasks 5.x stay open. The
+    prototype is kept as `probes/stage_b_lowrank_prototype.patch`
+    (applies to A2's `pwl/nonlinear_solve.hpp`; variant chosen by the
+    env var `PULSIM_NEWTON_LOWRANK=p|w`).
+
+    - *Partial* (`p`): `partial_refactor` on J_nl's columns while the
+      linear values are unchanged, behind the 0.6·n path gate; full
+      factorisation otherwise.
+    - *Woodbury* (`w`): a cached in-house factor of J_lin,
+      `W = J_lin⁻¹·E_R`, and a k×k dense solve per iteration.
+
+    Gate against the stage-1 goldens with the Newton trace:
+
+    | Case | partial: trace / max rel | partial: refactors | Woodbury: trace / max rel |
+    |---|---|---|---|
+    | Shockley buck, pwl | identical / 3.4e-16 | 27209 of 27540 | **differs** (27540 → 27524) / 1.5e-12 |
+    | Shockley buck, trbdf2 | **differs** (31087 → 31086) / 1.5e-10 | 26984 of 31086 | **aborts** (residual 1.3e17 at h_min) |
+    | Shockley rectifier n = 51, pwl | identical / 0 | 0 (fell back every call) | identical / 3.7e-13 |
+    | Shockley rectifier n = 51, trbdf2 | identical / 0 | 0 | identical / 1.5e-10 |
+    | Shockley rectifier n = 483, pwl | identical / 0 | 0 | identical / 4.6e-14 |
+    | MOSFET Level-1, pwl | identical / 1.5e-15 | 13053 of 13054 | identical / 4.7e-15 |
+    | saturable inductor, pwl | identical / 0 | 65644 of 65645 | **aborts** (no convergence at t = 1e-7) |
+
+    ns/step, interleaved (3 rounds × best of 3, full-power mode, re-measured
+    with the stage-1 build in the same rounds):
+
+    | Case | stage 1 | A2 | partial | A2 ÷ partial | Woodbury (own A/B) | A2 ÷ Woodbury |
+    |---|---|---|---|---|---|---|
+    | Shockley buck, pwl | 4062 | 1029 | 891 | 1.15 | 866 (A2 959) | 1.11 |
+    | Shockley buck, trbdf2 | 15230 | 3643 | 3899 | 0.93 | — | — |
+    | Shockley rectifier n = 51, pwl | 17156 | 6137 | 6735 | 0.91 | 3203 (A2 5481) | 1.71 |
+    | Shockley rectifier n = 483, pwl | 178613 | 89079 | 89319 | 1.00 | 43434 (A2 81128) | 1.87 |
+    | MOSFET Level-1, pwl | 5381 | 1013 | 803 | 1.26 | 1078 (A2 1002) | 0.93 |
+    | saturable inductor, pwl | 5049 | 1006 | 897 | 1.12 | — | — |
+
+    Reading: on the small circuits A2 already factors a 10–20 unknown
+    matrix in well under a microsecond, so skipping the linear columns
+    saves at most ~15 %. On the rectifier the diode columns span nearly
+    every node, the partial path never runs (the prototype does not
+    split its fallbacks by cause; the 0.6·n path gate is the likely
+    refusal), and Woodbury's rank equals the diode count. Woodbury is
+    the only variant with a large-case gain (1.87× at n = 483), but it
+    changes the iteration trace on the buck and diverges on the buck
+    under TR-BDF2 and on the saturable inductor: `I + W[C,:]·Ñ` is
+    ill-conditioned when a device's conductance spans many decades,
+    and without a conditioning test and a fallback it is unsafe.
+    What would make B worth revisiting: a Woodbury guarded by a
+    condition estimate of the k×k capacitance matrix with fallback to
+    the full factor, used only above a size threshold (n ≳ 200); the
+    small-circuit cost is now the residual/refresh, not the factor.

@@ -36,7 +36,7 @@ with the new time split; it is not waived.
 - [x] 4.4 Allocation test: zero heap allocations per Newton iteration after the first step (requires the allocation-free `factorize` of `update-trbdf2-factor-reuse`; otherwise record the residual count)
 - [x] 4.5 Measure as in 1.3. Accept A2 when the Shockley buck is ≤ 0.3 × baseline and the n = 1503 rectifier ≤ 0.6 × baseline — Shockley buck 0.14 × baseline, rectifier n = 483 0.24 × (n = 1503 not in the golden set; DECISIONS.md 16)
 
-## 5. Stage B — low-rank update (gated: starts only after 4 is merged)
+## 5. Stage B — low-rank update (gated: starts only after 4 is merged) — measured 2026-11-13, not landed (DECISIONS 17)
 - [ ] 5.1 Baseline for stage B: counters and ns/step after A2; path length of the device columns on the rectifier ladder (`partial_refactor_count_path`)
 - [ ] 5.2 Prototype `partial_refactor` on the device columns and Woodbury on the cached linear factor on the rectifier ladder; choose by measured time and by error against the A2 result
 - [ ] 5.3 Implement the chosen update; full factorisation on mask or `dt` change and on pivot fault; counter `newton_partial_refactors`
