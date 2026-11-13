@@ -261,6 +261,17 @@ Limits with the rule on:
 - an MNA PMSM retries every fixed step at dt/2 with the rule on or off,
   so its steps are never split.
 
+Resolution diagnostics (`res.resolution`, `pulsim.ResolutionWarning`):
+the truncation estimate covers linear capacitors and inductors only
+(the stateful devices are seen by the ringing detector through their
+node voltages and branch currents); it is skipped on steps whose
+three-point stencil straddles a mask change, restart, split, retry or
+built-in source jump (an undeclared `b_extra_fn` jump is not seen); it
+is an estimate, not an error bound. Thresholds (1e-2; 1 % over four
+steps) come from one prototype and five circuits. Cost with it on:
++5 % to +14 % ns/step (design gate: 3 %); `resolution_diagnostics=False`
+removes it.
+
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or

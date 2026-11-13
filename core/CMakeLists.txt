@@ -387,6 +387,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
         tests/layer5_v3/test_substep_correction.cpp
+        tests/layer5_v3/test_resolution_diagnostics.cpp
     )
     target_link_libraries(pulsim_core_layer5_v3_tests
         PRIVATE

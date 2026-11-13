@@ -1837,6 +1837,11 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("resolution_diagnostics",
+                        &SimulationOptions::resolution_diagnostics,
+                        "Record SimulationResult.resolution (truncation "
+                        "estimate + ringing detector) on the pwl engine. "
+                        "Read-only: states are bit-identical either way.")
         .def_readwrite("discontinuity_restart",
                         &SimulationOptions::discontinuity_restart,
                         "Fixed engine: take the step after a discontinuity "
@@ -2010,6 +2015,31 @@ void init_module(py::module_& m) {
         .def_readonly("new_state",
                        &CommutationEvent::new_state);
 
+    py::class_<SimulationResult::RingingRecord>(m, "RingingRecord",
+        "A run of >= 4 sign-alternating steps of one state entry "
+        "(add-fixed-step-resolution-diagnostics).")
+        .def_readonly("var", &SimulationResult::RingingRecord::var)
+        .def_readonly("t_start", &SimulationResult::RingingRecord::t_start)
+        .def_readonly("length", &SimulationResult::RingingRecord::length)
+        .def_readonly("max_delta",
+                       &SimulationResult::RingingRecord::max_delta);
+    py::class_<SimulationResult::Resolution>(m, "ResolutionRecord",
+        "Fixed-step resolution diagnostics. `lte` is an ESTIMATE of "
+        "the per-step truncation relative to each variable's running "
+        "peak, not an error bound; stateful devices are not covered.")
+        .def_property_readonly("lte",
+            [](const SimulationResult::Resolution& r) {
+                return py::array_t<Real>(
+                    static_cast<py::ssize_t>(r.lte.size()), r.lte.data());
+            })
+        .def_readonly("lte_max", &SimulationResult::Resolution::lte_max)
+        .def_readonly("lte_branch",
+                       &SimulationResult::Resolution::lte_branch)
+        .def_readonly("lte_time", &SimulationResult::Resolution::lte_time)
+        .def_readonly("n_branches_covered",
+                       &SimulationResult::Resolution::n_branches_covered)
+        .def_readonly("ringing", &SimulationResult::Resolution::ringing);
+
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
@@ -2030,6 +2060,16 @@ void init_module(py::module_& m) {
             },
             "Sample times as a read-only numpy view over the result "
             "(zero-copy). `list(res.times)` gives the old list.")
+        .def_property_readonly("resolution",
+            [](py::object self) -> py::object {
+                const auto& r = self.cast<const SimulationResult&>();
+                if (!r.resolution.enabled) return py::none();
+                return py::cast(&r.resolution,
+                                py::return_value_policy::reference_internal,
+                                self);
+            },
+            "Resolution diagnostics of a pwl run (None when off, and "
+            "for trbdf2/dsed). See pulsim.ResolutionWarning.")
         .def_property_readonly("counters",
             [](const SimulationResult& r) {
                 py::dict d;

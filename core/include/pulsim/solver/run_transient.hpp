@@ -1046,6 +1046,53 @@ inline SimulationResult run_transient(
             restart_cache->build_lazy(restart_dt);
         }
 
+        // ---- add-fixed-step-resolution-diagnostics (read-only) ----
+        // Truncation: e = (h/12)|f_{k+1} − 2f_k + f_{k−1}| per linear
+        // C/L (f = i/C, v/L from the committed companion), over the
+        // variable's running peak; valid only on three plain steps under
+        // one stamped mask. Ringing: per state entry, runs of
+        // sign-alternating differences above max(1 % of the local
+        // magnitude, 1e-9 of the peak); a run of >= 4 is recorded once.
+        const bool diag = opts.resolution_diagnostics;
+        auto& rd = result.resolution;
+        rd.enabled = diag;
+        // Two buffers for the whole workspace (the zero-alloc budget):
+        // per C/L f_k, f_{k−1}, peak |y|, 1/C or 1/L; per state entry
+        // Δ_{k−1}, peak |x|, run start, run max |Δ|; run length, record.
+        Size rd_run = 0;
+        topology::SwitchStateMask rd_prev_mask;
+        Real rd_since_store = 0;
+        std::vector<Real> rd_buf;
+        std::vector<Size> rd_ibuf;
+        Real *rd_f1 = nullptr, *rd_f2 = nullptr, *rd_peak = nullptr,
+             *rd_inv = nullptr, *rd_dprev = nullptr, *rd_xpeak = nullptr,
+             *rd_t0 = nullptr, *rd_dmax = nullptr;
+        Size *rd_cnt = nullptr, *rd_open = nullptr;
+        constexpr Size kRdNone = std::numeric_limits<Size>::max();
+        if (diag) {
+            const auto& ents = history.entries();
+            const Size nh = ents.size();
+            const auto n = static_cast<Size>(x.size());
+            rd_buf.assign(4 * nh + 4 * n, Real{0});
+            rd_ibuf.assign(2 * n, Size{0});
+            rd_f1 = rd_buf.data();
+            rd_f2 = rd_f1 + nh;
+            rd_peak = rd_f2 + nh;
+            rd_inv = rd_peak + nh;
+            rd_dprev = rd_inv + nh;
+            rd_xpeak = rd_dprev + n;
+            rd_t0 = rd_xpeak + n;
+            rd_dmax = rd_t0 + n;
+            rd_cnt = rd_ibuf.data();
+            rd_open = rd_cnt + n;
+            std::fill(rd_open, rd_open + n, kRdNone);
+            for (Size j = 0; j < nh; ++j) {
+                rd_inv[j] = Real{1} / ents[j].C_or_L;
+            }
+            rd.n_branches_covered = nh;
+            rd.lte.reserve(result.times.capacity());
+        }
+
         for (Size k = 1; k < n_steps; ++k) {
             // User-cancellation check (Phase: live scope). Lets a
             // GUI / external watchdog stop the simulation early
@@ -2020,6 +2067,84 @@ inline SimulationResult run_transient(
                 ++result.n_restart_steps;
             }
 
+            if (diag) {
+                const bool src_jump = (has_pwm || has_pulse) &&
+                    sources::next_source_jump_after(pool, graph, t_prev) <= t;
+                const bool plain = !restart && !step_retried && n_ev == 0 &&
+                    committed_dt == opts.dt && !src_jump;
+                rd_run = !plain ? 0
+                    : (rd_run > 0 && stamped_mask == rd_prev_mask ? rd_run + 1
+                                                                  : 1);
+                rd_prev_mask = stamped_mask;
+                const auto& ents = history.entries();
+                for (Size j = 0; j < ents.size(); ++j) {
+                    const auto& e = ents[j];
+                    const bool cap =
+                        e.kind == pwl::DevicePool::StoredKind::Capacitor;
+                    const Real f = (cap ? e.i_prev : e.v_prev) * rd_inv[j];
+                    const Real y = std::abs(cap ? e.v_prev : e.i_prev);
+                    rd_peak[j] = std::max(rd_peak[j], y);
+                    if (rd_run >= 3) {
+                        // e > r_best·peak  ⇔  e/peak > r_best (no division
+                        // unless a maximum moves).
+                        const Real e_abs = opts.dt / Real{12} *
+                            std::abs(f - Real{2} * rd_f1[j] + rd_f2[j]);
+                        if (e_abs > rd_since_store * rd_peak[j] &&
+                            rd_peak[j] > Real{0}) {
+                            const Real r = e_abs / rd_peak[j];
+                            rd_since_store = r;
+                            if (r > rd.lte_max) {
+                                rd.lte_max = r;
+                                rd.lte_branch = e.branch_id;
+                                rd.lte_time = t;
+                            }
+                        }
+                    }
+                    rd_f2[j] = rd_f1[j];
+                    rd_f1[j] = f;
+                }
+                const Real* xs = x.data();
+                const Real* xps = x_prev.data();
+                Real* dps = rd_dprev;
+                Real* pks = rd_xpeak;
+                const Size nx = static_cast<Size>(x.size());
+                for (Size u = 0; u < nx; ++u) {
+                    const Real d = xs[u] - xps[u];
+                    const Real ax = std::abs(xs[u]);
+                    pks[u] = ax > pks[u] ? ax : pks[u];
+                    const Real d_last = dps[u];
+                    dps[u] = d;
+                    if (d * d_last < Real{0}) [[unlikely]] {
+                        const Real thr = std::max(
+                            Real{0.01} * std::max(ax, std::abs(xps[u])),
+                            Real{1e-9} * pks[u]);
+                        if (std::abs(d) > thr) {
+                            if (rd_cnt[u]++ == 0) {
+                                rd_t0[u] = t;
+                                rd_dmax[u] = 0;
+                            }
+                            rd_dmax[u] = std::max(rd_dmax[u], std::abs(d));
+                            if (rd_cnt[u] >= 4) {
+                                if (rd_open[u] == kRdNone) {
+                                    rd_open[u] = rd.ringing.size();
+                                    rd.ringing.push_back(
+                                        {.var = static_cast<Index>(u)});
+                                }
+                                auto& rec = rd.ringing[rd_open[u]];
+                                rec.t_start = rd_t0[u];
+                                rec.length = rd_cnt[u];
+                                rec.max_delta = rd_dmax[u];
+                            }
+                            continue;
+                        }
+                    }
+                    if (rd_cnt[u] != 0) [[unlikely]] {
+                        rd_cnt[u] = 0;
+                        rd_open[u] = kRdNone;
+                    }
+                }
+            }
+
             // 6. Record. event_iteration_count = iters - 1 (the
             //    first iteration always runs; the count is the
             //    number of EXTRA solves caused by diode flips).
@@ -2031,7 +2156,16 @@ inline SimulationResult run_transient(
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(iters - 1);
                 result.record_switch_state(stamped_mask);
+                if (diag) {
+                    rd.lte.push_back(rd_since_store);
+                    rd_since_store = 0;
+                }
             }
+        }
+        if (diag && rd.lte.size() < result.times.size()) {
+            // The initial sample(s) carry no estimate.
+            rd.lte.insert(rd.lte.begin(),
+                          result.times.size() - rd.lte.size(), Real{0});
         }
         result.final_snapshot.restart_steps_left = restart_left;
         if (restart_cache) {

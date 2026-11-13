@@ -38,6 +38,13 @@ Pulsim's transient kernel supports two **fixed-step** integrators
   event, then the SDIRK window from it. Edges off the grid become
   second order (buck D = 0.4567, `v_C` at T/50: 8.08e-2 V snapped,
   1.07e-6 V split); `res.n_split_steps` counts the split steps.
+- **Resolution diagnostics** (on by default, read-only): the trapezoid's
+  local error `(h/12)|f_{k+1} − 2f_k + f_{k−1}|` per linear C/L
+  (`f = i/C`, `v/L` from the companion), over the variable's running
+  peak, on three steps under one mask without restart, split, retry or
+  source jump; plus a Nyquist-ringing detector (`Δ_k·Δ_{k−1} < 0`,
+  `|Δ_k|` above 1 % of the local magnitude, four steps). Recorded in
+  `res.resolution`; `pulsim.ResolutionWarning` above 1e-2 or on a run.
 
 ### BDF1 (implicit Euler)
 

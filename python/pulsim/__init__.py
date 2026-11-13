@@ -476,6 +476,7 @@ from .plot import scope  # noqa: E402,F811
 from ._ai_guide import ai_guide  # noqa: E402
 
 __all__ = [
+    "ResolutionWarning",
     "ai_guide",
     "CircuitBuilder",
     "Graph",
@@ -758,6 +759,56 @@ if _HAS_SCOPE:
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
+
+
+# add-fixed-step-resolution-diagnostics thresholds (design D3).
+_RESOLUTION_LTE_MAX = 1e-2
+
+
+def _warn_resolution(builder, res, dt):
+    """One ResolutionWarning per run (see ResolutionWarning)."""
+    rd = getattr(res, "resolution", None)
+    if rd is None:
+        return
+    ring = list(rd.ringing)
+    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring):
+        return
+    import warnings
+    lines = []
+    if rd.lte_max > _RESOLUTION_LTE_MAX:
+        name = builder.graph.branch_name(rd.lte_branch) or \
+            f"branch #{rd.lte_branch}"
+        lines.append(
+            f"  * {name}: estimated truncation {rd.lte_max:.3g} of its "
+            f"peak in one step, at t = {rd.lte_time:.6g} s.")
+    if ring:
+        try:
+            names = builder.state_var_names()
+        except Exception:  # noqa: BLE001 — test doubles without names
+            names = []
+        worst = max(ring, key=lambda r: r.length)
+        nm = names[worst.var] if worst.var < len(names) else \
+            f"x[{worst.var}]"
+        lines.append(
+            f"  * {nm}: {worst.length} sign-alternating steps from "
+            f"t = {worst.t_start:.6g} s (largest step change "
+            f"{worst.max_delta:.4g}); {len(ring)} such run(s) in all.")
+    warnings.warn(
+        f"simulate(): dt = {dt:.4g} s does not resolve this circuit "
+        "(fixed-step engine).\n" + "\n".join(lines) +
+        "\n  Reduce dt, or omit dt to let the variable-step engine "
+        "choose. The estimate is not an error bound. Details: "
+        "res.resolution.",
+        ResolutionWarning, stacklevel=3)
+
+
+class ResolutionWarning(UserWarning):
+    """A fixed-step (`pwl`) run whose `dt` does not resolve the circuit:
+    a large truncation estimate or a Nyquist alternation
+    (`res.resolution`). Silence with
+    ``warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)``
+    or ``simulate(..., resolution_diagnostics=False)``."""
+
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
 from ._refusal import unsupported as _unsupported  # noqa: E402
@@ -1482,6 +1533,10 @@ class SolverOptions:
     # Fixed engine: three SDIRK(2,2) steps after every discontinuity,
     # gate sampled at the step start (None = off).
     discontinuity_restart: Optional[bool] = None
+    # Fixed engine: record res.resolution and warn once
+    # (ResolutionWarning) when dt does not resolve the circuit
+    # (None = on).
+    resolution_diagnostics: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1637,6 +1692,7 @@ def simulate(
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
+    resolution_diagnostics: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1843,6 +1899,15 @@ def simulate(
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
 
+    resolution_diagnostics
+        ``engine='pwl'`` only, default on: record ``res.resolution`` (a
+        per-step truncation estimate of the linear capacitors and
+        inductors relative to each one's running peak, and the runs of
+        >= 4 sign-alternating steps of any state entry) and warn once
+        (:class:`ResolutionWarning`) when ``lte_max > 1e-2`` or a run
+        exists. An estimate, not an error bound. ``False`` skips both
+        passes; the states are the same bit for bit either way.
+
     Returns
     -------
     SimulationResult
@@ -1856,6 +1921,9 @@ def simulate(
         On unknown ``engine``; on ``engine='pwl'`` without ``dt``;
         on invalid DSED options (negative tolerance, unknown
         ``integrator``).
+    ResolutionWarning
+        A ``UserWarning``: the fixed ``dt`` does not resolve the circuit
+        (see ``resolution_diagnostics``).
     UserWarning
         When DSED-only kwargs are passed with ``engine='pwl'`` (they
         are silently ignored — the warning is informational so
@@ -1931,6 +1999,8 @@ def simulate(
                 solver.enable_substep_state_correction)
         if discontinuity_restart is None:
             discontinuity_restart = solver.discontinuity_restart
+        if resolution_diagnostics is None:
+            resolution_diagnostics = solver.resolution_diagnostics
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -2648,6 +2718,8 @@ def simulate(
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
+    if resolution_diagnostics is not None:
+        opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -2980,6 +3052,8 @@ def simulate(
             f"get the failure back instead.\n  First reason: "
             f"{first.reason[:200]}",
             stacklevel=2)
+
+    _warn_resolution(builder, res, dt)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

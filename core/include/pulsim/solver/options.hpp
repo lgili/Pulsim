@@ -163,6 +163,13 @@ struct SimulationOptions {
     /// bit for bit.
     bool discontinuity_restart = false;
 
+    /// add-fixed-step-resolution-diagnostics: per-step normalised
+    /// truncation estimate of the linear capacitors and inductors and a
+    /// Nyquist-ringing detector over the state vector, recorded in
+    /// `SimulationResult::resolution`. Read-only: the states are the
+    /// same bit for bit either way; off skips both passes.
+    bool resolution_diagnostics = true;
+
     /// Floating-inductor freeze (post-solve guard).
     ///
     /// THIS DOES NOT SOLVE ANYTHING. It replaces a current the

@@ -238,6 +238,28 @@ struct SimulationResult {
     /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
     /// `switch_fn` evaluations in the step loop, segment lookups the
     /// last-segment memo did not absorb, and rollback snapshots taken.
+    /// add-fixed-step-resolution-diagnostics (`pwl` dynamic path).
+    struct RingingRecord {
+        Index var = kInvalidIndex;   ///< state-vector entry
+        Real t_start = 0;            ///< end of the run's first alternating step
+        Size length = 0;             ///< alternating steps in the run
+        Real max_delta = 0;          ///< largest |x_k − x_{k−1}| in the run
+    };
+    struct Resolution {
+        bool enabled = false;
+        /// Per stored sample: max over the steps since the previous one
+        /// of max_i (h/12)|f_{k+1} − 2f_k + f_{k−1}| / running peak |y_i|
+        /// (f = dy/dt of capacitor voltage / inductor current). 0 where
+        /// the stencil is invalid (mask change, restart, split, retry,
+        /// source jump, first two steps).
+        std::vector<Real> lte;
+        Real lte_max = 0;
+        Index lte_branch = kInvalidIndex;
+        Real lte_time = 0;
+        Size n_branches_covered = 0;
+        std::vector<RingingRecord> ringing;
+    };
+    Resolution resolution;
     Size switch_fn_calls = 0;
     Size segment_searches = 0;
     Size rollback_snapshots = 0;
