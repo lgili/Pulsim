@@ -139,7 +139,7 @@ TEST_CASE("ChargeTable: from (v, C) pairs integrates the curve and is not odd",
     for (int k = -4; k <= 40; ++k) {
         const Real vk = 2.5 * k;
         v.push_back(vk);
-        c.push_back(1e-9 / (1.0 + std::max(vk, -8.0) / 1.0) + 1e-11);
+        c.push_back(1e-9 / (1.0 + std::max(vk, -0.8)) + 1e-11);  // > 0 for v < 0
     }
     const auto tab = ChargeTable::from_capacitance(v, c, "pairs");
     CHECK(tab.charge(0.0) == 0.0);
