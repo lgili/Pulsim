@@ -787,3 +787,80 @@ def test_ac_sweep_cell_of_the_controlled_source_kinds(kind):
         assert np.array_equal(on, off)
     else:
         assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))
+
+
+# ---------------------------------------------------------------------
+# add-power-mosfet-datasheet-device (task 2.9): the charge-law variants
+# are the NonlinearCapacitor kind and add_power_mosfet is a composite of
+# existing kinds, so they add no table row. Their cells: run where every
+# kind they are made of runs (agreeing with pwl), refused by name
+# elsewhere, transient and kernel AC sweep alike.
+# ---------------------------------------------------------------------
+
+def _law_cap(law):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_resistor("R", "in", "o", 1e3)
+        b.add_capacitor("C", "o", "gnd", 100e-9)
+        b.add_resistor("Rl", "o", "gnd", 1e6)
+        if on:
+            b.add_nonlinear_capacitor("Cn", "o", "gnd", law())
+        return b
+    return build
+
+
+def _pm(on):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_voltage_source("Vg", "g", "gnd", 15.0)
+    b.add_resistor("R", "in", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 10e-9)
+    if on:
+        b.add_power_mosfet(
+            "Md", "o", "gnd", "g", K=1e-2, V_T=2.0, C_gs=1e-9, R_g=10.0,
+            C_gd=p.ChargeLaw.vdmos_cgd(1e-9, 50e-12, 0.5),
+            C_ds=p.ChargeLaw.junction(1e-9, 25.0, 0.5),
+            body_diode={"model": "shockley"})
+    return b
+
+
+# name -> (cell, kinds it is made of)
+VARIANT_CELLS = {
+    "NonlinearCapacitor[table]": (
+        (_law_cap(lambda: p.ChargeLaw.table(p.ChargeTable.from_capacitance(
+            [-1.0, 0.0, 5.0, 10.0, 20.0], [1.2e-6, 1e-6, 5e-7, 3e-7, 2e-7]))),
+         "o", "Cn", 1e-4, 1e-7, False), ("NonlinearCapacitor",)),
+    "NonlinearCapacitor[vdmos_cgd]": (
+        (_law_cap(lambda: p.ChargeLaw.vdmos_cgd(1e-6, 1e-7, 0.5)),
+         "o", "Cn", 1e-4, 1e-7, False), ("NonlinearCapacitor",)),
+    "power_mosfet": (
+        (_pm, "o", "Md", 2e-3, 2e-7, False),
+        ("MosfetLevel1", "Capacitor", "NonlinearCapacitor", "ShockleyDiode",
+         "Resistor")),
+}
+
+
+def _composite_supported(kinds, column):
+    caps = p.engine_capabilities()
+    return all(caps[kd][column] for kd in kinds)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(VARIANT_CELLS))
+def test_charge_law_and_power_mosfet_cells(name, engine):
+    cell, kinds = VARIANT_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+@pytest.mark.parametrize("name", list(VARIANT_CELLS))
+def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
+    cell, kinds = VARIANT_CELLS[name]
+    assert not _composite_supported(kinds, "ac_sweep")
+    b = cell[0](True)
+    with pytest.raises(p.UnsupportedError) as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.engine == "ac_sweep"
+    assert ei.value.device == cell[2]

@@ -19,8 +19,8 @@
   - Measured 0.058 % / 0.079 % (E_on / E_off), same with the Lauritzen body diode; pinned 0.2 %.
 - [x] 2.7 Third-quadrant test: 10 A reverse with the gate on gives `v_DS = −I·R_DS(on)`; with the gate off the body diode carries it
 - [x] 2.8 `T_j` test: at 0.1 A and the datasheet V_GS, `v_DS(125 °C) / v_DS(25 °C)` equals `r(125 °C)` = 1.700 (`tc1 = 5e-3`, `tc2 = 2e-5`) within 1e-3
-- [ ] 2.9 Conformance rows (`add-engine-conformance-matrix`): `power_mosfet` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC refused}; `nonlinear_capacitor[table]`, `nonlinear_capacitor[vdmos_cgd]` likewise
-  - Not ticked: the conformance matrix belongs to Phase 0 (`add-engine-conformance-matrix`). Rows to add: `power_mosfet`, `nonlinear_capacitor[table]`, `nonlinear_capacitor[vdmos_cgd]` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC refused}.
+- [x] 2.9 Conformance rows (`add-engine-conformance-matrix`): `power_mosfet` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC refused}; `nonlinear_capacitor[table]`, `nonlinear_capacitor[vdmos_cgd]` likewise
+  - Closed at integration: no new `kKindCaps` row (the laws are the NonlinearCapacitor kind; the composite is made of existing kinds). `test_engine_conformance.py::VARIANT_CELLS` runs each on pwl / trbdf2 (agrees with the pwl reference, presence control) and expects `UnsupportedError` naming the device on dsed and bdf1 (the 2.0 behaviour there was a silent drop of the nonlinear capacitor) and from the kernel AC sweep; `docs/known-limitations.md` states it under the matrix. DC: `compute_dc_op` treats the capacitors as open, as before.
 
 ## 3. VDMOS import
 - [x] 3.1 `_vdmos` builds `add_power_mosfet` when the card carries any of CGS, CGDMAX, CGDMIN, A, CJO, TT, RG; mapping table in the docstring

@@ -60,6 +60,12 @@ unless called with `allow_non_passive=True`.
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
 <!-- engine-capabilities:end -->
 
+The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
+NonlinearCapacitor row. `add_power_mosfet` is a composite of the
+MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
+Shockley / Lauritzen diode rows: it runs on `pwl` and `trbdf2` and is
+refused on `dsed`, `bdf1` and the kernel AC sweep, naming the channel.
+
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; builder initial conditions on `dsed`; PWL diodes with
