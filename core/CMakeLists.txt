@@ -62,6 +62,22 @@ if(PULSIM_BUILD_TESTS)
     endif()
     catch_discover_tests(pulsim_core_dsed_tests)
 
+    # add-complementarity-mode-selection — the dense LCP mode selector
+    # (core/include/pulsim/events/), its own small binary so it iterates
+    # without rebuilding the tree.
+    add_executable(pulsim_core_mode_tests
+        tests/modes/test_mode_selector.cpp
+    )
+    target_link_libraries(pulsim_core_mode_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_mode_tests)
+    endif()
+    catch_discover_tests(pulsim_core_mode_tests)
+
     # =============================================================================
     # pulsim_core_layer0_tests — bootstrap-pulsim-v2-kernel
     # =============================================================================
