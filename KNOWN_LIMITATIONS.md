@@ -409,8 +409,8 @@ saturable-inductor law, and a MOSFET with a loss/thermal block. Failing
 on `pwl` (4): `buck_igbt` and `ll16_flyback_closed_loop` (Newton does
 not converge), `ll05_diode_rectifier_filter` (no consistent DC diode
 configuration), `ll13_active_clamp_forward` (no DC operating point).
-The differential matrix records 76 `disagree` / `error` cells over 60
-circuits (`known:` in `benchmarks/manifests/v2_triage.yaml`); each is an
+The differential matrix records 73 `disagree` / `error` cells over 56
+circuits (integrated tree, 2026-11-13; `benchmarks/REFERENCE_STATUS.md`) (`known:` in `benchmarks/manifests/v2_triage.yaml`); each is an
 open finding, not a tolerance. Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 
@@ -458,7 +458,8 @@ The body / freewheeling diodes of `add_mosfet`, `add_mosfet_with_body_diode`,
 (no hysteresis band). A diode that turns on from zero current at a
 dead time could chatter on `dsed`; an H-bridge of four `add_mosfet` with
 200 ns dead time settles (measured), and a run that does not settle
-raises a named error. For a band, build the device from `add_switch` and
+or settles a mode its law forbids raises a named error
+(`DiodeModeInconsistentError` for the latter). For a band, build the device from `add_switch` and
 `add_diode(V_th=V_f + 1e-3, V_f=...)`. The composites keep a fixed
 1 mΩ diode slope (`g_on_diode` only on `add_mosfet_with_body_diode`).
 `add_igbt` is still a bidirectional switch with no knee and no diode;
