@@ -58,4 +58,5 @@
   - Not ticked: the nightly job belongs to `restore-reference-benchmark-harness`; the ngspice-side tests skip cleanly without ngspice on PATH.
 
 ## 8. Verification
-- [ ] 8.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+- [x] 8.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+  - 2026-11-13: ctest 757/757; pytest 2064 passed, 4 skipped, 8 xfailed; ruff clean; openspec 76/76; stubs up to date.
