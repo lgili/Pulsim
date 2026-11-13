@@ -755,7 +755,7 @@ inline void load_device(
             "pwm_voltage_source, sine_voltage_source, "
             "pulse_voltage_source, resistor, capacitor, "
             "inductor, saturable_inductor, hysteretic_inductor, "
-            "diode, nonlinear_diode, switch, "
+            "diode, nonlinear_diode (retired; needs allow_non_passive), switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, vccs, ccvs, cccs, gyrator, "
             "sine_current_source, pulse_current_source, "
