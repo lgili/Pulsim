@@ -27,6 +27,8 @@ import numpy
 
 class CircuitBuilder:
     def _resolve_alias(self, name: str) -> tuple[str, str] | None: ...
+    def _snapshot(self) -> Circuit:
+        """``build()`` without the side-state check (``simulate`` keeps the builder's Python side state beside it)."""
 
 class SimulationResult:
     engine_used: str

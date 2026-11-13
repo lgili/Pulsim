@@ -51,6 +51,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # Builder API (Layer 6).
     Circuit,
     CircuitBuilder,
+    Parameter,
     # Topology / device handles (opaque — produced by the
     # builder and consumed by the cache).
     Graph,
@@ -493,6 +494,7 @@ __all__ = [
     "ai_guide",
     "Circuit",
     "CircuitBuilder",
+    "Parameter",
     "Graph",
     "DevicePool",
     "SwitchStateMask",
@@ -780,7 +782,9 @@ if _HAS_SCOPE:
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
 from ._circuit_ir import RunPlan, Tie
+from ._circuit_ir import install as _install_parameters
 _berg.install(CircuitBuilder)
+_install_parameters(CircuitBuilder)  # after _berg: wraps its add_* too
 
 
 # add-fixed-step-resolution-diagnostics thresholds (design D3).
@@ -2135,9 +2139,14 @@ def simulate(
     _caller_side_state = None
     _caller_builder = builder  # identity checks (MMC arms) name the caller's
     if isinstance(builder, Circuit):
+        if mmc_arms:
+            raise ValueError(
+                "simulate(circuit, mmc_arms=...): MMC arms are registered "
+                "on a CircuitBuilder; pass that builder, not a "
+                "pulsim.Circuit")
         _run_circuit = builder
     elif isinstance(builder, CircuitBuilder):
-        _run_circuit = builder.build()
+        _run_circuit = builder._snapshot()
         # Python-side tables (C blocks, Shockley parameters) until they
         # live in the IR (group 3).
         _caller_side_state = dict(builder.__dict__)

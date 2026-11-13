@@ -121,3 +121,65 @@ is not a precondition; `simulate()` keeps its entry points and calls
   identity check (gets the caller's builder), `compute_dc_op`.
 - **Reverse:** call `builder.run_preflight(opts)` in place (still
   public) before `simulate()`.
+
+## 9. Named parameters before expressions (group 6)
+
+- **Question:** the design's field value is `variant<Real, ExprId>`;
+  expressions are group 7, not in this slice. What does a field hold?
+- **Option:** `Value = variant<Real, ParamId>`: a literal or one named
+  parameter (the one-identifier expression). Parameters live in the
+  builder (`param(name, value, unit, lo, hi)`), fields are bound with
+  `bind_param("dev.field", name)`; Python `add_*` binds the argument a
+  `Parameter` was passed for (argument name = field name or alias,
+  read from the signature or the pybind11 docstring). Which fields a
+  parameter drives is structure (`structure_hash`); parameter values
+  are values. `set_value` / `with_value` on a bound field makes it a
+  literal again.
+- **Evidence:** `test_with_params_equals_rebuilding` (value hash and
+  pwl states bit-identical to rebuilding with the new values);
+  `test_with_value_equals_rebuilding` for one field of all 26 scalar
+  kinds; refusals name parameter, device and field.
+- **Limits:** a composite's parameter argument (`add_transformer`'s
+  `L_p`, an `add_power_mosfet` datasheet value) is refused by
+  `bind_param` — the composite's name is not a device; the device is
+  added before the binding is refused (the error says which argument).
+  C++ `add_*` takes numbers only; C++ callers bind with `bind_param`.
+  An overloaded binding (`add_nonlinear_capacitor`) is not wrapped (one
+  signature cannot stand for its overloads in the stub check) and,
+  since a `Parameter` is not a float, refuses one with `TypeError`
+  instead of binding nothing; bind its field with `bind_param`.
+  The wrappers carry the native signature (`__signature__`); the stub
+  is generated from the native methods (`PULSIM_STUBGEN_NATIVE`).
+- **Reverse:** group 7 replaces `ParamId` by `ExprId`; a bare
+  identifier parses to the same binding.
+
+## 10. The four `update_*` methods
+
+- **Option:** deprecated in Python (`DeprecationWarning` naming
+  `with_value("dev.F", value)` and `set_value`); internal callers
+  (`sweep_path_aware`, `monte_carlo_path_aware`,
+  `periodic_steady_state`'s input sensitivity) use `set_value`, which
+  writes the same field setter (`G = 1/R`) and, beyond `update_*`,
+  checks the bound and re-derives a coupled inductor's `L_p` / `L_s`.
+  The C++ `DevicePool::update_*` used by `refactor_parametric` stay.
+- **Reverse:** drop the wrappers in `_circuit_ir.install`.
+
+## 11. Review after group 2 (fresh-context reviewer), and what changed
+
+- A Circuit dropped the builder's Python side tables: Shockley loss /
+  thermal parameters now come from the device's fields
+  (`shockley_params` reads `get_value`; the `_shockley_params` copy and
+  its recording wrapper are gone — group 3's Shockley item);
+  `builder.build()` refuses a builder with C blocks (`UnsupportedError`)
+  until they are `ControlDecl`s (group 3); `simulate` snapshots with
+  the unchecked `_snapshot()` and keeps the builder's side state.
+- `simulate(circuit, mmc_arms=...)` always failed the arms' builder
+  identity check: refused up front, naming the builder.
+- `set_value` accepted values `add_*` refuses: `ir::check_device` runs
+  the model's `validate` and the IGBT tail rules on a copy, and refuses
+  a field the device's law does not read.
+- `Graph::id()`'s lazy cache could be written by two threads on a
+  regularised circuit: `make_data_` fills it.
+- `Circuit.components()` called the class attribute by name, so a
+  Python patch of `CircuitBuilder.components` would run on the shared
+  lowered builder: the native function is captured at module init.

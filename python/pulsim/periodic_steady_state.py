@@ -728,7 +728,7 @@ class _SourceInput:
         self.dV = max(1.0, abs(self.V))
         self._b, self._g, self._y = {}, {}, {}
         b = s.builder
-        b.update_voltage_source_V(name, self.V + self.dV)
+        b.set_value(f"{name}.V", self.V + self.dV)
         try:
             cache = PwlStateSpaceCache(b.graph, b.pool)
             cache.build_lazy(s.T)
@@ -761,7 +761,7 @@ class _SourceInput:
                             - float(s.ad.node_pair_voltage(
                                 node, -1, 0.0, self._x0))) / self.dV
         finally:
-            b.update_voltage_source_V(name, self.V)
+            b.set_value(f"{name}.V", self.V)
 
     def dbdu(self, mask, t):
         return self._b[(str(mask), t)]

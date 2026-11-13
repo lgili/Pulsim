@@ -33,6 +33,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   yourself, or run `result.circuit` / `circuit.with_ties(...)`.
   `Circuit.with_preflight(options)` returns `(circuit, report, ties)`
   without running.
+* **Added** named parameters and generic value updates
+  (docs/parameters.md): `p = builder.param("Lbase", 1e-3, "H", lo=,
+  hi=)` passed to any `add_*` in place of a number drives that field;
+  `circuit.with_params(Lbase=2e-3)` and `circuit.with_value("RL.R",
+  8.0)` return new circuits equal, bit for bit, to rebuilding (one
+  field of every device kind is tested), and leave the receiver
+  unchanged. Errors name the parameter, the device and the field.
+  Field updates are checked as `add_*` checks the device (cross-field
+  rules, fields the device's law does not read).
+* **Deprecated** `update_resistor_R`, `update_inductor_L`,
+  `update_capacitor_C`, `update_voltage_source_V`
+  (`DeprecationWarning`): use `circuit.with_value("R1.R", v)` or, in
+  place, `builder.set_value("R1.R", v)` — which also checks the bound.
+* **Changed** `builder.build()` refuses a builder carrying C blocks
+  (`UnsupportedError`; a Circuit cannot hold them yet — simulate the
+  builder); `simulate(circuit, mmc_arms=...)` asks for the builder.
+  Shockley loss/thermal parameters are read from the device's fields,
+  so `set_value("D1.I_S", ...)` reaches them.
 
 ### Integration fixes (batch 6b: design optimisation, exact route)
 

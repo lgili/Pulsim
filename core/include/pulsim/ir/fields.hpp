@@ -24,7 +24,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <string_view>
 #include <variant>
 
@@ -60,6 +64,19 @@ enum class Bound : std::uint8_t {
 }
 
 using ParamsVariant = pwl::DevicePool::ParamsVariant;
+
+/// A named parameter (group 6): fields bound to it take its value, and
+/// `Circuit::with_params` re-values them. `lo` / `hi` are its own
+/// bounds, checked beside the bound of every field it drives.
+struct Parameter {
+    std::string name;
+    Real value;
+    std::string unit;
+    std::optional<Real> lo;
+    std::optional<Real> hi;
+};
+
+struct ParamId { std::uint32_t v; };
 
 struct FieldSpec {
     std::string_view name;
@@ -269,6 +286,51 @@ static_assert(kKindFields.size() == pwl::kKindCaps.size(),
 [[nodiscard]] inline std::span<const FieldSpec> fields_of(
     pwl::DevicePool::StoredKind k) noexcept {
     return kKindFields[static_cast<std::size_t>(k)];
+}
+
+/// What a device's `add_*` checks beyond one field's bound, applied to
+/// its values after one field changed (`field`): the model's own
+/// cross-field `validate`, and a refusal for a field the device's law
+/// does not read (the new value would be silently ignored). Throws
+/// `std::invalid_argument`.
+inline void check_device(const ParamsVariant& v, std::string_view field) {
+    namespace m = ::pulsim::models;
+    std::visit([&](const auto& p) {
+        using P = std::decay_t<decltype(p)>;
+        auto unread = [&](std::string_view law) {
+            throw std::invalid_argument(std::string{"its "} + std::string{law} +
+                " law does not read " + std::string{field} +
+                "; rebuild the device with the new value");
+        };
+        if constexpr (std::is_same_v<P, m::NonlinearCapacitor::Params>) {
+            using L = m::ChargeLawKind;
+            const bool vdmos_field = field == "cgd_max" || field == "cgd_min" || field == "a";
+            if (p.law == L::Table) unread("table");
+            if (p.law == L::VdmosCgd && !vdmos_field) unread("vdmos_cgd");
+            if (p.law == L::Junction && vdmos_field) unread("junction");
+            m::NonlinearCapacitor::validate(p);
+        } else if constexpr (std::is_same_v<P, m::SaturableInductor::Params>) {
+            if (p.table) unread("table");
+            if (p.ja) unread("Jiles-Atherton");
+        } else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) {
+            m::LauritzenDiode::validate(p);
+        } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) {
+            m::ShockleyDiode::validate(p);
+        } else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
+            m::PmsmMna::validate(p);
+        } else if constexpr (std::is_same_v<P, m::IgbtLevel1::Params>) {
+            // As add_igbt_level1: k_tail < 1, and a tail needs both.
+            if (!(p.k_tail < Real{1})) {
+                throw std::invalid_argument("k_tail must be < 1 (1 means "
+                    "the channel carries nothing at all)");
+            }
+            if ((p.tau_tail > Real{0}) != (p.k_tail > Real{0})) {
+                throw std::invalid_argument("tau_tail and k_tail must be "
+                    "set together (one alone means no tail, silently); "
+                    "rebuild the device with both");
+            }
+        }
+    }, v);
 }
 
 [[nodiscard]] inline const FieldSpec* find_field(

@@ -44,8 +44,9 @@ namespace pulsim::ir {
 struct NodeId   { std::uint32_t v; };
 struct DeviceId { std::uint32_t v; };
 
-/// A field value: a literal (named parameters: group 6).
-using Value = std::variant<Real>;
+/// A field value: a literal, or a named parameter (`parameters()[id]`).
+/// Group 7 widens the parameter reference to an expression.
+using Value = std::variant<Real, ParamId>;
 
 /// A node of the lowered graph; `NodeId{i}` is unknown `i`.
 struct Node { std::string name; };
@@ -103,6 +104,15 @@ public:
         return d_->ics;
     }
     [[nodiscard]] std::span<const Alias> aliases() const noexcept { return d_->aliases; }
+    [[nodiscard]] std::span<const Parameter> parameters() const noexcept {
+        return d_->lowered.parameters();
+    }
+
+    /// The number a field value stands for.
+    [[nodiscard]] Real evaluate(const Value& v) const {
+        if (const auto* x = std::get_if<Real>(&v)) return *x;
+        return d_->lowered.parameters()[std::get<ParamId>(v).v].value;
+    }
 
     /// Topology, kinds and names (what a symbolic analysis depends on,
     /// and identity).
@@ -119,6 +129,26 @@ public:
     /// A private, mutable copy of the lowered builder: what a run
     /// consumes (the engines take `CircuitBuilder&`).
     [[nodiscard]] builder::CircuitBuilder to_builder() const { return d_->lowered.clone(); }
+
+    /// The circuit with parameter values replaced (`{{"Lbase", 2e-3}}`);
+    /// every field bound to a parameter follows it. Bounds of the
+    /// parameter and of each driven field are checked; the receiver is
+    /// unchanged and the structure (and its symbolic plan) is shared.
+    [[nodiscard]] Circuit with_params(
+        std::span<const std::pair<std::string_view, Real>> values) const {
+        auto b = d_->lowered.clone();
+        for (const auto& [name, v] : values) b.set_param(name, v);
+        return Circuit{std::move(b)};
+    }
+
+    /// The circuit with one field set to a literal
+    /// (`with_value("R1.R", 2.0)`), equal to rebuilding with that literal.
+    [[nodiscard]] Circuit with_value(std::string_view device_dot_field,
+                                     Real value) const {
+        auto b = d_->lowered.clone();
+        b.set_value_("with_value", device_dot_field, value);
+        return Circuit{std::move(b)};
+    }
 
     /// The circuit with resistors `ties` added (node to ground), each as
     /// the preflight adds one. The receiver is unchanged.
@@ -208,6 +238,10 @@ private:
         auto d = std::make_shared<Data>(Data{std::move(b), {}, {}, {}, {}, 0, 0});
         const auto& g = d->lowered.graph();
         const auto& pool = d->lowered.pool();
+        // Fill the graph's lazy id cache now: after construction nothing
+        // writes it, so threads sharing the circuit never race on it
+        // (with_ties / with_preflight add branches, which clear it).
+        (void)g.id();
 
         Hash s;  // structure
         s.idx(g.num_nodes());
@@ -271,6 +305,25 @@ private:
         for (const auto& m : pool.pmsm_mna_machines()) {
             s.idx(m.omega_node);
             s.idx(m.theta_node);
+        }
+        // Which fields a parameter drives is structure; parameter values
+        // are values.
+        const auto& params = d->lowered.parameters();
+        for (const auto& p : params) {
+            v.str(p.name); v.real(p.value); v.str(p.unit);
+            v.word(p.lo.has_value()); v.real(p.lo.value_or(0));
+            v.word(p.hi.has_value()); v.real(p.hi.value_or(0));
+        }
+        auto binds = std::vector(d->lowered.param_bindings().begin(),
+                                 d->lowered.param_bindings().end());
+        std::ranges::sort(binds, {}, [](const auto& x) {
+            return std::pair{x.branch, x.field};
+        });
+        for (const auto& bd : binds) {
+            s.idx(bd.branch); s.word(bd.field); s.str(params[bd.param].name);
+            for (auto& f : d->devices[static_cast<std::size_t>(bd.branch)].fields) {
+                if (f.index == bd.field) f.value = ParamId{bd.param};
+            }
         }
 
         for (const auto& [bid, val] : d->lowered.initial_conditions()) {

@@ -439,9 +439,6 @@ def test_unrecorded_shockley_and_unsupported_kinds_name_a_recipe():
         res = p.simulate(b, t_end=2e-4, dt=1e-6)
     with pytest.raises(NotImplementedError, match="resistor in series"):
         res.i("DL")
-    b._shockley_params.clear()
-    with pytest.raises(NotImplementedError, match="resistor in series"):
-        res.i("D")
 
 
 # ---------------------------------------------------------------------

@@ -258,13 +258,13 @@ def test_source_input_matches_a_finite_difference(dcm):
     dv = 1e-3
     cols = []
     for sign in (1, -1):
-        b.update_voltage_source_V("Vin", ref.VIN + sign * dv)
+        b.set_value("Vin.V", ref.VIN + sign * dv)
         try:
             other = p.periodic_steady_state(b, period=T,
                                             switch_fn=_pwm(b, 0.3))
             cols.append(other._ctx.run(r.x0).x_end)
         finally:
-            b.update_voltage_source_V("Vin", ref.VIN)
+            b.set_value("Vin.V", ref.VIN)
     fd = (cols[0] - cols[1]) / (2 * dv)
     assert np.allclose(sm.B[:, 0], fd, rtol=1e-6, atol=1e-9)
     # vout is the capacitor state: C selects it, D is zero

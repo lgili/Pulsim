@@ -386,9 +386,6 @@ def install(builder_cls) -> None:
         builder_cls.set_initial = _set_initial             # type: ignore[attr-defined]
     if not hasattr(builder_cls, "initial_state"):
         builder_cls.initial_state = _initial_state_vector   # type: ignore[attr-defined]
-    native = getattr(builder_cls, "add_shockley_diode", None)
-    if native is not None and not getattr(native, "_records_params", False):
-        builder_cls.add_shockley_diode = _recording_shockley(native)  # type: ignore[attr-defined]
     native = getattr(builder_cls, "add_nonlinear_diode", None)
     if native is not None and not getattr(native, "_retired", False):
         builder_cls.add_nonlinear_diode = _retired_nonlinear_diode(native)  # type: ignore[attr-defined]
@@ -424,48 +421,19 @@ def _retired_nonlinear_diode(native):
     return add_nonlinear_diode
 
 
-def _recording_shockley(native):
-    """``add_shockley_diode`` that also keeps its law parameters.
-
-    ``builder.components()`` reports a Shockley diode with empty
-    ``params`` (the binding exposes none), so ``result.i()`` and the
-    loss / thermal summaries could not evaluate its current. The
-    native call runs first (it validates); the parameters are then
-    stored by device name in ``builder._shockley_params`` and read
-    back by :func:`shockley_params`."""
-    def add_shockley_diode(self, name: str, anode: str, cathode: str,
-                           I_S: float = 1e-12, n: float = 1.0,
-                           V_T: float = 0.025852, G_min: float = 1e-12,
-                           BV: float = 0.0) -> CircuitBuilder:
-        out = native(self, name, anode, cathode, I_S, n, V_T, G_min, BV)
-        table = getattr(self, "_shockley_params", None)
-        if table is None:
-            table = {}
-            try:
-                self._shockley_params = table
-            except AttributeError:  # pragma: no cover — no dynamic_attr
-                return out
-        table[str(name)] = {"I_S": float(I_S), "n": float(n),
-                            "V_T": float(V_T), "G_min": float(G_min),
-                            "BV": float(BV)}
-        return out
-
-    # The binding's docstring (signature line included), without
-    # functools.wraps' __wrapped__: inspect.signature must read this
-    # function, not the builtin, which has none.
-    add_shockley_diode.__doc__ = native.__doc__
-    add_shockley_diode.__qualname__ = "CircuitBuilder.add_shockley_diode"
-    add_shockley_diode._records_params = True  # type: ignore[attr-defined]
-    return add_shockley_diode
-
-
 def shockley_params(builder, name: str) -> "dict | None":
     """The ``add_shockley_diode`` parameters of device ``name``
-    (``I_S``, ``n``, ``V_T``, ``G_min``, ``BV``), or ``None`` when the
-    builder did not record them (a diode added by a path that bypassed
-    the Python ``add_shockley_diode``)."""
-    table = getattr(builder, "_shockley_params", None) or {}
-    return table.get(str(name))
+    (``I_S``, ``n``, ``V_T``, ``G_min``, ``BV``), read from the
+    device's own value fields, or ``None`` when ``name`` is not a
+    Shockley diode."""
+    try:
+        kind = builder.pool.kind_of(builder.branch_id_of(str(name)))
+    except Exception:  # noqa: BLE001 — not a device of this builder
+        return None
+    if getattr(kind, "name", None) != "ShockleyDiode":
+        return None
+    return {f: float(builder.get_value(f"{name}.{f}"))
+            for f in ("I_S", "n", "V_T", "G_min", "BV")}
 
 
 def _resolve_alias_native(self, name: str):

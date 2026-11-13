@@ -200,3 +200,53 @@ TEST_CASE("IR: with_preflight regularises a copy, never the receiver", "[ir]") {
     const std::vector<ir::Tie> bad{{"Rx", 99, 1e9}};
     CHECK_THROWS_WITH(c.with_ties(bad), ContainsSubstring("tie \"Rx\" names node 99"));
 }
+
+TEST_CASE("IR: with_params / with_value derive, never mutate", "[ir]") {
+    auto make = [](Real L, Real R, bool bind) {
+        CircuitBuilder b;
+        b.add_voltage_source("Vs", "a", "gnd", 12.0);
+        b.add_inductor("L1", "a", "o", L);
+        b.add_resistor("RL", "o", "gnd", R);
+        b.add_resistor("R2", "o", "gnd", R);
+        if (bind) {
+            (void)b.param("Lbase", L, "H", Real{1e-9});
+            (void)b.param("Rload", R, "Ohm");
+            b.bind_param("L1.L", "Lbase");
+            b.bind_param("RL.R", "Rload");
+            b.bind_param("R2.R_ohms", "Rload");   // alias
+        }
+        return b.build();
+    };
+    const auto c = make(1e-3, 5.0, true);
+    const auto h = c.value_hash();
+    const std::pair<std::string_view, Real> vs[]{{"Lbase", 2.2e-3}, {"Rload", 8.0}};
+    const auto d = c.with_params(vs);
+    CHECK(d.value_hash() == make(2.2e-3, 8.0, true).value_hash());
+    CHECK(d.structure_hash() == c.structure_hash());
+    CHECK(c.value_hash() == h);
+    CHECK(d.lowered().get_value("R2.R") == 8.0);
+    CHECK(std::holds_alternative<ir::ParamId>(d.devices()[3].fields[0].value));
+    CHECK(d.evaluate(d.devices()[3].fields[0].value) == 8.0);
+    // A binding is structure; a literal circuit hashes differently.
+    CHECK(make(1e-3, 5.0, false).structure_hash() != c.structure_hash());
+
+    // with_value: a literal again, equal to the rebuilt literal circuit.
+    const auto lit = make(1e-3, 5.0, false);
+    CHECK(lit.with_value("RL.R", 7.0).value_hash() ==
+          make(1e-3, 7.0, false).with_value("R2.R", 5.0).value_hash());
+    CHECK(std::holds_alternative<Real>(
+        c.with_value("RL.R", 5.0).devices()[2].fields[0].value));
+
+    using Catch::Matchers::ContainsSubstring;
+    const std::pair<std::string_view, Real> bad[]{{"Rload", -1.0}};
+    CHECK_THROWS_WITH(c.with_params(bad),
+                      ContainsSubstring("parameter \"Rload\" = -1: field R of device \"RL\""));
+    const std::pair<std::string_view, Real> low[]{{"Lbase", 0.0}};
+    CHECK_THROWS_WITH(c.with_params(low),
+                      ContainsSubstring("parameter \"Lbase\" must be a finite number >= 1e-09"));
+    const std::pair<std::string_view, Real> unknown[]{{"X", 1.0}};
+    CHECK_THROWS_WITH(c.with_params(unknown),
+                      ContainsSubstring("no parameter named \"X\"; parameters: Lbase, Rload"));
+    CHECK_THROWS_WITH(c.with_value("RL.Q", 1.0),
+                      ContainsSubstring("with_value(\"RL.Q\"): device \"RL\" (Resistor) has no value field \"Q\""));
+}

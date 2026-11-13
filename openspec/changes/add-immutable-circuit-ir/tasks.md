@@ -43,11 +43,11 @@ lands).
 - [ ] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine)
 
 ## 6. Named parameters and generic updates
-- [ ] 6.1 `Parameter`, `builder.param(name, value, unit)`; `Value` overloads on every `add_*`
-- [ ] 6.2 `Circuit::with_params`, `Circuit::with_value("dev.field", v)`; bounds checks from the parameter and from the field table; errors name device and field
-- [ ] 6.3 Deprecate `update_resistor_R`, `update_inductor_L`, `update_capacitor_C`, `update_voltage_source_V` (warning naming `with_value`)
-- [ ] 6.4 Tests: for one field of every kind, `with_value` equals rebuilding with the new literal, bit for bit; the receiver's `value_hash` is unchanged
-- [ ] 6.5 Docs: parameters page; CHANGELOG
+- [x] 6.1 `Parameter`, `builder.param(name, value, unit)`; `Value` overloads on every `add_*`
+- [x] 6.2 `Circuit::with_params`, `Circuit::with_value("dev.field", v)`; bounds checks from the parameter and from the field table; errors name device and field
+- [x] 6.3 Deprecate `update_resistor_R`, `update_inductor_L`, `update_capacitor_C`, `update_voltage_source_V` (warning naming `with_value`)
+- [x] 6.4 Tests: for one field of every kind, `with_value` equals rebuilding with the new literal, bit for bit; the receiver's `value_hash` is unchanged
+- [x] 6.5 Docs: parameters page; CHANGELOG
 
 ## 7. Expressions
 - [ ] 7.1 `ir/expr.hpp`: recursive-descent parser to a postfix program; evaluator; dependency ordering; cycle, unknown-name and non-finite errors naming device, field and text

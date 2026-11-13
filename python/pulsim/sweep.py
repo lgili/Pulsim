@@ -449,28 +449,22 @@ def monte_carlo(builder_factory: Callable[..., Any],
 # etc.) is unchanged.
 
 
-# Component-kind dispatch table for the in-place builder updaters.
-# Maps `DevicePool::StoredKind` enum values to the matching
-# `CircuitBuilder.update_<kind>(name, value)` method name. Keys are
-# integers (the enum's underlying value); we look up the integer
-# from `pool.kind_of(branch_id)` which returns the StoredKind.
-#
-# The kind enum is exposed to Python as `_pulsim.StoredKind` —
-# we don't import it eagerly to keep this module importable without
-# the kernel extension (e.g. for docs builds). Lookup happens
-# inside the helper via duck-typing on `pool.kind_of()`'s return.
-_KIND_TO_UPDATE_METHOD = {
-    "Resistor":      "update_resistor_R",
-    "Inductor":      "update_inductor_L",
-    "Capacitor":     "update_capacitor_C",
-    "VoltageSource": "update_voltage_source_V",
+# The kinds `refactor_parametric` supports, and the value field
+# `builder.set_value("<name>.<field>", v)` updates in place for each.
+# Lookup happens inside the helper via duck-typing on
+# `pool.kind_of()`'s return (its `.name`).
+_KIND_TO_FIELD = {
+    "Resistor":      "R",
+    "Inductor":      "L",
+    "Capacitor":     "C",
+    "VoltageSource": "V",
 }
 
 
 def _resolve_param_kind(builder, name: str) -> Optional[str]:
     """Look up the device kind for a builder-time component name.
 
-    Returns one of the strings in `_KIND_TO_UPDATE_METHOD`, or None
+    Returns one of the strings in `_KIND_TO_FIELD`, or None
     if the name is unknown / the kind isn't parametric-refactor-supported.
     """
     try:
@@ -484,7 +478,7 @@ def _resolve_param_kind(builder, name: str) -> Optional[str]:
     # kind comes back as the `StoredKind` enum; its `.name` attribute
     # is the canonical string ("Resistor", "Inductor", etc.).
     kind_str = getattr(kind, "name", str(kind))
-    if kind_str in _KIND_TO_UPDATE_METHOD:
+    if kind_str in _KIND_TO_FIELD:
         return kind_str
     return None
 
@@ -598,21 +592,20 @@ def sweep_path_aware(
                 # injected into KPIs but not a real pool entry).
                 if kind is None:
                     continue
-                method = getattr(builder, _KIND_TO_UPDATE_METHOD[kind])
-                method(n, v)
+                builder.set_value(f"{n}.{_KIND_TO_FIELD[kind]}", v)
             return builder
         return sweep(_legacy_factory, params=params,
                      kpi_fn=kpi_fn, parallel=False,
                      verbose=verbose, t_end=t_end, dt=dt,
                      **simulate_kwargs)
 
-    # Resolve every param name → (branch_id, update_method_name) once.
+    # Resolve every param name → (branch_id, field) once.
     resolved = []
     for n in keys:
         kind = _resolve_param_kind(builder, n)
         assert kind is not None, "pre-flight guarantees kind"
         resolved.append((n, builder.branch_id_of(n),
-                         _KIND_TO_UPDATE_METHOD[kind]))
+                         _KIND_TO_FIELD[kind]))
 
     # Build the cache ONCE at the initial values.
     cache = _v2.PwlStateSpaceCache(builder.graph, builder.pool)
@@ -644,8 +637,8 @@ def sweep_path_aware(
         grid_params.append(p_dict)
 
         # 1. Push pool updates through builder convenience setters.
-        for n, b_id, method_name in resolved:
-            getattr(builder, method_name)(n, p_dict[n])
+        for n, b_id, fld in resolved:
+            builder.set_value(f"{n}.{fld}", p_dict[n])
 
         # 2. Refactor every active mask's cached factor via the
         #    path-based update. Batch overload pushes all updates
@@ -753,8 +746,7 @@ def monte_carlo_path_aware(
             for n, v in p.items():
                 kind = _resolve_param_kind(builder, n)
                 if kind is not None:
-                    method = getattr(builder, _KIND_TO_UPDATE_METHOD[kind])
-                    method(n, v)
+                    builder.set_value(f"{n}.{_KIND_TO_FIELD[kind]}", v)
             return builder
         return monte_carlo(
             _legacy_factory, distributions=distributions,
@@ -767,7 +759,7 @@ def monte_carlo_path_aware(
         kind = _resolve_param_kind(builder, n)
         assert kind is not None, "pre-flight guarantees kind"
         resolved.append((n, builder.branch_id_of(n),
-                         _KIND_TO_UPDATE_METHOD[kind]))
+                         _KIND_TO_FIELD[kind]))
 
     cache = _v2.PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build(dt)
@@ -797,8 +789,8 @@ def monte_carlo_path_aware(
     total_refactor_us = 0.0
 
     for i, sample in enumerate(samples):
-        for n, b_id, method_name in resolved:
-            getattr(builder, method_name)(n, sample[n])
+        for n, b_id, fld in resolved:
+            builder.set_value(f"{n}.{fld}", sample[n])
         if len(resolved) == 1:
             res = cache.refactor_parametric(
                 resolved[0][1], sample[resolved[0][0]])

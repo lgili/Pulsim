@@ -52,7 +52,9 @@ private clone (`c.to_builder()`). Nor does it change your builder: the
 topology preflight's ties (1 GΩ per floating subnet) go on the run's
 own circuit, `res.circuit`, and are listed in `res.plan.ties`;
 `c.with_preflight(opts)` returns `(circuit, report, ties)` without a
-run.
+run. Values change by derivation too: `c.with_value("RL.R", 8.0)` and
+`c.with_params(Lbase=2e-3)` return new circuits
+([Parameters and value updates](parameters.md)).
 
 ## 1. Graph + DevicePool — the circuit description
 

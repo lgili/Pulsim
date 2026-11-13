@@ -286,7 +286,7 @@ def compute_dc_op(builder,
     # (add-immutable-circuit-ir): the caller's builder is not changed.
     from . import Circuit as _Circuit, CircuitBuilder as _CB
     if isinstance(builder, (_Circuit, _CB)):
-        circuit = builder if isinstance(builder, _Circuit) else builder.build()
+        circuit = builder if isinstance(builder, _Circuit) else builder._snapshot()
         side = None if isinstance(builder, _Circuit) else dict(builder.__dict__)
     else:  # a builder stand-in
         circuit = side = None

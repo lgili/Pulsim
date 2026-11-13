@@ -28,19 +28,35 @@ using pulsim::ir::Circuit;
 
 namespace {
 
-/// Call a read-only `CircuitBuilder` method of the circuit's lowered
-/// builder through its Python binding (one implementation of
-/// `components()`, `initial_state()`, … for both classes). The
-/// temporary Python handle does not own the builder and does not
-/// outlive the call; only const methods are named here.
-py::object lowered_call(const Circuit& c, const char* method, py::args args) {
-    auto handle = py::cast(&c.lowered(), py::return_value_policy::reference);
-    return handle.attr(method)(*args);
+/// `CircuitBuilder.components` as bound in C++, captured at module init:
+/// a later Python patch of the class attribute never runs against a
+/// circuit's shared lowered builder. The temporary handle passed to it
+/// does not own the builder and does not outlive the call.
+py::object* g_components = nullptr;  // leaked: outlives interpreter teardown
+
+py::object lowered_components(const Circuit& c) {
+    return (*g_components)(py::cast(&c.lowered(), py::return_value_policy::reference));
 }
 
 }  // namespace
 
 void init_module(py::module_& m) {
+    g_components = new py::object(m.attr("CircuitBuilder").attr("components"));
+    using pulsim::ir::Parameter;
+    py::class_<Parameter>(m, "Parameter",
+        "A named parameter (`builder.param(name, value, unit)`). Pass it "
+        "to any `add_*` in place of a number: the field takes its value, "
+        "and `Circuit.with_params` re-values it.")
+        .def_readonly("name", &Parameter::name)
+        .def_readonly("value", &Parameter::value)
+        .def_readonly("unit", &Parameter::unit)
+        .def_readonly("lo", &Parameter::lo)
+        .def_readonly("hi", &Parameter::hi)
+        .def("__repr__", [](const Parameter& p) {
+            return std::format("<pulsim.Parameter {} = {}{}{}>", p.name,
+                               p.value, p.unit.empty() ? "" : " ", p.unit);
+        });
+
     py::class_<Circuit>(m, "Circuit",
         "Immutable circuit (add-immutable-circuit-ir). Built with "
         "`builder.build()`; a handle to shared, read-only data, cheap to "
@@ -61,22 +77,61 @@ void init_module(py::module_& m) {
                 for (const auto& d : c.devices()) {
                     py::dict fields;
                     const auto row = pulsim::ir::kKindFields[d.kind];
+                    py::dict params;
                     for (const auto& f : d.fields) {
-                        fields[py::str(std::string{row[f.index].name})] =
-                            std::get<pulsim::Real>(f.value);
+                        const auto n = py::str(std::string{row[f.index].name});
+                        fields[n] = c.evaluate(f.value);
+                        if (const auto* id = std::get_if<pulsim::ir::ParamId>(&f.value)) {
+                            params[n] = c.parameters()[id->v].name;
+                        }
                     }
                     py::dict e;
                     e["name"] = d.name;
                     e["kind"] = std::string{pulsim::pwl::kKindCaps[d.kind].name};
                     e["pins"] = d.pins;
                     e["fields"] = fields;
+                    e["params"] = params;
                     out.append(e);
                 }
                 return out;
             },
             "One dict per lowered branch, in insertion order: name, kind "
-            "(capability-table name), pins (node indices, -1 = ground) and "
-            "fields ({name: value}, the names `with_value` takes).")
+            "(capability-table name), pins (node indices, -1 = ground), "
+            "fields ({name: value}, the names `with_value` takes) and "
+            "params ({field: parameter name} for the fields a parameter "
+            "drives).")
+        .def("parameters", [](const Circuit& c) {
+                return std::vector<pulsim::ir::Parameter>(
+                    c.parameters().begin(), c.parameters().end());
+            }, "The named parameters, in declaration order.")
+        .def("with_value", &Circuit::with_value,
+             py::arg("device_dot_field"), py::arg("value"),
+             "A new circuit with one field set, e.g. with_value(\"R1.R\", "
+             "2.0): equal, bit for bit, to rebuilding with that literal. "
+             "Every field of every kind (see devices()); the receiver is "
+             "unchanged. ValueError names device and field on an unknown "
+             "name or an out-of-bound value.")
+        .def("with_params", [](const Circuit& c, const py::dict& values,
+                               const py::kwargs& kw) {
+                std::vector<std::string> names;
+                std::vector<std::pair<std::string_view, pulsim::Real>> vs;
+                for (const auto* d : {&values, static_cast<const py::dict*>(&kw)}) {
+                    for (const auto& [k, v] : *d) {
+                        names.push_back(k.cast<std::string>());
+                    }
+                }
+                std::size_t i = 0;
+                for (const auto* d : {&values, static_cast<const py::dict*>(&kw)}) {
+                    for (const auto& [k, v] : *d) {
+                        vs.emplace_back(names[i++], v.cast<pulsim::Real>());
+                    }
+                }
+                return c.with_params(vs);
+            }, py::arg("values") = py::dict(),
+            "A new circuit with parameter values replaced: "
+            "with_params({\"Lbase\": 2e-3}) or with_params(Lbase=2e-3). "
+            "Every field bound to a parameter follows it; the structure "
+            "(and structure_hash) is unchanged, the receiver too.")
         .def("initial_conditions", [](const Circuit& c) {
                 py::dict out;
                 for (const auto& ic : c.initial_conditions()) {
@@ -95,9 +150,8 @@ void init_module(py::module_& m) {
         .def_property_readonly("num_switches", [](const Circuit& c) {
                 return c.graph().num_switches();
             }, "Number of switching branches (the SwitchStateMask size).")
-        .def("components", [](const Circuit& c) {
-                return lowered_call(c, "components", py::args{});
-            }, "As CircuitBuilder.components().")
+        .def("components", &lowered_components,
+             "As CircuitBuilder.components().")
         .def("initial_state", [](const Circuit& c) {
                 return c.lowered().initial_state();
             }, "As CircuitBuilder.initial_state().")
@@ -168,7 +222,24 @@ void init_module(py::module_& m) {
              "out-of-bound value.")
         .def("get_value", &CircuitBuilder::get_value,
              py::arg("device_dot_field"),
-             "Value of one field, e.g. get_value(\"R1.R\").");
+             "Value of one field, e.g. get_value(\"R1.R\").")
+        .def("param", &CircuitBuilder::param, py::arg("name"),
+             py::arg("value"), py::arg("unit") = std::string{},
+             py::arg("lo") = std::nullopt, py::arg("hi") = std::nullopt,
+             "Declare a named parameter and return it (a "
+             "pulsim.Parameter); pass it to any add_* in place of a "
+             "number. lo / hi bound its value.")
+        .def("bind_param", &CircuitBuilder::bind_param,
+             py::arg("device_dot_field"), py::arg("name"),
+             "Drive one field by a parameter: bind_param(\"L1.L\", "
+             "\"Lbase\"). add_* does this for a Parameter argument.")
+        .def("set_param", &CircuitBuilder::set_param, py::arg("name"),
+             py::arg("value"),
+             "Re-value a parameter and every field bound to it, in place.")
+        .def("parameters", [](const CircuitBuilder& b) {
+                return std::vector<pulsim::ir::Parameter>(
+                    b.parameters().begin(), b.parameters().end());
+            }, "The named parameters, in declaration order.");
 }
 
 }  // namespace pulsim_ir_bindings

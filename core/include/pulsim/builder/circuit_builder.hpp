@@ -86,57 +86,110 @@ public:
     /// Refuses, naming device and field: an unknown device or field, an
     /// out-of-bound value, and a power-MOSFET composite (its element
     /// values are derived from the datasheet record).
+    /// A field bound to a parameter literal becomes a literal again.
     void set_value(std::string_view device_dot_field, Real value) {
-        const auto dot = device_dot_field.rfind('.');
-        if (dot == std::string_view::npos || dot == 0 ||
-            dot + 1 == device_dot_field.size()) {
+        set_value_("set_value", device_dot_field, value);
+    }
+
+    // ---- add-immutable-circuit-ir group 6: named parameters --------
+    /// A field driven by a parameter: branch, field index in the kind's
+    /// row of `ir::kKindFields`, parameter index.
+    struct ParamBinding {
+        Index branch;
+        std::uint16_t field;
+        std::uint32_t param;
+    };
+
+    /// Declare a named parameter: `param("Lbase", 1e-3, "H")`. Bind
+    /// fields to it with `bind_param` (Python: pass it to any `add_*`
+    /// in place of a number); `Circuit::with_params` re-values it.
+    ir::Parameter param(std::string_view name, Real value,
+                        std::string_view unit = {},
+                        std::optional<Real> lo = std::nullopt,
+                        std::optional<Real> hi = std::nullopt) {
+        if (name.empty() || name.find('.') != std::string_view::npos) {
             throw std::invalid_argument(std::format(
-                "set_value(\"{}\"): expected \"<device>.<field>\", e.g. "
-                "\"R1.R\"", device_dot_field));
+                "param(\"{}\"): a parameter name must be non-empty and "
+                "contain no '.'", name));
         }
-        const auto dev = device_dot_field.substr(0, dot);
-        const auto field = device_dot_field.substr(dot + 1);
-        const auto hit = branch_index_.find(dev);
-        if (hit == branch_index_.end()) {
+        if (find_param_(name) != kNoParam_) {
             throw std::invalid_argument(std::format(
-                "set_value(\"{}\"): no device named \"{}\"",
-                device_dot_field, dev));
+                "param(\"{}\"): a parameter of that name already exists",
+                name));
         }
-        const Index b = hit->second;
-        for (const auto& [ch, rec] : power_mosfets_) {
-            const bool member = ch == b ||
-                std::find(rec.sub_elements.begin(), rec.sub_elements.end(),
-                          dev) != rec.sub_elements.end();
-            if (member) {
+        ir::Parameter p{std::string{name}, value, std::string{unit}, lo, hi};
+        check_param_(p, value);
+        params_.push_back(p);
+        return p;
+    }
+
+    [[nodiscard]] std::span<const ir::Parameter> parameters() const noexcept {
+        return params_;
+    }
+    [[nodiscard]] std::span<const ParamBinding> param_bindings() const noexcept {
+        return bindings_;
+    }
+
+    /// Drive field `device_dot_field` by parameter `name`: the field
+    /// takes the parameter's value now and on every `set_param`.
+    void bind_param(std::string_view device_dot_field, std::string_view name) {
+        const auto pi = require_param_("bind_param", name);
+        const auto r = resolve_field_("bind_param", device_dot_field);
+        const Real v = params_[pi].value;
+        if (!ir::within(r.spec->bound, v)) {
+            throw std::invalid_argument(std::format(
+                "bind_param(\"{}\"): field {} of device \"{}\" must be {} "
+                "(parameter \"{}\" is {})", device_dot_field, r.spec->name,
+                graph_.branch_name(r.branch), ir::bound_text(r.spec->bound),
+                name, v));
+        }
+        apply_field_(r, v, "bind_param", device_dot_field);
+        unbind_(r.branch, r.field);
+        bindings_.push_back(ParamBinding{r.branch, r.field,
+                                         static_cast<std::uint32_t>(pi)});
+    }
+
+    /// Re-value parameter `name` and every field bound to it. All bounds
+    /// (the parameter's and each driven field's) are checked before
+    /// anything changes.
+    void set_param(std::string_view name, Real value) {
+        const auto pi = require_param_("set_param", name);
+        check_param_(params_[pi], value);
+        for (const auto& bd : bindings_) {
+            if (bd.param != pi) continue;
+            const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
+            if (!ir::within(spec.bound, value)) {
                 throw std::invalid_argument(std::format(
-                    "set_value(\"{}\"): \"{}\" belongs to the power MOSFET "
-                    "\"{}\", whose element values are derived from its "
-                    "datasheet record; rebuild it with the new value",
-                    device_dot_field, dev, rec.name));
+                    "parameter \"{}\" = {}: field {} of device \"{}\" must "
+                    "be {}", name, value, spec.name,
+                    graph_.branch_name(bd.branch), ir::bound_text(spec.bound)));
             }
         }
-        const auto kind = pool_.kind_of(b);
-        const auto* spec = ir::find_field(kind, field);
-        if (spec == nullptr) {
-            std::string names;
-            for (const auto& f : ir::fields_of(kind)) {
-                names += names.empty() ? "" : ", ";
-                names += f.name;
+        // Every driven device checked on a copy first (all, or nothing).
+        std::vector<std::pair<Index, pwl::DevicePool::ParamsVariant>> next;
+        for (const auto& bd : bindings_) {
+            if (bd.param != pi) continue;
+            auto it = std::find_if(next.begin(), next.end(),
+                [&](const auto& x) { return x.first == bd.branch; });
+            if (it == next.end()) {
+                next.emplace_back(bd.branch, pool_.params_of(bd.branch));
+                it = std::prev(next.end());
             }
-            throw std::invalid_argument(std::format(
-                "set_value(\"{}\"): device \"{}\" ({}) has no value field "
-                "\"{}\"; its fields: {}", device_dot_field, dev,
-                pwl::kKindCaps[static_cast<std::size_t>(kind)].name, field,
-                names.empty() ? std::string{"none"} : names));
+            const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
+            spec.set(it->second, value);
+            try {
+                ir::check_device(it->second, spec.name);
+            } catch (const std::invalid_argument& e) {
+                throw std::invalid_argument(std::format(
+                    "parameter \"{}\" = {}: device \"{}\": {}", name,
+                    value, graph_.branch_name(bd.branch), e.what()));
+            }
         }
-        if (!ir::within(spec->bound, value)) {
-            throw std::invalid_argument(std::format(
-                "set_value(\"{}\"): field {} of device \"{}\" must be {} "
-                "(got {})", device_dot_field, spec->name, dev,
-                ir::bound_text(spec->bound), value));
+        params_[pi].value = value;
+        for (auto& [b, params] : next) {
+            pool_.params_of_mut(b) = std::move(params);
+            pool_.sync_derived_values(b);
         }
-        spec->set(pool_.params_of_mut(b), value);
-        pool_.sync_derived_values(b);
     }
 
     /// Read one value field (`"R1.R"`), as `set_value` resolves it.
@@ -2246,6 +2299,137 @@ private:
 
     CircuitBuilder(const CircuitBuilder&) = default;
     CircuitBuilder& operator=(const CircuitBuilder&) = default;
+
+    friend class ir::Circuit;  // with_value: set_value_ with its own name
+
+    struct FieldRef_ {
+        Index branch;
+        std::uint16_t field;
+        const ir::FieldSpec* spec;
+    };
+
+    /// Resolve "<device>.<field>"; refuses, naming device and field, an
+    /// unknown device or field and a power-MOSFET composite member.
+    [[nodiscard]] FieldRef_ resolve_field_(std::string_view fn,
+                                           std::string_view device_dot_field) const {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos || dot == 0 ||
+            dot + 1 == device_dot_field.size()) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): expected \"<device>.<field>\", e.g. "
+                "\"R1.R\"", fn, device_dot_field));
+        }
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto field = device_dot_field.substr(dot + 1);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end()) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): no device named \"{}\"",
+                fn, device_dot_field, dev));
+        }
+        const Index b = hit->second;
+        for (const auto& [ch, rec] : power_mosfets_) {
+            const bool member = ch == b ||
+                std::find(rec.sub_elements.begin(), rec.sub_elements.end(),
+                          dev) != rec.sub_elements.end();
+            if (member) {
+                throw std::invalid_argument(std::format(
+                    "{}(\"{}\"): \"{}\" belongs to the power MOSFET "
+                    "\"{}\", whose element values are derived from its "
+                    "datasheet record; rebuild it with the new value",
+                    fn, device_dot_field, dev, rec.name));
+            }
+        }
+        const auto kind = pool_.kind_of(b);
+        const auto* spec = ir::find_field(kind, field);
+        if (spec == nullptr) {
+            std::string names;
+            for (const auto& f : ir::fields_of(kind)) {
+                names += names.empty() ? "" : ", ";
+                names += f.name;
+            }
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): device \"{}\" ({}) has no value field "
+                "\"{}\"; its fields: {}", fn, device_dot_field, dev,
+                pwl::kKindCaps[static_cast<std::size_t>(kind)].name, field,
+                names.empty() ? std::string{"none"} : names));
+        }
+        return FieldRef_{b, static_cast<std::uint16_t>(
+                             spec - ir::fields_of(kind).data()), spec};
+    }
+
+    /// Write one field after checking the device as its `add_*` does
+    /// (`ir::check_device`); a refusal leaves the device unchanged.
+    void apply_field_(const FieldRef_& r, Real value,
+                      std::string_view fn = {}, std::string_view what = {}) {
+        auto params = pool_.params_of(r.branch);
+        r.spec->set(params, value);
+        try {
+            ir::check_device(params, r.spec->name);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): device \"{}\": {} (got {} = {})", fn, what,
+                graph_.branch_name(r.branch), e.what(), r.spec->name, value));
+        }
+        pool_.params_of_mut(r.branch) = std::move(params);
+        pool_.sync_derived_values(r.branch);
+    }
+
+    void set_value_(std::string_view fn, std::string_view device_dot_field,
+                    Real value) {
+        const auto r = resolve_field_(fn, device_dot_field);
+        if (!ir::within(r.spec->bound, value)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): field {} of device \"{}\" must be {} "
+                "(got {})", fn, device_dot_field, r.spec->name,
+                graph_.branch_name(r.branch), ir::bound_text(r.spec->bound),
+                value));
+        }
+        apply_field_(r, value, fn, device_dot_field);
+        unbind_(r.branch, r.field);
+    }
+
+    void unbind_(Index branch, std::uint16_t field) {
+        std::erase_if(bindings_, [&](const ParamBinding& x) {
+            return x.branch == branch && x.field == field;
+        });
+    }
+
+    static constexpr std::size_t kNoParam_ = static_cast<std::size_t>(-1);
+    [[nodiscard]] std::size_t find_param_(std::string_view name) const noexcept {
+        for (std::size_t i = 0; i < params_.size(); ++i) {
+            if (params_[i].name == name) return i;
+        }
+        return kNoParam_;
+    }
+    [[nodiscard]] std::size_t require_param_(std::string_view fn,
+                                             std::string_view name) const {
+        const auto i = find_param_(name);
+        if (i == kNoParam_) {
+            std::string names;
+            for (const auto& p : params_) {
+                names += names.empty() ? "" : ", ";
+                names += p.name;
+            }
+            throw std::invalid_argument(std::format(
+                "{}: no parameter named \"{}\"; parameters: {}", fn, name,
+                names.empty() ? std::string{"none"} : names));
+        }
+        return i;
+    }
+    static void check_param_(const ir::Parameter& p, Real value) {
+        if (!std::isfinite(value) || (p.lo && value < *p.lo) ||
+            (p.hi && value > *p.hi)) {
+            throw std::invalid_argument(std::format(
+                "parameter \"{}\" must be a finite number{}{} (got {})",
+                p.name,
+                p.lo ? std::format(" >= {}", *p.lo) : std::string{},
+                p.hi ? std::format(" <= {}", *p.hi) : std::string{}, value));
+        }
+    }
+
+    std::vector<ir::Parameter> params_;
+    std::vector<ParamBinding>  bindings_;
 
     /// The builder's graph, copyable only through `Graph::clone` so
     /// the builder's (private) copy constructor stays a default one:
