@@ -87,7 +87,8 @@ def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
         warnings.simplefilter("ignore")
         bd = build()
         zero = [0.0] * bd.pool.state_size(bd.graph)
-        rd = p.simulate(bd, t_end=2e-3, engine="dsed", b_extra_fn=lambda _t: zero)
+        rd = p.simulate(bd, t_end=2e-3, engine="dsed", b_extra_fn=lambda _t: zero,
+                        allow_implicit_segments=True)
         rp = p.simulate(build(), t_end=2e-3, engine="pwl", dt=1e-7)
     assert rd.n_exact_steps == 0
     assert rd.n_rk45_steps + rd.n_bdf2_steps > 0

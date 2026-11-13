@@ -50,6 +50,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <numbers>
 #include <functional>
 #include <stdexcept>
@@ -256,6 +257,29 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         return current_entry_->exact.valid;
+    }
+
+    /// add-exact-propagator-strategy 13.2: with `engine='exact'` a
+    /// segment the exact kernel cannot step (tier 3) is refused unless
+    /// the caller allows implicit segments.
+    void set_refuse_implicit(bool on) noexcept { refuse_implicit_ = on; }
+
+    /// Called by the schedulers where the current mode has no exact step
+    /// and they would integrate it numerically: refuses when asked to,
+    /// naming the D11 rule ('source' for a user b_extra_fn, else 'cost').
+    void refuse_implicit_step(Real t) const {
+        if (!refuse_implicit_) return;
+        ensure_current_resolved_();
+        const bool src = static_cast<bool>(b_extra_fn_);
+        const std::string& why = current_entry_->exact.reason;
+        char tb[32];
+        std::snprintf(tb, sizeof tb, "%.9e", t);
+        throw UnsupportedError(
+            "dsed", src ? "source" : "cost", "", "",
+            std::string{"engine='exact' at t = "} + tb + " s: this segment's mode has no "
+            "exact step (" + (why.empty() ? std::string{"no closed form"} : why) + "). "
+            "Pass allow_implicit_segments=True to integrate it numerically, or use "
+            "engine='pwl' / 'trbdf2'.");
     }
 
     /// Advance the reduced state from absolute time `t` by `h`,
@@ -1109,6 +1133,7 @@ private:
     const pwl::DevicePool&    pool_;
     pwl::PwlStateSpaceCache&  cache_;
     std::function<Vector(Real)> b_extra_fn_;
+    bool refuse_implicit_ = false;     // 13.2: refuse a tier-3 segment
     bool                       has_dynamic_sources_;
     bool                       has_sine_sources_;
     std::vector<PwlSource>     pwl_sources_;

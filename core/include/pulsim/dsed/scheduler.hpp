@@ -407,6 +407,12 @@ public:
             // this mask — falls through to the numeric path below,
             // which remains correct everywhere.
             if constexpr (HasExactStep<System>) {
+                if (!system_.has_exact_step()) {
+                    // 13.2: engine='exact' refuses a numeric segment unless allowed
+                    if constexpr (requires { system_.refuse_implicit_step(t); }) {
+                        system_.refuse_implicit_step(t);
+                    }
+                }
                 if (system_.has_exact_step()) {
                     const Real h_ex =
                         std::min(dt_max_, t_target - t);

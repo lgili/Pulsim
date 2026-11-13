@@ -86,6 +86,7 @@ def exact_route(builder, t_end: float, switch_fn=None, **simulate_kwargs) -> dic
         return one_row("source", "", "", "b_extra_fn: a user source function has no closed form")
     kw = dict(simulate_kwargs)
     kw.setdefault("integrator", "rk45")
+    kw.setdefault("allow_implicit_segments", True)   # classify, do not refuse (13.2)
     if switch_fn is not None:
         kw["switch_fn"] = switch_fn
     try:

@@ -2370,6 +2370,10 @@ class _NativeCircuitBuilderAdapter:
         """
         Set the active mask. Subsequent A_matrix / b_vector / rhs queries resolve against this mask (cached lazily).
         """
+    def set_refuse_implicit(self, on: bool) -> None:
+        """
+        add-exact-propagator-strategy 13.2: refuse a segment with no exact step (engine='exact' without allow_implicit_segments).
+        """
     @property
     def has_dynamic_sources(self) -> bool:
         """

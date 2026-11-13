@@ -1002,6 +1002,10 @@ void init_module(py::module_& m) {
             py::arg("builder"),
             py::arg("cache"),
             py::arg("b_extra_fn") = py::none())
+        .def("set_refuse_implicit", &NativeAdapter::set_refuse_implicit,
+             py::arg("on"),
+             "add-exact-propagator-strategy 13.2: refuse a segment with no "
+             "exact step (engine='exact' without allow_implicit_segments).")
         .def("set_mask", &NativeAdapter::set_mask,
             "Set the active mask. Subsequent A_matrix / b_vector / "
             "rhs queries resolve against this mask (cached lazily).")

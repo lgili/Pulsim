@@ -78,6 +78,7 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
+| `allow_implicit_segments` | `bool` or `None` | `None` | `engine='exact'` only. A segment the exact kernel cannot step raises `UnsupportedError('dsed', feature)` with `feature` the failed rule (`'source'`: a `b_extra_fn`; `'cost'`: a stiff, near-defective mode; `'extraction'`: the extractor rejected the circuit) unless `True`, which integrates it numerically. Refused by name on other engines. |
 | `engine` | `str` | `'auto'` | `'auto'`, `'pwl'`, `'trbdf2'` or `'exact'`. `'exact'` is the canonical name of the event-driven exact engine and `'dsed'` its alias: one engine, bit-identical runs; `result.engine_used` and every refusal's `engine` field read `'dsed'` (the capability-table column) until the default flip. |
 
 `pulsim.exact_route(builder, t_end, switch_fn=None, **kw)` runs the

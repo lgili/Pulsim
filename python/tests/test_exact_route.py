@@ -185,3 +185,70 @@ def test_a_run_without_a_tier_record_is_not_reported_exact():
         b.add_resistor("R", "a", "o", 1e3)
         b.add_capacitor("C", "o", "gnd", 1e-6)
         p.exact_route(b, 1e-3, integrator="bdf2")
+
+
+# ---------------------------------------------------------------------------------------------
+# Task 13.2: engine='exact' refuses a segment it cannot step exactly, unless allowed
+# ---------------------------------------------------------------------------------------------
+def _rc_with_b_extra():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    zero = [0.0] * b.pool.state_size(b.graph)
+    return b, (lambda _t: zero)
+
+
+@pytest.mark.parametrize("engine", ["exact", "dsed"])
+def test_a_b_extra_fn_segment_is_refused_by_rule_unless_allowed(engine):
+    b, fn = _rc_with_b_extra()
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, t_end=1e-3, engine=engine, b_extra_fn=fn)
+    assert (ei.value.engine, ei.value.feature, ei.value.device) == ("dsed", "source", "")
+    assert "allow_implicit_segments=True" in str(ei.value)
+    b, fn = _rc_with_b_extra()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=1e-3, engine=engine, b_extra_fn=fn, allow_implicit_segments=True)
+    assert r.n_exact_steps == 0 and r.n_rk45_steps + r.n_bdf2_steps > 0
+    assert np.asarray(r.v("o"))[-1] == pytest.approx(5.0 * (1 - np.exp(-1.0)), rel=1e-5)
+
+
+def _paralleled_bridges(n):
+    b = p.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", GON, GOFF, 0.0)
+            b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", GON, GOFF, 0.0)
+    b.add_capacitor("C", "p", "n", 2e-3)
+    b.add_resistor("R", "p", "n", 5.0)
+    b.add_resistor("Rg", "n", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_stiff_near_defective_mode_is_refused_as_cost(mode):
+    """Ten three-phase bridges paralleled on one bus: the mode at rest (all 30 diodes ON) has no
+    exact step (kappa2(V) 2.3e6, ||A*h|| 1.5e6) and the numeric fallback made no progress past
+    1 us ("no meaningful progress"). engine='exact' now names it at its first segment
+    (add-complementarity-mode-selection DECISIONS #25)."""
+    kw = {} if mode is None else {"mode_selection": mode}
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(_paralleled_bridges(10), t_end=0.02, engine="exact", **kw)
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "cost")
+    assert "near-defective" in str(ei.value)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])
+def test_allow_implicit_segments_refused_off_the_exact_engine(engine):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    kw = {"dt": 1e-5} if engine == "pwl" else {}
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, t_end=1e-4, engine=engine, allow_implicit_segments=True, **kw)
+    assert ei.value.feature == "allow_implicit_segments"

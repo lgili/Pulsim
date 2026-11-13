@@ -91,6 +91,7 @@ def test_dsed_auto_raises_on_nan_b_extra():
             b, t_end=1e-4, dt=1e-6,
             engine="dsed",
             b_extra_fn=_make_nan_b_extra(b),
+            allow_implicit_segments=True,   # a b_extra_fn is numeric (13.2)
         )
     msg = str(exc.value)
     # Error must mention NaN/Inf and provide an actionable hint.
@@ -110,6 +111,7 @@ def test_dsed_rk45_raises_on_nan_b_extra():
             b, t_end=1e-4, dt=1e-6,
             engine="dsed", integrator="rk45",
             b_extra_fn=_make_nan_b_extra(b),
+            allow_implicit_segments=True,   # a b_extra_fn is numeric (13.2)
         )
     msg = str(exc.value)
     assert "NaN" in msg or "nan" in msg.lower()

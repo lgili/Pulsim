@@ -242,6 +242,12 @@ public:
             //     as on the RK45 scheduler.
             if constexpr (HasExactStep<System>) {
                 const Real h_ex = std::min(dt_max_, t_gate - t);
+                if (h_ex > Real{0} && !system_.has_exact_step()) {
+                    // 13.2: engine='exact' refuses a numeric segment unless allowed
+                    if constexpr (requires { system_.refuse_implicit_step(t); }) {
+                        system_.refuse_implicit_step(t);
+                    }
+                }
                 if (h_ex > Real{0} && system_.has_exact_step()) {
                     step_mask = system_.current_mask();
                     if constexpr (requires {

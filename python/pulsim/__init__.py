@@ -1631,6 +1631,7 @@ def simulate(
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
     mode_selection: Optional[str] = None,
+    allow_implicit_segments: Optional[bool] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -1839,6 +1840,15 @@ def simulate(
         solved beside it; disagreements in
         ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'``
         on ``pwl`` / ``trbdf2`` raise :class:`UnsupportedError`.
+    allow_implicit_segments
+        ``engine='exact'`` (alias ``'dsed'``) only. A segment whose mode the
+        exact kernel cannot step (a user ``b_extra_fn``: ``feature='source'``;
+        a stiff, near-defective mode: ``'cost'``; a circuit its extractor
+        rejects: ``'extraction'``) raises :class:`UnsupportedError` naming the
+        rule, unless this is ``True`` (the segment is then integrated
+        numerically and recorded in ``result.exact['segments']``).
+        ``integrator='bdf2'`` (deprecated) is numeric throughout and is not
+        refused. On other engines passing it raises :class:`UnsupportedError`.
 
     Returns
     -------
@@ -2152,6 +2162,7 @@ def simulate(
             builder_initial_state=initial_state if _ic_from_builder else None,
             progress=progress,
             mode_selection=mode_selection,
+            allow_implicit_segments=bool(allow_implicit_segments),
         )
         try:
             _dsed_res._preflight = _preflight_report
@@ -2246,6 +2257,13 @@ def simulate(
                 "engine automatically, or engine='pwl' explicitly.")
 
     # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
+    if allow_implicit_segments is not None:
+        raise _unsupported(
+            engine, "allow_implicit_segments",
+            f"simulate(engine={_engine_asked!r}, allow_implicit_segments="
+            f"{allow_implicit_segments!r}): the keyword governs the exact "
+            f"engine's numeric segments; this run lands on engine={engine!r}, "
+            "which has no exact segments. Use engine='exact', or drop it.")
     if mode_selection in ("shadow", "lcp"):
         raise _unsupported(
             engine, "mode_selection",

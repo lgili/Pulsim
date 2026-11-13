@@ -240,11 +240,13 @@ refuses them.
 `engine='dsed'` steps a mask with constant sources exactly (tier 1
 eigen, tier 2 Padé; `result.exact["masks"]`). A mask that passes
 neither bound (tier 3: stiff and non-normal, e.g. a 1e12 Jordan block)
-runs on the old numeric path for that mask, recorded with its reason;
-the implicit hand-off and a strict refusal need the unified stepper
-(`add-exact-propagator-strategy` task 2.4). Sine, PWM and pulse
-sources are exact (corners are time events); a user `b_extra_fn`
-makes the mask numeric. Capacitor loops (parallel
+is refused by name (`UnsupportedError('dsed', 'cost')`) unless
+`allow_implicit_segments=True`, which runs it on the old numeric path,
+recorded with its reason (task 13.2); the implicit strategy hand-off
+needs the unified stepper (task 2.4). Sine, PWM and pulse sources are
+exact (corners are time events); a user `b_extra_fn` makes the mask
+numeric, refused as `'source'` unless allowed. `integrator='bdf2'` is
+numeric throughout and not refused. Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).

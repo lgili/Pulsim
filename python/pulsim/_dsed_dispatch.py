@@ -548,6 +548,7 @@ def run_dsed_from_builder(
     progress: Any = False,
     builder_initial_state: Optional[Any] = None,
     mode_selection: Optional[str] = None,
+    allow_implicit_segments: bool = True,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
 
@@ -788,11 +789,16 @@ def run_dsed_from_builder(
                    and run_bdf2_b11 is not None
                    and run_auto_b11 is not None)
 
+    adapter_rejected = False
     if bridge11_ok:
         try:
+            adapter_rejected = True
             native_adapter = NativeAdapterCls(
                 builder, cache,
                 b_extra_fn if b_extra_fn is not None else None)
+            adapter_rejected = False
+            # 13.2: engine='exact' refuses a segment with no exact step
+            native_adapter.set_refuse_implicit(not allow_implicit_segments)
             ic_adjustment = None
             if builder_initial_state is not None:
                 native_adapter.set_mask(initial_mask)
@@ -897,6 +903,13 @@ def run_dsed_from_builder(
             f"simulate(engine='dsed', mode_selection={mode_selection!r}): "
             "the native adapter rejected this circuit and the fallback "
             "path has no complementarity hook. Drop mode_selection.")
+
+    if not allow_implicit_segments and adapter_rejected and opts.integrator != "bdf2":
+        raise unsupported(
+            "dsed", "extraction", message=
+            "simulate(engine='exact'): the exact kernel's state extraction "
+            "rejected this circuit, so every segment would be numeric. Pass "
+            "allow_implicit_segments=True, or use engine='pwl' / 'trbdf2'.")
 
     if builder_initial_state is not None:
         raise unsupported(

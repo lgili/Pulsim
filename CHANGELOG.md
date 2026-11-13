@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `engine='exact'` refuses a segment it cannot step exactly (breaking for `b_extra_fn` users)
+
+With `engine='exact'` (alias `'dsed'`) a segment whose mode has no exact
+step now raises `UnsupportedError('dsed', feature)` naming the rule:
+`'source'` for a user `b_extra_fn`, `'cost'` for a stiff, near-defective
+mode, `'extraction'` when the native extractor rejects the circuit. Pass
+`allow_implicit_segments=True` to integrate such segments numerically,
+as before. Ten diode bridges paralleled on one bus, which ground for
+minutes into "no meaningful progress", are now refused at their first
+segment. `integrator='bdf2'` is unaffected. The keyword is refused by name
+on `pwl`, `trbdf2` and `auto`. Reference runs are unchanged.
+
 ### dsed give-up sites throw one typed C++ exception
 
 The event-driven engine's own failures (diode settle round cap, diode
