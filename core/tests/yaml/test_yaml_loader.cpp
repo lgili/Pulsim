@@ -260,6 +260,7 @@ circuit:
       name: D2
       anode: a
       cathode: c
+      allow_non_passive: true
       V_F0: 0.7
       R_d: 0.01
       G_off: 1e-9
@@ -269,6 +270,28 @@ circuit:
     REQUIRE(loaded.builder.num_branches() == 1);
     REQUIRE(loaded.builder.pool().kind_of(0) ==
               DevicePool::StoredKind::NonlinearDiode);
+}
+
+TEST_CASE("YAML loader: retired nonlinear_diode needs the opt-in",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: nonlinear_diode
+      name: D2
+      anode: a
+      cathode: c
+)YAML";
+    try {
+        (void)yaml::load_string(yaml);
+        FAIL("nonlinear_diode without allow_non_passive was accepted");
+    } catch (const std::runtime_error& e) {
+        const std::string msg = e.what();
+        REQUIRE(msg.find("D2") != std::string::npos);
+        REQUIRE(msg.find("retired") != std::string::npos);
+        REQUIRE(msg.find("allow_non_passive") != std::string::npos);
+        REQUIRE(msg.find("add_shockley_diode") != std::string::npos);
+    }
 }
 
 TEST_CASE("YAML loader: mosfet round-trip",

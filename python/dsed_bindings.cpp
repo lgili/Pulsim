@@ -52,6 +52,7 @@
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
+#include "switch_fn_adapter.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -528,6 +529,7 @@ py::dict ped_result_to_dict(
     d["n_accept"] = res.n_accept;
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
+    d["n_exact_steps"] = res.n_exact_steps;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
     // Event log: skip the MaskT objects (they're py::object wrappers
     // around Python objects that we just hand back).
@@ -586,6 +588,7 @@ py::dict ped_result_auto_to_dict(
     d["n_events"] = res.n_events;
     d["n_rk45_steps"] = res.n_rk45_steps;
     d["n_bdf2_steps"] = res.n_bdf2_steps;
+    d["n_exact_steps"] = res.n_exact_steps;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
     py::list events;
     for (const auto& e : res.event_log) {
@@ -759,59 +762,31 @@ void init_module(py::module_& m) {
     struct PySwitchFnSSM {
         explicit PySwitchFnSSM(py::object fn)
             : fn_{std::move(fn)} {
-            // Try to detect the native PWM types first. py::cast<T*>
-            // returns the C++ pointer if the py::object holds an
-            // instance of the bound type; throws py::cast_error
-            // otherwise.
-            try {
-                native_pwm2_ =
-                    fn_.cast<pulsim::sources::NativePwm2Switch*>();
-            } catch (const py::cast_error&) {
-                native_pwm2_ = nullptr;
-            }
-            if (!native_pwm2_) {
-                try {
-                    native_multi_ =
-                        fn_.cast<pulsim::sources::NativeMultiMaskPwm*>();
-                } catch (const py::cast_error&) {
-                    native_multi_ = nullptr;
-                }
-            }
-            if (!native_pwm2_ && !native_multi_ &&
-                py::isinstance<pulsim::sources::SwitchSchedule>(fn_)) {
-                // Built-in PWM helper (make_pwm_switch_fn & co.):
-                // copy the C++ schedule; mask and edge oracle then
-                // run without the GIL.
-                sched_ = fn_.cast<pulsim::sources::SwitchSchedule>();
-                has_sched_ = true;
-            }
-            if (!native_pwm2_ && !native_multi_ && !has_sched_) {
-                // Fallback path — generic Python callable. Pre-resolve
-                // `next_edge_after` attribute (if any) to avoid the
-                // hasattr cost per call.
-                if (py::hasattr(fn_, "next_edge_after")) {
-                    nea_attr_ = fn_.attr("next_edge_after");
-                    has_nea_  = true;
-                }
+            // The native schedules (SwitchSchedule, NativePwm2Switch,
+            // NativeMultiMaskPwm) are recognised by the adapter every
+            // engine binding shares; they run without the GIL.
+            if (py::isinstance<pulsim::sources::SwitchSchedule>(fn_)
+                || py::isinstance<pulsim::sources::NativePwm2Switch>(fn_)
+                || py::isinstance<pulsim::sources::NativeMultiMaskPwm>(fn_)) {
+                native_ = pulsim_bindings_common::adapt_switch_fn(fn_);
+                is_native_ = true;
+            } else if (py::hasattr(fn_, "next_edge_after")) {
+                // Generic Python callable: pre-resolve the attribute
+                // to avoid the hasattr cost per call.
+                nea_attr_ = fn_.attr("next_edge_after");
+                has_nea_  = true;
             }
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            // Bridge.12 native fast path — pure C++, no GIL touch.
-            if (native_pwm2_) return (*native_pwm2_)(t);
-            if (native_multi_) return (*native_multi_)(t);
-            if (has_sched_) return sched_(t);
+            if (is_native_) return native_.fn(t);
             // Generic Python fallback (Bridge.11 path).
             py::gil_scoped_acquire gil;
             return fn_(t).cast<SSM>();
         }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
-            if (native_pwm2_)  return native_pwm2_->next_edge_after(t);
-            if (native_multi_) return native_multi_->next_edge_after(t);
-            if (has_sched_ && sched_.has_edges()) {
-                return sched_.next_edge_after(t);
-            }
+            if (is_native_ && native_.next_edge) return native_.next_edge(t);
             if (has_nea_) {
                 py::gil_scoped_acquire gil;
                 return nea_attr_(t).cast<Real>();
@@ -824,10 +799,8 @@ void init_module(py::module_& m) {
         void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
         py::object fn_;
-        pulsim::sources::NativePwm2Switch*   native_pwm2_  = nullptr;
-        pulsim::sources::NativeMultiMaskPwm* native_multi_ = nullptr;
-        pulsim::sources::SwitchSchedule      sched_;
-        bool       has_sched_ = false;
+        pulsim_bindings_common::SwitchFnAdapter native_;
+        bool       is_native_ = false;
         py::object nea_attr_;
         bool       has_nea_ = false;
         EdgeSearch<SSM> search_;

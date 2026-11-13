@@ -43,6 +43,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_diode_events.cpp    # Gate 3 — buck DCM + body-diode commutation
         tests/dsed/test_bdf2.cpp            # Gate 4 — BDF2 + stiffness detector
         tests/dsed/test_bdf2_scheduler.cpp  # Gate 4.C — end-to-end BDF2 PED scheduler
+        tests/dsed/test_bdf2_bootstrap.cpp  # L-stable backward-Euler start
         tests/dsed/test_mmc_thevenin_arm.cpp
         tests/dsed/test_trbdf2_transient.cpp
         tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask
@@ -160,6 +161,7 @@ if(PULSIM_BUILD_TESTS)
         tests/analysis/test_main.cpp
         tests/analysis/test_core_loss.cpp
         tests/analysis/test_mna_sweep.cpp   # v1.4.0 — in-house complex solver integration
+        tests/analysis/test_mna_sweep_assembly.cpp  # fix-mna-sweep-correctness
     )
     target_link_libraries(pulsim_core_analysis_tests
         PRIVATE
@@ -236,6 +238,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4/test_row_names.cpp   # v2.0 Phase 1 — named diagnostics
         tests/layer4/test_preflight.cpp    # v2.0 Phase 2 — preflight
         tests/layer4/test_gmin.cpp         # v2.0 Phase 2 — gmin + DC cascade
+        tests/layer4/test_engine_capabilities.cpp  # engine conformance table
         tests/layer4/test_cache.cpp
         tests/layer4/test_integration_chopper.cpp
         tests/layer4/test_pwl_cache_rank1.cpp       # Layer 4 V8 — rank-1 fast path

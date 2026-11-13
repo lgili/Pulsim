@@ -28,7 +28,7 @@ def failing_rectifier():
     b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 400.0, 60.0)
     q = p.IdealDiodeParams()
     q.kappa = 100.0
-    b.add_nonlinear_diode("D", "ac", "vout", q)
+    b.add_nonlinear_diode("D", "ac", "vout", q, allow_non_passive=True)
     b.add_resistor("R", "vout", "gnd", 50.0)
     b.add_capacitor("C", "vout", "gnd", 100e-6)
     return b

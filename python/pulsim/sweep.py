@@ -66,6 +66,8 @@ from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
 
+from ._refusal import UnsupportedError
+
 
 __all__ = [
     "SweepResult",
@@ -130,9 +132,10 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
     """Run every job; returns ``(kpi_list, failed, backend_used)``.
 
     Results are in job order on every backend. The serial and thread
-    paths record a raising job in ``failed`` and go on; the process
-    path propagates the first failure (its behaviour before
-    ``backend`` existed).
+    paths record a raising job in ``failed`` and go on, except an
+    ``UnsupportedError``, which holds for every point and propagates;
+    the process path propagates the first failure (its behaviour
+    before ``backend`` existed).
     """
     if backend not in _BACKENDS:
         raise ValueError(
@@ -144,6 +147,8 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
     def run_captured(i):
         try:
             kpis, cbs = _run_one_simulation(args_iter[i])
+        except UnsupportedError:
+            raise   # a refusal holds for every point
         except Exception as exc:
             failed.append((i, str(exc)))
             return None
@@ -631,6 +636,8 @@ def sweep_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"sweep point {i} {p_dict}")
             kpi_list.append(kpi_fn(sim, p_dict))
+        except UnsupportedError:
+            raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
             kpi_list.append({})
@@ -777,6 +784,8 @@ def monte_carlo_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"MC sample {i}")
             kpi_list.append(kpi_fn(sim, sample))
+        except UnsupportedError:
+            raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
             kpi_list.append({})

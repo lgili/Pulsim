@@ -504,6 +504,21 @@ inline void load_device(
             real_or(dev, "V_th", Real{0}),
             real_or(dev, "V_f", Real{0}));
     } else if (type == "nonlinear_diode") {
+        // Retired (fix-nonlinear-diode-passivity): the law sources
+        // power below V_F0. Same text as the Python refusal.
+        if (!bool_or(dev, "allow_non_passive", false)) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: nonlinear_diode is retired: its "
+                "smooth-blend law logistic(kappa*(v - V_F0))*(v - V_F0)/R_d "
+                "is negative for 0 < v < V_F0, so the device sources power "
+                "below its knee (-1.39 A out of a forward-biased anode at "
+                "+0.636 V with the default parameters). Use type: diode "
+                "with V_f (a PWL diode with a forward drop), or build the "
+                "circuit in Python with add_shockley_diode (a smooth "
+                "junction). Set allow_non_passive: true to build the "
+                "legacy device anyway.",
+                device_label(dev, idx, type)));
+        }
         models::IdealDiode::Params p{
             .V_F0  = real_or(dev, "V_F0", Real{0.7}),
             .R_d   = real_or(dev, "R_d",  Real{0.01}),

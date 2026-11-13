@@ -22,9 +22,12 @@ User-facing knobs:
 
 * ``rtol`` / ``atol`` — RK45 tolerances (default 1e-6 / 1e-9)
 * ``dt`` — interpreted as ``dt_max`` (step cap) for the dsed engine
-* ``integrator`` — ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``
+* ``integrator`` — ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``.
+  ``'auto'`` takes, in order: the exact (closed-form) stepper when the
+  mode has one; otherwise the stiffness detector's choice of DOPRI5 or
+  BDF2. ``'rk45'`` also takes the exact stepper when it exists.
 * ``stiffness_threshold`` — when ``|λ_max|·h > threshold``, dispatcher
-  picks BDF2 (default 10.0)
+  picks BDF2 (default 10.0) for a mode with no exact stepper
 * ``h_bdf2`` — fixed step for BDF2 segments (default 1e-6)
 
 See ``notes/GATE5_PROGRESS.md`` for captured performance across 13
@@ -43,15 +46,18 @@ from ._pulsim import (  # type: ignore[import-not-found]
     NativeMultiMaskPwm,
     NativePwm2Switch,
     SwitchSchedule,
+    UnsupportedError,
 )
+from ._refusal import _UnsupportedNotImplemented, unsupported
 
 
 # =============================================================================
 # Type aliases (public for downstream type-hints)
 # =============================================================================
 
-# Auto = pick per mode via stiffness detector;
-# rk45/bdf2 = force one integrator for ALL modes.
+# Auto = exact stepper when the mode has one, else the stiffness
+# detector's DOPRI5/BDF2 choice; rk45/bdf2 = force one integrator for
+# ALL modes (rk45 still takes the exact stepper where it exists).
 IntegratorChoice = Literal["auto", "rk45", "bdf2"]
 
 
@@ -342,7 +348,9 @@ class _PEDSimulationResult:
 
     * ``n_accept`` / ``n_reject`` — PI controller accept/reject counts
     * ``n_events`` — number of mask transitions fired
-    * ``n_rk45_steps`` / ``n_bdf2_steps`` — per-integrator step counts
+    * ``n_rk45_steps`` / ``n_bdf2_steps`` / ``n_exact_steps`` —
+      per-integrator step counts (``n_exact_steps``: closed-form LTI
+      propagator)
       (only populated when ``integrator='auto'`` was selected)
     * ``cpu_time_seconds`` — wall-clock from the PED scheduler
     * ``event_iteration_count`` / ``commutation_events`` — empty lists
@@ -383,6 +391,7 @@ class _PEDSimulationResult:
         n_events: int = 0,
         n_rk45_steps: int = 0,
         n_bdf2_steps: int = 0,
+        n_exact_steps: int = 0,
         cpu_time_seconds: float = 0.0,
     ) -> None:
         self.times = times
@@ -415,6 +424,7 @@ class _PEDSimulationResult:
         self.n_events = n_events
         self.n_rk45_steps = n_rk45_steps
         self.n_bdf2_steps = n_bdf2_steps
+        self.n_exact_steps = n_exact_steps
         self.cpu_time_seconds = cpu_time_seconds
         # PWL-engine diagnostic fields — empty for PED, but exposed
         # for API-compat with code that destructures both result types.
@@ -565,7 +575,8 @@ def run_dsed_from_builder(
         # 'auto' quietly becomes 'rk45'; an EXPLICIT 'bdf2' request
         # is refused rather than silently downgraded.
         if integrator == "bdf2":
-            raise ValueError(
+            raise unsupported(
+                "dsed", "integrator", kind="Diode", message=
                 f"simulate(engine='dsed', integrator='bdf2'): this "
                 f"circuit has {_n_diodes} PWL diode(s), and diode "
                 f"commutation is only implemented on the RK45 "
@@ -575,14 +586,11 @@ def run_dsed_from_builder(
                 f"integrator='bdf2' (the default routes correctly) "
                 f"or use engine='pwl'.")
         integrator = "rk45"
-    if builder.pool.has_nonlinear_devices():
-        raise ValueError(
-            "simulate(engine='dsed'): this circuit has nonlinear "
-            "devices (smooth diode / MOSFET / IGBT / saturable "
-            "inductor), which the dsed engine's LTI extraction "
-            "silently treats as ABSENT — the run would simulate a "
-            "different circuit. Use the default engine "
-            "(engine='pwl'), which Newton-iterates them.")
+    # Device kinds: the kernel's capability table, before any adapter
+    # is built (the Python adapter below would extract the LTI system
+    # with every Newton device silently ABSENT). The native adapter
+    # repeats the check for C++ callers.
+    _kern._require_supported(builder.graph, builder.pool, "dsed")
 
     opts = _resolve_dsed_options(
         dt=dt,
@@ -683,7 +691,9 @@ def run_dsed_from_builder(
     try:
         _ = adapter.A_matrix()
     except NotImplementedError as e:
-        raise NotImplementedError(_BRIDGE_FALLBACK_MESSAGE.format(
+        raise unsupported(
+            "dsed", "extraction", cls=_UnsupportedNotImplemented,
+            message=_BRIDGE_FALLBACK_MESSAGE.format(
             rtol=opts.rtol,
             atol=opts.atol,
             dt_max=opts.dt_max,
@@ -777,8 +787,13 @@ def run_dsed_from_builder(
                 n_events=native_res.get("n_events", 0),
                 n_rk45_steps=native_res.get("n_rk45_steps", 0),
                 n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+                n_exact_steps=native_res.get("n_exact_steps", 0),
                 cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
             )
+        except UnsupportedError:
+            # A refusal is an answer, not a reason to try the next
+            # bridge (which would run the circuit without the device).
+            raise
         except (RuntimeError, ValueError):
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
             # device that the C++ extractor can't handle). Silently fall
@@ -837,6 +852,7 @@ def run_dsed_from_builder(
             n_events=native_res.get("n_events", 0),
             n_rk45_steps=native_res.get("n_rk45_steps", 0),
             n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+            n_exact_steps=native_res.get("n_exact_steps", 0),
             cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
         )
 
@@ -850,7 +866,8 @@ def run_dsed_from_builder(
     # fallback that used to live here was demoted to the test
     # tree in v1.6.3 (see `python/tests/_dsed_reference/`); the
     # production path is C++-only.
-    raise NotImplementedError(
+    raise unsupported(
+        "dsed", "extraction", cls=_UnsupportedNotImplemented, message=
         "pulsim.simulate(engine='dsed'): both the native C++ "
         "builder adapter (Bridge.11) and the Python builder "
         "adapter (Bridge.10) rejected this circuit. This usually "

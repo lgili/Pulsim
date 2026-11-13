@@ -51,7 +51,14 @@ import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ._pulsim import CircuitBuilder
+    from ._pulsim import CircuitBuilder, IdealDiodeParams
+
+
+class RetiredDeviceError(ValueError):
+    """Raised by a builder method whose device was retired because it
+    gives wrong answers (today: ``add_nonlinear_diode``). The message
+    names the replacements and the explicit opt-in that still builds
+    the legacy device."""
 
 
 class Cancelled(RuntimeError):
@@ -376,6 +383,39 @@ def install(builder_cls) -> None:
     native = getattr(builder_cls, "add_shockley_diode", None)
     if native is not None and not getattr(native, "_records_params", False):
         builder_cls.add_shockley_diode = _recording_shockley(native)  # type: ignore[attr-defined]
+    native = getattr(builder_cls, "add_nonlinear_diode", None)
+    if native is not None and not getattr(native, "_retired", False):
+        builder_cls.add_nonlinear_diode = _retired_nonlinear_diode(native)  # type: ignore[attr-defined]
+
+
+NONLINEAR_DIODE_RETIRED = (
+    "add_nonlinear_diode is retired: its smooth-blend law "
+    "logistic(kappa*(v - V_F0))*(v - V_F0)/R_d is negative for "
+    "0 < v < V_F0, so the device sources power below its knee "
+    "(-1.39 A out of a forward-biased anode at +0.636 V with the "
+    "default IdealDiodeParams). Use add_diode(name, anode, cathode, "
+    "g_on, g_off, V_f=...) for a PWL diode with a forward drop, or "
+    "add_shockley_diode(name, anode, cathode, ...) for a smooth "
+    "junction. Pass allow_non_passive=True to build the legacy device "
+    "anyway (hostile-circuit test fixtures).")
+
+
+def _retired_nonlinear_diode(native):
+    """``add_nonlinear_diode`` that refuses unless the caller opts in
+    with ``allow_non_passive=True``; the native call is unchanged."""
+    def add_nonlinear_diode(self, name: str, anode: str, cathode: str,
+                            params: IdealDiodeParams, *,
+                            allow_non_passive: bool = False) -> CircuitBuilder:
+        if not allow_non_passive:
+            raise RetiredDeviceError(f"{name}: {NONLINEAR_DIODE_RETIRED}")
+        return native(self, name, anode, cathode, params)
+
+    add_nonlinear_diode.__doc__ = (
+        "Retired. Raises RetiredDeviceError unless "
+        "allow_non_passive=True.\n\n" + NONLINEAR_DIODE_RETIRED)
+    add_nonlinear_diode.__qualname__ = "CircuitBuilder.add_nonlinear_diode"
+    add_nonlinear_diode._retired = True  # type: ignore[attr-defined]
+    return add_nonlinear_diode
 
 
 def _recording_shockley(native):

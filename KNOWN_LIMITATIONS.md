@@ -9,6 +9,8 @@
 > model change: the output falls by 16.6 %. Two entries are out of date: `.subckt`
 > is now flattened, and since 1.4.0 the AC sweep has factorised with
 > the in-house `PulsimComplexSparseLuSolver`, not `Eigen::SparseLU`.
+> `add_nonlinear_diode` is retired (its law sources power below
+> `V_F0`); see the 2.0 page.
 
 This file catalogues every gap we knowingly ship in **pulsim 1.3.0** —
 deliberately deferred work, partial implementations, and features whose
@@ -235,6 +237,30 @@ for the v1.4 cycle.
 ---
 
 ## Transient engines (2.0)
+
+### Which engine runs which device: one table, typed refusals
+
+The kernel's capability table (`pulsim.engine_capabilities()`, mirrored
+in `docs/known-limitations.md` and checked by
+`test_engine_conformance.py`) decides which engine simulates which
+device kind. Newton devices (smooth / Shockley / Lauritzen diode,
+level-1 MOSFET / IGBT, saturable inductor, junction capacitor, PMSM) run
+on `pwl` and `trbdf2` only; `dsed`, `run_transient_bdf1` and the kernel
+AC sweep refuse them with `pulsim.UnsupportedError`. Before the table, a
+junction capacitor on `dsed` / `bdf1` was silently absent (6.3186 V
+instead of 1.0216 V). The retired `add_nonlinear_diode` is opt-in only
+(`allow_non_passive=True`). Feature keywords an engine cannot honour
+refuse the same way, with `feature` set to the keyword. Controllers
+(`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
+refuses them.
+
+### Fixed-step controller ticks land on the `dt` grid
+
+On `pwl` a controller tick is delivered at the first grid point at or
+after `t_start + k*T`. When `T` is not a multiple of `dt` each tick is
+late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
+records the largest lateness); `T < dt` is refused. `trbdf2` lands every
+tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
 
 ### TR-BDF2 stalls at `h_min` after a hard switching edge
 

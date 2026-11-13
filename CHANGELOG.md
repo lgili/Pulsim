@@ -6,6 +6,160 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Controller ticks: one rule on every engine
+
+Source j with period `T_j` (a `ClosedLoop`'s `period`, or `step_observer`
+with `controller_period=` / a `.period`) ticks at `t_start + k*T_j` for
+every instant `< t_end`, `ceil(span / T_j)` times, the first at `t_start`.
+Sources due at one instant fire in registration order (closed loops in
+list order, then `step_observer`). `simulate()` composes the controllers
+once, above the engine dispatch, and both engines consume that plan.
+
+* **Fixed** two `ClosedLoop`s without `dt` (`trbdf2`) raised `TypeError`
+  composing their masks; they run (200 and 20 ticks at 20 kHz and 2 kHz
+  over 10 ms), also with a user `switch_fn` on another switch.
+* **Fixed** loops at two rates on `trbdf2` all ticked at the fastest rate
+  (a 2 kHz PI updated 400 times instead of 40 next to a 20 kHz monitor,
+  V_out 12.091 V instead of 13.033 V). The kernel takes
+  `observer_periods` / `observers` lists (`run_transient_trbdf2`) and
+  reports `stats['control_tick_counts']`.
+* **BREAKING** `controller_period` is honoured on `pwl`: an observer with
+  `controller_period=1e-4` over 2 ms is called 20 times (was every step,
+  2001). Migration: drop `controller_period` to keep an every-step
+  observer.
+* **BREAKING** `pwl` closed loops tick on an integer-k schedule through
+  `.tick`, not their elapsed-time throttle: 200 and 20 ticks over 10 ms at
+  `dt = 1e-6` (was 198 and 20), tick 0 at `t_start` with the initial
+  state. Closed-loop waveforms on `pwl` move accordingly. A period that is
+  not a multiple of `dt` runs with a warning (each tick at the first grid
+  point at or after its instant; `result.control_tick_jitter_max`);
+  a period shorter than `dt` raises `ValueError`.
+* **BREAKING** `controller_period` without a `step_observer` raises
+  `ValueError` (was ignored). On `trbdf2` every controller needs its own
+  period: a period-less `step_observer` next to a `ClosedLoop` used to
+  ride the loop's rate and now routes `auto` to `pwl` (or refuses
+  without `dt`).
+* **Added** `result.control_tick_counts` (per source, registration order)
+  and `result.control_tick_jitter_max` on `pwl` and `trbdf2`.
+
+### Engine conformance: one capability table, one typed refusal
+
+* **Added** `pulsim.UnsupportedError` (a `ValueError`; C++
+  `pulsim::UnsupportedError`, a `std::invalid_argument`) with `engine`,
+  `feature`, `device` (branch name) and `kind`. Every device-kind and
+  feature refusal of `simulate()`, the DSED dispatch, `run_transient`,
+  `run_transient_trbdf2`, `run_transient_bdf1` and the kernel AC sweep
+  raises it; `except ValueError` keeps catching it. Catch it by name, not
+  with `except Exception`.
+* **Added** `pulsim.engine_capabilities()`: the kernel's table, one row
+  per device kind with its solve class and a boolean per engine (`pwl`,
+  `trbdf2`, `dsed`, `bdf1`, `ac_sweep`). `DevicePool.has_nonlinear_devices()`
+  is now derived from it (alias of the new `requires_newton()`), beside
+  `requires_static_refresh()`.
+* **Fixed (BREAKING)** silent wrong answers that now refuse:
+  - a junction capacitor (`add_nonlinear_capacitor`) on `engine='dsed'`
+    and `run_transient_bdf1` was simulated as absent: 10 V, 1 kΩ, 100 nF
+    plus `Cn` (1 µF, 1 V, 0.5) read `v(100 µs)` = 6.3186 V / 6.3002 V
+    (the value without `Cn`) where `pwl` gives 1.0216 V. Use `pwl` or
+    `trbdf2`;
+  - `simulate(engine='pwl', enable_nonlinear_refresh=False)` on a circuit
+    with a smooth / Shockley diode, MOSFET or IGBT simulated them as open
+    circuits (10.000 V on a Shockley clamp that reads 0.5937 V). Drop the
+    keyword (`None` lets the kernel decide);
+  - C blocks on `engine='dsed'` were a warning followed by an open-loop
+    run. Use `pwl`.
+  - coupled inductors on `run_transient_bdf1` ran uncoupled (9.38 V off
+    on an 18 V span);
+  - a PWL diode with `V_f > V_th` on `engine='dsed'` stayed ON through
+    reverse bias (a sine clamp read 0.70 V for the whole negative
+    half-cycle, 10.37 V off). Pass `V_th = V_f + 1e-3`;
+  - the fixed-step guards `inductor_freeze_di_max`, `inductor_abs_clamp`
+    and `enable_substep_state_correction` were silently ignored on
+    `engine='dsed'`.
+* **Changed (BREAKING, numbers)** the raw `_pulsim.run_transient`,
+  `run_transient_trbdf2` and `run_transient_with_chain` default
+  `enable_nonlinear_refresh` to `None`: the kernel stamps Newton devices
+  itself (the Shockley clamp above: 10.000 V → 0.5937 V). A C++ caller of
+  `run_transient` / `run_transient_trbdf2` that passes no refresh gets the
+  same.
+* **Fixed** `NativeMultiMaskPwm` on `engine='trbdf2'` was an opaque
+  callable sampled every `h/4`: a 1 µs window in a 1 ms period gave 0 of
+  40 gate events. One switch-function adapter now serves the three
+  engine bindings, so its edges are landed exactly (40 of 40).
+  `NativePwm2Switch` runs are unchanged (1104 steps, 2254 solves).
+* **Changed** refusals that raised `NotImplementedError` in the DSED
+  extractor (e.g. coupled inductors) raise an `UnsupportedError` that is
+  also a `NotImplementedError`.
+
+### `engine='dsed'`: `integrator='auto'` takes the exact stepper; BDF2 starts L-stable
+
+* **Fixed (BREAKING, numbers)** with the default `integrator='auto'` the
+  DSED auto scheduler sent every mode its stiffness detector flagged to
+  fixed-step BDF2 (`h = 1 µs`) without asking whether the mode had a
+  closed-form propagator, and BDF2 started each segment with a
+  Crank–Nicolson step, which is not L-stable. On a 100 V source, 10 Ω and
+  a 1 nF capacitor across a 1 mΩ switch (100 kHz, τ = 10 ns while open):
+
+  | `integrator` | `v(sw)` range | max error, open interval |
+  |---|---|---|
+  | `'auto'` before | −99.98 … 196.08 V | 96.07 V |
+  | `'auto'` now | 0.000 … 100.000 V | 1.0e-6 V |
+  | `'bdf2'` before | −99.98 … 166.67 V | 66.66 V |
+  | `'bdf2'` now | 0.000 … 102.77 V | 9.09 V (first sample after each opening) |
+
+  `'auto'` now advances any mode with an exact stepper exactly (capped at
+  `dt`); only modes without one go to the detector. The BDF2 start is a
+  backward-Euler step, so a segment opens at `100·(h/τ)/(1 + h/τ)`
+  (90.91 V at a 0.1 µs step) instead of overshooting. The result reports
+  `n_exact_steps` beside `n_rk45_steps` and `n_bdf2_steps`. Runs with PWL
+  diodes already used the RK45 scheduler and are unchanged.
+
+### `add_nonlinear_diode` is retired
+
+* **Changed (BREAKING)** `CircuitBuilder.add_nonlinear_diode` raises
+  `pulsim.RetiredDeviceError` (a `ValueError`). Its smooth-blend law
+  `logistic(κ(v − V_F0))·(v − V_F0)/R_d` is negative for
+  `0 < v < V_F0`: at the default `IdealDiodeParams` it pushes −1.39 A out
+  of a forward-biased anode at +0.636 V, a 20 V / 1 kHz clamp aborts on
+  `engine='pwl'` at `dt = 1 µs`, and on `trbdf2` it reads RMS 9.634 V
+  where the PWL and Shockley diodes give 10.01 V. Use
+  `add_diode(..., V_f=)` (PWL diode with a forward drop) or
+  `add_shockley_diode` (smooth junction). `allow_non_passive=True`
+  still builds the unchanged legacy device (hostile-circuit fixtures).
+* **Changed (BREAKING)** YAML `type: nonlinear_diode` is refused unless
+  the device sets `allow_non_passive: true`.
+* **Changed (BREAKING)** the SPICE importer maps an LTspice
+  `D(Ron Roff Vfwd)` diode to `add_diode(g_on = area/Ron,
+  g_off = area/Roff, V_th = 0, V_f = Vfwd)` instead of the retired
+  device: `Ron=0.05 Roff=1Meg Vfwd=0.7` at 10 A reads 1.2 V and 12.0 W,
+  and the device is a PWL branch (`kind == "diode"`).
+
+### Kernel AC sweep answers only for the circuit it models
+
+* **Fixed** `run_mna_sweep(freqs=, v_in_branch_id=)` (kernel path) took
+  its mass matrix from a private stamper that knew capacitors and
+  inductors only, so a coupled transformer's mutual inductance was
+  missing: `|H|` of a k = 0.99 transformer between 10 Ω source and load
+  read 0 / 0 / 0 at 100 Hz / 1 kHz / 10 kHz instead of 0.0617 / 0.3885 /
+  0.4949. The sweep now takes `(G, C)` from the transient assembler and
+  uses `E = C/2`, so it integrates exactly the elements the transient
+  does. R, L, C, VCVS and ideal-transformer sweeps are unchanged to
+  rounding.
+* **Changed (BREAKING)** `run_mna_sweep` takes `mask=`
+  (`SwitchStateMask`). A circuit with switches or PWL diodes and no
+  `mask` now raises `ValueError` naming them; it used to be swept with
+  every switch open (an RC through a closed switch read 0 / 0 / 0).
+* **Changed (BREAKING)** a circuit with a Newton device (smooth,
+  Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor,
+  junction capacitor, PMSM) is refused by the kernel sweep with
+  `ValueError` naming the branch and its kind; it used to be dropped (a
+  Shockley diode at 1 A read `|H| = 1`, exact 0.0252). Use `run_ac_sweep`, `pulsim.fra.run_fra`,
+  `frequency_response`, or `run_mna_sweep(use_kernel=False, dt=, t_end=)`.
+* **Fixed** a kernel error inside `run_mna_sweep` is no longer swallowed
+  by a broad `except` and turned into an impulse-FFT run; the FFT path
+  runs only when asked for (`use_kernel=False`, or no `freqs` /
+  `v_in_branch_id`).
+
 ### Controlled sources and waveform current sources
 
 * **Added** `add_vccs(name, in_pos, in_neg, n_pos, n_neg, gm)`,
@@ -200,7 +354,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged until the fixed engine shoots on the true state (Phase 2).
 * **Added** `_NativeCircuitBuilderAdapter.node_pair_voltage` and the
   sine source `frequency` in `CircuitBuilder.components()`.
-
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

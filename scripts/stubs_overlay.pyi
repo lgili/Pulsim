@@ -40,6 +40,14 @@ class SimulationResult:
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
     ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
     empty when the loop ran fully native."""
+    control_tick_counts: list[int]
+    """Controller ticks per tick source, in registration order (closed
+    loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
+    :func:`pulsim.simulate` on ``pwl`` and ``trbdf2``."""
+    control_tick_jitter_max: float
+    """Largest lateness of a controller tick [s]: below ``dt`` on
+    ``pwl`` (0 when every period is a multiple of ``dt``), 0 on
+    ``trbdf2``."""
     @typing.overload
     def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload

@@ -1,38 +1,32 @@
 ## ADDED Requirements
 
-### Requirement: Smooth Diode Law Is Passive and Monotone
+### Requirement: Retired Smooth-Blend Diode Requires an Explicit Opt-In
 
-The smooth diode (`models::IdealDiode`, `add_nonlinear_diode`) SHALL
-conduct `i(v) = [sp(κ·(v − V_F0)) − sp(−κ·V_F0)]/(κ·R_d) + G_off·v`,
-with `sp(x) = ln(1 + eˣ)` and `v = v_anode − v_cathode`. For every
-finite `v` and every parameter set with `R_d > 0`, `κ > 0` and
-`G_off ≥ 0`, the law SHALL satisfy `i(0) = 0`, `i·v ≥ 0` and
-`di/dv = logistic(κ·(v − V_F0))/R_d + G_off > 0`. Its value and Jacobian
-SHALL stay finite for `κ·|v − V_F0|` up to at least 1000. The reverse
-current SHALL be bounded below by
-`−sp(−κ·V_F0)/(κ·R_d) + G_off·v`.
+The smooth-blend diode (`models::IdealDiode`) SHALL NOT be built from
+Python or YAML without an explicit opt-in, because its law
+`logistic(κ·(v − V_F0))·(v − V_F0)/R_d` is negative for
+`0 < v < V_F0`. `CircuitBuilder.add_nonlinear_diode` SHALL raise
+`pulsim.RetiredDeviceError`, a subclass of `ValueError`, unless called
+with `allow_non_passive=True`; nothing SHALL be stamped on refusal. The
+message SHALL name the device, the measured −1.39 A at +0.636 V and the
+replacements `add_diode(..., V_f=)` and `add_shockley_diode`. A YAML
+device of `type: nonlinear_diode` SHALL be refused unless it sets
+`allow_non_passive: true`. With the opt-in, the law SHALL be unchanged.
 
-#### Scenario: Below the knee the diode absorbs power
-- **GIVEN** the default parameters (`V_F0 = 0.7 V`, `R_d = 10 mΩ`,
-  `κ = 20 /V`, `G_off = 1 nS`)
-- **WHEN** 0.636 V is forced across the diode
-- **THEN** the current is +1.2266 A within 1e-3 A (it was −1.392 A)
+#### Scenario: The builder refuses the device
+- **WHEN** `add_nonlinear_diode("Dx", "a", "gnd", IdealDiodeParams())`
+  is called without the opt-in
+- **THEN** `RetiredDeviceError` is raised, its message contains `Dx`,
+  `-1.39 A`, `+0.636 V`, `add_diode`, `add_shockley_diode` and
+  `allow_non_passive=True`, and the builder has no branch
 
-#### Scenario: Monotone and passive over the whole range
-- **WHEN** the law is evaluated on 550 001 equally spaced points in
-  [−50 V, +5 V] with the default parameters
-- **THEN** the current is strictly increasing, `i·v ≥ 0` everywhere and
-  `i(0)` is exactly 0
+#### Scenario: The opt-in keeps the legacy law
+- **GIVEN** the device built with `allow_non_passive=True` and default
+  parameters
+- **WHEN** 0.636 V is forced across it on `engine='pwl'`
+- **THEN** the diode current is −1.3923 A within 1e-3 A
 
-#### Scenario: Forward asymptote is unchanged
-- **WHEN** 1.0 V is forced across the diode with the default parameters
-- **THEN** the current is 30.012 A within 1e-3 A, against 30.000 A for
-  the line `(v − V_F0)/R_d`
-
-#### Scenario: A sine clamp runs on the fixed engine
-- **GIVEN** a 20 V, 1 kHz sine source, 10 Ω in series and the diode to
-  ground
-- **WHEN** 2 ms are simulated on `engine='pwl'` at `dt = 1 µs` and on
-  `engine='trbdf2'`
-- **THEN** both runs complete and the time-weighted RMS of the diode
-  voltage is 10.010 V within 0.02 V
+#### Scenario: YAML refuses without the key
+- **WHEN** a YAML circuit declares `type: nonlinear_diode` without
+  `allow_non_passive: true`
+- **THEN** loading fails with a message naming the device and the key

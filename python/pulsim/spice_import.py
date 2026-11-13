@@ -641,9 +641,11 @@ def _spice_diode(b, el: SpiceElement, nodes: List[str], notes: List[str],
         Ron = float(p.get("RON", 1.0))
         Roff = float(p.get("ROFF", 1.0 / 1e-12))
         Vfwd = float(p.get("VFWD", 0.0))
-        import pulsim as _v2
-        b.add_nonlinear_diode(d, nodes[0], nodes[1],
-                              _v2.IdealDiodeParams(V_F0=Vfwd, R_d=Ron / area, G_off=area / Roff))
+        # LTspice's model is an ideal switch with a series drop: on at
+        # v >= Vfwd, off at zero current, v = Vfwd + Ron*i while on. That
+        # is the PWL SwitchedDiode with V_f, not a smooth Newton diode.
+        b.add_diode(d, nodes[0], nodes[1], area / Ron, area / Roff,
+                    V_th=0.0, V_f=Vfwd)
         return
 
     unknown = sorted(k for k in p if k not in _DIODE_KNOWN)

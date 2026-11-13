@@ -17,10 +17,58 @@ pulsim.guide`). How to check a result is in its
 [section 6](ai-guide.md#6-how-to-verify-a-result). Newton failures and
 their messages are covered in [Gotchas](gotchas.md).
 
+## Engine capability matrix
+
+Which engine simulates which device kind. This table is the kernel's
+(`pulsim.engine_capabilities()`); `test_engine_conformance.py` checks
+that it equals this page and that every "yes" agrees with `engine='pwl'`
+within 1 % of the observable's span and every "no" raises
+`pulsim.UnsupportedError` naming the engine and the branch. `ac_sweep` is
+the kernel AC sweep (`run_mna_sweep` with `freqs=`), which refuses every
+Newton device. `NonlinearDiode` is retired: `add_nonlinear_diode` refuses
+unless called with `allow_non_passive=True`.
+
+<!-- engine-capabilities:begin -->
+| Kind | Class | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
+|---|---|---|---|---|---|---|
+| Resistor | Linear | yes | yes | yes | yes | yes |
+| VoltageSource | Source | yes | yes | yes | yes | yes |
+| Switch | Switch | yes | yes | yes | yes | yes |
+| Capacitor | Linear | yes | yes | yes | yes | yes |
+| Inductor | Linear | yes | yes | yes | yes | yes |
+| Diode | PwlDiode | yes | yes | yes | no | yes |
+| NonlinearDiode | NewtonStatic | yes | yes | no | no | no |
+| CurrentSource | Source | yes | yes | yes | yes | yes |
+| PWMVoltageSource | Source | yes | yes | yes | yes | yes |
+| SineVoltageSource | Source | yes | yes | yes | yes | yes |
+| PulseVoltageSource | Source | yes | yes | yes | yes | yes |
+| MosfetLevel1 | NewtonStatic | yes | yes | no | no | no |
+| IgbtLevel1 | NewtonStatic | yes | yes | no | no | no |
+| VCVS | Linear | yes | yes | yes | yes | yes |
+| SaturableInductor | NewtonStateful | yes | yes | no | no | no |
+| NonlinearCapacitor | NewtonStateful | yes | yes | no | no | no |
+| ShockleyDiode | NewtonStatic | yes | yes | no | no | no |
+| LauritzenDiode | NewtonStateful | yes | yes | no | no | no |
+| PmsmMna | NewtonStateful | yes | yes | no | no | no |
+| IdealTransformer | Linear | yes | yes | yes | yes | yes |
+<!-- engine-capabilities:end -->
+
+Circuit-level limits, also raised as `UnsupportedError` (with `feature`
+set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
+`dsed` and `bdf1`; builder initial conditions on `dsed`; PWL diodes with
+`integrator='bdf2'`, or with `V_f > V_th` (use `V_th = V_f + 1e-3`), on
+`dsed`; C blocks, controllers
+(`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
+`live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
+guards and `enable_substep_state_correction` on `dsed`; the fixed-step
+keywords on `trbdf2`; `enable_nonlinear_refresh=False` with a smooth /
+Shockley diode, MOSFET or IGBT on every transient engine.
+
 ## Engines
 
 | Limitation | Measured | Workaround |
 |---|---|---|
+| **Fixed-step controller ticks land on the `dt` grid.** Source j ticks at `t_start + k*T_j` on both engines; `trbdf2` lands each instant, `pwl` delivers it at the first grid point at or after it. | `T = 2.5*dt` over 100 µs at `dt` = 1 µs: 40 ticks, each late by less than `dt` (`result.control_tick_jitter_max`), with a warning; `T < dt` raises. | `dt = T/n`, or omit `dt` (`trbdf2`). |
 | **The fixed engine is first order from an inconsistent start.** At `t = 0` the companion history sets each inductor's `v_prev` and each capacitor's `i_prev` to zero. Guide trap 9; pinned by `test_first_step_order.py`. | RL decay, R = 1 Ω, L = 1 mH, `i0` = 5 A. Relative error at 5 τ is 1.997e-3, 9.99e-4 and 5.00e-4 at `dt` = 4, 2 and 1 µs, so order 1.00. Sample 0 of `v(a)` reads 0 V; the consistent value is -5 V. | Discard the start-up, then halve `dt` and compare. |
 | **TR-BDF2 stalls at `h_min` after a hard switching edge when a Newton device is present.** Pinned by `test_saturable_transformer.py::test_engines_agree_below_saturation`. | Snubbed 48 V flyback with a saturable transformer. `engine='trbdf2'` and `'auto'` abort at t = 4 µs with `||dx|| = 8.787e-08`. `engine='pwl', dt=1e-8` gives V_out = 15.31 V. | Use `engine='pwl'` with a `dt`. Do not loosen `tol_newton_dx` / `tol_newton_res` ([Gotchas](gotchas.md)). |
 | **Diode-mask chatter on the fixed engine.** With PWL diodes and a Newton device in the same circuit, the diode mask is re-decided at every Newton iteration and no mask is self-consistent at a small step. Pinned by `test_newton_stall_and_mask_chatter.py`. | PSFB with a saturable primary and a floating secondary. At `dt` = 20, 10, 5 and 2 ns it aborts near t = 1.5 µs, even split into 64 sub-steps. At 50 ns it runs. V_out = `v(vout) - v(rect_neg)`, averaged over 1.5-2 ms, is 6.771 V. With a linear primary it is 6.765 V at 50 ns and 6.938 V at 10 ns (6.937 V at 5 ns). So 50 ns reads 2.4 % low. | Run at 50 ns and accept about 2.5 % low; check it against the linear-primary circuit at 10 ns. `add_shockley_diode` runs at 10 ns but changes the model: each junction drops about 0.7 V and a PWL diode drops none (trap 1). V_out falls to 5.785 V (-16.6 %). Use it only if you want that drop. |
@@ -33,6 +81,18 @@ their messages are covered in [Gotchas](gotchas.md).
 | **DSED refuses a three-phase VSI with a floating star neutral.** The message blames floating capacitors and nonlinear devices, although the circuit has no capacitor, and it points to `notes/DSED_BRIDGE_DESIGN.md`, an internal design note. | SPWM VSI with an R-L star load, `engine='dsed'`: `NotImplementedError`. | Run it on `engine='pwl'` with a `dt` (guide 3.7). |
 | `simulate(engine='dsed')` with no `switch_fn` warns that it will poll "this plain Python switch_fn". | RC plus diode, no `switch_fn`: the run is correct but prints that warning. | Ignore it. |
 | `start_from_dc_op=True` works only on the fixed engine. | Without `dt` it raises `ValueError: ... start_from_dc_op is a fixed-step entry point`. | Pass `dt`. |
+
+## AC analysis
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, sources, and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `UnsupportedError` (a `ValueError`) naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
+
+## Devices
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`add_nonlinear_diode` is retired.** Its law `logistic(κ(v − V_F0))·(v − V_F0)/R_d` sources power for `0 < v < V_F0`. It now raises `RetiredDeviceError` unless called with `allow_non_passive=True` (YAML: `allow_non_passive: true`). | Default parameters, 0.636 V forced: −1.3923 A. 20 V / 1 kHz sine clamp through 10 Ω: `pwl` at `dt = 1 µs` aborts; `trbdf2` RMS 9.634 V against 10.01 V for the PWL and Shockley diodes. | `add_diode(..., V_f=)` or `add_shockley_diode`. |
 
 ## Switching helpers
 

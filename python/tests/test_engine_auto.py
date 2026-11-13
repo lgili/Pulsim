@@ -491,7 +491,7 @@ def test_newton_kwargs_reach_the_variable_engine():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "in", "gnd", 5.0)
     b.add_resistor("R", "in", "n1", 1e3)
-    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("C", "n1", "gnd", 1e-6)
     res = p.simulate(b, t_end=1e-3, engine="auto",
                       max_newton_iterations=80,
@@ -534,7 +534,7 @@ def test_real_diode_rectifier_matches_the_fixed_reference():
         b.add_sine_voltage_source("Vac", "ac", "gnd",
                                    0.0, 10.0, 50.0, 0.0)
         b.add_nonlinear_diode("D", "ac", "out",
-                               _k.IdealDiodeParams())
+                               _k.IdealDiodeParams(), allow_non_passive=True)
         b.add_capacitor("Co", "out", "gnd", 100e-6)
         b.add_resistor("Rl", "out", "gnd", 100.0)
         return b
@@ -558,7 +558,7 @@ def test_real_diode_and_mosfet_buck_matches_the_reference():
                                       R_on=1e-3, R_off=1e9,
                                       V_F=0.7)
         b.add_nonlinear_diode("DFW", "gnd", "sw",
-                               _k.IdealDiodeParams())
+                               _k.IdealDiodeParams(), allow_non_passive=True)
         b.add_inductor("L", "sw", "out", 22e-6)
         b.add_capacitor("C", "out", "gnd", 100e-6)
         b.add_resistor("R", "out", "gnd", 1.0)
@@ -606,7 +606,7 @@ def test_newton_failure_shrinks_the_step_instead_of_aborting():
     b.add_voltage_source("Vin", "in", "gnd", 48.0)
     b.add_switch("Q1", "in", "sw", 1e3, 1e-9)
     b.add_inductor("L", "sw", "m", 1e-3)
-    b.add_nonlinear_diode("D", "m", "out", _k.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "m", "out", _k.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("Co", "out", "gnd", 10e-6)
     b.add_resistor("Ro", "out", "gnd", 20.0)
     b.add_resistor("Rsn", "sw", "sn", 100.0)

@@ -60,7 +60,7 @@ x = p.compute_dc_op(b, report=report)     # strategy="auto" by default
 print(report[0].summary())                # which rung answered
 ```
 
-**`compute_dc_op` stamps nonlinear devices.** Before v2.0 it did not: a diode fed from 5 V through 1 kΩ was reported at 5.000 V instead of 0.700 V, because `dc_assemble` treats `BranchKind::Nonlinear` as an open circuit and nothing put it back. If you want the linear system, ask for it with `enable_nonlinear_refresh=False`.
+**`compute_dc_op` stamps nonlinear devices.** Before v2.0 it did not: a diode fed from 5 V through 1 kΩ was reported at 5.000 V instead of 0.700 V, because `dc_assemble` treats `BranchKind::Nonlinear` as an open circuit and nothing put it back. If you want the linear system, ask for it with `enable_nonlinear_refresh=False`. That opt-out is for the DC operating point only: on a transient (`simulate`, `run_transient`, `run_transient_trbdf2`) it would simulate the devices as open circuits, so it raises `pulsim.UnsupportedError`.
 
 #### (c2) gmin, and what it will not do for you
 

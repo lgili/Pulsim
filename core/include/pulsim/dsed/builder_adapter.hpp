@@ -39,6 +39,7 @@
 #include "pulsim/dsed/exact_lti.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
@@ -118,7 +119,11 @@ public:
           cache_{cache},
           b_extra_fn_{std::move(b_extra_fn)},
           has_dynamic_sources_{detect_dynamic_sources_()},
-          sine_only_sources_{detect_sine_only_()} {}
+          sine_only_sources_{detect_sine_only_()} {
+        // The LTI extraction drops Newton devices; refuse them here so
+        // every caller (not only simulate()) gets the typed refusal.
+        require_supported(graph, pool, pwl::Engine::Dsed);
+    }
 
     // ----- HasLTIPerMode contract --------------------------------
 

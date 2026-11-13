@@ -130,7 +130,7 @@ Available blocks: `PIController`, `PIDController`, `Comparator`,
 
 | Pre-1.0 | 1.0 |
 |---|---|
-| `Simulator.run_ac_sweep(...)` | `p.run_ac_sweep(b, freqs=..., excite_fn=..., output_idx=...)` (swept-sine) or `p.run_mna_sweep(b, ...)` (linearised, faster) |
+| `Simulator.run_ac_sweep(...)` | `p.run_ac_sweep(b, freqs=..., excite_fn=..., output_idx=...)` (swept-sine) or `p.run_mna_sweep(b, ...)` (linear circuits and switches at a fixed `mask=`; refuses Newton devices) |
 | `Simulator.run_fra(...)` | `p.run_fra(...)` — swept-sine FRA (closed-loop and nonlinear-friendly) |
 | `Simulator.run_periodic_steady_state(...)` | not yet on 1.0 — file an issue if you need it |
 | `pulsim.sweep.run(...)` (Monte-Carlo / LHS / Cartesian) | `p.sweep(builder_factory, ...)` and `p.monte_carlo(...)` |

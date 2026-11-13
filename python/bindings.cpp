@@ -62,6 +62,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
@@ -78,11 +79,46 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 #include "pulsim/yaml/loader.hpp"
+#include "switch_fn_adapter.hpp"
 
 namespace py = pybind11;
 using namespace pybind11::literals;  // for "name"_a kwarg shorthand
 
 namespace pulsim_kernel_bindings {
+
+/// The static Newton chain for a transient driver. `None` lets the kernel
+/// decide (it builds the standard chain when the pool needs one); `True`
+/// forces it; `False` on a circuit with static Newton devices is refused,
+/// because it means "simulate them as open circuits".
+inline pulsim::pwl::NonlinearRefreshFn transient_refresh(
+    const pulsim::topology::Graph& graph,
+    const pulsim::pwl::DevicePool& pool, std::optional<bool> enable,
+    const char* engine) {
+    using pulsim::pwl::SolveClass;
+    if (!enable.has_value()) return {};
+    if (*enable) {
+        // The chain stamps only static Newton devices; on a circuit with
+        // none it would only reroute a linear solve through Newton.
+        return pool.requires_static_refresh()
+                   ? pulsim::pwl::make_combined_diode_mosfet_refresh()
+                   : pulsim::pwl::NonlinearRefreshFn{};
+    }
+    for (pulsim::Index b = 0; b < graph.num_branches(); ++b) {
+        if (!pool.is_registered(b)
+            || pulsim::pwl::kind_caps(pool.kind_of(b)).cls
+                   != SolveClass::NewtonStatic) {
+            continue;
+        }
+        const std::string name(graph.branch_name(b));
+        throw pulsim::UnsupportedError(engine, "enable_nonlinear_refresh",
+            name, std::string(pulsim::pwl::stored_kind_name(pool.kind_of(b))),
+            std::string(engine) + ": enable_nonlinear_refresh=False would "
+            "simulate '" + name + "' (a Newton device: smooth / Shockley "
+            "diode, MOSFET, IGBT) as an open circuit. Pass None (the "
+            "default) or True.");
+    }
+    return {};
+}
 
 void init_module(py::module_& m) {
     m.doc() = "Pulsim kernel — PWL state-space cache, "
@@ -129,6 +165,65 @@ void init_module(py::module_& m) {
                 PyErr_SetObject(aborted_exc.ptr(), inst.ptr());
             }
         });
+
+    // The typed refusal (add-engine-conformance-matrix). A ValueError,
+    // so `except ValueError` keeps working; the four fields say which
+    // engine refused which device or feature.
+    static py::object unsupported_exc = py::exception<void>(
+        m, "UnsupportedError", PyExc_ValueError);
+    for (const char* a : {"engine", "feature", "device", "kind"}) {
+        unsupported_exc.attr(a) = "";
+    }
+    py::register_exception_translator(
+        [](std::exception_ptr pe) {
+            if (!pe) {
+                return;
+            }
+            try {
+                std::rethrow_exception(pe);
+            } catch (const UnsupportedError& e) {
+                py::object inst = unsupported_exc(e.what());
+                inst.attr("engine") = e.engine();
+                inst.attr("feature") = e.feature();
+                inst.attr("device") = e.device();
+                inst.attr("kind") = e.kind();
+                PyErr_SetObject(unsupported_exc.ptr(), inst.ptr());
+            }
+        });
+
+    m.def("engine_capabilities",
+        []() {
+            py::dict out;
+            for (const auto& row : pwl::kKindCaps) {
+                py::dict d;
+                d["class"] = std::string(pwl::kSolveClassNames[
+                    static_cast<std::size_t>(row.cls)]);
+                for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
+                    d[py::str(std::string(pwl::kEngineNames[e]))] =
+                        row.supports(static_cast<pwl::Engine>(e));
+                }
+                out[py::str(std::string(row.name))] = d;
+            }
+            return out;
+        },
+        "The kernel's device-kind capability table: {kind: {'class': "
+        "solve class, 'pwl'|'trbdf2'|'dsed'|'bdf1'|'ac_sweep': bool}}. "
+        "An engine marked False refuses the kind with UnsupportedError.");
+    m.def("_require_supported",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool,
+           const std::string& engine) {
+            for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
+                if (pwl::kEngineNames[e] == engine) {
+                    require_supported(graph, pool,
+                                      static_cast<pwl::Engine>(e));
+                    return;
+                }
+            }
+            throw std::invalid_argument("unknown engine '" + engine + "'");
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("engine"),
+        "Raise UnsupportedError for the first branch `engine` cannot "
+        "simulate (the capability table's column).");
 
     // ---- SwitchStateMask -------------------------------------------------
     py::class_<topology::SwitchStateMask>(m, "SwitchStateMask",
@@ -1427,12 +1522,17 @@ void init_module(py::module_& m) {
         "CircuitBuilder; access via builder.pool.")
         .def("has_nonlinear_devices",
               &pwl::DevicePool::has_nonlinear_devices,
-              "Return True if any registered branch is a "
-              "smooth-blend IdealDiode, SH1 MOSFET, Level 1 "
-              "IGBT, or saturable inductor (i.e. requires "
-              "Newton iteration). Used by the Python "
-              "`simulate()` wrapper to auto-enable the "
-              "nonlinear-refresh pass.")
+              "Alias of requires_newton(): True if any branch "
+              "needs a Newton solve (the capability table's "
+              "NewtonStatic / NewtonStateful kinds, see "
+              "pulsim.engine_capabilities()).")
+        .def("requires_newton",
+              &pwl::DevicePool::requires_newton,
+              "True if any branch needs a Newton solve.")
+        .def("requires_static_refresh",
+              &pwl::DevicePool::requires_static_refresh,
+              "True if any branch needs the static Newton chain "
+              "(smooth / Shockley diode, MOSFET, IGBT).")
         .def("branch_var_id_for_inductor",
               &pwl::DevicePool::branch_var_id_for_inductor,
               py::arg("branch_id"), py::arg("graph"),
@@ -2732,61 +2832,18 @@ void init_module(py::module_& m) {
            py::object switch_fn_obj,         // Bridge.13: was SwitchScheduleFn
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
-           bool enable_nonlinear_refresh,
+           std::optional<bool> enable_nonlinear_refresh,
            StepObserverFn step_observer,
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring,
            py::object resume_from_obj) {
-            // Bridge.13 — detect native PWM switch_fn (NativePwm2Switch
-            // / NativeMultiMaskPwm) and build a std::function lambda
-            // that calls the C++ method directly, no Python __call__.
-            // For generic Python callables, fall back to pybind11's
-            // auto-conversion path.
-            SwitchScheduleFn switch_fn;
-            {
-                sources::NativePwm2Switch* native_pwm2 = nullptr;
-                sources::NativeMultiMaskPwm* native_multi = nullptr;
-                if (py::isinstance<sources::SwitchSchedule>(
-                        switch_fn_obj)) {
-                    // Built-in PWM helper: copy the C++ schedule, no
-                    // Python round-trip per step.
-                    switch_fn = switch_fn_obj.cast<
-                        sources::SwitchSchedule>();
-                }
-                try {
-                    native_pwm2 = switch_fn_obj.cast<
-                        sources::NativePwm2Switch*>();
-                } catch (const py::cast_error&) {}
-                if (!native_pwm2) {
-                    try {
-                        native_multi = switch_fn_obj.cast<
-                            sources::NativeMultiMaskPwm*>();
-                    } catch (const py::cast_error&) {}
-                }
-                if (native_pwm2) {
-                    // Capture py::object to keep the C++ instance alive
-                    // for the lambda's lifetime (pybind11 ref-count).
-                    auto keepalive = switch_fn_obj;
-                    switch_fn = [native_pwm2, keepalive](Real t) {
-                        return (*native_pwm2)(t);
-                    };
-                } else if (native_multi) {
-                    auto keepalive = switch_fn_obj;
-                    switch_fn = [native_multi, keepalive](Real t) {
-                        return (*native_multi)(t);
-                    };
-                } else if (!switch_fn) {
-                    // Generic Python callable — pybind11 wraps as
-                    // std::function via its automatic converter.
-                    switch_fn = switch_fn_obj.cast<SwitchScheduleFn>();
-                }
-            }
-            pwl::NonlinearRefreshFn nl_refresh{};
-            if (enable_nonlinear_refresh) {
-                nl_refresh =
-                    pwl::make_combined_diode_mosfet_refresh();
-            }
+            // Bridge.13: native schedules run their mask in C++ (no
+            // Python __call__); the detection is shared by every engine.
+            const SwitchScheduleFn switch_fn =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj).fn;
+            const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
+                graph, pool, enable_nonlinear_refresh, "pwl");
             // Convert optional initial_state to a Vector pointer.
             Vector x_init;
             const Vector* x_init_ptr = nullptr;
@@ -2855,7 +2912,7 @@ void init_module(py::module_& m) {
         py::arg("opts"), py::arg("switch_fn"),
         py::arg("b_extra_fn") = BExtraFn{},
         py::arg("start_from_dc_op") = false,
-        py::arg("enable_nonlinear_refresh") = false,
+        py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("step_observer") = StepObserverFn{},
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
@@ -2868,12 +2925,11 @@ void init_module(py::module_& m) {
         "of every step BEFORE switch_fn/b_extra_fn evaluate "
         "— use it to update Python-side controller state "
         "(PI, comparator, etc.) so the next switch_fn call "
-        "reads the new duty. Set "
-        "`enable_nonlinear_refresh=True` for circuits "
-        "with smooth-blend IdealDiode / SH1 MOSFET "
-        "branches (constructs the refresh inside the "
-        "binding to avoid Python-roundtrip aliasing of "
-        "sparse-matrix references).");
+        "reads the new duty. `enable_nonlinear_refresh`: "
+        "None (default) lets the kernel stamp the Newton "
+        "devices (smooth / Shockley diode, MOSFET, IGBT) "
+        "when the circuit has any; True forces the chain; "
+        "False with such devices raises UnsupportedError.");
 
     // ---- DC operating-point strategies (Phase A.2) -----------------------
     //
@@ -4121,11 +4177,13 @@ void init_module(py::module_& m) {
            solver::ShouldContinueFn should_continue,
            Real observer_period,
            py::object observer_obj,
-           bool enable_nonlinear_refresh,
+           std::optional<bool> enable_nonlinear_refresh,
            Size max_newton_iterations,
            Real tol_newton_dx, Real tol_newton_res,
            bool enable_newton_line_search, bool enable_newton_lm,
-           py::object resume_from) {
+           py::object resume_from,
+           std::vector<Real> observer_periods,
+           std::vector<py::object> observers) {
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -4137,6 +4195,12 @@ void init_module(py::module_& m) {
                 o.max_event_iterations = max_event_iterations;
             }
             o.observer_period = observer_period;
+            if (observers.size() != observer_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient_trbdf2: observers and "
+                    "observer_periods must have the same length");
+            }
+            o.observer_periods = std::move(observer_periods);
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
@@ -4148,51 +4212,21 @@ void init_module(py::module_& m) {
             }
             o.enable_newton_line_search = enable_newton_line_search;
             o.enable_newton_lm = enable_newton_lm;
-            pwl::NonlinearRefreshFn nl_refresh{};
-            if (enable_nonlinear_refresh) {
-                nl_refresh =
-                    pwl::make_combined_diode_mosfet_refresh();
-            }
+            const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
+                graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
             if (!initial_state.is_none()) {
                 x0 = initial_state.cast<Vector>();
             }
-            // Bridge.13 pattern: a native PWM schedule runs the
-            // mask function in pure C++ AND hands the stepper its
-            // analytic next_edge_after — edge landing then costs
-            // zero Python round-trips and no bisection.
-            solver::SwitchScheduleFn switch_fn;
-            std::function<Real(Real)> next_edge_fn;
-            {
-                sources::NativePwm2Switch* native = nullptr;
-                try {
-                    native = switch_fn_obj.cast<
-                        sources::NativePwm2Switch*>();
-                } catch (const py::cast_error&) {}
-                if (py::isinstance<sources::SwitchSchedule>(
-                        switch_fn_obj)) {
-                    // Built-in PWM helper: C++ mask function and,
-                    // when it has one, its analytic edge oracle.
-                    const auto sched = switch_fn_obj.cast<
-                        sources::SwitchSchedule>();
-                    switch_fn = sched;
-                    if (sched.has_edges()) {
-                        next_edge_fn = [sched](Real t) {
-                            return sched.next_edge_after(t);
-                        };
-                    }
-                } else if (native) {
-                    switch_fn = [native](Real t) {
-                        return (*native)(t);
-                    };
-                    next_edge_fn = [native](Real t) {
-                        return native->next_edge_after(t);
-                    };
-                } else {
-                    switch_fn = switch_fn_obj.cast<
-                        solver::SwitchScheduleFn>();
-                }
-            }
+            // Bridge.13 pattern: a native schedule runs the mask
+            // function in pure C++ AND hands the stepper its analytic
+            // next_edge_after — edge landing then costs zero Python
+            // round-trips and no bisection.
+            auto adapted =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            const solver::SwitchScheduleFn switch_fn = std::move(adapted.fn);
+            const std::function<Real(Real)> next_edge_fn =
+                std::move(adapted.next_edge);
             std::function<void(Real, const Vector&)> observer_fn;
             if (!observer_obj.is_none()) {
                 // Re-acquires the GIL per call through pybind's
@@ -4200,6 +4234,17 @@ void init_module(py::module_& m) {
                 // callback the released-GIL engines invoke.
                 observer_fn = observer_obj.cast<
                     std::function<void(Real, const Vector&)>>();
+            }
+            std::vector<std::function<void(Real, const Vector&)>> obs_fns;
+            for (const auto& ob : observers) {
+                obs_fns.push_back(ob.cast<
+                    std::function<void(Real, const Vector&)>>());
+            }
+            std::function<void(Size, Real, const Vector&)> tick_fn;
+            if (!obs_fns.empty()) {
+                tick_fn = [&obs_fns](Size j, Real t, const Vector& x) {
+                    obs_fns[j](t, x);
+                };
             }
             solver::TrBdf2Stats st;
             SimulationResult res;
@@ -4223,7 +4268,7 @@ void init_module(py::module_& m) {
                 res = solver::run_transient_trbdf2(
                     cache, graph, pool, o, switch_fn, b_extra_fn,
                     x0, &st, next_edge_fn, should_continue,
-                    observer_fn, nl_refresh, resume_ptr);
+                    observer_fn, nl_refresh, resume_ptr, tick_fn);
             }
             py::dict d;
             d["n_accept"]       = st.n_accept;
@@ -4234,6 +4279,7 @@ void init_module(py::module_& m) {
             d["n_chatter_breaks"] = st.n_chatter_breaks;
             d["n_forced_accepts"] = st.n_forced_accepts;
             d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
+            d["control_tick_counts"] = st.ctrl_tick_counts;
             d["n_newton_retries"] = st.n_newton_retries;
             d["gate_pulse_min"]   = st.gate_pulse_min;
             d["n_gate_undersampled"] = st.n_gate_undersampled;
@@ -4254,17 +4300,22 @@ void init_module(py::module_& m) {
         py::arg("should_continue") = solver::ShouldContinueFn{},
         py::arg("observer_period") = Real{0},
         py::arg("step_observer") = py::none(),
-        py::arg("enable_nonlinear_refresh") = false,
+        py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("max_newton_iterations") = Size{0},
         py::arg("tol_newton_dx") = Real{0},
         py::arg("tol_newton_res") = Real{0},
         py::arg("enable_newton_line_search") = false,
         py::arg("enable_newton_lm") = false,
         py::arg("resume_from") = py::none(),
+        py::arg("observer_periods") = std::vector<Real>{},
+        py::arg("observers") = std::vector<py::object>{},
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
-        "Illinois. Returns (SimulationResult, stats dict).");
+        "Illinois. Returns (SimulationResult, stats dict). "
+        "`observers[j]` ticks at t_start + k*observer_periods[j] "
+        "(ceil(span/T_j) times, index order when coincident); "
+        "stats['control_tick_counts'] counts each.");
 
     m.def("run_transient_with_chain",
         [](const pwl::PwlStateSpaceCache& cache,
@@ -4276,16 +4327,13 @@ void init_module(py::module_& m) {
            Real chain_dt,
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
-           bool enable_nonlinear_refresh,
+           std::optional<bool> enable_nonlinear_refresh,
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring,
            py::object resume_from) {
-            pwl::NonlinearRefreshFn nl_refresh{};
-            if (enable_nonlinear_refresh) {
-                nl_refresh =
-                    pwl::make_combined_diode_mosfet_refresh();
-            }
+            const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
+                graph, pool, enable_nonlinear_refresh, "pwl");
             // Build a step_observer that calls the chain DIRECTLY in
             // C++ — no Python roundtrip per step.
             auto step_observer = chain.make_step_observer(chain_dt);
@@ -4345,7 +4393,7 @@ void init_module(py::module_& m) {
         py::arg("chain"), py::arg("chain_dt"),
         py::arg("b_extra_fn") = BExtraFn{},
         py::arg("start_from_dc_op") = false,
-        py::arg("enable_nonlinear_refresh") = false,
+        py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},

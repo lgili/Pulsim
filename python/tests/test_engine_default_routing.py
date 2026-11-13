@@ -93,7 +93,7 @@ def test_nonlinear_devices_are_served_not_routed_away():
     fixed engine."""
     from pulsim import _pulsim as _k
     b = _rc()
-    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams(), allow_non_passive=True)
     res = p.simulate(b, t_end=1e-3)          # no dt
     assert res.engine_used == "trbdf2"
 
@@ -130,7 +130,7 @@ def test_no_device_kind_blocks_the_router():
     b = _rc()
     b.add_saturable_inductor("Lsat", "n1", "gnd", L_0=1e-3,
                               I_sat=2.0, L_residual=1e-4)
-    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams(), allow_non_passive=True)
     b.add_lauritzen_diode("Dl", "n1", "gnd", tau=1e-7, T_M=1e-8)
     b.add_igbt_level1("Q", "in", "e", "g", 1.5, 0.05, 5.0,
                       tau_tail=1e-6, k_tail=0.3)

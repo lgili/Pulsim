@@ -31,7 +31,7 @@ p.CircuitBuilder()
   .add_multi_winding_transformer(...)   # N windings, no ceiling
   .add_saturable_transformer_n(...)     # N secondaries on one gapped core
   .add_diode(...)
-  .add_nonlinear_diode(...)
+  .add_shockley_diode(...)
   .add_switch(...)
   .add_mosfet(...)
   .add_mosfet_with_body_diode(...)
@@ -78,7 +78,7 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `switch_fn` | `Callable[[float], SwitchStateMask]` | all closed | Switch driver. |
 | `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step constant residual extras. |
 | `start_from_dc_op` | `bool` | `False` | Seed initial state from DC OP. |
-| `enable_nonlinear_refresh` | `bool` or `None` | auto-detect | Force-enable Newton refresh. `None` = auto via `pool.has_nonlinear_devices()`. |
+| `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
 
@@ -173,7 +173,7 @@ add no AC excitation. `trbdf2` lands on table knots and pulse corners.
 |---|---|
 | `add_switch` | `(name, n_pos, n_neg, g_on, g_off)` |
 | `add_diode` | `(name, anode, cathode, g_on, g_off, V_th=0, V_f=0)` — binary switched diode; `V_f` is the forward drop while ON (PSIM's diode voltage drop: `v = V_f + i/g_on`), `V_th` the turn-on threshold (effectively `max(V_th, V_f)`), not a drop |
-| `add_nonlinear_diode` | `(name, anode, cathode, params: IdealDiodeParams)` |
+| `add_nonlinear_diode` | **retired** — raises `RetiredDeviceError`: its law sources power for `0 < v < V_F0` (−1.39 A out of the anode at +0.636 V). Use `add_diode(..., V_f=)` or `add_shockley_diode`. `allow_non_passive=True` builds the legacy device (test fixtures only); YAML `type: nonlinear_diode` needs `allow_non_passive: true` |
 
 ### Nonlinear actives
 
@@ -191,7 +191,8 @@ Opaque parameter store. Most methods are not exposed to Python — you go throug
 
 | Method | Returns | Use case |
 |---|---|---|
-| `has_nonlinear_devices()` | `bool` | Auto-detect by `simulate()`. |
+| `has_nonlinear_devices()` | `bool` | Alias of `requires_newton()`: any kind the capability table (`pulsim.engine_capabilities()`) marks NewtonStatic / NewtonStateful. |
+| `requires_static_refresh()` | `bool` | Any smooth / Shockley diode, MOSFET or IGBT (the kernel then builds the static Newton chain). |
 
 ## Source-helper factories
 
@@ -546,7 +547,7 @@ sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
 
 `.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`
 with RS as a series resistor (BV mapped to the kernel's knee at IBV),
-LTspice `D(Ron Roff Vfwd)` → `add_nonlinear_diode`, LEVEL-1 `NMOS`
+LTspice `D(Ron Roff Vfwd)` → `add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0, V_f = Vfwd)`, LEVEL-1 `NMOS`
 → `add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)`
 with RD/RS series resistors and an explicit body diode when the card
 gives IS/JS, LTspice `VDMOS` → the same with K = KP/2, Rds, and the

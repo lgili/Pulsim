@@ -1,0 +1,903 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7e33312e..f8a6ecfd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+ ## [Unreleased]
+ 
++### Smooth diode made passive; SPICE PWL diodes import as `add_diode(V_f=)`
++
++* **Fixed (BREAKING, numbers)** `add_nonlinear_diode` (`IdealDiode`)
++  sourced power: its law `logistic·(v − V_F0)/R_d` was negative for every
++  `0 < v < V_F0` (−1.392 A at 0.636 V at the defaults), so Newton saw a
++  negative conductance. A 20 V / 1 kHz half-wave clamp (10 Ω) aborted on
++  `engine='pwl'` at `dt = 1 µs` and read RMS 9.634 V on `trbdf2`. The law
++  is now `[sp(κ(v − V_F0)) − sp(−κ·V_F0)]/(κ·R_d) + G_off·v` (softplus):
++  `i(0) = 0`, `di/dv > 0`, same forward asymptote, same parameters. At the
++  defaults the current at 0.636 V goes from −1.392 A to +1.227 A, at
++  `V_F0` from 0 A to 3.466 A, at 1.0 V from 29.93 A to 30.01 A; the clamp
++  reads 10.010 V on both engines. The reverse current has a floor of
++  `sp(−κ·V_F0)/(κ·R_d)` (4.2 µA at the defaults).
++* **Changed (BREAKING, import)** `spice_to_builder` maps an LTspice
++  `Ron/Roff/Vfwd` diode to `add_diode(g_on=area/Ron, g_off=area/Roff,
++  V_th=0, V_f=Vfwd)` instead of the smooth diode: kind `StoredKind.Diode`
++  (was `NonlinearDiode`), a sharp knee at `Vfwd`, no Newton iteration,
++  visible to `res.i` and `device_loss_summary`. The `Vrev`/`Rrev`
++  refusals are unchanged.
++
+ ### PWL diode forward drop (PSIM `V_f`)
+ 
+ * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the
+diff --git a/KNOWN_LIMITATIONS.md b/KNOWN_LIMITATIONS.md
+index cd3dca55..bd49ea02 100644
+--- a/KNOWN_LIMITATIONS.md
++++ b/KNOWN_LIMITATIONS.md
+@@ -132,6 +132,13 @@ The intentional gaps for v1.3:
+ * `.param` expressions — only numeric assignments; algebraic forms
+   (`{R*2}`) raise.
+ * Behavioural sources (`B`, `E` with expressions) — not parsed.
++* LTspice `D(Ron Roff Vfwd)` diodes import as the PWL
++  `add_diode(g_on=area/Ron, g_off=area/Roff, V_th=0, V_f=Vfwd)` (since
++  the smooth-diode passivity fix; before, they became the smooth
++  `add_nonlinear_diode`). Reverse breakdown (`Vrev`, `Rrev`) is refused.
++  The smooth diode itself is a soft knee (rounded outward by up to
++  `ln 2/kappa`) with a reverse floor `sp(-kappa*V_F0)/(kappa*R_d)`,
++  `sp(x) = ln(1 + e^x)`: 4.2 uA at the defaults.
+ 
+ For complex netlists, the YAML loader (`pulsim.load_yaml_file`) or
+ hand-built `CircuitBuilder` is the recommended path.
+diff --git a/core/CMakeLists.txt b/core/CMakeLists.txt
+index c56eb07d..bcc1f583 100644
+--- a/core/CMakeLists.txt
++++ b/core/CMakeLists.txt
+@@ -71,6 +71,7 @@ if(PULSIM_BUILD_TESTS)
+         tests/layer0/test_main.cpp
+         tests/layer0/test_numeric_types.cpp
+         tests/layer0/test_logistic.cpp     # v2.0 Phase 2 — overflow-free sigmoid
++        tests/layer0/test_softplus.cpp     # fix-nonlinear-diode-passivity — overflow-free softplus
+         tests/layer0/test_sparse_matrix.cpp
+         tests/layer0/test_sparse_solver.cpp
+         tests/layer0/test_pulsim_lu_solver.cpp
+diff --git a/core/include/pulsim/builder/circuit_builder.hpp b/core/include/pulsim/builder/circuit_builder.hpp
+index 46cd7d33..3771ad58 100644
+--- a/core/include/pulsim/builder/circuit_builder.hpp
++++ b/core/include/pulsim/builder/circuit_builder.hpp
+@@ -1102,9 +1102,9 @@ public:
+         return *this;
+     }
+ 
+-    /// Add a smooth-blend `IdealDiode` (Layer 4 V3's
+-    /// AD-driven nonlinear model). The branch uses
+-    /// `BranchKind::Nonlinear`.
++    /// Add a smooth soft-knee `IdealDiode` (AD-driven Newton model):
++    /// i = [sp(kappa(v - V_F0)) - sp(-kappa V_F0)]/(kappa R_d) + G_off v,
++    /// passive and monotone. The branch uses `BranchKind::Nonlinear`.
+     CircuitBuilder& add_nonlinear_diode(
+         std::string_view name, std::string_view anode,
+         std::string_view cathode,
+@@ -1115,6 +1115,12 @@ public:
+                 "zero/negative slope resistance divides by zero in the diode "
+                 "current law and yields NaN.", name, params.R_d));
+         }
++        if (!(params.kappa > Real{0}) || !std::isfinite(params.kappa)) {
++            throw std::invalid_argument(std::format(
++                "add_nonlinear_diode(\"{}\"): kappa must be finite and > 0 "
++                "(got {}); the softplus law divides by kappa.",
++                name, params.kappa));
++        }
+         const Index a_idx = resolve_node_(anode);
+         const Index k_idx = resolve_node_(cathode);
+         const Index b_id = add_branch_(
+diff --git a/core/include/pulsim/models/ideal_diode.hpp b/core/include/pulsim/models/ideal_diode.hpp
+index a638b7b8..9201abcf 100644
+--- a/core/include/pulsim/models/ideal_diode.hpp
++++ b/core/include/pulsim/models/ideal_diode.hpp
+@@ -6,24 +6,27 @@
+ //
+ // `pulsim-v2-device-models-ad-driven` Phase 5.
+ //
+-// Smooth-blend Norton-shifted ideal diode. The nonlinear "AD killer
+-// test" — if AD works here, it works for every device in Pulsim's
+-// catalogue.
++// Smooth soft-knee diode. The nonlinear "AD killer test" — if AD
++// works here, it works for every device in Pulsim's catalogue.
+ //
+-// Model:
++// Model (fix-nonlinear-diode-passivity):
+ //
+ //   v_diode = v[0] - v[1]                          (anode - cathode)
+-//   alpha   = 1 / (1 + exp(-kappa · (v_diode - V_F0)))
+-//                                                  (sigmoid on/off)
+-//   i_on    = alpha · (v_diode - V_F0) / R_d       (Norton-shifted)
+-//   i_off   = (1 - alpha) · v_diode · G_off        (reverse leakage)
+-//   current = i_on + i_off
++//   sp(x)   = ln(1 + e^x)                          (numeric/softplus.hpp)
++//   current = [sp(kappa·(v_diode - V_F0)) - sp(-kappa·V_F0)] / (kappa·R_d)
++//             + G_off · v_diode
++//   di/dv   = logistic(kappa·(v_diode - V_F0)) / R_d + G_off  > 0
+ //
+-// Reverse-biased (v_diode ≪ V_F0): alpha ≈ 0 → current ≈ v_diode·G_off
+-//   (small leakage, typically pA range)
+-// Forward-biased (v_diode ≫ V_F0): alpha ≈ 1 → current ≈ (v_diode -
+-//   V_F0)/R_d (linear past V_F0, with slope 1/R_d)
+-// Threshold (v_diode ≈ V_F0): alpha ≈ 0.5, smooth blend
++// Passive and monotone for every finite v: i(0) = 0 exactly and
++// i·v >= 0. The earlier law, logistic·(v - V_F0)/R_d, was negative
++// for every 0 < v < V_F0 (-1.392 A at 0.636 V at the defaults): it
++// sourced power and gave Newton a region of negative conductance.
++//
++// Forward (v_diode ≫ V_F0): current → (v_diode - V_F0)/R_d, the same
++//   asymptote as before; the knee is rounded outward by ≤ ln2/kappa.
++// Reverse (v_diode ≪ 0): current → -sp(-kappa·V_F0)/(kappa·R_d)
++//   + G_off·v_diode. The constant floor is 4.16 µA at the defaults
++//   and grows as kappa·V_F0 shrinks (ln2/(kappa·R_d) at V_F0 = 0).
+ //
+ // `kappa` controls the sigmoid sharpness. Typical: 20-50/V. Too
+ // sharp → Newton struggles at the transition; too soft → off-state
+@@ -40,7 +43,7 @@
+ 
+ #include "pulsim/ad/ad_scalar.hpp"
+ #include "pulsim/numeric/concepts.hpp"
+-#include "pulsim/numeric/logistic.hpp"
++#include "pulsim/numeric/softplus.hpp"
+ #include "pulsim/numeric/types.hpp"
+ #include "pulsim/topology/graph.hpp"
+ 
+@@ -62,22 +65,17 @@ struct IdealDiode {
+     static constexpr bool is_linear = false;
+ 
+     /// Current from terminal 0 (anode) to terminal 1 (cathode).
+-    /// Templated on any FloatingPoint type; ADL handles `exp` via
+-    /// `using std::exp` so `S = Real` and `S = ADRealN<N>` both
+-    /// dispatch correctly.
++    /// Instantiated for `Real` and `ADRealN<N>`; `numeric::softplus`
++    /// has an overload for each.
+     template <numeric::FloatingPoint S>
+     [[nodiscard]] static S current(const S* v, const Params& p) noexcept {
+-        using std::exp;
+         const S v_diode = v[0] - v[1];
+-        const S delta = v_diode - p.V_F0;
+-        // Overflow-free logistic: written as 1/(1+exp(-k*d)) this
+-        // produces a NaN Jacobian entry once k*|d| passes 709, which
+-        // an ordinary mains rectifier reaches in its first
+-        // half-cycle. See numeric/logistic.hpp.
+-        const S alpha = numeric::logistic(S{p.kappa * delta});
+-        const S i_on  = alpha * delta * (S{1} / p.R_d);
+-        const S i_off = (S{1} - alpha) * v_diode * p.G_off;
+-        return i_on + i_off;
++        // softplus keeps exp in (0, 1], so neither the value nor the AD
++        // Jacobian overflows at any reverse bias (numeric/softplus.hpp).
++        const S knee = numeric::softplus(S{p.kappa * (v_diode - p.V_F0)});
++        const Real knee_at_zero = numeric::softplus(Real{-p.kappa * p.V_F0});
++        return (knee - S{knee_at_zero}) * (S{1} / (p.kappa * p.R_d))
++             + v_diode * p.G_off;
+     }
+ };
+ 
+diff --git a/core/tests/builder/test_circuit_builder.cpp b/core/tests/builder/test_circuit_builder.cpp
+index 0e3fa0f9..109020b5 100644
+--- a/core/tests/builder/test_circuit_builder.cpp
++++ b/core/tests/builder/test_circuit_builder.cpp
+@@ -5,6 +5,8 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/catch_approx.hpp>
+ 
++#include "../support/smooth_diode_reference.hpp"
++
+ #include "pulsim/builder/circuit_builder.hpp"
+ #include "pulsim/pwl/cache.hpp"
+ #include "pulsim/pwl/device_pool.hpp"
+@@ -408,9 +410,10 @@ TEST_CASE("Nonlinear diode builder: DC load-line",
+ 
+     // v_n0 should be V_dc = 2.0.
+     REQUIRE(x[0] == Approx(2.0).margin(1e-4));
+-    // Load-line: v_n1 ≈ V_dc - V_F0 = 1.3 V.
+-    REQUIRE(x[1] > 1.0);
+-    REQUIRE(x[1] < 1.5);
++    // Load-line of the softplus law: v_n1 = 2 - 0.30078 = 1.69922 V
++    // (1.7 mA is on the soft knee's exponential tail).
++    REQUIRE(x[1] == Approx(2.0 - test_support::SmoothDiode{}.load_line_vd(2.0, 1000.0))
++                        .margin(1e-6));
+ }
+ 
+ // -----------------------------------------------------------------------------
+diff --git a/core/tests/layer2/test_ideal_diode.cpp b/core/tests/layer2/test_ideal_diode.cpp
+index 75d109c7..298981a1 100644
+--- a/core/tests/layer2/test_ideal_diode.cpp
++++ b/core/tests/layer2/test_ideal_diode.cpp
+@@ -13,7 +13,12 @@
+ #include "pulsim/models/device_model.hpp"
+ #include "pulsim/models/ideal_diode.hpp"
+ 
++#include "pulsim/numeric/logistic.hpp"
++
++#include <algorithm>
+ #include <cmath>
++#include <limits>
++#include <utility>
+ 
+ using namespace pulsim;
+ using namespace pulsim::models;
+@@ -45,13 +50,15 @@ Real fd_partial(const IdealDiode::Params& p,
+ 
+ }  // namespace
+ 
+-TEST_CASE("IdealDiode: reverse-biased current is essentially zero",
++TEST_CASE("IdealDiode: reverse current sits on the softplus floor",
+           "[v2][layer2][diode]") {
+     auto p = standard_diode();
+     ModelInputs<IdealDiode> v = {Real{0}, Real{5}};   // v_diode = -5
+     const Real i = evaluate_current<IdealDiode>(v, p);
+-    // Off-state leakage only — should be small and negative.
+-    REQUIRE(std::abs(i) < Real{1e-7});
++    // Floor -sp(-kappa*V_F0)/(kappa*R_d) = -ln(1+e^-14)/0.2 = -4.158e-6 A,
++    // plus G_off*v = -5e-9 A. Negative (passive) and bounded.
++    const Real floor = -std::log1p(std::exp(-14.0)) / 0.2;
++    REQUIRE(i == Approx(floor - 5e-9).epsilon(1e-9));
+ }
+ 
+ TEST_CASE("IdealDiode: forward-biased current scales linearly past V_F0",
+@@ -66,15 +73,72 @@ TEST_CASE("IdealDiode: forward-biased current scales linearly past V_F0",
+     REQUIRE(i == Approx(Real{30}).epsilon(0.01));
+ }
+ 
+-TEST_CASE("IdealDiode: at V_F0 current is half-way (alpha ≈ 0.5)",
++TEST_CASE("IdealDiode: at V_F0 the current is ln2/(kappa*R_d)",
+           "[v2][layer2][diode]") {
+     auto p = standard_diode();
+     ModelInputs<IdealDiode> v = {Real{0.7}, Real{0}};
+     const Real i = evaluate_current<IdealDiode>(v, p);
+-    // At v_diode = V_F0: alpha = 0.5 → i_on = 0 (numerator is zero);
+-    //   i_off = 0.5 · 0.7 · G_off ≈ tiny.
+-    // So total i ≈ 0.5 · G_off · V_F0 ≈ 3.5e-10.
+-    REQUIRE(std::abs(i) < Real{1e-8});
++    // [sp(0) - sp(-14)]/0.2 + 0.7e-9 = (ln 2 - 8.3e-7)/0.2 = 3.46573 A.
++    // The old line-times-logistic law gave 0 here and was negative below.
++    REQUIRE(i == Approx(3.46573).epsilon(1e-5));
++}
++
++// fix-nonlinear-diode-passivity 1.1: the old law reached -1.392 A at
++// 0.636 V (power out of a forward-biased junction).
++TEST_CASE("IdealDiode: law is strictly increasing and passive on [-50, 5] V",
++          "[v2][layer2][diode][passivity]") {
++    auto p = standard_diode();
++    constexpr int n = 550001;
++    Real prev = -std::numeric_limits<Real>::infinity();
++    for (int k = 0; k < n; ++k) {
++        const Real vd = Real{-50} + Real{55} * Real(k) / Real(n - 1);
++        ModelInputs<IdealDiode> v = {vd, Real{0}};
++        const Real i = evaluate_current<IdealDiode>(v, p);
++        if (!(i > prev) || !(i * vd >= Real{0})) {
++            INFO("v = " << vd << "  i = " << i << "  prev = " << prev);
++            REQUIRE(false);
++        }
++        prev = i;
++    }
++    ModelInputs<IdealDiode> zero = {Real{0}, Real{0}};
++    REQUIRE(evaluate_current<IdealDiode>(zero, p) == Real{0});
++}
++
++// fix-nonlinear-diode-passivity 1.2: values from the closed form
++// i = [sp(k(v-V_F0)) - sp(-k V_F0)]/(k R_d) + G_off v.
++TEST_CASE("IdealDiode: value table at the default parameters",
++          "[v2][layer2][diode][passivity]") {
++    auto p = standard_diode();
++    const std::pair<Real, Real> table[] = {
++        {0.5, 0.090746}, {0.636, 1.22662}, {0.7, 3.46573},
++        {0.75, 6.5663}, {1.0, 30.0124}, {-10.0, -4.16764e-6}};
++    for (const auto& [vd, want] : table) {
++        ModelInputs<IdealDiode> v = {vd, Real{0}};
++        INFO("v = " << vd);
++        REQUIRE(evaluate_current<IdealDiode>(v, p) == Approx(want).epsilon(1e-5));
++    }
++}
++
++// fix-nonlinear-diode-passivity 1.3.
++TEST_CASE("IdealDiode: AD Jacobian is logistic/R_d + G_off and stays finite",
++          "[v2][layer2][diode][passivity][ad]") {
++    auto p = standard_diode();
++    for (const Real vd : {-40.0, 0.0, 0.7, 40.0}) {
++        ModelInputs<IdealDiode> v = {vd, Real{0}};
++        const auto [i, J] = evaluate_current_and_jacobian<IdealDiode>(v, p);
++        const Real want = numeric::logistic(p.kappa * (vd - p.V_F0)) / p.R_d + p.G_off;
++        INFO("v = " << vd << "  J0 = " << J[0] << "  want = " << want);
++        REQUIRE(std::abs(J[0] - want) <= 1e-12 * std::max(Real{1}, std::abs(want)));
++        REQUIRE(J[1] == -J[0]);
++    }
++    // kappa*|v - V_F0| = 1000 on both sides.
++    for (const Real vd : {p.V_F0 - 50.0, p.V_F0 + 50.0}) {
++        ModelInputs<IdealDiode> v = {vd, Real{0}};
++        const auto [i, J] = evaluate_current_and_jacobian<IdealDiode>(v, p);
++        REQUIRE(std::isfinite(i));
++        REQUIRE(std::isfinite(J[0]));
++        REQUIRE(std::isfinite(J[1]));
++    }
+ }
+ 
+ TEST_CASE("IdealDiode: AD partials match central-difference (sub-threshold)",
+diff --git a/core/tests/layer4/test_gmin.cpp b/core/tests/layer4/test_gmin.cpp
+index 6d21d26c..2aba9c12 100644
+--- a/core/tests/layer4/test_gmin.cpp
++++ b/core/tests/layer4/test_gmin.cpp
+@@ -13,6 +13,8 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/catch_approx.hpp>
+ 
++#include "../support/smooth_diode_reference.hpp"
++
+ #include "pulsim/builder/circuit_builder.hpp"
+ #include "pulsim/pwl/dc_assemble.hpp"
+ #include "pulsim/pwl/dc_operating_point.hpp"
+@@ -355,7 +357,7 @@ TEST_CASE("The DC operating point honours nonlinear devices",
+           "[v2][layer4][gmin][dc_op]") {
+     // The regression that motivated `dc_operating_point.hpp`: the raw
+     // linear solve treats a diode as an open circuit and answers
+-    // 5.000 V where the truth is ~0.70 V, with no warning.
++    // 5.000 V where the truth is 0.351 V, with no warning.
+     builder::CircuitBuilder b;
+     b.add_voltage_source("V", "vin", "gnd", 5.0);
+     b.add_resistor("R", "vin", "na", 1000.0);
+@@ -369,7 +371,10 @@ TEST_CASE("The DC operating point honours nonlinear devices",
+     const auto refresh = make_combined_diode_mosfet_refresh();
+     const auto op = compute_dc_operating_point(
+         b.graph(), b.pool(), m, refresh);
+-    REQUIRE(op.x[1] == Approx(0.70).margin(0.02));
++    // Closed-form softplus load line: 5 V, 1 kOhm -> v_d = 0.35104 V
++    // (4.6 mA is on the soft knee's exponential tail).
++    REQUIRE(op.x[1] == Approx(test_support::SmoothDiode{}.load_line_vd(5.0, 1000.0))
++                           .margin(1e-6));
+     REQUIRE(op.report.strategy == DCStrategy::Naive);
+ }
+ 
+diff --git a/core/tests/layer4_v3/test_diode_load_line.cpp b/core/tests/layer4_v3/test_diode_load_line.cpp
+index 8e7277b2..f5f1000c 100644
+--- a/core/tests/layer4_v3/test_diode_load_line.cpp
++++ b/core/tests/layer4_v3/test_diode_load_line.cpp
+@@ -19,6 +19,8 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/catch_approx.hpp>
+ 
++#include "../support/smooth_diode_reference.hpp"
++
+ #include "pulsim/pwl/cache.hpp"
+ #include "pulsim/pwl/device_pool.hpp"
+ #include "pulsim/pwl/nonlinear_refresh_diode.hpp"
+@@ -77,15 +79,15 @@ TEST_CASE("DC diode load-line converges to expected operating point",
+     // Source enforces v_n0 = V_dc.
+     REQUIRE(v_n0 == Approx(V_dc).margin(1e-6));
+ 
+-    // Diode in firm conduction → v_diode ≈ V_F0 + I·R_d.
+-    // With V_F0=0.7, R_d=0.01, R=1000: solving iteratively,
+-    // I ≈ (V_dc − V_F0) / (R + R_d) = 1.3 / 1000.01 ≈ 1.3 mA.
+-    const Real I_expected = (V_dc - dp.V_F0) / (R + dp.R_d);
+-    REQUIRE(I == Approx(I_expected).epsilon(0.05));
+-
+-    // Sanity: v_diode is in the "linear past V_F0" region.
+-    REQUIRE(v_diode > dp.V_F0);
+-    REQUIRE(v_diode < dp.V_F0 + 0.1);  // not crazy high
++    // Closed-form load line of the softplus law: 1.7 mA sits far below
++    // the knee current 1/(kappa*R_d) = 5 A, on the exponential tail,
++    // so v_diode = 0.30078 V (the pre-passivity law, a logistic times
++    // a line through V_F0, read ~0.70 V and I = 1.3 mA here).
++    const test_support::SmoothDiode ref{};
++    const Real vd_expected = ref.load_line_vd(V_dc, R);
++    REQUIRE(vd_expected == Approx(0.30078).margin(1e-5));
++    REQUIRE(v_diode == Approx(vd_expected).margin(1e-7));
++    REQUIRE(I == Approx((V_dc - vd_expected) / R).epsilon(1e-6));
+ }
+ 
+ TEST_CASE("Reverse-biased diode: source constraint holds + bounded v_n1",
+diff --git a/core/tests/layer5/test_dt_retry.cpp b/core/tests/layer5/test_dt_retry.cpp
+index 0345272d..12391129 100644
+--- a/core/tests/layer5/test_dt_retry.cpp
++++ b/core/tests/layer5/test_dt_retry.cpp
+@@ -60,6 +60,14 @@ solver::SimulationOptions rect_options(Real dt) {
+     o.t_start = 0.0;
+     o.t_end   = 1.7e-2;      // just over one mains half-cycle
+     o.dt      = dt;
++    // An iteration budget is what makes one step fail at dt = 2e-4:
++    // the step ending at t = 5.4 ms needs 7 Newton iterations from the
++    // previous state and 6 or fewer after one halving (measured: 6 ->
++    // one retry with one halving, 5 -> six halvings, 7 -> no retry).
++    // Before the smooth diode was made passive (fix-nonlinear-diode-
++    // passivity) its negative-conductance region failed this step at
++    // any budget; the passive law converges, so the budget stands in.
++    o.max_newton_iterations = 6;
+     return o;
+ }
+ 
+diff --git a/core/tests/layer5_v4/test_continuation_rectifier.cpp b/core/tests/layer5_v4/test_continuation_rectifier.cpp
+index 96e97bf9..9fd41047 100644
+--- a/core/tests/layer5_v4/test_continuation_rectifier.cpp
++++ b/core/tests/layer5_v4/test_continuation_rectifier.cpp
+@@ -24,6 +24,8 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/catch_approx.hpp>
+ 
++#include "../support/smooth_diode_reference.hpp"
++
+ #include "pulsim/pwl/cache.hpp"
+ #include "pulsim/pwl/continuation.hpp"
+ #include "pulsim/pwl/device_pool.hpp"
+@@ -125,10 +127,10 @@ TEST_CASE("continuation through kappa sequence finds DC diode load-line",
+     // v_n0 = 2.0 (source). v_n1 ≈ V_dc - V_F0 (diode drop) since
+     // 1 kΩ load is much larger than R_d.
+     REQUIRE(x[0] == Approx(2.0).margin(1e-3));
+-    // Allow a bit of slop: at κ=20 the sigmoid is sharp enough
+-    // that v_n1 is essentially V_dc - V_F0 = 1.3 V.
+-    REQUIRE(x[1] > 1.0);
+-    REQUIRE(x[1] < 1.5);
++    // The continuation must land on the κ=20 load line of the
++    // softplus law: v_n1 = 2 - 0.30078 = 1.69922 V.
++    REQUIRE(x[1] == Approx(2.0 - test_support::SmoothDiode{}.load_line_vd(2.0, 1000.0))
++                        .margin(1e-5));
+ }
+ 
+ TEST_CASE("continuation_solve rejects empty sequence",
+diff --git a/core/tests/layer5_v4/test_integration_smooth_rectifier.cpp b/core/tests/layer5_v4/test_integration_smooth_rectifier.cpp
+index 3febfc85..174a27b2 100644
+--- a/core/tests/layer5_v4/test_integration_smooth_rectifier.cpp
++++ b/core/tests/layer5_v4/test_integration_smooth_rectifier.cpp
+@@ -20,6 +20,8 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/catch_approx.hpp>
+ 
++#include "../support/smooth_diode_reference.hpp"
++
+ #include "pulsim/pwl/cache.hpp"
+ #include "pulsim/pwl/device_pool.hpp"
+ #include "pulsim/pwl/nonlinear_refresh_diode.hpp"
+@@ -111,10 +113,11 @@ TEST_CASE("DC diode load-line via run_transient",
+ 
+     // Every step should converge to the same DC answer.
+     const Real V_dc = 2.0;
+-    const Real V_F0 = dp.V_F0;
+     const Real R    = 1000.0;
+-    const Real I_ana = (V_dc - V_F0) / (R + dp.R_d);   // ~1.3 mA
+-    (void)V_F0;
++    // Closed-form load line of the softplus law (v_d = 0.30078 V,
++    // I = 1.6992 mA; the pre-passivity law gave ~1.3 mA).
++    const Real I_ana =
++        (V_dc - test_support::SmoothDiode{}.load_line_vd(V_dc, R)) / R;
+ 
+     // Skip the first sample (warm-start from zero takes some
+     // iters to converge); check k >= 1.
+diff --git a/core/tests/layer5_v4/test_vf0_continuation_rectifier.cpp b/core/tests/layer5_v4/test_vf0_continuation_rectifier.cpp
+index e071d972..05288e99 100644
+--- a/core/tests/layer5_v4/test_vf0_continuation_rectifier.cpp
++++ b/core/tests/layer5_v4/test_vf0_continuation_rectifier.cpp
+@@ -36,6 +36,8 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/catch_approx.hpp>
+ 
++#include "../support/smooth_diode_reference.hpp"
++
+ #include "pulsim/pwl/cache.hpp"
+ #include "pulsim/pwl/continuation.hpp"
+ #include "pulsim/pwl/device_pool.hpp"
+@@ -224,8 +226,8 @@ TEST_CASE("V_F0 override sweep matches analytical load-line",
+     cache.build();
+     const auto& seg = cache.lookup(SwitchStateMask(0));
+ 
+-    // For each override V_F0, the converged v_n1 should be
+-    // ~ V_dc − V_F0 (with small ~R_d/R_load correction).
++    // For each override V_F0, the converged v_n1 is the closed-form
++    // load line at that V_F0.
+     for (Real vf0_override : {0.3, 0.5, 0.7}) {
+         auto refresh = make_vf0_override_refresh(vf0_override);
+         Vector x = solve_with_newton_b_extra(
+@@ -234,10 +236,15 @@ TEST_CASE("V_F0 override sweep matches analytical load-line",
+             Vector::Zero(seg.state_size),
+             /*max_iters=*/100);
+         const Real v_n1 = x[1];
+-        const Real expected = 2.0 - vf0_override;
++        // Closed-form load line at the overridden V_F0: 1.99253,
++        // 1.88839 and 1.69922 V (a lower V_F0 also raises the reverse
++        // floor sp(-k V_F0)/(k R_d), so v_d is far below V_F0 here).
++        test_support::SmoothDiode ref{};
++        ref.V_F0 = vf0_override;
++        const Real expected = 2.0 - ref.load_line_vd(2.0, 1000.0);
+         INFO("V_F0=" << vf0_override
+              << "  v_n1=" << v_n1
+              << "  expected~" << expected);
+-        REQUIRE(v_n1 == Approx(expected).margin(0.05));
++        REQUIRE(v_n1 == Approx(expected).margin(1e-6));
+     }
+ }
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 481056ce..41c863d0 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -419,7 +419,7 @@ capacitor or inductor. Settle with a transient run and use its
+ 
+ `.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`
+ with RS as a series resistor (BV mapped to the kernel's knee at IBV),
+-LTspice `D(Ron Roff Vfwd)` → `add_nonlinear_diode`, LEVEL-1 `NMOS`
++LTspice `D(Ron Roff Vfwd)` → `add_diode(g_on=area/Ron, g_off=area/Roff, V_th=0, V_f=Vfwd)`, LEVEL-1 `NMOS`
+ → `add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)`
+ with RD/RS series resistors and an explicit body diode when the card
+ gives IS/JS, LTspice `VDMOS` → the same with K = KP/2, Rds, and the
+diff --git a/docs/known-limitations.md b/docs/known-limitations.md
+index 2f30ed36..52b8ccae 100644
+--- a/docs/known-limitations.md
++++ b/docs/known-limitations.md
+@@ -17,6 +17,12 @@ pulsim.guide`). How to check a result is in its
+ [section 6](ai-guide.md#6-how-to-verify-a-result). Newton failures and
+ their messages are covered in [Gotchas](gotchas.md).
+ 
++## Devices
++
++| Limitation | Measured | Workaround |
++|---|---|---|
++| **`add_nonlinear_diode` is a soft-knee diode, not a junction.** Its law is `[sp(κ(v − V_F0)) − sp(−κ·V_F0)]/(κ·R_d) + G_off·v` with `sp(x) = ln(1 + eˣ)`: passive and monotone, but the knee is rounded outward by up to `ln 2/κ` and the reverse current has a floor of `sp(−κ·V_F0)/(κ·R_d)`, which grows as `κ·V_F0` shrinks. | Defaults (`V_F0 = 0.7`, `R_d = 10 mΩ`, `κ = 20`): 1 A at 0.625 V and 10 A at 0.793 V (a sharp knee gives 0.710 V and 0.800 V); reverse floor 4.2 µA. With `V_F0 = 0` the floor is `ln 2/(κ·R_d)` = 3.47 A. | For a forward drop use `add_diode(V_f=)`; for an exponential junction use `add_shockley_diode`. |
++
+ ## Engines
+ 
+ | Limitation | Measured | Workaround |
+@@ -55,6 +61,7 @@ their messages are covered in [Gotchas](gotchas.md).
+ 
+ | Limitation | Measured | Workaround |
+ |---|---|---|
++| An LTspice `Ron/Roff/Vfwd` diode imports as the PWL `add_diode(V_th=0, V_f=Vfwd)`. | `Vrev`/`Rrev` (breakdown) are refused. With `Vfwd = 0` the diode has no hysteresis band, so `engine='dsed'` may refuse to settle it (named error). | Use `engine='pwl'` with a `dt`. |
+ | **`spice_to_builder` reads a subset of SPICE.** | `Q` (BJT) and `K` (coupled inductors) raise `NotImplementedError`. A `.param` expression such as `{R*2}` raises `KeyError`. `B` sources raise `ValueError`. `.subckt` is flattened correctly. | Build those parts with `CircuitBuilder` (`add_transformer` for coupled inductors) or a YAML netlist. |
+ 
+ ## Older entries
+diff --git a/python/bindings.cpp b/python/bindings.cpp
+index 8bd675b2..1a951551 100644
+--- a/python/bindings.cpp
++++ b/python/bindings.cpp
+@@ -183,8 +183,11 @@ void init_module(py::module_& m) {
+ 
+     // ---- IdealDiode::Params (smooth-blend nonlinear) ---------------------
+     py::class_<models::IdealDiode::Params>(m, "IdealDiodeParams",
+-        "Parameters for the smooth-blend nonlinear "
+-        "IdealDiode model (Layer 4 V3). Used by "
++        "Parameters for the smooth soft-knee diode "
++        "i = [sp(kappa(v-V_F0)) - sp(-kappa*V_F0)]/(kappa*R_d) "
++        "+ G_off*v, sp(x) = ln(1+e^x): passive, i(0) = 0, "
++        "forward asymptote (v-V_F0)/R_d, reverse floor "
++        "sp(-kappa*V_F0)/(kappa*R_d). Used by "
+         "CircuitBuilder.add_nonlinear_diode.")
+         .def(py::init<>())
+         .def(py::init([](Real V_F0, Real R_d,
+@@ -842,8 +845,10 @@ void init_module(py::module_& m) {
+               py::arg("name"), py::arg("anode"),
+               py::arg("cathode"), py::arg("params"),
+               py::return_value_policy::reference,
+-              "Add a smooth-blend nonlinear diode "
+-              "(V3's IdealDiode, AD-driven).")
++              "Add a smooth soft-knee Newton diode (IdealDiode; "
++              "see IdealDiodeParams for the law). For a forward "
++              "drop prefer add_diode(V_f=); for a junction, "
++              "add_shockley_diode.")
+         .def("add_switch",
+               &builder::CircuitBuilder::add_switch,
+               py::arg("name"), py::arg("n_pos"),
+diff --git a/python/pulsim/AI_GUIDE.md b/python/pulsim/AI_GUIDE.md
+index 27014dbd..8a01b48e 100644
+--- a/python/pulsim/AI_GUIDE.md
++++ b/python/pulsim/AI_GUIDE.md
+@@ -71,6 +71,8 @@ add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: s
+   switches follow `switch_fn(t) -> SwitchStateMask`; diodes commutate
+   on their own. Smooth devices (`add_shockley_diode`, `add_mosfet_level1`,
+   saturable magnetics) are nonlinear and are solved with Newton.
++  `add_nonlinear_diode` is a soft knee. SPICE `Ron/Roff/Vfwd` diodes
++  import as `add_diode(V_f=Vfwd)`.
+ - **Engines** (`p.simulate(..., engine=...)`):
+ 
+ | engine | step | use it for |
+diff --git a/python/pulsim/discovery.py b/python/pulsim/discovery.py
+index 998d4d35..4a6dfb4c 100644
+--- a/python/pulsim/discovery.py
++++ b/python/pulsim/discovery.py
+@@ -95,9 +95,10 @@ _CATEGORIES: dict[str, list[_Entry]] = {
+                "event detection finds zero-crossings within sub-step "
+                "and re-solves at the exact commutation time."),
+         _Entry("add_nonlinear_diode",
+-               "Smooth-blend IdealDiode (AD-driven, Newton refresh)",
+-               "When you need a smooth I-V (Shockley-like) and don't "
+-               "want event detection — useful inside Newton loops."),
++               "Smooth soft-knee IdealDiode (AD-driven, Newton refresh)",
++               "Passive softplus law, knee rounded by up to ln2/kappa. "
++               "For a forward drop prefer add_diode(V_f=); for a "
++               "junction, add_shockley_diode."),
+     ],
+ 
+     "Active devices (nonlinear, Newton)": [
+diff --git a/python/pulsim/spice_import.py b/python/pulsim/spice_import.py
+index 4c5edf6d..377fa4b4 100644
+--- a/python/pulsim/spice_import.py
++++ b/python/pulsim/spice_import.py
+@@ -641,9 +641,11 @@ def _spice_diode(b, el: SpiceElement, nodes: List[str], notes: List[str],
+         Ron = float(p.get("RON", 1.0))
+         Roff = float(p.get("ROFF", 1.0 / 1e-12))
+         Vfwd = float(p.get("VFWD", 0.0))
+-        import pulsim as _v2
+-        b.add_nonlinear_diode(d, nodes[0], nodes[1],
+-                              _v2.IdealDiodeParams(V_F0=Vfwd, R_d=Ron / area, G_off=area / Roff))
++        # LTspice's model is an ideal switch with a series drop: on at
++        # v >= Vfwd, off at zero current, v = Vfwd + Ron*i while on. That
++        # is the PWL SwitchedDiode with V_f, not a smooth Newton diode.
++        b.add_diode(d, nodes[0], nodes[1], area / Ron, area / Roff,
++                    V_th=0.0, V_f=Vfwd)
+         return
+ 
+     unknown = sorted(k for k in p if k not in _DIODE_KNOWN)
+diff --git a/core/include/pulsim/numeric/softplus.hpp b/core/include/pulsim/numeric/softplus.hpp
+new file mode 100644
+index 00000000..cd2a826e
+--- /dev/null
++++ b/core/include/pulsim/numeric/softplus.hpp
+@@ -0,0 +1,39 @@
++#pragma once
++
++// =============================================================================
++// Pulsim — the softplus ln(1 + e^x), evaluated so it cannot overflow
++// =============================================================================
++//
++// sp(x) = max(x, 0) + log1p(exp(-|x|)), whose derivative is
++// logistic(x). Written the textbook way, ln(1 + exp(x)) overflows to
++// inf once x > 709 and loses every digit of the reverse tail to the
++// `1 +` rounding; this form keeps `exp` in (0, 1].
++//
++// The AD overload sets the derivative directly from `logistic`, so no
++// intermediate `exp` can overflow under forward-mode AD either (see
++// numeric/logistic.hpp for why that matters to Newton).
++
++#include "pulsim/ad/ad_scalar.hpp"
++#include "pulsim/numeric/logistic.hpp"
++#include "pulsim/numeric/types.hpp"
++
++#include <array>
++#include <cmath>
++
++namespace pulsim::numeric {
++
++/// `ln(1 + exp(x))`, finite and accurate for every finite `x`.
++[[nodiscard]] inline Real softplus(Real x) noexcept {
++    return (x > Real{0} ? x : Real{0}) + std::log1p(std::exp(-std::abs(x)));
++}
++
++/// AD overload: value as above, derivative `logistic(x)`.
++template <Size N>
++[[nodiscard]] inline ad::ADRealN<N> softplus(const ad::ADRealN<N>& x) noexcept {
++    const Real s = logistic(x.value());
++    std::array<Real, N> d{};
++    for (Size i = 0; i < N; ++i) d[i] = s * x.deriv(i);
++    return ad::ADRealN<N>{softplus(x.value()), d};
++}
++
++}  // namespace pulsim::numeric
+diff --git a/core/tests/layer0/test_softplus.cpp b/core/tests/layer0/test_softplus.cpp
+new file mode 100644
+index 00000000..777cd6db
+--- /dev/null
++++ b/core/tests/layer0/test_softplus.cpp
+@@ -0,0 +1,52 @@
++// =============================================================================
++// Layer 0 — the overflow-free softplus
++// =============================================================================
++//
++// sp(x) = ln(1 + e^x), derivative logistic(x). The smooth diode law
++// (models/ideal_diode.hpp) is built on it, so it must stay finite and
++// accurate where the textbook form overflows (x > 709) or rounds the
++// reverse tail away (x < -37).
++
++#include <catch2/catch_test_macros.hpp>
++#include <catch2/catch_approx.hpp>
++
++#include "pulsim/ad/ad_scalar.hpp"
++#include "pulsim/numeric/logistic.hpp"
++#include "pulsim/numeric/softplus.hpp"
++
++#include <cmath>
++
++using namespace pulsim;
++using Catch::Approx;
++
++TEST_CASE("softplus matches ln(1 + e^x) where that is representable",
++          "[v2][layer0][softplus]") {
++    for (const Real x : {-30.0, -5.0, -1.0, 0.0, 1.0, 5.0, 30.0}) {
++        INFO("x = " << x);
++        REQUIRE(numeric::softplus(x) ==
++                Approx(std::log1p(std::exp(x))).epsilon(1e-14));
++    }
++    REQUIRE(numeric::softplus(Real{0}) == Approx(std::log(2.0)).epsilon(1e-15));
++}
++
++TEST_CASE("softplus is finite and asymptotically exact at the extremes",
++          "[v2][layer0][softplus]") {
++    REQUIRE(numeric::softplus(Real{1e3}) == Real{1e3});
++    REQUIRE(numeric::softplus(Real{1e300}) == Real{1e300});
++    // Reverse tail: e^x, not 0 (the `1 +` form rounds it away past -37).
++    REQUIRE(numeric::softplus(Real{-50}) == Approx(std::exp(-50.0)).epsilon(1e-12));
++    REQUIRE(numeric::softplus(Real{-1e3}) == Real{0});
++}
++
++TEST_CASE("softplus AD derivative is logistic(x) and never NaN",
++          "[v2][layer0][softplus][ad]") {
++    using AD = ad::ADRealN<1>;
++    for (const Real x : {-1e3, -40.0, -1.0, 0.0, 1.0, 40.0, 1e3}) {
++        const AD s = numeric::softplus(AD{x, {Real{1}}});
++        INFO("x = " << x);
++        REQUIRE(std::isfinite(s.value()));
++        REQUIRE(std::isfinite(s.deriv(0)));
++        REQUIRE(s.value() == numeric::softplus(x));
++        REQUIRE(s.deriv(0) == numeric::logistic(x));
++    }
++}
+diff --git a/core/tests/support/smooth_diode_reference.hpp b/core/tests/support/smooth_diode_reference.hpp
+new file mode 100644
+index 00000000..f094f686
+--- /dev/null
++++ b/core/tests/support/smooth_diode_reference.hpp
+@@ -0,0 +1,44 @@
++#pragma once
++
++// =============================================================================
++// Test support — closed-form reference for the smooth diode
++// =============================================================================
++//
++// fix-nonlinear-diode-passivity: the smooth diode (models::IdealDiode)
++// conducts
++//
++//   i(v) = [sp(k(v - V_F0)) - sp(-k V_F0)] / (k R_d) + G_off v,
++//   sp(x) = ln(1 + e^x).
++//
++// Written out here independently of the model header, so a test that
++// compares a solver against it checks the model too. `load_line_vd`
++// solves V = v_d + R·i(v_d) (source, diode, resistor in series) by
++// bisection; the residual is strictly increasing in v_d.
++
++#include <algorithm>
++#include <cmath>
++
++namespace pulsim::test_support {
++
++struct SmoothDiode {
++    double V_F0 = 0.7, R_d = 0.01, G_off = 1e-9, kappa = 20.0;
++
++    static double sp(double x) {
++        return std::max(x, 0.0) + std::log1p(std::exp(-std::abs(x)));
++    }
++    double current(double v) const {
++        return (sp(kappa * (v - V_F0)) - sp(-kappa * V_F0)) / (kappa * R_d)
++             + G_off * v;
++    }
++    /// Diode voltage of V -- D -- R -- gnd, V > 0.
++    double load_line_vd(double V, double R) const {
++        double lo = 0.0, hi = V;
++        for (int k = 0; k < 200; ++k) {
++            const double mid = 0.5 * (lo + hi);
++            if (mid + R * current(mid) > V) hi = mid; else lo = mid;
++        }
++        return 0.5 * (lo + hi);
++    }
++};
++
++}  // namespace pulsim::test_support
+diff --git a/python/tests/test_nonlinear_diode_passivity.py b/python/tests/test_nonlinear_diode_passivity.py
+new file mode 100644
+index 00000000..d3c86d5f
+--- /dev/null
++++ b/python/tests/test_nonlinear_diode_passivity.py
+@@ -0,0 +1,118 @@
++"""The smooth diode (``add_nonlinear_diode``) is passive and monotone.
++
++Its old law, ``logistic(k(v - V_F0))·(v - V_F0)/R_d``, was negative for
++every ``0 < v < V_F0``: at the defaults it pushed -1.392 A out of a
++forward-biased anode at 0.636 V. A 20 V / 1 kHz half-wave clamp then
++aborted on ``engine='pwl'`` at dt = 1 µs and gave RMS 9.634 V on
++``trbdf2`` (the PWL and Shockley diodes give 10.01 V).
++
++The law is now ``[sp(k(v - V_F0)) - sp(-k V_F0)]/(k R_d) + G_off v``
++(softplus): ``i(0) = 0``, ``di/dv > 0``, same forward asymptote.
++
++The SPICE importer no longer produces this device for LTspice's
++``Ron/Roff/Vfwd`` diode: that model is an ideal switch with a series
++drop, i.e. ``add_diode(g_on, g_off, V_th=0, V_f=Vfwd)``.
++"""
++
++from __future__ import annotations
++
++import warnings
++
++import numpy as np
++import pytest
++
++import pulsim as p
++
++
++def _sim(b, **kw):
++    with warnings.catch_warnings():
++        warnings.simplefilter("ignore")
++        return p.simulate(b, **kw)
++
++
++# ---------------------------------------------------------------------
++# 1.4 forced voltage below the knee
++# ---------------------------------------------------------------------
++
++def _forced(v):
++    b = p.CircuitBuilder()
++    b.add_voltage_source("V", "a", "gnd", v)
++    b.add_nonlinear_diode("D", "a", "gnd", p.IdealDiodeParams())
++    return b
++
++
++def test_forced_voltage_below_the_knee_absorbs_power_on_pwl():
++    r = _sim(_forced(0.636), t_end=1e-5, dt=1e-6, engine="pwl")
++    # res.i of a voltage source is its MNA branch current, which flows
++    # into its + terminal: minus the diode current here.
++    i_diode = -float(np.asarray(r.i("V"))[-1])
++    assert i_diode == pytest.approx(1.22662, abs=1e-3)   # was -1.3923 A
++
++
++def test_forced_voltage_below_the_knee_through_the_dc_operating_point():
++    x = np.asarray(p.compute_dc_op(_forced(0.636)))
++    assert x[0] == pytest.approx(0.636, abs=1e-12)
++    # x = [v(a), i_V]: the source's branch current, minus the diode
++    # current (+1.3923 A before the fix).
++    assert x[-1] == pytest.approx(-1.22662, abs=1e-3)
++
++
++# ---------------------------------------------------------------------
++# 1.5 sine clamp on the fixed and the adaptive engine
++# ---------------------------------------------------------------------
++
++def _clamp():
++    b = p.CircuitBuilder()
++    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 20.0, 1e3)
++    b.add_resistor("Rs", "in", "a", 10.0)
++    b.add_nonlinear_diode("D", "a", "gnd", p.IdealDiodeParams())
++    return b
++
++
++@pytest.mark.parametrize("engine,kw", [("pwl", {"dt": 1e-6}), ("trbdf2", {})])
++def test_sine_clamp_completes_with_the_static_law_rms(engine, kw):
++    r = _sim(_clamp(), t_end=2e-3, engine=engine, **kw)
++    t = np.asarray(r.times)
++    v = np.asarray(r.v("a"))
++    rms = np.sqrt(np.trapezoid(v ** 2, t) / (t[-1] - t[0]))   # adaptive grid: time-weighted
++    assert rms == pytest.approx(10.010, abs=0.02)   # trbdf2 was 9.634 V, pwl aborted
++    assert v.max() == pytest.approx(0.662, abs=0.01)
++
++
++# ---------------------------------------------------------------------
++# 1.6 importer: LTspice Ron/Roff/Vfwd -> PWL diode with V_f
++# ---------------------------------------------------------------------
++
++_NET = """D1 a 0 DX{area}
++.MODEL DX D(Ron=0.05 Roff=1Meg Vfwd=0.7)
++.END
++"""
++
++
++def _component(b, name):
++    return next(c for c in b.components() if c["name"] == name)
++
++
++def test_imported_pwl_diode_is_a_switched_diode_with_a_forward_drop():
++    b = p.spice_to_builder(_NET.format(area=""))
++    c = _component(b, "D1")
++    assert c["kind"] == "diode"
++    prm = c["params"]
++    assert prm["g_on"] == pytest.approx(20.0, rel=1e-12)
++    assert prm["g_off"] == pytest.approx(1e-6, rel=1e-12)
++    assert prm["V_f"] == 0.7
++    assert prm["V_th"] == 0.0
++    # 10 A forward through the diode (builder convention: from = a).
++    b.add_current_source("I1", "a", "gnd", 10.0)
++    r = _sim(b, t_end=2e-3, dt=1e-6, engine="pwl")
++    assert float(np.asarray(r.v("a"))[-1]) == pytest.approx(1.2, rel=1e-9)
++    with warnings.catch_warnings():
++        warnings.simplefilter("ignore")
++        e = next(e for e in p.device_loss_summary(b, r, t_from=1e-3) if e["name"] == "D1")
++    assert e["P_avg"] == pytest.approx(12.0, rel=1e-9)
++
++
++def test_imported_pwl_diode_area_scales_both_conductances():
++    prm = _component(p.spice_to_builder(_NET.format(area=" 2")), "D1")["params"]
++    assert prm["g_on"] == pytest.approx(40.0, rel=1e-12)
++    assert prm["g_off"] == pytest.approx(2e-6, rel=1e-12)
