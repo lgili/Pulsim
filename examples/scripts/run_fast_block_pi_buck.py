@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -160,8 +161,10 @@ def main(argv: list[str] | None = None) -> int:
         ax_d.set_xlabel("t [ms]")
         ax_d.set_ylim(0, 1)
         fig.tight_layout()
-        out = "examples/scripts/out/fast_block_pi_buck.png"
+        # out/ is git-ignored (generated), so create it on first use.
+        out = Path(__file__).resolve().parent / "out" / "fast_block_pi_buck.png"
         try:
+            out.parent.mkdir(parents=True, exist_ok=True)
             fig.savefig(out, dpi=140)
             print(f"\nPlot saved to {out}")
         except Exception as exc:  # noqa: BLE001

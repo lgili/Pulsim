@@ -44,8 +44,9 @@ namespace pulsim::solver {
 
 /// Layer 5 V2.2 — sub-step commutation timing diagnostic.
 /// `t_estimated` is the linear-interpolated zero crossing of the
-/// watched signal (i_diode for ON → OFF, v_diode − V_th for
-/// OFF → ON) between two grid points. The state vectors
+/// watched signal (v_diode − turn_on_voltage for both directions on
+/// the pwl engine, see run_transient's interp_commutation_time)
+/// between two grid points. The state vectors
 /// themselves remain at the dt grid; only the COMMUTATION
 /// timestamp is sub-step accurate.
 struct CommutationEvent {
@@ -253,7 +254,8 @@ struct SimulationResult {
     // SwitchStateMask the solver STAMPED for the solve that produced
     // `states[k]` — the mask whose conductances are consistent with
     // the stored vector, so a switched branch's current is exactly
-    //     i_k = (bit ? g_on : g_off) · v_k.
+    //     i_k = (bit ? g_on : g_off) · v_k
+    // (minus g_on·V_f for an ON SwitchedDiode with forward drop V_f).
     // It is NOT the mask the step after it starts with: a PWL diode
     // whose voltage crosses V_th in the last solve of a step is
     // re-decided by `update_from_state` AFTER that solve, and on the

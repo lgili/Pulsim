@@ -1,10 +1,27 @@
+> Reconciled 2026-11: one task is done as written (2.1). Related files
+> exist with other parameters, each with a baseline CSV:
+> `circuits/thermal/long_run_drift_buck.yaml` (100 ms, not 1 s; its KPI
+> is ripple, not a drift slope),
+> `circuits/stress/stiff_rc_high_freq_switching.yaml` (1 GOhm leak, 500
+> kHz loop rather than 5 MHz) and
+> `circuits/switching/multilevel/mmc_4cell_chain.yaml` (4 cells, not 8).
+> There is no `compute_drift`, no `compute_conservation_drift` and no
+> `--include-long-runs` flag. Also, none of these benchmark files runs
+> on 2.0: they use `schema: pulsim-v1`, which `p.load_yaml_file` refuses
+> ("missing required top-level key 'circuit:'"), and
+> `benchmarks/tools/benchmark_runner.py` imports
+> `pulsim_python_backend`, deleted in 64837c4c, so each run fails with
+> "Pulsim Python runtime backend unavailable".
+
 ## 1. Long-run drift
 - [ ] 1.1 Create `long_run_drift_buck.yaml` — buck at 100 kHz for 1 s simulated.
 - [ ] 1.2 Add KPI `compute_drift(samples, time_window)` that fits a linear regression and returns the slope in V/s.
 - [ ] 1.3 Validate: drift slope < 1 mV/s over the second half of the run.
 
 ## 2. High-frequency (GaN / SiC)
-- [ ] 2.1 Create `high_freq_gan_buck.yaml` — buck at 1 MHz switching with L = 1 µH, C = 1 µF, dt = 10 ns.
+- [x] 2.1 Create `high_freq_gan_buck.yaml` — buck at 1 MHz switching with L = 1 µH, C = 1 µF, dt = 10 ns.
+  (Reconciled 2026-11:
+  circuits/switching/buck/high_freq_gan_buck.yaml.)
 - [ ] 2.2 Capture baseline and verify steady-state V(out) within 1 % of analytical `V_in · duty`.
 
 ## 3. Stiff system

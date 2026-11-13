@@ -82,7 +82,7 @@ h  = h_init
 
 while t < t_end:
     # 1. PREDICT next event time analytically.
-    t_gate  = switch_fn.next_edge_after(t)
+    t_gate  = switch_fn.next_edge_after(t)   # or: sample + bisect
     t_pred  = min(t_gate, t_end)
 
     # 2. INTEGRATE between events with adaptive step.
@@ -114,6 +114,22 @@ Three things hide the entire complexity:
 | `extractor(m)` | MNA $\to$ continuous-time $(A_m, \mathbf{b}_m)$, with floating-cap handling | [12](12-dsed-state-space-extraction.md) |
 | `rk45_step + PI_controller + scan_for_predicate_events` | DOPRI5 with FSAL, Söderlind PI step controller, cubic Hermite interp + Illinois root | [13](13-dsed-dopri5-adaptive.md) |
 | Per-mode dispatch RK45↔BDF2 | Stiffness detector + auto-dispatcher (`PEDSimulatorAuto`) | [14](14-dsed-bdf2-and-dispatch.md) |
+
+Where `t_gate` comes from matters. The built-in PWM helpers
+(`make_pwm_switch_fn`, `make_dead_time_pwm_pair_fn`,
+`make_spwm_pair_fn`, `make_phase_shift_full_bridge_fn`,
+`make_three_phase_spwm_fn`, `make_combined_switch_fn`) return a
+`SwitchSchedule` whose `next_edge_after` is analytic (bisected to the
+last representable time for the sine-modulated ones), as do
+`NativePwm2Switch` / `NativeMultiMaskPwm`. A plain callable has no
+oracle: the scheduler samples it every `dt_max / 10` and bisects each
+change it finds down to the edge (`EdgeSearch` in
+`python/dsed_bindings.cpp`). A pulse that starts and ends between two
+samples is missed, and `simulate` warns about it. Before the bisection
+existed, every edge of a plain callable moved onto the sample grid: a
+synchronous buck at 100 kHz, D = 0.25 and 100 ns dead time ran with no
+dead time and D = 0.30 (14.28 V against 11.49 V, body diodes never
+conducting) at the default `dt_max`.
 
 The native C++ implementation of the loop + the
 `NativePwm2Switch` fast path that gives DSED its 24× story are

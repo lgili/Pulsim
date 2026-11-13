@@ -186,6 +186,7 @@ if(PULSIM_BUILD_TESTS)
         tests/sources/test_three_phase_spwm_fn.cpp    # Layer 2 V8
         tests/sources/test_phase_shift_full_bridge_fn.cpp  # V9
         tests/sources/test_combined_switch_fn.cpp     # Layer 2 V10
+        tests/sources/test_pwm_grid_edges.cpp         # grid-exact edges
     )
     target_link_libraries(pulsim_core_sources_tests
         PRIVATE
@@ -359,6 +360,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v2/test_integration_half_wave_rectifier.cpp
         tests/layer5_v2/test_integration_boost.cpp   # V2.1 fix
         tests/layer5_v2/test_commutation_events.cpp  # V2.2 substep
+        tests/layer5_v2/test_switched_diode_forward_drop.cpp  # PSIM V_f
     )
     target_link_libraries(pulsim_core_layer5_v2_tests
         PRIVATE

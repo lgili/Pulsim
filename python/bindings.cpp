@@ -71,6 +71,7 @@
 #include "pulsim/sources/pwm_switch_fn.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
+#include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/streaming/live_ring.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -827,10 +828,15 @@ void init_module(py::module_& m) {
               py::arg("name"), py::arg("anode"),
               py::arg("cathode"), py::arg("g_on"),
               py::arg("g_off"), py::arg("V_th") = 0.0,
+              py::arg("V_f") = 0.0,
               py::return_value_policy::reference,
               "Add a binary switched diode (V2's "
-              "SwitchedDiode). g_on/g_off in siemens, "
-              "V_th in volts.")
+              "SwitchedDiode). g_on/g_off in siemens. "
+              "V_f: forward drop while ON (PSIM's diode voltage "
+              "drop), in volts: v = V_f + i/g_on; must be finite "
+              "and >= 0. V_th: turn-on threshold in volts, "
+              "effectively max(V_th, V_f) when V_f > 0; V_th > V_f "
+              "is a hysteresis band. OFF is plain g_off.")
         .def("add_nonlinear_diode",
               &builder::CircuitBuilder::add_nonlinear_diode,
               py::arg("name"), py::arg("anode"),
@@ -866,7 +872,9 @@ void init_module(py::module_& m) {
               "`body_diode=False` for an eGaN HEMT (which "
               "conducts in reverse through the channel, not a "
               "p-n junction) or for a bare switch. Defaults: "
-              "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V.")
+              "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the "
+              "body diode's turn-on THRESHOLD (add_diode's V_th), "
+              "not a conduction drop.")
         .def("add_mosfet_with_body_diode",
               &builder::CircuitBuilder::add_mosfet_with_body_diode,
               py::arg("name"), py::arg("drain"),
@@ -880,7 +888,9 @@ void init_module(py::module_& m) {
               "Add an n-channel power MOSFET WITH "
               "intrinsic anti-parallel body diode. Adds "
               "TWO branches: switch (drain→source) + "
-              "diode (source→drain).")
+              "diode (source→drain). V_F is the body diode's "
+              "turn-on THRESHOLD (add_diode's V_th), not a "
+              "conduction drop.")
         .def("add_igbt",
               &builder::CircuitBuilder::add_igbt,
               py::arg("name"), py::arg("collector"),
@@ -1091,6 +1101,7 @@ void init_module(py::module_& m) {
                               params["g_on"]  = p.g_on;
                               params["g_off"] = p.g_off;
                               params["V_th"]  = p.V_th;
+                              params["V_f"]   = p.V_f;
                               break;
                           }
                           case K::NonlinearDiode: {
@@ -1981,7 +1992,8 @@ void init_module(py::module_& m) {
             "STAMPED for the solve that produced states[k], as a "
             "(num_steps, num_switches) bool array (column j = "
             "builder.switch_index_of(name)). A switched branch's "
-            "current is exactly (g_on if bit else g_off) * v_branch. "
+            "current is exactly (g_on if bit else g_off) * v_branch, "
+            "less g_on * V_f for an ON diode with a forward drop V_f. "
             "None when the result carries no record (a result not "
             "produced by a kernel engine). Raw: where "
             "switch_states_unsolved[k] is True (a sample 0 seeded from "
@@ -2047,8 +2059,12 @@ void init_module(py::module_& m) {
     // stage (V1 add-on).
     // ---- YAML loader (Layer 8) -------------------------------------------
     py::class_<yaml::LoadedCircuit>(m, "LoadedCircuit",
-        "Result of `load_yaml_*`: a populated "
-        "`CircuitBuilder` + `SimulationOptions`.")
+        "Result of `load_yaml_*`: a populated `CircuitBuilder` "
+        "(`.builder`) + the `simulation:` block (`.options`).\n\n"
+        "Read-only conveniences: `source`, `has_simulation`, "
+        "`t_start`, `t_end`, `dt`, `switch_names`, `node_names`, "
+        "`warnings`. `pulsim.simulate(loaded, ...)` takes t_start / "
+        "t_end / dt / store_every from it.")
         // `builder` is move-only (Graph has deleted copy)
         // so we expose by-reference. The LoadedCircuit
         // OWNS the builder; this view stays valid as
@@ -2060,16 +2076,118 @@ void init_module(py::module_& m) {
             },
             py::return_value_policy::reference_internal)
         .def_readwrite("options",
-                        &yaml::LoadedCircuit::options);
+                        &yaml::LoadedCircuit::options)
+        .def_property_readonly("source",
+            [](const yaml::LoadedCircuit& self) { return self.source; },
+            "Where the YAML came from: the path given to "
+            "`load_yaml_file`, or '<string>' for `load_yaml_string`.")
+        .def_property_readonly("has_simulation",
+            [](const yaml::LoadedCircuit& self) {
+                return self.has_simulation;
+            },
+            "True when the YAML has a top-level `simulation:` block. "
+            "When False, `t_end` and `dt` are 0.0 (not set) and "
+            "`simulate(loaded)` refuses until you pass `t_end`.")
+        .def_property_readonly("t_start",
+            [](const yaml::LoadedCircuit& self) {
+                return self.options.t_start;
+            },
+            "`simulation.t_start` (s); 0.0 when not set. Same value "
+            "as `options.t_start`.")
+        .def_property_readonly("t_end",
+            [](const yaml::LoadedCircuit& self) {
+                return self.options.t_end;
+            },
+            "`simulation.t_end` (s); 0.0 when the YAML does not set "
+            "it. Same value as `options.t_end`.")
+        .def_property_readonly("dt",
+            [](const yaml::LoadedCircuit& self) {
+                return self.options.dt;
+            },
+            "`simulation.dt` (s); 0.0 when the YAML does not set it "
+            "(then `simulate(loaded)` runs without a dt, i.e. on the "
+            "variable-step engine where it qualifies). Same value as "
+            "`options.dt`.")
+        .def_property_readonly("switch_names",
+            [](const yaml::LoadedCircuit& self) {
+                const auto& g = self.builder.graph();
+                std::vector<std::string> names;
+                for (Index i = 0; i < g.num_branches(); ++i) {
+                    if (g.branch(i).kind
+                            == topology::BranchKind::Switch) {
+                        names.emplace_back(g.branch_name(i));
+                    }
+                }
+                return names;
+            },
+            "Names of the switching branches in SwitchStateMask bit "
+            "order: `switch_names[k]` is the device at bit k, i.e. "
+            "`builder.switch_index_of(switch_names[k]) == k`. "
+            "Includes the generated ones (a MOSFET's '<name>_body' "
+            "diode, binary diodes).")
+        .def_property_readonly("node_names",
+            [](const yaml::LoadedCircuit& self) {
+                const auto& g = self.builder.graph();
+                std::vector<std::string> names;
+                names.reserve(static_cast<std::size_t>(g.num_nodes()));
+                for (Index i = 0; i < g.num_nodes(); ++i) {
+                    names.push_back(g.node(i).name);
+                }
+                return names;
+            },
+            "Non-ground node names in node-id order (the names "
+            "`result.v(name)` accepts). Ground ('gnd' / '0') is not "
+            "listed.")
+        .def_property_readonly("warnings",
+            [](const yaml::LoadedCircuit& self) {
+                return self.warnings;
+            },
+            "Non-fatal loader findings (unknown keys), "
+            "each also emitted as a UserWarning at load time.")
+        .def("__repr__",
+            [](const yaml::LoadedCircuit& self) {
+                return std::format(
+                    "LoadedCircuit(source='{}', has_simulation={}, "
+                    "t_end={}, dt={}, nodes={}, switches={})",
+                    self.source, self.has_simulation ? "True" : "False",
+                    self.options.t_end, self.options.dt,
+                    self.builder.graph().num_nodes(),
+                    self.builder.graph().num_switches());
+            });
+
+    // Re-emit the loader's non-fatal findings as Python UserWarnings.
+    // Under `-W error` PyErr_WarnEx returns -1 and the warning becomes
+    // the exception, as Python users expect.
+    const auto emit_load_warnings = [](const yaml::LoadedCircuit& lc) {
+        for (const auto& w : lc.warnings) {
+            const std::string msg = std::format(
+                "load_yaml ({}): {}", lc.source, w);
+            if (PyErr_WarnEx(PyExc_UserWarning, msg.c_str(), 1) != 0) {
+                throw py::error_already_set();
+            }
+        }
+    };
 
     m.def("load_yaml_string",
-        &yaml::load_string, py::arg("yaml_text"),
+        [emit_load_warnings](const std::string& yaml_text) {
+            auto lc = yaml::load_string(yaml_text);
+            emit_load_warnings(lc);
+            return lc;
+        }, py::arg("yaml_text"),
         "Parse a YAML circuit description from an in-memory "
-        "string. Returns LoadedCircuit(builder, options).");
+        "string. Returns LoadedCircuit(builder, options). Warns on "
+        "unknown top-level / `circuit:` / `simulation:` keys; refuses "
+        "a `simulation:` block indented under `circuit:`.");
     m.def("load_yaml_file",
-        &yaml::load_file, py::arg("path"),
+        [emit_load_warnings](const std::string& path) {
+            auto lc = yaml::load_file(path);
+            emit_load_warnings(lc);
+            return lc;
+        }, py::arg("path"),
         "Parse a YAML circuit description from disk. "
-        "Returns LoadedCircuit(builder, options).");
+        "Returns LoadedCircuit(builder, options); errors and "
+        "warnings name the path. Same key checks as "
+        "`load_yaml_string`.");
 
     // ---- PWM switch_fn helper (Layer 2 V5) -------------------------------
     //
@@ -2135,16 +2253,51 @@ void init_module(py::module_& m) {
               py::arg("t"))
         .def_readonly("T_sw", &sources::NativeMultiMaskPwm::T_sw);
 
+    py::class_<sources::SwitchSchedule>(m, "SwitchSchedule",
+        "A switch_fn that knows its own gate edges: returned by "
+        "make_pwm_switch_fn, make_dead_time_pwm_pair_fn, "
+        "make_spwm_pair_fn, make_phase_shift_full_bridge_fn, "
+        "make_three_phase_spwm_fn and make_combined_switch_fn. "
+        "Call it with t for the SwitchStateMask. "
+        "`next_edge_after(t)` is the first gate edge strictly "
+        "after t (inf when unknown), so the variable-step engines "
+        "(engine='trbdf2', 'dsed') land their steps ON the edges "
+        "instead of sampling for them; every engine evaluates it "
+        "in C++ without the GIL. Edges that fall on a dt grid "
+        "point take effect at that point.")
+        .def("__call__",
+              [](const sources::SwitchSchedule& self, Real t) {
+                  return self(t);
+              },
+              py::arg("t"),
+              "Return the switch mask at time `t`.")
+        .def("next_edge_after",
+              &sources::SwitchSchedule::next_edge_after,
+              py::arg("t"),
+              "First gate-edge time strictly greater than `t`; inf "
+              "when the schedule does not know it (a combination "
+              "with a plain Python callable). An edge may be a no-op "
+              "(same mask on both sides), never a missed one.")
+        .def_property_readonly("has_edges",
+              &sources::SwitchSchedule::has_edges,
+              "False when the schedule cannot name its edges (a "
+              "make_combined_switch_fn with a plain Python callable "
+              "in it); the variable-step engines then search for "
+              "them by sampling.");
+
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
         py::arg("frequency"), py::arg("duty"),
         py::arg("switch_idx"), py::arg("num_switches"),
         py::arg("phase") = 0.0,
-        "Build a SwitchScheduleFn that toggles `switch_idx` "
+        "Build a SwitchSchedule that toggles `switch_idx` "
         "ON during the first `duty · T` fraction of each "
-        "period (T = 1 / frequency) and OFF for the rest. "
-        "All other switch bits stay OFF. Returns a Python "
-        "callable usable as `switch_fn=` in run_transient.");
+        "period (T = 1 / frequency) and OFF for the rest; "
+        "`phase` is a time offset in seconds. All other switch "
+        "bits stay OFF. Edges on a dt grid point take effect "
+        "at that point, so an on-time of a whole number of "
+        "steps is exactly that many steps in every period. "
+        "Usable as `switch_fn=` in simulate / run_transient.");
 
     m.def("make_dead_time_pwm_pair_fn",
         &sources::make_dead_time_pwm_pair_fn,
@@ -2152,7 +2305,7 @@ void init_module(py::module_& m) {
         py::arg("hs_switch_idx"), py::arg("ls_switch_idx"),
         py::arg("num_switches"), py::arg("dead_time"),
         py::arg("phase") = 0.0,
-        "Build a SwitchScheduleFn driving a complementary "
+        "Build a SwitchSchedule driving a complementary "
         "HS/LS half-bridge pair at `frequency` with `duty` "
         "and symmetric `dead_time` inserted at each "
         "commutation. Shoot-through is prevented by "
@@ -2168,7 +2321,7 @@ void init_module(py::module_& m) {
         py::arg("num_switches"), py::arg("dead_time"),
         py::arg("carrier_phase") = 0.0,
         py::arg("modulation_phase") = 0.0,
-        "Build a SwitchScheduleFn driving a HS/LS half-"
+        "Build a SwitchSchedule driving a HS/LS half-"
         "bridge with naturally-sampled SPWM: instantaneous "
         "duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). "
         "Symmetric `dead_time` is inserted at each "
@@ -2203,13 +2356,34 @@ void init_module(py::module_& m) {
             &sources::ThreePhaseLegIndices::ls_c);
 
     m.def("make_combined_switch_fn",
-        &sources::make_combined_switch_fn,
+        [](Size num_switches, const std::vector<py::object>& fns) {
+            // A SwitchSchedule goes in by value, so the combination
+            // keeps its edge oracle (and its C++ call path); any
+            // other callable goes through pybind11's std::function
+            // adapter, which makes the combined edges unknown.
+            std::vector<SwitchScheduleFn> cpp_fns;
+            cpp_fns.reserve(fns.size());
+            for (const auto& fn : fns) {
+                if (fn.is_none()) {
+                    cpp_fns.emplace_back();
+                } else if (py::isinstance<sources::SwitchSchedule>(fn)) {
+                    cpp_fns.emplace_back(
+                        fn.cast<sources::SwitchSchedule>());
+                } else {
+                    cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
+                }
+            }
+            return sources::make_combined_switch_fn(
+                num_switches, std::move(cpp_fns));
+        },
         py::arg("num_switches"), py::arg("fns"),
-        "Compose multiple SwitchScheduleFn callbacks into a "
-        "single one whose mask is the bitwise OR of all "
+        "Compose multiple switch_fn callbacks into a single "
+        "SwitchSchedule whose mask is the bitwise OR of all "
         "sub-masks. Useful for combining e.g. a primary-"
         "side PWM helper with a sync-rectifier helper "
-        "where each drives different switch indices.");
+        "where each drives different switch indices. Its "
+        "`next_edge_after` is the earliest edge of the parts "
+        "when every part is a SwitchSchedule, else inf.");
 
     m.def("make_phase_shift_full_bridge_fn",
         &sources::make_phase_shift_full_bridge_fn,
@@ -2219,7 +2393,7 @@ void init_module(py::module_& m) {
         py::arg("leg_b_hs_idx"), py::arg("leg_b_ls_idx"),
         py::arg("num_switches"), py::arg("dead_time"),
         py::arg("carrier_phase") = 0.0,
-        "Build a SwitchScheduleFn driving a phase-shift "
+        "Build a SwitchSchedule driving a phase-shift "
         "full-bridge: two HS/LS half-bridge legs at 50 %% "
         "duty each, with leg B lagging leg A by "
         "`phase_shift` radians. φ=0 → synchronous (no power); "
@@ -2237,7 +2411,7 @@ void init_module(py::module_& m) {
         py::arg("dead_time"),
         py::arg("modulation_phase") = 0.0,
         py::arg("carrier_phase") = 0.0,
-        "Build a SwitchScheduleFn driving a 3-phase 2-level "
+        "Build a SwitchSchedule driving a 3-phase 2-level "
         "VSI with SPWM: common carrier, sine modulation "
         "references at 0°/-120°/-240° on legs A/B/C, "
         "symmetric dead-time. Shoot-through prevented on "
@@ -2425,6 +2599,13 @@ void init_module(py::module_& m) {
             {
                 sources::NativePwm2Switch* native_pwm2 = nullptr;
                 sources::NativeMultiMaskPwm* native_multi = nullptr;
+                if (py::isinstance<sources::SwitchSchedule>(
+                        switch_fn_obj)) {
+                    // Built-in PWM helper: copy the C++ schedule, no
+                    // Python round-trip per step.
+                    switch_fn = switch_fn_obj.cast<
+                        sources::SwitchSchedule>();
+                }
                 try {
                     native_pwm2 = switch_fn_obj.cast<
                         sources::NativePwm2Switch*>();
@@ -2447,7 +2628,7 @@ void init_module(py::module_& m) {
                     switch_fn = [native_multi, keepalive](Real t) {
                         return (*native_multi)(t);
                     };
-                } else {
+                } else if (!switch_fn) {
                     // Generic Python callable — pybind11 wraps as
                     // std::function via its automatic converter.
                     switch_fn = switch_fn_obj.cast<SwitchScheduleFn>();
@@ -3840,7 +4021,19 @@ void init_module(py::module_& m) {
                     native = switch_fn_obj.cast<
                         sources::NativePwm2Switch*>();
                 } catch (const py::cast_error&) {}
-                if (native) {
+                if (py::isinstance<sources::SwitchSchedule>(
+                        switch_fn_obj)) {
+                    // Built-in PWM helper: C++ mask function and,
+                    // when it has one, its analytic edge oracle.
+                    const auto sched = switch_fn_obj.cast<
+                        sources::SwitchSchedule>();
+                    switch_fn = sched;
+                    if (sched.has_edges()) {
+                        next_edge_fn = [sched](Real t) {
+                            return sched.next_edge_after(t);
+                        };
+                    }
+                } else if (native) {
                     switch_fn = [native](Real t) {
                         return (*native)(t);
                     };
@@ -3894,6 +4087,12 @@ void init_module(py::module_& m) {
             d["n_forced_accepts"] = st.n_forced_accepts;
             d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
             d["n_newton_retries"] = st.n_newton_retries;
+            d["gate_pulse_min"]   = st.gate_pulse_min;
+            d["n_gate_undersampled"] = st.n_gate_undersampled;
+            d["gate_sample_spacing_max"] = st.gate_sample_spacing_max;
+            d["n_held_diode_redecided"] = st.n_held_diode_redecided;
+            d["probe_floor_used"] = st.probe_floor_used;
+            d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

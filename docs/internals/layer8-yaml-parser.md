@@ -42,6 +42,15 @@ simulation:
   dt: 1e-7
 ```
 
+`simulation:` is a top-level key, a sibling of `circuit:`. The loader
+refuses a `simulation:` block indented under `circuit:` (until 2.0.x
+that was ignored and the file loaded with `t_end = dt = 0`). Any other
+unknown key (top-level, under `circuit:` other than `nodes`/`devices`,
+or inside `simulation:`) is ignored but collected in
+`LoadedCircuit::warnings` and re-emitted by the Python binding as a
+`UserWarning`. `LoadedCircuit::source` records the path (or
+`"<string>"`) and `has_simulation` whether the block was present.
+
 ```python
 import pulsim as p
 
@@ -69,7 +78,7 @@ device entry's `type:` field selects the schema:
 | `resistor` | `from`, `to`, `R` (Ω) | — |
 | `capacitor` | `from`, `to`, `C` (F) | — |
 | `inductor` | `from`, `to`, `L` (H) | — |
-| `diode` | `anode`, `cathode`, `g_on`, `g_off` | `V_th` (default 0) |
+| `diode` | `anode`, `cathode`, `g_on`, `g_off` | `V_th` (default 0), `V_f` forward drop (default 0) |
 | `nonlinear_diode` | `anode`, `cathode` | `V_F0` (0.7), `R_d` (0.01), `G_off` (1e-9), `kappa` (20) |
 | `switch` | `from`, `to`, `g_on`, `g_off` | — |
 | `mosfet` | `drain`, `source` | `R_on` (1mΩ), `R_off` (1GΩ) |

@@ -82,8 +82,9 @@ struct EventPredicate {
 
     // v2.0 Phase 3 — diode commutation. A diode predicate is only
     // MEANINGFUL in one of the diode's two states: the DiodeOn
-    // predicate (g = v_D − V_th) while the bit is OFF, the DiodeOff
-    // predicate (g = v_D) while it is ON. `aux_index` is the diode's
+    // predicate (g = v_D − V_on) while the bit is OFF, the DiodeOff
+    // predicate (g = v_D − V_f) while it is ON (SwitchedDiode::
+    // crossing_signal). `aux_index` is the diode's
     // switch index; `required_bit` is the bit value the predicate is
     // armed for (-1 = always armed — every pre-existing predicate).
     // The scheduler consults these; the predicate itself stays a

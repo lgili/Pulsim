@@ -27,12 +27,15 @@
 // Caller passes the 6 switch indices via `ThreePhaseLegIndices`
 // to keep the parameter list readable.
 
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
@@ -51,13 +54,16 @@ struct ThreePhaseLegIndices {
     Size ls_c;
 };
 
-/// Build a `SwitchScheduleFn` driving a 3-phase VSI with
+/// Build a `SwitchSchedule` driving a 3-phase VSI with
 /// SPWM: common `carrier_frequency`, modulation reference at
 /// `modulation_frequency` with phase rotation A → B → C
 /// (120° between phases), modulation index
 /// `modulation_index ∈ [0, 1]`. Symmetric `dead_time`
 /// inserted at each commutation on every leg.
-[[nodiscard]] inline solver::SwitchScheduleFn
+/// `next_edge_after(t)` bisects the crossings like
+/// `make_spwm_pair_fn` (same carrier_frequency >
+/// pi · M · modulation_frequency assumption).
+[[nodiscard]] inline SwitchSchedule
 make_three_phase_spwm_fn(
     Real carrier_frequency,
     Real modulation_frequency,
@@ -68,58 +74,58 @@ make_three_phase_spwm_fn(
     Real modulation_phase = Real{0},
     Real carrier_phase    = Real{0}) {
     if (carrier_frequency <= Real{0}) {
-        return [num_switches](Real /*t*/) {
-            return topology::SwitchStateMask{num_switches};
-        };
+        return constant_schedule(topology::SwitchStateMask{num_switches});
     }
     const Real T_c = Real{1} / carrier_frequency;
     const Real omega_m = Real{2} *
         std::numbers::pi_v<Real> * modulation_frequency;
     const Real dt_eff = std::max(
         Real{0}, std::min(dead_time, T_c * Real{0.5}));
-    // 120° phase rotation between legs. `constexpr` is fine
-    // here: it's used as an rvalue inside the closure body
-    // without an explicit capture.
-    return [T_c, omega_m, dt_eff,
-            modulation_index, modulation_phase, carrier_phase,
-            legs, num_switches](Real t) {
+    const Real d = dt_eff / T_c;
+    // Duty of leg `leg` (0, 1, 2 = A, B, C) at t: 120° phase
+    // rotation between legs.
+    const auto duty_at = [omega_m, modulation_index,
+                          modulation_phase](int leg, Real t) {
         constexpr Real two_pi_3 =
             Real{2} * std::numbers::pi_v<Real> / Real{3};
-        // Carrier position within the current period.
-        const Real t_shifted = t - carrier_phase;
-        Real t_cycle = std::fmod(t_shifted, T_c);
-        if (t_cycle < Real{0}) t_cycle += T_c;
-
-        topology::SwitchStateMask mask{num_switches};
-
-        // Modulation references for the 3 legs.
-        const Real base = omega_m * t + modulation_phase;
-        const Real ref_a = std::sin(base);
-        const Real ref_b = std::sin(base - two_pi_3);
-        const Real ref_c = std::sin(base - two_pi_3 * Real{2});
-
-        // Per-leg PWM stamping — identical math to
-        // `make_spwm_pair_fn` but inlined to avoid 3x the
-        // std::function indirection per tick.
-        auto stamp_leg = [&](Real ref, Size hs, Size ls) {
-            const Real duty = Real{0.5} + Real{0.5} *
-                std::clamp(modulation_index * ref,
-                           Real{-1}, Real{1});
-            const Real t_hs_end   = duty * T_c - dt_eff;
-            const Real t_ls_start = duty * T_c;
-            const Real t_ls_end   = T_c - dt_eff;
-            if (t_cycle < t_hs_end) {
-                mask.set(hs, true);
-            } else if (t_cycle >= t_ls_start &&
-                       t_cycle <  t_ls_end) {
-                mask.set(ls, true);
-            }
-        };
-        stamp_leg(ref_a, legs.hs_a, legs.ls_a);
-        stamp_leg(ref_b, legs.hs_b, legs.ls_b);
-        stamp_leg(ref_c, legs.hs_c, legs.ls_c);
-        return mask;
+        const Real ref = std::sin(omega_m * t + modulation_phase
+                                  - two_pi_3 * static_cast<Real>(leg));
+        return Real{0.5} + Real{0.5} *
+            std::clamp(modulation_index * ref, Real{-1}, Real{1});
     };
+    return SwitchSchedule{
+        [T_c, d, duty_at, carrier_phase, legs, num_switches](Real t) {
+            // Carrier position within the current period.
+            const auto p = pwm_phase::cycle_position(t, carrier_phase, T_c);
+            topology::SwitchStateMask mask{num_switches};
+            const std::array<std::array<Size, 2>, 3> idx{{
+                {legs.hs_a, legs.ls_a},
+                {legs.hs_b, legs.ls_b},
+                {legs.hs_c, legs.ls_c}}};
+            for (int leg = 0; leg < 3; ++leg) {
+                const Real duty = duty_at(leg, t);
+                const detail::PairThresholds th{duty - d, duty,
+                                                Real{1} - d};
+                detail::stamp_leg(mask, detail::pair_state(p, th),
+                                  idx[leg][0], idx[leg][1]);
+            }
+            return mask;
+        },
+        [T_c, d, duty_at, carrier_phase](Real t) {
+            const auto p = pwm_phase::cycle_position(t, carrier_phase, T_c);
+            const std::array<Real, 1> fixed{Real{1} - d};
+            Real best = pwm_phase::next_constant_crossing(
+                t, carrier_phase, T_c, fixed);
+            for (int leg = 0; leg < 3; ++leg) {
+                best = std::min(best, pwm_phase::next_varying_crossing(
+                    t, carrier_phase, T_c, p,
+                    [&](Real tau) { return duty_at(leg, tau) - d; }));
+                best = std::min(best, pwm_phase::next_varying_crossing(
+                    t, carrier_phase, T_c, p,
+                    [&](Real tau) { return duty_at(leg, tau); }));
+            }
+            return best;
+        }};
 }
 
 }  // namespace pulsim::sources

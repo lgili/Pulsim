@@ -35,7 +35,8 @@
 // inductor's ±1 incidence terms, which the dt-monolithic V1 path
 // only emitted when dt > 0) and `C` holding the 1/dt COEFFICIENTS
 // (2·C_cap, −2·L, −2·M). `C` does not depend on the switch mask.
-// `b` receives source stamps only and is dt-independent.
+// `b` receives source stamps and the per-mask SwitchedDiode forward
+// drop (−g_on·V_f while ON), and is dt-independent.
 //
 // `assemble_segment_split` exposes the split directly (consumed by
 // the cache's event-dt solver reuse and the EXACT continuous-LTI
@@ -63,6 +64,26 @@
 namespace pulsim::pwl {
 
 namespace detail {
+
+// The topological `Switch` kind covers both user-controlled
+// `IdealSwitch` and auto-commutating `SwitchedDiode`; the pool's
+// StoredKind picks (g_on, g_off) and the diode's forward drop. Shared
+// by the transient and DC stampers so the two cannot drift. Never
+// source-scaled: V_f is a device law, not an independent source.
+inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
+                                bool closed, sparse::Matrix& J, Vector& b,
+                                const Vector& x,
+                                const stamping::BranchCoord& coord) {
+    if (pool.kind_of(branch_id) == DevicePool::StoredKind::Diode) {
+        const auto& p = pool.diode_params(branch_id);
+        stamping::stamp_switch_fixed(J, b, x, coord, closed, p.g_on,
+                                     p.g_off, p.V_f);
+    } else {
+        stamping::stamp_switch_fixed(J, b, x, coord, closed,
+                                     pool.switch_g_on(branch_id),
+                                     pool.switch_g_off(branch_id));
+    }
+}
 
 // -----------------------------------------------------------------------------
 // assemble_impl — the ONE stamping loop behind both public entry
@@ -222,24 +243,8 @@ inline void assemble_impl(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Switch: {
-            // The topological `Switch` kind covers both
-            // user-controlled `IdealSwitch` and auto-commutating
-            // `SwitchedDiode`. Use the pool's StoredKind to fetch
-            // the right (g_on, g_off).
-            const bool closed = mask.get(switch_idx);
-            Real g_on  = Real{0};
-            Real g_off = Real{0};
-            const auto k = pool.kind_of(branch.id);
-            if (k == DevicePool::StoredKind::Diode) {
-                const auto& p = pool.diode_params(branch.id);
-                g_on  = p.g_on;
-                g_off = p.g_off;
-            } else {
-                g_on  = pool.switch_g_on(branch.id);
-                g_off = pool.switch_g_off(branch.id);
-            }
-            stamping::stamp_switch_fixed(S, b, x, coord, closed,
-                                          g_on, g_off);
+            stamp_switch_branch(pool, branch.id, mask.get(switch_idx),
+                                S, b, x, coord);
             ++switch_idx;
             break;
         }

@@ -20,6 +20,6 @@ circuit:
     from: out
     to: gnd
     C: 9.999999999999999e-06
-  simulation:
-    t_end: 0.002
-    dt: 1.0e-06
+simulation:
+  t_end: 0.002
+  dt: 1.0e-06

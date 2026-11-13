@@ -62,6 +62,7 @@ public:
                     .g_on       = p.g_on,
                     .g_off      = p.g_off,
                     .V_th       = p.V_th,
+                    .V_f        = p.V_f,
                     .is_on      = false,
                 });
             }
@@ -104,14 +105,8 @@ public:
         for (auto& d : diodes_) {
             const Real v_a = stamping::read_node_voltage(x, d.from);
             const Real v_k = stamping::read_node_voltage(x, d.to);
-            const Real v_diode = v_a - v_k;
-            const Real g = d.is_on ? d.g_on : d.g_off;
-            const Real i_diode = g * v_diode;
-
-            const models::SwitchedDiode::Params p{
-                d.g_on, d.g_off, d.V_th};
-            const bool next = models::SwitchedDiode::decide_next_state(
-                d.is_on, v_diode, i_diode, p);
+            const bool next = models::SwitchedDiode::decide(
+                d.is_on, v_a - v_k, d.params());
             if (next != d.is_on) {
                 d.is_on = next;
                 changed = true;
@@ -131,7 +126,12 @@ public:
         Real  g_on;
         Real  g_off;
         Real  V_th;
+        Real  V_f;
         bool  is_on;
+
+        [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
+            return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};
+        }
     };
 
     [[nodiscard]] std::span<const DiodeEntry>

@@ -28,6 +28,7 @@
 //   * Open-loop chopper / buck-leg driver.
 
 #include "pulsim/numeric/concepts.hpp"
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -62,13 +63,11 @@ struct PWMVoltageSource {
             return p.v_low;
         }
         const Real T_period = Real{1} / p.frequency;
-        const Real t_shifted = t - p.phase;
-        // std::fmod with negative dividend can return
-        // negative — wrap into [0, T_period).
-        Real phase01 = std::fmod(t_shifted / T_period,
-                                   Real{1});
-        if (phase01 < Real{0}) phase01 += Real{1};
-        return (phase01 < p.duty) ? p.v_high : p.v_low;
+        // Grid-exact edges: an edge on a time-grid point takes
+        // effect at that point (see pwm_phase.hpp).
+        const auto pos =
+            pwm_phase::cycle_position(t, p.phase, T_period);
+        return pwm_phase::reached(pos, p.duty) ? p.v_low : p.v_high;
     }
 };
 

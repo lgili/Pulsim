@@ -209,7 +209,7 @@ the detailed rationale.
 
 ```python
 # 1. Load the topology + simulation options.
-loaded = pulsim.load_yaml_file("examples/im_dol.yaml")
+loaded = pulsim.load_yaml_file("examples/induction_motor_dol.yaml")
 b      = loaded.builder
 opts   = loaded.options
 

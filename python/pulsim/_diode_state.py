@@ -5,14 +5,15 @@ One source of truth for :meth:`SimulationResult.i`,
 
 Why the voltage cannot say
 --------------------------
-``SwitchedDiode`` (``core/include/pulsim/models/switched_diode.hpp``) is a
-pure conductance in both states — the stamp (``pwl/assemble.hpp``) is
-``g_on`` or ``g_off`` between anode and cathode with NO voltage offset, so
-a conducting diode drops ``i / g_on`` whatever ``V_th`` is. ``V_th`` only
-enters ``decide_next_state`` (OFF -> ON iff ``v_D >= V_th``; ON stays iff
-``g_on * v_D > 0``). A diode carrying 48 A at ``g_on = 1e3`` sits at 48 mV,
-inside ``0 < v_D < V_th``, where BOTH states are self-consistent. The old
-rule ``closed = v_D > V_th`` reported such a diode idle (0 A, 0 W).
+``SwitchedDiode`` (``core/include/pulsim/models/switched_diode.hpp``) is,
+PSIM-style, ``g_on`` in series with its forward drop ``V_f`` while ON
+(``i = g_on·(v_D − V_f)``, so ``v_D = V_f + i/g_on``) and a plain ``g_off``
+while OFF (no offset). ``V_th`` only enters the decision (OFF -> ON iff
+``v_D >= V_on = max(V_th, V_f)``, ``V_th`` itself when ``V_f = 0``; ON stays
+iff ``g_on·(v_D − V_f) > 0``). With ``V_th > V_f`` a diode carrying 48 A at
+``g_on = 1e3`` sits at ``V_f + 48 mV``, inside ``V_f < v_D < V_on``, where
+BOTH states are self-consistent. The old rule ``closed = v_D > V_th``
+reported such a diode idle (0 A, 0 W).
 
 What this module reads instead
 ------------------------------
@@ -21,13 +22,14 @@ STAMPED for the solve that produced that sample
 (``SimulationResult.switch_states``, ``core/include/pulsim/solver/
 result.hpp``). The branch current is then exact by construction::
 
-    i_D[k] = (g_on if switch_states[k, bit] else g_off) * v_D[k]
+    i_D[k] = (g_on * (v_D[k] - V_f) if switch_states[k, bit]
+              else g_off * v_D[k])
 
 on every engine that writes the record: ``engine='pwl'`` (including the
 event-iterated, sub-step-corrected and dt-retried steps — the record is the
 LAST solve of the step), ``engine='auto'`` / ``'trbdf2'`` (an event landing
 is a real trap solve under the PRE-commutation mask, and is recorded as
-such — no ``g_on * V_th`` phantom from the post-flip bits) and
+such — no phantom ``g_on·(v_D − V_f)`` from the post-flip bits) and
 ``engine='dsed'`` (each full MNA sample is reconstructed through its own
 mode mask). Nothing is inferred, so a snubber across the diode, an ideal
 transformer, a VCVS probe or any other device on the diode's nodes changes
@@ -44,7 +46,7 @@ value there and the loss and thermal summaries start at that sample
 When a result carries no record (a hand-built result, a stitched
 ``AdaptiveResult`` whose segments lacked it, the DSED Python-adapter path),
 the state is replayed from the kernel's commutation rule on the stored
-samples (OFF -> ON at ``v_D >= V_th``, ON -> OFF at ``v_D <= 0``) and a
+samples (OFF -> ON at ``v_D >= V_on``, ON -> OFF at ``v_D <= V_f``) and a
 ``RuntimeWarning`` names the reason. That replay is the legacy fallback,
 not a second source of truth: it misses a turn-on the event iteration
 resolved inside one step, which is exactly why the record exists.
@@ -65,8 +67,8 @@ class DiodeStateTrace:
     """Per-sample conduction state of one switched diode.
 
     ``closed[k]`` is True when the ON stamp (``g_on``) produced sample
-    ``k``; ``current = v * (g_on if closed else g_off)`` is then the
-    branch current the solver actually carried. ``recorded`` is False
+    ``k``; ``current = g_on·(v − V_f) if closed else g_off·v`` is then
+    the branch current the solver actually carried. ``recorded`` is False
     when ``closed`` had to be replayed (no kernel record).
 
     ``v_start`` / ``closed_start`` are the same at the START of the step
@@ -88,6 +90,7 @@ class DiodeStateTrace:
     violation_t_range: Tuple[float, float] = (float("nan"), float("nan"))
     v_start: Optional[np.ndarray] = field(default=None, repr=False)
     closed_start: Optional[np.ndarray] = field(default=None, repr=False)
+    V_f: float = 0.0
     _messages: List[str] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -97,14 +100,35 @@ class DiodeStateTrace:
             self.closed_start = self.closed
 
     @property
+    def g(self) -> np.ndarray:
+        """Stamped conductance per sample."""
+        return np.where(self.closed, self.g_on, self.g_off)
+
+    @property
+    def g_start(self) -> np.ndarray:
+        return np.where(self.closed_start, self.g_on, self.g_off)
+
+    @property
+    def v_off(self) -> np.ndarray:
+        """Stamped series offset per sample (``V_f`` while ON, else 0)."""
+        return np.where(self.closed, self.V_f, 0.0)
+
+    @property
+    def v_off_start(self) -> np.ndarray:
+        return np.where(self.closed_start, self.V_f, 0.0)
+
+    @property
     def current(self) -> np.ndarray:
-        return self.v * np.where(self.closed, self.g_on, self.g_off)
+        if not self.V_f:  # legacy expression: bit-identical at V_f = 0
+            return self.v * self.g
+        return self.g * (self.v - self.v_off)
 
     @property
     def current_start(self) -> np.ndarray:
         """Branch current at the start of the step after each sample."""
-        return self.v_start * np.where(self.closed_start, self.g_on,
-                                       self.g_off)
+        if not self.V_f:
+            return self.v_start * self.g_start
+        return self.g_start * (self.v_start - self.v_off_start)
 
     @property
     def conducting(self) -> np.ndarray:
@@ -114,7 +138,7 @@ class DiodeStateTrace:
         (``pulsim.losses._time_fraction``).
 
         A step conducts when its stamp is ON AND the diode carries a
-        material forward current (``g_on·v_D > 1e-6 · i_peak``) at
+        material forward current (``g_on·(v_D − V_f) > 1e-6 · i_peak``) at
         EITHER end of it:
 
         * either end, because the step that carries the current down
@@ -138,11 +162,12 @@ class DiodeStateTrace:
             return closed.copy()
         i_pk = float(np.max(np.abs(self.current)))
         thr = max(1e-12, 1e-6 * i_pk)
-        i_fwd = self.g_on * np.asarray(self.v, dtype=float)
+        i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
         fwd = i_fwd > thr
         # A step's start is the right limit of the sample before it
         # (v_start; the sample itself except at a DSED event).
-        fwd_start = self.g_on * np.asarray(self.v_start, dtype=float) > thr
+        fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
+                                 - self.V_f) > thr
         either = fwd.copy()
         either[1:] |= fwd_start[:-1]
         stamp = closed.copy()
@@ -155,14 +180,21 @@ class DiodeStateTrace:
             warnings.warn(msg, RuntimeWarning, stacklevel=stacklevel + 1)
 
 
-def _replay_kernel_rule(v: np.ndarray, V_th: float) -> np.ndarray:
+def turn_on_voltage(V_th: float, V_f: float) -> float:
+    """``SwitchedDiode::turn_on_voltage``: ``V_th`` at ``V_f = 0``, else
+    ``max(V_th, V_f)``."""
+    return V_th if V_f == 0.0 else max(V_th, V_f)
+
+
+def _replay_kernel_rule(v: np.ndarray, V_th: float,
+                        V_f: float = 0.0) -> np.ndarray:
     """Legacy fallback: the kernel's commutation rule replayed on the
-    stored samples — ON where ``v >= V_th`` (and ``v > 0``), OFF where
-    ``v <= 0``, the previous state inside the band (initially OFF)."""
+    stored samples — ON where ``v >= V_on`` (and ``v > V_f``), OFF where
+    ``v <= V_f``, the previous state inside the band (initially OFF)."""
     n = v.size
     st = np.full(n, -1, dtype=np.int8)
-    st[(v > 0.0) & (v >= V_th)] = 1
-    st[v <= 0.0] = 0
+    st[(v > V_f) & (v >= turn_on_voltage(V_th, V_f))] = 1
+    st[v <= V_f] = 0
     idx = np.where(st >= 0, np.arange(n), -1)
     np.maximum.accumulate(idx, out=idx)
     return np.where(idx >= 0, st[np.clip(idx, 0, None)], 0).astype(bool)
@@ -201,11 +233,33 @@ def diode_state_trace(builder, result, branch_id: int, *,
                       switch_fn: Optional[Callable[[float], Any]] = None,
                       warn: bool = True,
                       stacklevel: int = 3) -> DiodeStateTrace:
-    """The :class:`DiodeStateTrace` of one diode; warns if asked."""
+    """The :class:`DiodeStateTrace` of one diode; warns if asked, ONCE
+    per result and diode.
+
+    Python's default filter shows a warning once per call site, so a
+    script that read ``res.i("D1")`` on four lines printed the same
+    missed-commutation warning four times, and a fifth time from
+    ``device_loss_summary``. The diodes already warned about are kept
+    on the result (on the full result, not on the
+    :func:`_result_views.solved_part` view of it); a result that
+    accepts no attributes warns on every call."""
     tr = diode_state_traces(builder, result, switch_fn=switch_fn)[
         int(branch_id)]
-    if warn:
-        tr.warn(stacklevel=stacklevel)
+    if warn and tr._messages:
+        owner = (result._result if isinstance(result, _views._SolvedPart)
+                 else result)
+        seen = getattr(owner, "_diode_warnings_emitted", None)
+        if seen is None:
+            seen = set()
+            try:
+                owner._diode_warnings_emitted = seen
+            except AttributeError:  # pragma: no cover — slotted result
+                seen = None
+        if seen is None or int(branch_id) not in seen:
+            if seen is not None:
+                seen.add(int(branch_id))
+            for msg in tr._messages:
+                warnings.warn(msg, RuntimeWarning, stacklevel=stacklevel)
     return tr
 
 
@@ -276,6 +330,8 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
         g_on = float(prm.get("g_on", float("nan")))
         g_off = float(prm.get("g_off", float("nan")))
         V_th = float(prm.get("V_th", 0.0))
+        V_f = float(prm.get("V_f", 0.0))
+        V_on = turn_on_voltage(V_th, V_f)
         f, to = d["nodes"]
         v = node_v(states, int(f)) - node_v(states, int(to))
         name = str(d.get("name", ""))
@@ -290,23 +346,24 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
             tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on,
                                  g_off=g_off, V_th=V_th, v=v,
                                  closed=closed, recorded=True,
-                                 v_start=v_s, closed_start=c_s)
+                                 v_start=v_s, closed_start=c_s, V_f=V_f)
         else:
             reason = why if rec is None else (
                 "its mask bit could not be resolved from the builder")
-            closed = _replay_kernel_rule(v, V_th)
+            closed = _replay_kernel_rule(v, V_th, V_f)
             tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on,
                                  g_off=g_off, V_th=V_th, v=v,
-                                 closed=closed, recorded=False)
-            in_band = (v > 0.0) & (v < V_th)
+                                 closed=closed, recorded=False, V_f=V_f)
+            in_band = (v > V_f) & (v < V_on)
             tr._messages.append(
                 f"diode {name!r}: the result carries no record of the "
                 f"switch / diode mask the solver stamped ({reason}), so "
                 f"its conduction state was replayed from the kernel's "
                 f"commutation rule on the stored samples (ON at "
-                f"v_D >= V_th = {V_th:g} V, OFF at v_D <= 0). "
+                f"v_D >= V_on = {V_on:g} V, OFF at v_D <= V_f = "
+                f"{V_f:g} V). "
                 f"{int(in_band.sum())} of {n} samples sit inside the "
-                f"0 < v_D < V_th band, where that replay cannot see a "
+                f"V_f < v_D < V_on band, where that replay cannot see a "
                 f"turn-on the solver resolved within one step; the "
                 f"reported current, duty and loss there may be wrong. "
                 f"To get the record, {_views.record_advice(result)}")
@@ -322,12 +379,12 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
             i_env = float(i_abs[rest].max()) if rest.any() else 0.0
             exempt = unsolved | (landing & np.where(closed, i_abs <= i_env,
                                                     v <= v_env))
-            off_fwd = ~exempt & ~closed & (v - V_th > 1e-3) & (v > 1e-3)
-            on_rev = ~exempt & closed & (v < -1e-3)
+            off_fwd = ~exempt & ~closed & (v - V_on > 1e-3) & (v > 1e-3)
+            on_rev = ~exempt & closed & (v - V_f < -1e-3)
             viol = off_fwd | on_rev
             if viol.any():
                 tr.n_rule_violations = int(viol.sum())
-                dv = np.where(closed, -v, v - V_th)
+                dv = np.where(closed, V_f - v, v - V_on)
                 tr.max_violation_V = float(dv[viol].max())
                 tv = times[viol]
                 tr.violation_t_range = (float(tv.min()), float(tv.max()))
@@ -338,14 +395,16 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                 kinds = []
                 if on_rev.any():
                     kinds.append(
-                        f"ON while reverse-biased on {int(on_rev.sum())} "
-                        f"samples, by up to "
-                        f"{float((-v[on_rev]).max()):.3g} V")
+                        f"ON while reverse-biased"
+                        f"{f' (v_D < V_f = {V_f:g} V)' if V_f else ''} "
+                        f"on {int(on_rev.sum())} samples, by up to "
+                        f"{float((V_f - v[on_rev]).max()):.3g} V")
                 if off_fwd.any():
                     kinds.append(
-                        f"OFF while forward-biased above V_th = "
-                        f"{V_th:g} V on {int(off_fwd.sum())} samples, by "
-                        f"up to {float((v - V_th)[off_fwd].max()):.3g} V")
+                        f"OFF while forward-biased above "
+                        f"{'V_on' if V_f else 'V_th'} = "
+                        f"{V_on:g} V on {int(off_fwd.sum())} samples, by "
+                        f"up to {float((v - V_on)[off_fwd].max()):.3g} V")
                 n_land = int((viol & landing).sum())
                 if n_land:
                     kinds.append(
@@ -367,3 +426,42 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                     f"cross-check with engine='pwl' and a fixed dt.")
         out[bid] = tr
     return out
+
+
+# The kernel's current ceiling above which the Shockley exponential is
+# continued by its tangent (ShockleyDiode::Params::i_lim; the builder
+# does not expose it).
+_SHOCKLEY_I_LIM = 1e6
+
+
+def _shockley_branch(u: np.ndarray, I_S: float, vte: float) -> np.ndarray:
+    """``I_S·(exp(u/vte) − 1)``, continued by its tangent above the
+    voltage where it reaches ``_SHOCKLEY_I_LIM``, as the kernel's
+    ``limited_exp_branch_``."""
+    vl = vte * np.log(_SHOCKLEY_I_LIM / I_S + 1.0)
+    e_l = np.exp(vl / vte)
+    i_l = I_S * (e_l - 1.0)
+    g_l = I_S * e_l / vte
+    exp_part = I_S * np.expm1(np.minimum(u, vl) / vte)
+    return np.where(u > vl, i_l + g_l * (u - vl), exp_part)
+
+
+def shockley_current(v: np.ndarray, params: Dict[str, float]) -> np.ndarray:
+    """Branch current (anode to cathode) of an ``add_shockley_diode``
+    at junction voltage ``v``: the kernel's law
+    (``core/include/pulsim/models/shockley_diode.hpp``)::
+
+        i = I_S·(exp(v/(n·V_T)) − 1) − [BV > 0] I_S·(exp((−BV − v)/(n·V_T)) − 1)
+            + v·G_min
+
+    with each exponential continued by its tangent above 1e6 A. The
+    state holds the node voltages the solver converged to, so this is
+    the current it carried, to its Newton tolerance."""
+    v = np.asarray(v, dtype=float)
+    I_S = float(params["I_S"])
+    vte = float(params["n"]) * float(params["V_T"])
+    i = _shockley_branch(v, I_S, vte)
+    BV = float(params.get("BV", 0.0))
+    if BV > 0.0:
+        i = i - _shockley_branch(-BV - v, I_S, vte)
+    return i + v * float(params.get("G_min", 0.0))

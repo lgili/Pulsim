@@ -17,7 +17,7 @@ fix).
 ## The diode state machine
 
 ```
-        ┌────── v_anode − v_cathode ≥ V_th ──────┐
+        ┌────── v_anode − v_cathode ≥ V_on ──────┐
         │                                         │
         ▼                                         │
     ┌──────┐                                   ┌──────┐
@@ -31,6 +31,26 @@ fix).
 
 For an ideal diode `V_th = 0`. For a Si-behavioral diode
 `V_th = 0.7`. Both are supported.
+
+**Forward drop `V_f` (PSIM's "Diode Voltage Drop").** While ON the
+diode is `g_on` in series with `V_f`: `i = g_on·(v − V_f)`, so
+`v = V_f + i/g_on`; OFF stays a plain `g_off` (no offset). The stamp
+adds `−g_on·V_f` to `b` at the anode (`+` at the cathode) on the ON mask
+only; `J` is unchanged. The decisions use one law
+(`SwitchedDiode::decide` / `crossing_signal`):
+
+| | |
+|---|---|
+| `V_on` | `V_th` if `V_f == 0`, else `max(V_th, V_f)` |
+| OFF → ON | `v ≥ V_on` |
+| ON stays | `g_on·(v − V_f) > 0` |
+| crossing signal | ON: `v − V_f`; OFF: `v − V_on` |
+| power while ON | `V_f·i + i²/g_on` |
+
+`V_th > V_f` is a hysteresis band of width `V_th − V_f`; the DSED
+engine's settle needs one to resolve a zero-current turn-on. `V_f`
+must be finite and ≥ 0. At `V_f = 0` everything is bit-identical to
+the law without it.
 
 At the topology level, the diode IS a Switch — same combinatorial
 axis in the Layer 4 cache (an N-switch graph with M diodes has
@@ -47,7 +67,8 @@ struct SwitchedDiode {
     struct Params {
         Real g_on;   // forward conductance (typ. 1e3)
         Real g_off;  // reverse conductance (typ. 1e-9)
-        Real V_th;   // forward threshold (0 for ideal, 0.7 for Si)
+        Real V_th;   // turn-on threshold (effective max(V_th, V_f))
+        Real V_f = 0;  // forward drop while ON
     };
 
     // Topology: looks like a switch.
@@ -69,7 +90,7 @@ namespace pulsim::pwl {
 class DevicePool {
 public:
     void add_diode(Index branch_id, Real g_on, Real g_off,
-                    Real V_th = 0.0);
+                    Real V_th = 0.0, Real V_f = 0.0);
     const models::SwitchedDiode::Params& diode_params(Index) const;
     std::span<const Index> diode_branches() const;
     Size num_diodes() const noexcept;

@@ -74,6 +74,7 @@ Thumbs.db
 examples/python/*.png
 examples/v2/scripts/output/
 examples/v2/scripts/run_buck_output.png
+examples/scripts/out/
 
 # Parity dashboard outputs
 benchmarks/parity_dashboard_out/
@@ -87,6 +88,8 @@ package-lock.json
 build-dsed/
 build-s6/
 build_tests/
+# build-tests/ was committed once by mistake (ebf2e1c4): 86 CMake/ninja
+# artefacts incl. test binaries, 36 MB. Untracked again; keep it ignored.
 build-tests/
 
 # Agent scratch space (scripts, logs, venvs). scikit-build-core puts

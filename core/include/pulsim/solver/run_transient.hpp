@@ -87,8 +87,11 @@ namespace pulsim::solver {
 // of the watched signal between t_prev and t_curr.
 //
 // Watched signal:
-//   OFF → ON: v_diode − V_th    (was negative at prev, ≥ 0 at curr)
-//   ON → OFF: i_diode            (was positive at prev, ≤ 0 at curr)
+//   v_diode − V_on for BOTH directions, V_on = SwitchedDiode::
+//   turn_on_voltage (= V_th at V_f = 0). Exact both ways when
+//   V_th ≤ V_f (both events at v = V_f); with V_th > V_f the ON → OFF
+//   time is biased by the band (pre-existing, see trbdf2's
+//   crossing_signal for the per-direction form).
 //
 // If the two endpoints have the same sign (no real zero
 // crossing), returns t_curr (the dt-grid time — the V0
@@ -1272,8 +1275,10 @@ inline SimulationResult run_transient(
                         stamping::read_node_voltage(x, e.to);
                     const Real v_d_curr = v_a_curr - v_k_curr;
 
-                    const Real s_prev = v_d_prev - e.V_th;
-                    const Real s_curr = v_d_curr - e.V_th;
+                    const Real v_on =
+                        models::SwitchedDiode::turn_on_voltage(e.params());
+                    const Real s_prev = v_d_prev - v_on;
+                    const Real s_curr = v_d_curr - v_on;
                     if (s_prev * s_curr >= Real{0}) continue;
 
                     const Real t_est = interp_commutation_time(
@@ -1718,8 +1723,10 @@ inline SimulationResult run_transient(
                         stamping::read_node_voltage(x, e.to);
                     const Real v_d_curr = v_a_curr - v_k_curr;
 
-                    const Real s_prev = v_d_prev - e.V_th;
-                    const Real s_curr = v_d_curr - e.V_th;
+                    const Real v_on =
+                        models::SwitchedDiode::turn_on_voltage(e.params());
+                    const Real s_prev = v_d_prev - v_on;
+                    const Real s_curr = v_d_curr - v_on;
                     if (s_prev * s_curr >= Real{0}) continue;
 
                     const Real t_est = interp_commutation_time(

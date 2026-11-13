@@ -80,6 +80,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
     make_three_phase_spwm_fn,
     make_phase_shift_full_bridge_fn,
     make_combined_switch_fn,
+    # What the helpers above return: mask + analytic next_edge_after.
+    SwitchSchedule,
     # Bridge.12 — native PWM switch_fn classes for the DSED engine.
     # Detected by the C++ scheduler binding and called without GIL
     # roundtrips per scheduler step. ~25× faster per call than the
@@ -242,6 +244,9 @@ from .topology import (
     BuckResult,
     BoostResult,
     FlybackResult,
+    BridgeRectifierResult,
+    ThreePhaseVsiResult,
+    ThreePhaseRLLoadResult,
     add_buck,
     add_boost,
     add_flyback,
@@ -496,6 +501,7 @@ __all__ = [
     "make_three_phase_spwm_fn",
     "make_phase_shift_full_bridge_fn",
     "make_combined_switch_fn",
+    "SwitchSchedule",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
     # add-python-named-lookups (v1.5).
@@ -635,6 +641,9 @@ __all__ = [
     "BuckResult",
     "BoostResult",
     "FlybackResult",
+    "BridgeRectifierResult",
+    "ThreePhaseVsiResult",
+    "ThreePhaseRLLoadResult",
     "add_buck",
     "add_boost",
     "add_flyback",
@@ -874,15 +883,21 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
-    | ``diode`` (PWL switched)   | ``(V_from − V_to)·G`` where ``G = g_on``|
-    |                            | on samples the solver stamped the diode |
-    |                            | ON, ``g_off`` otherwise (the kernel's   |
-    |                            | per-sample ``switch_states`` record;    |
-    |                            | NOT ``v_D > V_th`` — V_th is a          |
-    |                            | commutation threshold, not a drop)      |
+    | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
+    |                            | samples the solver stamped the diode    |
+    |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
+    |                            | (the kernel's per-sample                |
+    |                            | ``switch_states`` record; NOT           |
+    |                            | ``v_D > V_th`` — V_th is a commutation  |
+    |                            | threshold, V_f the forward drop)        |
     | ``switch``                 | ``(V_from − V_to)·G`` where             |
     |                            | ``G = g_on`` when the recorded stamped  |
     |                            | mask bit is set, ``g_off`` otherwise    |
+    | ``shockley_diode``         | ``I_S·(exp(v_D/(n·V_T)) − 1)``          |
+    |                            | ``+ v_D·G_min`` (minus the mirrored     |
+    |                            | breakdown branch when ``BV > 0``): the  |
+    |                            | kernel's law, ``add_shockley_diode``    |
+    |                            | parameters                              |
     +----------------------------+-----------------------------------------+
 
     Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -909,14 +924,14 @@ def _result_i(self, name: str, t=None):
     ``result._switch_fn = your_switch_fn`` for a switch, and then the
     switch_fn is re-evaluated with a warning.
 
-    Not yet supported (deferred to future PRs because their device
-    params aren't exposed by ``builder.components()`` today):
-    ``mosfet_level1``, ``igbt_level1``, ``nonlinear_diode``,
-    ``vcvs``, ``saturable_inductor``. Calls on those kinds raise
-    :class:`NotImplementedError` pointing at
-    :func:`pulsim.losses.device_loss_summary`, which already
-    implements per-step nonlinear stamp evaluation for the loss
-    summary.
+    Not yet supported (their device params aren't exposed by
+    ``builder.components()`` today): ``mosfet_level1``,
+    ``igbt_level1``, ``nonlinear_diode``, ``lauritzen_diode``,
+    ``nonlinear_capacitor``, ``vcvs``, ``saturable_inductor``. Calls
+    on those kinds raise :class:`NotImplementedError` with the
+    recipe that works: a small series resistor (1 mOhm) whose
+    ``res.i()`` is the device current. ``device_loss_summary`` does
+    not report them either.
 
     Sign convention. Current is positive flowing from the ``from``
     terminal to the ``to`` terminal of the ``add_*`` call (matches
@@ -1084,9 +1099,9 @@ def _result_i(self, name: str, t=None):
 
     # ----------------------- diode -----------------------------------
     if kind == "diode":
-        # PWL switched diode: a pure conductance in each state (the
-        # ON drop is i/g_on — there is NO V_th offset in the stamp;
-        # V_th only gates OFF→ON). The per-sample state is the
+        # PWL switched diode: g_on in series with the forward drop V_f
+        # while ON (v_D = V_f + i/g_on), plain g_off while OFF; V_th
+        # only gates OFF→ON. The per-sample state is the
         # kernel's record of the stamped mask, read through the one
         # helper shared with device_loss_summary and
         # device_thermal_summary (`pulsim._diode_state`).
@@ -1101,6 +1116,25 @@ def _result_i(self, name: str, t=None):
         from ._diode_state import diode_state_trace as _diode_trace
         tr = _diode_trace(builder, self, b_id, stacklevel=3)
         return _finalize(_hold_unsolved(tr.current))
+
+    # ----------------------- Shockley diode --------------------------
+    if kind == "shockley_diode":
+        # Exponential junction: the current is a function of v_D alone,
+        # the kernel's law with the parameters add_shockley_diode
+        # recorded on the builder (components() reports none).
+        from ._builder_ergonomics import shockley_params as _sh_params
+        from ._diode_state import shockley_current as _sh_current
+        prm = _sh_params(builder, name)
+        if prm is None:
+            raise NotImplementedError(
+                f"result.i({name!r}): this Shockley diode's parameters "
+                f"were not recorded (it was added by a path that "
+                f"bypassed `CircuitBuilder.add_shockley_diode`), so its "
+                f"current I_S*(exp(v/(n*V_T))-1) cannot be evaluated. "
+                f"Add it with `b.add_shockley_diode(...)`, or put a "
+                f"small resistor in series (1 mOhm) and read "
+                f"`res.i(<that resistor>)`.")
+        return _finalize(_sh_current(_v_branch(), prm))
 
     # ----------------------- switch ----------------------------------
     if kind == "switch":
@@ -1142,15 +1176,15 @@ def _result_i(self, name: str, t=None):
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(
         f"branch {name!r} has kind={kind!r}; result.i() does not yet "
-        f"reconstruct currents for this device family. Currently "
+        f"reconstruct currents for this device family, and "
+        f"device_loss_summary does not report it either. Currently "
         f"supported: inductor, voltage_source (incl. pwm / sine / "
         f"pulse variants), resistor, capacitor, current_source, "
-        f"diode, switch. For mosfet_level1 / igbt_level1 / "
-        f"nonlinear_diode / shockley_diode / lauritzen_diode / "
-        f"nonlinear_capacitor / vcvs / saturable_inductor, the per-step "
-        f"nonlinear stamp evaluation lives in "
-        f"`pulsim.losses.device_loss_summary` — use that for now. "
-        f"Lifting these into `result.i()` is tracked as a follow-up.")
+        f"diode, shockley_diode, switch. To measure this device's "
+        f"current, put a small resistor in series with it (1 mOhm) "
+        f"and read `res.i(<that resistor>)`; its loss is then the "
+        f"time average of v_device * i over a window "
+        f"(`pulsim.time_average`).")
 
 
 def _result_power(self, device_name: str) -> float:
@@ -1247,7 +1281,7 @@ def _result_currents(self, *, skip_unsupported: bool = True
     Walks ``builder.components()`` and calls :meth:`i` on every branch
     whose kind has a reconstruction implementation (inductor,
     voltage_source family, resistor, capacitor, current_source, diode,
-    switch). When ``skip_unsupported`` is True (default), kinds without
+    shockley_diode, switch). When ``skip_unsupported`` is True (default), kinds without
     a Python-side reconstruction
     (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
     ``saturable_inductor``) are silently omitted from the result —
@@ -1504,9 +1538,40 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
     return step_observer, b_extra_fn
 
 
+def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
+    """Unpack a :class:`LoadedCircuit` for :func:`simulate`.
+
+    Returns ``(builder, t_end, dt, t_start, store_every)`` with the
+    YAML's ``simulation:`` values filling what the caller left unset,
+    or raises ``ValueError`` naming ``lc.source`` when the window it
+    would run is empty.
+    """
+    opts = lc.options
+    if t_start == 0.0:
+        t_start = float(lc.t_start)
+    if t_end is None:
+        t_end = float(lc.t_end)
+        if not (t_end > t_start):
+            why = ("has no top-level 'simulation:' block"
+                   if not lc.has_simulation else
+                   "has a simulation: block without a t_end after "
+                   f"t_start ({t_start!r})")
+            raise ValueError(
+                f"simulate(): the YAML {lc.source!r} {why}, so its run "
+                f"window is empty (t_end = {t_end!r}). Add a top-level "
+                "'simulation: {t_end: ..., dt: ...}' (a sibling of "
+                "'circuit:', not nested under it), or pass t_end= to "
+                "simulate().")
+    if dt is None and lc.dt > 0.0:
+        dt = float(lc.dt)
+    if store_every is None and int(opts.store_every) != 1:
+        store_every = int(opts.store_every)
+    return lc.builder, t_end, dt, t_start, store_every
+
+
 def simulate(
-    builder: CircuitBuilder,
-    t_end: float,
+    builder: "CircuitBuilder | LoadedCircuit",
+    t_end: Optional[float] = None,
     dt: Optional[float] = None,
     *,
     # --- engine selector ---
@@ -1652,12 +1717,27 @@ def simulate(
             integrator='rk45',
         )
 
+    From a YAML netlist, pass the :class:`LoadedCircuit` itself::
+
+        lc = pulsim.load_yaml_file("examples/rc_circuit.yaml")
+        result = pulsim.simulate(lc)          # t_end / dt from the file
+
     Parameters
     ----------
     builder
-        A populated :class:`CircuitBuilder`.
+        A populated :class:`CircuitBuilder`, or a :class:`LoadedCircuit`
+        from :func:`load_yaml_file` / :func:`load_yaml_string`. From a
+        ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
+        sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
+        ``store_every`` (when not passed) from its ``simulation:``
+        block; a keyword you pass wins. The other ``simulation:``
+        fields stay on ``loaded.options`` — forward them yourself. A
+        ``LoadedCircuit`` whose ``t_end`` is not after ``t_start`` (no
+        top-level ``simulation:`` block, or no ``t_end`` in it) is
+        refused with a ``ValueError`` naming the YAML file.
     t_end
-        End time, in seconds.
+        End time, in seconds. Required with a :class:`CircuitBuilder`;
+        must be greater than ``t_start``.
     dt
         ``engine='auto'``: given → fixed step of exactly ``dt``;
         omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
@@ -1732,6 +1812,28 @@ def simulate(
         PED today with a user-supplied LTI system, use
         :func:`pulsim.dsed.run_user_lti` directly.
     """
+    # ---- LoadedCircuit (YAML) + the run window. ----
+    # Above everything else, so every engine sees the same t_end / dt.
+    # A YAML whose run settings did not load (no top-level
+    # `simulation:` block) used to reach the engines as t_end = dt = 0
+    # and died on an engine-specific message about the step ceiling;
+    # refuse it here and name the file.
+    if isinstance(builder, LoadedCircuit):
+        builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
+            builder, t_end, dt, t_start, store_every)
+    if t_end is None:
+        raise TypeError(
+            "simulate(): missing required argument 't_end' (end time, s). "
+            "Only a LoadedCircuit with a simulation: block supplies it.")
+    if not (t_end > t_start):
+        raise ValueError(
+            f"simulate(): t_end ({t_end!r}) must be greater than t_start "
+            f"({t_start!r}). If these came from a YAML's "
+            "loaded.options, the file had no top-level simulation: block "
+            "(loaded.has_simulation is False); pass the LoadedCircuit "
+            "itself, simulate(loaded), to have the file named, or pass "
+            "t_end=.")
+
     # ---- Merge `solver` bundle (v1.5 Round 2 ergonomics). ----
     # For every advanced kernel knob, the flat kwarg wins when the
     # user explicitly passed something non-default; otherwise we pull
@@ -2096,8 +2198,9 @@ def simulate(
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
         #      which is also the gate-edge sampling resolution
-        #      (a gate pulse narrower than h_max can be missed,
-        #      exactly like dsed's dt_max). ----
+        #      (switch_fn is sampled every h/4, so a one-shot gate
+        #      pulse narrower than h_max/4 can be missed SILENTLY;
+        #      a periodic one caps h at twice its pulse once seen). ----
         # Every unsupported combination was already caught by
         # _trbdf2_blockers above (which is also what routes
         # engine='auto' away from here).
@@ -2256,42 +2359,7 @@ def simulate(
         # auto return.
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
-        if _stats.get("n_forced_accepts", 0) > 0:
-            import warnings
-            warnings.warn(
-                f"simulate(engine='auto'): "
-                f"{_stats['n_forced_accepts']} step(s) were "
-                "accepted with the error estimate above tolerance "
-                "because h had already reached its floor (usually "
-                "the sliver between two events). The trace is "
-                "still finite, but those steps carry more error "
-                "than rtol promises — inspect "
-                "result._trbdf2_stats and the event times if the "
-                "waveform matters there.",
-                stacklevel=2)
-        # Threshold 3: a single boundary graze at startup is normal
-        # (measured 1 on the hysteresis-banded flyback); a sliding
-        # model produces them every few cycles (5 per 5 ms on the
-        # V_th=0 buck, hundreds on tightened tolerances).
-        if _stats.get("n_chatter_breaks", 0) > 3:
-            import warnings
-            warnings.warn(
-                f"simulate(engine='auto'): a diode rode its "
-                f"conduction boundary on "
-                f"{_stats['n_chatter_breaks']} step(s): its "
-                "current sat at zero while the engine decided its "
-                "state (a SLIDING-MODE model; the usual cause is an "
-                "ideal V_th=0 diode at a zero-current commutation, "
-                "e.g. in DCM). This engine AVERAGES the slide. That "
-                "average was correct to 0.1 mV on a flyback at the "
-                "default rtol, but a tightened rtol can bias it by "
-                "~0.5 %, and a V_th=0 bridge behind a source "
-                "resistance ran HALF-WAVE (reading res.i of its "
-                "diodes then warns of the missed commutation). "
-                "Cross-check with a dt (engine='pwl'), or give the "
-                "diode its physical V_th (that IS the hysteresis "
-                "band).",
-                stacklevel=2)
+        _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
         return res
 
     # ---- engine='pwl' from here on ----
@@ -2938,6 +3006,174 @@ def simulate(
     return res
 
 
+def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
+    """The variable-step engine's own confessions, from its stats and
+    its switch-state record. Each one names what the engine could not
+    guarantee and how to cross-check it."""
+    import warnings
+    eng = f"simulate(engine={engine_asked!r})"
+    if stats.get("n_forced_accepts", 0) > 0:
+        warnings.warn(
+            f"{eng}: "
+            f"{stats['n_forced_accepts']} step(s) were "
+            "accepted with the error estimate above tolerance "
+            "because h had already reached its floor (usually "
+            "the sliver between two events). The trace is "
+            "still finite, but those steps carry more error "
+            "than rtol promises — inspect "
+            "result._trbdf2_stats and the event times if the "
+            "waveform matters there.",
+            stacklevel=3)
+    # Threshold 3: a single boundary graze at startup is normal
+    # (measured 1 on the hysteresis-banded flyback); a sliding model
+    # produces them every few cycles (8 in 0.1 s on a V_th = 0 bridge
+    # behind 0.1 ohm).
+    if stats.get("n_chatter_breaks", 0) > 3:
+        warnings.warn(
+            f"{eng}: a diode rode its "
+            f"conduction boundary on "
+            f"{stats['n_chatter_breaks']} step(s): its "
+            "current sat at zero while the engine decided its "
+            "state (a SLIDING-MODE model; the usual cause is an "
+            "ideal V_th=0 diode at a zero-current commutation, "
+            "e.g. in DCM). This engine AVERAGES the slide. That "
+            "average was correct to 0.1 mV on a flyback at the "
+            "default rtol, but a tightened rtol can bias it by "
+            "~0.5 %. Cross-check with a dt (engine='pwl'), or give "
+            "the diode a V_th above its V_f (V_th - V_f IS the "
+            "hysteresis band).",
+            stacklevel=3)
+    # A gate pulse landed although narrower than the switch_fn
+    # sampling used while it was open (or before that bit's first
+    # edge): it was found by luck, so pulses that narrow may have been
+    # stepped over before its width was known (the step is capped at
+    # twice the narrowest pulse from then on). A one-shot pulse that
+    # no sample hit is not counted: nothing saw it.
+    if stats.get("n_gate_undersampled", 0) > 0:
+        w = float(stats.get("gate_pulse_min", 0.0))
+        sp = float(stats.get("gate_sample_spacing_max", 0.0))
+        warnings.warn(
+            f"{eng}: switch_fn produced a gate pulse of {w:.3g} s, "
+            "narrower than the spacing at which the engine had been "
+            f"sampling that gate (at most {sp:.3g} s), so pulses that "
+            "narrow may have been stepped over before then (this "
+            "engine sees a Python switch_fn only where it calls it). "
+            "Pass dt=<at most 4x the narrowest "
+            "pulse> as the step ceiling (engine='trbdf2'), drive the "
+            "gates with p.NativePwm2Switch, whose edges the engine "
+            "computes, or use engine='pwl' with a dt on the PWM grid.",
+            stacklevel=3)
+    # The zero-time probe needed a longer step to factor: some subnet
+    # reaches the rest of the circuit only through switches and diodes,
+    # so while they are OFF its common mode is set by g_off alone. The
+    # E3 reproducer (bridge, floating 470 uF DC side) still answers
+    # right (321.851 V vs 321.852 V on dt = 1e-6), but its variants do
+    # not: 10 mF across the rails read 323.94 V vs 324.51 V, and a
+    # 1 mH DC choke put a 76.7 kV common-mode sample on dn.
+    pf = float(stats.get("probe_floor_used", 0.0) or 0.0)
+    subnets = None
+    if pf > 0.0:
+        subnets = _floating_subnets(builder)
+        where = ("node(s) " + "; ".join(", ".join(sn) for sn in subnets)
+                 if subnets else "some subnet")
+        warnings.warn(
+            f"{eng}: {where} reach the rest of the circuit only "
+            "through switches/diodes, so while those are OFF the "
+            "subnet's common-mode voltage is set by their g_off alone "
+            "and the zero-time diode probe could not factor it at its "
+            f"default step (it used {pf:.3g} s). The differential "
+            "answer is usually right, but this engine resolves that "
+            "common mode less robustly than engine='pwl'. Tie the "
+            "subnet to ground (ground a rail, e.g. dc_neg, or add a "
+            "resistor to gnd) or cross-check with engine='pwl' and a "
+            "fixed dt.",
+            stacklevel=3)
+    # A diode held in a state its own commutation rule forbids is a
+    # commutation the engine missed: every switched branch after it is
+    # suspect. The record says so per sample (the same check res.i
+    # runs); say it HERE, where the run is, naming the diodes.
+    try:
+        has_pwl_diode = any(c.get("kind") == "diode"
+                            for c in builder.components())
+    except AttributeError:  # pragma: no cover — duck-typed builders
+        has_pwl_diode = False
+    if has_pwl_diode and getattr(res, "switch_states", None) is not None:
+        from . import _diode_state
+        bad = [tr for tr in _diode_state.diode_state_traces(
+                   builder, res).values() if tr.n_rule_violations]
+        if bad:
+            first = min(tr.violation_t_range[0] for tr in bad)
+            names = ", ".join(
+                f"{tr.name!r} ({tr.n_rule_violations} samples, by up to "
+                f"{tr.max_violation_V:.3g} V)" for tr in bad)
+            if subnets is None:
+                subnets = _floating_subnets(builder)
+            # A floating DC choke: dq/dn swung to 76.7 kV common mode
+            # with no probe floor learned, so name the subnet here too.
+            hint = ("" if not subnets else
+                    " Node(s) " + "; ".join(", ".join(sn) for sn in subnets)
+                    + " reach the rest of the circuit only through "
+                    "switches/diodes; grounding one of them (a DC rail) "
+                    "removed this on a floating-rail bridge with a DC "
+                    "choke.")
+            warnings.warn(
+                f"{eng}: the variable-step engine held diode(s) {names} "
+                f"in a state their commutation rule forbids, from "
+                f"t = {first:.6g} s: a missed commutation, so every "
+                "switched branch from there on is suspect. Rerun with "
+                "engine='pwl' and a fixed dt and compare (res.i of each "
+                "diode says which samples)." + hint,
+                RuntimeWarning, stacklevel=3)
+
+
+def _floating_subnets(builder) -> list:
+    """Node-name groups that reach ground only through switch
+    branches (switches, diodes, body diodes) and hold a capacitor or
+    inductor: union-find over every other branch except current
+    sources, which carry no voltage reference. A group with no stored
+    energy is left out: the node between two series switches, or an
+    ideal transformer's primary (no graph branch of its own), is not a
+    floating rail. Best effort: [] when the builder cannot be read."""
+    try:
+        g = builder.graph
+        branches = list(g.branches)
+        comps = builder.components()
+        current_src = {c.get("branch_id") for c in comps
+                       if "current_source" in str(c.get("kind", ""))}
+        storage = {nd for c in comps
+                   if c.get("kind") in ("capacitor", "inductor")
+                   for nd in c.get("nodes", ()) if nd >= 0}
+        n = int(g.num_nodes)
+    except (AttributeError, TypeError):  # pragma: no cover
+        return []
+    parent = list(range(n + 1))       # slot n = ground
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def slot(node):
+        return n if node < 0 else node
+
+    for br in branches:
+        kind = getattr(br["kind"], "name", str(br["kind"]))
+        if kind.endswith("Switch") or br["id"] in current_src:
+            continue
+        ra, rb = find(slot(br["from_"])), find(slot(br["to"]))
+        if ra != rb:
+            parent[ra] = rb
+    gnd = find(n)
+    groups: dict = {}
+    for i in range(n):
+        r = find(i)
+        if r != gnd:
+            groups.setdefault(r, []).append(i)
+    return sorted([g.node_name(i) or f"#{i}" for i in grp]
+                  for grp in groups.values() if storage.intersection(grp))
+
+
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                      on_cache=None,
                       controller_period, live_stream, progress,
@@ -3227,7 +3463,7 @@ _V1_SYMBOL_HINTS = {
     "Inductor":           "b.add_inductor(...)",
     "VoltageSource":      "b.add_voltage_source(...)",
     "CurrentSource":      "b.add_current_source(...)",
-    "Diode":              "b.add_diode(name, anode, cathode, g_on, g_off, V_th)",
+    "Diode":              "b.add_diode(name, anode, cathode, g_on, g_off, V_th, V_f)",
     "MOSFET":             "b.add_mosfet_with_body_diode(...)",
     "IGBT":               "b.add_igbt(...)",
     "Preset":             "no longer exposed — pass an explicit SimulationOptions",
@@ -3236,8 +3472,8 @@ _V1_SYMBOL_HINTS = {
     "YamlParser":         "p.load_yaml_file(path) returns a LoadedCircuit",
     "YamlParserOptions":  "no equivalent — load_yaml_file / load_yaml_string take no options",
     "RobustnessProfile":  "no equivalent — use enable_nonlinear_refresh + DC-OP strategies",
-    "codegen":            "no equivalent in 1.0.0",
-    "fmu":                "no equivalent in 1.0.0",
+    "codegen":            "no equivalent",
+    "fmu":                "no equivalent",
     "templates":          "moved to pulsim.schematic.templates",
     # schematic intentionally NOT listed here — `pulsim.schematic` is
     # the restored subpackage (Phase 1-17 of the schematic-renderer-v2
@@ -3285,12 +3521,25 @@ def __getattr__(name: str):
     if name in _V1_SYMBOL_HINTS:
         hint = _V1_SYMBOL_HINTS[name]
         raise AttributeError(
-            f"pulsim.{name} was a v1 symbol and is no longer "
-            f"available (pulsim 1.0.0 retired the legacy kernel). "
-            f"Migration hint: {hint}. See "
+            f"pulsim.{name} was a v1 symbol and is not available in "
+            f"pulsim {__version__} (the legacy kernel was retired in "
+            f"1.0.0). Migration hint: {hint}. See "
             f"docs/migration-guide.md for the full mapping, and run "
             f"`python -m pulsim.guide` for the current API.")
+    if name.startswith("__"):
+        raise AttributeError(
+            f"module 'pulsim' has no attribute {name!r}")
+    # A name that lives in an already-imported submodule: say where.
+    import sys as _sys
+    homes = sorted(
+        mod_name for mod_name, mod in list(_sys.modules.items())
+        if mod_name.startswith("pulsim.") and mod is not None
+        and not mod_name.rsplit(".", 1)[-1].startswith("_")
+        and name in (getattr(mod, "__all__", None) or ()))
+    where = (f" It is defined in {homes[0]}: `from {homes[0]} import "
+             f"{name}`." if homes else "")
     raise AttributeError(
-        f"module 'pulsim' has no attribute {name!r}. "
-        f"Run `python -m pulsim.guide` for the current API, and see "
-        f"docs/migration-guide.md if you're porting v1 code.")
+        f"module 'pulsim' (version {__version__}) has no attribute "
+        f"{name!r}.{where} Run `python -m pulsim.guide` for the "
+        f"current API, and see docs/migration-guide.md if you're "
+        f"porting v1 code.")
