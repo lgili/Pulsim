@@ -31,6 +31,8 @@ When the high-side MOSFET opens, the inductor needs a freewheel path. Without on
 
 **Fix:** use `add_mosfet_level1(..., with_body_diode=True)` (proposal #3.1) or add an explicit anti-parallel `add_diode("Body", source, drain, ...)`.
 
+The composite body / freewheeling diodes (`add_mosfet`, `add_mosfet_with_body_diode`, `add_mosfet_level1`, `add_igbt_level1(with_fwd=True)`) take `V_F` as a **conduction drop**: `v_SD = V_F + i/g_on` while on. Up to 2.0 it was only a turn-on threshold, so a conducting body diode dropped `i/g_on` alone (10 mV at 10 A) — results that freewheel through one move. `V_F=0.0` gives a lossless ideal-ish diode; `add_diode(V_th=0.7, V_f=0)` beside a bare switch reproduces the old behaviour.
+
 #### (c) Cold start at `x = 0`
 
 Some op-amp / feedback circuits have a non-trivial DC operating point that `x = 0` is far from. Newton can wander before converging.

@@ -179,11 +179,11 @@ add no AC excitation. `trbdf2` lands on table knots and pulse corners.
 
 | Method | Signature |
 |---|---|
-| `add_mosfet` | `(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)` — linear switch model PLUS an anti-parallel body diode `<name>_body`, ON by default. Both are switching branches, so each `add_mosfet` takes **two** bits of the `SwitchStateMask`; use `builder.switch_index_of(name)` |
-| `add_mosfet_with_body_diode` | `(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)` |
-| `add_mosfet_level1` | `(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True)` |
+| `add_mosfet` | `(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)` — linear switch model PLUS an anti-parallel body diode `<name>_body`, ON by default; `V_F` is its conduction drop (`v_SD = V_F + i/1e3 S`). Both are switching branches, so each `add_mosfet` takes **two** bits of the `SwitchStateMask`; use `builder.switch_index_of(name)` |
+| `add_mosfet_with_body_diode` | `(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)` — `V_F` is the body diode's conduction drop (`v_SD = V_F + i/g_on_diode`) |
+| `add_mosfet_level1` | `(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True, V_F=0.7)` — `V_F` is the body diode's conduction drop |
 | `add_igbt` | `(name, collector, emitter, R_on=1e-2, R_off=1e9)` (linear) |
-| `add_igbt_level1` | `(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0)` |
+| `add_igbt_level1` | `(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0, V_F=0.7)` — `V_F` is the freewheeling diode's conduction drop |
 
 ## `DevicePool`
 

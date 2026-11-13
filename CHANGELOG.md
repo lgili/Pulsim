@@ -438,6 +438,69 @@ once, above the engine dispatch, and both engines consume that plan.
 * Not in this step: the `components()` entry, the induction machine, BLDC harmonics and flux maps
   (`openspec/changes/add-mna-native-machines/DECISIONS.md`).
 
+### BREAKING: composite MOSFET / IGBT diodes — `V_F` is a conduction drop
+
+* **Changed** `add_mosfet`, `add_mosfet_with_body_diode`,
+  `add_mosfet_level1` (body diode) and `add_igbt_level1(with_fwd=True)`
+  (freewheeling diode) build their diode as `add_diode(V_th=0, V_f=V_F)`
+  (PSIM style, the mapping `add_three_phase_vsi` uses): while on,
+  `v = V_F + i/g_on`. `V_F` used to be the turn-on threshold only, so a
+  conducting body diode dropped `i/g_on` and nothing else.
+  * 10 A through the body diode of `add_mosfet(V_F=0.7)`, gate off:
+    |v_SD| 0.010 V → 0.710 V, diode power 0.10 W → 7.10 W (`pwl`,
+    `trbdf2`, DC operating point). Gate on: unchanged (0.010 V, the
+    channel carries it).
+  * 24 V buck, D = 0.5, 100 kHz, freewheeling through a gate-off
+    `add_mosfet`: V_out 11.990 V → 11.640 V; body-diode loss over the
+    last 100 of 400 periods 3.442 W, on `pwl`, `trbdf2` and `dsed`.
+  * Level-1 diodes: the hard-coded 0.5 V threshold is gone. New keyword
+    `V_F=0.7` on `add_mosfet_level1` and `add_igbt_level1` (appended, so
+    positional calls keep working); they now turn on at 0.7 V, not 0.5 V.
+  * `V_F` must be finite and ≥ 0 when a diode is built; the error names
+    the builder, the device and `V_F`.
+  * YAML: `V_F` on `mosfet`, `mosfet_level1` (with `with_body_diode`)
+    and `igbt_level1` (with `v_knee`, `with_fwd`).
+  * Migration — the old diode was a 0.7 V threshold with no drop:
+    `b.add_switch("Q", d, s, 1/R_on, 1/R_off)` plus
+    `b.add_diode("Q_body", s, d, 1e3, 1e-9, V_th=0.7, V_f=0.0)`.
+    `V_F=0.0` gives a diode that turns on at 0 V with no drop. `add_igbt`
+    is unchanged (no diode).
+
+### Reference benchmark harness restored
+
+* **Added** a harness-only reader for the 126 `schema: pulsim-v1`
+  benchmark circuits (`benchmarks/tools/v1_reader.py`) and a triage of
+  every file (`benchmarks/manifests/v2_triage.yaml`): 107 run on
+  `engine='pwl'`, 15 are skipped by name, 4 fail on `pwl` and are
+  recorded. `benchmark_runner.py` runs on `pulsim.simulate` (the missing
+  backend module import is gone); `benchmark_ngspice.py` works again.
+* **Added** time-weighted metrics (`benchmarks/tools/metrics.py`), the
+  differential runner circuit × engine (`differential_runner.py`), 20
+  analytic reference circuits with closed-form or exact piecewise-LTI
+  solutions and per-engine ceilings (RC step: `pwl` 1.59e-3 at 10 µs,
+  `trbdf2` 2.3e-7; underdamped RLC: `pwl` 6.13e-4, `trbdf2` 9.2e-5),
+  golden checkpoints of `engine='pwl'` for 45 circuits (exact step count,
+  commutation count and switch-state digest; values within `rtol`
+  1e-9 / 1e-6), and a counter-based performance gate on the counters the
+  kernel already reports. No wall-clock assertion.
+* **CI**: job `reference-smoke` (three platforms, non-blocking until one
+  week green) and `.github/workflows/nightly-reference.yml` (full matrix
+  and ngspice, never gates a pull request). `make reference-smoke` /
+  `make reference-nightly`. The general Python job deselects marker
+  `reference`.
+
+### SPICE import: current-source sign
+
+* **Fixed** `spice_to_builder`: a SPICE current source `Iname n+ n- DC I`
+  drives `I` from `n+` through the source to `n-`, so it leaves the
+  source at `n-`. The importer passed the nodes unswapped to
+  `add_current_source` (which pushes `I` out of its first node), so
+  every imported current source had the wrong sign: `I1 0 a DC 1` into
+  `R1 a 0 1` gave v(a) = -1.000 V, now +1.000 V (ngspice: +1 V). Any
+  result of an imported netlist with a current source changes sign in
+  that source's contribution. The misleading comments on
+  `add_current_source` are corrected; the kernel is unchanged.
+
 ### Periodic steady state by Newton shooting on the true state (slice 1)
 
 * **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,

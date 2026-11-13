@@ -149,6 +149,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "doc_snippets: executes the python blocks of the user-facing docs (python/tests/test_doc_snippets.py)",
+    "reference: reference benchmark harness (analytic set, pwl goldens, counter gate); its own CI job",
 ]
 
 [tool.coverage.run]

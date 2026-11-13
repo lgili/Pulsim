@@ -108,7 +108,7 @@ LOCAL_LIMIT_MAX_RUNTIME ?=
         lib cli grpc python \
         test test-quick test-converters test-verbose test-list \
         pytest test-all test-coverage \
-        benchmark benchmark-converters benchmark-converters-baselines benchmark-ltspice benchmark-converters-compare benchmark-table benchmark-local-limit \
+        reference-smoke reference-nightly benchmark benchmark-converters benchmark-converters-baselines benchmark-ltspice benchmark-converters-compare benchmark-table benchmark-local-limit \
         clean distclean \
         install uninstall \
         format format-cpp format-python format-check \
@@ -150,6 +150,8 @@ help:
 	@echo "  make test-coverage  Run tests with coverage"
 	@echo ""
 	@echo "Benchmark targets:"
+	@echo "  make reference-smoke                Analytic set + pwl goldens + counter gate (PR job)"
+	@echo "  make reference-nightly              Differential matrix + ngspice parity (nightly job)"
 	@echo "  make benchmark                      Run converter runtime + LTspice parity and print table"
 	@echo "  make benchmark-converters           Run complex converter benchmarks (runtime only)"
 	@echo "  make benchmark-converters-baselines Run converter benchmarks and regenerate baselines"
@@ -300,6 +302,20 @@ test-coverage:
 # Benchmark Targets
 # =============================================================================
 benchmark: benchmark-converters-compare
+
+# restore-reference-benchmark-harness. Shared-machine rule: nice'd, one
+# process (the C++ side is not rebuilt here; build the bindings first).
+REF_NICE ?= nice -n 15
+reference-smoke:
+	@PYTHONPATH=$(BUILD_DIR)/python:benchmarks $(REF_NICE) $(PYTHON) -m pytest \
+		python/tests/test_benchmark_harness.py -q -m reference -p no:cacheprovider
+
+reference-nightly:
+	@mkdir -p benchmarks/out_reference
+	@PYTHONPATH=$(BUILD_DIR)/python $(REF_NICE) $(PYTHON) benchmarks/tools/differential_runner.py \
+		--out benchmarks/out_reference/results.json
+	@PYTHONPATH=$(BUILD_DIR)/python $(REF_NICE) $(PYTHON) benchmarks/tools/benchmark_ngspice.py \
+		--backend ngspice --quiet --output-dir benchmarks/out_reference/ngspice
 
 benchmark-converters: python
 	@echo "Running converter benchmarks (runtime only)..."

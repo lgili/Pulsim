@@ -366,6 +366,30 @@ and a PWL diode drops none. The output, `v(vout) - v(rect_neg)` over
 1.5-2 ms, is 5.785 V against 6.938 V with PWL diodes (-16.6 %).
 At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 
+### Reference benchmark suite: what runs on 2.0
+
+The harness reader maps 111 of the 126 `pulsim-v1` benchmark circuits;
+107 complete on `engine='pwl'`. Skipped (15): eight closed loops built
+from control blocks other than PI → PWM (`hysteresis`, `integrator`,
+`limiter`, `lookup_table`, `gain`, `pid_controller`, `rate_limiter`,
+`sample_hold`), four PLL / dq circuits, a p-channel MOSFET, the v1
+saturable-inductor law, and a MOSFET with a loss/thermal block. Failing
+on `pwl` (4): `buck_igbt` and `ll16_flyback_closed_loop` (Newton does
+not converge), `ll05_diode_rectifier_filter` (no consistent DC diode
+configuration), `ll13_active_clamp_forward` (no DC operating point).
+The differential matrix records 76 `disagree` / `error` cells over 60
+circuits (`known:` in `benchmarks/manifests/v2_triage.yaml`); each is an
+open finding, not a tolerance. Circuits whose v1 file has no `uic: true`
+start from the DC operating point, which `dsed` cannot take (refused).
+
+### First stored sample of algebraic nodes
+
+On `engine='pwl'` and `'trbdf2'` the first stored sample is the initial
+state, not the solution at `t = 0⁺`: an RL step reads 0 V across the
+inductor at `t = 0` where the answer is 10 V (`dsed` returns 10 V).
+Comparisons in the reference harness exclude that sample; the fix is the
+consistent-initial-conditions solve.
+
 ---
 
 ## Machines (`add-mna-native-machines`, step 1)
@@ -393,6 +417,20 @@ is not a validation, and it extrapolates outside its band as its last
 cell does.
 
 ---
+
+### Composite MOSFET / IGBT diodes: a zero-width band
+
+The body / freewheeling diodes of `add_mosfet`, `add_mosfet_with_body_diode`,
+`add_mosfet_level1` and `add_igbt_level1(with_fwd=True)` are
+`add_diode(V_th=0, V_f=V_F)`: they turn on and off at the same voltage
+(no hysteresis band). A diode that turns on from zero current at a
+dead time could chatter on `dsed`; an H-bridge of four `add_mosfet` with
+200 ns dead time settles (measured), and a run that does not settle
+raises a named error. For a band, build the device from `add_switch` and
+`add_diode(V_th=V_f + 1e-3, V_f=...)`. The composites keep a fixed
+1 mΩ diode slope (`g_on_diode` only on `add_mosfet_with_body_diode`).
+`add_igbt` is still a bidirectional switch with no knee and no diode;
+`add_igbt_level1` is the IGBT that blocks reverse current.
 
 ## Open OpenSpec proposals as of v1.3.0
 

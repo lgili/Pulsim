@@ -300,7 +300,9 @@ inline void load_device(
             require_real(dev, idx, type, "K"),
             require_real(dev, idx, type, "V_T"),
             real_or(dev, "lambda", Real{0.02}),
-            real_or(dev, "kappa",  Real{15.0}));
+            real_or(dev, "kappa",  Real{15.0}),
+            bool_or(dev, "with_body_diode", true),
+            real_or(dev, "V_F",    Real{0.7}));
     } else if (type == "vcvs") {
         b.add_vcvs(
             name,
@@ -406,7 +408,11 @@ inline void load_device(
             real_or(dev, "V_CE_sat", Real{1.5}),
             real_or(dev, "R_CE_sat", Real{0.05}),
             real_or(dev, "V_T",      Real{5.0}),
-            real_or(dev, "kappa",    Real{10.0}));
+            real_or(dev, "kappa",    Real{10.0}),
+            real_or(dev, "v_knee",   Real{0.01}),
+            bool_or(dev, "with_fwd", false),
+            Real{0}, Real{0},
+            real_or(dev, "V_F",      Real{0.7}));
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -543,7 +549,9 @@ inline void load_device(
             require_string(dev, idx, type, "drain"),
             require_string(dev, idx, type, "source"),
             real_or(dev, "R_on",  Real{1e-3}),
-            real_or(dev, "R_off", Real{1e9}));
+            real_or(dev, "R_off", Real{1e9}),
+            /*body_diode=*/true,
+            real_or(dev, "V_F",   Real{0.7}));
     } else if (type == "mosfet_with_body_diode") {
         b.add_mosfet_with_body_diode(
             name,

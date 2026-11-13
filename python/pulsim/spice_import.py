@@ -1014,7 +1014,9 @@ def spice_to_builder(text_or_path, *, strict: bool = False, charge: str = "keep"
             if spec["kind"] != "dc":
                 raise NotImplementedError(
                     "Time-varying current source from SPICE not yet supported by the importer")
-            b.add_current_source(designator, nodes[0], nodes[1], spec["value"])
+            # SPICE drives I from n+ through the source to n-, so it leaves at n-;
+            # add_current_source pushes I out of its FIRST node: swap them.
+            b.add_current_source(designator, nodes[1], nodes[0], spec["value"])
         elif kind == "D":
             _spice_diode(b, elem, nodes, notes, drops)
         elif kind == "M":

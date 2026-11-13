@@ -38,7 +38,7 @@ defaults.
 |-------|--------|------|-------|
 | `R_on` | 1 mΩ | 10 mΩ | Typical Si power device |
 | `R_off` | 1 GΩ | 1 GΩ | Leakage cap |
-| `V_F` (body diode) | 0.7 V | — | Si body diode |
+| `V_F` (body diode) | 0.7 V | — | Conduction drop: `v_SD = V_F + i/g_on_diode` while on |
 | `g_on_diode` | 1 kS | — | Matches `add_diode` default |
 | `g_off_diode` | 1 nS | — | Matches `add_diode` default |
 
@@ -54,7 +54,9 @@ Adds TWO branches in sequence:
    `g_off = 1/R_off`. Driven by `switch_fn(t)` at
    simulation time.
 2. Diode branch (source → drain — ANTI-PARALLEL!) with
-   `V_th = V_F`, `g_on = g_on_diode`,
+   `V_f = V_F` (conduction drop, PSIM style: `v = V_F +
+   i/g_on_diode` while on; it turns on at `V_F`), `V_th = 0`,
+   `g_on = g_on_diode`,
    `g_off = g_off_diode`. Auto-commutates via the V2
    diode-iteration loop.
 

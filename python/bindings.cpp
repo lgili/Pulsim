@@ -844,6 +844,7 @@ void init_module(py::module_& m) {
               py::arg("with_fwd") = false,
               py::arg("tau_tail") = 0.0,
               py::arg("k_tail")   = 0.0,
+              py::arg("V_F")      = 0.7,
               py::return_value_policy::reference,
               "Add a 3-terminal IGBT Level 1 (linear-"
               "conduction model with cutoff sigmoid). "
@@ -856,7 +857,9 @@ void init_module(py::module_& m) {
               "`with_fwd=True` for the co-packaged anti-"
               "parallel freewheeling diode, which an inductive "
               "load needs: without it there is no path for the "
-              "freewheeling current and the solve fails. Use "
+              "freewheeling current and the solve fails. `V_F` is "
+              "that diode's CONDUCTION DROP (v = V_F + i/1e3 S "
+              "while on; it turns on at V_F). Use "
               "`run_transient(..., enable_nonlinear_refresh="
               "True)` to stamp the device per Newton iteration. "
               "`tau_tail`/`k_tail` add the TURN-OFF TAIL: when the "
@@ -882,6 +885,7 @@ void init_module(py::module_& m) {
               py::arg("lambda_") = 0.02,
               py::arg("kappa")   = 15.0,
               py::arg("with_body_diode") = true,
+              py::arg("V_F") = 0.7,
               py::return_value_policy::reference,
               "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
               "Level 1). Cutoff/triode/saturation regions "
@@ -896,7 +900,9 @@ void init_module(py::module_& m) {
               "carries the current when the gate is off and an "
               "inductive load would otherwise have no path. "
               "Set `with_body_diode=False` for an eGaN HEMT, "
-              "which has no p-n body diode. Call "
+              "which has no p-n body diode. `V_F` is the body "
+              "diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while "
+              "on; it turns on at V_F). Call "
               "`run_transient` with "
               "`enable_nonlinear_refresh=True` so the Newton "
               "loop stamps the MOSFET each iteration.")
@@ -1098,8 +1104,9 @@ void init_module(py::module_& m) {
               "conducts in reverse through the channel, not a "
               "p-n junction) or for a bare switch. Defaults: "
               "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the "
-              "body diode's turn-on THRESHOLD (add_diode's V_th), "
-              "not a conduction drop.")
+              "body diode's CONDUCTION DROP (add_diode's V_f): "
+              "v_SD = V_F + i/1e3 S while on, and it turns on at "
+              "V_F.")
         .def("add_mosfet_with_body_diode",
               &builder::CircuitBuilder::add_mosfet_with_body_diode,
               py::arg("name"), py::arg("drain"),
@@ -1114,8 +1121,8 @@ void init_module(py::module_& m) {
               "intrinsic anti-parallel body diode. Adds "
               "TWO branches: switch (drain→source) + "
               "diode (source→drain). V_F is the body diode's "
-              "turn-on THRESHOLD (add_diode's V_th), not a "
-              "conduction drop.")
+              "CONDUCTION DROP (add_diode's V_f): v_SD = V_F + "
+              "i/g_on_diode while on, and it turns on at V_F.")
         .def("add_igbt",
               &builder::CircuitBuilder::add_igbt,
               py::arg("name"), py::arg("collector"),

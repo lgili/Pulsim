@@ -40,9 +40,9 @@ namespace pulsim::models {
 
 struct CurrentSource {
     struct Params {
-        Real I;   // amperes — current flowing FROM `from`
-                   // TO `to` (positive = conventional current
-                   // direction).
+        Real I;   // amperes — positive I leaves the source at
+                   // `from` and returns at `to` (flows through
+                   // the external circuit from `from` to `to`).
     };
 
     static constexpr topology::BranchKind kind =
