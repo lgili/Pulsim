@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed engine: restart/split checkpoint-review fixes
+
+* A restart stage-2 backward-Euler re-try that throws (now forced in a
+  test by a node singular exactly at its dt) keeps the SDIRK stage 2 as
+  before and now also warns (`UserWarning` naming
+  `stage2_retry_failures`); the three-phase rectifier then returns to the
+  pre-fallback 37.20 V bus peak, the number the warning protects.
+  `split_event_overflows` warns too.
+* `unlocated_gate_steps` no longer counts an opaque `switch_fn` edge that
+  falls on the grid point itself (it was taken where it is).
+* A `step_observer` that moves the declared `b_extra_fn` jumps is honoured
+  (the memo of the next jump is reset after it, as the gate oracle's was).
+* `n_restart_factorizations` counts every restart-stage refactor (split
+  sub-intervals, the stage-2 re-try). Results bit-identical; Newton
+  round-off counters still include solves a discarded re-try made.
+
 ### Ideal switch in branch form (add-branch-form-ideal-switch)
 
 * **BREAKING** (invalid values only) `add_switch`, `add_diode` and YAML

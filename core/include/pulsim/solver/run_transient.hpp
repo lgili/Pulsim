@@ -1161,6 +1161,9 @@ inline SimulationResult run_transient(
                 // schedule: its oracle answer is stale (review M3).
                 edge_from = std::numeric_limits<Real>::infinity();
                 edge_next = -std::numeric_limits<Real>::infinity();
+                // ... and so may its declared b_extra_fn jumps (review L6).
+                bj_from = std::numeric_limits<Real>::infinity();
+                bj_next = -std::numeric_limits<Real>::infinity();
             }
             gate_memo_n = 0;
             // ---- add-fixed-step-event-splitting: the step's events ----
@@ -1281,7 +1284,12 @@ inline SimulationResult run_transient(
             if (split && !next_edge_fn) {
                 // An opaque switch_fn: a gate change between two grid
                 // samples was not located (review M3).
-                if (have_prev_gate && !(mask_pre == prev_gate)) {
+                // Counted only when the change happened INSIDE the
+                // previous step (the gate at t_prev - snap is already the
+                // new mask); an edge exactly on the grid point t_prev was
+                // taken where it is (review L4).
+                if (have_prev_gate && !(mask_pre == prev_gate) &&
+                    gate_at(t_prev - snap) == mask_pre) {
                     ++result.unlocated_gate_steps;
                 }
                 prev_gate = mask_pre;
@@ -1447,7 +1455,9 @@ inline SimulationResult run_transient(
                     // `solve_at` delegates to `solve` bit-identically
                     // when the dt matches, so the nominal path costs
                     // nothing extra.
-                    if (restart_rule && for_dt == restart_dt) {
+                    // Every restart stage counts, the split's sub-interval
+                    // stages (dt_eq = 2γ·h_sub) included (review L8b).
+                    if (restart_rule && (for_dt == restart_dt || backward_euler)) {
                         const auto m0 = cache.metrics();
                         cache.solve_at(mask, for_dt, b_extra, x);
                         const auto m1 = cache.metrics();

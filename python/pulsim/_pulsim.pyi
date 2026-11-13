@@ -1483,7 +1483,7 @@ class SimulationResult:
     @property
     def n_restart_factorizations(self) -> int:
         """
-        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts). 0 with the rule off.
+        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
         """
     @property
     def n_restart_steps(self) -> int:

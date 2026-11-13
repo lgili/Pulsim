@@ -2671,7 +2671,10 @@ void init_module(py::module_& m) {
                        &SimulationResult::n_restart_factorizations,
                        "Factorisations made for the restart stages: one "
                        "per mask at 2*gamma*dt (more only if the segment "
-                       "byte budget evicts). 0 with the rule off.")
+                       "byte budget evicts), plus every refactor for a "
+                       "restart stage of another size (event-split "
+                       "sub-intervals, the stage-2 re-try). 0 with the "
+                       "rule off.")
         .def_readonly("n_split_steps", &SimulationResult::n_split_steps,
                        "Steps split at a gate edge, source jump or diode "
                        "crossing inside them "

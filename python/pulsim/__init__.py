@@ -783,11 +783,21 @@ _RESOLUTION_UNESTIMATED_MAX = 0.5
 
 
 def _warn_unlocated_edges(res):
-    """Event splitting without an edge oracle (review M3): say so once."""
+    """Fixed-step loop counters that mean a less accurate step: say so once.
+
+    * ``unlocated_gate_steps`` (review M3 / L4): a gate change from a
+      switch_fn without an edge oracle that happened INSIDE the previous
+      step (an edge exactly on the grid is not counted);
+    * ``split_event_overflows`` (L5): steps with more events than the
+      split takes; the rest were taken unsplit (first order there);
+    * ``stage2_retry_failures`` (M3): restart stage-2 backward-Euler
+      re-tries that failed, so the SDIRK stage 2 they were checking was
+      kept (it may carry an overshoot of the diode mode change).
+    """
     c = getattr(res, "counters", None) or {}
+    import warnings
     n = c.get("unlocated_gate_steps", 0)
     if n:
-        import warnings
         warnings.warn(
             f"simulate(enable_substep_state_correction=True): {n} gate "
             "change(s) came from a switch_fn without next_edge_after(t) "
@@ -795,6 +805,23 @@ def _warn_unlocated_edges(res):
             "at the next grid point (first order there). Give the "
             "schedule an oracle (make_pwm_switch_fn & co. have one) or "
             "put the edges on the dt grid. See res.counters.",
+            UserWarning, stacklevel=3)
+    n = c.get("split_event_overflows", 0)
+    if n:
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} step(s) "
+            "had more events than the event split takes (8 per step); "
+            "the events beyond it were taken unsplit, first order there. "
+            "Reduce dt. See res.counters['split_event_overflows'].",
+            UserWarning, stacklevel=3)
+    n = c.get("stage2_retry_failures", 0)
+    if n:
+        warnings.warn(
+            f"simulate(discontinuity_restart=True): {n} restart step(s) "
+            "changed a diode's mode in SDIRK stage 2 and the backward-Euler "
+            "re-try that checks it failed; the SDIRK stage 2 was kept and "
+            "may overshoot the mode change. Reduce dt. See "
+            "res.counters['stage2_retry_failures'].",
             UserWarning, stacklevel=3)
 
 
