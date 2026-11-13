@@ -167,8 +167,9 @@ cases:
     trbdf2:
       ceiling: 7.52e-06
       measured: 3.761e-06
-    dsed:
-      known: error
+    dsed:  # was known: error (the stored-sample diode guard); the complementarity guard repairs it (batch 6a)
+      ceiling: 1.14e-08
+      measured: 5.694e-09
       reason: 'exact-propagator slice 1 settles D ON through -0.85 A reverse current after the 2nd cycle
         (err_rms 0.3995, silently); the integration batch-4 diode-law guard turns that into DiodeModeInconsistentError
         (before the slice: "did not settle after 64 rounds")'

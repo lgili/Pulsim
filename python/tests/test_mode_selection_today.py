@@ -91,11 +91,12 @@ def test_boost_zero_threshold_dsed_settle_is_wrong_and_the_guard_repairs_it(R, s
     (was: the default run == the settle's wrong number, 43.70907 / 23.67304 V)."""
     import pulsim._dsed_dispatch as DD
     b, fn = _boost(0.0, R)
-    DD.MODE_GUARD = False
+    check = DD.check_diode_modes                 # the stored-sample guard would name it
+    DD.MODE_GUARD, DD.check_diode_modes = False, (lambda *a, **k: None)
     try:
         v_settle = _end(p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn), "out")
     finally:
-        DD.MODE_GUARD = True
+        DD.MODE_GUARD, DD.check_diode_modes = True, check
     assert v_settle == pytest.approx(settle, abs=1e-6)
     assert REF_BOOST[R] - v_settle > 0.1
     r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)

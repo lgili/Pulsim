@@ -58,16 +58,16 @@ diagnostic below explains a disagreement and never decides one.
 
 | circuit | engine | frozen | now | err_rms |
 |---|---|---|---|---:|
-| diodes/diode_half_wave_rl_load.yaml | dsed | error | agree | 0.000135 |
 | switching/buck_boost/sepic.yaml | pwl | agree/refused | error |  |
 | switching/buck_boost/sepic.yaml | trbdf2 | agree/refused | error |  |
 
 ### Edge diagnostic of every cell that disagrees on the gate
 
-`edge err`: err_rms with the steps holding a recorded switch-state change (either
-trace) and the source-forced nodes left out; `undersampled` when more than
+`worst observable`: the one with the largest strict err_rms. `edge err`: err_rms
+with the steps holding a recorded switch-state change (either trace) and the
+source-forced nodes left out; `undersampled` when more than
 10% of the span is excluded, `chatter` when one trace records more than
-2x the other's switch-state changes. `timing`: max |t_edge - t_edge,ref| over
+2x the other's switch-state changes, `missed edges` when one never switches. `timing`: max |t_edge - t_edge,ref| over
 matched switching instants (`unmatched`: an instant without a partner), in s and in
 the engine's `dt` (pwl). Edge err within the tolerance and timing <= 1 step: the
 cell disagrees by edge timing; edge err above it: the states differ.
@@ -306,12 +306,18 @@ by default). Strict gate: 85 / 15 / 8 / 0 vs pwl 77 / 23 and pwl+restart
 82 / 18. Of the late-gate-edge cells only `cascaded_h_bridge_5level`
 agrees (0.0142; the rule alone 0.0402). `vcswitch_resistor` 0.0332,
 `ll07` 0.0997, `ll09` 0.0585, `ll10` 0.0496 and `ll12` 0.0806 still
-disagree, but their edge errors fall from the rule's 0.013-0.057 to
-5.9e-7-6.5e-3, and their timing falls from 1.5-2 steps to 1 step. The
-worst observable is the source-forced gate node (`V(ctrl*)`), sampled
-on the step grid. The states agree. What still differs is the recorded
-edge instant, one step late. The split alone cleared `boost_pfc_open_loop`
-(0.0304 -> 1.1e-5) and `dual_active_bridge` (0.0812 -> 5.8e-4).
+disagree on the strict gate, but their edge errors fall from the rule's
+0.013-0.057 to 1.1e-21-6.5e-3 (all within 2e-2), and their timing falls
+from 1.5-2 steps to 1 step (0.99 on `vcswitch_resistor`). The worst
+observable is the source-forced gate node (`V(ctrl*)`, or `V(out)` of the
+resistive stage), sampled on the step grid. Read with the diagnostic:
+the states agree off the edges; what still differs is the recorded edge
+instant, one step late. The gate is not changed for it, so these cells
+stay `disagree` and stay frozen. The split alone cleared
+`boost_pfc_open_loop` (0.0304 -> 1.1e-5) and `dual_active_bridge`
+(0.0812 -> 5.8e-4). `pwl+restart` went from 81 / 19 to 82 / 18 with
+this merge: `three_phase_diode_rectifier` 2.17 -> 6.3e-3 (53141080,
+the restart rule no longer overshoots a diode rectifier bus).
 
 **Integration batch 6a: the gate is strict again, 2026-11-13.** Batch 5
 (e076241b) gated on an `edge` measure that left out every step holding a
@@ -356,13 +362,29 @@ Reading the diagnostic: the nine pwl cells re-frozen above, `ll09` /
 within 2e-2, worst observable a PWM source node or the output of a
 resistive stage); `half_bridge_transformer_dc`, `ll06`, `ll08`, DAB,
 `cuk`, `synchronous_flyback` and the three-phase rectifier on pwl have
-an edge error above the tolerance (the states differ), flyback and
-forward on pwl `chatter`; dsed's switching-rate traces are
-`undersampled` (86-100 % of the span in switching steps).
+an edge error above the tolerance (the states differ); flyback, forward
+and `boost_pfc_open_loop` on pwl are `chatter`; dsed's switching-rate traces are
+`undersampled` (16-100 % of the span in switching steps).
+
+**Complementarity mode selection merged (11ab8e95, batch 6a).** On the
+strict gate pwl, pwl+restart and trbdf2 are unchanged cell for cell
+(and bit-identical); dsed goes from 38 / 17 / 14 / 39 to
+39 / 17 / 13 / 39: `diode_half_wave_rl_load` error
+(`DiodeModeInconsistentError`) -> agree 1.35e-4 (the kernel guard
+repairs 2 events), and the analytic `halfwave_rl` error -> 5.7e-9. No
+`disagree` cell moves: the dsed disagreements are interpolation of
+switching-rate samples (`undersampled`, 16-100 % of the span in
+switching steps), sit on a source node, or are linear-source accuracy
+(`pulse_voltage_rl` V(out) 1.97e-3, `core_loss_steinmetz_sine` I(L1)
+0.0106, 0 % excluded); none moved with the guard.
+The other 13 dsed `error` cells are unchanged: 8 "diode configuration
+did not settle" (the settle fails before the guard judges anything) and
+5 "no meaningful progress".
 
 Measured 2026-11-13 on `feat/core-integration-wip` (integration batch 4:
 phase0b harness + composite diode drop + exact-propagator slice 1).
-Event splitting is not on this tree, so it has no column.
+The paragraphs below are the batch-4 record; numbers that have moved
+since are marked.
 
 **Against the harness as frozen on feat/core-phase0b.** pwl 77 / 23 / 7
 and trbdf2 89 / 11 / 2 / 5 are unchanged. dsed moved from 31 / 16 / 17 /
@@ -376,23 +398,28 @@ only because the exact stepper's sparse samples are interpolated across
 edges (pointwise < 5e-5 of span).
 
 **What the restart rule does on pwl (23 disagreements with the flag
-off).** It removes 5: `current_source_rl_step`, `rl_natural_response`
-(5.8e-3 -> 4e-5), `half_bridge_transformer_dc` (0.151 -> 4.6e-4),
-`high_q_rlc_ringdown` (0.0228 -> 0.0149) and `synchronous_flyback`
-(0.207 -> 1.6e-6). It cuts DAB 3.58 -> 0.081, flyback 0.95 -> 0.11,
-forward 0.71 -> 0.092, MMC 0.046 -> 0.026, CHB 0.041 -> 0.027 without
-reaching 2e-2. The analytic set goes from 19/20 to 20/20
-(`hard_switched_rc` 0.01 -> 4.9e-5; the linear and switched cases drop 40-20000x).
+off).** On the strict gate today (table above) it removes 6:
+`current_source_rl_step`, `rl_natural_response` (5.8e-3 -> 4e-5),
+`half_bridge_transformer_dc` (0.151 -> 4.6e-4), `high_q_rlc_ringdown`
+(0.0229 -> 0.0149), `synchronous_flyback` (0.207 -> 1.01e-6) and, since
+the b6 merge, `three_phase_diode_rectifier` (1.51 -> 6.3e-3). It cuts
+DAB 3.58 -> 0.081, flyback 0.95 -> 0.11 and forward 0.71 -> 0.092
+without reaching 2e-2. It makes `cascaded_h_bridge_5level` (0.0142 ->
+0.0402, now disagree) and `mmc_4cell_chain` (0.0255 -> 0.0369) worse:
+the late-gate-edge effect below. (The batch-4 record had MMC 0.046 ->
+0.026 and CHB 0.041 -> 0.027 against the older reference.) The analytic
+set goes from 19/20 to 20/20 (`hard_switched_rc` 0.01 -> 4.9e-5; the
+linear and switched cases drop 40-20000x).
 
-The 18 left, by cause (convergence at dt, dt/4, dt/16 with the flag on;
-per-observable errors):
+The 18 left with the flag on, by cause (convergence at dt, dt/4, dt/16
+with the flag on; per-observable errors):
 
 | cause | circuits | evidence |
 |---|---|---|
 | PWM source node as observable (still in the gate since batch 6a; the edge diagnostic leaves it out) | ll06, ll07, ll09, ll10, ll12 (`V(ctrl*)`); also the switch nodes below | an ideal square-wave source node nobody reads; the tight reference itself scores 0.06-0.11 against rtol 1e-10/1e-11 on it, and it does not converge with dt (ll09 0.164 / 0.155 / 0.155) |
 | first-order off-grid edges -> event splitting | vcswitch_resistor, boost_pfc_open_loop, full_bridge_dc, flying_capacitor_3level, t_type_3level, DAB, forward, flyback; the switch nodes of ll06/07/09/10/12 | error falls about 2x per 4x dt (order 1/2 in this metric across a jump; order 1 in the states): DAB 0.081 / 0.016 / 0.0045, t-type 0.074 / 0.038 / 0.019, ll06 V(sw) 0.118 / 0.051 / 0.028 |
 | resolution only (linear, trapezoidal) | transformer_leakage | 4.1e-3 / 3e-4 / < 1e-4: second order, dt too coarse for the 1e-3 tolerance |
-| real defect of the restart rule (diode decision inside the SDIRK window) | three_phase_diode_rectifier (1.51 off -> 2.17 on) | the start charges 1 mF through 5 mOhm (tau 5 us, dt 50 us). Flag off: trapezoidal overshoot to 34.0 V. Flag on: 37.2 V, above every source (24 V peak), then the diodes are OFF and it decays. Likely cause (not proven): stage 2 starts from x0* = x0 + 2.41 (x1 - x0), and its diode event iteration decides on that extrapolated, non-physical state. Converges at dt/4 (0.018), dt/16 (1e-4) |
+| real defect of the restart rule (diode decision inside the SDIRK window); FIXED by 53141080 (b6 merge): 2.17 -> 6.3e-3 on, agrees; the batch-4 evidence follows | three_phase_diode_rectifier (1.51 off -> 2.17 on, batch 4) | the start charges 1 mF through 5 mOhm (tau 5 us, dt 50 us). Flag off: trapezoidal overshoot to 34.0 V. Flag on: 37.2 V, above every source (24 V peak), then the diodes are OFF and it decays. Likely cause (not proven): stage 2 starts from x0* = x0 + 2.41 (x1 - x0), and its diode event iteration decides on that extrapolated, non-physical state. Converges at dt/4 (0.018), dt/16 (1e-4) |
 | re-measured 2026-11-13 (batch 6a), strict / edge diagnostic at dt, dt/4, dt/16 against trbdf2 rtol 1e-8 | cascaded_h_bridge_5level, mmc_4cell_chain: they DO converge (the batch-4 row said they did not; the reference has since moved) | CHB, flag off: strict 0.0142 / 0.0082 / 0.0046 (order 0.40, 0.42 per 4x), edge 2.4e-12 at all three, timing 0.58 / 0.31 / 0.24 steps; flag on: strict 0.040 / 0.017 / 0.0083 (0.60, 0.53), edge 0.030 / 0.011 / 0.0047, timing 1.6 / 1.3 / 1.2 steps. MMC, flag off: strict 0.0255 / 0.0125 / 0.0071 (0.51, 0.40), edge 1.3e-8, timing 0.79 / 0.46 / 0.86 steps; flag on: strict 0.037 / 0.019 / 0.011 (0.47, 0.41), edge 0.019 / 0.011 / 0.0073. Order 1/2 in the strict RMS is first order in the edge instant on a resistive output; the edge diagnostic is blind to it (0 with the flag off) |
 | does not converge with dt: the circuit and the reference are suspect, open | cuk_converter | strict = edge 0.233 / 0.232 / 0.226 (flag off), 0.463 / 0.461 / 0.448 (on); timing 557 dt at every dt, so a commutation is displaced, not late. The reference accepts 3163 steps at h_min above tolerance and both engines put node `mid` at 2.6e4-3.5e6 V (an inductor current cut by the diode); V(out) over 1.5-2 ms is 11.92 V (reference) vs 17.19 V (pwl dt/16) where the file's comment expects -12 V |
 
@@ -407,9 +434,9 @@ every physical state). Independent checks: dsed (exact, dense output)
 agrees with the reference to 4.8e-5 pointwise on ll09, 6e-7 on ll10
 I(Lload), and lands on rtol 1e-10 on ll07; pwl at dt/64 converges to it
 on all five. The "disagreements" are the PWM-node metric artefact plus
-first-order edge error on pwl, except ll07 on trbdf2 at default
-tolerance (rtol 1e-6): I(L1) drifts linearly to 7.8e-3 of span, a real
-accuracy shortfall (the error scales with rtol). Side finding: ll09 and
+first-order edge error on pwl. (Batch 4: ll07 on trbdf2 at default
+tolerance drifted linearly to 7.8e-3 of span in I(L1); since the TR-BDF2
+merge it agrees at 1.2e-4.) Side finding: ll09 and
 ll10 read `phase: 0.5` as radians (v1 semantics), so the low-side gate
 is shifted 3.98 us, not half a period, and both switches conduct for
 about 20 us of every 50 us (shoot-through, about 1000 A); the reader

@@ -138,6 +138,13 @@ def test_a_chattering_trace_is_reported_chatter_not_agree():
     assert d["excluded_frac"] > 0.3
 
 
+def test_a_trace_that_never_switches_is_missed_edges_not_chatter():
+    t = np.linspace(0.0, 1.0, 101)
+    ref = (t, {"y": np.ones_like(t)}, _sw(t, (t * 4).astype(int) % 2))  # 3 edges
+    eng = (t, {"y": np.ones_like(t)}, _sw(t, np.zeros_like(t)))
+    assert dr.diagnose(eng, ref, ["y"], 1e-3)["edge"] == "missed edges"
+
+
 def test_union_of_excluded_steps_covering_the_span_does_not_raise():
     # Each trace alone switches on less than half its span; together they
     # cover it all (the old measure raised "every interval excluded").

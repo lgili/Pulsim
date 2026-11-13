@@ -27,10 +27,10 @@ circuits:
   circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
   circuits/diodes/diode_bridge_rectifier.yaml: {status: runs}
   circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}
-  # dsed: the exact-propagator slice 1 runs it silently wrong (D1 held OFF while forward-biased by
-  # 10 V, V(out) off by 0.97 of span pointwise); the diode-law guard raises
-  # DiodeModeInconsistentError (before the slice: "did not settle").
-  circuits/diodes/diode_half_wave_rl_load.yaml: {status: runs, known: {dsed: error}}
+  # dsed: the exact-propagator slice 1 ran it silently wrong (D1 held OFF while forward-biased by
+  # 10 V); batch 4 raised DiodeModeInconsistentError; since the complementarity guard (batch 6a)
+  # the kernel repairs the 2 events and it agrees (1.35e-4).
+  circuits/diodes/diode_half_wave_rl_load.yaml: {status: runs}
   circuits/diodes/diode_rectifier.yaml: {status: runs}
   circuits/diodes/half_wave_rectifier_sine.yaml: {status: runs}
   circuits/diodes/ll05_diode_rectifier_filter.yaml: {status: error, match: "PWL diode states never settled", reason: "pwl: RuntimeError: compute_dc_operating_point: the PWL diode states never settled — 16 rounds of re-solving still flip at least one diode. The ci"}
