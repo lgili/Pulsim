@@ -358,6 +358,21 @@ TEST_CASE("Passivity: coupled inductors, ideal transformer, VCVS",
         REQUIRE(c.kind == "InductorCoupling");
         REQUIRE(std::string(c.name()) == "non_passive");
     }
+    SECTION("two couplings on one pair add, as the assembly stamps them") {
+        // k = 0.8 twice on L1-L2 simulates M = 1.6·sqrt(L1·L2): eigenvalue
+        // 1 - 1.6 < 0 mH. Each coupling alone is PSD; the check must sum.
+        builder::CircuitBuilder b;
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0);
+        b.add_inductor("L1", "a", "gnd", 1e-3);
+        b.add_inductor("L2", "s", "gnd", 1e-3);
+        b.add_inductor_coupling("L1", "L2", 0.8);
+        b.add_inductor_coupling("L1", "L2", 0.8);
+        rect(b);
+        const auto c = cls(b);
+        REQUIRE_FALSE(c.passive());
+        REQUIRE(c.device == "L1+L2");
+        REQUIRE(c.kind == "InductorCoupling");
+    }
     SECTION("an ideal transformer is passive, not reciprocal") {
         builder::CircuitBuilder b;
         b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0);

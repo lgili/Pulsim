@@ -179,6 +179,17 @@ choices it did not pin.
     (shadow_survey + extra_circuits, 29 circuits × settle / guard /
     'lcp' = 87 runs) is bit-identical to 11ab8e95
     (`probes/survey_bit_identity.out`); `bit_identity.py` 36/36. → Reverse: restore `if (g == 0) continue;` in both locators.
+    Review (fresh-context, read-only): no Zeno loop — a zero start is
+    located only in `(t0 + d, t1]` and the predicate that fired at `t0`
+    is skipped, so each zero start advances time by `d`. Residual risks,
+    recorded in KNOWN_LIMITATIONS and not changed: `d = 1e-6·h` when
+    `h_e = 0` (guard off), so a diode sliding on its threshold advances
+    slowly until the chatter detector stops it; a zero start leaving
+    toward its event side is skipped for the step (the decision at `t0`
+    owns it; unjudged without the guard); current zero-crossing and
+    custom predicates at zero are still skipped (as before);
+    `last_fired_*` is not reset between two `simulate()` calls on one
+    `PEDSimulator` (Python builds a new one per run).
 
 
 20. **Cost gate on a 60-diode bank (task 8.3): the guard is affordable.**

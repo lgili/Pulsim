@@ -106,6 +106,11 @@ def exact_route(builder, t_end: float, switch_fn=None, **simulate_kwargs) -> dic
         if getattr(e, "feature", "") == "extraction":
             return from_err("extraction", e)
         raise
-    segs = (r.exact or {}).get("segments", [])
+    if r.exact is None:
+        # no tier record (a numeric integrator was asked for): "exact" would be a guess
+        raise ValueError(
+            "exact_route: this run kept no exact-tier record (it took integrator="
+            f"{kw.get('integrator')!r}); leave `integrator` unset (the event integrator, 'rk45').")
+    segs = r.exact.get("segments", [])
     bad = [s for s in segs if not s["exact"]]
     return {"exact": not bad, "reason": bad[0]["reason"] if bad else None, "segments": segs}

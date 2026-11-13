@@ -938,7 +938,9 @@ public:
                 const auto& p = cps[e].params;
                 L(r, r) = p.L_p;
                 L(c, c) = p.L_s;
-                L(r, c) = L(c, r) = models::TwoWindingTransformer::mutual_inductance(p);
+                // couplings on one pair add, as the assembly stamps them (assemble.hpp)
+                L(r, c) += models::TwoWindingTransformer::mutual_inductance(p);
+                L(c, r) = L(r, c);
             }
             const Real lmax = L.diagonal().cwiseAbs().maxCoeff();
             Eigen::SelfAdjointEigenSolver<DenseMatrix> es(L, Eigen::EigenvaluesOnly);

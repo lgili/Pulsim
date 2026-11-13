@@ -257,8 +257,14 @@ task 4.2). The guard and the LCP decide at events; a commutation the
 event locator misses is not decided. A diode predicate that starts a
 step at exactly zero is located from the side it leaves to over the
 first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is
-not seen. The guard repairs only the modes it judges inconsistent over
-`1e4·h_e`; a mode consistent that long and wrong later is not caught.
+not seen, nor is a predicate at zero that leaves toward its event side
+(a mode the decision at that instant should have set). With the guard
+off (`h_e = 0`) the read-ahead is `1e-6·h`, so a diode sliding on its
+threshold advances by that much per event until the chatter detector
+stops it. Current zero-crossing and custom predicates starting at zero
+are still skipped for the step. The guard repairs only the modes it
+judges inconsistent over `1e4·h_e`; a mode consistent that long and
+wrong later is not caught.
 
 ### `mode_selection='lcp'` on a bridge whose DC bus floats on leak resistors
 

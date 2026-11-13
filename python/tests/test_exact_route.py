@@ -170,3 +170,13 @@ def test_capability_check_takes_the_exact_name():
         with pytest.raises(p.UnsupportedError) as ei:
             k._require_supported(b.graph, b.pool, eng)
         assert (ei.value.engine, ei.value.device) == ("dsed", "Dsh")
+
+
+def test_a_run_without_a_tier_record_is_not_reported_exact():
+    # integrator='bdf2' keeps no exact-tier record: the route is unknown, not "exact"
+    with pytest.raises(ValueError, match="no exact-tier record"):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "a", "gnd", 1.0)
+        b.add_resistor("R", "a", "o", 1e3)
+        b.add_capacitor("C", "o", "gnd", 1e-6)
+        p.exact_route(b, 1e-3, integrator="bdf2")
