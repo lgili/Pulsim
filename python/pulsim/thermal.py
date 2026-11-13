@@ -270,9 +270,13 @@ def compute_temperature(t: np.ndarray,
                                   point_index=n)
         delta = 0.0
         for i, s in enumerate(stages):
-            alpha = math.exp(-dt / s.tau_s)
-            state[i] = alpha * state[i] + \
-                          s.R_th_K_per_W * (1.0 - alpha) * p[n]
+            # n = 0 is the start (at ambient): heating P[0] there put
+            # the trace one sample ahead of t (1.90 K at t = 0 for 20 W
+            # into 1 K/W, tau = 1 s, dt = 0.1 s).
+            if n > 0:
+                alpha = math.exp(-dt / s.tau_s)
+                state[i] = alpha * state[i] + \
+                              s.R_th_K_per_W * (1.0 - alpha) * p[n]
             delta += state[i]
         T_out[n] = T_amb_C + delta
     return T_out
@@ -314,11 +318,11 @@ def add_cauer_thermal_network(builder,
                                     name_prefix: str = "Th") -> None:
     """Embed a Cauer RC ladder using direct (R, C) parameters.
 
-    Identical topology to :func:`add_foster_network` (R between
-    consecutive nodes, C from each node to ambient) but takes
-    :class:`CauerStage` (R + C) instead of :class:`FosterStage`
-    (R + τ). Convenient when the user has material-stack thermal
-    values rather than impedance-fit values.
+    R between consecutive nodes, C from each node to ambient (a
+    Foster network, :func:`add_foster_network`, puts each C across its
+    own R instead). Takes :class:`CauerStage` (R + C). Convenient when
+    the user has material-stack thermal values rather than
+    impedance-fit values.
 
     Example
     -------
@@ -476,8 +480,11 @@ def add_foster_network(builder,
         builder.add_resistor(f"{name_prefix}_R{k}",
                                 prev, curr,
                                 float(s.R_th_K_per_W))
+        # Across its own R (Foster). To ambient it was a Cauer ladder:
+        # 10 W into (0.05, 1e-4), (0.3, 5e-3), (0.8, 0.5) read 0.016 K
+        # at 1 ms against the Foster 1.06 K.
         builder.add_capacitor(f"{name_prefix}_C{k}",
-                                  curr, ambient_node,
+                                  curr, prev,
                                   float(s.C_th_J_per_K))
         prev = curr
 
@@ -1289,7 +1296,9 @@ def add_shared_heatsink(
             curr = f"{pfx}_Tj" if k == n - 1 else f"{pfx}_stage{k}"
             builder.add_resistor(f"{pfx}_R{k}", prev, curr,
                                     float(s.R_th_K_per_W))
-            builder.add_capacitor(f"{pfx}_C{k}", curr, ambient_node,
+            # Foster stage: C across its own R; Cauer stage: C to ambient.
+            c_ref = prev if isinstance(s, FosterStage) else ambient_node
+            builder.add_capacitor(f"{pfx}_C{k}", curr, c_ref,
                                       float(s.C_th_J_per_K))
             prev = curr
         # When there are no junction-to-case stages, junction ≡ case.
