@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -220,6 +220,73 @@ class PreflightOptions:
     @tie_resistance.setter
     def tie_resistance(self, arg0: float) -> None:
         ...
+class ChargeTable:
+    """
+    Monotone charge law Q(v) for a nonlinear capacitor: knots (v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the exact derivative of Q(v). Not odd; linear tails at the end-knot slopes; one knot must sit at v = 0 with Q = 0. Fritsch-Carlson monotonicity is checked and a violating tangent clamped.
+    """
+    @staticmethod
+    def from_capacitance(v: collections.abc.Sequence[float], C: collections.abc.Sequence[float]) -> ChargeTable:
+        """
+        From (v, C) pairs, e.g. a digitised datasheet curve: Q is the exact integral of the monotone cubic interpolant of C. Use pulsim.datasheet.fit_charge_table to get a table with a checked residual.
+        """
+    def __init__(self, v: collections.abc.Sequence[float], Q: collections.abc.Sequence[float], C: collections.abc.Sequence[float]) -> None:
+        """
+        From triples: voltages [V], charges [C], capacitances [F].
+        """
+    def capacitance(self, v: float) -> float:
+        """
+        C(v) = dQ/dv [F], exact derivative of charge().
+        """
+    def charge(self, v: float) -> float:
+        """
+        Q(v) [C].
+        """
+    @property
+    def c_knots(self) -> list[float]:
+        """
+        Knot tangents after Fritsch-Carlson clamping.
+        """
+    @property
+    def clamped_tangents(self) -> int:
+        ...
+    @property
+    def q_knots(self) -> list[float]:
+        ...
+    @property
+    def v_knots(self) -> list[float]:
+        ...
+class ChargeLaw:
+    """
+    A nonlinear capacitor's charge law: junction C0/(1+v/V0)^m, a ChargeTable, or the SPICE VDMOS gate-drain law. Build one with ChargeLaw.junction / .table / .vdmos_cgd and pass it to add_nonlinear_capacitor or as add_power_mosfet's C_gd / C_ds.
+    """
+    @staticmethod
+    def junction(C0: float, V0: float, m: float = 0.5, v_floor: float = -0.9) -> ChargeLaw:
+        """
+        C(v) = C0 / (1 + v/V0)^m (C0 [F], V0 [V]).
+        """
+    @staticmethod
+    def table(table: ChargeTable) -> ChargeLaw:
+        """
+        Charge law from a ChargeTable.
+        """
+    @staticmethod
+    def vdmos_cgd(cgd_max: float, cgd_min: float, a: float) -> ChargeLaw:
+        """
+        ngspice VDMOS C_gd(v_gd): s = (CGDMAX-CGDMIN)/(1+pi/2), C = CGDMAX - s + s*tanh(a*u) for u > 0, CGDMAX - s + s*atan(a*u) for u <= 0.
+        """
+    def capacitance(self, v: float) -> float:
+        """
+        C(v) = dQ/dv [F].
+        """
+    def charge(self, v: float) -> float:
+        """
+        Q(v) [C].
+        """
+    @property
+    def kind(self) -> str:
+        """
+        'junction', 'table' or 'vdmos_cgd'.
+        """
 class CircuitBuilder:
     """
     High-level v2 circuit constructor. Hides the two-object Graph + DevicePool setup; users pass string node names and SI-unit parameter values.
@@ -292,11 +359,17 @@ class CircuitBuilder:
         """
         N-winding LINEAR coupled-inductor transformer, no ceiling: windings = [(from, to, L), ...], k_matrix = N x N couplings in [0, 1] (upper triangle read; empty = 1 everywhere). Couplings that are not realisable (inductance matrix not positive definite) are refused by name. Branch k is named name + '.w' + k.
         """
+    @typing.overload
     def add_nonlinear_capacitor(self, name: str, n_pos: str, n_neg: str, C0: float, V0: float, m: float = 0.5, v_floor: float = -0.9) -> CircuitBuilder:
         """
         Charge-based nonlinear capacitor — a MOSFET's Coss: C(v) = C0 / (1 + v/V0)^m.
 
         What decides ZVS is the CHARGE Q(V) = int C dv, not the small-signal C a datasheet quotes at the operating point: for C0 = 2 nF, V0 = 25 V, m = 0.5 at 400 V those differ by 1.61x, which is the difference between a dead time that reads as clean ZVS and one that leaves the node at 209 V when the switch turns on (17 uJ per edge). m = 0 gives an ordinary linear capacitor, exactly — useful for the A/B.
+        """
+    @typing.overload
+    def add_nonlinear_capacitor(self, name: str, n_pos: str, n_neg: str, law: ChargeLaw) -> CircuitBuilder:
+        """
+        Charge-based nonlinear capacitor with an explicit ChargeLaw (junction, table or vdmos_cgd). Stamped in charge form, so charge is conserved over any cycle.
         """
     def add_nonlinear_diode(self, name: str, anode: str, cathode: str, params: IdealDiodeParams) -> CircuitBuilder:
         """
@@ -309,6 +382,10 @@ class CircuitBuilder:
     def add_pmsm_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, R_s: float, L_d: float, L_q: float, psi_pm: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0) -> CircuitBuilder:
         """
         Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5).
+        """
+    def add_power_mosfet(self, name: str, drain: str, source: str, gate: str, *, K: float, V_T: float, lambda_: float = 0.0, kappa: float = 15.0, R_d: float = 0.0, C_gs: float, C_gd: typing.Any, C_ds: typing.Any, R_g: float = 0.0, L_s: float = 0.0, body_diode: typing.Any = None, T_j: float = 25.0, rds_tc1: float = 0.0, rds_tc2: float = 0.0, vt_tc: float = 0.0) -> CircuitBuilder:
+        """
+        Datasheet power MOSFET as one call: Level-1 channel (K [A/V^2], V_T [V], third quadrant by terminal swap), drift resistance R_d [ohm], C_gs [F], C_gd and C_ds (float = linear farads, 0 = absent; or a ChargeTable / ChargeLaw), internal gate resistance R_g [ohm], common source inductance L_s [H], body_diode None or {'model': 'lauritzen'|'shockley', ...}. T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). Sub-elements: name (channel), name.rd/.rg/.ls/.cgs/.cgd/.cds, name_body. Runs on pwl (time step must resolve the gate transient: ~0.2 ns for a 60 ns plateau) and trbdf2. components() reports one 'power_mosfet' entry.
         """
     def add_pulse_voltage_source(self, name: str, n_pos: str, n_neg: str, v_initial: float, v_pulsed: float, t_start: float, pulse_width: float, period: float = 0.0, rise_time: float = 0.0, fall_time: float = 0.0) -> CircuitBuilder:
         """

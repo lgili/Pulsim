@@ -29,6 +29,7 @@
 #include "pulsim/models/inductor.hpp"
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
+#include "pulsim/models/power_mosfet.hpp"
 #include "pulsim/models/vcvs.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
@@ -1355,6 +1356,95 @@ public:
         return *this;
     }
 
+    // ---- add-power-mosfet-datasheet-device -----------------------------
+    /// A charge-based nonlinear capacitor with an explicit law (junction,
+    /// `ChargeTable`, or the VDMOS C_gd closed form) — Python binds it as
+    /// the `add_nonlinear_capacitor(name, n_pos, n_neg, law)` overload; see
+    /// models/nonlinear_capacitor.hpp. Same device kind as the junction
+    /// overload above — same history, same stamp, same engines.
+    CircuitBuilder& add_nonlinear_capacitor_law(
+        std::string_view name,
+        std::string_view from, std::string_view to,
+        const models::NonlinearCapacitor::Params& law) {
+        try {
+            models::NonlinearCapacitor::validate(law);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_nonlinear_capacitor(\"{}\"): {}", name, e.what()));
+        }
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx, topology::BranchKind::Nonlinear);
+        pool_.add_nonlinear_capacitor(b_id, law);
+        return *this;
+    }
+
+    /// Datasheet power MOSFET as a composite (models/power_mosfet.hpp):
+    /// Level-1 channel, R_d, C_gs, C_gd(v_gd), C_ds(v_ds), R_g, optional
+    /// L_s and a Shockley or Lauritzen body diode, at a run-constant T_j.
+    /// Pins in the house order (drain, source, gate), as add_mosfet_level1.
+    CircuitBuilder& add_power_mosfet(
+        std::string_view name,
+        std::string_view drain, std::string_view source,
+        std::string_view gate,
+        const models::PowerMosfet::Params& p) {
+        using PM = models::PowerMosfet;
+        PM::validate(p, name);
+        const std::string n{name};
+        const Real r = PM::r_of_T(p);
+        PM::Record rec;
+        rec.name = n;
+        rec.drain = std::string{drain};
+        rec.source = std::string{source};
+        rec.gate = std::string{gate};
+        rec.params = p;
+        rec.K_eff = p.K / r;
+        rec.V_T_eff = PM::V_T_of_T(p);
+        rec.R_d_eff = p.R_d * r;
+        const std::string dn = p.R_d > Real{0} ? n + ".d" : std::string{drain};
+        const std::string gn = p.R_g > Real{0} ? n + ".g" : std::string{gate};
+        const std::string sn = p.L_s > Real{0} ? n + ".s" : std::string{source};
+        auto sub = [&](std::string s_) { rec.sub_elements.push_back(s_); return s_; };
+        if (p.R_d > Real{0}) add_resistor(sub(n + ".rd"), drain, dn, rec.R_d_eff);
+        if (p.R_g > Real{0}) add_resistor(sub(n + ".rg"), gate, gn, p.R_g);
+        if (p.L_s > Real{0}) add_inductor(sub(n + ".ls"), sn, source, p.L_s);
+        add_mosfet_level1(sub(n), dn, sn, gn, rec.K_eff, rec.V_T_eff,
+                          p.lambda, p.kappa, /*with_body_diode=*/false);
+        const Index channel = branch_id_of(n);
+        if (p.C_gs > Real{0}) add_capacitor(sub(n + ".cgs"), gn, sn, p.C_gs);
+        auto add_cap = [&](const PM::Capacitance& c, const std::string& cn,
+                           const std::string& a, const std::string& b) {
+            if (const Real* x = std::get_if<Real>(&c)) {
+                if (*x > Real{0}) add_capacitor(sub(cn), a, b, *x);
+            } else {
+                add_nonlinear_capacitor_law(
+                    sub(cn), a, b,
+                    std::get<models::NonlinearCapacitor::Params>(c));
+            }
+        };
+        add_cap(p.C_gd, n + ".cgd", gn, dn);
+        add_cap(p.C_ds, n + ".cds", dn, sn);
+        if (p.body == PM::BodyDiode::Shockley) {
+            const auto& d = p.shockley;
+            add_shockley_diode(sub(n + "_body"), sn, dn,
+                               d.I_S, d.n, d.V_T, d.G_min, d.BV);
+        } else if (p.body == PM::BodyDiode::Lauritzen) {
+            const auto& d = p.lauritzen;
+            add_lauritzen_diode(sub(n + "_body"), sn, dn,
+                                d.I_S, d.n, d.V_T, d.tau, d.T_M, d.G_min);
+        }
+        power_mosfets_.emplace(channel, std::move(rec));
+        return *this;
+    }
+
+    /// The power-MOSFET record whose channel is `branch_id`, or nullptr.
+    [[nodiscard]] const models::PowerMosfet::Record*
+    power_mosfet_record(Index branch_id) const {
+        const auto it = power_mosfets_.find(branch_id);
+        return it == power_mosfets_.end() ? nullptr : &it->second;
+    }
+
     CircuitBuilder& add_saturable_inductor(
         std::string_view name,
         std::string_view from, std::string_view to,
@@ -1895,6 +1985,8 @@ private:
     // Alias storage. Mutable through `set_alias`; consulted by the
     // canonical lookups (`node_id_of`, `branch_id_of`).
     std::unordered_map<std::string, AliasTarget> aliases_;
+    // add-power-mosfet-datasheet-device: channel branch id -> composite.
+    std::unordered_map<Index, models::PowerMosfet::Record> power_mosfets_;
 };
 
 }  // namespace pulsim::builder

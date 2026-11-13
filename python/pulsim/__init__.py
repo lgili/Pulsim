@@ -331,6 +331,10 @@ from .spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
+# add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
+from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
+from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
 from .electrothermal import (
     TempCoResistance,
@@ -707,6 +711,11 @@ __all__ = [
     "parse_spice_value",
     "parse_spice_netlist",
     "spice_to_builder",
+    "ChargeLaw",
+    "ChargeTable",
+    "DoublePulseResult",
+    "double_pulse_metrics",
+    "double_pulse_test",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
     "NativeLiveStream",

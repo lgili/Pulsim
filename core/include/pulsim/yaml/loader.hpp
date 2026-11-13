@@ -509,6 +509,110 @@ inline void load_device(
             require_string(dev, idx, type, "to"),
             N_turns, A_core, l_m, real_or(dev, "l_gap", Real{0}), ja,
             /*substeps_min=*/8, real_or(dev, "M0", Real{0}));
+    } else if (type == "power_mosfet") {
+        // add-power-mosfet-datasheet-device. Strict keys: a misspelt
+        // parameter would otherwise silently take its default.
+        auto strict = [&](const YAML::Node& node, const std::string& where,
+                          std::initializer_list<std::string_view> keys) {
+            for (const auto& kv : node) {
+                const auto k = kv.first.as<std::string>();
+                bool ok = false;
+                for (auto a : keys) ok = ok || k == a;
+                if (!ok) {
+                    throw std::runtime_error(std::format(
+                        "yaml::load: device {}: unknown key '{}' in {}",
+                        device_label(dev, idx), k, where));
+                }
+            }
+        };
+        strict(dev, "power_mosfet",
+               {"type", "name", "drain", "source", "gate", "K", "V_T",
+                "lambda", "kappa", "R_d", "C_gs", "C_gd", "C_ds", "R_g",
+                "L_s", "body_diode", "T_j", "rds_tc1", "rds_tc2", "vt_tc"});
+        auto reals = [&](const YAML::Node& n, const std::string& f) {
+            if (!n[f] || !n[f].IsSequence()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: '{}' must be a list of numbers",
+                    device_label(dev, idx), f));
+            }
+            return n[f].as<std::vector<Real>>();
+        };
+        auto cap = [&](const std::string& f) -> models::PowerMosfet::Capacitance {
+            const YAML::Node n = dev[f];
+            if (!n) return Real{0};
+            if (n.IsScalar()) return n.as<Real>();
+            const std::string law = n["law"] ? n["law"].as<std::string>() : "";
+            if (law == "junction") {
+                strict(n, f, {"law", "C0", "V0", "m", "v_floor"});
+                return models::NonlinearCapacitor::junction(
+                    require_real(n, idx, type + "." + f, "C0"),
+                    require_real(n, idx, type + "." + f, "V0"),
+                    real_or(n, "m", Real{0.5}), real_or(n, "v_floor", Real{-0.9}));
+            }
+            if (law == "vdmos_cgd") {
+                strict(n, f, {"law", "cgd_max", "cgd_min", "a"});
+                return models::NonlinearCapacitor::vdmos_cgd(
+                    require_real(n, idx, type + "." + f, "cgd_max"),
+                    require_real(n, idx, type + "." + f, "cgd_min"),
+                    require_real(n, idx, type + "." + f, "a"));
+            }
+            if (law == "table") {
+                strict(n, f, {"law", "v", "Q", "C"});
+                const std::string what = std::format("{}.{}", name, f);
+                auto t = n["Q"]
+                    ? models::ChargeTable(reals(n, "v"), reals(n, "Q"), reals(n, "C"), what)
+                    : models::ChargeTable::from_capacitance(reals(n, "v"), reals(n, "C"), what);
+                return models::NonlinearCapacitor::from_table(
+                    std::make_shared<const models::ChargeTable>(std::move(t)));
+            }
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: {} must be a number (linear, F) or a "
+                "map with law: junction | vdmos_cgd | table (got law '{}')",
+                device_label(dev, idx), f, law));
+        };
+        models::PowerMosfet::Params p;
+        p.K = require_real(dev, idx, type, "K");
+        p.V_T = require_real(dev, idx, type, "V_T");
+        p.lambda = real_or(dev, "lambda", Real{0});
+        p.kappa = real_or(dev, "kappa", Real{15});
+        p.R_d = real_or(dev, "R_d", Real{0});
+        p.C_gs = require_real(dev, idx, type, "C_gs");
+        p.C_gd = cap("C_gd");
+        p.C_ds = cap("C_ds");
+        p.R_g = real_or(dev, "R_g", Real{0});
+        p.L_s = real_or(dev, "L_s", Real{0});
+        p.T_j = real_or(dev, "T_j", Real{25});
+        p.rds_tc1 = real_or(dev, "rds_tc1", Real{0});
+        p.rds_tc2 = real_or(dev, "rds_tc2", Real{0});
+        p.vt_tc = real_or(dev, "vt_tc", Real{0});
+        if (const YAML::Node bd = dev["body_diode"]; bd && !bd.IsNull()) {
+            const std::string model = bd["model"] ? bd["model"].as<std::string>() : "";
+            if (model == "lauritzen") {
+                strict(bd, "body_diode", {"model", "I_S", "n", "V_T", "tau", "T_M", "G_min"});
+                p.body = models::PowerMosfet::BodyDiode::Lauritzen;
+                auto& L = p.lauritzen;
+                L.I_S = real_or(bd, "I_S", L.I_S); L.n = real_or(bd, "n", L.n);
+                L.V_T = real_or(bd, "V_T", L.V_T); L.tau = real_or(bd, "tau", L.tau);
+                L.T_M = real_or(bd, "T_M", L.T_M); L.G_min = real_or(bd, "G_min", L.G_min);
+            } else if (model == "shockley") {
+                strict(bd, "body_diode", {"model", "I_S", "n", "V_T", "G_min", "BV"});
+                p.body = models::PowerMosfet::BodyDiode::Shockley;
+                auto& S = p.shockley;
+                S.I_S = real_or(bd, "I_S", S.I_S); S.n = real_or(bd, "n", S.n);
+                S.V_T = real_or(bd, "V_T", S.V_T); S.G_min = real_or(bd, "G_min", S.G_min);
+                S.BV = real_or(bd, "BV", S.BV);
+            } else {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: body_diode.model must be "
+                    "'lauritzen' or 'shockley' (got '{}')",
+                    device_label(dev, idx), model));
+            }
+        }
+        b.add_power_mosfet(
+            name,
+            require_string(dev, idx, type, "drain"),
+            require_string(dev, idx, type, "source"),
+            require_string(dev, idx, type, "gate"), p);
     } else {
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +
@@ -519,7 +623,7 @@ inline void load_device(
             "inductor, saturable_inductor, hysteretic_inductor, "
             "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "igbt, igbt_level1, vcvs, op_amp_ideal, "
+            "power_mosfet, igbt, igbt_level1, vcvs, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor");
     }
