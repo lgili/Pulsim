@@ -18,6 +18,10 @@ default value); time-weighted averages on adaptive grids (owner note
 
 ## Goals / Non-Goals
 
+- First slice: runs on today's kernel (resistor-pair switches, `dsed`
+  and `trbdf2`, `periodic_steady_state` slice 1); its tests use only
+  what is integrated. The ideal-switch and exact-route numbers improve
+  the KPIs' smoothness later without changing the contract.
 - Goals: one evaluation contract; deterministic, thread-safe records;
   typed failures an optimiser can consume; a closed `T_j` loop now and
   a path to the in-kernel loop; batch evaluation; one worked example a

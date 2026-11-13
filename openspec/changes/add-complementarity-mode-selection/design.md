@@ -72,7 +72,7 @@ diode without hysteresis is `V_f` (`w = 0` at `i_d = 0`).
 the negative thresholds that today make a diode with `V_f = 0` conduct
 early, has none; such a value is accepted and ignored with a
 deprecation warning during the legacy period and refused afterwards
-(`UnsupportedError(engine, 'V_th', device, 'diode')`).
+(`UnsupportedError(engine, 'V_th', device, 'Diode')`).
 
 ### D2. The LCP: ports of the companion network at the event step
 
@@ -95,8 +95,12 @@ with `K` the MNA matrix of the companion network with every port open,
 `E` the port incidence and `b` the right-hand side holding the state.
 This is the rational complementarity problem of linear complementarity
 systems at `σ = 1/h_e` (Heemels, Camlibel, Schumacher; general
-knowledge): for small `h_e` its solution is the mode the trajectory
-takes on `(t, t + ε)`, including the impulsive ones.
+knowledge): when the RCP has a unique solution for all large `σ`
+(guaranteed with every `R_on > 0`, D3), its solution for small `h_e` is
+the mode the trajectory takes on `(t, t + ε)`, including the impulsive
+ones. With `R_on = 0` uniqueness can fail; D5's widening and D6's
+consistency check are what protect that case, and the prototype's five
+families are the evidence, not a theorem.
 
 `K` does not exist when a port is the only path (two diodes in series
 with nothing between them, an inductor whose only path is a diode). The
@@ -134,10 +138,14 @@ the exchanged pairs and therefore preserves this property. Consequences
 - With every `R_on > 0` the matrix is positive definite, a P-matrix,
   and the solution is unique.
 - With `R_on = 0` the port currents can be non-unique (two ideal
-  diodes in parallel); the port voltages are not affected, and the
-  state trajectory is not affected; the kernel splits the current by
-  the minimum-norm rule and reports the split as non-unique in the
-  event record.
+  diodes in parallel). For a reciprocal network (`M` symmetric: R, L,
+  C, coupled inductors, independent sources, switches) the port
+  voltages and the state trajectory are still unique; the kernel splits
+  the current by the minimum-norm rule and reports the split as
+  non-unique in the event record. Gyrators and the ideal transformer
+  are passive but not reciprocal (`M` non-symmetric PSD): the
+  voltages can then be non-unique too, and the event record reports it
+  (task 5.1 classifies these kinds).
 
 **Non-passive networks**: controlled sources with gain, negative
 resistors, an op-amp macro-model. `M` is then not certified, Lemke can
@@ -148,9 +156,15 @@ For a non-passive circuit it uses Lemke first and, on a secondary ray,
 enumerates the `2^k` modes for `k ≤ 12` (4096 solves, each one
 back-substitution in the event's factor); above 12 it raises
 `UnsupportedError(engine, 'non_passive_ports', device, kind)` (`kind`
-the device kind, as everywhere in the capability table)
+the device kind of the capability table, e.g. `'VCVS'`)
 naming the controlled sources that make it non-passive. Enumeration is
 also the test oracle for every `k ≤ 12` circuit in the suite.
+
+Enumeration outcomes: no complementary mode → the typed "no
+consistent mode" error, as for a secondary ray on a passive circuit;
+several → the mode with the fewest flips from the previous mode, ties
+broken by port order, with `nonunique_modes` counted in the
+diagnostics.
 
 ### D4. Solver: Lemke with the lexicographic rule
 
@@ -240,10 +254,12 @@ error (the prototype counter `immediate`; 0 over all families).
 
 ### D8. Hysteresis `V_th > V_f`
 
-Not prototyped. A diode that is OFF with `V_th > V_f` is held OFF in
-the LCP (its port fixed OFF) while its open-circuit voltage is below
-`V_th`; an event is scheduled at `v = V_th` and the LCP is posed again
-there with the port free. A diode that is ON stays a free port, so
+Not prototyped. A diode that is OFF with `V_th > V_f` enters the LCP
+with its port fixed OFF; the solution gives its voltage `v` in the
+selected mode. If `v ≥ V_th` the port is released and the LCP is posed
+once more; otherwise it stays OFF and its crossing signal becomes
+`v − V_th`, located as a state event. This is a bounded re-solve (at
+most one per hysteresis port per event), not a settle loop. A diode that is ON stays a free port, so
 turn-off is at `i_d = 0` as for every diode. This reproduces today's
 meaning of a threshold above the drop. Task 6 adds the test before the
 behaviour is claimed.
@@ -278,10 +294,13 @@ With ideal diodes OFF, a sub-network that only diodes and open
 switches connect to the rest (the DC side of a rectifier between
 conduction intervals) has an undefined potential: the dynamics do not
 depend on it and the diode gaps constrain it only to an interval.
-Today the leak picks a value and the engines disagree (1.9e-10 V on
-`trbdf2`, 47.586 V on `pwl` and `dsed`, same `v_C = 95.1711 V`;
-`probes/today_dsed.py`). The kernel:
+Today the leak picks a value and the engines disagree: `v(p)` at
+0.2 s reads 0.000000 V on `trbdf2`, 47.585852 V on `pwl` and
+47.585559 V on `dsed` (`probes/today_dsed.out`). The kernel:
 
+- applies only to islands bounded by OFF diodes with `g_off = 0`;
+  with a leak the island's potential is set by the leak divider and is
+  reported as solved;
 - detects the gauge directions per mode (the null space of the mode's
   constraint Jacobian that moves no state; prototype `Mode`);
 - uses gauge-free event predicates: the gap of a diode on the island is
@@ -347,7 +366,16 @@ reference harness.
 - Shadow disagreements may be many on circuits that today run only
   thanks to a band → the shadow report is the evidence for each one;
   none is silently accepted.
-- Hysteresis not prototyped (D8) → a test precedes the claim.
+- Hysteresis not prototyped (D8) → a test precedes the claim, and the
+  shadow comparison on banded circuits waits for it (task 3.4).
+- The tie tolerance at circuit scale is coarse in current: on the
+  single-phase bridge `tol_w·σ·C_max ≈ 1e-7 V × 5e7 s⁻¹ × 1e-3 F ≈
+  5 mA`, so a genuinely small current can be classified as a tie and
+  decided by widening → task 3.2 measures the classified-tie currents
+  against the prototype's, and a tie decided differently from a
+  10× smaller `tol_w` is counted.
+- Gyrators and ideal transformers (passive, not reciprocal) → D3; the
+  non-unique-voltage case is reported, not silently split.
 
 ## Open Questions
 

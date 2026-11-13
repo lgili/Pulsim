@@ -269,3 +269,19 @@ default flip, for one release.
   `engine='exact'`
 - **THEN** the states are bit-identical and the route records name the
   exact strategy
+
+### Requirement: Restart Rule Uses One Extra Factor Per Mode
+
+The restart rule SHALL be three consecutive Alexander SDIRK(2,2) steps
+(`γ = 1 − 1/√2`) whose stage matrix is the trapezoidal matrix keyed by
+`factor_dt = 2γh`, cached per mode like any other factor, and SHALL
+supersede the backward-Euler half-step pair, which SHALL remain only as
+the legacy restart policy.
+
+#### Scenario: One extra factor per mode
+- **GIVEN** a buck on the fixed grid that visits 3 modes, with the
+  restart rule after every event
+- **WHEN** it runs for 100 periods
+- **THEN** the factorisation counter shows at most one factor per
+  `(mode, h)` and one per `(mode, 2γh)` (sub-step factors of
+  event splitting counted separately)

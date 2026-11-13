@@ -8,7 +8,8 @@ network that problem has a solution that a pivoting method finds in a
 finite number of steps. The kernel does not pose it. Every engine
 settles the diodes by re-solving the network and re-applying the value
 law of `SwitchedDiode::decide` (ON stays ON while `g_on·(v − V_f) > 0`,
-OFF turns ON at `v ≥ max(V_th, V_f)`), round after round, with a
+OFF turns ON at `v ≥ V_on`, `V_on = V_th` when `V_f = 0`, else
+`max(V_th, V_f)`), round after round, with a
 64-round cap, a 64-entry mask-cycle detector, a chatter guard that
 aborts after 32 commutations in a zero-length interval, and the advice
 to add a hysteresis band `V_th > V_f` when it fails (owner notes
@@ -41,9 +42,10 @@ engine, and its band is still a tolerance (`1e-12 × max node voltage`).
 
 The two engines that do run these circuits disagree on what they
 cannot know: with the diodes off, the DC side of a bridge has no
-defined potential, and `v(p)` reads 1.9e-10 V on `trbdf2` against
-47.586 V on `pwl` and `dsed`, with the same `v_C = 95.1711 V`
-(`probes/today_dsed.py`). The leak `g_off` decides it, not physics.
+defined potential, and `v(p)` at 0.2 s reads 0.000000 V on `trbdf2`
+against 47.585852 V on `pwl` and 47.585559 V on `dsed`
+(`probes/today_dsed.out`). The leak `g_off` and each engine's
+numerics decide it, not physics.
 
 Prototype (`probes/lcp_core.py`, `probes/lcp_cases.py`, output in
 `probes/lcp_cases.out`; numpy / scipy / mpmath): ideal switches and
@@ -60,7 +62,7 @@ propagation between events:
 | DCM buck, L·(1 ± δ), δ = 1e-5, 1e-4, 1e-2 | 6 runs | 2 | 0 | all complete |
 | boost CCM, 20 000 periods | 40 179 | 2 / 0.01 | 0 | 2.5e-12 V, 6.2e-13 A from the mpmath orbit |
 | boost DCM (500 Ω), 4000 periods | 11 958 | 2 / 0.66 | 0 | completes |
-| single-phase bridge, C filter, `V_f = 0.7` and 0 | 40 / 39 | 6 / 3.6 | 0 | 39 event times within 1.1e-14 s of the closed form |
+| single-phase bridge, C filter, `V_f = 0.7` / `V_f = 0` | 40 / 39 | 6 / 3.61, 6 / 3.90 | 0 | 39 event times within 1.1e-14 s of the closed form |
 | three-phase bridge, `L_s`, 10 A load (overlap) | 36 | 4 / 2.8 | 0 | 36 commutation times within 4.0e-15 s of `1 − cos μ = 2ωL_sI_d/(√3·V_m)` |
 | three-phase bridge, C filter, C from 0 V | 60 | 5 / 3.0 | 0 | 56 event times within 8.1e-15 s; inrush impulse 14.758 J recorded at t = 0 |
 
@@ -107,7 +109,7 @@ consistent (series-pair turn-offs, the rest state).
   result; then `'lcp'` opt-in; then the default, engine by engine.
 - **BREAKING (at the default flip only):** `V_th < V_f` with `V_f = 0`
   (a negative threshold) is no longer a distinct law; the ON branch of
-  the conductance-form diode gains `g_off·v` (below 1e-9·v at the
+  the conductance-form diode gains `g_off·v` (1e-9 S × v at the
   default leak) so that the law is monotone; runs that aborted with
   "did not settle" or "is chattering" complete.
 
@@ -133,8 +135,9 @@ consistent (series-pair turn-offs, the rest state).
   (saltation at a diode event uses the mode the LCP returns).
 - Cost per event: one solve with a cached factor when the previous
   mode is still consistent (zero pivots — 67 % of the DCM buck's events
-  and 98 % of the boost's), plus one solve and O(k) dense work per
-  pivot otherwise; at most 6 pivots per event over the five families.
+  and 99.6 % of the CCM boost's), plus one solve and O(k) dense work
+  per pivot otherwise; at most 6 pivots per event over the five
+  families (15 when the tie re-solves are counted).
   Estimates for C++ are gated in tasks.md, not claimed.
 - Competitor behaviour (general knowledge, not measured): PLECS and
   PSIM model ideal switches and diodes and resolve commutations without

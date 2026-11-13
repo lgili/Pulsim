@@ -88,10 +88,10 @@ currents or capacitor voltages dependent, from the state that conserves
 flux linkage on every inductor cut-set and charge on every capacitor
 loop, through one re-initialisation service shared by every strategy:
 the exact propagator SHALL apply the projection explicitly and continue
-on the reduced state of the mode, and the implicit strategies SHALL
-realise it with the restart rule of three consecutive Alexander
-SDIRK(2,2) steps and SHALL NOT take the first step after such an event
-with the trapezoidal rule. The service SHALL record for the event the
+on the reduced state of the mode, and the implicit strategies (the
+fixed trapezoid and TR-BDF2) SHALL realise it with the restart rule of
+three consecutive Alexander SDIRK(2,2) steps and SHALL NOT take the
+first step after such an event with a trapezoidal rule or stage. The service SHALL record for the event the
 devices, the kind of constraint, the transferred flux or charge and the
 energy removed, SHALL mark the pulse sample in the result, and SHALL
 apply the `on_impulse` policy (`'warn'` by default, `'error'`,

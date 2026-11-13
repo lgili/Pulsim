@@ -41,8 +41,7 @@ selection service when `mode_selection='lcp'` is in effect.
 - **WHEN** it is simulated on `pwl`, `trbdf2` and `dsed` with
   `mode_selection='lcp'`
 - **THEN** the sequence of diode modes is identical on the three
-  engines and the overlap angle is 15.479928° within the engine's event
-  tolerance
+  engines and the overlap angle is 15.479928° within 1e-3° on each
 
 ### Requirement: Mode Selection Termination And Infeasibility
 
@@ -66,12 +65,15 @@ chatter guard on the selection path.
   consistent conduction state exists
 
 #### Scenario: Non-passive refusal
-- **GIVEN** a circuit with 13 diodes and a voltage-controlled voltage
-  source of gain 10 inside the diode network, on which Lemke ends at a
-  secondary ray
-- **WHEN** an event requires a selection
+- **GIVEN** a circuit classified non-passive by a VCVS, whose 13-port
+  problem at an event is replaced through the service's test entry
+  point by `M = −I₁₃`, `q = −1` (no solution: Lemke ends at a secondary
+  ray)
+- **WHEN** the selection runs
 - **THEN** `pulsim.UnsupportedError` is raised with `feature =
-  'non_passive_ports'` and the VCVS named as `device`
+  'non_passive_ports'`, the VCVS as `device` and `kind = 'VCVS'`
+- **AND** the same problem with 2 ports (`M = −I₂`, `q = −1`) is
+  enumerated and raises the "no consistent mode" error
 
 ### Requirement: Mode Selection Tie Resolution
 
@@ -90,7 +92,7 @@ counted in `result.diagnostics`.
 ### Requirement: Floating Islands As A Gauge
 
 The kernel SHALL treat the potential of a sub-network connected to the
-rest only through OFF diodes as a gauge: it SHALL locate diode
+rest only through OFF diodes with `g_off = 0` as a gauge: it SHALL locate diode
 crossings on gauge-free combinations of gaps, SHALL report the
 island's potential at the centre of the interval its OFF diodes allow,
 and SHALL list the island's nodes in
@@ -98,12 +100,13 @@ and SHALL list the island's nodes in
 open gated switches SHALL remain a floating-node error.
 
 #### Scenario: DC side of a rectifier between conduction intervals
-- **GIVEN** the single-phase bridge with ideal diodes
+- **GIVEN** the single-phase bridge with ideal diodes (`g_off = 0`)
 - **WHEN** it is simulated on `pwl`, `trbdf2` and `dsed`
 - **THEN** the reported potential of the positive DC node in a
   non-conducting interval agrees between the three engines within
-  1e-9 V (today: 1.9e-10 V on `trbdf2` against 47.586 V on `pwl` and
-  `dsed`) and the node is listed as a gauge node
+  1e-9 V (today, with the leak: 0.000000 V on `trbdf2` against
+  47.585852 V on `pwl` and 47.585559 V on `dsed`) and the node is
+  listed as a gauge node
 
 ### Requirement: Mode Selection Shadow Mode
 
@@ -115,7 +118,8 @@ number of settle rounds and the pivots. The states of a shadow run
 SHALL be bit-identical to a run without the option.
 
 #### Scenario: Shadow on a banded circuit
-- **GIVEN** the DCM buck with `V_th = 1e-2` on `dsed`
+- **GIVEN** the DCM buck with `V_th = 1e-2` on `dsed` (requires the
+  hysteresis handling of the selection, since `V_th > V_f = 0`)
 - **WHEN** it is simulated with and without `mode_selection='shadow'`
 - **THEN** the states are bit-identical and the shadow report lists 0
   disagreements

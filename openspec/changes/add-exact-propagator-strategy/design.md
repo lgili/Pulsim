@@ -314,7 +314,10 @@ An eligible segment is propagated exactly; otherwise it is taken by
 the implicit strategy (D12) and the reason is recorded. With an
 explicit `engine='exact'` (alias `'dsed'`) a segment that is not
 eligible is refused with `UnsupportedError(engine, feature, device,
-kind)` naming the failed rule, unless `allow_implicit_segments=True`.
+kind)` naming the failed rule in `feature` (`'device'`, `'source'`,
+`'extraction'`, `'cost'`) and the offending device and its kind where
+there is one (`device = ''`, `kind = ''` for `'cost'` and for a source
+function), unless `allow_implicit_segments=True`.
 This supersedes Applicability rule 3 (`n_state ≤ 64`) and task 12.2's
 placeholder: size is a cost question, answered by D13. The spec
 requirement "Applicability Limit" keeps its form (a limit, a route
@@ -334,8 +337,12 @@ names is the D13 cost rule, not a state count.
   each accepted implicit step and its first success schedules an
   event at that step's end). There is no mid-step switch.
 - **Entry to an implicit segment** is a discontinuity of the vector
-  field, so the implicit strategy starts with the restart rule (three
-  consecutive Alexander SDIRK(2,2) steps) from the exact state. **Entry
+  field, so the implicit strategy starts with its post-event restart
+  from the exact state: the restart rule (three consecutive Alexander
+  SDIRK(2,2) steps) on the fixed trapezoid, and on TR-BDF2 the restart
+  of `update-trbdf2-post-event-restart` — or SDIRK(2,2) × 3 when the
+  entry event has dependent states (`add-branch-form-ideal-switch`
+  D4). **Entry
   to an exact segment** gathers the reduced state per device (D5) and
   applies the re-initialisation service if the new mode has dependent
   states.
@@ -359,7 +366,7 @@ first visit: segment length / `h`):
 | Kernel | Setup | Per step | Exact? |
 |---|---|---|---|
 | dense modal (tier 1) / dense Padé (tier 2) | ≈ `2n³·(6 + log₂‖A·h‖₁)` flops, `48n²` bytes cached | `2n²` | yes |
-| action of the exponential (truncated Taylor with scaling, Al-Mohy & Higham 2011) | none | ≈ `2·nnz·m`, `m ≈ ‖A·h‖₁ + 10` matvecs | yes (to the tolerance `u`) |
+| action of the exponential (truncated Taylor with scaling, Al-Mohy & Higham 2011) | none | ≈ `2·nnz·m` with `m` the kernel's own predicted matvec count, growing about linearly in `‖A·h‖₁` (measured: 20 at 2, 2492 at 1e3) | yes (to the tolerance `u`) |
 | implicit hand-over (TR-BDF2, or trapezoid on a fixed grid) | one sparse LU | one solve | no (second order) |
 
 Rule, per mode at its first visit (re-evaluated when `N_m` changes by a

@@ -442,12 +442,12 @@ run():
                                                     watch = crossing signals of the mode; returns at e.t
                                                     or at the first located state event before it
      t = t_hit
-     handle every event at t (D2 order of add-unified-event-queue):
-        samples → record (no mode change)
+     handle every event at t (order of add-unified-event-queue D10):
         ticks → controller outputs; gate edges; breakpoints
         mode = selector.select(gates(t⁺), x, mode, t)          one LCP
         x = reinit.apply(mode, x, t)                           projection, record
-        seg.restart()                                          SDIRK(2,2) × 3 on the implicit strategies
+        seg.restart()                                          post-event restart (D9)
+        samples → record x(t⁺) (no mode change)
 ```
 
 The implicit inner loop is D4 with two changes: step 2
@@ -462,12 +462,23 @@ the event).
 |---|---|---|---|
 | Exact propagator | linear / PWL segments (default) | none (exact flow; the projection is explicit) | none needed; tier and route recorded |
 | Trapezoid, fixed grid | `engine='pwl'`, and implicit segments of a fixed-`dt` run | three consecutive Alexander SDIRK(2,2) steps after every discontinuity | none (fixed grid) |
-| TR-BDF2 | `engine='trbdf2'`, and implicit segments of an `auto` run | post-event restart (`update-trbdf2-post-event-restart`) | LTE (`update-trbdf2-error-control`) |
+| TR-BDF2 | `engine='trbdf2'`, and implicit segments of an `auto` run | post-event restart (`update-trbdf2-post-event-restart`); SDIRK(2,2) × 3 after an event with dependent states | LTE (`update-trbdf2-error-control`) |
 | Backward Euler | the `bdf1` entry point (D4 table) | — | — |
 
 `StageSpec` already expresses an SDIRK stage: `E/(γh) − J` is the
 trapezoidal matrix at `factor_dt = 2γh`, so the restart uses the
-factor cache with no new factor kind.
+factor cache with no new factor kind; it is one more cached factor
+per mode (key `2γh`), not the nominal one.
+
+Superseded by this section: D2's statement that the restart rule is
+`BackwardEuler::stage(h/2, …)` twice reusing the nominal factor, and
+the scenario "Restart half-steps reuse the nominal factor" of the
+requirement "Single-Factor TR-BDF2 And Cached Fixed Factor
+Preserved". Both describe the backward-Euler pair, which the restart
+rule of three consecutive Alexander SDIRK(2,2) steps replaced on
+2026-11-13; they stay valid only for the legacy `Cda` policy used in
+the D7 equality proofs. The requirement "Restart Rule Uses One Extra
+Factor Per Mode" states the replacement.
 
 ### D10. Two shared services
 
@@ -486,7 +497,7 @@ No strategy contains a decision loop or a projection of its own.
 
 | Name | Strategy | Status |
 |---|---|---|
-| `'auto'` (default) | exact where eligible, TR-BDF2 elsewhere | default after the flip |
+| `'auto'` | exact where eligible, TR-BDF2 elsewhere | the default after the flip (before it, the current default is kept) |
 | `'exact'` | exact; non-eligible segments refused unless allowed | new |
 | `'dsed'` | alias of `'exact'` | legacy, warns after the flip, removed one release later |
 | `'pwl'` | trapezoid on the fixed grid + SDIRK×3 restart | kept |
