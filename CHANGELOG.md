@@ -44,6 +44,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refusal does not stop the batch, three identical refusals at its
   start do. Threads do not speed up the `pss` route (87 % of an
   evaluation is Python), see DECISIONS 12.
+* **Added** `ThermalSpec`: junction temperatures by a damped fixed
+  point between the losses at `T_j` (3-D switching tables read at each
+  device's `T_j`, an optional `loss_at(device, P, T_j)`) and
+  `T_amb + R_th·P`, to 0.1 K in at most 20 iterations; re-simulated
+  only when `build` reads `design['_T_j']`. Linear loss model: 63.0425 °C
+  against the closed form 63.0435 °C; `R_th·P₀·α = 1.2` is `infeasible`
+  with `thermal_runaway`.
 * **Changed** `pulsim.sweep`'s job runner takes the job function (and
   an option to let every exception propagate); `sweep` / `monte_carlo`
   are unchanged.

@@ -531,9 +531,74 @@ class Evaluator:
         T = self._period_of(design)
         b, sf = self._build(design)
         run, a, z = self._steady(b, sf, T, counters)
-        rows, losses = self._loss_rows(b, run, a, z)
+        th = self.thermal
+        if th is None:
+            rows, losses = self._loss_rows(b, run, a, z)
+            kpis = self._kpis(b, run, a, z, design, did, rows, losses,
+                              counters)
+            return kpis, losses, {}
+        names = {c["name"] for c in b.components()}
+        for d in th.r_th:
+            if d not in names:
+                raise KeyError(f"ThermalSpec.r_th names {d!r}, which is not "
+                               f"a device of the circuit")
+        tj = {d: float(th.t_amb) for d in th.r_th}
+        omega, prev = 1.0, math.inf
+        for k in range(1, th.max_iter + 1):
+            rows, losses = self._loss_rows(b, run, a, z, tj)
+            losses = self._losses_at(losses, tj)
+            new = {}
+            for d, r in th.r_th.items():
+                t_hat = th.t_amb + float(r) * sum(losses[d].values())
+                new[d] = tj[d] + omega * (t_hat - tj[d])
+            inc = max(abs(new[d] - tj[d]) for d in tj)
+            if inc > prev:
+                omega *= 0.5        # the increment grew: damp
+            prev, tj = inc, new
+            counters["thermal_iterations"] = k
+            counters["thermal_increment"] = inc
+            hot = max(tj[d] - th.t_limit for d in tj)
+            if hot > 0:
+                raise _Infeasible(
+                    f"thermal_runaway: T_j = {max(tj.values()):.4g} C exceeds "
+                    f"t_limit = {th.t_limit:g} C at iteration {k}",
+                    {"thermal_runaway": hot})
+            if inc < th.tol:
+                break
+            if th.temperature_dependent:
+                # the electrical solution depends on T_j: re-simulate
+                b, sf = self._build({**design, "_T_j": _fz(tj)})
+                run, a, z = self._steady(b, sf, T, counters)
+        else:
+            raise _Infeasible(
+                f"thermal_runaway: no fixed point within {th.max_iter} "
+                f"iterations (last increment {inc:.4g} K)",
+                {"thermal_runaway": inc})
+        # the losses AT the converged temperatures (no re-simulation:
+        # the run is within th.tol of them)
+        rows, losses = self._loss_rows(b, run, a, z, tj)
+        losses = self._losses_at(losses, tj)
         kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters)
-        return kpis, losses, {}
+        for d in tj:
+            kpis[f"t_j.{d}"] = tj[d]
+        return kpis, losses, tj
+
+    def _losses_at(self, losses, tj):
+        """Apply ``ThermalSpec.loss_at`` (device, P, T_j) -> P, scaling
+        the device's categories (``conduction`` when it had none)."""
+        th = self.thermal
+        out = {d: dict(c) for d, c in losses.items()}
+        if th.loss_at is None:
+            for d in th.r_th:
+                out.setdefault(d, {"conduction": 0.0})
+            return out
+        for d in th.r_th:
+            cat = out.get(d) or {"conduction": 0.0}
+            p0 = sum(cat.values())
+            p1 = float(th.loss_at(d, p0, tj[d]))
+            out[d] = ({c: v * p1 / p0 for c, v in cat.items()} if p0 > 0
+                      else {"conduction": p1})
+        return out
 
     def _steady(self, b, sf, T, counters):
         """``(result, t_from, t_to)`` of one steady period."""
@@ -609,8 +674,10 @@ class Evaluator:
             if _is_pss_failure(e):
                 raise _Failed(str(e)) from e
             raise
-        counters["pss_period_runs"] = int(r.n_period_runs)
-        counters["engine_steps"] = int(r.n_engine_steps)
+        counters["pss_period_runs"] = counters.get(
+            "pss_period_runs", 0) + int(r.n_period_runs)
+        counters["engine_steps"] = counters.get(
+            "engine_steps", 0) + int(r.n_engine_steps)
         counters["simulations"] += int(r.n_period_runs)
         run = _engine(lambda: simulate(
             b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
@@ -865,10 +932,11 @@ def as_objectives(record: EvaluationRecord, names: Sequence[str], *,
                   maximise: Sequence[str] = (), penalty: float = 1e30
                   ) -> np.ndarray:
     """The KPI vector to MINIMISE (``maximise`` names negated), or
-    ``penalty`` in every component for ``refused`` / ``failed``. The
+    ``penalty`` in every component for ``refused`` / ``failed`` and for
+    an ``infeasible`` record without KPIs (a thermal runaway). The
     status stays on the record: count it, do not read the penalty as
     a value."""
-    if record.status in ("refused", "failed"):
+    if record.status in ("refused", "failed") or not record.kpis:
         return np.full(len(names), float(penalty))
     return np.array([-record.kpis[n] if n in maximise else record.kpis[n]
                      for n in names], dtype=float)
@@ -877,7 +945,8 @@ def as_objectives(record: EvaluationRecord, names: Sequence[str], *,
 def as_constraints(record: EvaluationRecord, names: Sequence[str], *,
                    penalty: float = 1e30) -> np.ndarray:
     """The violation vector (``<= 0`` feasible, NSGA-II convention), or
-    ``penalty`` in every component for ``refused`` / ``failed``."""
-    if record.status in ("refused", "failed"):
+    ``penalty`` in every component for ``refused`` / ``failed`` and for
+    a record without KPIs (a thermal runaway)."""
+    if record.status in ("refused", "failed") or not record.kpis:
         return np.full(len(names), float(penalty))
     return np.array([record.violations[n] for n in names], dtype=float)

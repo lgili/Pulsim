@@ -194,6 +194,35 @@ designs on processes: serial 1.83 s, 2 → 1.83 s, 4 → 1.43 s, 8 →
 (tested). → Reverse: nothing to reverse; the lever is in the kernel
 (item 3).
 
+## 13. The junction-temperature fixed point
+
+→ `ThermalSpec(r_th={device: K/W}, t_amb, t_limit=150, tol=0.1,
+max_iter=20, loss_at=None, temperature_dependent=False)`. Per
+iteration: the loss summary at `T_j` (a switch's 3-D `E_on_table` /
+`E_off_table` read at the device's `T_j`), then `loss_at(device, P,
+T_j)` if given (it scales the device's categories), then
+`T̂ = T_amb + R_th·P`, `T_j += ω(T̂ − T_j)`, `ω` halved when the
+increment grows. `T_j > t_limit` at any iterate, or no increment
+below `tol` in `max_iter`, is `infeasible` with `thermal_runaway` and
+NO KPIs (a number at an unsettled `T_j` is not a number); the adaptors
+give the penalty for a record without KPIs. `temperature_dependent`
+means `build` reads `design['_T_j']` (device → °C) and the steady
+state is re-run per iterate; otherwise one simulation serves every
+iterate. `T_j` per device is in `record.t_j` and the KPI `t_j.<dev>`.
+`R_th` is a single junction-to-ambient resistance per device (no
+shared sink): the steady thermal network of D4 reduced to its
+simplest form; `device_thermal_summary`'s Foster chains are
+transient, so their steady value is their `R` sum.
+
+Evidence: `P = 10·(1 + 0.004·(T − 25))` W, `R_th = 2`, `T_amb = 40`:
+`T_j` = 63.042534 °C against the closed form 63.043478 (9.4e-4 K) in 4
+iterations, one simulation as without the loop. `R_th·P₀·α = 1.2`:
+358 °C at the first iterate, `thermal_runaway` 208 K. A switch with
+`R_on(T) = 50 mΩ·(1 + 0.006(T − 25))`, `R_th = 10`: 84.85 °C in 5
+iterations, `T_j = T_amb + R_th·P(T_j)` to 0.06 K, 20 simulations.
+→ Reverse: `mode='kernel'` when `add-in-kernel-event-losses` lands
+(task 7.1).
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 1. **A typed non-convergence.** What: a `RuntimeError` subclass, e.g.
