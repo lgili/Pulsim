@@ -115,11 +115,16 @@ def compare(tr, ref, cols, scale, metric="edge"):
     contain a switching instant: linear interpolation across such a step
     compares a jump with a ramp that neither engine computed. ``"interp"``
     is the previous measure (every interval interpolated; with it,
-    :func:`observables_of` keeps the source-forced nodes)."""
+    :func:`observables_of` keeps the source-forced nodes). A trace whose
+    switching steps cover more than half its span keeps them."""
     if metric not in METRICS:
         raise ValueError(f"metric {metric!r}: one of {METRICS}")
     t, ys, ea = tr
     tr_, yr, eb = ref
+    # A trace that switches across most of its steps is sampled at the switching
+    # rate (dsed on a coarse grid): its steps are its only data, keep them.
+    if sum(b - a for a, b in ea) > 0.5 * (t[-1] - t[0]):
+        ea = []
     excl = (ea + eb) if metric == "edge" else ()
     worst = (0.0, 0.0)
     for c in cols:
