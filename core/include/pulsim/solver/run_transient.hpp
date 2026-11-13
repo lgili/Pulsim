@@ -739,6 +739,16 @@ inline SimulationResult run_transient(
     std::vector<pwl::SaturableInductorHistory::Entry> sat_snap;
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
+    // Restart stage-1 state, kept for the stage-2 fallback (see
+    // run_restart): x1, its diode bits and the histories at x0.
+    Vector rs_x1, rs_x2;
+    std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
+    std::vector<Real> rs_hist;
+    std::vector<pwl::NonlinearCapacitorHistory::Entry> rs_coss;
+    std::vector<pwl::LauritzenDiodeHistory::Entry> rs_laur;
+    std::vector<pwl::PmsmMnaHistory::Entry> rs_pmsm;
+    std::vector<pwl::IgbtTailHistory::Entry> rs_tail;
+    std::vector<pwl::SaturableInductorHistory::Entry> rs_sat;
     std::vector<CommutationEvent> step_events;      // per-step event scratch
     std::vector<bool> post_event_bits;              // event-split scratch
     // add-fixed-step-event-splitting workspace: the step's first solve
@@ -1429,6 +1439,7 @@ inline SimulationResult run_transient(
             // The final solve of this step was a restart stage, so the
             // deferred commit below is a backward-Euler one (at γh).
             bool committed_be = false;
+            Real be_commit_h = kGamma * opts.dt;   // set by run_restart
             auto commit_backward_euler = [&](Real h_e) {
                 history.update_from_state_backward_euler(x, h_e);
                 coss_history.update_from_state(x, h_e, true);
@@ -1455,9 +1466,23 @@ inline SimulationResult run_transient(
             // stage 2 is the caller's (deferred past the freeze guard):
             // commit_backward_euler(γh) from x0* refreshes the derivative
             // slots with stage 2's own (x2 − x0*)/(γh).
+            //
+            // Stage-2 fallback: x0* carries stage 1's slope, which belongs
+            // to stage 1's diode mode. If stage 2's event iteration changes
+            // the mode, the new mode's solve starts from that slope: a
+            // rectifier at dt/τ = 10 then turns its diode off on stage 2's
+            // overshoot (25 V for a 20.7 V phase) and the OFF solve returns
+            // x0* itself, 37.2 V on a 24 V source. Such a stage 2 is re-tried
+            // as a backward-Euler step of (1 − γ)h from x1, the last
+            // physical state. If backward Euler keeps stage 1's mode, the
+            // flip was the SDIRK overshoot and the BE step is kept
+            // (`be_commit_h` tells the commit which step that was); else
+            // the mode change is real and the SDIRK stage 2 is restored bit
+            // for bit (a BE remainder there cost DCM buck 8× in accuracy).
             auto run_restart = [&](Real t_from, Real h) {
                 const Real h_s = kGamma * h;
                 const Real dt_eq = Real{2} * h_s;
+                be_commit_h = h_s;
                 accumulate_b_extra(t_from + h_s, dt_eq, true);
                 run_event_iteration(t_from + h_s, dt_eq, true);
                 const Size iters_1 = iters;
@@ -1465,6 +1490,17 @@ inline SimulationResult run_transient(
                 if (breach_1 && has_diodes && !last_solved_bits.empty()) {
                     diodes.restore_on_bits(last_solved_bits);
                 }
+                if (has_diodes) {
+                    rs_x1 = x;
+                    diodes.snapshot_on_bits_into(rs_bits);
+                    history.snapshot_into(rs_hist);
+                    rs_coss = coss_history.snapshot();
+                    rs_laur = laur_history.snapshot();
+                    rs_pmsm = pmsm_history.snapshot();
+                    rs_tail = tail_history.snapshot();
+                    rs_sat = sat_history.snapshot();
+                }
+                const bool cycle_1 = mask_cycle;
                 constexpr Real c = (Real{1} - kGamma) / kGamma;
                 history.extrapolate_previous(x, c);
                 coss_history.extrapolate_previous(x, c);
@@ -1474,14 +1510,72 @@ inline SimulationResult run_transient(
                 if (has_saturable) sat_history.extrapolate_previous(x, c);
                 accumulate_b_extra(t_from + h, dt_eq, true);
                 run_event_iteration(t_from + h, dt_eq, true);
+                const Size iters_2 = iters;
+                if (has_diodes && iters_2 > 1) {
+                    // Stage 2 changed the mode. Re-take it as backward
+                    // Euler from x1 under stage 1's bits; if that keeps
+                    // stage 1's mode, the change was SDIRK's own overshoot
+                    // (R(z) < 0 for h ≫ τ) and the backward-Euler step is
+                    // kept. If backward Euler changes the mode too, the
+                    // event is real and the SDIRK stage 2 stands: its
+                    // x0* is accurate when the slopes are continuous
+                    // (DCM turn-off: −2.4e-4 V at T/50 with backward
+                    // Euler kept, +2.9e-5 V without).
+                    rs_x2 = x;
+                    diodes.snapshot_on_bits_into(rs_bits2);
+                    const bool flipped_2 = flipped;
+                    const bool cycle_2 = mask_cycle;
+                    const auto stamped_2 = stamped_mask;
+                    rs_solved2 = last_solved_bits;
+                    auto histories_at_x0 = [&] {
+                        history.restore(rs_hist);
+                        coss_history.restore(rs_coss);
+                        laur_history.restore(rs_laur);
+                        pmsm_history.restore(rs_pmsm);
+                        tail_history.restore(rs_tail);
+                        sat_history.restore(rs_sat);
+                    };
+                    x = rs_x1;
+                    diodes.restore_on_bits(rs_bits);
+                    histories_at_x0();
+                    mask_cycle = cycle_1;
+                    commit_backward_euler(h_s);          // stage 1, as taken
+                    const Real h_b = h - h_s;
+                    accumulate_b_extra(t_from + h, Real{2} * h_b, true);
+                    run_event_iteration(t_from + h, Real{2} * h_b, true);
+                    diodes.snapshot_on_bits_into(rs_bits_be);
+                    if (rs_bits_be == rs_bits) {
+                        be_commit_h = h_b;
+                    } else {
+                        // Back to the SDIRK stage 2, bit for bit: the
+                        // histories at x0*, recomputed from x0 and x1.
+                        histories_at_x0();
+                        x = rs_x1;
+                        history.extrapolate_previous(x, c);
+                        coss_history.extrapolate_previous(x, c);
+                        laur_history.extrapolate_previous(x, c);
+                        pmsm_history.extrapolate_previous(x, c);
+                        tail_history.extrapolate_previous(x, c);
+                        if (has_saturable) sat_history.extrapolate_previous(x, c);
+                        x = rs_x2;
+                        diodes.restore_on_bits(rs_bits2);
+                        stamped_mask = stamped_2;
+                        last_solved_bits = rs_solved2;
+                        iters = iters_2;
+                        flipped = flipped_2;
+                        mask_cycle = cycle_2;
+                    }
+                    if (rs_bits_be == rs_bits) iters += iters_2 - 1;
+                }
                 // A diode flip inside the step is a discontinuity of its
                 // own: the window covers this step and the next two.
-                if (iters_1 > 1 || iters > 1) {
+                if (iters_1 > 1 || iters_2 > 1) {
                     restart_left = std::max(restart_left, kRestartSteps - 1);
                 }
                 iters += iters_1 - 1;
                 flipped = flipped || breach_1;
             };
+
             // ---- add-fixed-step-event-splitting (design D1, D3, D4) ----
             // The step as sub-intervals between the located events: the
             // first one trapezoidal (or an SDIRK step when the step
@@ -1623,7 +1717,7 @@ inline SimulationResult run_transient(
                     breach = breach || flipped;
                     if (!last) {
                         if (be) {
-                            commit_backward_euler(kGamma * h);
+                            commit_backward_euler(be_commit_h);
                         } else {
                             commit_trap(h);
                         }
@@ -1783,7 +1877,7 @@ inline SimulationResult run_transient(
                         // halving rolls all of them back together
                         // from `sat_snap`.
                         if (j + 1 < n_sub && sub_restart) {
-                            commit_backward_euler(kGamma * sub_dt);
+                            commit_backward_euler(be_commit_h);
                         } else if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
                             coss_history.update_from_state(x,
@@ -2052,7 +2146,7 @@ inline SimulationResult run_transient(
             //    path and dt2 when sub-step correction split the step (whose
             //    sub-step 1 already committed the dt1 half above).
             if (committed_be) {
-                commit_backward_euler(kGamma * committed_dt);
+                commit_backward_euler(be_commit_h);
             } else {
             history.update_from_state(x, committed_dt);
             coss_history.update_from_state(x, committed_dt);

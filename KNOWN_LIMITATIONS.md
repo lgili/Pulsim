@@ -260,6 +260,11 @@ Limits with the rule on:
   interior events (the next step restarts on the new mask);
 - an MNA PMSM retries every fixed step at dt/2 with the rule on or off,
   so its steps are never split.
+- a diode that turns off inside stage 2 of a restart step because of
+  the SDIRK overshoot (dt/τ ≫ 1, a rectifier charging its bus) is
+  re-tried as backward Euler from stage 1: that step is first order
+  (bus within 1e-4 of the source peak, but 0.76 V max error vs trbdf2
+  at dt/τ = 10, 0.36 V at dt/τ = 1).
 
 Resolution diagnostics (`res.resolution`, `pulsim.ResolutionWarning`):
 the truncation estimate covers linear capacitors and inductors only

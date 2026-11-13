@@ -469,11 +469,16 @@ def test_one_factor_per_mask_and_no_refactor():
     assert runs[0].n_restart_factorizations == 0
     off, on = caches
     m = on.metrics()
-    assert m.event_builds == m.event_refactors == on.num_event_entries() == 0
+    # One event entry (was 0): a diode turning off inside stage 2 is
+    # re-tried as backward Euler over 2(1 - gamma)*dt (the stage-2
+    # fallback), built once and never refactored.
+    assert m.event_builds == on.num_event_entries() == 1
+    assert m.event_refactors == 0
     # The transitional masks of the event iteration are now solved on
-    # the restart factor only: nominal segments 2 (4 without the rule),
-    # i.e. 6 factorisations in all against 4.
-    assert (on.num_built_segments(), off.num_built_segments()) == (2, 4)
+    # the restart factor only: nominal segments 3 (4 without the rule);
+    # was 2 before the stage-2 fallback, whose path visits one more
+    # mask on the nominal cache (measured, not derived).
+    assert (on.num_built_segments(), off.num_built_segments()) == (3, 4)
 
 
 def test_substep_correction_requires_the_restart_rule():
@@ -716,3 +721,56 @@ def test_the_static_path_samples_the_gate_at_the_step_start():
     # the PWM falls at 5 us and rises at 10 us: the sample ON a jump reads the left limit
     assert list(vx_off[5:11]) == [0.0, 0.0, 0.0, 0.0, 0.0, 5.0]
     assert list(vx_on[5:11]) == [5.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+# --- diode mode change inside a restart step ------------------------------------
+def _rect3(dt, classic, **kw):
+    """Three 24 V-peak phases, six diodes (5 mOhm on), 1 mF bus charged
+    from 0 V: tau = 5 us. `classic`: low side on a floating DC rail (bus
+    = line-to-line, peak 41.57 V); else on ground (the benchmark
+    `three_phase_diode_rectifier`, bus peak = phase peak 24 V)."""
+    b = p.CircuitBuilder()
+    lo = "neg" if classic else "gnd"
+    for n, ph in (("a", 0.0), ("b", 2.0943951), ("c", 4.1887902)):
+        b.add_sine_voltage_source("V" + n, n, "gnd", 0.0, 24.0, 100.0, ph)
+        b.add_diode("D" + n + "h", n, "out", 200.0, 1e-6)
+        b.add_diode("D" + n + "l", lo, n, 200.0, 1e-6)
+    b.add_capacitor("Cout", "out", lo, 1e-3)
+    b.add_resistor("Rload", "out", lo, 200.0)
+    if classic:
+        b.add_resistor("Rref", "neg", "gnd", 1e6)
+    kw.setdefault("engine", "pwl")
+    res = p.simulate(b, t_end=40e-3, dt=dt, **kw)
+    v = np.asarray(res.v("out"))
+    if classic:
+        v = v - np.asarray(res.v("neg"))
+    return np.asarray(res.times), v
+
+
+@pytest.mark.parametrize("classic, peak", [(False, 24.0),
+                                           (True, 24.0 * math.sqrt(3))])
+@pytest.mark.parametrize("dt", [50e-6, 5e-6])          # dt/tau = 10 and 1
+def test_rectifier_bus_never_exceeds_the_source_peak(classic, peak, dt):
+    """Stage 2 of a restart step starts from x0* = x0 + ((1-g)/g)(x1-x0),
+    stage 1's slope. When the charging diode turns off in stage 2, the
+    OFF solve returned x0* itself: 37.20 V on the 24 V benchmark (59.63 V
+    on the 41.57 V bridge) at dt/tau = 10. Stage 2 is now re-taken as
+    backward Euler from x1 when that keeps stage 1's mode (the flip was
+    the SDIRK overshoot): 23.999 / 41.566 V."""
+    _, v = _rect3(dt, classic, **ON)
+    assert v.max() < peak * (1 + 1e-4), v.max()
+
+
+@pytest.mark.parametrize("classic", [False, True])
+def test_rectifier_with_the_rule_agrees_with_trbdf2_better_than_without(classic):
+    tr, vr = _rect3(None, classic, engine="trbdf2", rtol=1e-8, atol=1e-10)
+
+    def err(**kw):
+        t, v = _rect3(50e-6, classic, **kw)
+        return float(np.max(abs(v - np.interp(t, tr, vr))))
+
+    off, on = err(), err(**ON)
+    # engine, max |error| over 40 ms: off 13.45 / 17.84 V; on 0.762 /
+    # 3.441 V (16.66 / 18.35 V before the stage-2 fallback)
+    assert on < 0.3 * off, (on, off)
+    assert on < (1.0 if not classic else 4.0), on

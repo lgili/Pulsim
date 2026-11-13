@@ -156,3 +156,45 @@ while applying it.
   - first-step test: the SDIRK amplification on steps 1–3, trapezoid
     on step 4, `n_restart_steps` 3.
   - snapshot `restart_pending` → `restart_steps_left`.
+
+## Stage-2 fallback (fix after the integration-branch report, 2026-11-13)
+
+- **Defect.** → With the flag on, `three_phase_diode_rectifier` at
+  dt/τ = 10 charged its bus to 37.20 V on 24 V-peak phases. Measured
+  mechanism: stage 1 (diode ON) gives x1 = 15.4 V, so the stage-2
+  pseudo-state is x0* = x0 + ((1−γ)/γ)(x1 − x0) = 37.2 V. Stage 2 ON
+  overshoots to 25 V (> the 20.7 V phase; R(−10) ≈ −0.2), the diode
+  turns OFF, and the OFF solve of an undamped capacitor returns x0*
+  itself. An OFF solve from x0* = 37.18 V reproduces 37.203 V.
+- **Fix chosen.** → When stage 2's event iteration flips a diode,
+  re-try it as backward Euler over (1−γ)h from x1. Keep the BE step only
+  when its mode equals stage 1's (the flip was the overshoot); otherwise
+  restore the SDIRK stage 2 bit for bit. → The rule keeps its per-stage
+  diode decision (deciding once per step collapsed the buck to
+  −11.9 V), and real mode changes keep SDIRK accuracy.
+- **Rejected.** → (a) BE remainder for every stage-2 flip: rectifier
+  equal, but DCM buck T/50 −2.41e-4 instead of +2.93e-5 (8× worse,
+  still order 2). (b) Recursive SDIRK on the remainder: depth 1 DCM
+  −1.67e-4 with 2948 event-LRU refactors in 1000 periods; depth 4
+  −1.26e-4 with 6412.
+- **Numbers** (probe `probes/rectifier_stage2.py`, max |err| vs trbdf2
+  rtol 1e-8 over 40 ms):
+
+  | circuit, dt | off | on, before | on, after |
+  |---|---|---|---|
+  | benchmark, 50 µs: peak | 33.99 V | 37.20 V | 23.999 V |
+  | benchmark, 50 µs: err | 13.45 | 16.66 | 0.762 |
+  | L-L bridge, 50 µs: peak | 59.35 V | 59.63 V | 41.566 V |
+  | L-L bridge, 50 µs: err | 17.84 | 18.35 | 3.44 |
+  | benchmark / bridge, 5 µs: err | 6.21 / 8.04 | 0.363 / 0.167 | 0.363 / 0.167 |
+
+  Acceptance unchanged within rounding: buck CCM 1.182e-7 / 3.015e-8 /
+  7.295e-9 A at T/50/100/200 (1.175e-7 / 2.946e-8 / 6.608e-9 before);
+  tank −0.730 % / −0.040 %; isolated LC 0.9973; DCM +2.93e-5 /
+  +6.56e-6 / +1.59e-6 (identical).
+- **Expectation moved.** → `test_one_factor_per_mask_and_no_refactor`:
+  event entries 0 → 1 (the BE trial at 2(1−γ)dt, built once, never
+  refactored); nominal segments 2 → 3 (measured).
+- **Reverse.** → Delete the `has_diodes && iters_2 > 1` block in
+  `run_restart` and set `be_commit_h` back to γh; the two rectifier
+  tests then fail.
