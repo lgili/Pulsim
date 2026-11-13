@@ -111,6 +111,14 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 |---|---|---|
 | A slow mode limits the orbit's accuracy to the map's rounding over one minus the Floquet radius. | Zero-mean sine current into 1 µF ∥ 1 TΩ (Floquet radius 1 - 1e-9): v(0) = 0.15726 V against 0.159155 V. | Add the real loss; check `floquet_radius`. |
 
+## Design evaluation (`pulsim.design`)
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| Threads do not speed up the `pss` route: the shooting Newton and the KPI post-processing are Python and hold the GIL. | 64 DCM-buck designs: 1 thread 0.50 s, 8 threads 0.47 s; the kernel is 13 % of an evaluation. | `evaluate_many(..., backend="process")` for large batches. |
+| A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
+| `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
+
 ## Devices
 
 | Limitation | Measured | Workaround |

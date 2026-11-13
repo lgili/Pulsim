@@ -155,8 +155,9 @@ def test_guard_fixes_the_half_wave_rl_rectifier():
 
 def test_lcp_double_crossing_with_a_band_switches_at_the_exact_instants():
     """test_double_crossing_inside_one_step_is_seen's tank at V_th = 1e-3: the correct conduction
-    windows are 1.2536-1.8877 us and 7.537-8.170 us. (At V_th = 0 the turn-off inside the step after
-    the turn-on is not located: an event-location defect, not a mode decision; DECISIONS.md #16.)"""
+    windows are 1.2536-1.8877 us and 7.537-8.170 us. (V_th = 0, where the turn-off inside the step
+    after the turn-on used to be missed by the locator, DECISIONS.md #16 and #19: see
+    test_double_crossing_inside_one_step_is_seen.)"""
     b = p.CircuitBuilder()
     b.add_capacitor("C", "t", "gnd", 100e-9)
     b.add_inductor("L", "t", "gnd", 10e-6, i0=-1.0)

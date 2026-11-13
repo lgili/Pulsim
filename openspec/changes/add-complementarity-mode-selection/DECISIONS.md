@@ -156,3 +156,109 @@ choices it did not pin.
     `trbdf2` and a diode-free dsed run (#11 still holds for the hooks).
     → The other engines' hooks sit in files this change does not own. →
     Reverse: refuse 'lcp' everywhere again in `pulsim.simulate`.
+
+## Slice 3 (2026-11-13)
+
+19. **Zero-start predicates: skip only the one that fired (fixes #16).**
+    `locate_event_exact_` and `locate_event_in_step_` skipped every armed
+    predicate with `g(t0) == 0`. Now: the predicate that fired the last
+    event is skipped only on a step starting at that instant; a diode
+    predicate at exactly zero is evaluated at `t0 + d` (`d = 100·h_e`,
+    the judge's shortest propagation; `1e-6·h` without h_e; at most half
+    a scan interval) and located from there when it moves into its
+    admissible side (DiodeOn `v − V_on < 0`, DiodeOff `v − V_f > 0`).
+    One that stays at zero (a diode at rest) or leaves on its event side
+    (an inconsistent mode — the guard's case) is skipped; nothing fires
+    at zero length, so no Zeno loop exists by construction
+    (`test_diode_resting_at_exactly_zero_does_not_spin`). Non-diode
+    predicates keep the old skip (no direction is known for them).
+    → Measured: the V_th = 0 tank now switches at 1.2532358877,
+    1.8877214715, 7.5370567364, 8.1702737953 µs (solve_ivp DOP853 rtol
+    1e-13: within 3e-16 s; pwl at 0.1 ns: same edges to its grid); worst
+    ON reverse current −1.83e-2 → 0 A. Every other survey circuit
+    (shadow_survey + extra_circuits, 29 circuits × settle / guard /
+    'lcp' = 87 runs) is bit-identical to 11ab8e95
+    (`probes/survey_bit_identity.out`); `bit_identity.py` 36/36. → Reverse: restore `if (g == 0) continue;` in both locators.
+    Review (fresh-context, read-only): no Zeno loop — a zero start is
+    located only in `(t0 + d, t1]` and the predicate that fired at `t0`
+    is skipped, so each zero start advances time by `d`. Residual risks,
+    recorded in KNOWN_LIMITATIONS and not changed: `d = 1e-6·h` when
+    `h_e = 0` (guard off), so a diode sliding on its threshold advances
+    slowly until the chatter detector stops it; a zero start leaving
+    toward its event side is skipped for the step (the decision at `t0`
+    owns it; unjudged without the guard); current zero-crossing and
+    custom predicates at zero are still skipped (as before);
+    `last_fired_*` is not reset between two `simulate()` calls on one
+    `PEDSimulator` (Python builds a new one per run).
+
+
+20. **Cost gate on a 60-diode bank (task 8.3): the guard is affordable.**
+    Ten three-phase bridges (60 diodes, phases 6° apart, each on its own
+    200 µF ‖ 50 Ω, tied by 1 MΩ), `V_th = 0`, no line inductance,
+    `t_end = 0.04 s` (`probes/bank60_cost.py`, `.out`). All three modes
+    end at 173.198150009 V − 2.71e-11 V against trbdf2 rtol 1e-9.
+
+    | mode | events | guard checks / repairs | LCP problems = port-model solves | pivots (max / event) | widenings | enumerations | masks = eigendecompositions | median wall (7 interleaved rounds) | per event |
+    |---|---|---|---|---|---|---|---|---|---|
+    | settle (guard off) | 435 | — | 0 | 0 | 0 | 0 | 221 | 21.2 s | 48.6 ms |
+    | default (settle + guard) | 373 | 374 / 98 | 292 | 699 (30) | 188 | 0 | 204 | 21.4 s | 57.5 ms |
+    | 'lcp' | 373 | — | 1102 | 1177 (30) | 728 | 0 | 126 | 21.7 s | 58.2 ms |
+
+    Gate "no event over `4·k` pivots": max 30 against 240, passes. The
+    enumeration limit (`k ≤ 12`) is never reached: the bank is passive,
+    Lemke always terminates. The machine was shared; the min/max spread
+    was 13–37 s per mode, so the medians differ by noise, and the
+    counters decide: the guard adds 292 port-model solves and 699 pivots
+    to a run whose cost is one eigendecomposition per new mask (221 /
+    204 / 126). The 62 fewer events under the guard are settle detours
+    the repaired mode no longer takes. The guard is affordable; nothing
+    was made cheaper. Per-event time is dominated by mask extraction
+    (add-exact-propagator-strategy owns the mask cache).
+
+    Variants that do not run on dsed in any mode, identical on the HEAD
+    11ab8e95 extension (not caused by #19): 0.2 mH line inductors
+    chatter ("commutated 32 times") at `V_th = 0` and `1e-2`; the same
+    bank paralleled onto one 2 mF ‖ 5 Ω bus does not settle at `t = 0`
+    (settle, guard) or makes no progress ('lcp'); trbdf2 aborts on both
+    ("non-finite step … h_min"); pwl at `dt = 1 µs` runs both (181.81 V /
+    200.01 V, no reference to check against). Recorded in
+    KNOWN_LIMITATIONS. → Reverse: nothing to reverse (a measurement); a
+    cheaper guard would cache the judge's two propagations per mask.
+
+21. **Passivity classes at build time (task 5.1).**
+    `CircuitBuilderAdapter::passivity()` now reports three classes,
+    exposed as `diagnostics['mode_guard'|'mode_selection']['passivity']
+    = {'class', 'device', 'kind'}`: `non_passive` (a VCVS; a negative
+    R, C or L; a group of coupled inductors — connected by couplings —
+    whose inductance matrix has an eigenvalue below `−1e-12·max L_ii`,
+    named `L1+L2+…`, kind `InductorCoupling`), `passive_nonreciprocal`
+    (an ideal transformer, named; Lemke keeps its PSD guarantee, the
+    class is reported, nothing refused), `passive_reciprocal`.
+    Pairwise couplings with `0 ≤ k ≤ 1` do not make three windings PSD:
+    `k12 = k13 = 1, k23 = 0` has eigenvalues `1 ± √2, 1` (Catch2
+    "Passivity: coupled inductors, ideal transformer, VCVS");
+    `add_multi_winding_transformer` already refuses such a matrix at
+    build time, `add_inductor_coupling` calls do not, so the check
+    belongs here. No gyrator device exists in the builder. → Measured on
+    real circuits: a four-diode bridge behind an ideal transformer
+    (n = 0.5) on dsed default: 31.876241227679 V against pwl at 0.1 µs
+    31.876241231725 V, 2 guard repairs, no diode conducting in reverse
+    or blocking forward voltage; a rectifier fed by a coupled-inductor
+    transformer is refused before any mode decision by the extractor
+    (`UnsupportedError('dsed', 'extraction')`; the inductance-matrix
+    block is add-exact-propagator-strategy task 7), so the PSD class is
+    exercised by the Catch2 test only. → Reverse: `passivity()` back to
+    the slice-2 loop.
+
+    **Finding (open, not a passivity matter):** `mode_selection='lcp'`
+    is wrong on that bridge — 11.726610 V, D2 and D3 never conduct and
+    D2 blocks +49.86 V — and identically with the transformer replaced
+    by a floating sine source between the secondary nodes (n = 0.5 /
+    1 / 2: 11.73 / 23.45 / 46.91 V against 31.88 / 63.75 / 127.50 V).
+    The result flips with `H_E_REL` (wrong at 1e-10, 1e-9, 1e-7; right
+    at 1e-8, 1e-6…1e-4). The shadow shows the LCP's open-circuit gap of
+    D2 at its turn-on event as +2.3e-4 V (reverse) where the exact
+    trajectory rises 0.31 V in 1e4·h_e: the port model's `q` at a
+    turn-on event on a bus whose common mode is set by 1 MΩ and g_off
+    leaks. The default (settle + guard) is right on all six. Recorded in
+    KNOWN_LIMITATIONS; 'lcp' stays opt-in.

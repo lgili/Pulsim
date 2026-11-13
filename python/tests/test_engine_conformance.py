@@ -698,8 +698,11 @@ def test_mode_guard_diagnostics_only_on_dsed(engine):
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
+    rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
+    assert g["passivity"] == rec        # task 5.1 class, dsed only
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
+    assert r.diagnostics["mode_selection"]["passivity"] == rec
     assert "mode_guard" not in r.diagnostics
 
 
@@ -955,3 +958,45 @@ def test_voltage_sanity_factor_honoured_on_every_engine(engine):
         r = p.simulate(_rc(), 1e-3, engine=engine,
                        voltage_sanity_factor=0.5, **kw)
     assert r._implausible_voltage.peak == pytest.approx(10.0)
+
+# add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
+# exact engine, 'dsed' its alias. Every keyword cell of 'dsed' holds under 'exact', and the
+# refusal keeps naming 'dsed' (the capability-table column; DECISIONS, group 13 slice).
+@pytest.mark.parametrize("feature", [f for f, (_, eng) in _REFUSED.items() if "dsed" in eng])
+def test_exact_alias_refuses_what_dsed_refuses(feature):
+    kw, _ = _REFUSED[feature]
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("exact", **kw)
+    assert (ei.value.engine, ei.value.feature) == ("dsed", feature)
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
+def test_exact_segments_only_on_the_exact_engine(engine):
+    # result.exact['segments'] (group 13 route record) rides on the event integrator's runs only
+    r = _sim(engine, _half_wave())
+    ex = getattr(r, "exact", None)
+    if engine in ("pwl", "trbdf2"):
+        assert ex is None
+        return
+    assert r.engine_used == "dsed"
+    segs = ex["segments"]
+    assert segs and all(s["exact"] and s["reason"] is None for s in segs)
+    assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
+
+
+# Integration batch 6b: 'exact' and 'dsed' are one engine on every device cell and the
+# coupled-inductor cell -- the same refusal, or bit-identical times and samples.
+@pytest.mark.parametrize("kind", [*CELLS, "coupled"])
+def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
+    args = _args(COUPLED if kind == "coupled" else CELLS[kind])
+    out = {}
+    for eng in ("dsed", "exact"):
+        try:
+            out[eng] = _run(*args, eng)
+        except p.UnsupportedError as e:
+            out[eng] = (type(e), e.engine, e.feature, e.device, e.kind)
+    a, b = out["dsed"], out["exact"]
+    if isinstance(a[0], type):
+        assert a == b
+        return
+    assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])

@@ -74,10 +74,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hosea–Shampine filtered estimate exists as an off-by-default C++
   option (it made a bridge diode chatter 4334 times).
 * Documented: a floating V_th = 0 diode bridge grinds to `max_steps` on
-  TR-BDF2 at rtol ≤ 1e-6 (pre-existing; docs/known-limitations.md). The
+  TR-BDF2 at rtol ≤ 1e-6 (pre-existing; fixed by the roundoff-floor entry
+  above). The
   baseline's VSI and bridge "errors" are the reference's edge
   quantisation and the bus common mode (DECISIONS 11). The ripple test
   pins the engine's own peak-to-peak at 5e-3 again.
+### Integration fixes (batch 6b: design optimisation, exact route)
+
+* **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
+  only warns about: an opening inductor on `trbdf2` came back `ok` with
+  `v_peak.S` = 1.19e10 V. A run with an implausible node voltage, or a
+  trbdf2 run that held a diode against its commutation rule, is now
+  `failed` (`implausible_voltage: ...`, `missed_commutation: ...`); a
+  warning is shown once per call site, so an optimiser never saw it.
+* **Fixed** (batch review) four more ways `pulsim.design` could return
+  a number or a raw exception for a run it should have typed: an
+  inductor trace held by `inductor_guard` and a trbdf2 gate pulse
+  narrower than its `switch_fn` sampling are `failed`
+  (`inductor_guard: ...`, `gate_undersampled: ...`); diode event-
+  iteration breaches and trbdf2 chatter breaks are counted in
+  `rec.counters`; `method='pss'` on a circuit whose state space cannot
+  be extracted is `refused` (the auto route already took the transient
+  route), and a `LinAlgError` from pss is `failed`; the auto route's pss
+  capability probe runs under the engine-error mapping. `evaluate_many`
+  no longer stops a batch on three `consistent_mode` refusals: that one
+  is met mid-run at a design-dependent state. pss period runs now carry
+  the kernel diode-mode guard that `simulate`'s dsed runs carry (CCM and
+  DCM pss KPIs bit-identical; oracles unchanged).
+* **Fixed** `engine='exact'` (the canonical name of `'dsed'`) was a
+  `ValueError` in `pulsim.design.Evaluator`, a `KeyError` in the
+  analytic benchmark cases, and read no freeze in
+  `differential_runner --engines exact`; all three alias it to `dsed`.
+  `'exact'` and `'dsed'` give the same refusal or bit-identical samples
+  on every engine-conformance cell (new test).
+* **Changed** the `V_th = 0` LC tank of
+  `test_double_crossing_inside_one_step_is_seen`: re-pinned from "the
+  stored-sample guard raises" to the right answer (event-locator fix):
+  four edges and end v(t) = -5.437946944 V, v(k) = 9.49998506 V against
+  a DOP853 reference. The -5.18 V of batch 6a was v(k).
+* **Changed** `mode_selection='lcp'` on the bridge behind an ideal
+  transformer (slice 3's passivity test): on its own tree it returned
+  11.73 V (pwl 31.88 V) silently; here the stored-sample guard raises
+  `DiodeModeInconsistentError` naming D2 at t = 10.008 ms. The test
+  checks the class on a 9 ms run (matches pwl to 5e-9 V) and the raise.
+
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 
 * **Changed** on the integrated tree the dsed runs that the batch-4
@@ -145,6 +185,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   conformance step counts 1104/2254 → 1031/2058). Two ceilings are
   looser: `hard_switched_rc` 1.098e-6 → 2.224e-6, `buck_dcm` 4.136e-7 →
   5.635e-7; ten are tighter.
+
+### Design evaluation for optimisers (`pulsim.design`, first slice)
+
+* **Added** `pulsim.design.Evaluator(build, period=..., loads=...,
+  output=..., constraints=...)` and `evaluate(design) ->
+  EvaluationRecord`: status `ok` / `refused` / `failed` /
+  `infeasible`, KPIs on one steady period (efficiency, input / output
+  power, losses per device and category, output ripple and mean,
+  inductor ripple, peak / RMS current and peak voltage per
+  semiconductor, user `Kpi`s), violations, route and solver counters,
+  provenance (version, extension hash, options digest) and a SHA-256
+  design id. Every KPI is time-weighted on the run's own grid with the
+  right limit of each event; on a CCM buck the efficiency, the loss
+  and the ripple match a matrix-exponential reference of the same
+  orbit to 1.9e-12, 8e-15 and 6e-11 relative (2000 samples per period;
+  a plain trapezoid over the gate edge read the input power 1 % high
+  at 100 samples).
+* **Added** failures as records: an `UnsupportedError` becomes
+  `refused` with its `(engine, feature, device, kind)`; an engine's
+  `RuntimeError` or a `periodic_steady_state` non-convergence becomes
+  `failed` with the reason; a violated bound becomes `infeasible` with
+  the excess in the KPI's unit. No default value replaces a failure;
+  any other exception propagates. `as_objectives` / `as_constraints`
+  map records to an optimiser's vectors (`penalty` for `refused` /
+  `failed`).
+* **Added** steady-state routes (`SteadySpec`): `pss`
+  (`periodic_steady_state`, DCM buck orbit within 1e-9 V in 6 period
+  runs), `transient` (doubling runs until the estimated distance to the
+  orbit is below `tol`, else `failed` / `not_settled`) and `auto` (`pss`
+  when its capability check accepts the circuit, else the transient;
+  the route and the reason are in the counters; never a fallback after
+  a failure). A device whose power no loss model covers (a Lauritzen
+  diode) refuses the efficiency instead of reading 0.99989 without it.
+* **Added** `Evaluator.evaluate_many(designs, workers=..., backend=...)`
+  on the sweep job runner: input order kept, 64 designs give equal
+  records on 1 and 8 threads and on processes; a design-specific
+  refusal does not stop the batch, three identical refusals at its
+  start do. Threads do not speed up the `pss` route (87 % of an
+  evaluation is Python), see DECISIONS 12.
+* **Added** `ThermalSpec`: junction temperatures by a damped fixed
+  point between the losses at `T_j` (3-D switching tables read at each
+  device's `T_j`, an optional `loss_at(device, P, T_j)`) and
+  `T_amb + R_th·P`, stopped when the estimated distance to the fixed
+  point is below 0.1 K; re-simulated only when `temperature_dependent`.
+  Linear loss model: 63.0317 °C against the closed form 63.0435 °C;
+  `R_th·P₀·α = 1.2` is `infeasible` with `thermal_runaway`. An
+  unstable `pss` orbit is `failed`, `unstable_orbit`.
+* **Added** `examples/optimization/buck_pareto.py` (+ notebook): a
+  synchronous 48 V → 12 V buck's efficiency-against-volume front over
+  `f_sw`, `L`, `C` and two MOSFETs, with NSGA-II when `pymoo` is
+  installed (new extra `pulsim[opt]`) and a Latin-hypercube sample with
+  a numpy non-dominated filter otherwise. Its MOSFETs are SYNTHETIC
+  and its volume law illustrative; it says so in its output and plot.
+  512 designs: 376 ok, 136 infeasible, a 7-design front, 3.3 s.
+* **Added** Tutorial 08, "Using Pulsim inside an optimiser" (executed):
+  the contract, the four statuses, the adaptors, why derivative-free.
+* **Changed** `pulsim.sweep`'s job runner takes the job function (and
+  an option to let every exception propagate); `sweep` / `monte_carlo`
+  are unchanged.
 
 ### Integration fixes (review of the integration branch, 2026-11-13)
 
@@ -396,6 +495,52 @@ backward-Euler half-steps, never shipped. It drained resonant modes:
   - `mmc_arms` refuses the flag;
   - a Jiles–Atherton core extrapolates its stage-1 flux from the
     committed state (O(h) at a loop tip).
+
+### `engine='exact'` and the exact-route record (report only)
+
+`engine='exact'` is the canonical name of the event-driven exact engine;
+`'dsed'` stays accepted as its alias everywhere (one engine,
+bit-identical runs; `result.engine_used` and refusals keep naming
+`'dsed'`, the capability-table column). Every exact run carries
+`result.exact['segments']`: one row per mask visited, `exact` or not,
+with the reason (`'device'`, `'source'`, `'extraction'`, `'cost'`), the
+device and kind, the tier and `n_segments`. `pulsim.exact_route(builder,
+t_end, ...)` returns the same record, and classifies circuits the exact
+engine refuses (a Shockley diode → `'device'`; coupled inductors, an
+inductor cut-set or a capacitor loop → `'extraction'`; a PWM / pulse
+source → `'source'`). The route of `engine='auto'` does not change.
+
+### Diode mode selection: passivity classes in the diagnostics
+
+`diagnostics['mode_guard']` and `diagnostics['mode_selection']` now
+carry `passivity = {'class', 'device', 'kind'}`: `non_passive` (a VCVS,
+a negative R/C/L, or a group of coupled inductors whose inductance
+matrix is not positive semidefinite, named `L1+L2+…`, kind
+`InductorCoupling` — pairwise `|k| ≤ 1` does not make three windings
+PSD: `k12 = k13 = 1, k23 = 0` has an eigenvalue `1 − √2`),
+`passive_nonreciprocal` (an ideal transformer, named; Lemke kept,
+nothing refused) or `passive_reciprocal`. Numbers do not change. A diode
+bridge behind an ideal transformer (n = 0.5) runs on the dsed default at
+31.876241228 V against pwl 31.876241232 V. A rectifier fed by coupled
+inductors is still refused by the dsed extractor
+(`UnsupportedError('dsed', 'extraction')`). Known: `mode_selection='lcp'`
+is wrong on that bridge (11.73 V; KNOWN_LIMITATIONS).
+
+### dsed: a diode predicate starting a step at exactly zero is located (fix)
+
+The dsed event locator skipped every armed predicate whose value was
+exactly 0 at the start of a step ("just fired"). With `V_th = 0` a
+turn-on lands at `v = 0`, so the armed turn-off predicate started the
+next step at 0 and a return through zero inside that step was never an
+event: the double-crossing LC tank held its diode ON at −18 mA from
+1.89 µs to 7.66 µs. Now only the predicate that fired at that instant is
+skipped; a diode predicate at zero is read just after the step start
+(`100·h_e` on the exact trajectory) and located when it moves into its
+admissible side, never fired at zero length. The tank's edges are now
+1.2532358877 / 1.8877214715 / 7.5370567364 / 8.1702737953 µs (solve_ivp
+DOP853 rtol 1e-13 agrees to 3e-16 s), end `v(t)` −5.17799 → −5.43795 V.
+Every other circuit of the mode-selection surveys (29 circuits × settle /
+guard / 'lcp') and `pwl`/`trbdf2` are bit-identical.
 
 ### Diode mode selection: default-mode guard on dsed (BREAKING for wrong numbers)
 

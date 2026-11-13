@@ -440,6 +440,10 @@ class _Solver:
         self.ad = _pulsim._NativeCircuitBuilderAdapter(builder,
                                                        self.cache, None)
         self._run_native = _pulsim.run_ped_native_builder
+        # the kernel diode-mode guard, as simulate's dsed runs set it
+        from ._dsed_dispatch import MODE_GUARD, _shadow_h_e
+        self._guard = ({"mode_guard_h_e": _shadow_h_e(builder, switch_fn, self.T)}
+                       if MODE_GUARD and _nd else {})
         m0 = switch_fn(0.0)
         try:
             self.ad.set_mask(m0)
@@ -484,7 +488,7 @@ class _Solver:
             r = self._run_native(
                 self.ad, sf, x, self.T, rtol=1e-11, atol=1e-14,
                 dt_init=self.T * 1e-6, dt_max=self.T, store_every=1,
-                enable_event_projection=False)
+                enable_event_projection=False, **self._guard)
         except RuntimeError as e:
             raise _err(f"a period run failed: {e}") from e
         times = np.asarray(r["times"], dtype=float)

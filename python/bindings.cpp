@@ -211,7 +211,9 @@ void init_module(py::module_& m) {
         "An engine marked False refuses the kind with UnsupportedError.");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
-           const std::string& engine) {
+           const std::string& engine_in) {
+            // 'exact' is the canonical name of the dsed column (add-exact-propagator-strategy 13.2)
+            const std::string engine = engine_in == "exact" ? std::string("dsed") : engine_in;
             for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
                 if (pwl::kEngineNames[e] == engine) {
                     require_supported(graph, pool,
