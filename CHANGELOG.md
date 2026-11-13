@@ -46,6 +46,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   devices. `result._trbdf2_stats["n_sdirk_steps"]` counts them. A
   Hosea–Shampine filtered estimate exists as an off-by-default C++
   option (it made a bridge diode chatter 4334 times).
+* Documented: a floating V_th = 0 diode bridge grinds to `max_steps` on
+  TR-BDF2 at rtol ≤ 1e-6 (pre-existing; docs/known-limitations.md). The
+  baseline's VSI and bridge "errors" are the reference's edge
+  quantisation and the bus common mode (DECISIONS 11). The ripple test
+  pins the engine's own peak-to-peak at 5e-3 again.
 
 ### Newton roundoff acceptance (add-newton-roundoff-acceptance)
 

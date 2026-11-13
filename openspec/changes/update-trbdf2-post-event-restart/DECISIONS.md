@@ -154,3 +154,41 @@ The open questions of `design.md` had no answer and none was marked
    artefact is not a filter question: filtered, its peak is 20 V at
    rtol 2e-6 and at default tolerances but 1029 V at rtol 1e-6, so the
    strict xfail stays. C++-only `TrBdf2Options::filter_error_estimate`.
+11. **The wrong-way rows of the baseline, explained (maintainer decision
+   4).** None is an engine defect of this change; one is a separate
+   defect, listed last.
+   - *VSI on RL, final i_L error 6.28e-4 → 6.73e-4 A.* The reference
+     scatters: `engine='pwl'` samples the opaque sine-PWM `switch_fn`
+     on its grid, so each edge is quantised to dt with a random sign.
+     Final i_L at dt = 1e-7, 5e-8, 2.5e-8, 1.25e-8, 6.25e-9 s:
+     −4.57519, −4.58104, −4.58043, −4.58099, −4.58057 A (±3e-4, not
+     monotone). TR-BDF2 bisects each edge to h_min and gives −4.58037
+     (rtol 1e-5) … −4.58042 (rtol 1e-8): flat in rtol and inside the
+     reference's scatter. The share of time a diode conducts beside its
+     switch is 14.54 % on both engines.
+   - *325 V bridge, final error 0.618 V, flat in rtol.* It is the
+     floating DC bus's common mode, not the output: v(dp) − v(dn)
+     agrees to ±0.01 V at every 2 ms sample, while after each
+     conduction interval pwl puts dn at −0.59 V and TR-BDF2 at 0.000 V.
+     With every diode off, dn is set by 1 MΩ and the 1e-9 S leakages,
+     and a V_th = 0 diode at zero current is on or off within that
+     leakage; both are solutions of the ideal-diode problem. The
+     baseline measures v(dp) alone; v(dp) − v(dn) would not see it.
+   - *Shockley rectifier error not shrinking from rtol 1e-5 to 1e-6*
+     (3.73e-5 → 7.77e-5 final; then 1.64e-5, 3.30e-6 at 1e-7, 1e-8; tw
+     5.5e-5, 8.5e-5, 1.9e-5, 3.8e-6). The steps barely move between the
+     first two (1079 → 1273), so the error is the sum of signed local
+     errors on almost the same grid; it converges from 1e-6 on.
+   - *Ripple tolerance 5e-3 → 7e-2* (`test_fft_and_rms_survive_the_
+     irregular_grid`). The 5.8 % is the uniform resampler at the median
+     spacing (T/8) clipping the ripple cusp, not the engine: the raw
+     grid gives 67.98 mV against 68.2 mV from (1−D)V_out/(8LCf²). The
+     engine's own peak-to-peak is now pinned at the old 5e-3; the
+     resampler keeps 7e-2 (a time-weighted AC RMS through the
+     resampler is worse, −14.6 %).
+   - *Separate defect, not fixed:* the 325 V bridge at rtol ≤ 1e-6
+     exhausts `max_steps` (1e7) at t = 10.18 ms (1e-6) and 10.05 ms
+     (1e-7), on this branch and on the build before it. That is the
+     first all-diodes-off interval, the common-mode node of the
+     previous point; the bridge's sensitivity to roundoff-sized changes
+     (items 6 and 9) is the same mechanism. Left for a change of its own.

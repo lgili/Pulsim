@@ -418,6 +418,9 @@ def test_fft_and_rms_survive_the_irregular_grid():
     # interpolation clips the ripple's cusp at the edges. 0.1 % when
     # the samples happened to align with them; 5.8 % (0.0640 vs
     # 0.0680 V, analytic 0.068 V) since update-trbdf2-error-control.
+    # The 7 % is the resampler's (dt = T/8), so the engine's own grid is
+    # pinned at the old 5e-3: (1-D)V_out/(8 L C f^2) = 68.2 mV, 68.0 here.
+    assert p2p_raw == pytest.approx(0.0682, rel=5e-3)
     assert p2p_u == pytest.approx(p2p_raw, rel=7e-2)
 
     # Time-weighted RMS matches the fixed-dt reference; the
