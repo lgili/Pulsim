@@ -15,7 +15,10 @@
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/pwl/cache.hpp"
 
+#include <array>
 #include <cmath>
+#include <utility>
+#include <vector>
 
 using namespace pulsim;
 
@@ -201,4 +204,32 @@ TEST_CASE("Period map: a defective basis declines the integrals by name",
     const Vector xf = ad.recover_from_state() * r.x_end + ad.recover_const();
     CHECK(std::abs(xf[k] - v) <= 1e-8);
     CHECK(r.monodromy.rows() == 2);
+}
+
+TEST_CASE("Period map: the extrema grid brackets a fast mode's peak",
+          "[period_map]") {
+    // y = e^{-3e8 s} - 3 e^{-3e7 s} + 2.5 e^{-3e6 s} on a 10 us step peaks
+    // at 1.707 near 92 ns; y' < 0 at both ends of the first uniform cell
+    const std::array<double, 3> mu{-3e8, -3e7, -3e6};
+    const std::array<double, 3> al{1.0, -3.0, 2.5};
+    auto dy = [&](double s) {
+        double v = 0.0;
+        for (int i = 0; i < 3; ++i) v += al[i] * mu[i] * std::exp(mu[i] * s);
+        return v;
+    };
+    auto brackets = [&](const std::vector<double>& g) {
+        std::vector<std::pair<double, double>> b;
+        for (std::size_t c = 1; c < g.size(); ++c) {
+            if (dy(g[c - 1]) > 0 && dy(g[c]) < 0) b.emplace_back(g[c - 1], g[c]);
+        }
+        return b;
+    };
+    const auto uniform = pulsim::dsed::detail::extrema_grid(1e-5, 16, 1e5);
+    REQUIRE(uniform.size() == 17);
+    REQUIRE(brackets(uniform).empty());          // the old miss
+    const auto g = pulsim::dsed::detail::extrema_grid(1e-5, 16, 3e8);
+    const auto b = brackets(g);
+    REQUIRE(b.size() == 1);
+    REQUIRE(b[0].first < 9.2e-8);
+    REQUIRE(b[0].second > 9.2e-8);
 }

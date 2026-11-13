@@ -283,6 +283,30 @@ template <class AdapterT, class MaskT>
            * e.d.head(n).asDiagonal();
 }
 
+/// Search grid of one step [0, h] for the stationary points of a sum
+/// of exponentials: K uniform cells plus h/2, h/4, ... down to about
+/// 1/(2 max|Re mu|), so a fast mode's extremum near the step start is
+/// bracketed (a uniform grid of 16 cells missed a 1.707 peak at 92 ns
+/// of a 10 us step and reported 0.5). Mirrored by
+/// pulsim.sensitivity._extrema_grid; keep the two equal.
+inline std::vector<Real> extrema_grid(Real h, long long K, Real re_max) {
+    std::vector<Real> g;
+    g.reserve(static_cast<std::size_t>(K) + 64);
+    for (long long c = 0; c <= K; ++c) {
+        g.push_back(h * static_cast<Real>(c) / static_cast<Real>(K));
+    }
+    if (h * re_max > Real{16}) {
+        const int M = std::min(60, static_cast<int>(
+            std::ceil(std::log2(h * re_max / Real{2}))));
+        for (int m = 1; m <= M; ++m) {
+            g.push_back(std::ldexp(h, -m));
+        }
+    }
+    std::sort(g.begin(), g.end());
+    g.erase(std::unique(g.begin(), g.end()), g.end());
+    return g;
+}
+
 inline Vector augment(const Vector& x) {
     Vector xb(x.size() + 1);
     xb.head(x.size()) = x;
@@ -492,14 +516,17 @@ template <class AdapterT, class MaskT>
         }
         // ---- extrema: ends, then stationary points of y ----
         Real wmax = Real{0};
+        Real rmax = Real{0};
         for (Index i = 0; i < n1; ++i) {
             wmax = std::max(wmax, std::abs(e.mu[i].imag()));
+            rmax = std::max(rmax, std::abs(e.mu[i].real()));
         }
         const auto K = static_cast<long long>(std::max(
             Real{16}, std::ceil(h * wmax * Real{8}
                                 / (Real{2} * std::numbers::pi_v<Real>))));
         const Vector y0 = y_of(e, res.states[k]);
         const Vector y1 = y_of(e, *left[k + 1]);
+        std::vector<Real> grid;   // built on the first observable searched
         for (Index j = 0; j < n_obs; ++j) {
             if (!obs[static_cast<std::size_t>(j)].extrema) {
                 continue;
@@ -531,11 +558,13 @@ template <class AdapterT, class MaskT>
                 }
                 return v;
             };
-            Real s_lo = Real{0};
+            if (grid.empty()) {
+                grid = detail::extrema_grid(h, K, rmax);
+            }
+            Real s_lo = grid.front();
             Real d_lo = dy(s_lo);
-            for (long long c = 1; c <= K; ++c) {
-                const Real s_hi = h * static_cast<Real>(c)
-                                  / static_cast<Real>(K);
+            for (std::size_t c = 1; c < grid.size(); ++c) {
+                const Real s_hi = grid[c];
                 const Real d_hi = dy(s_hi);
                 if ((d_lo > 0 && d_hi < 0) || (d_lo < 0 && d_hi > 0)) {
                     // bisection on y' to float resolution

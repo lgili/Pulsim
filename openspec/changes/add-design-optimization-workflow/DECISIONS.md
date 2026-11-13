@@ -429,6 +429,47 @@ two sign changes of y' in one search cell can be missed (a log-spaced
 grid near s = 0 would fix it); an event within 1e-12 T of the section
 is neither a section edge nor an inside edge in `Period.edges`.
 
+## 18. Integration batch 6c: fresh-context review of slices 2 and 3
+
+Reviewer (opus, read-only) on 1aef1a52..3ea998c6; each fix is its own
+commit with a test proved non-vacuous against the previous code.
+
+Acted on:
+* (d3) design ids collided: `math.sin` vs `math.cos` lambdas, two
+  `functools.partial`s, two bound methods, keyword-only defaults, a
+  read global; a nested function hashed differently per process → the
+  id now covers names, nested code, kw-defaults, globals, partials and
+  methods (§15 M3 extended).
+* (a1, d1) a zero-valued parameter gave NaN sensitivities (relative
+  steps 0/0; `dev > lim` is False for NaN) → refused by name; a
+  non-finite evaluator gradient goes to `grads_refused`.
+* (a2) near-miss events were a once-per-call-site warning →
+  `counters["grad_near_misses"]`, the record stays `ok` (the gradient
+  is exact for this event pattern).
+* (b1) the extrema search used 16 uniform cells per step: a fast mode's
+  peak and the following valley in one cell were both missed (1.707 at
+  92 ns of a 10 µs step reported as 0.5) → the grid adds `h/2^m` down
+  to `1/(2 max|Re μ|)`, the same in C++ (`detail::extrema_grid`) and
+  Python (`_extrema_grid`). Still a grid: two stationary points closer
+  than one geometric cell can be missed; no root isolation.
+* (d2) an inconsistent kernel edge log raised outside the engine
+  wrapper and stopped the batch → `failed` for that design.
+* (e1) the Python `LossTable` returned NaN / inf / 0 for non-finite
+  queries where the kernel table refuses → both refuse.
+
+Recorded, not changed:
+* (c1) the pss verification period is the Newton map itself, so its
+  residual test cannot fire; periodicity is certified by the Newton
+  stop and, independently, by the `orbit` test (§16). An independent
+  per-evaluation check costs one `simulate` period.
+* (a7) two separately logged events at the same instant on one sample
+  can raise `KeyError` in the Python sensitivity jump (a crash, not a
+  wrong number); no circuit in the tests produces it.
+* (b4) the kernel attaches an event to the first sample at or after its
+  time; Python raises in that case. (a3) the grazing cosine is
+  dimensionally sound only when each state label names one device;
+  the kernel's 1e-12 test is on the raw cosine.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):
