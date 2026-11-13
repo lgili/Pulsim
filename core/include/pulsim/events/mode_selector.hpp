@@ -53,6 +53,7 @@ enum class LcpStatus : int {
     Solution = 1,
     SecondaryRay = 2,  // no solution on a copositive-plus matrix
     PivotCap = 3,      // bug trap; lexicographic Lemke is finite
+    Unenumerable = 4,  // non-passive, secondary ray, more than 12 free ports (D3)
 };
 
 [[nodiscard]] inline const char* to_string(LcpStatus s) noexcept {
@@ -61,6 +62,7 @@ enum class LcpStatus : int {
     case LcpStatus::Solution: return "solution";
     case LcpStatus::SecondaryRay: return "secondary ray";
     case LcpStatus::PivotCap: return "pivot cap (bug)";
+    case LcpStatus::Unenumerable: return "secondary ray on a non-passive problem above 12 ports";
     }
     return "?";
 }
@@ -272,6 +274,11 @@ struct ModeSelection {
     int widenings = 0;        // re-solves at a widened step
     int released = 0;         // hysteresis ports released (D8)
     int first_pass_ties = 0;  // ports tied at h_e (before widening)
+    int leak_pins = 0;        // remaining ties ON because their current pins an island (D5)
+    int pin_judgements = 0;   // events where the pins went to the judge (or its absence)
+    int unfixed = 0;          // decided ports freed again in a widened pass (D5)
+    int enumerations = 0;     // non-passive: Lemke ended at a ray, the 2^k modes enumerated (D3)
+    int nonunique_modes = 0;  // enumerations that found several modes (fewest flips taken)
     std::vector<Real> tie_currents;   // |i| of each port tied at h_e (A)
 };
 
@@ -286,6 +293,10 @@ class ModeSelector {
 public:
     /// Tolerance coefficient of D4 (tol_w = tol·vscale).
     Real tol = Real{1e-9};
+    /// Structural passivity of the circuit (D3). False: a secondary ray
+    /// proves nothing, the modes are enumerated up to kMaxEnumerated ports.
+    bool passive = true;
+    static constexpr Eigen::Index kMaxEnumerated = 12;
 
     /// The port LCP in the previous mode's coordinates: z_j = w_j for a
     /// port ON in the previous mode, i_j for one OFF; the complement
@@ -322,15 +333,39 @@ public:
     /// Select the mode after an event. `port_at(h, Z, u)` fills the
     /// k-port of the previous mode's BE companion network of step h
     /// (called at h_e, and at 100·h_e, 1e4·h_e on ties).
-    template <class PortFn>
+    ///
+    /// Ties (D5, slice 2): a port with i ≤ tol_i and w ≤ tol_w at h_e is
+    /// re-decided at the widened step with every port the h_e LCP did
+    /// decide FIXED in its mode (principal pivot onto the decided basis,
+    /// the LCP re-solved on the ties alone). Merging per-port answers of
+    /// independent LCPs was not complementary: two diodes pinning one
+    /// floating island swapped roles between h_e and 100·h_e and the
+    /// merge kept both ON or neither. A tie remaining after 1e4·h_e is
+    /// ON if its current pins an island (removing it would open its own
+    /// gap beyond tol_w: i·R_jj > tol_w, R_jj its driving-point
+    /// resistance — ~1/g_off for a leak-scale current holding a DC bus)
+    /// and the mode with it OFF is not consistent, otherwise OFF (no
+    /// current flows, both modes consistent).
+    ///
+    /// `judge(mode)` (optional; 1 consistent, 0 not, −1 unknown) is the
+    /// engine's exact-trajectory check (D6 step 4). When given, it
+    /// arbitrates the pins: the remaining ties go OFF if that mode is
+    /// consistent, else the pinning ones are ON. The resistance test at
+    /// the widest step alone also pins currents left by event location
+    /// (pA at a series-pair turn-off, where the leak divider already
+    /// centres the island and all-OFF is exact).
+    template <class PortFn, class JudgeFn = int (*)(const std::vector<char>&)>
     ModeSelection select(const std::vector<DiodePort>& ports,
                          const std::vector<char>& prev_on, PortFn&& port_at,
-                         Real h_e, const CircuitScale& sc) {
+                         Real h_e, const CircuitScale& sc,
+                         JudgeFn&& judge = [](const std::vector<char>&) { return -1; }) {
         const auto k = static_cast<Eigen::Index>(ports.size());
         ModeSelection out;
         out.on.assign(ports.size(), 0);
         if (k == 0) return out;
         st_.assign(ports.size(), 0);
+        pin_.assign(ports.size(), 0);
+        enum_ = nonunique_ = 0;
         const Real factors[3] = {Real{1}, Real{100}, Real{1e4}};
         for (int pass = 0; pass < 3; ++pass) {
             if (pass > 0) {
@@ -342,15 +377,56 @@ public:
             const Real h = h_e * factors[pass];
             port_at(h, Z_, u_);
             hybrid_lcp(Z_, u_, ports, prev_on, H_, q_);
+            H_he_ = H_;
+            q_he_ = q_;
+            st_prev_ = st_;
             int piv = 0;
-            const LcpStatus status = solve_with_hysteresis_(ports, prev_on, sc, h, piv, out.released);
+            LcpStatus status = LcpStatus::Trivial;
+            // pass > 0: decided ports fixed. A fixed port whose complement
+            // this LCP violates was not decided robustly (two diodes on one
+            // high-impedance island split a tiny gap differently at each
+            // step): it is freed and the pass solved again (bounded by k).
+            for (Eigen::Index round = 0; round <= k; ++round) {
+                coord_ = prev_on;
+                fixed_.assign(ports.size(), 0);
+                if (pass > 0) {
+                    for (std::size_t j = 0; j < ports.size(); ++j) {
+                        if (st_[j] < 0) continue;
+                        fixed_[j] = 1;
+                        coord_[j] = st_[j] > 0 ? 1 : 0;   // ON: z = w = 0; OFF: z = i = 0
+                    }
+                    H_ = H_he_;
+                    q_ = q_he_;
+                    if (!pivot_to_coords_(prev_on)) { status = LcpStatus::PivotCap; break; }
+                }
+                status = solve_with_hysteresis_(ports, sc, h, piv, out.released);
+                if (pass == 0 || (status != LcpStatus::Solution && status != LcpStatus::Trivial))
+                    break;
+                const Real tol_w = tol * sc.vscale;
+                const Real tol_i = tol * sc.iscale + tol_w * sc.c_max / h;
+                bool freed = false;
+                for (Eigen::Index j = 0; j < k; ++j) {
+                    auto& s = st_[static_cast<std::size_t>(j)];
+                    if ((s == 0 && wg_[j] < -tol_w) || (s == 1 && i_[j] < -tol_i)) {
+                        s = -1;
+                        freed = true;
+                        ++out.unfixed;
+                    }
+                }
+                if (!freed) break;
+            }
             ++out.lcps;
             if (pass == 0) out.pivots = piv;
             out.pivots_total += piv;
-            const bool failed = status == LcpStatus::SecondaryRay || status == LcpStatus::PivotCap;
+            const bool failed = status == LcpStatus::SecondaryRay || status == LcpStatus::PivotCap
+                                || status == LcpStatus::Unenumerable;
             if (pass == 0) out.status = status;
-            if (failed && pass == 0) return out;
-            if (failed) break;  // a failed widening keeps the h_e decision; its ties stay OFF
+            if (failed && pass == 0) {
+                out.enumerations = enum_;
+                return out;
+            }
+            if (failed) { st_ = st_prev_; break; }  // a failed widening keeps the earlier decision
+            const Real tol_w = tol * sc.vscale;
             for (Eigen::Index j = 0; j < k; ++j) {
                 auto& s = st_[static_cast<std::size_t>(j)];
                 if (pass == 0 && cls_[static_cast<std::size_t>(j)] < 0) {
@@ -358,12 +434,26 @@ public:
                     out.tie_currents.push_back(std::abs(i_[j]));
                 }
                 if (pass == 0 || s < 0) s = cls_[static_cast<std::size_t>(j)];
+                if (s < 0)
+                    pin_[static_cast<std::size_t>(j)] =
+                        (i_[j] > Real{0} && i_[j] * port_resistance_(j) > tol_w) ? 1 : 0;
             }
         }
+        out.enumerations = enum_;
+        out.nonunique_modes = nonunique_;
+        bool any_pin = false;
         for (Eigen::Index j = 0; j < k; ++j) {
-            const int s = st_[static_cast<std::size_t>(j)];
-            if (s < 0) ++out.ties;
-            out.on[static_cast<std::size_t>(j)] = s > 0 ? 1 : 0;
+            const auto ju = static_cast<std::size_t>(j);
+            out.on[ju] = st_[ju] > 0 ? 1 : 0;      // remaining ties OFF
+            any_pin = any_pin || (st_[ju] < 0 && pin_[ju]);
+        }
+        const bool pins_on = any_pin && judge(out.on) != 1;
+        if (any_pin) ++out.pin_judgements;
+        for (Eigen::Index j = 0; j < k; ++j) {
+            const auto ju = static_cast<std::size_t>(j);
+            if (st_[ju] >= 0) continue;
+            if (pins_on && pin_[ju]) { out.on[ju] = 1; ++out.leak_pins; }
+            else ++out.ties;
         }
         return out;
     }
@@ -373,19 +463,67 @@ public:
     [[nodiscard]] const Vector& last_gap() const noexcept { return wg_; }
 
 private:
-    // Solve the LCP of (H_, q_) with OFF hysteresis ports held OFF,
-    // releasing each held port whose voltage reaches V_th (D8, bounded:
-    // the held set only shrinks), then classify every port into cls_.
+    // Principal pivot of (H_, q_) from the previous mode's coordinates to
+    // coord_ (z_j = w_j where coord_ is 1, i_j where 0). False when the
+    // pivot block is singular.
+    bool pivot_to_coords_(const std::vector<char>& prev_on) {
+        const auto k = static_cast<Eigen::Index>(prev_on.size());
+        idx_.clear();
+        oth_.clear();
+        for (Eigen::Index j = 0; j < k; ++j)
+            (coord_[static_cast<std::size_t>(j)] != prev_on[static_cast<std::size_t>(j)] ? idx_ : oth_)
+                .push_back(j);
+        const auto nb = static_cast<Eigen::Index>(idx_.size());
+        if (nb == 0) return true;
+        const auto na = static_cast<Eigen::Index>(oth_.size());
+        auto pick = [&](const std::vector<Eigen::Index>& r, const std::vector<Eigen::Index>& c) {
+            DenseMatrix m(static_cast<Eigen::Index>(r.size()), static_cast<Eigen::Index>(c.size()));
+            for (std::size_t i = 0; i < r.size(); ++i)
+                for (std::size_t j = 0; j < c.size(); ++j)
+                    m(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) = H_(r[i], c[j]);
+            return m;
+        };
+        const DenseMatrix Hbb = pick(idx_, idx_), Hba = pick(idx_, oth_);
+        const DenseMatrix Hab = pick(oth_, idx_), Haa = pick(oth_, oth_);
+        Vector qb(nb), qa(na);
+        for (Eigen::Index r = 0; r < nb; ++r) qb[r] = q_[idx_[static_cast<std::size_t>(r)]];
+        for (Eigen::Index r = 0; r < na; ++r) qa[r] = q_[oth_[static_cast<std::size_t>(r)]];
+        const Eigen::FullPivLU<DenseMatrix> lu(Hbb);
+        if (!lu.isInvertible()) return false;
+        const DenseMatrix Bi = lu.inverse();
+        const DenseMatrix nBa = -(Bi * Hba);
+        const DenseMatrix AB = Hab * Bi;
+        const DenseMatrix Aa = Haa + Hab * nBa;
+        const Vector qbn = -(Bi * qb);
+        const Vector qan = qa + Hab * qbn;
+        for (Eigen::Index r = 0; r < nb; ++r) {
+            const Eigen::Index jr = idx_[static_cast<std::size_t>(r)];
+            q_[jr] = qbn[r];
+            for (Eigen::Index c = 0; c < nb; ++c) H_(jr, idx_[static_cast<std::size_t>(c)]) = Bi(r, c);
+            for (Eigen::Index c = 0; c < na; ++c) H_(jr, oth_[static_cast<std::size_t>(c)]) = nBa(r, c);
+        }
+        for (Eigen::Index r = 0; r < na; ++r) {
+            const Eigen::Index jr = oth_[static_cast<std::size_t>(r)];
+            q_[jr] = qan[r];
+            for (Eigen::Index c = 0; c < nb; ++c) H_(jr, idx_[static_cast<std::size_t>(c)]) = AB(r, c);
+            for (Eigen::Index c = 0; c < na; ++c) H_(jr, oth_[static_cast<std::size_t>(c)]) = Aa(r, c);
+        }
+        return true;
+    }
+
+    // Solve the LCP of (H_, q_) in the coordinates coord_, with fixed_
+    // ports and OFF hysteresis ports held (z = 0), releasing each
+    // hysteresis port whose voltage reaches V_th (D8, bounded: the held
+    // set only shrinks), then classify every port into cls_.
     LcpStatus solve_with_hysteresis_(const std::vector<DiodePort>& ports,
-                                     const std::vector<char>& prev_on,
                                      const CircuitScale& sc, Real h,
                                      int& pivots, int& released) {
         const auto k = static_cast<Eigen::Index>(ports.size());
         held_.assign(ports.size(), 0);
         for (Eigen::Index j = 0; j < k; ++j) {
-            const auto& p = ports[static_cast<std::size_t>(j)];
-            held_[static_cast<std::size_t>(j)] =
-                (!prev_on[static_cast<std::size_t>(j)] && p.V_th > p.V_f) ? 1 : 0;
+            const auto ju = static_cast<std::size_t>(j);
+            const auto& p = ports[ju];
+            held_[ju] = (fixed_[ju] || (!coord_[ju] && p.V_th > p.V_f)) ? 1 : 0;
         }
         // impedance scale: currents are compared in volts (prototype)
         const Real zs = sc.vscale / sc.iscale;
@@ -399,45 +537,55 @@ private:
             qs_.resize(nf);
             for (Eigen::Index r = 0; r < nf; ++r) {
                 const Eigen::Index jr = free_[static_cast<std::size_t>(r)];
-                // ŵ of an ON-before port is a current; z of an OFF-before port too
-                const Real sr = prev_on[static_cast<std::size_t>(jr)] ? zs : Real{1};
+                // ŵ of an ON-coordinate port is a current; z of an OFF one too
+                const Real sr = coord_[static_cast<std::size_t>(jr)] ? zs : Real{1};
                 qs_[r] = sr * q_[jr];
                 for (Eigen::Index c = 0; c < nf; ++c) {
                     const Eigen::Index jc = free_[static_cast<std::size_t>(c)];
-                    const Real scol = prev_on[static_cast<std::size_t>(jc)] ? Real{1} : zs;
+                    const Real scol = coord_[static_cast<std::size_t>(jc)] ? Real{1} : zs;
                     Hs_(r, c) = sr * H_(jr, jc) / scol;
                 }
             }
             const LcpOutcome o = lemke_.solve(Hs_, qs_, zf_, wf_);
             pivots += o.pivots;
             status = o.status;
+            if (status == LcpStatus::SecondaryRay && !passive) {
+                // D3: on a non-passive problem a ray proves nothing; the
+                // 2^k principal systems decide (fewest flips on several)
+                if (nf > kMaxEnumerated) return LcpStatus::Unenumerable;
+                ++enum_;
+                const int n = enumerate_lcp(Hs_, qs_, zf_, wf_);
+                if (n > 1) ++nonunique_;
+                if (n > 0) status = LcpStatus::Solution;
+            }
             if (status == LcpStatus::SecondaryRay || status == LcpStatus::PivotCap)
                 return status;
-            // back to physical coordinates; held ports: z = i = 0
+            // back to physical coordinates; held ports: z = 0
             zfull_.setZero(k);
             for (Eigen::Index r = 0; r < nf; ++r) {
                 const Eigen::Index j = free_[static_cast<std::size_t>(r)];
-                zfull_[j] = prev_on[static_cast<std::size_t>(j)] ? zf_[r] : zf_[r] / zs;
+                zfull_[j] = coord_[static_cast<std::size_t>(j)] ? zf_[r] : zf_[r] / zs;
             }
             // held ports: their complement from the relation; free ports:
             // Lemke's own (exactly complementary) values
             what_ = H_ * zfull_ + q_;
             for (Eigen::Index r = 0; r < nf; ++r) {
                 const Eigen::Index j = free_[static_cast<std::size_t>(r)];
-                what_[j] = prev_on[static_cast<std::size_t>(j)] ? wf_[r] / zs : wf_[r];
+                what_[j] = coord_[static_cast<std::size_t>(j)] ? wf_[r] / zs : wf_[r];
             }
             i_.resize(k);
             wg_.resize(k);
             for (Eigen::Index j = 0; j < k; ++j) {
-                if (prev_on[static_cast<std::size_t>(j)]) { wg_[j] = zfull_[j]; i_[j] = what_[j]; }
+                if (coord_[static_cast<std::size_t>(j)]) { wg_[j] = zfull_[j]; i_[j] = what_[j]; }
                 else { i_[j] = zfull_[j]; wg_[j] = what_[j]; }
             }
             bool release = false;
             for (Eigen::Index j = 0; j < k; ++j) {
-                const auto& p = ports[static_cast<std::size_t>(j)];
-                // held OFF: i = 0, v = V_f − w
-                if (held_[static_cast<std::size_t>(j)] && p.V_f - wg_[j] >= p.V_th) {
-                    held_[static_cast<std::size_t>(j)] = 0;
+                const auto ju = static_cast<std::size_t>(j);
+                const auto& p = ports[ju];
+                // held OFF by hysteresis: i = 0, v = V_f − w
+                if (held_[ju] && !fixed_[ju] && p.V_f - wg_[j] >= p.V_th) {
+                    held_[ju] = 0;
                     ++released;
                     release = true;
                 }
@@ -448,21 +596,56 @@ private:
         const Real tol_i = tol * sc.iscale + tol_w * sc.c_max / h;
         cls_.assign(ports.size(), 0);
         for (Eigen::Index j = 0; j < k; ++j) {
+            const auto ju = static_cast<std::size_t>(j);
             int s;
-            if (held_[static_cast<std::size_t>(j)] || wg_[j] > tol_w) s = 0;
+            if (fixed_[ju]) s = coord_[ju] ? 1 : 0;
+            else if (held_[ju] || wg_[j] > tol_w) s = 0;
             else if (i_[j] > tol_i) s = 1;
             else s = -1;
-            cls_[static_cast<std::size_t>(j)] = s;
+            cls_[ju] = s;
         }
         return status;
     }
 
+    // Driving-point resistance dw_j/di_j of port j in the last solution's
+    // mode (fixed ports in theirs, held ports OFF, a free port ON when it
+    // carries current): the diagonal entry of the principal pivot of H_
+    // onto the coordinates z_m = i_m (OFF and j), z_m = w_m (ON).
+    [[nodiscard]] Real port_resistance_(Eigen::Index j) {
+        const auto k = static_cast<Eigen::Index>(coord_.size());
+        idx_.clear();   // ports whose coordinate leaves coord_
+        for (Eigen::Index m = 0; m < k; ++m) {
+            const auto mu = static_cast<std::size_t>(m);
+            const bool on_now = m != j && (fixed_[mu] ? coord_[mu] != 0
+                                                       : (!held_[mu] && i_[m] > Real{0}));
+            if (on_now != (coord_[mu] != 0)) idx_.push_back(m);
+        }
+        const auto nb = static_cast<Eigen::Index>(idx_.size());
+        if (nb == 0) return H_(j, j);
+        const bool j_in = coord_[static_cast<std::size_t>(j)] != 0;   // j pivots too
+        DenseMatrix Hbb(nb, nb);
+        Vector hbj(nb), hjb(nb);
+        Eigen::Index pj = -1;
+        for (Eigen::Index r = 0; r < nb; ++r) {
+            const Eigen::Index a = idx_[static_cast<std::size_t>(r)];
+            if (a == j) pj = r;
+            hbj[r] = H_(a, j);
+            hjb[r] = H_(j, a);
+            for (Eigen::Index c = 0; c < nb; ++c) Hbb(r, c) = H_(a, idx_[static_cast<std::size_t>(c)]);
+        }
+        const Eigen::FullPivLU<DenseMatrix> lu(Hbb);
+        if (!lu.isInvertible()) return Real{0};       // undecidable: stays a tie
+        if (j_in) return lu.inverse()(pj, pj);        // H'_jj = (H_ββ⁻¹)_jj
+        return H_(j, j) - hjb.dot(lu.solve(hbj));     // Schur complement
+    }
+
     LemkeSolver lemke_;
-    DenseMatrix Z_, H_, Hs_;
-    Vector u_, q_, qs_, zf_, wf_, zfull_, what_, i_, wg_;
-    std::vector<int> st_, cls_;
-    std::vector<char> held_;
-    std::vector<Eigen::Index> free_;
+    DenseMatrix Z_, H_, Hs_, H_he_;
+    Vector u_, q_, qs_, zf_, wf_, zfull_, what_, i_, wg_, q_he_;
+    std::vector<int> st_, cls_, st_prev_;
+    std::vector<char> held_, coord_, fixed_, pin_;
+    std::vector<Eigen::Index> free_, idx_, oth_;
+    int enum_ = 0, nonunique_ = 0;
 };
 
 }  // namespace pulsim::events

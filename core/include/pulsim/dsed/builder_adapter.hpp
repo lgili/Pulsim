@@ -38,6 +38,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/dsed/event_projection.hpp"
 #include "pulsim/dsed/exact_lti.hpp"
+#include "pulsim/events/mode_refusal.hpp"
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -860,6 +861,27 @@ public:
         sc.vscale = vs;
         sc.iscale = std::max(is, vs * gmax);
         return sc;
+    }
+
+    /// add-complementarity-mode-selection D3 / task 5.1: structural
+    /// passivity at the diode ports. A VCVS (gain), or a resistor,
+    /// capacitor or inductor with a negative value, makes the circuit
+    /// non-passive; the first one found is named. The ideal transformer
+    /// is passive (not reciprocal): Lemke keeps its guarantee.
+    [[nodiscard]] events::PassivityClass passivity() const {
+        using K = pwl::DevicePool::StoredKind;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            if (!pool_.is_registered(b)) continue;
+            const K kind = pool_.kind_of(b);
+            const bool neg =
+                (kind == K::Resistor && pool_.resistor_params(b).G < Real{0})
+                || (kind == K::Capacitor && pool_.capacitor_params(b).C < Real{0})
+                || (kind == K::Inductor && pool_.inductor_params(b).L < Real{0});
+            if (kind == K::VCVS || neg)
+                return {std::string(graph_.branch_name(b)),
+                        std::string(pwl::stored_kind_name(kind))};
+        }
+        return {};
     }
 
     /// Port-model k-port builds (each k + 1 back-substitutions).

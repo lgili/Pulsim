@@ -1822,13 +1822,16 @@ def simulate(
         TR-BDF2 abort).
     mode_selection
         How PWL diodes are decided at an event. ``None`` / ``'legacy'``
-        (default): today's settle. ``'shadow'`` (``engine='dsed'``
-        only): the settle still decides, so the numbers are unchanged,
-        and a complementarity problem (LCP) is solved on the same held
-        state at every event; the events where the two disagree, with
-        the LCP counters, are in ``result.diagnostics['mode_shadow']``.
-        ``'shadow'`` on ``pwl`` / ``trbdf2`` and ``'lcp'`` raise
-        :class:`UnsupportedError` (not implemented yet).
+        (default): today's settle; on ``engine='dsed'`` a guard judges
+        each settled mode on its own exact trajectory and re-decides an
+        event whose mode violates a diode's law with the complementarity
+        problem (LCP) — counted in ``result.diagnostics['mode_guard']``.
+        ``'lcp'`` (``engine='dsed'``): the LCP decides every event,
+        counters in ``result.diagnostics['mode_selection']``.
+        ``'shadow'`` (``engine='dsed'``): the default run, plus the LCP
+        solved beside it; disagreements in
+        ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'``
+        on ``pwl`` / ``trbdf2`` raise :class:`UnsupportedError`.
 
     Returns
     -------
@@ -1948,13 +1951,6 @@ def simulate(
         raise ValueError(
             f"simulate(): mode_selection={mode_selection!r}; expected "
             "None, 'legacy', 'shadow' or 'lcp'.")
-    if mode_selection == "lcp":
-        raise _unsupported(
-            engine, "mode_selection",
-            "simulate(mode_selection='lcp'): the complementarity mode "
-            "selection does not decide diode states on any engine yet; "
-            "mode_selection='shadow' (engine='dsed') measures it against "
-            "today's settle without changing the numbers.")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -2237,13 +2233,14 @@ def simulate(
                 "engine automatically, or engine='pwl' explicitly.")
 
     # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
-    if mode_selection == "shadow":
+    if mode_selection in ("shadow", "lcp"):
         raise _unsupported(
             engine, "mode_selection",
-            f"simulate(engine={_engine_asked!r}, mode_selection='shadow'): "
-            f"the shadow LCP is implemented on engine='dsed' only; this run "
-            f"lands on engine={engine!r}, whose settle has no shadow hook "
-            "yet. Use engine='dsed', or drop mode_selection.")
+            f"simulate(engine={_engine_asked!r}, mode_selection="
+            f"{mode_selection!r}): the complementarity selection is "
+            f"implemented on engine='dsed' only; this run lands on "
+            f"engine={engine!r}, whose settle has no hook yet. Use "
+            "engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse

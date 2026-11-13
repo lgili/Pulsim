@@ -11,8 +11,8 @@ Reference: the prototype's LCP-driven exact simulation (tests/oracles/lcp_refere
 circuit with R_on = 1 mOhm switch and diode (g_on = 1e3), 400 periods from rest:
 R = 500 -> v_out = 44.72165676 V, R = 50 -> 23.80641613 V.
 
-The pins of the WRONG dsed numbers flip at the default stage of the change (task 9.2): with
-mode_selection='lcp' they must move to the reference.
+Slice 2: the default run's guard and mode_selection='lcp' both land on the reference; the wrong
+numbers remain pinned for the settle alone (pulsim._dsed_dispatch.MODE_GUARD = False).
 """
 import warnings
 
@@ -83,14 +83,26 @@ def test_boost_zero_threshold_pwl_and_trbdf2_match_reference(R):
         assert _end(r, "out") == pytest.approx(REF_BOOST[R], abs=5e-3), eng
 
 
-@pytest.mark.parametrize("R,today", [(500.0, 43.7090734186091), (50.0, 23.673043048750188)])
-def test_boost_zero_threshold_dsed_is_silently_wrong_today(R, today):
-    """Characterisation pin (flips at the default stage, task 9.2): dsed's settle is wrong."""
+@pytest.mark.parametrize("R,settle", [(500.0, 43.7090734186091), (50.0, 23.673043048750188)])
+def test_boost_zero_threshold_dsed_settle_is_wrong_and_the_guard_repairs_it(R, settle):
+    """The settle alone (the guard switched off) is still silently wrong: 43.70907 / 23.67304 V.
+    Slice 2's default-mode guard (task 4) judges each settled mode and lets the LCP decide the
+    events it fails, and 'lcp' decides every event: both land on the reference. Corrected pin
+    (was: the default run == the settle's wrong number, 43.70907 / 23.67304 V)."""
+    import pulsim._dsed_dispatch as DD
     b, fn = _boost(0.0, R)
+    DD.MODE_GUARD = False
+    try:
+        v_settle = _end(p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn), "out")
+    finally:
+        DD.MODE_GUARD = True
+    assert v_settle == pytest.approx(settle, abs=1e-6)
+    assert REF_BOOST[R] - v_settle > 0.1
     r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
-    v = _end(r, "out")
-    assert v == pytest.approx(today, abs=1e-6)
-    assert REF_BOOST[R] - v > 0.1          # the error the shadow must report
+    assert _end(r, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
+    assert r.diagnostics["mode_guard"]["repairs"] > 0
+    r_lcp = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn, mode_selection="lcp")
+    assert _end(r_lcp, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
 
 
 def test_boost_with_a_band_is_right_on_dsed():

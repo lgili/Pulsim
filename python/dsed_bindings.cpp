@@ -719,6 +719,11 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
     d["max_pivots_per_event"] = r.max_pivots_per_event;
     d["ties"] = r.ties;
     d["widenings"] = r.widenings;
+    d["leak_pins"] = r.leak_pins;
+    d["pin_judgements"] = r.pin_judgements;
+    d["unfixed"] = r.unfixed;
+    d["enumerations"] = r.enumerations;
+    d["nonunique_modes"] = r.nonunique_modes;
     d["hysteresis_released"] = r.released;
     d["settle_rounds_total"] = r.settle_rounds_total;
     d["port_model_problems"] = port_problems;
@@ -1067,6 +1072,9 @@ void init_module(py::module_& m) {
                 d["pivots_total"] = out.pivots_total;
                 d["ties"] = out.ties;
                 d["widenings"] = out.widenings;
+                d["leak_pins"] = out.leak_pins;
+                d["pin_judgements"] = out.pin_judgements;
+                d["unfixed"] = out.unfixed;
                 d["released"] = out.released;
                 d["first_pass_ties"] = out.first_pass_ties;
                 d["tie_currents"] = out.tie_currents;
@@ -1099,7 +1107,9 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool enable_event_projection,
            bool event_log,
-           Real mode_shadow_h_e) {
+           Real mode_shadow_h_e,
+           Real mode_lcp_h_e,
+           Real mode_guard_h_e) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1199,6 +1209,19 @@ void init_module(py::module_& m) {
                     diode_names.push_back(pulsim::pwl::branch_label(adapter.graph(), d.branch_id));
                 if (!diode_names.empty()) sim.enable_mode_shadow(mode_shadow_h_e);
             }
+            // add-complementarity-mode-selection slice 2: the LCP decides
+            // (mode_selection='lcp'), or guards the settle (default)
+            const bool any_diode = diode_owned.count() > 0;
+            if (any_diode && mode_lcp_h_e > Real{0}) {
+                sim.enable_mode_lcp(mode_lcp_h_e, adapter.passivity());
+            } else if (any_diode && mode_guard_h_e > Real{0}) {
+                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+            }
+            if (any_diode && diode_names.empty()) {
+                pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
+                for (const auto& dd : census.entries())
+                    diode_names.push_back(pulsim::pwl::branch_label(adapter.graph(), dd.branch_id));
+            }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
@@ -1209,6 +1232,23 @@ void init_module(py::module_& m) {
             if (mode_shadow_h_e > Real{0}) {
                 d["mode_shadow"] = mode_shadow_dict(res.mode_shadow, diode_names,
                                                     adapter.n_port_problems());
+            }
+            if (res.mode_shadow.decides) {
+                d["mode_selection"] = mode_shadow_dict(res.mode_shadow, diode_names,
+                                                       adapter.n_port_problems());
+            }
+            if (res.mode_guard.enabled) {
+                const auto& g = res.mode_guard;
+                py::dict gd;
+                gd["checks"] = g.checks;
+                gd["unchecked"] = g.unchecked;
+                gd["repairs"] = g.repairs;
+                gd["confirmed"] = g.confirmed;
+                gd["repair_times"] = g.repair_times;
+                gd["repair_diodes"] = g.repair_diodes;
+                gd["repair_violations"] = g.repair_violations;
+                gd["lcp"] = mode_shadow_dict(g.lcp, diode_names, adapter.n_port_problems());
+                d["mode_guard"] = gd;
             }
             // v2.0 Phase 3 item 5 — the unified result: full MNA
             // trajectory reconstructed per recorded sample.
@@ -1228,6 +1268,8 @@ void init_module(py::module_& m) {
         py::arg("enable_event_projection") = true,
         py::arg("event_log") = true,
         py::arg("mode_shadow_h_e") = Real{0},
+        py::arg("mode_lcp_h_e") = Real{0},
+        py::arg("mode_guard_h_e") = Real{0},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

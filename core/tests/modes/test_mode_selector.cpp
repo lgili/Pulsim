@@ -221,3 +221,132 @@ TEST_CASE("A hysteresis port is held OFF below V_th and released at V_th",
         CHECK(out.on[0] == 1);
     }
 }
+
+// add-complementarity-mode-selection slice 2, D5 (DECISIONS.md #13): the
+// three-phase diode bridge into C || R at a pair turn-off (dsed state at
+// t = 5.0035e-4 s, V_f = 0.7, g_on = 1e3, g_off = 1e-9). The k-port at
+// h_e = 2e-9 s, 100·h_e and 1e4·h_e, dumped with full precision. Port 3
+// (Dbb) carries ~49 nA, the leak current that holds the floating DC bus:
+// slice 1 called it a tie and took it OFF, and the leak divider then
+// forward-biased an OFF diode by 8.14 V.
+TEST_CASE("A leak-scale current pinning a floating island is ON unless the judge accepts OFF",
+          "[modes][ties]") {
+    const std::vector<std::vector<double>> Zs = {
+        {0.0005004995004485765, -0.0004995004995493759, 0.0005004995004485765, -0.0004995004995493759, 0.0005004995004485765, -0.0004995004995493759, -0.0004995004995493758, 0.0005004995004485765, -0.0004995004995493758, 0.0005004995004485765, -0.0004995004995493758, 0.0005004995004485765, 0.0005004995004486049, -0.0004995004995494043, 0.0005004995004486049, -0.0004995004995494043, 0.0005004995004486049, -0.0004995004995494043, -0.0004995004995494042, 0.0005004995004486049, -0.0004995004995494042, 0.0005004995004486049, -0.0004995004995494042, 0.0005004995004486049, 0.0005004995004485481, -0.0004995004995493475, 0.0005004995004485481, -0.0004995004995493475, 0.0005004995004485481, -0.0004995004995493475, -0.0004995004995493474, 0.0005004995004485481, -0.0004995004995493474, 0.0005004995004485481, -0.0004995004995493474, 0.0005004995004485481},
+        {0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, -0.00045454586776384634, 0.0005454541322341528, 0.0005454541322341532, -0.00045454586776384634, 0.0005454541322341532, -0.00045454586776384634, 0.0005454541322341532, -0.00045454586776384634, -0.0004545458677638468, 0.0005454541322341528, -0.0004545458677638468, 0.0005454541322341528, -0.0004545458677638468, 0.0005454541322341528},
+        {0.0009545041359858115, -4.5495864012188805e-05, 0.0009545041359858115, -4.5495864012188805e-05, 0.0009545041359858115, -4.5495864012188805e-05, -4.5495864012188805e-05, 0.0009545041359858112, -4.5495864012188805e-05, 0.0009545041359858112, -4.5495864012188805e-05, 0.0009545041359858112, 0.0009545041359858115, -4.5495864012188886e-05, 0.0009545041359858115, -4.5495864012188886e-05, 0.0009545041359858115, -4.5495864012188886e-05, -4.549586401218882e-05, 0.0009545041359858113, -4.549586401218882e-05, 0.0009545041359858113, -4.549586401218882e-05, 0.0009545041359858113, 0.0009545041359858113, -4.5495864012188805e-05, 0.0009545041359858113, -4.5495864012188805e-05, 0.0009545041359858113, -4.5495864012188805e-05, -4.549586401218858e-05, 0.0009545041359858112, -4.549586401218858e-05, 0.0009545041359858112, -4.549586401218858e-05, 0.0009545041359858112}};
+    const std::vector<std::vector<double>> us = {
+        {-61.35336207255125, -108.31629525801563, -170.3696572960298, 0.6999999654629221, 0.699999965404615, -170.36965729597148},
+        {-61.34330643553156, -108.32467052062981, -170.36797364808365, 0.6999966919222942, 0.6999966918751852, -170.36797364803655},
+        {-60.33639903216793, -109.15992319087536, -170.19612943570587, 0.699807212662563, 0.6998072126137345, -170.19612943565704}};
+    std::vector<DiodePort> ports(6, DiodePort{1e-3, 1e-9, 0.7, 0.0});
+    const std::vector<char> prev = {0, 0, 0, 1, 1, 0};
+    const CircuitScale sc{100.0, 5.0, 1e-3};
+    const Real h_e = 2e-9;
+    auto port_at = [&](Real h, DenseMatrix& Z, Vector& u) {
+        const int p = h < 1e-8 ? 0 : (h < 1e-6 ? 1 : 2);
+        Z = mat(6, Zs[static_cast<std::size_t>(p)]);
+        u = vec(us[static_cast<std::size_t>(p)]);
+    };
+    ModeSelector sel;
+    const std::vector<char> pinned = {0, 0, 0, 1, 0, 0};
+    // no judge: the resistance test alone pins it
+    auto a = sel.select(ports, prev, port_at, h_e, sc);
+    CHECK(a.on == pinned);
+    CHECK(a.leak_pins == 1);
+    CHECK(a.ties == 0);
+    // the judge rejects the all-OFF mode: pinned
+    int asked = 0;
+    auto b = sel.select(ports, prev, port_at, h_e, sc, [&](const std::vector<char>& m) {
+        ++asked;
+        CHECK(m == std::vector<char>(6, 0));
+        return 0;
+    });
+    CHECK(asked == 1);
+    CHECK(b.on == pinned);
+    // the judge accepts all-OFF (as at a symmetric single-phase turn-off): OFF, counted as a tie
+    auto c = sel.select(ports, prev, port_at, h_e, sc, [](const std::vector<char>&) { return 1; });
+    CHECK(c.on == std::vector<char>(6, 0));
+    CHECK(c.leak_pins == 0);
+    CHECK(c.ties == 1);
+    CHECK(c.pin_judgements == 1);
+}
+
+// task 5 (D3): passivity, enumeration and the named refusals. The k-port
+// Z = −(1 + R_on)·I, u = 1 of OFF ports gives H = −I, q = −1 in OFF
+// coordinates: no complementary solution, Lemke ends at a secondary ray.
+#include "pulsim/events/mode_refusal.hpp"
+
+namespace {
+ModeSelection select_neg_identity(int k, bool passive) {
+    std::vector<DiodePort> ports(static_cast<std::size_t>(k), DiodePort{1e-3, 0.0, 0.0, 0.0});
+    const std::vector<char> prev(static_cast<std::size_t>(k), 0);
+    ModeSelector sel;
+    sel.passive = passive;
+    return sel.select(ports, prev,
+                      [&](Real, DenseMatrix& Z, Vector& u) {
+                          Z = -(1.0 + 1e-3) * DenseMatrix::Identity(k, k);
+                          u = Vector::Ones(k);
+                      },
+                      1e-9, CircuitScale{1.0, 1.0, 0.0});
+}
+
+std::vector<std::string> names(int k) {
+    std::vector<std::string> v;
+    for (int j = 0; j < k; ++j) v.push_back("D" + std::to_string(j + 1));
+    return v;
+}
+}  // namespace
+
+TEST_CASE("Named refusals of the mode selection", "[modes][refusal]") {
+    const PassivityClass vcvs{"E1", "VCVS"};
+    SECTION("passive, secondary ray: no consistent mode, every diode named") {
+        const auto s = select_neg_identity(2, true);
+        CHECK(s.status == LcpStatus::SecondaryRay);
+        CHECK(s.enumerations == 0);
+        try {
+            raise_if_refused(s, "dsed", 1.5e-3, names(2), {});
+            FAIL("no refusal");
+        } catch (const pulsim::UnsupportedError& e) {
+            CHECK(e.engine() == "dsed");
+            CHECK(e.feature() == "consistent_mode");
+            CHECK(e.device() == "D1, D2");
+            CHECK(e.kind() == "Diode");
+            CHECK(std::string(e.what()).find("1.500000000e-03") != std::string::npos);
+        }
+    }
+    SECTION("non-passive, 2 ports: enumerated, still none -> no consistent mode") {
+        const auto s = select_neg_identity(2, false);
+        CHECK(s.status == LcpStatus::SecondaryRay);
+        CHECK(s.enumerations == 1);
+        CHECK_THROWS_AS(raise_if_refused(s, "dsed", 0.0, names(2), vcvs), pulsim::UnsupportedError);
+    }
+    SECTION("non-passive, 13 ports: beyond the enumeration limit -> non_passive_ports") {
+        const auto s = select_neg_identity(13, false);
+        CHECK(s.status == LcpStatus::Unenumerable);
+        try {
+            raise_if_refused(s, "dsed", 0.0, names(13), vcvs);
+            FAIL("no refusal");
+        } catch (const pulsim::UnsupportedError& e) {
+            CHECK(e.feature() == "non_passive_ports");
+            CHECK(e.device() == "E1");
+            CHECK(e.kind() == "VCVS");
+        }
+    }
+    SECTION("a solution raises nothing") {
+        ModeSelection ok;
+        CHECK_NOTHROW(raise_if_refused(ok, "dsed", 0.0, names(1), vcvs));
+    }
+}
+
+TEST_CASE("Non-passive ports: enumeration finds the mode Lemke cannot certify", "[modes][refusal]") {
+    // M = [[-1, 2], [2, -1]], q = (-1, -1): not copositive; z = (1, 1), w = 0 solves it
+    const DenseMatrix M = mat(2, {-1.0, 2.0, 2.0, -1.0});
+    const Vector q = vec({-1.0, -1.0});
+    Vector z, w;
+    const int n = enumerate_lcp(M, q, z, w);
+    CHECK(n >= 1);
+    CHECK((M * z + q - w).cwiseAbs().maxCoeff() < 1e-12);
+    CHECK(z.minCoeff() >= 0.0);
+    CHECK(w.minCoeff() >= -1e-12);
+}

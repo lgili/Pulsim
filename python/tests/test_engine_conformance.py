@@ -570,6 +570,39 @@ def test_fixed_step_feature_refused_by_name(feature, engine):
 
 
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
+def test_mode_selection_lcp_refused_by_name_without_the_event_integrator(engine):
+    # 'lcp' decides on the dsed event integrator only; this RC routes to "auto"
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, mode_selection="lcp")
+    assert (ei.value.engine, ei.value.feature) == (engine, "mode_selection")
+
+
+def _half_wave():
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 500.0)
+    b.add_diode("D", "in", "o", 1e3, 1e-9)
+    b.add_resistor("R", "o", "gnd", 100.0)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    return b
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
+def test_mode_guard_diagnostics_only_on_dsed(engine):
+    # The default-mode guard (add-complementarity-mode-selection task 4)
+    # judges every settled diode mode on dsed and reports there; the
+    # other engines have no hook yet and carry no such key.
+    r = _sim(engine, _half_wave())
+    g = (getattr(r, "diagnostics", None) or {}).get("mode_guard")
+    if engine != "dsed":
+        assert g is None
+        return
+    assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
+    r = _sim(engine, _half_wave(), mode_selection="lcp")
+    assert r.diagnostics["mode_selection"]["lcp_count"] > 0
+    assert "mode_guard" not in r.diagnostics
+
+
+@pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
 def test_c_blocks_refused(engine):
     b = _rc()
     b._c_blocks = [_CBlock()]

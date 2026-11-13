@@ -85,6 +85,13 @@ def test_port_model_equals_the_prototype_port_lcp(name):
 # the diode shares the switch's current (both paths are 1 mOhm into a capacitor at 0 V), so the
 # conductance circuit selects ON; the ideal reference (R_on = 0) sees an exact tie and takes OFF.
 MODEL_DIFFERENCE = {"boost_50": 1, "boost_500": 1}
+# Slice-2 D5 leak pins (DECISIONS.md #13): a tie left after widening whose current holds a floating
+# island (i * R_jj > tol_w) is ON unless the engine's exact judge accepts the all-ties-OFF mode. This
+# probe surface has no judge, so every pin stands. bridge3_cfilter: every turn-off; conductance-form
+# physics (the leak divider forward-biases an OFF diode by volts), the ideal reference has a gauge
+# instead. bridge1: series-pair turn-offs where event-location residuals (pA) look like pins; on dsed
+# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges).
+LEAK_PINS = {"bridge1_vf07": 2, "bridge1_vf0": 3, "bridge3_cfilter": 12}
 
 
 @pytest.mark.parametrize("name", list(B.FAMILIES))
@@ -93,15 +100,25 @@ def test_selected_mode_equals_the_prototype_mode_at_every_event(name):
     _, rec = B.prototype_selections(fam)
     P = B.PulsimPorts(fam)
     h = 1e-7 * B.T_REF[name]                     # the default h_e (DECISIONS.md)
-    bad = []
+    bad, pins = [], []
     for t, y, sw, prev, sel in rec:
         r = P.select(t, y, sw, prev, h)
         assert r["status"] in ("solution", "trivial")
-        if tuple(r["mode"]) != sel:
+        mode = tuple(r["mode"])
+        if mode == sel:
+            continue
+        if r["leak_pins"]:
+            # the only difference: diodes the selector pinned ON, each with a leak-scale current
+            diff = [j for j in range(len(sel)) if mode[j] != sel[j]]
+            assert all(mode[j] and not sel[j] for j in diff), (t, mode, sel)
+            assert len(diff) == r["leak_pins"]
+            pins.append(t)
+        else:
             bad.append(t)
     assert len(bad) == MODEL_DIFFERENCE.get(name, 0), bad
     if bad:
         assert bad == [0.0]
+    assert len(pins) == LEAK_PINS.get(name, 0), pins
 
 
 def test_at_rest_zero_drop_diode_is_one_lcp_two_pivots_and_off():

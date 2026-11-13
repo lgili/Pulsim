@@ -65,21 +65,18 @@ def test_zero_threshold_boost_disagreements_are_the_settles_errors():
 
 
 @pytest.mark.parametrize("V_th", (0.0, 1e-2))
-def test_three_phase_c_filter_tie_rule_is_the_lcps_error(V_th):
-    """Measured finding (not the design's prediction of 0): at each turn-off of the three-phase
-    bridge into C || R the LCP's own solution keeps the settle's diode ON with a leak-scale
-    current (~49 nA, under tol_i), so it is a tie; D5's "a remaining tie is OFF" then takes all
-    diodes OFF, and the leak divider puts the floating bus where an OFF diode is forward biased by
-    8.1 V. The settle's mode is consistent; this is the gauge of D10 (task 7)."""
+def test_three_phase_c_filter_leak_pins_agree_with_the_settle(V_th):
+    """Slice 1 measured 30 LCP errors here: at each pair turn-off the LCP's own solution keeps one
+    diode ON with ~49 nA, the leak current that holds the floating DC bus; slice 1's D5 called it a
+    tie and took it OFF, and the leak divider then forward-biased an OFF diode by 8.14 V. The slice-2
+    D5 (DECISIONS.md #13): decided ports stay fixed while the ties are widened, and a remaining tie
+    whose current pins the island (i * R_jj > tol_w) is ON when the all-ties-OFF mode fails the exact
+    judge. Now 0 disagreements, 18 pins over 0.06 s (one per turn-off after the first period)."""
     ms = _run("bridge3_cfilter", V_th, 0.06, "shadow").diagnostics["mode_shadow"]
-    dis = ms["disagreements"]
-    assert len(dis) == ms["ties"] > 0 and ms["errors"] == 0
-    for d in dis:
-        assert d["settle_consistent"] is True and d["lcp_consistent"] is False, d
-        assert not any(d["lcp_mode"]) and sum(d["settle_mode"]) == 1
-        on = d["settle_mode"].index(True)
-        assert 0.0 < d["lcp_current"][on] < 1e-7
-        assert d["lcp_violation"] == pytest.approx(8.14, abs=0.01)
+    assert ms["errors"] == 0 and ms["events"] == 37
+    assert ms["disagreements"] == []
+    assert ms["leak_pins"] == 18 and ms["ties"] == 0
+    assert ms["pin_judgements"] >= ms["leak_pins"]
 
 
 def test_shadow_counters_and_keys():
@@ -99,8 +96,9 @@ def test_shadow_refused_by_name_off_dsed(engine):
     assert ei.value.feature == "mode_selection" and ei.value.engine in ("pwl", "trbdf2")
 
 
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
-def test_lcp_refused_by_name_on_every_engine(engine):
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2"))
+def test_lcp_refused_by_name_off_dsed(engine):
+    """Slice 2 opened 'lcp' on dsed only (task 6.1); the other engines have no event hook yet."""
     b = B.FAMILIES["bridge1_vf07"].builder(0.0)
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(b, t_end=1e-3, engine=engine, mode_selection="lcp", **({"dt": 1e-6} if engine == "pwl" else {}))
