@@ -1,0 +1,14 @@
+* VDMOS Cgd(Vgd) probe
+.model MV VDMOS(VTO=3 KP=2.86 CGDMAX=1n CGDMIN=50p A=0.5 CGS=1n CJO=0 RG=0)
+M1 d g 0 MV
+Vd d 0 DC 0 AC 1
+Vg g 0 DC 0
+.control
+foreach vd -20 -5 -2 -1 0 1 2 5 20 100 400
+  alter Vd dc = $vd
+  ac lin 1 1k 1k
+  let cgd = -imag(i(Vg))/(2*pi*1k)
+  print cgd
+end
+.endc
+.end
