@@ -62,7 +62,8 @@ class FrequencyResponse:
     n_period_runs: int
 
 
-def frequency_response(builder, *, period: float, dt: float,
+def frequency_response(builder, *, period: float,
+                        dt: float | None = None,
                         switch_fn_of, output: str,
                         frequencies,
                         u0: float = 0.0,
@@ -92,6 +93,14 @@ def frequency_response(builder, *, period: float, dt: float,
         column of zeros.
     steady
         A `SteadyStateResult` to reuse. Recomputed if omitted.
+    dt
+        Fixed step of the fixed-engine path above. OMIT it to build
+        the model on `pulsim.periodic_steady_state` (dsed exact
+        stepper, true state; works in DCM): `Phi` is its monodromy,
+        `B` a central difference of its one-period map in `u`
+        (`du` defaults to 1e-5 of max(1, |u0|)), `C` the output's
+        recovery row at the section; `steady` is then a
+        `PeriodicSteadyStateResult`.
     """
     from . import simulate as _simulate
     from .steady_state import steady_state as _steady_state, _snapshot_like
@@ -109,6 +118,10 @@ def frequency_response(builder, *, period: float, dt: float,
             f"or above the sampling Nyquist {f_nyq:g} Hz "
             f"(= 1/2T). A sampled model says nothing there — the "
             "response aliases. Sweep below it.")
+    if dt is None:
+        return _frequency_response_exact(
+            builder, period, switch_fn_of, output, freqs, u0, du,
+            steady, simulate_kwargs)
     if du is None:
         du = dt / period
     if not (du > 0):
@@ -204,6 +217,66 @@ def frequency_response(builder, *, period: float, dt: float,
         phase_deg=np.degrees(np.angle(H)),
         Phi=Phi, B=B, C=C, D=float(D), steady=steady,
         n_period_runs=n_runs)
+
+
+def _frequency_response_exact(builder, period, switch_fn_of, output,
+                              freqs, u0, du, steady, simulate_kwargs):
+    """`frequency_response` on the true-state shooting solver."""
+    from .periodic_steady_state import (
+        PeriodicSteadyStateResult, _check_schedule, periodic_steady_state)
+
+    if simulate_kwargs:
+        raise ValueError(
+            "frequency_response without dt runs on the dsed exact "
+            "stepper, which takes no simulate options; got "
+            f"{sorted(simulate_kwargs)}. Pass dt= for the fixed engine.")
+    if du is None:
+        du = 1e-5 * max(1.0, abs(u0))
+    if not (du > 0):
+        raise ValueError(
+            f"frequency_response: du must be > 0, got {du!r}")
+    if steady is None:
+        steady = periodic_steady_state(builder, period=period,
+                                       switch_fn=switch_fn_of(u0))
+    elif not isinstance(steady, PeriodicSteadyStateResult):
+        raise ValueError(
+            "frequency_response without dt needs steady= from "
+            "periodic_steady_state (a true-state orbit), not a "
+            f"{type(steady).__name__}.")
+    s = steady._ctx
+    x0 = np.asarray(steady.x0, dtype=float)
+    orbit = [name for name, _tau in steady.pattern]
+    mask0 = switch_fn_of(u0)(0.0)
+    ends = []
+    for u in (u0 + du, u0 - du):
+        sf = switch_fn_of(u)
+        _check_schedule(sf, period)
+        if not (sf(0.0) == mask0):
+            raise ValueError(
+                "frequency_response: the input moves the gate at the "
+                "section (t = 0), where the output is sampled; use a "
+                "family whose t = 0 mask does not depend on u.")
+        tr = s.run(x0, sf=sf)
+        if [ev["name"] for ev in tr.events] != orbit:
+            raise ValueError(
+                f"frequency_response: du={du:g} changes the "
+                "commutation pattern of the orbit, so a difference "
+                "across it is not a derivative. Use a smaller du.")
+        ends.append(tr.x_end)
+    B = (ends[0] - ends[1]) / (2.0 * du)
+    C, _node = s.output_row(output, s.orbit_traj.seg_masks[0])
+    Phi = np.asarray(steady.monodromy, dtype=float)
+    eye = np.eye(Phi.shape[0])
+    H = np.empty(freqs.size, dtype=complex)
+    for k, f in enumerate(freqs):
+        z = np.exp(2j * np.pi * f * period)
+        H[k] = C @ np.linalg.solve(z * eye - Phi, B)
+    with np.errstate(divide="ignore"):
+        mag_db = 20.0 * np.log10(np.abs(H))
+    return FrequencyResponse(
+        frequencies=freqs, H=H, magnitude_db=mag_db,
+        phase_deg=np.degrees(np.angle(H)), Phi=Phi, B=B, C=C, D=0.0,
+        steady=steady, n_period_runs=int(steady.n_period_runs) + 2)
 
 
 __all__ = ["frequency_response", "FrequencyResponse"]
