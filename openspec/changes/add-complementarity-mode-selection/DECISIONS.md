@@ -349,3 +349,91 @@ choices it did not pin.
     (12 events, old − new 6.7e-9 V on v(p) − v(n), both 1.05e-8 V from
     pwl). → Reverse: drop the `starts_admissible_` tests in both
     locators.
+
+24. **A widened pass stops short of the decided mode's own next event
+    (fixes the false repair).** The selector widens a tied event to
+    `100·h_e` and `1e4·h_e`. A conducting diode whose current really
+    reaches zero inside that window looked like a contradiction at the
+    wide step: the pass released it, and the diode was cut early.
+    Measured on two (and five, ten) three-phase bridges behind 0.2 mH on
+    their own buses over 20 ms (`h_e = 2 ns`, window 20 µs): dsed cut
+    Dt0c with Dt1c at 0.887458 ms where pwl at 20 ns turns Dt1c off at
+    0.88648 and Dt0c at 0.89752 ms; 0.128 V off pwl at 0.9 ms, on the
+    default and on 'lcp'. Now `select()` takes `horizon(mode, decided)`:
+    the scheduler (`first_departure_`) propagates the candidate mode
+    (ties OFF) exactly from the held state at `100·h_e·2^k`, k = 0..7,
+    and returns the first d at which a decided diode breaks its law (the
+    judge's measure, `1e-9·vscale`); the event lies in (d/2, d], and a
+    widened step is capped at d/2 (`ModeSelection::capped`,
+    `diagnostics[...]['capped']`). → Measured: max bus deviation against
+    pwl extrapolated from 0.5 / 0.25 µs: 2 bridges 0.128 → 3.3e-4 V
+    (cap fired 33 / 56 times, default / 'lcp'), 5 bridges 0.128 →
+    3.5e-4 V, 10 bridges to 6 ms −1.3e-2 → 3.4e-4 V, 1 bridge 2.2e-4 V
+    (unchanged; it never tripped). `bit_identity.py` 36/36 and the mode
+    survey 90/90 bit-identical against 25ceafec: the cap never shortens
+    a widening on the five families, the bridges or the extra circuits;
+    `shadow_survey` / `guard_survey` / `extra_circuits` change in
+    wall-time columns only (0 wrong modes before and after).
+    `test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off`
+    fails on 25ceafec (0.128 V) in both modes. The guard's judge still
+    reads `1e4·h_e` and flags such a mode; the LCP now returns the same
+    mode, so it is a confirmation, not a repair. Runs outside the
+    reference sets that change: the bank60 cost case (ten bridges, no
+    line inductance, 40 ms; `probes/bank60_cost.out`) goes from 311 to
+    372 events on the default and 'lcp' (cap fired 309 / 483 times; the
+    shortened widenings leave 462 / 654 leak pins where there were 0),
+    end value unchanged (−2.71e-11 V from trbdf2), max bus deviation
+    from trbdf2 at rtol 1e-9 over the run 2.40e-3 → 1.18e-3 V (4001
+    samples); its line-inductance variant 521 / 515 → 642 / 649 events,
+    end 181.808127 V unchanged. → Reverse: drop the horizon argument.
+
+25. **A settle that hits its round cap is decided by the LCP (default).**
+    Paralleled bridges on one bus: at rest every diode pair fights over
+    the bus, and the settle raised "did not settle after 64 rounds" at
+    t = 1.8e-26 s (5 bridges) / 2.9e-13 s (10) before the guard could
+    judge anything; 'lcp' ran the 5-bridge bus. Verdict on the
+    paralleled bus, 5 bridges, 20 ms: 'lcp' is right (1.49e-4 V max
+    from pwl extrapolated; pwl converges to 183.282915 V), the default
+    was a crash. Now, with the guard on, the cap (`SettleCapError`) is
+    caught in `decide_modes_` and the event is decided by the LCP from
+    the held state (`mode_guard['settle_caps']`; an LCP refusal names
+    the diode); with the guard off the cap still raises. → Measured:
+    the 5-bridge paralleled bus runs on the default, 4 capped settles,
+    1.49e-4 V like 'lcp'; `test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp`
+    raises the cap error on 25ceafec. Bit-identity 36/36, survey 90/90
+    (no survey run hit the cap). Ten paralleled bridges: the event at
+    rest pins all 30 diodes ON (510 leak pins), and that mode has no
+    exact step: tier 3 'cost', κ₂(V) = 2.3e6 and ‖A·h‖₁ = 1.5e6 (ten
+    identical bridges in parallel: a near-defective eigenbasis). The
+    numeric fallback grinds at h ≈ 1.5e-11 s ("no meaningful progress",
+    t = 1 µs, 'lcp' and default). Not made to run here: it is the
+    tier-3 segment rule of add-exact-propagator-strategy 13.2 (refused
+    by name under `engine='exact'`). → Reverse: rethrow in
+    `decide_modes_`.
+
+26. **The settle alone (`MODE_GUARD = False`) refuses instead of
+    continuing silently wrong.** The module switch stays (four probes
+    and the A/B tests use it), but off it now means "the settle
+    decides, judged": every settled mode goes through the guard's judge
+    and LCP, and where the guard would repair (judge flags the mode and
+    the LCP decides another), the run raises
+    `UnsupportedError('dsed', 'consistent_mode', <diode>, 'Diode')`
+    naming the diode and the violation; where the LCP confirms the
+    settle, the run continues bit-identical to before. Removing the knob
+    would have deleted the A/B record without making anything safer; a
+    refusal keeps the record (the old wrong numbers stay in the test
+    docstrings) and leaves no path that returns a mode its own law
+    rejects. → Measured: on the 30 survey circuits the settle alone
+    refuses on exactly the 9 the default guard repairs (0 mismatches:
+    the boosts at V_th = 0 / 1e-3, both single-phase bridges, the
+    three-phase example, the half-wave RL); the other 21 are
+    bit-identical (`survey_bit_identity.py`: 81 identical, the 9 settle
+    rows now refusals). Three of the nine refused settles were wrong
+    only in law, not in waveform: the single-phase bridges and the
+    three-phase example read within 1.1e-9 / 3.7e-10 / 1.2e-12 V of the
+    guarded run (`guard_survey.out` before this change); the refusal
+    still applies, since the A/B switch is not a user path and the mode
+    it continued violated its own law.
+    `test_guard_leaves_consistent_runs_bit_identical`
+    now also checks that the judged guard-off run counts the same checks.
+    → Reverse: pass `mode_guard_refuse=False` from the dispatch.

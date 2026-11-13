@@ -1,31 +1,31 @@
 pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
 circuit                                events disagr LCP right settle right both neither unk maxpiv ties  wid rounds/ev bit-id  t_def  t_shd
 buck at rest, gate off (i)                  2      0         0            0    0       0   0      0    1    2      2.50    yes   0.00   0.00
-DCM buck V_th=0, 400 T (iii)             1179      0         0            0    0       0   0      2    0  380      2.36    yes   0.00   0.00
-DCM buck V_th=1e-2, 400 T                1179      0         0            0    0       0   0      2    0  380      2.36    yes   0.00   0.04
-DCM buck V_f=0.7, 400 T                  1179      0         0            0    0       0   0      2    0  381      2.36    yes   0.01   0.03
-boost R=50 V_th=0, 400 T (iv)             979     16        16            0    0       0   0      2    0  259      2.65    yes   0.00   0.01
+DCM buck V_th=0, 400 T (iii)             1179      0         0            0    0       0   0      2    0  380      2.36    yes   0.00   0.01
+DCM buck V_th=1e-2, 400 T                1179      0         0            0    0       0   0      2    0  380      2.36    yes   0.00   0.01
+DCM buck V_f=0.7, 400 T                  1179      0         0            0    0       0   0      2    0  381      2.36    yes   0.00   0.01
+boost R=50 V_th=0, 400 T (iv)             979     16        16            0    0       0   0      2    0  259      2.65    yes   0.00   0.00
     t=4.667989747e-04 settle=(True,) lcp=(False,) prev=(True,) rounds=3 piv=2 status=solution viol settle/lcp=1.67e-01/0.00e+00 -> LCP
     t=5.368690704e-04 settle=(True,) lcp=(False,) prev=(True,) rounds=3 piv=2 status=solution viol settle/lcp=1.60e-01/0.00e+00 -> LCP
-boost R=50 V_th=1e-2, 400 T               979      0         0            0    0       0   0      2    0  257      2.63    yes   0.00   0.02
-boost R=500 V_th=0, 400 T (iv)           1158     31        31            0    0       0   0      2    0  360      2.41    yes   0.00   0.02
+boost R=50 V_th=1e-2, 400 T               979      0         0            0    0       0   0      2    0  257      2.63    yes   0.00   0.01
+boost R=500 V_th=0, 400 T (iv)           1158     31        31            0    0       0   0      2    0  360      2.41    yes   0.00   0.01
     t=5.566849033e-04 settle=(True,) lcp=(False,) prev=(True,) rounds=3 piv=2 status=solution viol settle/lcp=1.78e+00/0.00e+00 -> LCP
     t=6.166875999e-04 settle=(True,) lcp=(False,) prev=(True,) rounds=3 piv=2 status=solution viol settle/lcp=1.78e+00/0.00e+00 -> LCP
-boost R=500 V_th=1e-3, 400 T             1158      0         0            0    0       0   0      2    0  358      2.38    yes   0.01   0.01
-1-ph bridge V_f=0.7, 0.2 s (ii)            61     40        20            0   20       0   0      3   11   60      2.33    yes   0.66   0.64
+boost R=500 V_th=1e-3, 400 T             1158      0         0            0    0       0   0      2    0  358      2.38    yes   0.00   0.01
+1-ph bridge V_f=0.7, 0.2 s (ii)            61     40        20            0   20       0   0      3   11   60      2.33    yes   0.46   0.44
     t=4.456483992e-05 settle=(True, False, False, False) lcp=(True, False, False, True) prev=(False, False, False, False) rounds=2 piv=3 status=solution viol settle/lcp=6.28e-01/0.00e+00 -> LCP
     t=5.101869175e-03 settle=(True, False, False, False) lcp=(False, False, False, False) prev=(True, False, False, True) rounds=4 piv=2 status=solution viol settle/lcp=0.00e+00/0.00e+00 -> both
-1-ph bridge V_f=0, 0.2 s (ii)              60     39        19            0   20       0   0      3   13  100      2.37    yes   0.65   0.58
+1-ph bridge V_f=0, 0.2 s (ii)              60     39        19            0   20       0   0      3   13  100      2.37    yes   0.45   0.54
     t=5.103286954e-03 settle=(True, False, False, False) lcp=(False, False, False, False) prev=(True, False, False, True) rounds=4 piv=2 status=solution viol settle/lcp=1.42e-09/0.00e+00 -> both
     t=1.369542823e-02 settle=(False, False, True, False) lcp=(False, True, True, False) prev=(False, False, False, False) rounds=2 piv=3 status=solution viol settle/lcp=2.67e-01/0.00e+00 -> LCP
-1-ph bridge V_f=0, V_th=1e-2               41      0         0            0    0       0   0      3    3   40      2.98    yes   0.71   0.82
-3-ph bridge C filter V_f=0.7 (v-b)         61      0         0            0    0       0   0      3    0   90      2.02    yes   0.85   0.62
-3-ph bridge C filter, V_th=1e-2            61      0         0            0    0       0   0      3    0   90      2.02    yes   0.70   0.68
+1-ph bridge V_f=0, V_th=1e-2               41      0         0            0    0       0   0      3    3   40      2.98    yes   0.44   0.47
+3-ph bridge C filter V_f=0.7 (v-b)         61      0         0            0    0       0   0      3    0   90      2.02    yes   0.47   0.45
+3-ph bridge C filter, V_th=1e-2            61      0         0            0    0       0   0      3    0   90      2.02    yes   0.39   0.42
 series diode L-C from rest                  2      0         0            0    0       0   0      2    0    1      2.50    yes   0.00   0.00
-examples/buck.yaml (PWM 100k, 0.4)        411      0         0            0    0       0   0      2    0   18      2.94    yes   0.00   0.03
+examples/buck.yaml (PWM 100k, 0.4)        411      0         0            0    0       0   0      2    0   18      2.94    yes   0.01   0.01
 examples/buck_converter.yaml (PWM)        472      0         0            0    0       0   0      2    0  171      2.69    yes   0.00   0.00
-examples/stress_buck_switching.yaml       465      0         0            0    0       0   0      2    0  166      2.72    yes   0.01   0.02
-examples/three_phase_diode_rectifier       51      9         9            0    0       0   0      3    0   79      2.14    yes   0.18   0.26
+examples/stress_buck_switching.yaml       465      0         0            0    0       0   0      2    0  166      2.72    yes   0.01   0.01
+examples/three_phase_diode_rectifier       51      9         9            0    0       0   0      3    0   61      2.14    yes   0.13   0.13
     t=4.999999999e-03 settle=(False, False, False, False, True, True) lcp=(False, False, False, False, False, True) prev=(False, False, False, False, True, False) rounds=2 piv=3 status=solution viol settle/lcp=5.44e+04/0.00e+00 -> LCP
     t=1.166666667e-02 settle=(False, False, False, True, False, True) lcp=(False, False, False, True, False, False) prev=(False, False, False, False, False, True) rounds=2 piv=3 status=solution viol settle/lcp=5.44e+04/0.00e+00 -> LCP
-examples/three_phase_inverter (off)         1      0         0            0    0       0   0      0    0    0      2.00    yes   1.23   1.16
+examples/three_phase_inverter (off)         1      0         0            0    0       0   0      0    0    0      2.00    yes   1.10   1.03

@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### dsed diode modes: no early release, no crash on a paralleled bus, no silent settle
+
+Three fixes to the diode-mode decision on `engine='dsed'`
+(add-complementarity-mode-selection DECISIONS #24–#26):
+
+- A widened selection step no longer reaches past the decided mode's own
+  next event. A conducting diode whose current reached zero inside the
+  `1e4·h_e` window was released and cut early: three-phase bridge banks
+  behind line inductors read 0.128 V off pwl; now 3.3e-4 V (2 bridges),
+  3.5e-4 V (5), 3.4e-4 V (10). New counter `capped`.
+- With the default guard, a settle that hits its 64-round cap is decided
+  by the LCP instead of raising: five bridges paralleled on one bus now
+  run (1.5e-4 V from pwl, as `'lcp'`). New counter
+  `diagnostics['mode_guard']['settle_caps']`.
+- The guard-off A/B switch (`pulsim._dsed_dispatch.MODE_GUARD = False`)
+  now refuses with `UnsupportedError('dsed', 'consistent_mode', <diode>)`
+  where the guard would repair, instead of returning the settle's wrong
+  mode (it did on 9 of 30 survey circuits; the other 21 are unchanged).
+
+Default runs are bit-identical on the reference sets (36/36 arrays, 90/90
+survey runs).
+
 ### `engine='exact'` and the exact-route record (report only)
 
 `engine='exact'` is the canonical name of the event-driven exact engine;

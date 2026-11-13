@@ -122,6 +122,7 @@ struct ModeShadowReport {
     std::size_t leak_pins = 0;       // D5: leak-scale currents kept ON (island pins)
     std::size_t pin_judgements = 0;  // D5: pin candidates sent to the exact-trajectory judge
     std::size_t unfixed = 0;         // D5: decided ports freed again in a widened pass
+    std::size_t capped = 0;          // widenings shortened to the mode's next event (DECISIONS #24)
     std::size_t enumerations = 0;    // D3: non-passive ray, modes enumerated
     std::size_t nonunique_modes = 0; // D3: enumerations with several modes
     std::size_t released = 0;        // hysteresis ports released (D8)
@@ -135,8 +136,15 @@ struct ModeShadowReport {
 /// The default-mode guard (slice 2, task 4): after each settle, the
 /// settled mode is checked on its own exact trajectory (the shadow's
 /// judge); a mode that violates its own law is replaced by the LCP's.
+/// The settle's round cap (a pair of diodes fighting over one node). With
+/// the guard on the event is decided by the LCP instead (DECISIONS #25).
+struct SettleCapError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 struct ModeGuardReport {
     bool enabled = false;
+    std::size_t settle_caps = 0;     // settles that hit the round cap, decided by the LCP
     std::size_t checks = 0;          // settles judged
     std::size_t unchecked = 0;       // no exact step for the settled mask
     std::size_t repairs = 0;         // settled mode inconsistent, LCP mode applied
@@ -687,9 +695,13 @@ public:
     /// Slice 2, task 4: the settle still decides; a settled mode that
     /// violates its own law on its exact trajectory is replaced by the
     /// LCP's (counted in `PEDResult::mode_guard`).
-    void enable_mode_guard(Real h_e, events::PassivityClass cls)
+    /// `refuse`: the settle alone, judged (DECISIONS #26): a mode the
+    /// guard would repair raises UnsupportedError('dsed',
+    /// 'consistent_mode', <diode>, 'Diode') instead of being continued.
+    void enable_mode_guard(Real h_e, events::PassivityClass cls, bool refuse = false)
         requires HasNodePairVoltage<System> {
         guard_ = true;
+        guard_refuses_ = refuse;
         shadow_.h_e = h_e;
         passivity_ = std::move(cls);
     }
@@ -989,7 +1001,20 @@ private:
             }
             if (shadow_.enabled || guard_) shadow_x_ = x;
             settle_rounds_ = 0;
-            settle_and_project_(t, x, mask);
+            try {
+                settle_and_project_(t, x, mask);
+            } catch (const SettleCapError&) {
+                if (!guard_ || guard_refuses_) throw;
+                // the settle found no mode; the guard's arbiter decides from
+                // the held state (an LCP refusal there names the diode)
+                result.mode_guard.enabled = true;
+                ++result.mode_guard.settle_caps;
+                x = shadow_x_;
+                diode_bits_ = prev_bits;
+                mask = lcp_apply_(t, x, gates_prev, prev_bits, rec, result.mode_guard.lcp);
+                project_(t, x);
+                return;
+            }
             shadow_compare_(t, shadow_x_, gates_prev, prev_bits, result, &rec);
             guard_check_(t, x, mask, gates_prev, prev_bits, rec, result);
         } else {
@@ -1031,6 +1056,11 @@ private:
                 const int c = judge_(gates_prev, m, t, x_held, sc, worst);
                 system_.set_mask(rec);
                 return c;
+            },
+            [&](const std::vector<char>& m, const std::vector<char>& decided) {
+                const Real d = first_departure_(gates_prev, m, decided, t, x_held, sc);
+                system_.set_mask(rec);
+                return d;
             });
         rep.lcps += static_cast<std::size_t>(sel.lcps);
         rep.pivots_total += static_cast<std::size_t>(sel.pivots_total);
@@ -1040,6 +1070,7 @@ private:
         rep.leak_pins += static_cast<std::size_t>(sel.leak_pins);
         rep.pin_judgements += static_cast<std::size_t>(sel.pin_judgements);
         rep.unfixed += static_cast<std::size_t>(sel.unfixed);
+        rep.capped += static_cast<std::size_t>(sel.capped);
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
@@ -1107,6 +1138,15 @@ private:
             system_.set_mask(cur);
             ++g.confirmed;
             return;
+        }
+        if (guard_refuses_) {
+            throw UnsupportedError(
+                "dsed", "consistent_mode", who, "Diode",
+                "dsed at t = " + sci_(t) + " s: the settled diode mode violates the law of "
+                + who + " on its own trajectory (by " + sci_(worst) + " V) and the "
+                "complementarity selection decides otherwise; with the mode guard off "
+                "the settle's mode would be continued silently wrong. Leave the guard on "
+                "(the default) or pass mode_selection='lcp'.");
         }
         ++g.repairs;
         g.repair_times.push_back(t);
@@ -1438,7 +1478,7 @@ private:
                     if (!culprits.empty()) culprits += ", ";
                     culprits += d.label;
                 }
-                throw std::runtime_error(
+                throw SettleCapError(
                     "PEDSimulator: diode configuration did not "
                     "settle after 64 rounds at t = "
                     + sci_(t) + " s (diodes: " + culprits
@@ -1615,6 +1655,44 @@ private:
         }
     }
 
+    /// The selector's horizon (DECISIONS #24): the first d of
+    /// 100·h_e·2^k, k = 0..7, at which a `decided` diode of `mode` breaks
+    /// its own law on the exact trajectory (the judge's measure), +∞ if
+    /// none up to 12 800·h_e or no exact step. The event lies in (d/2, d].
+    /// Leaves the system's mask to the caller to restore.
+    Real first_departure_(const MaskT& gates, const std::vector<char>& mode,
+                          const std::vector<char>& decided, Real t, const Vector& x,
+                          const events::CircuitScale& sc)
+        requires HasNodePairVoltage<System> {
+        constexpr Real inf = std::numeric_limits<Real>::infinity();
+        if constexpr (HasExactStep<System>) {
+            MaskT m = gates;
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                m.set(diodes_[j].switch_idx, mode[j] != 0);
+            system_.set_mask(m);
+            if (!system_.has_exact_step()) return inf;
+            const Real tol_v = Real{1e-9} * sc.vscale;
+            const Real zs = sc.vscale / sc.iscale;
+            Real d = Real{100} * shadow_.h_e;
+            for (int k = 0; k < 8; ++k, d *= Real{2}) {
+                advance_(t, x, d, x_tmp_);
+                for (std::size_t j = 0; j < diodes_.size(); ++j) {
+                    if (!decided[j]) continue;
+                    const auto& dd = diodes_[j];
+                    const Real v = system_.node_pair_voltage(dd.from, dd.to, t + d, x_tmp_);
+                    const Real viol = mode[j]
+                        ? -(dd.g_on * (v - dd.V_f)) * zs
+                        : v - std::max(dd.V_th, dd.V_f);
+                    if (!(viol <= tol_v)) return d;   // NaN counts as a departure
+                }
+            }
+            return inf;
+        } else {
+            (void)gates; (void)mode; (void)decided; (void)t; (void)x; (void)sc;
+            return inf;
+        }
+    }
+
     /// Whether every entry of `v` is finite (not NaN, not Inf).
     [[nodiscard]] static bool is_all_finite_(const Vector& v) noexcept {
         for (Eigen::Index i = 0; i < v.size(); ++i) {
@@ -1693,6 +1771,7 @@ private:
     struct { bool enabled = false; Real h_e = Real{0}; } shadow_;
     bool lcp_decides_ = false;   // mode_selection='lcp'
     bool guard_ = false;         // default-mode guard
+    bool guard_refuses_ = false; // guard off: refuse what it would repair
     events::PassivityClass passivity_;
     events::CircuitScale last_scale_;
     std::vector<std::string> shadow_labels_;

@@ -731,6 +731,7 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
     d["leak_pins"] = r.leak_pins;
     d["pin_judgements"] = r.pin_judgements;
     d["unfixed"] = r.unfixed;
+    d["capped"] = r.capped;
     d["enumerations"] = r.enumerations;
     d["nonunique_modes"] = r.nonunique_modes;
     d["hysteresis_released"] = r.released;
@@ -1084,6 +1085,7 @@ void init_module(py::module_& m) {
                 d["leak_pins"] = out.leak_pins;
                 d["pin_judgements"] = out.pin_judgements;
                 d["unfixed"] = out.unfixed;
+                d["capped"] = out.capped;
                 d["released"] = out.released;
                 d["first_pass_ties"] = out.first_pass_ties;
                 d["tie_currents"] = out.tie_currents;
@@ -1118,7 +1120,8 @@ void init_module(py::module_& m) {
            bool event_log,
            Real mode_shadow_h_e,
            Real mode_lcp_h_e,
-           Real mode_guard_h_e) {
+           Real mode_guard_h_e,
+           bool mode_guard_refuse) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1224,7 +1227,7 @@ void init_module(py::module_& m) {
             if (any_diode && mode_lcp_h_e > Real{0}) {
                 sim.enable_mode_lcp(mode_lcp_h_e, adapter.passivity());
             } else if (any_diode && mode_guard_h_e > Real{0}) {
-                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity(), mode_guard_refuse);
             }
             if (any_diode && diode_names.empty()) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1254,6 +1257,7 @@ void init_module(py::module_& m) {
                 gd["checks"] = g.checks;
                 gd["unchecked"] = g.unchecked;
                 gd["repairs"] = g.repairs;
+                gd["settle_caps"] = g.settle_caps;
                 gd["confirmed"] = g.confirmed;
                 gd["repair_times"] = g.repair_times;
                 gd["repair_diodes"] = g.repair_diodes;
@@ -1282,6 +1286,7 @@ void init_module(py::module_& m) {
         py::arg("mode_shadow_h_e") = Real{0},
         py::arg("mode_lcp_h_e") = Real{0},
         py::arg("mode_guard_h_e") = Real{0},
+        py::arg("mode_guard_refuse") = false,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

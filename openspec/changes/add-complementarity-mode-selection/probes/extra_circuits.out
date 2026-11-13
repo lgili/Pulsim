@@ -1,37 +1,37 @@
 pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
 == boost 20 ohm, V_th = 0
    trbdf2 rtol 1e-10: v(out) end=23.786198209 mean=24.992801243 law: rev 0 A  fwd 0 V 
-   settle : events=852 law: rev 0.857 A D1 fwd 0 V  | v(out) end=23.821716844 mean=24.973017810 d_end=+3.55e-02 d_mean=-1.98e-02 [0.00 s]
+   settle : UnsupportedError: dsed at t = 4.970546933e-04 s: the settled diode mode violates the law of D1 (branch #3) on its own trajectory (by 5.831907686e-02 V) and the compleme
    default: events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786196692 mean=24.990360383 d_end=-1.52e-06 d_mean=-2.44e-03 | guard repairs=7/857 [0.00 s]
    lcp    : events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786196692 mean=24.990360383 d_end=-1.52e-06 d_mean=-2.44e-03 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == boost 20 ohm, V_th = 1e-3
    trbdf2 rtol 1e-10: v(out) end=23.786156834 mean=24.992850932 law: rev 0 A  fwd 0 V 
-   settle : events=856 law: rev 0.443 A D1 fwd 0 V  | v(out) end=23.789676700 mean=24.988533415 d_end=+3.52e-03 d_mean=-4.32e-03 [0.00 s]
+   settle : UnsupportedError: dsed at t = 7.178711196e-04 s: the settled diode mode violates the law of D1 (branch #3) on its own trajectory (by 4.170531000e-02 V) and the compleme
    default: events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786155316 mean=24.990410072 d_end=-1.52e-06 d_mean=-2.44e-03 | guard repairs=1/857 [0.00 s]
    lcp    : events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786155316 mean=24.990410072 d_end=-1.52e-06 d_mean=-2.44e-03 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == boost 20 ohm, V_th = 1e-2
    trbdf2 rtol 1e-10: v(out) end=23.786156834 mean=24.992850932 law: rev 0 A  fwd 0 V 
-   settle : events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786155316 mean=24.990410072 d_end=-1.52e-06 d_mean=-2.44e-03 [0.00 s]
+   settle : events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786155316 mean=24.990410072 d_end=-1.52e-06 d_mean=-2.44e-03 | guard repairs=0/857 [0.00 s]
    default: events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786155316 mean=24.990410072 d_end=-1.52e-06 d_mean=-2.44e-03 | guard repairs=0/857 [0.00 s]
    lcp    : events=856 law: rev 0 A  fwd 0 V  | v(out) end=23.786155316 mean=24.990410072 d_end=-1.52e-06 d_mean=-2.44e-03 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == boost 50 ohm, V_th = 1e-3
    trbdf2 rtol 1e-10: v(out) end=23.806555568 mean=28.080889833 law: rev 0 A  fwd 0 V 
-   settle : events=975 law: rev 1.04 A D1 fwd 0 V  | v(out) end=23.764172135 mean=28.044674405 d_end=-4.24e-02 d_mean=-3.62e-02 [0.00 s]
+   settle : UnsupportedError: dsed at t = 4.968286082e-04 s: the settled diode mode violates the law of D1 (branch #3) on its own trajectory (by 1.639853782e-01 V) and the compleme
    default: events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | guard repairs=3/979 [0.00 s]
-   lcp    : events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | lcp piv_max=2 pins=0 ties=0 [0.01 s]
+   lcp    : events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == boost 500 ohm, V_th = 1e-3
    trbdf2 rtol 1e-10: v(out) end=44.722105420 mean=43.759028794 law: rev 0 A  fwd 0 V 
-   settle : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 [0.00 s]
+   settle : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | guard repairs=0/1158 [0.00 s]
    default: events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | guard repairs=0/1158 [0.00 s]
    lcp    : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == half-wave RL rectifier = benchmark diode_half_wave_rl_load (builder), V_th = 0
    trbdf2 rtol 1e-10: v(out) end=0.000003142 mean=3.180662149 law: rev 0 A  fwd 0 V 
-   settle : events=4 law: rev 0 A  fwd 10 V D1 | v(out) end=0.000003142 mean=2.120456524 d_end=-2.31e-11 d_mean=-1.06e+00 [0.10 s]
-   default: events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | guard repairs=2/6 [0.07 s]
-   lcp    : events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | lcp piv_max=2 pins=0 ties=0 [0.09 s]
+   settle : UnsupportedError: dsed at t = 0.000000000e+00 s: the settled diode mode violates the law of D1 (branch #1) on its own trajectory (by 6.282766988e-02 V) and the compleme
+   default: events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | guard repairs=2/6 [0.08 s]
+   lcp    : events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | lcp piv_max=2 pins=0 ties=0 [0.07 s]
 == double-crossing LC tank, V_th = 0
    trbdf2 rtol 1e-10: v(t) end=-5.437891218 mean=1.838735571 law: rev 0.000192 A D fwd 0 V 
-   settle : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 [0.00 s]
+   settle : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 | guard repairs=0/5 [0.00 s]
             switching: ['ON @1.2532e-06', 'OFF@1.8877e-06', 'ON @7.5371e-06', 'OFF@8.1703e-06']
    default: events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 | guard repairs=0/5 [0.00 s]
             switching: ['ON @1.2532e-06', 'OFF@1.8877e-06', 'ON @7.5371e-06', 'OFF@8.1703e-06']
@@ -40,7 +40,7 @@ pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
    trbdf2  switching: ['ON @1.2532e-06', 'OFF@1.9433e-06', 'ON @7.5371e-06', 'OFF@8.2271e-06']
 == double-crossing LC tank, V_th = 1e-3
    trbdf2 rtol 1e-10: v(t) end=-5.437891496 mean=1.838735698 law: rev 0.000193 A D fwd 0 V 
-   settle : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946946 mean=1.786433599 d_end=-5.55e-05 d_mean=-5.23e-02 [0.00 s]
+   settle : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946946 mean=1.786433599 d_end=-5.55e-05 d_mean=-5.23e-02 | guard repairs=0/5 [0.00 s]
             switching: ['ON @1.2536e-06', 'OFF@1.8877e-06', 'ON @7.5374e-06', 'OFF@8.1703e-06']
    default: events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946946 mean=1.786433599 d_end=-5.55e-05 d_mean=-5.23e-02 | guard repairs=0/5 [0.00 s]
             switching: ['ON @1.2536e-06', 'OFF@1.8877e-06', 'ON @7.5374e-06', 'OFF@8.1703e-06']
@@ -49,16 +49,16 @@ pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
    trbdf2  switching: ['ON @1.2536e-06', 'OFF@1.9437e-06', 'ON @7.5374e-06', 'OFF@8.2275e-06']
 == benchmark chopper_with_rc_snubber (builder; duty 0.5 @ 5 kHz)
    trbdf2 rtol 1e-10: v(out) end=14.617371036 mean=9.692843701 law: rev 0 A  fwd 0 V 
-   settle : events=21 law: rev 0 A  fwd 0 V  | v(out) end=14.617361130 mean=9.691996674 d_end=-9.91e-06 d_mean=-8.47e-04 [0.00 s]
+   settle : events=21 law: rev 0 A  fwd 0 V  | v(out) end=14.617361130 mean=9.691996674 d_end=-9.91e-06 d_mean=-8.47e-04 | guard repairs=0/22 [0.00 s]
    default: events=21 law: rev 0 A  fwd 0 V  | v(out) end=14.617361130 mean=9.691996674 d_end=-9.91e-06 d_mean=-8.47e-04 | guard repairs=0/22 [0.00 s]
    lcp    : events=21 law: rev 0 A  fwd 0 V  | v(out) end=14.617361130 mean=9.691996674 d_end=-9.91e-06 d_mean=-8.47e-04 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == benchmark cuk_converter (builder; duty 0.5 @ 50 kHz, dead time dropped)
    trbdf2 rtol 1e-10: v(out) end=11.947819644 mean=12.713618866 law: rev 0 A  fwd 0 V 
-   settle : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 [0.00 s]
+   settle : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | guard repairs=0/266 [0.00 s]
    default: events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | guard repairs=0/266 [0.00 s]
-   lcp    : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | lcp piv_max=2 pins=0 ties=0 [0.01 s]
+   lcp    : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == benchmark sepic (builder; duty 0.5 @ 50 kHz, dead time dropped)
    trbdf2 rtol 1e-10: v(out) end=17.704006607 mean=18.131326754 law: rev 0 A  fwd 0 V 
-   settle : events=290 law: rev 0 A  fwd 0 V  | v(out) end=17.704008169 mean=18.110182594 d_end=+1.56e-06 d_mean=-2.11e-02 [0.00 s]
+   settle : events=290 law: rev 0 A  fwd 0 V  | v(out) end=17.704008169 mean=18.110182594 d_end=+1.56e-06 d_mean=-2.11e-02 | guard repairs=0/291 [0.00 s]
    default: events=290 law: rev 0 A  fwd 0 V  | v(out) end=17.704008169 mean=18.110182594 d_end=+1.56e-06 d_mean=-2.11e-02 | guard repairs=0/291 [0.00 s]
    lcp    : events=290 law: rev 0 A  fwd 0 V  | v(out) end=17.704008169 mean=18.110182594 d_end=+1.56e-06 d_mean=-2.11e-02 | lcp piv_max=2 pins=0 ties=0 [0.00 s]

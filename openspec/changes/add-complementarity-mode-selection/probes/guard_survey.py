@@ -72,8 +72,12 @@ def v(r, nd):
 def main():
     print("pulsim from", p.__file__)
     for label, make in S.CASES:
+        refused = None
         try:
-            b, r_off, t_off = run(make, None, guard=False)
+            try:
+                b, r_off, t_off = run(make, None, guard=False)
+            except p.UnsupportedError as e:      # the settle alone, judged (DECISIONS #26)
+                r_off, t_off, refused = None, float("nan"), e
             _, r_g, t_g = run(make, None, guard=True)
             _, r_l, t_l = run(make, "lcp")
         except Exception as e:  # noqa: BLE001
@@ -84,13 +88,14 @@ def main():
         except Exception as e:  # noqa: BLE001
             r_ref = None
             print(f"{label}: trbdf2 reference FAILS {type(e).__name__}: {str(e)[:120]}")
-        nds = nodes_for(r_off)
-        same = (np.array_equal(np.asarray(r_off.times), np.asarray(r_g.times))
+        nds = nodes_for(r_g)
+        same = r_off is not None and (np.array_equal(np.asarray(r_off.times), np.asarray(r_g.times))
                 and np.array_equal(np.asarray(r_off.states), np.asarray(r_g.states)))
         g = r_g.diagnostics.get("mode_guard", {})
         s = r_l.diagnostics.get("mode_selection", {})
         print(f"== {label}")
-        print(f"   events settle/guard/lcp = {r_off.n_events}/{r_g.n_events}/{r_l.n_events}; "
+        ev_off = "refused" if r_off is None else r_off.n_events
+        print(f"   events settle/guard/lcp = {ev_off}/{r_g.n_events}/{r_l.n_events}; "
               f"guard checks={g.get('checks', 0)} repairs={g.get('repairs', 0)} "
               f"confirmed={g.get('confirmed', 0)} unchecked={g.get('unchecked', 0)}; "
               f"lcp max_piv={s.get('max_pivots_per_event', 0)} pins={s.get('leak_pins', 0)} "
@@ -99,7 +104,9 @@ def main():
         if g.get("repairs"):
             print(f"   repairs at {['%.6e' % x for x in g['repair_times'][:4]]} "
                   f"diodes {sorted(set(g['repair_diodes']))}")
-        if not same:
+        if refused is not None:
+            print(f"   settle alone refused: ({refused.feature}, {refused.device}) {str(refused)[:60]}")
+        elif not same:
             for nd in nds:
                 t1, t2 = np.asarray(r_off.times), np.asarray(r_g.times)
                 tt = np.linspace(max(t1[0], t2[0]), min(t1[-1], t2[-1]), 50001)
@@ -115,6 +122,8 @@ def main():
                 ref_end, ref_avg = v(r_ref, nd)[-1], tw(tr, v(r_ref, nd))
                 row += f" trbdf2 end={ref_end:.9f} mean={ref_avg:.9f} |"
             for tag, r in (("settle", r_off), ("guard", r_g), ("lcp", r_l)):
+                if r is None:
+                    continue
                 t = np.asarray(r.times)
                 e, a = v(r, nd)[-1], tw(t, v(r, nd))
                 if ref_end is None:

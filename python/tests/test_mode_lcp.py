@@ -119,8 +119,10 @@ def test_lcp_and_guard_fix_the_zero_threshold_boost(R):
     at R = 20 / 50 / 500 ohm); 'lcp' and the guarded default decide those events OFF."""
     ref, ev_settle, ev_lcp = BOOST[R]
     b, fn = _boost(R)
-    r_settle = _sim(b, 400 * T, fn, guard=False)
-    assert abs(_end(r_settle, "out") - ref) > 3e-2 and r_settle.n_events == ev_settle
+    # the settle alone kept D1 ON (> 3e-2 V off ref); judged, it refuses there (DECISIONS #26)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(b, 400 * T, fn, guard=False)
+    assert (ei.value.engine, ei.value.feature, ei.value.device.split()[0]) == ("dsed", "consistent_mode", "D1")
     r_lcp = _sim(b, 400 * T, fn, mode_selection="lcp")
     r_def = _sim(b, 400 * T, fn)
     assert _end(r_lcp, "out") == pytest.approx(ref, abs=2e-5)          # measured -1.5e-6 .. -1.24e-5
@@ -135,9 +137,12 @@ def test_guard_fixes_the_half_wave_rl_rectifier():
     """The settle held D1 OFF through a forward bias of 10 V (mean v(out) 1.06 V low); the guard
     repairs the two events and every stored OFF sample is reverse-biased."""
     b = _half_wave_rl()
-    r_settle, r = _sim(b, 60e-3, guard=False), _sim(b, 60e-3)
+    # the settle alone read 1.06 V low; judged, it refuses at its first wrong event (#26)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(b, 60e-3, guard=False)
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
+    r = _sim(b, 60e-3)
     ref = 3.180662149                                                   # trbdf2 rtol 1e-10
-    assert _tw_mean(r_settle, "out") == pytest.approx(ref - 1.060, abs=5e-3)
     assert _tw_mean(r, "out") == pytest.approx(ref, abs=1e-4)          # measured +2.3e-5
     assert r.diagnostics["mode_guard"]["repairs"] == 2
     on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
@@ -234,7 +239,8 @@ def test_guard_leaves_consistent_runs_bit_identical(fam, vth, t_end):
     assert np.array_equal(np.asarray(r_off.states), np.asarray(r_on.states))
     g = r_on.diagnostics["mode_guard"]
     assert g["repairs"] == 0 and g["checks"] == r_on.n_events + 1
-    assert "mode_guard" not in (getattr(r_off, "diagnostics", None) or {})
+    g_off = r_off.diagnostics["mode_guard"]                 # judged, nothing to refuse
+    assert (g_off["checks"], g_off["repairs"]) == (g["checks"], 0)
 
 
 def _floating_bridge(source):
@@ -276,3 +282,80 @@ def test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding(source, h_e_
     if h_e_rel == DD.H_E_REL == 1e-7:
         r0 = _sim(b, 0.04)
         assert np.array_equal(np.asarray(r.states), np.asarray(r0.states))
+
+
+def _bridge_bank(n, ls=0.2e-3):
+    """n three-phase diode bridges, each on its own 200 uF || 50 ohm bus behind 0.2 mH line
+    inductors, 100 V 50 Hz, the bridges 6 deg apart."""
+    b = p.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", ls)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", f"p{k}", 1e3, 1e-9, 0.0)
+            b.add_diode(f"Db{k}{ph}", f"n{k}", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+        b.add_capacitor(f"C{k}", f"p{k}", f"n{k}", 200e-6)
+        b.add_resistor(f"R{k}", f"p{k}", f"n{k}", 50.0)
+        b.add_resistor(f"Rg{k}", f"n{k}", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
+    """DECISIONS #24. Two bridge banks over 20 ms (h_e = 2 ns): at a commutation the widened
+    pass (1e4*h_e = 20 us) saw a conducting diode's current reach zero inside the window, read
+    it as a contradiction, released the diode and cut it 11 us early, 0.128 V off pwl. The
+    widening is now capped at half the decided mode's next event: within 1e-3 V of pwl
+    extrapolated in dt (measured 3.3e-4 V), and the cap fires."""
+    t_end, n = 0.02, 2
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def buses(r):
+        return [np.interp(tg, r.times, np.asarray(r.v(f"p{k}")) - np.asarray(r.v(f"n{k}")))
+                for k in range(n)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        a, b2 = (buses(p.simulate(_bridge_bank(n), t_end=t_end, engine="pwl", dt=dt))
+                 for dt in (5e-7, 2.5e-7))
+        kw = {} if mode is None else {"mode_selection": mode}
+        r = p.simulate(_bridge_bank(n), t_end=t_end, engine="dsed", **kw)
+    ref = [2 * y - x for x, y in zip(a, b2)]
+    dev = max(np.abs(v - e).max() for v, e in zip(buses(r), ref))
+    assert dev <= 1e-3, dev
+    d = r.diagnostics
+    sel = d["mode_selection"] if mode == "lcp" else d["mode_guard"]["lcp"]
+    assert sel["capped"] > 0
+
+
+def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp():
+    """DECISIONS #25. Five bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
+    pair fights over the bus, and the settle raised "did not settle after 64 rounds" at
+    t = 1.8e-26 s. With the guard on, such an event is decided by the LCP from the held
+    state: the default runs as 'lcp' does, within 1e-3 V of pwl extrapolated in dt (measured
+    1.5e-4 V), and the guard counts the capped settles."""
+    t_end, n = 0.02, 5
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def bank():
+        b = p.CircuitBuilder()
+        for k in range(n):
+            for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+                b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                          np.deg2rad(ang + 6.0 * k))
+                b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+                b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
+                b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+        b.add_capacitor("C", "p", "n", 2e-3)
+        b.add_resistor("R", "p", "n", 5.0)
+        b.add_resistor("Rg", "n", "gnd", 1e6)
+        return b
+
+    def bus(r):
+        return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        a, b2 = (bus(p.simulate(bank(), t_end=t_end, engine="pwl", dt=dt)) for dt in (5e-7, 2.5e-7))
+        r = p.simulate(bank(), t_end=t_end, engine="dsed")
+    assert np.abs(bus(r) - (2 * b2 - a)).max() <= 1e-3
+    assert r.diagnostics["mode_guard"]["settle_caps"] > 0

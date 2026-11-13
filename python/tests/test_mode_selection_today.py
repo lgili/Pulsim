@@ -12,7 +12,8 @@ circuit with R_on = 1 mOhm switch and diode (g_on = 1e3), 400 periods from rest:
 R = 500 -> v_out = 44.72165676 V, R = 50 -> 23.80641613 V.
 
 Slice 2: the default run's guard and mode_selection='lcp' both land on the reference; the wrong
-numbers remain pinned for the settle alone (pulsim._dsed_dispatch.MODE_GUARD = False).
+numbers are kept as the record; the settle alone (pulsim._dsed_dispatch.MODE_GUARD = False) now
+refuses there (add-complementarity-mode-selection DECISIONS #26).
 """
 import warnings
 
@@ -85,19 +86,21 @@ def test_boost_zero_threshold_pwl_and_trbdf2_match_reference(R):
 
 @pytest.mark.parametrize("R,settle", [(500.0, 43.7090734186091), (50.0, 23.673043048750188)])
 def test_boost_zero_threshold_dsed_settle_is_wrong_and_the_guard_repairs_it(R, settle):
-    """The settle alone (the guard switched off) is still silently wrong: 43.70907 / 23.67304 V.
-    Slice 2's default-mode guard (task 4) judges each settled mode and lets the LCP decide the
-    events it fails, and 'lcp' decides every event: both land on the reference. Corrected pin
-    (was: the default run == the settle's wrong number, 43.70907 / 23.67304 V)."""
+    """The settle alone (the guard switched off) was silently wrong: 43.70907 / 23.67304 V
+    (`settle`, kept as the record). It is now judged and refuses at the first wrong event
+    (DECISIONS #26). Slice 2's default-mode guard (task 4) judges each settled mode and lets
+    the LCP decide the events it fails, and 'lcp' decides every event: both land on the
+    reference. Corrected pin (was: the default run == the settle's wrong number)."""
     import pulsim._dsed_dispatch as DD
     b, fn = _boost(0.0, R)
+    assert REF_BOOST[R] - settle > 0.1
     DD.MODE_GUARD = False
     try:
-        v_settle = _end(p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn), "out")
+        with pytest.raises(p.UnsupportedError) as ei:
+            p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
     finally:
         DD.MODE_GUARD = True
-    assert v_settle == pytest.approx(settle, abs=1e-6)
-    assert REF_BOOST[R] - v_settle > 0.1
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
     r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
     assert _end(r, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
     assert r.diagnostics["mode_guard"]["repairs"] > 0

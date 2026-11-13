@@ -89,11 +89,18 @@ def main():
     res = {}
     for _ in range(n_rounds):
         for tag, mode, guard in modes:
-            r, dt = run(mode, guard, b_kw)
+            try:
+                r, dt = run(mode, guard, b_kw)
+            except p.UnsupportedError as e:   # the settle alone, judged (DECISIONS #26)
+                res[tag] = e
+                continue
             times[tag].append(dt)
             res[tag] = r
     for tag, _, _ in modes:
         r = res[tag]
+        if isinstance(r, p.UnsupportedError):
+            print(f"   {tag:6s} refused: ({r.feature}, {r.device}) {str(r)[:90]}")
+            continue
         dg = r.diagnostics or {}
         g = dg.get("mode_guard", {})
         s = dg.get("mode_selection") or g.get("lcp", {})

@@ -509,7 +509,9 @@ def _has_edge_oracle(sf) -> bool:
 # source) or the run length (see DECISIONS.md for the measured band).
 H_E_REL = 1e-7
 # Slice 2, task 4: the default-mode guard (judge each settled mode, re-decide a
-# violating one with the LCP). Module switch for A/B measurements only.
+# violating one with the LCP). Module switch for A/B measurements only. Off, the
+# settle still decides but is judged: a mode the guard would repair raises
+# UnsupportedError('dsed', 'consistent_mode') instead (DECISIONS #26).
 MODE_GUARD = True
 
 
@@ -810,8 +812,9 @@ def run_dsed_from_builder(
                 h_e = _shadow_h_e(builder, sf, t_window)
                 if mode_selection == "lcp":
                     shadow_kw["mode_lcp_h_e"] = h_e
-                elif MODE_GUARD:    # default and shadow: the settle, guarded
+                else:    # default and shadow: the settle, guarded (or judged, refusing)
                     shadow_kw["mode_guard_h_e"] = h_e
+                    shadow_kw["mode_guard_refuse"] = not MODE_GUARD
                 if mode_selection == "shadow":
                     shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
