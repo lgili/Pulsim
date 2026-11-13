@@ -178,9 +178,13 @@ class Kpi:
 
 @dataclass(frozen=True)
 class SteadyPeriod:
-    """What a user KPI sees: one steady period of the design."""
+    """What a user KPI sees: one steady period of the design.
 
-    result: Any
+    ``result`` is the ``simulate`` result holding the period
+    ``[t_from, t_to]``; on the kernel KPI path it is simulated on first
+    access."""
+
+    _result: Any
     builder: Any
     design: Mapping[str, Any]
     t_from: float
@@ -189,6 +193,12 @@ class SteadyPeriod:
     #: The default KPIs and the per-device losses (read-only).
     kpis: Mapping[str, float] = field(default_factory=dict)
     losses: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+
+    @property
+    def result(self):
+        if isinstance(self._result, _Deferred):
+            object.__setattr__(self, "_result", self._result.make())
+        return self._result
 
     def average(self, y) -> float:
         """Time-weighted mean of a per-sample trace over the period."""
@@ -299,6 +309,18 @@ def _window(t, y, a, b):
 def _mean(t, y, a, b):
     from .stats import time_average
     return time_average(t, y, a, b)
+
+
+def _rms(t, y, a, b):
+    from .stats import time_rms
+    return time_rms(t, y, a, b)
+
+
+class _Deferred:
+    """A result made on first access (:attr:`SteadyPeriod.result`)."""
+
+    def __init__(self, make):
+        self.make = make
 
 
 def _extreme(tw, yw, k, sign):
@@ -742,8 +764,11 @@ class Evaluator:
     def _pss(self, b, sf, T, counters):
         from . import simulate
         from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
+        from ._period_kpis import Period, Spec, spec_for
         from .periodic_steady_state import periodic_steady_state
         counters["route"] = "pss/dsed"
+        spec = spec_for(b, self.output, self.loss_options)
+        obs = spec if isinstance(spec, Spec) else None
 
         def solve():
             try:
@@ -751,7 +776,8 @@ class Evaluator:
                     b, period=T, switch_fn=sf,
                     max_period_runs=self.steady.max_period_runs,
                     sensitivities=(sorted(set(self.gradients.values()))
-                                   if self.gradients else None))
+                                   if self.gradients else None),
+                    _observables=obs)
             except (ConvergenceError, np.linalg.LinAlgError) as e:
                 # typed at the source: a non-convergence of the design (a
                 # singular I - M from a degenerate design included). An
@@ -770,13 +796,39 @@ class Evaluator:
         counters["engine_steps"] = counters.get(
             "engine_steps", 0) + int(r.n_engine_steps)
         counters["simulations"] += int(r.n_period_runs)
-        run = _engine(lambda: simulate(
-            b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
-            switch_fn=sf, initial_state=r.x0, rtol=1e-11, atol=1e-14))
-        self._count(run, counters, b)
+        ctx = r._ctx
+        counters["python_callbacks"] = int(ctx.n_python_callbacks)
+        counters["nogil_period_runs"] = int(ctx.n_nogil_runs)
+        d = r._period
+
+        def sampled(n):
+            run = _engine(lambda: simulate(
+                b, t_end=n * T, dt=T / self.samples_per_period,
+                engine="dsed", switch_fn=sf, initial_state=r.x0, rtol=1e-11,
+                atol=1e-14))
+            self._count(run, counters, b)
+            return run
+
+        if obs is not None and d is not None and d["integrals_ok"]:
+            # the KPIs are the kernel's closed-form period integrals;
+            # waveforms only when a user KPI reads them
+            counters["kpi_path"] = "kernel"
+            kp = Period(obs, d, T)
+            _raise_if_suspect_kernel(kp, b)
+            # two periods, the second read: as the sampled route below
+            kp.lazy_run = _Deferred(lambda: sampled(2))
+            kp.pss_orbit = r
+            return kp, 0.0, T
+        counters["kpi_path"] = "sampled: " + (
+            spec if obs is None else
+            "no kernel period map" if d is None else d["integrals_reason"])
+        # Two periods, the second measured: a switch edge AT the section
+        # is then an edge inside the window (a one-period run starts in
+        # the new state and its turn-on is never seen: E_on was lost).
+        run = sampled(2)
         if self.gradients:
             run.pss_orbit = r
-        return run, 0.0, T
+        return run, T, 2 * T
 
     def _gradients(self, b, run, design, kpis, grads, counters):
         """``grads[kpi][variable]`` from the orbit sensitivities; the
@@ -890,8 +942,12 @@ class Evaluator:
                     spec["Tj"] = float(tj[dev])
             if ss:
                 opts["switch_specs"] = ss
-        rows = {r["name"]: r for r in device_loss_summary(
-            b, run, t_from=a, t_to=z, **opts) if "name" in r}
+        from ._period_kpis import Period, loss_rows
+        if isinstance(run, Period):
+            rows = loss_rows(b, run, opts)
+        else:
+            rows = {r["name"]: r for r in device_loss_summary(
+                b, run, t_from=a, t_to=z, **opts) if "name" in r}
         for n in self.loads:
             if n not in rows or "P_avg" not in rows[n]:
                 raise ValueError(f"load {n!r} has no dissipated power in "
@@ -917,7 +973,9 @@ class Evaluator:
         return rows, losses
 
     def _kpis(self, b, run, a, z, design, did, rows, losses, counters):
+        from ._period_kpis import Period
         from ._refusal import unsupported
+        kp = run if isinstance(run, Period) else None
         comps = {c["name"]: c for c in b.components()}
         kpis: dict = {}
         src = self.sources
@@ -951,9 +1009,12 @@ class Evaluator:
                     f"{n!r} is a {c['kind']}; the input power is measured "
                     "on DC voltage sources only. Name the DC sources in "
                     "`sources=`.", device=n, kind=c["kind"])
+            # MNA branch current flows + -> - inside the source.
+            if kp is not None:
+                p_in -= float(c["params"]["V"]) * kp.mean(("i", n))
+                continue
             col = int(b.pool.branch_var_id_for_source(c["branch_id"], b.graph))
             t, i = _with_right_limits(run, lambda st, col=col: st[:, col])
-            # MNA branch current flows + -> - inside the source.
             p_in -= float(c["params"]["V"]) * _mean(t, i, a, z)
         if p_in is not None:
             kpis["p_in"] = p_in
@@ -972,23 +1033,42 @@ class Evaluator:
             kpis["efficiency"] = (p_out / (p_out + p_loss)
                                   if p_out + p_loss > 0 else math.nan)
         if self.output is not None:
-            t, v = _with_right_limits(run, _node_col(b, self.output))
-            kpis["v_out"] = _mean(t, v, a, z)
-            kpis["ripple_v"] = _p2p(t, v, a, z)
+            if kp is not None:
+                kpis["v_out"] = kp.mean(("node", self.output))
+                kpis["ripple_v"] = kp.p2p(("node", self.output))
+            else:
+                t, v = _with_right_limits(run, _node_col(b, self.output))
+                kpis["v_out"] = _mean(t, v, a, z)
+                kpis["ripple_v"] = _p2p(t, v, a, z)
         for n, c in comps.items():
             if c["kind"] == "inductor":
-                kpis[f"ripple_i.{n}"] = _p2p(
-                    np.asarray(run.times, float), np.asarray(run.i(n), float),
-                    a, z)
+                if kp is not None:
+                    key = ("i", n)
+                    kpis[f"ripple_i.{n}"] = kp.p2p(key)
+                    kpis[f"i_peak.{n}"] = kp.peak_abs(key)
+                    kpis[f"i_rms.{n}"] = kp.rms(key)
+                    continue
+                t = np.asarray(run.times, float)
+                i = np.asarray(run.i(n), float)
+                kpis[f"ripple_i.{n}"] = _p2p(t, i, a, z)
+                tw, iw = _window(t, i, a, z)
+                kpis[f"i_peak.{n}"] = float(np.abs(iw).max())
+                kpis[f"i_rms.{n}"] = _rms(t, i, a, z)
             elif c["kind"] in _SEMIS and n in rows:
                 r = rows[n]
                 kpis[f"i_peak.{n}"] = float(r["i_peak"])
                 kpis[f"i_rms.{n}"] = float(r["i_rms"])
+                if kp is not None:
+                    kpis[f"v_peak.{n}"] = kp.peak_abs(("v", n))
+                    continue
                 t, v = _with_right_limits(run, _pair_col(c["nodes"]))
                 _, vw = _window(t, v, a, z)
                 kpis[f"v_peak.{n}"] = float(np.abs(vw).max())
         if self.kpis:
-            per = SteadyPeriod(result=run, builder=b, design=design,
+            if kp is not None:
+                # the waveforms of the orbit, simulated on first access
+                run, a, z = kp.lazy_run, kp.T, 2 * kp.T
+            per = SteadyPeriod(run, builder=b, design=design,
                                t_from=a, t_to=z, seed=int(did, 16) % 2**32,
                                kpis=_fz(kpis), losses=_fz(losses))
             for k in self.kpis:
@@ -1099,6 +1179,18 @@ def _raise_if_suspect(run, b) -> None:
         raise _Failed(f"missed_commutation: trbdf2 held diode(s) "
                       f"{', '.join(bad)} in a state their commutation "
                       "rule forbids; cross-check with engine='pwl' and dt")
+
+
+def _raise_if_suspect_kernel(kp, b) -> None:
+    """:func:`_raise_if_suspect` for a kernel period: the implausible-
+    voltage detector on every node's extrema (the dsed run has no guard
+    and no trbdf2 record, so that is the only check that applies)."""
+    from . import _pulsim as _k  # type: ignore[import-not-found]
+    t, X = kp.node_extrema_trace()
+    volt = _k.find_implausible_voltage(b.graph, b.pool, t, X, 100.0)
+    if volt is not None and volt.node >= 0:
+        raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
+            b.graph, b.pool, volt))
 
 
 def _engine(fn):

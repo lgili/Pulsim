@@ -43,6 +43,7 @@
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
+#include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/stiffness_detector.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -947,6 +948,7 @@ void init_module(py::module_& m) {
             if (is_native_) return native_.fn(t);
             // Generic Python fallback (Bridge.11 path).
             py::gil_scoped_acquire gil;
+            if (n_python_calls) ++*n_python_calls;
             return fn_(t).cast<SSM>();
         }
 
@@ -954,6 +956,7 @@ void init_module(py::module_& m) {
             if (is_native_ && native_.next_edge) return native_.next_edge(t);
             if (has_nea_) {
                 py::gil_scoped_acquire gil;
+                if (n_python_calls) ++*n_python_calls;
                 return nea_attr_(t).cast<Real>();
             }
             // No oracle: bisect inside the poll window (EdgeSearch).
@@ -963,6 +966,9 @@ void init_module(py::module_& m) {
 
         void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
+        // dsed_period_map: Python calls of this schedule (owned by the
+        // caller's frame; null elsewhere).
+        std::size_t* n_python_calls = nullptr;
         py::object fn_;
         pulsim_bindings_common::SwitchFnAdapter native_;
         bool       is_native_ = false;
@@ -1376,6 +1382,130 @@ void init_module(py::module_& m) {
         py::arg("event_log") = true,
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
+
+    // add-design-optimization-workflow (kernel item 3): one period of
+    // the exact stepper as a map, with M and the period integrals
+    // (pulsim/dsed/period_integrals.hpp), the GIL released for the run
+    // AND its post-processing.
+    m.def("dsed_period_map",
+        [](NativeAdapter& adapter, py::object switch_fn_obj, Vector x0,
+           Real period, py::list observables,
+           std::vector<std::pair<int, int>> pairs, bool monodromy,
+           Real rtol, Real atol, Real mode_guard_h_e) {
+            if (adapter.has_dynamic_sources()) {
+                throw py::value_error(
+                    "dsed_period_map: time-varying sources are not "
+                    "handled (their b(t) has no closed form here)");
+            }
+            std::vector<pulsim::dsed::PeriodObservable> obs;
+            for (const auto& item : observables) {
+                const auto t = item.cast<py::tuple>();
+                pulsim::dsed::PeriodObservable o;
+                const auto idx = t[0].cast<std::vector<pulsim::Index>>();
+                const auto cf = t[1].cast<std::vector<Real>>();
+                for (std::size_t i = 0; i < idx.size(); ++i) {
+                    o.w.emplace_back(idx[i], cf.at(i));
+                }
+                o.bit = t[2].cast<int>();
+                o.g_on = t[3].cast<Real>();
+                o.g_off = t[4].cast<Real>();
+                o.v_on = t[5].cast<Real>();
+                o.extrema = t[6].cast<bool>();
+                obs.push_back(std::move(o));
+            }
+            for (const auto& [a, c] : pairs) {
+                if (a < 0 || c < 0 || a >= static_cast<int>(obs.size())
+                    || c >= static_cast<int>(obs.size())) {
+                    throw py::value_error("dsed_period_map: pair index out "
+                                          "of range");
+                }
+            }
+            std::size_t n_python_calls = 0;
+            PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(period));
+            sf.n_python_calls = &n_python_calls;
+            EventPredictor pred;
+            auto diodes = pulsim::dsed::add_diode_predicates(adapter, pred);
+            PEDSimulator<NativeAdapter, PySwitchFnSSM> sim(
+                adapter, std::move(sf), PIController(rtol, atol),
+                std::move(pred), period * Real{1e-6}, period, 1);
+            if (!diodes.list.empty()) {
+                const auto n_sw = static_cast<pulsim::Size>(
+                    adapter.graph().num_switches());
+                sim.enable_diode_commutation(
+                    diodes.owned, pulsim::topology::SwitchStateMask(n_sw),
+                    diodes.list);
+                if (mode_guard_h_e > Real{0}) {
+                    // the kernel diode-mode guard, as the pss runs set it
+                    sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+                }
+            }
+            sim.set_event_projection(false);
+            pulsim::dsed::PeriodMapResult<SSM> r;
+            bool nogil = false;
+            {
+                py::gil_scoped_release release;
+                nogil = PyGILState_Check() == 0;
+                auto res = sim.simulate(x0, period);
+                r = pulsim::dsed::period_map_from_run(
+                    adapter, res, diodes, obs, pairs, monodromy);
+            }
+            py::dict d;
+            d["x_end"] = r.x_end;
+            d["monodromy"] = r.monodromy.size()
+                ? py::object(py::cast(r.monodromy)) : py::object(py::none());
+            d["grazing"] = r.grazing;
+            py::list evs;
+            for (const auto& e : r.events) {
+                py::dict ed;
+                ed["t"] = e.t;
+                ed["name"] = e.name;
+                ed["predicate_type"] = e.type;
+                ed["old_mask"] = py::cast(e.old_mask);
+                ed["new_mask"] = py::cast(e.new_mask);
+                ed["x"] = e.x;
+                evs.append(ed);
+            }
+            d["events"] = evs;
+            d["first_mask"] = py::cast(r.first_mask);
+            d["last_mask"] = py::cast(r.last_mask);
+            d["scale"] = r.scale;
+            d["n_accept"] = r.n_steps;
+            d["n_exact_steps"] = r.n_exact_steps;
+            d["python_callbacks"] = n_python_calls;
+            d["nogil"] = nogil;
+            d["integrals_ok"] = r.integrals_ok;
+            d["integrals_reason"] = r.integrals_reason;
+            const auto n_obs = static_cast<py::ssize_t>(r.stats.size());
+            py::array_t<double> st(std::vector<py::ssize_t>{n_obs, 6});
+            for (py::ssize_t j = 0; j < n_obs; ++j) {
+                const auto& s = r.stats[static_cast<std::size_t>(j)];
+                const double row[6] = {s.int1, s.int2, s.peak, s.t_peak,
+                                       s.valley, s.t_valley};
+                for (int c = 0; c < 6; ++c) st.mutable_at(j, c) = row[c];
+            }
+            d["stats"] = st;
+            d["cross"] = r.cross;
+            d["y_left"] = r.y_left;
+            d["y_right"] = r.y_right;
+            d["y_start"] = r.y_start;
+            d["y_end"] = r.y_end;
+            return d;
+        },
+        py::arg("adapter"), py::arg("switch_fn"), py::arg("x0"),
+        py::arg("period"), py::arg("observables") = py::list(),
+        py::arg("pairs") = std::vector<std::pair<int, int>>{},
+        py::arg("monodromy") = true, py::arg("rtol") = Real{1e-11},
+        py::arg("atol") = Real{1e-14},
+        py::arg("mode_guard_h_e") = Real{0},
+        "One period of the exact stepper from x0 (events located, no "
+        "projection) with the GIL released: x(T), the events, the "
+        "monodromy M = dP/dx0 and, per observable "
+        "(indices, coefs, bit, g_on, g_off, v_on, extrema), the closed-form "
+        "integrals stats[j] = (int y, int y^2, peak, t_peak, valley, "
+        "t_valley) and cross[q] = int y_a*y_b per pair. integrals_ok is "
+        "False with a reason when a mode has no modal form or a step "
+        "was numeric. DC sources only.");
 }
 
 }  // namespace pulsim_dsed_bindings

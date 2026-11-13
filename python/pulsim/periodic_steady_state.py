@@ -123,8 +123,10 @@ class PeriodicSteadyStateResult:
     #: ``simulate(..., engine='dsed', initial_state=x0)``.
     x0: np.ndarray
     state_labels: list
-    #: One period of waveforms from ``x0`` (a ``simulate`` result).
-    orbit: Any
+    #: One period of waveforms from ``x0``: :attr:`orbit` (a
+    #: ``simulate`` result, run on first access) or its zero-argument
+    #: maker.
+    _orbit: Any
     #: ``M = dP/dx0`` on the true state.
     monodromy: np.ndarray
     #: Floquet multipliers (eigenvalues of ``M``).
@@ -158,6 +160,17 @@ class PeriodicSteadyStateResult:
     #: The orbit's :class:`pulsim.sensitivity.SensitivityResult`
     #: (``S(0) = dx*/dp``) when ``sensitivities=`` was given.
     sensitivity: Any = field(default=None, repr=False)
+    #: The verification period as the kernel map returned it (with the
+    #: integrals of the observables the caller asked for), or ``None``.
+    _period: Any = field(default=None, repr=False)
+
+    @property
+    def orbit(self):
+        """One period of waveforms from ``x0`` (a ``simulate`` result,
+        ``engine='dsed'``); simulated on first access."""
+        if callable(self._orbit):
+            self._orbit = self._orbit()
+        return self._orbit
 
     def kpi(self, signal, kind="avg", *, with_grad=True):
         """Orbit KPI over one period with its exact gradient (the second
@@ -440,6 +453,9 @@ class _Traj:
     events: list              # dicts: t, name, type, old, new, x
     scale: np.ndarray         # max |x_i(t)| over the period
     n_steps: int
+    M: Any = None             # the kernel's monodromy (dsed_period_map)
+    grazing: str = ""         # the kernel's grazing diagnostic
+    native: Any = None        # the kernel's period dict
 
 
 class _Solver:
@@ -494,6 +510,12 @@ class _Solver:
         self._A = {}
         self.n_runs = 0
         self.n_steps = 0
+        # the kernel period map (GIL released for the run, M and the
+        # integrals); DC sources only, a sine b(t) takes the old path
+        self._map = (None if self.dynamic
+                     else getattr(_pulsim, "dsed_period_map", None))
+        self.n_python_callbacks = 0
+        self.n_nogil_runs = 0
 
     # -- per-mask data ---------------------------------------------------
     def A(self, mask):
@@ -510,8 +532,10 @@ class _Solver:
         return np.asarray(self.ad.rhs(t, x), dtype=float)
 
     # -- the map -----------------------------------------------------------
-    def run(self, x, sf=None):
+    def run(self, x, sf=None, observables=None):
         x = np.asarray(x, dtype=float).copy()
+        if sf is None and self._map is not None:
+            return self._run_map(x, observables)
         sf = self.sf if sf is None else sf
         self.n_runs += 1
         try:
@@ -547,6 +571,43 @@ class _Solver:
                      bounds=bounds, events=events,
                      scale=np.abs(states).max(axis=0), n_steps=int(
                          r["n_accept"]))
+
+    def _run_map(self, x, spec):
+        """One period on the kernel map: x(T), the events, M and, for
+        ``spec`` (a ``_period_kpis.Spec``), the period integrals."""
+        self.n_runs += 1
+        try:
+            d = self._map(
+                self.ad, self.sf, x, self.T,
+                spec.obs if spec is not None else [],
+                spec.pairs if spec is not None else [], True, 1e-11, 1e-14,
+                float(self._guard.get("mode_guard_h_e", 0.0)))
+        except RuntimeError as e:
+            if isinstance(e, (NotImplementedError, RecursionError)) or \
+                    type(e).__name__ == "_CxxCancelled":
+                raise       # a stub, a bug or a cancellation: not a non-convergence
+            raise _conv(f"a period run failed: {e}") from e
+        self.n_steps += int(d["n_accept"])
+        self.n_python_callbacks += int(d["python_callbacks"])
+        self.n_nogil_runs += bool(d["nogil"])
+        log = list(d["events"])
+        seg_masks = [log[0]["old_mask"] if log else d["first_mask"]]
+        events, bounds = [], [0.0]
+        for e in log:
+            events.append(dict(t=float(e["t"]), name=str(e["name"]),
+                               type=int(e["predicate_type"]),
+                               old=e["old_mask"], new=e["new_mask"],
+                               x=np.asarray(e["x"], dtype=float)))
+            bounds.append(float(e["t"]))
+            seg_masks.append(e["new_mask"])
+        bounds.append(self.T)
+        M = d["monodromy"]
+        return _Traj(x0=x, x_end=np.asarray(d["x_end"], dtype=float),
+                     seg_masks=seg_masks, bounds=bounds, events=events,
+                     scale=np.asarray(d["scale"], dtype=float),
+                     n_steps=int(d["n_accept"]),
+                     M=None if M is None else np.asarray(M, dtype=float),
+                     grazing=str(d["grazing"]), native=d)
 
     # -- events --------------------------------------------------------
     def _diode(self, name):
@@ -609,6 +670,11 @@ class _Solver:
     # -- monodromy (augmented with inputs) ----------------------------
     def jacobian(self, traj, inputs=()):
         """``[[M, B], [0, I]]`` for the augmented state ``(x, u)``."""
+        if not inputs and traj.native is not None:
+            # the kernel's product of the same propagators and saltations
+            if traj.M is None:
+                raise _conv(traj.grazing or "the period map returned no M")
+            return traj.M.copy()
         n, m = self.n, len(inputs)
         J = np.eye(n + m)
         for k, mask in enumerate(traj.seg_masks):
@@ -845,7 +911,8 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           start_from=None, max_period_runs: int = 60,
                           n_relax: int = 5,
                           rtol: float = _RTOL,
-                          sensitivities=None) -> PeriodicSteadyStateResult:
+                          sensitivities=None,
+                          _observables=None) -> PeriodicSteadyStateResult:
     """Periodic steady state of a switching circuit by Newton shooting
     on the true state, on the ``dsed`` exact stepper.
 
@@ -1007,12 +1074,22 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                 f"{s.name_states(vec[:, i], scale)}.")
     budget(" (no run left for the verification period)")
     from . import simulate as _simulate
-    orbit = _simulate(builder, t_end=s.T, dt=s.T, engine="dsed",
-                      switch_fn=s.sf, initial_state=x0, rtol=1e-11,
-                      atol=1e-14)
-    s.n_runs += 1
-    s.n_steps += int(getattr(orbit, "n_accept", 0))
-    x_back = np.asarray(orbit.states_reduced[-1], dtype=float)
+
+    def orbit():
+        return _simulate(builder, t_end=s.T, dt=s.T, engine="dsed",
+                         switch_fn=s.sf, initial_state=x0, rtol=1e-11,
+                         atol=1e-14)
+    period = None
+    if s._map is not None:
+        # the verification period IS a kernel period, carrying the
+        # caller's integrals; the waveforms are simulated on demand
+        vt = s.run(x0, observables=_observables)
+        x_back, period = vt.x_end, vt.native
+    else:
+        orbit = orbit()
+        s.n_runs += 1
+        s.n_steps += int(getattr(orbit, "n_accept", 0))
+        x_back = np.asarray(orbit.states_reduced[-1], dtype=float)
     residual = float(np.abs(x_back - x0).max())
     if residual > 1e3 * max(history[-1], rtol * float(
             (scale + np.abs(x0)).max())):
@@ -1023,12 +1100,12 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     unstable = [(i, complex(m_), _classify(m_)) for i, m_ in
                 enumerate(mu) if abs(m_) >= 1.0]
     res = PeriodicSteadyStateResult(
-        x0=x0, state_labels=list(s.labels), orbit=orbit, monodromy=M,
+        x0=x0, state_labels=list(s.labels), _orbit=orbit, monodromy=M,
         multipliers=mu, stable=not unstable,
         unstable_multipliers=unstable, pattern=s.pattern(traj),
         residual=residual, residual_history=history,
         pattern_history=patterns, n_period_runs=s.n_runs, n_engine_steps=s.n_steps,
-        period=s.T, _ctx=s)
+        period=s.T, _ctx=s, _period=period)
     s.orbit_traj = traj
     if sensitivities is not None:
         from .sensitivity import orbit_sensitivities
