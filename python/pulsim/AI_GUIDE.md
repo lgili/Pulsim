@@ -34,9 +34,8 @@ Short version:
 
 - `python -m pulsim.guide` (this text) and `python -m pulsim.guide --path`.
 - The native classes are pybind11 builtins: `inspect.signature` fails on
-  them. The real signature is the first line of `__doc__`, and the
-  package ships type stubs (`pulsim/_pulsim.pyi`, PEP 561) that IDEs and
-  mypy read.
+  them. Read the first line of `__doc__`, or the shipped type stubs
+  (`pulsim/_pulsim.pyi`, PEP 561) that IDEs and mypy read.
 - `p.catalog()` lists every builder method and helper by category;
   `p.example("buck")` prints a runnable snippet (`"rc"`, `"boost"`,
   `"yaml"`, `"bode"`, ...).
@@ -55,15 +54,13 @@ print(p.CircuitBuilder.add_current_source.__doc__.splitlines()[0])
 add_current_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, I: typing.SupportsFloat | typing.SupportsIndex) -> pulsim._pulsim.CircuitBuilder
 ```
 
-`typing.SupportsFloat | typing.SupportsIndex` is pybind11's spelling of
-`float` (the stub writes `float`).
+That union is pybind11's `float` (the stub writes `float`).
 
 ## 2. Mental model
 
 - **Netlist by name.** Nodes are strings; `"gnd"`, `"GND"` and `"0"` are
   ground. Every `b.add_*` call adds a branch between two nodes; the
   first argument is the branch name used later by `res.i(name)`.
-  Pulsim assembles a modified nodal analysis (MNA) system from them.
 - **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
   and `add_diode` are two-state branches: a conductance `g_on` (or
   `1/R_on`) when on, `g_off` when off; only `add_diode(V_f=)` adds a
@@ -193,8 +190,8 @@ print(f"{br.diode_names}; V_dc = {v_dc:.2f} V [{rect.engine_used}]")
 ['BR__D1', 'BR__D2', 'BR__D3', 'BR__D4']; V_dc = 92.83 V [trbdf2]
 ```
 
-It may warn that a step was accepted above tolerance at an event. Run
-the balance of 6.1 before you use any diode current from it.
+It may warn of a step accepted above tolerance at an event; run the
+balance of 6.1 before using any diode current from it.
 
 ### 3.4 Losses and junction temperature
 
@@ -202,7 +199,7 @@ the balance of 6.1 before you use any diode current from it.
 energies come from `switch_specs`: each gate edge costs
 `E_ref * (|V_blk| / V_ref) * (|I| / I_ref)`, with `V_blk` measured across
 the open switch (before a turn-on, after a turn-off) and `I` through the
-closed one, so a soft edge costs what its measured voltage says (3.7).
+closed one (a soft edge is cheap, 3.7).
 An offset-plus-slope conduction model `V_f0*|i| + r_on*i^2` comes from
 `conduction_specs`. `p.device_thermal_summary` adds a Foster network per
 device (`p.FosterStage(R_th_K_per_W, tau_s)`). Both cover the WHOLE
@@ -329,8 +326,7 @@ R_load = 100.0 ohm -> V_out = 15.79 V
 ```
 
 At 100 ohm the inductor current reaches zero each cycle (discontinuous
-conduction), so `V_out` rises above `D * V_in`. That is physics, not an
-error. `p.sweep_path_aware` reuses the factorisation for R/L/C-only
+conduction), so `V_out` rises above `D * V_in`: physics, not an error. `p.sweep_path_aware` reuses the factorisation for R/L/C-only
 sweeps; `parallel=True` runs on threads when the step loop is native.
 
 ### 3.7 Three-phase inverter with sinusoidal PWM
@@ -375,20 +371,16 @@ ideal V_LL1 = sqrt(3/8) * m * V_dc = 293.9 V
 
 The dead time costs `4/pi * V_dc * t_d * f_sw * sqrt(3/2)` = 9.4 V of
 `V_LL1`; `P_dc < 0` is the source sign convention (section 4). In the
-dead time the antiparallel PWL diode takes the freewheel current and
-drops `V_f + i / g_on` (0.7 V + 0.05 ohm); once `HSa` is gated on, the
-switch takes it all and the diode turns off at zero current: it never
-shares (printed above). `switch_specs`
-on `HSa` (`E_on_ref` 4 mJ, `E_off_ref` 3.5 mJ at 600 V, 50 A) gives
-11.3 W with the dead time (soft edges see only the diode's drop: about 0 J)
-and 22.6 W without (soft edges block 600 V and are charged like hard
-ones, on top of `INV__LSa`'s own hard edges). Model the dead time.
+dead time the freewheel diode carries the current (drop `V_f + i / g_on`);
+once `HSa` is on, the switch takes it all and the diode never shares
+(printed above). `switch_specs` on `HSa` (4 / 3.5 mJ at 600 V, 50 A)
+give 11.3 W with the dead time (soft edges cost about 0 J) and 22.6 W
+without (every edge hard). Model the dead time.
 
 ## 4. Exact signatures of the most used calls
 
-`b` is a `CircuitBuilder`, `res` a `SimulationResult`. These lines are
-checked against the package by the test suite. `...` marks
-further keyword-only options; see `help()`.
+`b` is a `CircuitBuilder`, `res` a `SimulationResult`; the test suite
+checks these lines. `...` marks more keyword-only options (`help()`).
 
 ```text
 p.CircuitBuilder()
@@ -515,9 +507,9 @@ otherwise (a reversed source, an open switch, a floating node).
 ### 6.1 Charge and energy balance from independent branches
 
 KCL holds over time: the charge a source delivers must reappear in the
-branches it feeds. Compare branches that are computed independently.
-On the rectifier of 3.3, every coulomb from the AC source must flow
-through the diodes and end up in `RL` or `C`:
+branches it feeds, each computed independently. On the rectifier of 3.3
+every coulomb from the AC source flows through the diodes into `RL` or
+`C`:
 
 ```python
 t = np.asarray(rect.times)
@@ -586,12 +578,11 @@ trbdf2 time-weighted 6.330 V, sample mean 5.007 V
 
 The engines agree; the sample mean on the variable grid does not.
 When two engines disagree, check the metric before blaming an engine.
-Compare ripple and RMS too: the buck of 3.2 reads 11.999 V on both
-engines, but 16.8 mV pp with `dt` and 15.4 mV without (analytic
-16.0 mV): `min`, `max` and `ripple_pp` are sample extremes, and the
-variable grid (about 20 samples per period here) misses the peaks.
-Read ripple from a fixed-`dt` run, or `np.interp` onto a uniform grid
-first.
+Compare ripple too: the buck of 3.2 reads 11.999 V on both engines but
+16.8 mV pp with `dt` and 15.4 mV without (analytic 16.0 mV): `min`,
+`max` and `ripple_pp` are sample extremes, which the variable grid
+(about 20 samples per period) misses. Read ripple from a fixed-`dt`
+run, or `np.interp` onto a uniform grid.
 
 ### 6.3 Step-size convergence
 
