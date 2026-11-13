@@ -165,6 +165,12 @@ CASES = {
     "xfmr_trbdf2": (transformer, dict(t_end=2e-3, engine="trbdf2")),
     "satind_pwl": (saturable, dict(t_end=2e-3, dt=1e-7, engine="pwl")),
     "syncbuck_dsed": (sync_buck, dict(t_end=2e-3, engine="dsed")),
+    # discontinuity_restart=True (add-discontinuity-restart-rule): the
+    # SDIRK restart stages solve on the event table at 2*gamma*dt.
+    "buck_pwl_restart": (buck, dict(t_end=2e-3, dt=1e-7, engine="pwl",
+                                    discontinuity_restart=True)),
+    "vsi_pwl_restart": (vsi, dict(t_end=10e-3, dt=1e-7, engine="pwl",
+                                  discontinuity_restart=True)),
 }
 
 
@@ -212,6 +218,9 @@ def run_case(name):
     if rc:
         for k, v in dict(rc).items():
             counters[f"res.{k}"] = int(v)
+    for k in ("n_restart_steps", "n_restart_factorizations"):
+        if getattr(res, k, 0):
+            counters[f"res.{k}"] = int(getattr(res, k))
     for i, c in enumerate(_caches):
         for k, v in _int_fields(c.metrics()).items():
             counters[f"cache.{k}"] = counters.get(f"cache.{k}", 0) + v
