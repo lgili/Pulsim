@@ -43,6 +43,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_diode_events.cpp    # Gate 3 — buck DCM + body-diode commutation
         tests/dsed/test_bdf2.cpp            # Gate 4 — BDF2 + stiffness detector
         tests/dsed/test_bdf2_scheduler.cpp  # Gate 4.C — end-to-end BDF2 PED scheduler
+        tests/dsed/test_bdf2_bootstrap.cpp  # L-stable backward-Euler start
         tests/dsed/test_mmc_thevenin_arm.cpp
         tests/dsed/test_trbdf2_transient.cpp
         tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask

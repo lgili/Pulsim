@@ -112,6 +112,7 @@ struct PEDResult {
     std::size_t n_accept = 0;
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
+    std::size_t n_exact_steps = 0;   // closed-form LTI propagator
     Real cpu_time_seconds = Real{0};
 };
 
@@ -368,6 +369,7 @@ public:
                     }
                     rk_state.invalidate();
                     ++result.n_accept;
+                    ++result.n_exact_steps;
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
                         ped_push_sample(result, t, x,

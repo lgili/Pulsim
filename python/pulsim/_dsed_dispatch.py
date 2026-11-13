@@ -22,9 +22,12 @@ User-facing knobs:
 
 * ``rtol`` / ``atol`` — RK45 tolerances (default 1e-6 / 1e-9)
 * ``dt`` — interpreted as ``dt_max`` (step cap) for the dsed engine
-* ``integrator`` — ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``
+* ``integrator`` — ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``.
+  ``'auto'`` takes, in order: the exact (closed-form) stepper when the
+  mode has one; otherwise the stiffness detector's choice of DOPRI5 or
+  BDF2. ``'rk45'`` also takes the exact stepper when it exists.
 * ``stiffness_threshold`` — when ``|λ_max|·h > threshold``, dispatcher
-  picks BDF2 (default 10.0)
+  picks BDF2 (default 10.0) for a mode with no exact stepper
 * ``h_bdf2`` — fixed step for BDF2 segments (default 1e-6)
 
 See ``notes/GATE5_PROGRESS.md`` for captured performance across 13
@@ -50,8 +53,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
 # Type aliases (public for downstream type-hints)
 # =============================================================================
 
-# Auto = pick per mode via stiffness detector;
-# rk45/bdf2 = force one integrator for ALL modes.
+# Auto = exact stepper when the mode has one, else the stiffness
+# detector's DOPRI5/BDF2 choice; rk45/bdf2 = force one integrator for
+# ALL modes (rk45 still takes the exact stepper where it exists).
 IntegratorChoice = Literal["auto", "rk45", "bdf2"]
 
 
@@ -342,7 +346,9 @@ class _PEDSimulationResult:
 
     * ``n_accept`` / ``n_reject`` — PI controller accept/reject counts
     * ``n_events`` — number of mask transitions fired
-    * ``n_rk45_steps`` / ``n_bdf2_steps`` — per-integrator step counts
+    * ``n_rk45_steps`` / ``n_bdf2_steps`` / ``n_exact_steps`` —
+      per-integrator step counts (``n_exact_steps``: closed-form LTI
+      propagator)
       (only populated when ``integrator='auto'`` was selected)
     * ``cpu_time_seconds`` — wall-clock from the PED scheduler
     * ``event_iteration_count`` / ``commutation_events`` — empty lists
@@ -383,6 +389,7 @@ class _PEDSimulationResult:
         n_events: int = 0,
         n_rk45_steps: int = 0,
         n_bdf2_steps: int = 0,
+        n_exact_steps: int = 0,
         cpu_time_seconds: float = 0.0,
     ) -> None:
         self.times = times
@@ -415,6 +422,7 @@ class _PEDSimulationResult:
         self.n_events = n_events
         self.n_rk45_steps = n_rk45_steps
         self.n_bdf2_steps = n_bdf2_steps
+        self.n_exact_steps = n_exact_steps
         self.cpu_time_seconds = cpu_time_seconds
         # PWL-engine diagnostic fields — empty for PED, but exposed
         # for API-compat with code that destructures both result types.
@@ -777,6 +785,7 @@ def run_dsed_from_builder(
                 n_events=native_res.get("n_events", 0),
                 n_rk45_steps=native_res.get("n_rk45_steps", 0),
                 n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+                n_exact_steps=native_res.get("n_exact_steps", 0),
                 cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
             )
         except (RuntimeError, ValueError):
@@ -837,6 +846,7 @@ def run_dsed_from_builder(
             n_events=native_res.get("n_events", 0),
             n_rk45_steps=native_res.get("n_rk45_steps", 0),
             n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+            n_exact_steps=native_res.get("n_exact_steps", 0),
             cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
         )
 

@@ -1757,8 +1757,12 @@ def simulate(
         Initial step for the DSED PI controller (default 1e-9).
     integrator
         DSED override: ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``.
-        ``'auto'`` picks per mode via stiffness detector. Force one
-        for debug / repeatability.
+        ``'auto'`` advances every mode that has a closed-form
+        propagator (LTI, supported sources, non-defective eigenbasis)
+        with the exact stepper, capped at ``dt``; only modes without
+        one go to the stiffness detector, which picks DOPRI5 or BDF2.
+        ``result.n_exact_steps`` counts the exact steps. ``'bdf2'``
+        starts each segment with one backward-Euler step.
     stiffness_threshold
         DSED override: ``|λ_max|·h`` ratio above which auto-dispatch
         picks BDF2 (default 10.0).

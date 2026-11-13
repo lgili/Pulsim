@@ -528,6 +528,7 @@ py::dict ped_result_to_dict(
     d["n_accept"] = res.n_accept;
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
+    d["n_exact_steps"] = res.n_exact_steps;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
     // Event log: skip the MaskT objects (they're py::object wrappers
     // around Python objects that we just hand back).
@@ -586,6 +587,7 @@ py::dict ped_result_auto_to_dict(
     d["n_events"] = res.n_events;
     d["n_rk45_steps"] = res.n_rk45_steps;
     d["n_bdf2_steps"] = res.n_bdf2_steps;
+    d["n_exact_steps"] = res.n_exact_steps;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
     py::list events;
     for (const auto& e : res.event_log) {

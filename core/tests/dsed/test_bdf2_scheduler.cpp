@@ -4,7 +4,7 @@
 //
 // Validates that PEDSimulatorBDF2 correctly:
 //   1. Refactors J on mask change (LU + history invalidation)
-//   2. Uses Crank-Nicolson bootstrap on the first step after each event
+//   2. Uses a backward-Euler bootstrap on the first step after each event
 //   3. Lands exactly on gate edges via the next_edge_after fast path
 //   4. Matches a high-resolution DOPRI5 reference within tolerance
 //   5. Beats DOPRI5-at-stability-limit on wall-clock for the stiff case
@@ -249,15 +249,15 @@ TEST_CASE("PEDSimulatorBDF2 on switching stiff RLC tracks DOPRI5 reference",
     // 10% V_in tolerance — at each gate edge, the new mask's b vector
     // changes discontinuously, exciting a fast LC transient of
     // amplitude ≈ |Δb|·|v_fast_eigvec(v_C)|/|λ_fast|. With our params
-    // this is ~5V (matching V_in). The Crank-Nicolson bootstrap step
-    // (A-stable but NOT L-stable) under-damps the fast mode for the
-    // first 1-2 BDF2 steps, leaving residual error of ~0.5V on v_C.
+    // this is ~5V (matching V_in). The first steps after an edge
+    // (backward-Euler bootstrap, then BDF2) are first/second order on
+    // the fast mode, leaving residual error on v_C.
     // Time-averaged this is ~8% — round up to 10% for the bound.
     //
     // The single-mode algorithmic correctness (0.137% RMSE on slow-mode
     // -only IC) is captured by test_bdf2.cpp Test 5. This test
     // validates the SCHEDULER-LEVEL plumbing — mask change triggers
-    // LU + history invalidation, bootstrap step uses CN, post-bootstrap
+    // LU + history invalidation, bootstrap step uses backward Euler, post-bootstrap
     // BDF2 takes over correctly.
     //
     // For Pulsim's real PED dispatch, fast-switching stiff scenarios
@@ -318,7 +318,7 @@ TEST_CASE("PEDSimulatorBDF2 invalidates BDF2 state on every gate edge",
           "[dsed][gate4][bdf2-sched]") {
     // We can't directly inspect bdf2_state from outside the scheduler,
     // but we can verify the EFFECT: after a mask change, the next step's
-    // y should be computed via Crank-Nicolson bootstrap (which gives a
+    // y should be computed via the backward-Euler bootstrap (which gives a
     // different answer than carrying stale BDF2 history would).
     //
     // The reference is the DOPRI5 ground truth — if the mask change DIDN'T

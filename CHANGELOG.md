@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `engine='dsed'`: `integrator='auto'` takes the exact stepper; BDF2 starts L-stable
+
+* **Fixed (BREAKING, numbers)** with the default `integrator='auto'` the
+  DSED auto scheduler sent every mode its stiffness detector flagged to
+  fixed-step BDF2 (`h = 1 µs`) without asking whether the mode had a
+  closed-form propagator, and BDF2 started each segment with a
+  Crank–Nicolson step, which is not L-stable. On a 100 V source, 10 Ω and
+  a 1 nF capacitor across a 1 mΩ switch (100 kHz, τ = 10 ns while open):
+
+  | `integrator` | `v(sw)` range | max error, open interval |
+  |---|---|---|
+  | `'auto'` before | −99.98 … 196.08 V | 96.07 V |
+  | `'auto'` now | 0.000 … 100.000 V | 1.0e-6 V |
+  | `'bdf2'` before | −99.98 … 166.67 V | 66.66 V |
+  | `'bdf2'` now | 0.000 … 102.77 V | 9.09 V (first sample after each opening) |
+
+  `'auto'` now advances any mode with an exact stepper exactly (capped at
+  `dt`); only modes without one go to the detector. The BDF2 start is a
+  backward-Euler step, so a segment opens at `100·(h/τ)/(1 + h/τ)`
+  (90.91 V at a 0.1 µs step) instead of overshooting. The result reports
+  `n_exact_steps` beside `n_rk45_steps` and `n_bdf2_steps`. Runs with PWL
+  diodes already used the RK45 scheduler and are unchanged.
+
 ### `add_nonlinear_diode` is retired
 
 * **Changed (BREAKING)** `CircuitBuilder.add_nonlinear_diode` raises
