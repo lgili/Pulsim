@@ -167,6 +167,9 @@ def test_double_crossing_inside_one_step_is_seen():
         b.add_resistor("R", "k", "r", 1e3)
         b.add_voltage_source("Vr", "r", "gnd", 9.5)
         return b
+    # Batch 6a: the kernel guard does NOT catch this one (it repairs one
+    # event and returns v(k) = -5.18 V at 10 us; trbdf2 9.50 V); the
+    # stored-sample guard does, which is why both are kept.
     from pulsim._dsed_dispatch import DiodeModeInconsistentError
     with pytest.raises(DiodeModeInconsistentError):
         _run(build(0.0), t_end=10e-6)
@@ -303,13 +306,27 @@ def _boost(v_th, R):
     return b, fn
 
 
-@pytest.mark.parametrize("v_th,R", [(0.0, 50.0), (1e-3, 50.0), (0.0, 500.0)])
-def test_boost_with_a_wrong_settled_mode_is_named(v_th, R):
-    # measured: D1 ON at -1.07 A (R = 50, V_th = 0); V_out 0.76 V low at R = 500
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+@pytest.mark.parametrize("v_th,R,v_end", [(0.0, 50.0, 24.5295), (1e-3, 50.0, 24.5296),
+                                          (0.0, 500.0, 45.4835)])
+def test_boost_with_a_wrong_settled_mode_is_repaired_or_named(v_th, R, v_end):
+    # The settle alone holds D1 ON at -1.07 A (R = 50, V_th = 0; 0.76 V low at
+    # R = 500). Batch 4: the stored-sample guard named it. Since the
+    # complementarity guard (batch 6a) the kernel repairs those events and
+    # the run lands on trbdf2 rtol 1e-10 (end v(vout) to 1e-4, measured
+    # <= 1e-5); with the kernel guard off the stored-sample guard still
+    # names it. Re-pin: raise -> repaired run.
+    import pulsim._dsed_dispatch as DD
     b, fn = _boost(v_th, R)
-    with pytest.raises(DiodeModeInconsistentError, match="D1"):
-        p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    assert r.diagnostics["mode_guard"]["repairs"] > 0
+    assert np.asarray(r.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
+    b, fn = _boost(v_th, R)
+    DD.MODE_GUARD = False
+    try:
+        with pytest.raises(DD.DiodeModeInconsistentError, match="D1"):
+            p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    finally:
+        DD.MODE_GUARD = True
 
 
 def test_boost_with_a_threshold_band_runs_and_agrees():
@@ -322,12 +339,23 @@ def test_boost_with_a_threshold_band_runs_and_agrees():
     assert np.abs(v - np.asarray(r.v("vout"))).max() < 1e-3
 
 
-def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_named():
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
-    b = p.CircuitBuilder()
-    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
-    b.add_diode("D", "in", "a", 1e3, 1e-9)
-    b.add_resistor("R", "a", "b", 10.0)
-    b.add_inductor("L", "b", "gnd", 1e-3)
-    with pytest.raises(DiodeModeInconsistentError, match="'D' is ON while carrying"):
-        p.simulate(b, 3e-3, engine="dsed")
+def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
+    # Re-pin (batch 6a): the kernel guard repairs the one wrong event; the
+    # stored-sample guard still names it with the kernel guard off.
+    import pulsim._dsed_dispatch as DD
+
+    def build():
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+        b.add_diode("D", "in", "a", 1e3, 1e-9)
+        b.add_resistor("R", "a", "b", 10.0)
+        b.add_inductor("L", "b", "gnd", 1e-3)
+        return b
+    r = p.simulate(build(), 3e-3, engine="dsed")
+    assert r.diagnostics["mode_guard"]["repairs"] == 1
+    DD.MODE_GUARD = False
+    try:
+        with pytest.raises(DD.DiodeModeInconsistentError, match="'D' is ON while carrying"):
+            p.simulate(build(), 3e-3, engine="dsed")
+    finally:
+        DD.MODE_GUARD = True

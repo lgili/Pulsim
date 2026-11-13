@@ -10,7 +10,8 @@ parameter choices and reports what survived:
   4. Kp = 0 (pure I, no proportional)  — slow + oscillatory
   5. Kp = 10, Ki = 0                   — pure P, large steady-state err
   6. negative Kp                        — POSITIVE feedback → diverges
-  7. enable_substep_state_correction=True with aggressive duty
+  7. enable_substep_state_correction=True (with discontinuity_restart,
+     which the split requires)
   8. cold start with x_0 = 0 vs DC OP
 
 Each case captures: (steady_state_v_out, crashed?, sim_time, sample_count).
@@ -102,6 +103,9 @@ def run_case(spec: CaseSpec) -> dict:
             start_from_dc_op=spec.start_from_dc_op,
             max_event_iterations=8,
             enable_substep_state_correction=spec.enable_substep,
+            # The event split runs inside the restart rule's SDIRK
+            # window; the kernel refuses the split alone.
+            discontinuity_restart=spec.enable_substep,
         )
         result["samples"] = res.num_steps()
 

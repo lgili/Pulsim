@@ -276,6 +276,9 @@ TEST_CASE("run_transient hot loop: zero std-container allocations",
     opts.t_start = 0.0;
     opts.t_end   = 2e-3;
     opts.dt      = 1e-6;   // 2000 steps
+    // The resolution diagnostics' three one-off buffers are counted
+    // separately below.
+    opts.resolution_diagnostics = false;
 
     solver::SwitchScheduleFn switch_fn = [](Real t) {
         SwitchStateMask m(2);
@@ -310,6 +313,35 @@ TEST_CASE("run_transient hot loop: zero std-container allocations",
     // buffer became contiguous. Measured: 5.
     if (kCountsMeaningful) {
         REQUIRE(delta < 16);
+    }
+
+    // add-fixed-step-resolution-diagnostics: on, it adds one-off
+    // buffers (workspace, index buffer, `lte` reserve, the ringing
+    // records this every-step toggling makes), never a per-step cost.
+    {
+        std::size_t n_rec = 0;
+        auto count_on = [&](Real t_end) {
+            auto on_opts = opts;
+            on_opts.resolution_diagnostics = true;
+            on_opts.t_end = t_end;
+            const std::size_t b0 = g_new_count.load();
+            auto on = solver::run_transient(*f.cache, f.g, f.pool,
+                                              on_opts, switch_fn);
+            const std::size_t d = g_new_count.load() - b0;
+            n_rec = on.resolution.ringing.size();
+            return d;
+        };
+        const std::size_t on_2k = count_on(2e-3);
+        const std::size_t rec_2k = n_rec;
+        const std::size_t on_4k = count_on(4e-3);
+        INFO("with resolution diagnostics: " << on_2k << " / " << on_4k
+             << " (ringing records " << rec_2k << " / " << n_rec << ")");
+        if (kCountsMeaningful) {
+            // Twice the steps: at most one more growth of the ringing
+            // record vector (11 -> 20 records here), nothing per step.
+            REQUIRE(on_4k <= on_2k + 1);
+            REQUIRE(on_2k < delta + 16);
+        }
     }
 
     // Physical sanity so the run wasn't degenerate: with both
@@ -349,6 +381,7 @@ TEST_CASE("run_transient with diodes: allocation count is O(1), "
     opts.t_start = 0.0;
     opts.t_end   = 1e-3;
     opts.dt      = 1e-6;   // 1000 steps
+    opts.resolution_diagnostics = false;   // counted in the test above
 
     solver::SwitchScheduleFn switch_fn = [](Real) {
         return SwitchStateMask(1);   // diode-owned bit; user all-open
@@ -405,6 +438,7 @@ TEST_CASE("substep event correction path is allocation-free per event",
     opts.t_end   = 5e-3;   // 5 line cycles → ~10 commutations
     opts.dt      = 1e-6;
     opts.enable_substep_state_correction = true;
+    opts.discontinuity_restart = true;   // the split requires the rule
 
     solver::SwitchScheduleFn switch_fn = [](Real) {
         return SwitchStateMask(1);

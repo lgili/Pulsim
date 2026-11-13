@@ -243,9 +243,10 @@ def test_seeded_monte_carlo_is_backend_independent():
             verbose=False, **kw)
 
     ser = run()
-    # No switch_fn: the fixed engine installs a Python default mask, so
-    # "auto" keeps processes.
-    for backend, ran in (("auto", "process"), ("thread", "thread"),
+    # No switch_fn: the fixed engine's default mask is the native
+    # make_constant_switch_fn (update-fixed-step-loop-bookkeeping), so
+    # "auto" takes threads (it kept processes on a Python default mask).
+    for backend, ran in (("auto", "thread"), ("thread", "thread"),
                          ("process", "process")):
         par = run(parallel=True, n_workers=2, backend=backend)
         assert par.backend == ran

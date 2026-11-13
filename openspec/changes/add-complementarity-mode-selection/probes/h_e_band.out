@@ -1,0 +1,33 @@
+mismatches against the prototype's mode (events) per h_e/T_ref; 'x' = an error
+family           events   1e-12   1e-11   1e-10   1e-09   1e-08   1e-07   1e-06   1e-05   1e-04   1e-03   1e-02
+buck_rest            22      10       1       0       0       0       0       0       0       0       0       0
+dcm_buck            100      40      20       0       0       0       0       0       0       0       0       0
+boost_50             81      17       0       0       0       0       1       1       1       1       1       1
+boost_500            81      18       0       0       0       0       1       1       1       1       1       1
+bridge1_vf07          9       x       x       x       0       0       0       0       0       0       0       1
+bridge1_vf0           8       x       x       x       0       0       0       0       0       0       0       0
+bridge3_overlap      25       0       0       0       0       0       0       0       0       0       0       0
+bridge3_cfilter      25       x       x       x       0       0       0       0      12      12      12      12
+
+h_e = 1e-06 T_ref: first-pass ties, their currents, widenings, ties left (OFF),
+and ties decided differently with tol_w 10x smaller (tol = 1e-10)
+buck_rest        ties=  0 max|i_tie|=          - widenings=  0 left=  0 decided differently at tol/10: 0
+dcm_buck         ties=  0 max|i_tie|=          - widenings=  0 left=  0 decided differently at tol/10: 0
+boost_50         ties=  1 max|i_tie|= 6.00e-07 A widenings=  2 left=  0 decided differently at tol/10: 0
+boost_500        ties=  1 max|i_tie|= 6.00e-07 A widenings=  2 left=  0 decided differently at tol/10: 0
+bridge1_vf07     ties=  8 max|i_tie|= 9.27e-10 A widenings=  8 left=  0 decided differently at tol/10: 0
+bridge1_vf0      ties=  8 max|i_tie|= 1.80e-10 A widenings=  8 left=  0 decided differently at tol/10: 0
+bridge3_overlap  ties=  0 max|i_tie|=          - widenings=  0 left=  0 decided differently at tol/10: 0
+bridge3_cfilter  ties= 24 max|i_tie|= 4.89e-08 A widenings= 24 left= 12 decided differently at tol/10: 12
+
+h_e = 1e-07 T_ref: first-pass ties, their currents, widenings, ties left (OFF),
+and ties decided differently with tol_w 10x smaller (tol = 1e-10)
+buck_rest        ties=  1 max|i_tie|= 7.20e-01 A widenings=  1 left=  0 decided differently at tol/10: 0
+dcm_buck         ties= 20 max|i_tie|= 7.20e-01 A widenings= 20 left=  0 decided differently at tol/10: 0
+boost_50         ties=  1 max|i_tie|= 6.00e-08 A widenings=  2 left=  0 decided differently at tol/10: 0
+boost_500        ties=  1 max|i_tie|= 6.00e-08 A widenings=  2 left=  0 decided differently at tol/10: 0
+bridge1_vf07     ties= 16 max|i_tie|= 3.14e-02 A widenings= 12 left=  1 decided differently at tol/10: 0
+bridge1_vf0      ties= 16 max|i_tie|= 3.14e-02 A widenings= 12 left=  2 decided differently at tol/10: 0
+bridge3_overlap  ties=  0 max|i_tie|=          - widenings=  0 left=  0 decided differently at tol/10: 0
+bridge3_cfilter  ties= 48 max|i_tie|= 2.97e-02 A widenings= 36 left= 12 decided differently at tol/10: 0
+
