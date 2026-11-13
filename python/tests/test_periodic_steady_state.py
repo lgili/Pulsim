@@ -439,3 +439,46 @@ def test_frequency_response_without_dt_on_the_dcm_buck():
                                   frequencies=[1e-3, 100.0, 1e3, 1e4])
     assert np.isfinite(fr.H).all()
     assert fr.H[0].real == pytest.approx(ref.DCM_DVC_DD, rel=1e-6)
+
+
+# A waveform current source that is not T-periodic has no T-periodic
+# orbit; before the check each of these returned stable=True with an
+# x0 the transient never reaches (review probe, T = 1 ms into
+# 1 kOhm || 1 uF): sine at 1.5/T -> -0.227 V (transient alternates
+# +-0.105 V), one-shot pulse -> -0.225 V (transient decays to 0),
+# periodic=False table -> +0.061 V (settles at -0.500 V), table of
+# period 2T -> -0.490 V (alternates -0.132 / -0.358 V).
+TP = 1e-3
+_NOT_T_PERIODIC = {
+    "sine_1.5_per_T": (lambda b: b.add_sine_current_source(
+        "I", "gnd", "o", 0.0, 1e-3, 1.5 / TP), "SineCurrentSource",
+        "f.T = 1.5"),
+    "pulse_period_0.7T": (lambda b: b.add_pulse_current_source(
+        "I", "gnd", "o", 0.0, 1e-3, 1e-4, 3e-4, 0.7 * TP, 0.0, 0.0),
+        "PulseCurrentSource", "does not divide"),
+    "pulse_one_shot": (lambda b: b.add_pulse_current_source(
+        "I", "gnd", "o", 0.0, 1e-3, 1e-4, 3e-4, 0.0, 0.0, 0.0),
+        "PulseCurrentSource", "one-shot"),
+    "pulse_late_start": (lambda b: b.add_pulse_current_source(
+        "I", "gnd", "o", 0.0, 1e-3, 0.9 * TP, 0.5 * TP, TP, 0.0, 0.0),
+        "PulseCurrentSource", "first period"),
+    "table_not_periodic": (lambda b: b.add_pwl_current_source(
+        "I", "gnd", "o", [0, 2e-4, 6e-4, TP], [0, 1e-3, -1e-3, 0.5e-3],
+        periodic=False), "PwlCurrentSource", "periodic=False"),
+    "table_period_2T": (lambda b: b.add_pwl_current_source(
+        "I", "gnd", "o", [0, 5e-4, TP, 2 * TP], [0, 1e-3, 0, 0],
+        periodic=True), "PwlCurrentSource", "does not divide"),
+}
+
+
+@pytest.mark.parametrize("case", list(_NOT_T_PERIODIC))
+def test_current_source_not_periodic_in_the_period_is_refused(case):
+    add, kind, frag = _NOT_T_PERIODIC[case]
+    b = p.CircuitBuilder()
+    add(b)
+    b.add_resistor("R", "o", "gnd", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    with pytest.raises(p.UnsupportedError, match=frag) as ei:
+        p.periodic_steady_state(b, period=TP)
+    e = ei.value
+    assert (e.feature, e.device, e.kind) == ("period", "I", kind)

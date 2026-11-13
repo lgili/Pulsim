@@ -13,7 +13,9 @@ Steady-state gradient used by the small-signal test:
 central finite difference to 3.5e-10).
 
 Slice 1 (tasks 1–4, 8) is implemented; decisions and deviations are in
-`DECISIONS.md`. Notes on ticked items: 3.3's CCM Bode is checked on the
+`DECISIONS.md`. The spec's source refusals ("a source that is not
+`T`-periodic") were true only for sine voltage sources until the
+integration fix of DECISIONS 12 extended them to the current sources. Notes on ticked items: 3.3's CCM Bode is checked on the
 Q = 8 buck of `test_sampled_ac.py`; 6.3's saltation guard is covered in
 slice 1 only by a hysteresis-band rectifier (M against a finite
 difference; without saltation it is off by 3.1e-5); 8.1's guides are a

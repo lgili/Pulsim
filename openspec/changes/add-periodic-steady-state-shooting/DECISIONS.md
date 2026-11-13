@@ -89,6 +89,16 @@ marked "proposed", else the most conservative one. Each entry: question
    events of the exact stepper (it falls back to RK45 and does not
    land on them). DC and sine sources are accepted; a sine source must
    satisfy `f·T` integer within 1e-12.
+   Integration (review of 4f55aabc): the sine / pulse / table CURRENT
+   sources of add-controlled-source-set were accepted unchecked, and a
+   source that is not T-periodic returned an orbit that does not exist
+   (`stable=True`). Now every waveform source is checked and refused
+   with `UnsupportedError(feature="period", device=<source>)`: sine
+   (voltage and current) `f·T` a positive integer; pulse current source
+   period > 0 dividing T with its first pulse inside its first period;
+   table current source `periodic=True`, table period dividing T, first
+   knot at t <= 0. The sine-voltage case changed type from ValueError to
+   UnsupportedError (a ValueError subclass), for one rule.
 13. **Scaled norm**: `atol_i = rtol·max_t|x_i(t)|` over all period runs
    so far (D4 says "from the state scale of the base run"; the running
    maximum is the base run's scale once the iterate is near the orbit,

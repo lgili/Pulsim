@@ -306,18 +306,54 @@ def _check_circuit(builder, T, comps):
                 "events of the exact stepper, so the one-period map "
                 "would not be computed exactly. Model the gate with a "
                 "switch and a schedule, or use a transient.")
-        if kind == "sine_voltage_source":
-            f = float(c["params"].get("frequency", float("nan")))
-            fT = f * T
-            k = round(fT)
-            if not (math.isfinite(fT) and k >= 1
-                    and abs(fT - k) <= 1e-12 * max(1.0, fT)):
-                raise _err(
-                    f"sine source {c['name']!r} at {f:g} Hz is not "
-                    f"periodic with period={T!r} (f.T = {fT:.12g}, "
-                    "not an integer): the circuit has no T-periodic "
-                    "steady state. Use the common period of all "
-                    "sources and schedules.")
+        why = _not_t_periodic(kind, c["params"], T)
+        if why:
+            raise _unsup(
+                "period", device=c["name"],
+                kind=builder.pool.kind_of(c["branch_id"]).name, msg=
+                f"source {c['name']!r} ({kind}) is not periodic with "
+                f"period={T!r}: {why}, so the circuit has no T-periodic "
+                "steady state. Use the common period of all sources "
+                "and schedules.")
+
+
+def _divides(P, T):
+    """Is ``P`` a period of the section, i.e. ``T/P`` a positive integer?"""
+    if not (P > 0 and math.isfinite(P)):
+        return False
+    k = round(T / P)
+    return k >= 1 and abs(T / P - k) <= 1e-12 * max(1.0, T / P)
+
+
+def _not_t_periodic(kind, prm, T):
+    """Why a waveform source is not T-periodic on [0, inf), or ''."""
+    if kind in ("sine_voltage_source", "sine_current_source"):
+        f = float(prm.get("frequency", float("nan")))
+        if f == 0.0:
+            return ""      # a DC source
+        if not _divides(1.0 / f if f > 0 else float("nan"), T):
+            return f"at {f:g} Hz, f.T = {f * T:.12g} is not a positive integer"
+    elif kind == "pulse_current_source":
+        P, t0 = float(prm["period"]), float(prm["t_start"])
+        d = float(prm["rise_time"]) + float(prm["pulse_width"]) + float(
+            prm["fall_time"])
+        if not (P > 0):
+            return "a one-shot pulse (period 0)"
+        if not _divides(P, T):
+            return f"its period {P!r} does not divide T"
+        if not (0.0 <= t0 and t0 + d <= P):
+            # before t_start it sits at i_initial; a later period does not
+            return (f"its first pulse (t_start {t0!r} + rise, width, fall "
+                    f"{d!r}) does not end within its first period")
+    elif kind == "pwl_current_source":
+        t = prm["t"]
+        if not prm["periodic"]:
+            return "a table with periodic=False"
+        if not _divides(t[-1] - t[0], T):
+            return f"its table period {t[-1] - t[0]!r} does not divide T"
+        if t[0] > 0.0:
+            return f"its table starts at t = {t[0]!r} > 0 (constant before)"
+    return ""
 
 
 def _labels(builder, cache, mask, comps):
@@ -752,8 +788,9 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         The circuit (linear R, L, C, switches, PWL diodes, DC and sine
         sources). Anything else is refused by name.
     period
-        ``T``. Every gate schedule and sine source must be periodic in
-        it (their own periods divide it).
+        ``T``. Every gate schedule and waveform source (sine, pulse
+        and table current sources included) must be periodic in it
+        (their own periods divide it); one that is not is refused.
     switch_fn
         A gate schedule that can name its edges: ``make_pwm_switch_fn``
         & co., ``NativePwm2Switch``, ``NativeMultiMaskPwm`` or a
