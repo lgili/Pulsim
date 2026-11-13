@@ -117,10 +117,14 @@ circuits:
   circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs, known: {dsed: disagree}}
   circuits/switching/inverter/lcc_resonant_inverter.yaml: {status: runs, known: {dsed: disagree}}
-  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
-  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree, dsed: disagree}}
+  # pwm phase read as a fraction of the period (batch 6b): trbdf2 0.00132 -> 4.3e-5, agrees.
+  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree}}
+  # pwm phase as a fraction (batch 6b): no shoot-through, so the DC start is non-zero and dsed
+  # refuses it (as every circuit without uic); its 0.201 was the shoot-through circuit.
+  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree}}
   circuits/switching/isolated/active_clamp_forward.yaml: {status: runs}
-  circuits/switching/isolated/dual_active_bridge.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  # pwm phase as a fraction (batch 6b): pwl 3.58 -> 2.6e-4, trbdf2 0.00244 -> 3.5e-5, both agree.
+  circuits/switching/isolated/dual_active_bridge.yaml: {status: runs}
   circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree}}
   circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree}}
   # dsed disagree on the gate is interpolation of sparse exact samples across edges (pointwise < 5e-5
@@ -129,7 +133,10 @@ circuits:
   circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, trbdf2: error}}
   circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: error, match: "no DC operating point", reason: "pwl: RuntimeError: compute_dc_operating_point: no DC operating point. The direct solve failed with: solve_with_newton: failed to converge after 5"}
   circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}}
-  circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs}
+  # pwm phase as a fraction (batch 6b): the B legs now switch half a period apart (twice the
+  # edges); pwl 0.0142 -> 0.0274 on the strict gate with edge error 1.4e-8: edge timing on
+  # the dt grid (the late-gate-edge class of REFERENCE_STATUS notes), not the states.
+  circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs, known: {pwl: disagree}}
   # dsed (runs since builder ICs are honoured): disagree on the gate as full_bridge_dc
   # (pointwise < 5e-5 of span; 0.0275 at dt/4 output).
   circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, dsed: disagree}}

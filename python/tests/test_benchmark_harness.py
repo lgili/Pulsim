@@ -183,10 +183,12 @@ def test_vcswitch_pwm_gate_becomes_a_native_schedule():
     assert sw.next_edge_after(100e-6) == pytest.approx(200e-6, rel=1e-12)
 
 
-def test_v1_pwm_phase_is_a_radian_advance_and_dead_time_shortens_on_time():
-    # v1 kernel: high while (t + phase/2pi*T) mod T < duty*T - dead_time
+def test_v1_pwm_phase_is_a_period_fraction_and_dead_time_shortens_on_time():
+    # high while (t + phase*T) mod T < duty*T - dead_time. Re-pin (batch 6b): the v1 kernel
+    # read radians, but every file that sets a pwm phase means a fraction (0.5 on a leg's
+    # low side, 1/3 and 2/3 on three phases); as radians ll09/ll10 modelled shoot-through.
     f, duty, start = v1_reader._on_windows(
-        {"type": "pwm", "frequency": 1e3, "duty": 0.5, "phase": math.pi / 2, "dead_time": 1e-4}, 0.5)
+        {"type": "pwm", "frequency": 1e3, "duty": 0.5, "phase": 0.25, "dead_time": 1e-4}, 0.5)
     assert (f, duty) == (1e3, pytest.approx(0.4))
     assert start == pytest.approx(0.75e-3)
 

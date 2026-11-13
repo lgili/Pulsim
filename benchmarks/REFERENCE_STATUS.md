@@ -436,9 +436,15 @@ I(Lload), and lands on rtol 1e-10 on ll07; pwl at dt/64 converges to it
 on all five. The "disagreements" are the PWM-node metric artefact plus
 first-order edge error on pwl. (Batch 4: ll07 on trbdf2 at default
 tolerance drifted linearly to 7.8e-3 of span in I(L1); since the TR-BDF2
-merge it agrees at 1.2e-4.) Side finding: ll09 and
-ll10 read `phase: 0.5` as radians (v1 semantics), so the low-side gate
-is shifted 3.98 us, not half a period, and both switches conduct for
-about 20 us of every 50 us (shoot-through, about 1000 A); the reader
-copies v1 faithfully, but these circuits do not model the intended
-inverter. No ngspice deck exists for these five.
+merge it agrees at 1.2e-4.) Side finding (fixed
+in batch 6b): ll09 and ll10 read `phase: 0.5` as radians (the v1
+kernel's unit), so the low-side gate was shifted 3.98 us, not half a
+period, and both switches conducted 40 % of the time (shoot-through,
+1000 A). Every circuit that sets a pwm phase means a fraction of the
+period (0.5 on a low side, 0.25 / 0.5 / 0.75 on four cells, 1/3 and 2/3
+on three phases), so the reader now reads it as one (ll09: no overlap,
+peak switch current 1.3 mA). Moved cells: ll09 trbdf2 0.00132 ->
+4.3e-5 (agrees), ll10 dsed 0.201 -> refused (DC start), DAB pwl 3.58 ->
+2.6e-4 and trbdf2 0.00244 -> 3.5e-5 (agree), CHB pwl 0.0142 -> 0.0274
+(edge timing; edge error 1.4e-8), flying capacitor pwl 0.0657 ->
+0.0466 and dsed 0.249 -> 0.287, MMC pwl 0.0255 -> 0.0268. No ngspice deck exists for these five.
