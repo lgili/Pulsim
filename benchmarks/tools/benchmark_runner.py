@@ -257,14 +257,14 @@ def analytical_rc_step(times: List[float], v0: float, r: float, c: float) -> Lis
     return [v0 * (1.0 - math.exp(-t / tau)) for t in times]
 
 
-def analytical_rl_step(times: List[float], v0: float, r: float, l: float) -> List[float]:
-    tau = l / r
+def analytical_rl_step(times: List[float], v0: float, r: float, ind: float) -> List[float]:
+    tau = ind / r
     return [v0 * math.exp(-t / tau) for t in times]
 
 
-def analytical_rlc_step(times: List[float], v0: float, r: float, l: float, c: float) -> List[float]:
-    alpha = r / (2.0 * l)
-    omega0 = 1.0 / math.sqrt(l * c)
+def analytical_rlc_step(times: List[float], v0: float, r: float, ind: float, c: float) -> List[float]:
+    alpha = r / (2.0 * ind)
+    omega0 = 1.0 / math.sqrt(ind * c)
     result = []
     if alpha < omega0:
         omega_d = math.sqrt(omega0 * omega0 - alpha * alpha)
@@ -300,13 +300,13 @@ def validate_analytical(times: List[float], values: List[float], model: str, par
         reference = analytical_rc_step(times, v0, r, c)
     elif model == "rl_step":
         r = parse_value(params["r"])
-        l = parse_value(params["l"])
-        reference = analytical_rl_step(times, v0, r, l)
+        ind = parse_value(params["l"])
+        reference = analytical_rl_step(times, v0, r, ind)
     elif model == "rlc_step":
         r = parse_value(params["r"])
-        l = parse_value(params["l"])
+        ind = parse_value(params["l"])
         c = parse_value(params["c"])
-        reference = analytical_rlc_step(times, v0, r, l, c)
+        reference = analytical_rlc_step(times, v0, r, ind, c)
     else:
         raise ValueError(f"Unknown analytical model: {model}")
     return compute_errors(values, reference)
