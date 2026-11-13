@@ -15,9 +15,9 @@ Reference values.
   (C, R_load), 1.1e-8 (`I_s`), 8e-9 (`n·V_t`).
 
 ## 1. Characterisation
-- [ ] 1.1 Port `probes/fd_gradient_today.py` as a documented test of today's finite-difference gradients (fixed engine at T/100: relative error between −13 and +2; `trbdf2`: about 1e-4), kept as the "why" record
-- [ ] 1.2 Finite-difference harness for tests: central difference with step selection and a Richardson check, usable on any engine
-- [ ] 1.3 Port the two prototypes as reference implementations with the values above as constants
+- [x] 1.1 Port `probes/fd_gradient_today.py` as a documented test of today's finite-difference gradients (fixed engine at T/100: relative error between −13 and +2; `trbdf2`: about 1e-4), kept as the "why" record
+- [x] 1.2 Finite-difference harness for tests: central difference with step selection and a Richardson check, usable on any engine
+- [x] 1.3 Port the two prototypes as reference implementations with the values above as constants
 
 ## 2. Exact path, linear-element parameters and duty (today's `dsed` adapter)
 - [ ] 2.1 `∂A/∂p`, `∂b/∂p` per mask for affine stamps (R, L, C, source value) from the exact difference of two assemblies

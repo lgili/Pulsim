@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Parameter sensitivities on the exact path (`add-parameter-sensitivities`)
+
+* **Added** characterisation and references (group 1): today's central
+  differences of the DCM buck's `v_C(40 T)` with respect to `L` are
+  pinned as a test (fixed engine at `T/100`: -9.49, -12.9, +2.00, -0.457
+  relative error at steps 1e-5 .. 1e-2; `trbdf2`: -8.8e-5); a
+  finite-difference harness with step selection and a Richardson
+  estimate; the two prototypes ported as numpy references that
+  reproduce the `tasks.md` table to 1e-7.
+
 ### Design evaluation for optimisers (`pulsim.design`, first slice)
 
 * **Added** `pulsim.design.Evaluator(build, period=..., loads=...,
