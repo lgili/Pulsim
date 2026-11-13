@@ -153,7 +153,7 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still forward-Euler observers on `pwl` only (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
+| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still explicit observers on `pwl` only (forward Euler; the induction motor's rotor flux is integrated exactly over each step since 2026-11, but its EMF still reaches the circuit one step late) (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
 | No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
 
 ## Passives
@@ -167,19 +167,18 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 
 ## Found by the examples audit (2026-11-13)
 
-Reproducers are the snippets quoted; each example affected says so where
-it prints the number.
+Reproducers are in `probes/` (run them against the tree to re-measure);
+each example affected says so where it prints the number. Fixed since
+the audit (see the CHANGELOG): the `pseudo_trans` divergence,
+`run_transient_adaptive` reading low, the forward-Euler induction-motor
+flux and `run_ac_sweep` reading inside the start-up. The `b_extra` sign
+and the moving `branch_var_id_for_*` index are contracts, documented in
+`simulate` and `docs/api-reference.md`.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **`compute_dc_op(strategy='pseudo_trans')` diverges on a linear circuit.** | 10 V, 1 kΩ / 5 kΩ divider: the residual reaches 1.4e84; `'auto'` and Newton give 8.3333 V (notebook 07). | `strategy='auto'` or `'newton'`. |
-| **`run_transient_adaptive` reads a switched buck about 1 % low.** | 8.045 V on `pwl`, `trbdf2` and `dsed`; 7.962 V adaptive (notebooks 24/25). | Use `simulate`. |
-| **The induction-motor observer integrates the rotor flux by forward Euler** (first order; see Machines). | `|ψ_r|` = 0.9432 / 0.9290 / 0.9220 Wb at `dt` = 50 / 25 / 12.5 µs; IFOC torque 12.9 → 11.7 N·m from 50 to 6.25 µs, the textbook value 11.6 (`run_im_ifoc_closed_loop.py`). | Halve `dt` until the quantity you report stops moving. |
-| **`device_loss_summary`'s resistor `P_avg` is first order in `dt` on PWM currents** (each edge becomes a one-step ramp; the switch `P_avg` is exact). | R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W (`run_device_loss_to_thermal.py`). | `p.time_average(t, R * i**2)` with `i` from `res.i`, or halve `dt`. |
-| **A `b_extra_fn` entry on a voltage-source row adds −v.** The source row carries −V. | Writing +10 on the row gives `v_a` = −10 V; three induction-motor scripts had it inverted. | Write −v on source rows. |
-| **`pool.branch_var_id_for_inductor` indices go stale when nodes are added afterwards.** | The MMC dq script looked up (26, 28, 30) before the build finished; the real slots were (28, 29, 30). | Look indices up after the last `add_*`, or use `res.i(name)`. |
-| **Tightly coupled half bridge: `trbdf2` aborts and a coarse fixed step is unconverged without warning.** | Half bridge, k = 0.999 and 0.99999: `trbdf2` raises `refactorize failed (numerically singular)` at h ≈ 5e-14 s. At k = 0.99999, `dt` = 2e-8 gives 4.17 V against 4.99 V at 1e-8 (ideal 5.0 V). | `engine='pwl'`; halve `dt` and compare. |
-| **`run_ac_sweep` restarts every frequency from the initial state.** `settling_cycles` counts test periods, so high-frequency points settle for a shorter time than the plant's start-up. | Buck, 8 settling cycles: the 11 kHz point (0.7 ms) still carried the cold-start LC ring (τ = 2RC = 0.47 ms) and read −16 dB / +10 dB off. | One call per frequency with `settling_cycles = ceil(T_settle * f)`, and seed `i0=` / `c0=` at the operating point (`run_auto_tune_buck.py`). |
+| **`device_loss_summary`'s resistor `P_avg` is first order in `dt` on PWM currents** (each edge becomes a one-step ramp in the stored samples; the switch `P_avg` is exact). Owner: `python/pulsim/losses.py`, `device_loss_summary` (line 1556). Probe: `probes/loss_resistor_first_order_edges.py`. | R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W; M1 11.2926 W against 11.2930 W. | `p.time_average(t, R * i**2)` with `i` from `res.i`, or halve `dt`. |
+| **Tightly coupled half bridge: `trbdf2` aborted and a coarse fixed step read low without warning** (audit report). Owner: `core/include/pulsim/solver/trbdf2_transient.hpp`. Probe: `probes/half_bridge_tight_coupling.py`. | Audit: `refactorize failed (numerically singular)` at h ≈ 5e-14 s for k = 0.999 / 0.99999; at k = 0.99999 `dt` = 2e-8 gave 4.17 V against 4.99 V at 1e-8. NOT reproduced on this tree with the project's half bridge (3 ms, mean over 2–3 ms): k = 0.99999 reads 4.869 / 4.870 V at `dt` = 2e-8 / 1e-8 and `trbdf2` runs (4.924 V); k = 0.999: 4.685 / 4.688 / 4.695 V. The configuration behind the audit's numbers was not recorded. | `engine='pwl'`; halve `dt` and compare. |
 
 ## Older entries
 

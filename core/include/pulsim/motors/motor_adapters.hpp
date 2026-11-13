@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -210,13 +211,26 @@ inline void add_induction_motor_to_chain(
         const Real omega_m = mech->omega_rad_s;
         const Real omega_e = static_cast<Real>(pole_pairs) * omega_m;
 
-        // Rotor flux dynamics (Krause Eq. 6.6-12 / 6.6-13).
+        // Rotor flux dynamics (Krause Eq. 6.6-12 / 6.6-13) as one
+        // complex ODE dψ/dt = a·ψ + (Lm/Tr)·i, a = −1/Tr + jω_e,
+        // integrated EXACTLY over the step with i held. Forward Euler
+        // grew |ψ| by |1 + a·dt| per step: 0.9432 / 0.9290 / 0.9220 Wb
+        // at dt = 50 / 25 / 12.5 µs on a 4 kW machine at 50 Hz (the
+        // limit is 0.915). The EMF applied over the coming step is the
+        // MEAN dψ/dt over it. Same law as make_induction_motor_observer.
         const Real psi_a = (*psi)[0];
         const Real psi_b = (*psi)[1];
-        const Real dpsi_a = -inv_Tr * psi_a + Lm_inv_Tr * i_alpha
-                                - omega_e * psi_b;
-        const Real dpsi_b = -inv_Tr * psi_b + Lm_inv_Tr * i_beta
-                                + omega_e * psi_a;
+        const std::complex<Real> a_c{-inv_Tr, omega_e};
+        const std::complex<Real> ead = std::exp(a_c * ctx.dt);
+        const std::complex<Real> phi1 =
+            std::abs(a_c * ctx.dt) > Real{1e-12}
+                ? (ead - Real{1}) / a_c
+                : std::complex<Real>{ctx.dt, Real{0}};
+        const std::complex<Real> psi_next =
+            ead * std::complex<Real>{psi_a, psi_b} +
+            phi1 * Lm_inv_Tr * std::complex<Real>{i_alpha, i_beta};
+        const Real dpsi_a = (psi_next.real() - psi_a) / ctx.dt;
+        const Real dpsi_b = (psi_next.imag() - psi_b) / ctx.dt;
 
         // Induced stator back-EMF reflected from the rotor (αβ).
         const Real e_alpha = Lm_over_Lr * dpsi_a;
@@ -232,9 +246,8 @@ inline void add_induction_motor_to_chain(
                           Lm_over_Lr *
                           (i_beta * psi_a - i_alpha * psi_b);
 
-        // Forward-Euler integration of the rotor flux state.
-        (*psi)[0] = psi_a + dpsi_a * ctx.dt;
-        (*psi)[1] = psi_b + dpsi_b * ctx.dt;
+        (*psi)[0] = psi_next.real();
+        (*psi)[1] = psi_next.imag();
 
         // Mechanical integration (matches the other motor adapters).
         mech->integrate(ctx.t, T_em, ctx.dt);

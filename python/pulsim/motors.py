@@ -41,6 +41,7 @@ finer pace.
 
 from __future__ import annotations
 
+import cmath
 import math
 import warnings
 from dataclasses import dataclass, field
@@ -1063,8 +1064,8 @@ def make_induction_motor_observer(builder,
     """Build a (step_observer, b_extra_fn) pair for an induction motor.
 
     The observer maintains the rotor flux (ψ_rα, ψ_rβ) as internal
-    state and updates the mechanical (ω_m, θ_m) by forward-Euler each
-    simulation step.  The induced stator EMF is computed from the
+    state, integrated exactly over each step with the stator current
+    held, and updates the mechanical (ω_m, θ_m) by forward Euler.  The induced stator EMF is computed from the
     instantaneous rotor-flux derivative and injected into each phase's
     dummy voltage source via ``b_extra``.
     """
@@ -1105,15 +1106,23 @@ def make_induction_motor_observer(builder,
         psi_ra = state["psi_r_alpha"]
         psi_rb = state["psi_r_beta"]
 
-        # Rotor flux dynamics in the STATIONARY αβ frame:
-        # dψ_rα/dt = −ψ_rα/Tr + (Lm/Tr)·i_sα − ω_e·ψ_rβ
-        # dψ_rβ/dt = −ψ_rβ/Tr + (Lm/Tr)·i_sβ + ω_e·ψ_rα
-        dpsi_ra = (-inv_Tr * psi_ra
-                       + (motor.L_m_H * inv_Tr) * i_alpha
-                       - omega_e * psi_rb)
-        dpsi_rb = (-inv_Tr * psi_rb
-                       + (motor.L_m_H * inv_Tr) * i_beta
-                       + omega_e * psi_ra)
+        # Rotor flux dynamics in the STATIONARY αβ frame, as one
+        # complex ODE ψ = ψ_rα + jψ_rβ, i = i_sα + j·i_sβ:
+        #     dψ/dt = a·ψ + (Lm/Tr)·i,   a = −1/Tr + jω_e
+        # integrated EXACTLY over the step with i held. Forward Euler
+        # (used until 2026-11) multiplies |ψ| by |1 + a·dt| > 1 every
+        # step: |ψ_r| read 0.9432 / 0.9290 / 0.9220 Wb at dt = 50 / 25
+        # / 12.5 µs on a 4 kW machine at 50 Hz.
+        psi = complex(psi_ra, psi_rb)
+        a = complex(-inv_Tr, omega_e)
+        ead = cmath.exp(a * dt)
+        phi1 = (ead - 1.0) / a if abs(a * dt) > 1e-12 else complex(dt)
+        psi_next = ead * psi + phi1 * (motor.L_m_H * inv_Tr) * complex(
+            i_alpha, i_beta)
+        # The EMF applied over the coming step is the MEAN dψ/dt over
+        # it, so the electrical and flux sides exchange the same energy.
+        dpsi = (psi_next - psi) / dt
+        dpsi_ra, dpsi_rb = dpsi.real, dpsi.imag
 
         # Induced stator EMF reflected from rotor: e = (Lm/Lr)·dψ_r/dt.
         # This is the "back-EMF" the observer feeds to the dummy
@@ -1126,9 +1135,8 @@ def make_induction_motor_observer(builder,
         T_em = (1.5 * pp * Lm_over_Lr
                   * (i_beta * psi_ra - i_alpha * psi_rb))
 
-        # Forward-Euler update of internal observer states.
-        state["psi_r_alpha"] = psi_ra + dpsi_ra * dt
-        state["psi_r_beta"]  = psi_rb + dpsi_rb * dt
+        state["psi_r_alpha"] = psi_next.real
+        state["psi_r_beta"]  = psi_next.imag
         state["e_alpha"]      = e_alpha
         state["e_beta"]       = e_beta
 

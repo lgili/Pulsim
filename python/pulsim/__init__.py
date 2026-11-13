@@ -1897,7 +1897,10 @@ def simulate(
         switch state at each sample.  Defaults to all-closed.
     b_extra_fn
         PWL-only: Callable ``t -> list[float]`` adding to the constant
-        residual at each step.  Defaults to None.
+        residual F = J·x + b at each step.  An entry ``e`` on a voltage
+        source's row gives v(+) − v(−) = V − e (write −v to add v); on
+        a node row it draws a current ``e`` out of the node.  Defaults
+        to None.
     start_from_dc_op
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.

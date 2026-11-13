@@ -4,38 +4,27 @@
 // Pulsim — Layer 4 V10: pseudo-transient continuation (research)
 // =============================================================================
 //
-// Solves F(x) = 0 by converting it into the artificial ODE
+// Solves F(x) = 0 by integrating the artificial dynamics
 //
-//     dx/dt = -F(x)
+//     D · dx/dt = -F(x),   D = 1 on every node (KCL) row, 0 elsewhere
 //
-// and integrating with implicit backward Euler at adaptive
-// pseudo-timesteps. The modified Newton system per iteration is
+// with implicit backward Euler at adaptive pseudo-timesteps. The
+// modified Newton system per iteration is
 //
-//     (J(x) + (1/dt) I) · dx = -F(x)
+//     (J(x) + (1/dt) D) · dx = -F(x)
 //
-// where dt grows automatically when ||F|| decreases.
+// where dt grows automatically when ||F|| decreases. D is a 1 F
+// capacitor from every node to ground: the branch rows (voltage
+// sources, inductors at DC, controlled sources) stay algebraic and are
+// met exactly at every iterate, and for a passive circuit the
+// pseudo-dynamics is a passive RC network, which backward Euler
+// integrates stably at any dt.
 //
-// IMPORTANT LIMITATION FOR MNA SYSTEMS:
-//
-// PTC requires the artificial dynamics dx/dt = -F to be
-// STABLE near the solution, which holds when J = ∂F/∂x has
-// positive-real-part eigenvalues. Pulsim's MNA matrices have
-// MIXED-SIGN eigenvalues (the constraint rows for voltage
-// sources introduce negative-real-part components). On those
-// rows, PTC's artificial dynamics is UNSTABLE — the iterate
-// is repelled from the solution.
-//
-// V10's empirical finding: pure PTC fails on Pulsim MNA
-// circuits with voltage-source constraints, regardless of dt
-// schedule. The robust fix for diode circuits is the
-// `make_diode_aware_initial_guess` helper in `initial_guess.hpp`,
-// which puts Newton inside the correct basin via a structural
-// load-line warm-start.
-//
-// `pseudo_transient_solve` SHIPS for use cases with
-// well-behaved Jacobians (e.g. purely resistive nonlinear
-// loads with no MNA-constraint rows). For canonical Pulsim
-// circuits, use the smart warm-start instead.
+// Until 2026-11 the shift was (1/dt)·I on EVERY row. On a voltage
+// source's branch row (no diagonal of its own) that term is not a
+// capacitor but a negative resistance in the loop, and the iterate
+// was repelled from the solution: a 10 V, 1 kΩ / 5 kΩ divider ended
+// at ||F|| = 1.4e84 after 500 iterations instead of 8.3333 V.
 
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -121,8 +110,28 @@ namespace pulsim::pwl {
         F_worst_row = F.size() == 0 ? kInvalidIndex
                                      : static_cast<Index>(f_at);
 
-        // 3. Convergence on original residual.
+        // 3. Convergence on original residual. tol_res is in amperes
+        // on a node row, i.e. tol_res / G volts (0.1 mV through 1 kΩ),
+        // so finish with one plain Newton step and keep it if it lowers
+        // the residual: exact on a linear circuit.
         if (F_norm < tol_res) {
+            sparse::Matrix J_full = seg.J;
+            if (J_nl.nonZeros() > 0) {
+                J_full += J_nl;
+            }
+            sparse::compress_in_place(J_full);
+            auto polish = sparse::make_default_solver();
+            if (polish->analyze(J_full) && polish->factorize(J_full)) {
+                Vector neg_F = -F;
+                polish->solve(neg_F, dx);
+                const Vector x_try = x + dx;
+                (void)refresh(x_try, J_nl, f_nl, graph, pool);
+                const Vector F_try = seg.J * x_try + seg.b_constant +
+                                     b_extra + f_nl;
+                if (F_try.lpNorm<Eigen::Infinity>() <= F_norm) {
+                    return x_try;
+                }
+            }
             return x;
         }
 
@@ -134,7 +143,9 @@ namespace pulsim::pwl {
         }
         sparse::compress_in_place(J_pt);
         const Real inv_dt = Real{1} / dt;
-        for (Index i = 0; i < J_pt.rows(); ++i) {
+        const Index n_kcl = std::min<Index>(
+            static_cast<Index>(graph.num_nodes()), J_pt.rows());
+        for (Index i = 0; i < n_kcl; ++i) {
             J_pt.coeffRef(i, i) += inv_dt;
         }
         sparse::compress_in_place(J_pt);
@@ -149,9 +160,8 @@ namespace pulsim::pwl {
                 explain_singular(graph, pool, J_pt, solver.get())));
         }
         if (!solver->factorize(J_pt)) {
-            // Shrink dt and retry (J_pt should ALWAYS be
-            // non-singular for dt > 0 because (1/dt)·I
-            // dominates near dt=0).
+            // Shrink dt and retry: a larger node shunt
+            // (1/dt) regularises a floating node.
             dt = std::max(dt_min, dt * Real{0.1});
             continue;
         }

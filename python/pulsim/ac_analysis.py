@@ -66,6 +66,7 @@ Typical usage:
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
@@ -160,6 +161,8 @@ def run_ac_sweep(
     extra_b_extra_fn: Callable[[float], list] | None = None,
     enable_nonlinear_refresh: bool | None = None,
     start_from_dc_op: bool = True,
+    settle_rtol: float = 0.01,
+    max_extra_windows: int = 20,
     verbose: bool = True,
 ) -> AcSweepResult:
     """Sweep frequency and build an AC frequency response.
@@ -171,7 +174,15 @@ def run_ac_sweep(
       3. DFT the remaining samples at frequency `f` to get the
          complex amplitude of the OUTPUT and the INPUT
          perturbation.
-      4. H(jω) = Y/U.
+      4. Continue the SAME run (``resume_from``) by another
+         `cycles_per_point` cycles and DFT that window, until two
+         successive windows agree within `settle_rtol`. Settling
+         counted in test cycles is short at high frequency: 8 cycles
+         at 11 kHz is 0.7 ms, and a buck's cold-start LC ring
+         (τ = 2RC = 0.47 ms) was still in the window, reading −16 dB /
+         +10 dB off. Each frequency still starts from the initial (or
+         DC) state; the windows run until that start has died out.
+      5. H(jω) = Y/U.
 
     Parameters
     ----------
@@ -208,8 +219,16 @@ def run_ac_sweep(
         Passed through to `simulate`. Auto-detected if None.
     start_from_dc_op
         Seed each per-frequency simulation from the DC
-        operating point so the plant starts in steady state.
-        Default True.
+        operating point. Default True. (For a switched plant the DC
+        point is not its switching steady state; the windows of
+        step 4 wait that start-up out.)
+    settle_rtol
+        Two successive DFT windows must agree to this relative
+        tolerance (default 1 %, 0.09 dB) before `H` is reported.
+    max_extra_windows
+        Windows to add before giving up; a frequency that has not
+        settled by then warns (``RuntimeWarning``) and keeps the last
+        window.
 
     Returns
     -------
@@ -263,17 +282,39 @@ def run_ac_sweep(
             enable_nonlinear_refresh=enable_nonlinear_refresh,
         )
 
-        times = np.asarray(res.times)
-        states = np.array([s[output_idx] for s in res.states])
+        def window_phasor(r, k0):
+            t_w = np.asarray(r.times)[k0:]
+            y_w = np.asarray(r.states)[k0:, output_idx]
+            # Subtract DC mean before DFT (cleaner phasor).
+            return extract_phasor(t_w, y_w - y_w.mean(), f)
 
         # Drop settling region.
-        k_settle = int(settling_cycles * T_cycle / dt_local)
-        t_w = times[k_settle:]
-        y_w = states[k_settle:]
-
-        # Subtract DC mean before DFT (cleaner phasor).
-        y_w_ac = y_w - y_w.mean()
-        Y = extract_phasor(t_w, y_w_ac, f)
+        Y = window_phasor(res, int(settling_cycles * T_cycle / dt_local))
+        converged = False
+        for _ in range(max_extra_windows):
+            snap = getattr(res, "final_snapshot", None)
+            if not getattr(snap, "valid", False):
+                break
+            t0 = float(np.asarray(res.times)[-1])
+            res = p.simulate(
+                builder,
+                t_start=t0, t_end=t0 + cycles_per_point * T_cycle,
+                dt=dt_local, switch_fn=sw_fn, b_extra_fn=b_extra_fn,
+                enable_nonlinear_refresh=enable_nonlinear_refresh,
+                resume_from=snap,
+            )
+            Y_next = window_phasor(res, 0)
+            done = abs(Y_next - Y) <= settle_rtol * abs(Y_next)
+            Y = Y_next
+            if done:
+                converged = True
+                break
+        if not converged:
+            warnings.warn(
+                f"run_ac_sweep: the point at {f:.6g} Hz did not settle to "
+                f"{settle_rtol:.1%} within {max_extra_windows} extra windows "
+                f"of {cycles_per_point} cycles; |H| there is unreliable",
+                RuntimeWarning, stacklevel=2)
         # The input phasor is just (perturbation_amplitude) · 1
         # by construction (sin → −j amplitude in the exp(-jωt)
         # convention, so divide and rotate accordingly).

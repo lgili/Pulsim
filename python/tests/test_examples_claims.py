@@ -97,6 +97,9 @@ SCRIPTS = {
     "run_im_ifoc_closed_loop.py": [
         (r"i_d\s+= " + F, near(8.0, 0.05)),
         (r"i_q\s+= " + F, near(6.0, 0.05)),
+        # 1.5·pp·(Lm²/Lr)·i_d·i_q = 11.607 Nm; 12.9 with the old
+        # forward-Euler rotor flux.
+        (r"T_em\s+= " + F, near(11.607, 0.12)),
     ],
     "run_im_sensorless_mras.py": [(r"error .*\(" + F + r"%\)", near(0.0, 2.0))],
     "run_im_vf_open_loop.py": [(r"ω_final\s+= " + F, near(157.08, 0.1))],
@@ -159,7 +162,14 @@ NOTEBOOKS = {
     "examples/notebooks/04_parameter_sweeps.ipynb": [
         (r"Simulated: R = " + F, near(59.86, 0.3))],
     "examples/notebooks/07_convergence.ipynb": [
-        (r"auto\s+: V\(n2\) = " + F, near(8.3333, 1e-4))],
+        (r"auto\s+: V\(n2\) = " + F, near(8.3333, 1e-4)),
+        # diverged to ~1e84 V before the PTC shift moved to the KCL rows
+        (r"pseudo_trans : V\(n2\) = " + F, near(8.3333, 1e-4))],
+    # The adaptive driver must read the same buck as the fixed step at the
+    # same dt (it read 7.9619 V against 8.0431 V before resume_from).
+    "examples/notebooks/24_buck_mosfet_diode_pwm_fixed_vs_variable.ipynb": [
+        (r"mode: fixed[\s\S]*?vout_mean_tail: " + F, near(8.0431, 0.004)),
+        (r"mode: variable[\s\S]*?vout_mean_tail: " + F, near(8.0431, 0.004))],
     "examples/notebooks/12_spice_parser.ipynb": [
         (r"v_dc_out = " + F + " V", near(9.29, 0.05))],
     "examples/notebooks/14_api_reference.ipynb": [

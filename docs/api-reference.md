@@ -76,7 +76,7 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `dt` | `float` or `None` | `None` | Fixed time step, seconds. Passing it selects the fixed-step `pwl` engine; omit it to let `engine='auto'` pick the engine and step. |
 | `t_start` | `float` | `0.0` | Start time. |
 | `switch_fn` | `Callable[[float], SwitchStateMask]` | all closed | Switch driver. |
-| `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step constant residual extras. |
+| `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step addend to the residual F = J·x + b. An entry e on a voltage source's row gives v(+) − v(−) = V − e (write −v to add v); on a node row it draws a current e out of the node. Index rows with `pool.branch_var_id_for_source(id, graph)` / `node_id_of` AFTER the last `add_*`: a branch row is `num_nodes + k` and moves when a node is added. |
 | `start_from_dc_op` | `bool` | `False` | Seed initial state from DC OP. |
 | `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |

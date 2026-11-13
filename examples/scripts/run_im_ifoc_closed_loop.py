@@ -57,11 +57,11 @@ What you should see
   torque (~Lm²/Lr · i_d_ref · i_q_ref); ω_m accelerates toward
   T_em / B (B = 0.1 Nm·s/rad, mechanical time constant J/B ≈ 0.8 s).
 
-Known limitation: pulsim's induction-motor observer integrates the
-rotor flux by forward Euler, which inflates |ψ_r| and T_em by an error
-first order in dt. Measured here: T_em = 12.9 / 12.2 / 11.9 / 11.7 Nm
-at dt = 50 / 25 / 12.5 / 6.25 µs, converging on the textbook 11.6 Nm
-(see KNOWN_LIMITATIONS).
+Measured here at dt = 50 µs: T_em = 11.685 Nm against the textbook
+11.607 Nm (+0.7 %; the observer's EMF reaches the circuit one step
+late). Until 2026-11 the observer integrated the rotor flux by forward
+Euler and read 12.9 / 12.2 / 11.9 / 11.7 Nm at dt = 50 / 25 / 12.5 /
+6.25 µs.
 """
 
 from __future__ import annotations
@@ -337,8 +337,6 @@ def main():
     expected_torque = 1.5 * PP * (L_m * L_m / kw["L_r"]) * I_D_REF * I_Q_REF
     print(f"    Expected T = {expected_torque:+.3f} Nm "
           f"(= 1.5·pp·(Lm²/Lr)·i_d_ref·i_q_ref)")
-    print("    NOTE: T_em and |ψ_r| read high — the IM observer's forward-Euler"
-          " rotor flux is first order in dt (12.9/12.2/11.9/11.7 Nm at dt=50/25/12.5/6.25 µs)")
     print(f"    ω_sync     = {diag['omega_sync_rad_s']:.2f} rad/s")
     print(f"    steps      = {res.num_steps():,}")
 

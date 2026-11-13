@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Examples audit, follow-up (2026-11-13)
+
+* **Fixed** (project model) the M3C L1 plant (`build_l1_plant`) built
+  R_load + L_out only, while its docstring, the PI/dq tuning, the DBPC,
+  `predict_i_out_peak` and Tab 16 all assume the 0.9 PF load R_load +
+  jω·L_load. At 100 A the converter then needed ±1.35 of its 4 kV
+  levels: DBPC delivered 86.5 A of fundamental at 12.3 % THD (PI/dq
+  99.5 A, 10.5 %), and notebook 05 differentiated the staircase current
+  with an inductance the plant did not have (V_ab "28.64 kV" against
+  15.56 kV). With L_load in the plant: V_ab fundamental 15.54 kV, DBPC
+  99.95 A at 2.87 % THD, PI/dq 99.78 A at 6.28 % (notebook 06).
+* **Fixed** (project model) the M3C capacitor bookkeeping (Eq 162) used
+  each period's START current; the voltage chosen for that period is
+  what moves it, so the ideal module sources delivered a net 156 kW at
+  Tab 16 (P_in 1.656 MW, P_out 1.812 MW) while the capacitors held
+  24 kV. It now uses the mean of the start and end currents
+  (P_in − P_out = −0.18 %).
+* **Fixed** (project model) the M3C PI/dq rotated currents sampled at
+  the start of a period with the angle of its centre, and the DBPC aimed
+  at i_ref(t_centre + T_s): both half a period (4.05° at 45 Hz) late.
+  PI/dq: +4.18° and i_q = 7.31 A for i_q_ref = 0 → −0.03°; DBPC +2.88° →
+  −0.90°. Notebook 08's precharge release moves 1.349 → 1.372 s.
+* **Fixed** `compute_dc_op(strategy="pseudo_trans")` diverged on a linear
+  divider (||F|| = 1.4e84): the continuation shift (1/dt)·I sat on the
+  voltage-source rows too, a negative resistance in the loop. It now sits
+  on the node rows only (`pwl/pseudo_transient.hpp`), and one Newton
+  step on the unshifted system polishes the point the continuation
+  stops at (it stopped 1e-4 V short): 8.3333 V.
+* **Fixed** `run_transient_adaptive` restarted every segment from the
+  state alone, re-inventing the companion history as zero at each
+  boundary: a 10 kHz buck on the fixed-step grid read 7.962 V against
+  8.043 V. Segments now resume from `final_snapshot` and match the fixed
+  run to 1e-6 V.
+* **Fixed** the induction-motor rotor flux (`make_induction_motor_observer`
+  and the C++ BlockChain adapter) was forward Euler: |ψ_r| 0.9432 /
+  0.9290 / 0.9220 Wb at dt = 50 / 25 / 12.5 µs. It is now integrated
+  exactly over each step with the current held: 0.9158 / 0.9155 /
+  0.9153 Wb.
+* **Fixed** `run_ac_sweep` counted settling in test cycles only, so a
+  high-frequency point could be read inside the plant's start-up: an LC
+  filter started from zero read −6.09 dB at 11 kHz against −26.65 dB.
+  Each point now continues the same run window by window until two
+  windows agree within `settle_rtol` (1 %), and warns when
+  `max_extra_windows` runs out.
+* **Documented** (not defects) the `b_extra` sign — it is an addend to the
+  residual F = J·x + b, so an entry e on a voltage source's row gives
+  v(+) − v(−) = V − e, and on a node row draws e out of the node — and
+  that `branch_var_id_for_*` returns `num_nodes + k`, which moves when a
+  node is added afterwards. Both pinned by tests.
+
 ### Control helpers: report the loop they build (examples audit, 2026-11-13)
 
 * **Fixed** `tune_pi_from_bode` returned `achieved_pm_deg` "by
