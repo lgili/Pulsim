@@ -417,6 +417,7 @@ p.simulate(builder, t_end=None, dt=None, *, engine='auto', rtol=None, atol=None,
 res.v(name, t=None)
 res.i(name, t=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
+p.periodic_steady_state(builder, *, period, switch_fn=None, start_from=None, ...)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
 p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0)

@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Periodic steady state by Newton shooting on the true state (slice 1)
+
+* **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,
+  start_from=None)`: Newton on `P(x0) - x0` over the true state
+  (capacitor voltages, inductor currents) at `t = 0`, each map
+  evaluation one period of the dsed exact stepper with located events,
+  the Jacobian the monodromy `M = Φ_K·S_K·…·S_1·Φ_0` with saltation
+  matrices. Works in DCM, where the pattern changes between iterations.
+  The audit's DCM buck (24 V, 100 µH, 47 µF, 50 Ω, D = 0.3) converges
+  from zero to `v_C = 8.99624708729 V` (50-digit reference
+  8.99624708728943) in 5 map evaluations plus one verification period;
+  before, `steady_state` raised "no periodic orbit found" and
+  `run_periodic_shooting` returned 8.8998 V (−1.07 %). Returns the
+  orbit, `monodromy`, Floquet `multipliers` (DCM: 0 and 0.98898),
+  `stable`, the commutation `pattern`, the residual history and the
+  period-run count, and `sampled_model(inputs, outputs)` — `A = M`,
+  `B = ∂P/∂u` for a switch duty or a DC source value (DCM:
+  `∂v_C*/∂D = 23.0896 V`). Refused by name: opaque Python gates,
+  schedules or sine sources not periodic in `period`, PWM/pulse
+  sources, nonlinear and stateful devices, grazing events, marginal
+  multipliers (a lossless LC loop), an exhausted budget.
+* **Added** `steady_state(...)` and `frequency_response(...)` without
+  `dt` run on the new solver; with `dt` they are unchanged (fixed
+  engine). `run_periodic_shooting` / `run_harmonic_balance` are
+  unchanged until the fixed engine shoots on the true state (Phase 2).
+* **Added** `_NativeCircuitBuilderAdapter.node_pair_voltage` and the
+  sine source `frequency` in `CircuitBuilder.components()`.
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

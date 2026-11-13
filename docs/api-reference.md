@@ -415,6 +415,62 @@ one-period map is affine only while every dynamic device is a linear
 capacitor or inductor. Settle with a transient run and use its
 `final_snapshot` instead.
 
+## Periodic steady state — `periodic_steady_state(b, *, period, switch_fn=None, start_from=None)`
+
+Newton shooting on the **true state** `x0` (capacitor voltages and
+inductor currents, the dsed reduced state, labels in
+`r.state_labels`) at the section `t = 0` — the rising edge of the
+zero-phase built-in PWM helpers. Each Newton step is one period of
+the dsed exact stepper with every event located in time, and the
+Jacobian is the monodromy `M = Φ_K·S_K·…·S_1·Φ_0` (flow Jacobians
+`e^{A h}` and saltation matrices), so the commutation pattern may
+change between iterations and DCM works. The audit's DCM buck (24 V,
+100 µH, 47 µF, 50 Ω, D = 0.3) converges from zero in 5 map
+evaluations plus one verification period to `v_C = 8.99624708729 V`
+(50-digit reference 8.99624708728943).
+
+```python
+sf = p.make_pwm_switch_fn(100e3, 0.3, b.switch_index_of("S"), b.graph.num_switches)
+r = p.periodic_steady_state(b, period=1e-5, switch_fn=sf)
+r.x0, r.state_labels, r.orbit        # state at t=0; one period (simulate result)
+r.multipliers, r.stable              # Floquet multipliers; max|mu| < 1
+r.pattern                            # [(event, instant/T)] at the orbit
+r.n_period_runs, r.residual_history  # the cost meter, Newton residuals
+sm = r.sampled_model(inputs=[("duty", "S")], outputs=["vout"])
+sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
+```
+
+* **Multipliers.** `stable = max|μ| < 1`. An orbit with a multiplier
+  outside the unit circle is returned with `stable=False`, and
+  `r.unstable_multipliers` names each one: −1 side `flip
+  (period-doubling)`, +1 side `fold`, complex `Neimark-Sacker`. A
+  multiplier on the unit circle (a lossless LC loop, a floating
+  capacitor) is refused: the orbit is not isolated, and the error
+  names the states involved.
+* **Resume** with `simulate(..., engine='dsed', initial_state=r.x0)`.
+* **Small-signal model.** `sampled_model(inputs, outputs)` returns
+  `x[k+1] = A x[k] + B u[k]`, `y = C x + D u` with `A = M` and `B =
+  ∂P/∂u` from the same propagators: `("duty", switch)` moves the
+  switch's turn-off edges by `T` per unit, `("source", name)` is a DC
+  source's value. Outputs are state labels, inductor names or node
+  names sampled at `t = 0`. `response(f)` is `H(e^{j2πfT})`, valid
+  below `1/(2T)`.
+* **Covered** (slice 1): linear R, L, C, controlled switches, PWL
+  diodes, DC sources, sine sources whose period divides `period`,
+  gate schedules that name their edges (`make_pwm_switch_fn` & co.,
+  `NativePwm2Switch`, `NativeMultiMaskPwm`, a callable with
+  `next_edge_after`). **Refused by name**: an opaque Python
+  `switch_fn`, a schedule or source not periodic in `period`, PWM or
+  pulse voltage sources, nonlinear and stateful devices, a grazing
+  event, a marginal multiplier, an exhausted budget
+  (`max_period_runs=60`, with the residual history, last pattern and
+  last multipliers).
+* `steady_state(...)` and `frequency_response(...)` **without `dt`**
+  run on this solver (`frequency_response` takes `B` as a central
+  difference of the true-state map in `u`); with `dt` they keep the
+  fixed-engine companion-history solve, which raises "no periodic
+  orbit found" in DCM.
+
 ## SPICE import — `spice_to_builder(text_or_path, *, strict=False)`
 
 `.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`
