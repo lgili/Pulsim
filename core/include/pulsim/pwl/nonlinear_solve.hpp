@@ -480,7 +480,7 @@ struct NewtonRoundoffAcceptance {
     }
 
     // Budget exhausted. Transient callers may accept x_k + dx_k when
-    // the last two steps did not contract, the step is tiny against
+    // the last two steps did not contract by 4, the step is tiny against
     // the state, and every row's residual is within omega_max of the
     // magnitudes that row sums (Oettli-Prager backward error): the
     // iterate solves a system perturbed by 8 eps per coefficient. The
@@ -488,8 +488,11 @@ struct NewtonRoundoffAcceptance {
     std::string ro_note;
     if (ro_on && ro_x.size() == static_cast<Index>(n)
         && ro_f.size() == static_cast<Index>(n)) {
-        const bool stagnated = ro_dx[0] >= Real{0.5} * ro_dx[1]
-                            && ro_dx[1] >= Real{0.5} * ro_dx[2];
+        // No NET contraction over two steps. "Each step at least half
+        // the previous" read a roundoff limit cycle (||dx|| 3.2e-7,
+        // 5.0e-7, 1.9e-7) as converging; quadratic or linear
+        // convergence cuts ||dx|| by far more than 4 in two steps.
+        const bool stagnated = ro_dx[0] >= Real{0.25} * ro_dx[2];
         const Real dx_cap = roundoff->dx_rel_max
             * std::max(Real{1}, ro_x.cwiseAbs().maxCoeff());
         const Vector ax = ro_x.cwiseAbs();

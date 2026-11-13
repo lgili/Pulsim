@@ -61,12 +61,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `result.newton_roundoff_accepts`, `newton_roundoff_omega_max`,
   `newton_roundoff_row`. Tolerances unchanged; the DC operating point
   never accepts this way. A declined check is explained in the abort.
-* Not cured: the documented TR-BDF2 h_min stall (snubbed flyback with a
-  saturable transformer) now runs to 494 µs instead of 10 µs (213
-  accepted solves) and then aborts in a roundoff limit cycle that the
-  stagnation test reads as contraction (||dx|| 3.2e-7, 5.0e-7,
-  1.9e-7; ω = 0.28 ε). The known-limitations row stays. The step floor
-  `h_noise` of the design is not implemented.
+* **Changed** the stagnation test: `||dx||` must not have contracted by
+  4 over the last two steps (`||dx_k|| >= ||dx_{k-2}||/4`); "each step at
+  least half the previous" read the roundoff limit cycle 3.2e-7, 5.0e-7,
+  1.9e-7 as converging. Transient only (a C++ test asserts that no DC
+  source names the acceptance). The h_min stall reproducer (cured by the
+  TR-BDF2 probe handling, above) still gives 15.3104 V; with this rule
+  431 solves are accepted at ω ≤ 6.6 ε, forced accepts 6 → 4, failed
+  probes retaken 15 → 9. Converged runs: 0 accepts on every baseline
+  circuit, step sequences and pwl/dsed traces bit-identical. The step
+  floor `h_noise` is not implemented: no run in the evidence needs it.
 
 ### TR-BDF2 error control (update-trbdf2-error-control)
 

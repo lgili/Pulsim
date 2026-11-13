@@ -54,3 +54,25 @@ conservative option was taken.
    15.31 V on pwl at 1e-8 s. The strict xfail is now a test (0.3 %),
    the known-limitations row is deleted and the `h_min` abort message
    no longer cites it (task 5.1). See 8 for the criterion change.
+8. **Stagnation is NET contraction over two steps (maintainer decision
+   2).** `stagnated = ||dx_k|| >= ¼·||dx_{k−2}||` replaces "each of the
+   last two steps at least half the previous": quadratic or linear
+   convergence cuts ||dx|| by far more than 4 in two steps, while the
+   limit cycle 3.16e-7, 5.03e-7, 1.87e-7 of item 5 was read as
+   converging. Transient only: the DC cascade still passes no
+   acceptance, asserted by a C++ test that scans the six DC sources
+   (absolute dx there is load-bearing). C++ test: a deterministic
+   whole-ulp cycle (dx 6, 10, 4 ulps at a constant residual) is
+   declined by the old rule (1.19e-6 vs 7.15e-7, 4.77e-7) and accepted
+   by the new one at iteration budgets 9, 10, 11. Measured: the stall
+   reproducer gives 15.3104 V with 431 roundoff accepts (ω ≤ 1.47e-15
+   = 6.6 ε), 4 forced accepts (6), 9 probe retries (15), 109942 steps
+   (109979). Converged runs: 0 accepts on all ten baseline circuits;
+   the baseline table and the pwl/dsed hashes are unchanged.
+9. **No step floor `h_noise` (maintainer decision 6).** The stall that
+   motivated it was the failed cascade probe read as a state
+   (post-event-restart DECISIONS 8), not a step below the noise floor:
+   with that fixed the reproducer completes with its smallest step at
+   1e-15 s, and no baseline circuit aborts at h_min. A floor would
+   change every run's step sequence for no measured gain; the h_min
+   abort already names the roundoff check that declined.
