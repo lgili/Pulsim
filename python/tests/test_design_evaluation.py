@@ -371,3 +371,67 @@ def test_accepted_with_error_steps_are_counted():
     run.resolution = NS(lte_max=0.5, ringing=[], unestimated_fraction=0.0)
     design.Evaluator._count(run, counters, None)
     assert counters["resolution_warnings"] == 1
+
+
+# ---------------------------------------------------------------------
+# batch 6c: the warnings that used to land `ok` with no counter
+# ---------------------------------------------------------------------
+
+def _opaque_buck(d):
+    b, sf = buck(d)
+    return b, sf.__call__                # no next_edge_after
+
+
+def test_unlocated_gate_edges_are_failed_not_ok():
+    """pwl + sub-step correction with an opaque gate: each edge is taken
+    at the next grid point (up to a whole step of duty error). Before
+    batch 6c this record was ok with v_out = 4.4674 V; the same design
+    with the oracle'd schedule reads 4.3033 V (3.8 % apart). dt = 4e-7
+    sums to 7.999999999999999e-05 over 8 periods: the KPI window must
+    read the run's end (it raised 'reaches outside the simulated span')."""
+    kw = dict(period=T, loads=("RL",), output="vout", engine="pwl",
+              steady=SteadySpec(method="transient", min_periods=8,
+                                max_periods=8, tol=10.0),
+              options=dict(dt=4e-7, discontinuity_restart=True,
+                           enable_substep_state_correction=True))
+    ok = Evaluator(buck, **kw).evaluate(CCM)
+    assert ok.status == "ok", ok.reason
+    assert ok.kpis["v_out"] == pytest.approx(4.3033, abs=1e-3)
+    with pytest.warns(UserWarning, match="could not be located"):
+        rec = Evaluator(_opaque_buck, **kw).evaluate(CCM)
+    assert rec.status == "failed", rec
+    assert rec.reason.startswith("unlocated_gate_edges: ")
+    assert rec.kpis == {}
+
+
+def test_a_floating_subnet_is_failed_and_retries_are_counted():
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2", n_accept=10,
+             _trbdf2_stats={"probe_floor_used": 1e-9})
+    with pytest.raises(design._Failed, match="floating_subnet: "):
+        design._raise_if_suspect(run, None)
+    run._trbdf2_stats = {}
+    run.dt_retries = [object(), object()]
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert counters["dt_retries"] == 2
+
+
+def test_a_polled_dsed_schedule_is_counted_and_its_kpis_are_unaffected():
+    """dsed bisects every edge it polls to the instant: an opaque PWM
+    gives the KPIs of the oracle'd one (measured equal to 1e-9) and stays
+    ok, with the polled runs counted."""
+    kw = dict(period=T, loads=("RL",), output="vout", engine="dsed",
+              steady=SteadySpec(method="transient", min_periods=8,
+                                max_periods=256, tol=1e-6))
+    a = Evaluator(buck, **kw).evaluate(CCM)
+    with pytest.warns(UserWarning, match="no next_edge_after"):
+        b = Evaluator(_opaque_buck, **kw).evaluate(CCM)
+    assert a.status == b.status == "ok", (a.reason, b.reason)
+    assert "polled_switch_fn_runs" not in a.counters
+    assert b.counters["polled_switch_fn_runs"] >= 2
+    for k in ("efficiency", "p_loss", "v_out", "ripple_v"):
+        assert b.kpis[k] == pytest.approx(a.kpis[k], rel=1e-6), k

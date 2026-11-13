@@ -108,6 +108,26 @@ period (its error is then no longer a sliver) or a roundoff accept whose
 today, so the threshold cannot be applied yet.
 → Reverse: move the two counters into `_raise_if_suspect`.
 
+Batch 6c (2026-11-13): the four warnings that still landed `ok` with no
+trace in the record, decided one by one. A warning that says the
+RESULT may be wrong is `failed`; one that says the run was more careful
+than asked is a counter.
+
+| warning (`simulate`) | record | evidence |
+|---|---|---|
+| a step re-taken at `dt/2^k` (`res.dt_retries`) | `ok`, `counters["dt_retries"]` | the interval is integrated more finely than asked; the grid is unchanged |
+| gate edge taken at the next grid point under sub-step correction (`res.counters["unlocated_gate_steps"]`) | `failed`, `unlocated_gate_edges` | CCM buck, pwl, `dt = 4e-7`, opaque gate: was `ok` with `v_out` 4.4674 V; the oracle'd schedule gives 4.3033 V (3.8 %) |
+| `dsed` polling a schedule without `next_edge_after` | `ok`, `counters["polled_switch_fn_runs"]` | each polled change is bisected to its instant; the same CCM buck's KPIs equal the oracle'd schedule's to 1e-6 (test); only a pulse narrower than `dt_max/10` is missed, and the `pss` route refuses such a schedule outright |
+| nodes reached only through switches/diodes (trbdf2 `probe_floor_used > 0`) | `failed`, `floating_subnet` | the common mode is set by `g_off`: E3 bridge variants read 323.94 V vs 324.51 V and a 76.7 kV sample on `dn` (comment at the warning) |
+
+Found on the way: on `pwl`/`trbdf2` the transient route's KPI window
+was `[(n−1)T, nT]` while a `dt` grid summed to `nT` can end an ulp
+short (`4e-7 × 200 = 7.999999999999999e-05`), so `evaluate` raised
+`ValueError` ("reaches outside the simulated span") and stopped the
+batch. The window now ends at the run's last sample when it is within
+`1e-9·T` of `nT`.
+→ Reverse: drop the two `_Failed` branches in `_raise_if_suspect`.
+
 ## 6. `build` and `period`
 
 → `build(design)` returns a builder or `(builder, switch_fn)`: the
