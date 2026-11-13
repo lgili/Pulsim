@@ -305,22 +305,23 @@ capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).
 
-**A diode with no threshold band can be settled into the wrong mode on
-`dsed`.** The zero-band settle of the exact-propagator slice keeps a
-diode ON through reverse current (or OFF while forward-biased) after
-some events. Before the slice these circuits failed loudly ("did not
-settle"); now a guard checks every stored sample against the diode law
-and raises `DiodeModeInconsistentError` (a `RuntimeError`, in
-`pulsim._dsed_dispatch`) naming the diode. Measured (boost 12 V, 100 µH,
-47 µF, 100 kHz, D = 0.5): V_th = 0 at R = 50 Ω held D1 ON at -1.07 A
-(V_out 0.16 V low at 3 ms); at R = 500 Ω V_out was 0.76 V low; V_th =
-1e-3 was still wrong at 20 and 50 Ω, right at 500 Ω; V_th = 1e-2 was
-right at all three. A half-wave rectifier into 10 Ω + 1 mH with V_th = 0
-conducted -0.85 A for half a period (err_rms 0.40). The guard reads the
-stored samples only, so a wrong mode shorter than one stored step is
-not seen. `periodic_steady_state` (no event projection, rtol 1e-11)
-solves these boosts correctly. Workaround: `V_th = 1e-2`, or `pwl` /
-`trbdf2`. The fix is the complementarity mode selection.
+**Two diode-mode guards on `dsed`.** The zero-band settle of the
+exact-propagator slice can keep a diode ON through reverse current (or
+OFF while forward-biased). The complementarity guard (default; see the
+next section) judges every settled mode and repairs the wrong ones with
+the LCP: the boost (12 V, 100 µH, 47 µF, 100 kHz, D = 0.5, 3 ms) with
+V_th = 0 at 20 / 50 / 500 Ω and V_th = 1e-3 at 20 / 50 Ω now ends on
+trbdf2 rtol 1e-10 (7 / 16 / 23 / 1 / 3 repairs), and the half-wave RL
+rectifiers run right (2 and 1 repairs). The batch-4 stored-sample guard
+stays: it checks every stored sample against the diode law and raises
+`DiodeModeInconsistentError` (a `RuntimeError`, in
+`pulsim._dsed_dispatch`), and it catches what the kernel guard does
+not: the `V_th = 0` LC tank of
+`test_double_crossing_inside_one_step_is_seen` (the kernel guard repairs
+one event and returns v(k) = -5.18 V at 10 µs; trbdf2 9.50 V), and every
+case above when `MODE_GUARD = False`. It reads stored samples only, so a
+wrong mode shorter than one stored step is not seen. Workaround for the
+double crossing: `V_th = 1e-3`.
 
 ### Complementarity mode selection: dsed only; double crossings at `V_th = 0`
 

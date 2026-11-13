@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration fixes (batch 6a: complementarity mode selection merged)
+
+* **Changed** on the integrated tree the dsed runs that the batch-4
+  stored-sample guard refused (`DiodeModeInconsistentError`) are now
+  repaired by the default-mode guard and returned: the zero-band boost
+  at 20 / 50 / 500 Ω (V_th = 0) and 20 / 50 Ω (V_th = 1e-3) ends on
+  trbdf2 rtol 1e-10, the half-wave RL rectifiers agree
+  (`diode_half_wave_rl_load` dsed error → agree 1.35e-4; analytic
+  `halfwave_rl` dsed error → 5.7e-9). The stored-sample guard is kept:
+  the kernel guard misses the `V_th = 0` double crossing of an LC tank
+  (it returns -5.18 V where trbdf2 has 9.50 V) and the guard covers
+  `MODE_GUARD = False`. The "changed numbers" in the guard section below
+  are against the unguarded settle, not against this tree.
+* **Added** conformance cells: `mode_selection='shadow'|'lcp'` with a
+  diode on `pwl`, `trbdf2` and `auto` raises
+  `UnsupportedError(feature='mode_selection')` (pwl had no cell).
+
 ### Integration fixes (batch 5: in-house LU Newton, TR-BDF2 error control)
 
 * **Fixed** `engine='trbdf2'` lands the corners of pulse and table
