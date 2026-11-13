@@ -340,6 +340,8 @@ from .spice_import import (
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
 from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+# add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
+from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
 from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
 from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
@@ -747,6 +749,8 @@ __all__ = [
     "spice_to_builder",
     "ChargeLaw",
     "ChargeTable",
+    "LossTable3D",
+    "ConductionTable",
     "DoublePulseResult",
     "double_pulse_metrics",
     "double_pulse_test",

@@ -1,7 +1,7 @@
 ## 1. Tables in the kernel
-- [ ] 1.1 `thermal/loss_table.hpp`: `LossTable3D` and `ConductionTable` (ascending axes, single-point axes, multilinear, linear extrapolation, clamp at 0); refusals by name
-- [ ] 1.2 Bindings and stubs; `LossTable.to_kernel()` in `python/pulsim/loss_tables.py`
-- [ ] 1.3 Test: 10 000 random `(v, i, T_j)` points, inside and outside the grid, equal `LossTable.__call__` within 1e-12; a table `E = 1 mJ·(1 + 0.01·(T − 25))` on `tj = [25, 125]` returns 1.5 mJ at 75 °C and 2.5 mJ at 175 °C
+- [x] 1.1 `thermal/loss_table.hpp`: `LossTable3D` and `ConductionTable` (ascending axes, single-point axes, multilinear, linear extrapolation, clamp at 0); refusals by name
+- [x] 1.2 Bindings and stubs; `LossTable.to_kernel()` in `python/pulsim/loss_tables.py`
+- [x] 1.3 Test: 10 000 random `(v, i, T_j)` points, inside and outside the grid, equal `LossTable.__call__` within 1e-12; a table `E = 1 mJ·(1 + 0.01·(T − 25))` on `tj = [25, 125]` returns 1.5 mJ at 75 °C and 2.5 mJ at 175 °C
 
 ## 2. Thermal port and event energy on `pwl`
 - [ ] 2.1 `thermal/device_losses.hpp`: per-device spec (junction node or fixed `Tj`, tables, conduction mode), pending-heat accumulator, event record

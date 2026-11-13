@@ -146,6 +146,15 @@ class LossTable:
                     out += e[av, ai, at] * ww_v * ww_i * ww_t
         return np.maximum(out, 0.0).reshape(shape)
 
+    def to_kernel(self):
+        """The same table as a kernel `pulsim._pulsim.LossTable3D`
+        (`core/include/pulsim/thermal/loss_table.hpp`), which reads it
+        with this class's rule: multilinear, extrapolated, clamped at 0."""
+        from ._pulsim import LossTable3D
+        return LossTable3D(self.v_axis.tolist(), self.i_axis.tolist(),
+                           self.tj_axis.tolist(),
+                           self.energy.ravel(order="C").tolist())
+
     # -- construction ----------------------------------------------
     @classmethod
     def from_curves(cls, curves: Mapping[Any, Sequence],

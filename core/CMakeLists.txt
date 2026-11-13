@@ -78,6 +78,21 @@ if(PULSIM_BUILD_TESTS)
     endif()
     catch_discover_tests(pulsim_core_mode_tests)
 
+    # add-in-kernel-event-losses group 1 — the kernel loss tables
+    # (core/include/pulsim/thermal/loss_table.hpp), header-only.
+    add_executable(pulsim_core_thermal_tests
+        tests/thermal/test_loss_table.cpp
+    )
+    target_link_libraries(pulsim_core_thermal_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_thermal_tests)
+    endif()
+    catch_discover_tests(pulsim_core_thermal_tests)
+
     # =============================================================================
     # pulsim_core_layer0_tests — bootstrap-pulsim-v2-kernel
     # =============================================================================
