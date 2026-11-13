@@ -38,6 +38,8 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/dsed/event_projection.hpp"
 #include "pulsim/dsed/exact_lti.hpp"
+#include "pulsim/events/mode_refusal.hpp"
+#include "pulsim/events/mode_selector.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/unsupported.hpp"
@@ -720,6 +722,258 @@ private:
         entry.exact_b = std::move(b_aug);
         entry.aug_omegas = std::move(omegas);
     }
+
+public:
+    /// add-complementarity-mode-selection D2 / task 3.1 — the k-port of
+    /// the diode ports `ports` (anode, cathode node) in the backward-
+    /// Euler companion network of step h under `mask`, from the state x
+    /// held at t (read through the CURRENT mask's recovery map; only
+    /// capacitor voltages and inductor currents enter). u: the port
+    /// voltages of that network's solution; Z: v = u − Z·e for a current
+    /// e drawn from each anode into its cathode. One factor per (mask, h)
+    /// — the cache's event solver (`solve_at` at dt = 2h, since its
+    /// companion is trapezoidal: G + C_coef/dt with C_coef = 2C, −2L) —
+    /// and k + 1 back-substitutions.
+    void diode_port_problem(const MaskT& mask, Real t, const Vector& x,
+                            Real h,
+                            const std::vector<std::pair<Index, Index>>& ports,
+                            DenseMatrix& Z, Vector& u) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Vector& xf = port_x_full_;
+        xf = e.recover_from_state * x + e.recover_const;
+        if (has_dynamic_sources_) {
+            xf += e.recover_from_b * build_time_varying_b_extra_(t);
+        }
+        diode_port_problem_full(mask, t, xf, h, ports, Z, u);
+    }
+
+    /// Same, from a full-MNA vector at t⁻ (capacitor branch voltages and
+    /// inductor currents are read from it; the rest is ignored).
+    void diode_port_problem_full(
+        const MaskT& mask, Real t, const Vector& xf, Real h,
+        const std::vector<std::pair<Index, Index>>& ports, DenseMatrix& Z,
+        Vector& u) const {
+        if (!port_C_set_) {
+            sparse::Matrix G;
+            Vector b;
+            pwl::assemble_segment_split(graph_, pool_, mask, G, port_C_, b);
+            port_C_set_ = true;
+        }
+        auto it = port_b_.find(mask);
+        if (it == port_b_.end()) {
+            sparse::Matrix G, C;
+            Vector b;
+            pwl::assemble_segment_split(graph_, pool_, mask, G, C, b);
+            it = port_b_.emplace(mask, std::move(b)).first;
+        }
+        const Vector& b_c = it->second;
+        const Real dt = Real{2} * h;
+        // BE history −(C_phys/h)·x(t⁻) = −(C_coef/(2h))·x(t⁻); sources at t + h
+        Vector& rhs = port_rhs_;
+        rhs = (Real{-1} / dt) * (port_C_ * xf);
+        if (has_dynamic_sources_) {
+            rhs += build_time_varying_b_extra_(t + h);
+        }
+        Vector& sol = port_sol_;
+        cache_.solve_at(mask, dt, rhs, sol);
+        const auto k = static_cast<Eigen::Index>(ports.size());
+        auto vp = [&](const Vector& s, std::size_t j) {
+            const auto [a, c] = ports[j];
+            return (a >= 0 ? s[a] : Real{0}) - (c >= 0 ? s[c] : Real{0});
+        };
+        u.resize(k);
+        Z.resize(k, k);
+        for (Eigen::Index j = 0; j < k; ++j) u[j] = vp(sol, static_cast<std::size_t>(j));
+        for (Eigen::Index j = 0; j < k; ++j) {
+            // J·s = −(b_c + b_extra) with b_extra = E_j − b_c: J·s = −E_j
+            rhs = -b_c;
+            const auto [a, c] = ports[static_cast<std::size_t>(j)];
+            if (a >= 0) rhs[a] += Real{1};
+            if (c >= 0) rhs[c] -= Real{1};
+            cache_.solve_at(mask, dt, rhs, sol);
+            for (Eigen::Index i = 0; i < k; ++i)
+                Z(i, j) = -vp(sol, static_cast<std::size_t>(i));
+        }
+        ++n_port_solves_;
+    }
+
+    /// Circuit scales of the LCP tolerances (design D4, prototype
+    /// `_lcp_at`): vscale = largest source / drop / node-voltage
+    /// magnitude (1 V floor), iscale = largest current-source, branch
+    /// current (inductors, sources) or vscale·G of a resistor, c_max =
+    /// largest capacitance. State read under the CURRENT mask.
+    [[nodiscard]] events::CircuitScale port_scale(Real t,
+                                                  const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Vector xf = e.recover_from_state * x + e.recover_const;
+        if (has_dynamic_sources_) {
+            xf += e.recover_from_b * build_time_varying_b_extra_(t);
+        }
+        return port_scale_full(xf);
+    }
+
+    /// Same, from a full-MNA vector.
+    [[nodiscard]] events::CircuitScale port_scale_full(const Vector& xf) const {
+        const Index nn = graph_.num_nodes();
+        events::CircuitScale sc;
+        Real vs = Real{1}, is = Real{1e-12}, gmax = Real{0};
+        for (Index i = 0; i < static_cast<Index>(xf.size()); ++i) {
+            if (i < nn) vs = std::max(vs, std::abs(xf[i]));
+            else is = std::max(is, std::abs(xf[i]));
+        }
+        using K = pwl::DevicePool::StoredKind;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            K kind;
+            try {
+                kind = pool_.kind_of(b);
+            } catch (const std::out_of_range&) {
+                continue;            // a branch without pool params
+            }
+            switch (kind) {
+            case K::VoltageSource:
+                vs = std::max(vs, std::abs(pool_.voltage_source_params(b).V));
+                break;
+            case K::SineVoltageSource: {
+                const auto& p = pool_.sine_voltage_source_params(b);
+                vs = std::max(vs, std::abs(p.v_dc) + std::abs(p.v_amplitude));
+                break;
+            }
+            case K::PWMVoltageSource: {
+                const auto& p = pool_.pwm_voltage_source_params(b);
+                vs = std::max({vs, std::abs(p.v_high), std::abs(p.v_low)});
+                break;
+            }
+            case K::Diode: {
+                const auto& p = pool_.diode_params(b);
+                vs = std::max({vs, std::abs(p.V_f), std::abs(p.V_th)});
+                break;
+            }
+            case K::CurrentSource:
+                is = std::max(is, std::abs(pool_.current_source_params(b).I));
+                break;
+            case K::Resistor:
+                gmax = std::max(gmax, std::abs(pool_.resistor_params(b).G));
+                break;
+            case K::Capacitor:
+                sc.c_max = std::max(sc.c_max, pool_.capacitor_params(b).C);
+                break;
+            default:
+                break;
+            }
+        }
+        sc.vscale = vs;
+        sc.iscale = std::max(is, vs * gmax);
+        return sc;
+    }
+
+    /// add-complementarity-mode-selection D3 / task 5.1: structural
+    /// passivity at the diode ports. Non-passive (the first found is
+    /// named): a VCVS (gain); a resistor, capacitor or inductor with a
+    /// negative value; a group of coupled inductors whose inductance
+    /// matrix is not positive semidefinite (pairwise |k| <= 1 does not
+    /// make three or more windings PSD). Passive but not reciprocal: an
+    /// ideal transformer (named in `nonreciprocal_*`).
+    [[nodiscard]] events::PassivityClass passivity() const {
+        using K = pwl::DevicePool::StoredKind;
+        events::PassivityClass out;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            if (!pool_.is_registered(b)) continue;
+            const K kind = pool_.kind_of(b);
+            const bool neg =
+                (kind == K::Resistor && pool_.resistor_params(b).G < Real{0})
+                || (kind == K::Capacitor && pool_.capacitor_params(b).C < Real{0})
+                || (kind == K::Inductor && pool_.inductor_params(b).L < Real{0});
+            if (kind == K::VCVS || neg)
+                return {std::string(graph_.branch_name(b)),
+                        std::string(pwl::stored_kind_name(kind)), {}, {}};
+            if (kind == K::IdealTransformer && out.nonreciprocal_device.empty()) {
+                out.nonreciprocal_device = std::string(graph_.branch_name(b));
+                out.nonreciprocal_kind = std::string(pwl::stored_kind_name(kind));
+            }
+        }
+        if (auto bad = coupled_inductors_not_psd_(); !bad.empty()) {
+            out.device = std::move(bad);
+            out.kind = "InductorCoupling";
+        }
+        return out;
+    }
+
+    /// The coupled-inductor groups (connected by couplings) whose
+    /// inductance matrix L (L_ii self, L_ij = k·sqrt(L_i·L_j)) has an
+    /// eigenvalue below −1e-12·max L_ii: the windings of the first such
+    /// group, joined by '+'; empty when every group is PSD.
+    [[nodiscard]] std::string coupled_inductors_not_psd_() const {
+        const auto& cps = pool_.transformer_couplings();
+        if (cps.empty()) return {};
+        std::vector<Index> ids;
+        const auto idx = [&](Index b) {
+            for (std::size_t i = 0; i < ids.size(); ++i)
+                if (ids[i] == b) return i;
+            ids.push_back(b);
+            return ids.size() - 1;
+        };
+        std::vector<std::pair<std::size_t, std::size_t>> edges;
+        for (const auto& c : cps)
+            edges.emplace_back(idx(c.primary_branch_id), idx(c.secondary_branch_id));
+        // union-find over the windings
+        std::vector<std::size_t> root(ids.size());
+        for (std::size_t i = 0; i < root.size(); ++i) root[i] = i;
+        const auto find = [&](std::size_t i) {
+            while (root[i] != i) i = root[i] = root[root[i]];
+            return i;
+        };
+        for (const auto& [a, b] : edges) root[find(a)] = find(b);
+        for (std::size_t g = 0; g < ids.size(); ++g) {
+            if (find(g) != g) continue;
+            std::vector<std::size_t> mem;
+            for (std::size_t i = 0; i < ids.size(); ++i)
+                if (find(i) == g) mem.push_back(i);
+            const auto n = static_cast<Index>(mem.size());
+            DenseMatrix L = DenseMatrix::Zero(n, n);
+            const auto pos = [&](std::size_t i) {
+                for (Index r = 0; r < n; ++r)
+                    if (mem[static_cast<std::size_t>(r)] == i) return r;
+                return Index{-1};
+            };
+            for (std::size_t e = 0; e < cps.size(); ++e) {
+                const Index r = pos(edges[e].first), c = pos(edges[e].second);
+                if (r < 0) continue;
+                const auto& p = cps[e].params;
+                L(r, r) = p.L_p;
+                L(c, c) = p.L_s;
+                // couplings on one pair add, as the assembly stamps them (assemble.hpp)
+                L(r, c) += models::TwoWindingTransformer::mutual_inductance(p);
+                L(c, r) = L(r, c);
+            }
+            const Real lmax = L.diagonal().cwiseAbs().maxCoeff();
+            Eigen::SelfAdjointEigenSolver<DenseMatrix> es(L, Eigen::EigenvaluesOnly);
+            if (es.info() == Eigen::Success
+                && es.eigenvalues().minCoeff() >= -Real{1e-12} * lmax) {
+                continue;
+            }
+            std::string names;
+            for (const auto i : mem) {
+                if (!names.empty()) names += "+";
+                names += std::string(graph_.branch_name(ids[i]));
+            }
+            return names;
+        }
+        return {};
+    }
+
+    /// Port-model k-port builds (each k + 1 back-substitutions).
+    [[nodiscard]] std::size_t n_port_problems() const noexcept {
+        return n_port_solves_;
+    }
+
+private:
+    mutable std::unordered_map<MaskT, Vector> port_b_;
+    mutable sparse::Matrix port_C_;
+    mutable bool port_C_set_ = false;
+    mutable Vector port_x_full_, port_rhs_, port_sol_;
+    mutable std::size_t n_port_solves_ = 0;
 
     /// Sum sine + PWM + pulse + user-supplied contributions at time t.
     /// Always returns a full-MNA-size vector even when no dynamic

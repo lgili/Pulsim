@@ -169,6 +169,21 @@ public:
         }
     }
 
+    /// TR-BDF2 post-event refresh: the phase voltages and dλ/dt from
+    /// the probe; (λ, i) are not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            const Real v_n =
+                stamping::read_node_voltage(x_probe, e.neutral);
+            for (Size k = 0; k < 3; ++k) {
+                e.v_old[k] =
+                    stamping::read_node_voltage(x_probe, e.phase_node[k])
+                    - v_n;
+                e.dlam_old[k] = e.v_old[k] - e.params.R_s * e.i_old[k];
+            }
+        }
+    }
+
     /// Seed from a warm-start / DC operating point — same fields as
     /// a commit, so the first stamp sees a consistent previous step.
     void seed_from_dc_op(const Vector& x) { update_from_state(x, Real{0}); }

@@ -66,6 +66,96 @@ def test_err_rms_identity_and_known_offset():
     assert metrics.err_rms(t, y + 0.1 * span, lambda s: np.sin(3 * s)) == pytest.approx(0.1, rel=1e-6)
 
 
+def test_edge_measure_drops_only_the_steps_that_hold_a_jump():
+    # The same unit step at t = 0.5, sampled densely and sparsely: both are
+    # exact at their samples; interpolating the sparse one across its edge
+    # step invents an error, the edge measure does not.
+    tr = np.linspace(0.0, 1.0, 1001)
+    yr = (tr >= 0.5).astype(float)
+    tr, yr = np.insert(tr, 500, 0.5), np.insert(yr, 500, 0.0)    # left limit
+    ts = np.array([0.0, 0.25, 0.45, 0.55, 0.75, 1.0])
+    ys = (ts >= 0.5).astype(float)
+    assert metrics.err_rms(ts, ys, (tr, yr)) > 0.05
+    assert metrics.err_rms(ts, ys, (tr, yr), exclude=[(0.45, 0.55)]) == 0.0
+    assert metrics.err_max(ts, ys, (tr, yr), exclude=[(0.45, 0.55)]) == 0.0
+    # an error outside the excluded step is still seen, weighted by the kept window
+    assert metrics.err_rms(ts, ys + 0.1, (tr, yr), exclude=[(0.45, 0.55)]) == pytest.approx(0.1)
+
+
+def test_gate_observables_keep_source_forced_nodes():
+    # The gate compares everything; only the edge diagnostic drops them.
+    case = v1_reader.load(BENCH / "circuits/switching/buck/ll06_buck_vcswitch.yaml")
+    assert dr.source_forced(case) == {"V(vin)", "V(ctrl)"}
+    assert {"V(vin)", "V(ctrl)", "V(sw)", "I(L1)"} <= set(dr.observables_of(case))
+
+
+def test_switching_steps_bracket_every_recorded_change():
+    case = v1_reader.load(BENCH / "circuits/switching/buck/ll06_buck_vcswitch.yaml")
+    r = case.run("pwl")
+    t = np.asarray(r.times)
+    s = dr.switch_record(r, t)
+    steps = dr.switching_steps(s, t)
+    assert len(steps) == int(np.any(s[1:] != s[:-1], axis=1).sum()) > 100
+    assert all(b - a == pytest.approx(case.dt, rel=1e-6) for a, b in steps)
+
+
+def _sw(t, on):
+    return np.asarray(on, dtype=int).reshape(-1, 1)
+
+
+def test_one_step_late_edge_on_a_resistive_load_disagrees_with_one_step_of_timing():
+    # R load behind an ideal switch: the output IS the switch state. The
+    # reference lands the edge at 0.5; the engine (dt = 0.02) applies it one
+    # step late. Inside the excluded step the late edge is invisible, so the
+    # edge diagnostic reads 0: only the gate and the timing column show it.
+    tr_ = np.union1d(np.linspace(0.0, 1.0, 1001), [0.5 + 1e-9])
+    ref = (tr_, {"V(out)": (tr_ > 0.5) * 1.0}, _sw(tr_, tr_ > 0.5))
+    dt = 0.02
+    t = np.linspace(0.0, 1.0, 51)
+    eng = (t, {"V(out)": (t > 0.5 + dt / 2) * 1.0}, _sw(t, t > 0.5 + dt / 2))
+    er, _ = dr.compare(eng, ref, ["V(out)"], 1e-3)
+    assert er == pytest.approx(np.sqrt(dt / 3 / 0.98), rel=1e-3)
+    assert er > dr.default_tol("pwl", True)                         # DISAGREE on the gate
+    d = dr.diagnose(eng, ref, ["V(out)"], 1e-3, step=dt)
+    assert d["edge"] == "ok" and d["edge_rms"] == pytest.approx(0.0, abs=1e-12)
+    assert d["excluded_frac"] == pytest.approx((dt + 1e-9) / 0.98, rel=1e-6)
+    assert d["edge_timing_steps"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_a_chattering_trace_is_reported_chatter_not_agree():
+    # The reference conducts throughout; the engine's diode mask flips on
+    # every step of [0.3, 0.7] and is wrong on half of them. Dropping the
+    # switching steps would drop exactly the wrong intervals.
+    tr_ = np.linspace(0.0, 1.0, 1001)
+    ref = (tr_, {"y": np.ones_like(tr_)}, _sw(tr_, np.ones_like(tr_)))
+    t = np.linspace(0.0, 1.0, 101)
+    on = np.where((t > 0.3) & (t < 0.7), np.arange(t.size) % 2, 1)
+    eng = (t, {"y": on * 1.0}, _sw(t, on))
+    er, _ = dr.compare(eng, ref, ["y"], 1e-3)
+    assert er > dr.default_tol("pwl", True)
+    d = dr.diagnose(eng, ref, ["y"], 1e-3)
+    assert d["edge"] == "chatter" and d["edge_rms"] is None
+    assert d["excluded_frac"] > 0.3
+
+
+def test_a_trace_that_never_switches_is_missed_edges_not_chatter():
+    t = np.linspace(0.0, 1.0, 101)
+    ref = (t, {"y": np.ones_like(t)}, _sw(t, (t * 4).astype(int) % 2))  # 3 edges
+    eng = (t, {"y": np.ones_like(t)}, _sw(t, np.zeros_like(t)))
+    assert dr.diagnose(eng, ref, ["y"], 1e-3)["edge"] == "missed edges"
+
+
+def test_union_of_excluded_steps_covering_the_span_does_not_raise():
+    # Each trace alone switches on less than half its span; together they
+    # cover it all (the old measure raised "every interval excluded").
+    t = np.linspace(0.0, 1.0, 21)
+    a = (t, {"y": np.ones_like(t)}, _sw(t, (t > 0.5) | ((t * 20).round() % 2 == 1) & (t < 0.5)))
+    b = (t, {"y": np.ones_like(t)}, _sw(t, (t < 0.5) | ((t * 20).round() % 2 == 1) & (t > 0.5)))
+    d = dr.diagnose(a, b, ["y"], 1e-3)
+    assert d["edge"] == "undersampled" and d["edge_rms"] is None
+    assert d["excluded_frac"] > 0.9
+
+
 def test_exclude_t0_drops_only_the_initial_sample():
     t = np.linspace(0, 1, 11)
     y = np.ones_like(t)
@@ -93,10 +183,12 @@ def test_vcswitch_pwm_gate_becomes_a_native_schedule():
     assert sw.next_edge_after(100e-6) == pytest.approx(200e-6, rel=1e-12)
 
 
-def test_v1_pwm_phase_is_a_radian_advance_and_dead_time_shortens_on_time():
-    # v1 kernel: high while (t + phase/2pi*T) mod T < duty*T - dead_time
+def test_v1_pwm_phase_is_a_period_fraction_and_dead_time_shortens_on_time():
+    # high while (t + phase*T) mod T < duty*T - dead_time. Re-pin (batch 6b): the v1 kernel
+    # read radians, but every file that sets a pwm phase means a fraction (0.5 on a leg's
+    # low side, 1/3 and 2/3 on three phases); as radians ll09/ll10 modelled shoot-through.
     f, duty, start = v1_reader._on_windows(
-        {"type": "pwm", "frequency": 1e3, "duty": 0.5, "phase": math.pi / 2, "dead_time": 1e-4}, 0.5)
+        {"type": "pwm", "frequency": 1e3, "duty": 0.5, "phase": 0.25, "dead_time": 1e-4}, 0.5)
     assert (f, duty) == (1e3, pytest.approx(0.4))
     assert start == pytest.approx(0.75e-3)
 
@@ -347,3 +439,27 @@ def test_benchmark_runner_imports_without_the_retired_backend():
     src = (BENCH / "tools" / "benchmark_runner.py").read_text()
     assert "import pulsim_python_backend" not in src and "from pulsim_python_backend" not in src
     import benchmark_runner  # noqa: F401
+
+
+def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
+    # checkpoint review M1 / M7 (integration batch 6b)
+    sus = {"status": "runs", "reference": "suspect", "reference_reason": "broken"}
+    for out in ("agree", "disagree", "error"):
+        r = dr.mark_suspect({"outcome": out}, sus)
+        assert r["outcome"] == "unverified" and r["was"] == out
+        assert dr.frozen_check(r, sus, "trbdf2") == ""
+    assert dr.mark_suspect({"outcome": "refused"}, sus)["outcome"] == "refused"
+    for rel in ("circuits/switching/buck_boost/cuk_converter.yaml",
+                "circuits/switching/buck_boost/sepic.yaml"):
+        assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    e = {"known": {"pwl+split": "disagree"}, "known_err": {"pwl+split": 0.01}}
+    assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.019}, e, "pwl+split") == ""
+    assert "grew" in dr.frozen_check({"outcome": "disagree", "err_rms": 0.021}, e, "pwl+split")
+    assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.01}, e, "pwl") == "new outcome"
+    r = {"outcome": "disagree", "err_rms": 0.004}
+    assert dr.frozen_check(r, e, "pwl+split") == "" and "re-freeze" in r["note"]
+    # every frozen disagreement carries its error
+    for rel, ent in TRIAGE.items():
+        for cfg, out in (ent.get("known") or {}).items():
+            if out == "disagree":
+                assert (ent.get("known_err") or {}).get(cfg), (rel, cfg)

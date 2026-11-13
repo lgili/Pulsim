@@ -97,3 +97,78 @@ Each entry: question → option taken → why → how to reverse.
     at n ≤ 152. → Keep tier 1 as is, leave 6.1 unticked, and report the
     numbers. → Tier 2 (partial refactor on single-switch flips) is the
     proposal's lever for first visits on small circuits.
+
+## Stage 2 (2026-11-13): tiers 2–3 and the build-path lookups
+
+Decided by the maintainer on 2026-11-13: take the rounding-changing
+stages now, behind these gates, re-baselining the Newton goldens once.
+Gate: step counts, switch-state sequences and per-call Newton iteration
+counts identical; states within 1e-9 relative (per variable, scaled by
+its range) where rounding may change, byte-identical elsewhere; no
+tolerance or convergence test changed. Goldens: `.scratch/golden_s1`
+(stage-1 numerics with the Newton trace), `probes/golden_baseline.py
+gate`.
+
+12. **Per-branch pool lookups cached at the call site** → landed,
+    bit-identical. The switched-ladder build spent ~37 % of its samples
+    in `DevicePool::kind_of` / `entry_at` (flat-map binary searches, one
+    per stamp). `SegmentAssembler` now resolves each branch's kind,
+    params pointer (Resistor, Capacitor, Inductor, VoltageSource — the
+    kinds `refactor_parametric` updates in place) and branch-current
+    unknown once, and rebuilds that table when it sees another pool or
+    another branch count. `DevicePool` is unchanged. Golden `compare`:
+    all 19 cases byte-identical, counters unmoved. Per-mask eager build,
+    interleaved 3 rounds (best): switched ladder n = 3008 337 → 212 µs
+    (1.59×); VSI 7.41 → 7.13 µs (1.04×, still dominated by the ordered
+    insert into the segment `flat_map`, ~52 % of its profile — the lever
+    for the VSI first-visit target in 6.1 is that container, not the
+    LU).
+
+13. **Tier 2 (first visit through `partial_refactor`)** → prototyped,
+    **not landed**; tasks 7.x stay open. Prototype:
+    `probes/tier2_flip_refactor_prototype.patch` (`clone()`, nearest
+    resident mask by Hamming distance, path-ratio gate, counters
+    `flip_partial_refactors` / `flip_fallbacks`, flag
+    `set_flip_refactor`). Evidence (`probes/flip_first_visit_bench.cpp`,
+    lazy Gray walk, flag on vs off, best of 3 × 3 rounds):
+
+    | Circuit | first visit off | on | on ÷ off | partial | fallbacks |
+    |---|---|---|---|---|---|
+    | switched ladder n = 310, 8 switches | 24.5–30.6 µs | 27.0–34.6 µs | 0.88–1.31 | 31 | 224 |
+    | switched ladder n = 3008, 6 switches | 241–304 µs | 285–332 µs | 1.07–1.25 | 15 | 48 |
+
+    Gates 7.4 (`flip_fallbacks ≤ 0.5 × flip_partial_refactors`) and 7.5
+    (≤ 0.5× at n = 3008) both fail. A switch column early in the
+    ladder's elimination order drags the whole chain after it, so the
+    path exceeds 0.6·n on most flips, and the copy of the neighbour's
+    factor is paid before the path is known. With the flag on, every
+    golden stayed byte-identical (re-eliminating the changed columns
+    with the neighbour's row order performs the same operations as a
+    fresh factor on these circuits; VSI: 18 partial, 37 fallbacks).
+    What would change the verdict: a path estimate before the clone and
+    an ordering that puts switch columns last (so a flip's path is
+    short); neither is in this proposal.
+
+14. **Tier 3 (stored reciprocal pivots)** → 8.1 met, **not landed**.
+    Microbenchmark (`probes/solve_reciprocal_bench.cpp`, quiet run, 3
+    runs): substitution 1.19–1.29× at n = 1502 (bar ≥ 1.15×), 1.22–1.29×
+    at n = 152, 1.19–1.40× at n = 15,002; max relative difference 4e-16.
+    End to end (interleaved, best of 3 × 3): rlc1502 pwl 24239 → 18921
+    ns/step (0.78×, would meet 8.4's ≤ 0.85×), rlc1502 trbdf2 0.93×,
+    rlc152 pwl 0.68×. The gate fails:
+
+    | Case | max rel state diff | note |
+    |---|---|---|
+    | buck / vsi / rlc152 / rlc1502 / xfmr, pwl | 1.8e-10 / 1.1e-10 / 4e-14 / 5e-14 / 8e-14 | within 1e-9 |
+    | Shockley rect 51 / 483, MOSFET L1, satind, Shockley buck pwl | ≤ 3.6e-13 | within 1e-9, traces identical |
+    | rlc152 / rlc1502 / xfmr / rect51, trbdf2 | 1.4e-10 / 3.6e-13 / 6.9e-13 / 1.9e-10 | within 1e-9 |
+    | buck, trbdf2 | **1.3e-8** | step times moved 1.3e-11 |
+    | vsi, trbdf2 | **1.9e-7** | step times moved 4.4e-10 |
+    | Shockley buck, trbdf2 | **6.1e-6**, Newton trace differs | step times moved 4.4e-7 |
+
+    Step counts and switch sequences stayed equal; the excess is the
+    TR-BDF2 adaptive step grid turning a last-bit change in the solve
+    into shifted step times, compared sample by sample on fast edges.
+    That sensitivity belongs to the TR-BDF2 step-grid work, which is
+    not this track's; tier 3 can land after it, with this patch
+    (`probes/tier3_reciprocal_pivot_prototype.patch`).

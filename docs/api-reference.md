@@ -81,6 +81,18 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
+| `engine` | `str` | `'auto'` | `'auto'`, `'pwl'`, `'trbdf2'` or `'exact'`. `'exact'` is the canonical name of the event-driven exact engine and `'dsed'` its alias: one engine, bit-identical runs; `result.engine_used` and every refusal's `engine` field read `'dsed'` (the capability-table column) until the default flip. |
+
+`pulsim.exact_route(builder, t_end, switch_fn=None, **kw)` runs the
+circuit on `engine='exact'` and classifies every mask it visits as
+exact-eligible or not (add-exact-propagator-strategy D11, report only —
+`'auto'` does not read it): `{"exact": bool, "reason": ..., "segments":
+[{"mask", "exact", "reason", "device", "kind", "detail", "tier",
+"n_segments"}, ...]}`. Reasons: `'device'` (a device with no linear / PWL
+law, named), `'source'` (a PWM / pulse source or a `b_extra_fn`),
+`'extraction'` (coupled inductors, a capacitor loop, an inductor
+cut-set), `'cost'` (the mask's propagator outside its accuracy tiers).
+The same rows ride on every exact run as `result.exact["segments"]`.
 
 Returns a `SimulationResult` with parallel arrays:
 - `result.times` — `list[float]`. With a fixed `dt`: length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on. Without one the grid is **variable-step** and the spacing is not uniform — average with [the time-weighted helpers](#statistics-over-a-result-time-weighted), not `.mean()`.
@@ -261,6 +273,14 @@ opts.store_every              # int
 - `result.n_restart_steps` / `result.n_restart_factorizations` — SDIRK
   restart steps taken and the factorisations they caused, with
   `discontinuity_restart=True` (0 otherwise)
+- `result.newton` — `NewtonCounters` of the run's Newton workspace
+  (`pwl` / `trbdf2`): `solves`, `iterations`, `analyses`,
+  `factorizations`, `partial_refactors`, `lm_attempts` and
+  `iterations_per_solve` (the iteration count of every Newton call)
+- `result.newton_roundoff_accepts` / `result.newton_roundoff_omega_max` /
+  `result.newton_roundoff_row` — transient Newton solves accepted at row
+  roundoff (row-wise backward error ≤ 8 eps) instead of aborting, the
+  worst backward error and its MNA row (DC never accepts)
 
 ## Statistics over a result (time-weighted)
 
@@ -277,8 +297,8 @@ average output over 2–3 ms:
 | engine | samples | `v[t >= 2e-3].mean()` | `p.time_average(t, v, 2e-3)` |
 |---|---:|---:|---:|
 | `pwl`, `dt=2e-7` | 15001 | 6.3295 V | 6.3308 V |
-| `trbdf2`, `dt=4e-6` (ceiling) | 1775 | **3.0408 V** | 6.3298 V |
-| `auto`, no `dt` | 1297 | **5.0070 V** | 6.3300 V |
+| `trbdf2`, `dt=4e-6` (ceiling) | 1270 | **3.9677 V** | 6.3298 V |
+| `auto`, no `dt` | 1432 | **4.5746 V** | 6.3300 V |
 
 The engines agree; the sample mean does not. The same applies to
 `np.sqrt((v**2).mean())`, and to slicing by index

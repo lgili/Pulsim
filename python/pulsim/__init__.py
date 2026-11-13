@@ -80,6 +80,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
     ThreePhaseLegIndices,
@@ -342,6 +343,7 @@ from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
 from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
 from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
+from ._exact_route import exact_route
 from .electrothermal import (
     TempCoResistance,
     make_bidirectional_observer,
@@ -494,6 +496,7 @@ from .plot import scope  # noqa: E402,F811
 from ._ai_guide import ai_guide  # noqa: E402
 
 __all__ = [
+    "ResolutionWarning",
     "ai_guide",
     "CircuitBuilder",
     "Graph",
@@ -519,6 +522,7 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
     "ThreePhaseLegIndices",
@@ -528,6 +532,8 @@ __all__ = [
     "SwitchSchedule",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
+    # add-exact-propagator-strategy D11 (report only).
+    "exact_route",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
@@ -785,6 +791,79 @@ if _HAS_SCOPE:
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
+
+
+# add-fixed-step-resolution-diagnostics thresholds (design D3).
+_RESOLUTION_LTE_MAX = 1e-2
+_RESOLUTION_UNESTIMATED_MAX = 0.5
+
+
+def _warn_unlocated_edges(res):
+    """Event splitting without an edge oracle (review M3): say so once."""
+    c = getattr(res, "counters", None) or {}
+    n = c.get("unlocated_gate_steps", 0)
+    if n:
+        import warnings
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} gate "
+            "change(s) came from a switch_fn without next_edge_after(t) "
+            "and could not be located inside the step; each was taken "
+            "at the next grid point (first order there). Give the "
+            "schedule an oracle (make_pwm_switch_fn & co. have one) or "
+            "put the edges on the dt grid. See res.counters.",
+            UserWarning, stacklevel=3)
+
+
+def _warn_resolution(builder, res, dt):
+    """One ResolutionWarning per run (see ResolutionWarning)."""
+    rd = getattr(res, "resolution", None)
+    if rd is None:
+        return
+    ring = list(rd.ringing)
+    unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
+    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring or unest):
+        return
+    import warnings
+    lines = []
+    if rd.lte_max > _RESOLUTION_LTE_MAX:
+        name = builder.graph.branch_name(rd.lte_branch) or \
+            f"branch #{rd.lte_branch}"
+        lines.append(
+            f"  * {name}: estimated truncation {rd.lte_max:.3g} of its "
+            f"peak in one step, at t = {rd.lte_time:.6g} s.")
+    if ring:
+        try:
+            names = builder.state_var_names()
+        except Exception:  # noqa: BLE001 — test doubles without names
+            names = []
+        worst = max(ring, key=lambda r: r.length)
+        nm = names[worst.var] if worst.var < len(names) else \
+            f"x[{worst.var}]"
+        lines.append(
+            f"  * {nm}: {worst.length} sign-alternating steps from "
+            f"t = {worst.t_start:.6g} s (largest step change "
+            f"{worst.max_delta:.4g}); {len(ring)} such run(s) in all.")
+    if unest:
+        lines.append(
+            f"  * {rd.unestimated_fraction:.0%} of the steps could not be "
+            "estimated (a mask change, restart, split or source jump "
+            "within three steps): the run is not shown to be resolved.")
+    warnings.warn(
+        f"simulate(): dt = {dt:.4g} s does not resolve this circuit "
+        "(fixed-step engine).\n" + "\n".join(lines) +
+        "\n  Reduce dt, or omit dt to let the variable-step engine "
+        "choose. The estimate is not an error bound. Details: "
+        "res.resolution.",
+        ResolutionWarning, stacklevel=3)
+
+
+class ResolutionWarning(UserWarning):
+    """A fixed-step (`pwl`) run whose `dt` does not resolve the circuit:
+    a large truncation estimate or a Nyquist alternation
+    (`res.resolution`). Silence with
+    ``warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)``
+    or by leaving ``resolution_diagnostics`` off (the default)."""
+
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
 
@@ -1577,10 +1656,17 @@ class SolverOptions:
     # disables event iteration entirely (the pre-V2.1 behaviour) —
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
+    # Fixed engine: split a step at a gate edge (schedules with
+    # next_edge_after), source jump or diode crossing inside it; needs
+    # discontinuity_restart (None = off).
     enable_substep_state_correction: Optional[bool] = None
-    # Fixed engine: two backward-Euler half-steps after every
-    # discontinuity, gate sampled at the step start (None = off).
+    # Fixed engine: three SDIRK(2,2) steps after every discontinuity,
+    # gate sampled at the step start (None = off).
     discontinuity_restart: Optional[bool] = None
+    # Fixed engine: record res.resolution and warn once
+    # (ResolutionWarning) when dt does not resolve the circuit
+    # (None = on).
+    resolution_diagnostics: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1756,6 +1842,7 @@ def simulate(
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
+    resolution_diagnostics: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1771,6 +1858,7 @@ def simulate(
     solver: Optional["SolverOptions"] = None,
     # --- forward parameter sensitivities (exact path only) ---
     sensitivities: "Optional[Sequence[str]]" = None,
+    mode_selection: Optional[str] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -1901,12 +1989,20 @@ def simulate(
         ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
         defaults to 10 µs); the grid is variable either way.
     engine
-        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
-        see above.
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
+        see above. ``'exact'`` is the canonical name of the event-driven
+        exact engine; ``'dsed'`` is its alias (one engine: the result's
+        ``engine_used`` and refusals name ``'dsed'``).
+        :func:`pulsim.exact_route` reports which segments of a run are
+        exact-eligible.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
-        ``rtol=1e-6, atol=1e-9``.
+        ``rtol=1e-6, atol=1e-9``. For ``'trbdf2'`` / ``'auto'``
+        (defaults ``1e-5`` / ``1e-8``) they bound the local error
+        estimate, which since update-trbdf2-error-control is the true
+        local error (it was half of it): pass doubled values for the
+        previous step density.
     dt_init
         Initial step for the DSED PI controller (default 1e-9).
     integrator
@@ -1973,6 +2069,30 @@ def simulate(
         ``.kpi(signal, kind, with_grad=True)``. Exact or refused, never
         a finite difference: see :mod:`pulsim.sensitivity`.
 
+    mode_selection
+        How PWL diodes are decided at an event. ``None`` / ``'legacy'``
+        (default): today's settle; on ``engine='dsed'`` a guard judges
+        each settled mode on its own exact trajectory and re-decides an
+        event whose mode violates a diode's law with the complementarity
+        problem (LCP) — counted in ``result.diagnostics['mode_guard']``.
+        ``'lcp'`` (``engine='dsed'``): the LCP decides every event,
+        counters in ``result.diagnostics['mode_selection']``.
+        ``'shadow'`` (``engine='dsed'``): the default run, plus the LCP
+        solved beside it; disagreements in
+        ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'``
+        on ``pwl`` / ``trbdf2`` raise :class:`UnsupportedError`.
+
+    resolution_diagnostics
+        ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
+        records ``res.resolution`` (a per-step truncation estimate of
+        the linear capacitors and inductors relative to each one's
+        running peak, floored at 1e-3 of its kind's peak, the runs of
+        >= 4 sign-alternating steps of any state entry, and the fraction
+        of steps that could not be estimated) and warns once
+        (:class:`ResolutionWarning`) when ``lte_max > 1e-2``, a run
+        exists or over half the steps are unestimated. An estimate, not
+        an error bound; the states are the same bit for bit either way.
+
     Returns
     -------
     SimulationResult
@@ -1986,6 +2106,9 @@ def simulate(
         On unknown ``engine``; on ``engine='pwl'`` without ``dt``;
         on invalid DSED options (negative tolerance, unknown
         ``integrator``).
+    ResolutionWarning
+        A ``UserWarning``: the fixed ``dt`` does not resolve the circuit
+        (see ``resolution_diagnostics``).
     UserWarning
         When DSED-only kwargs are passed with ``engine='pwl'`` (they
         are silently ignored — the warning is informational so
@@ -2061,6 +2184,8 @@ def simulate(
                 solver.enable_substep_state_correction)
         if discontinuity_restart is None:
             discontinuity_restart = solver.discontinuity_restart
+        if resolution_diagnostics is None:
+            resolution_diagnostics = solver.resolution_diagnostics
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -2078,6 +2203,12 @@ def simulate(
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
     # engine='pwl' it just warns on DSED-only kwarg leakage.
+    # add-exact-propagator-strategy D11: 'exact' is the canonical name of the
+    # event-driven exact engine and 'dsed' its alias. One run: the result's
+    # engine_used and every refusal keep naming 'dsed' (the capability-table
+    # column) until the default flip (DECISIONS #3).
+    if engine == "exact":
+        engine = "dsed"
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2089,6 +2220,10 @@ def simulate(
         stiffness_threshold=stiffness_threshold,
         h_bdf2=h_bdf2,
     )
+    if mode_selection not in (None, "legacy", "shadow", "lcp"):
+        raise ValueError(
+            f"simulate(): mode_selection={mode_selection!r}; expected "
+            "None, 'legacy', 'shadow' or 'lcp'.")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -2199,6 +2334,13 @@ def simulate(
             "finite difference of runs whose events sit on the step grid "
             "(off by a factor of ten on the DCM buck). Pass "
             "engine='dsed'.")
+    if sensitivities is not None and mode_selection in ("shadow", "lcp"):
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(sensitivities=..., mode_selection={mode_selection!r})"
+            ": the sensitivity run differentiates the legacy event "
+            "settle; a mode chosen by the complementarity problem has no "
+            "derivative here. Drop mode_selection.")
 
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -2253,6 +2395,8 @@ def simulate(
             "enable_substep_state_correction": bool(
                 enable_substep_state_correction),
             "discontinuity_restart": bool(discontinuity_restart),
+            # Per-step truncation of a fixed grid: none to estimate.
+            "resolution_diagnostics": bool(resolution_diagnostics),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -2299,6 +2443,7 @@ def simulate(
                 initial_state=None if _ic_from_builder else initial_state,
                 builder_initial_state=initial_state if _ic_from_builder else None,
                 progress=progress,
+                mode_selection=mode_selection,
             )
         try:
             _dsed_res._preflight = _preflight_report
@@ -2350,6 +2495,7 @@ def simulate(
             enable_substep_state_correction=(
                 enable_substep_state_correction),
             discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -2403,6 +2549,16 @@ def simulate(
                 + ". Use engine='auto' to route to the fixed-step "
                 "engine automatically, or engine='pwl' explicitly.")
 
+    # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
+    if mode_selection in ("shadow", "lcp"):
+        raise _unsupported(
+            engine, "mode_selection",
+            f"simulate(engine={_engine_asked!r}, mode_selection="
+            f"{mode_selection!r}): the complementarity selection is "
+            f"implemented on engine='dsed' only; this run lands on "
+            f"engine={engine!r}, whose settle has no hook yet. Use "
+            "engine='dsed', or drop mode_selection.")
+
     if engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
@@ -2455,8 +2611,7 @@ def simulate(
             # fixed engine's all-CLOSED legacy default is what the
             # router sends this case to instead — flipping THAT is
             # its own breaking change, not this one).
-            switch_fn = (lambda _n=_n_sw:
-                          (lambda t: SwitchStateMask(_n)))()
+            switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
@@ -2788,6 +2943,8 @@ def simulate(
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
+    if resolution_diagnostics is not None:
+        opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -2826,7 +2983,8 @@ def simulate(
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)
-        switch_fn = lambda _t: default_mask  # noqa: E731
+        # Evaluated in C++: no Python callable in the step loop.
+        switch_fn = make_constant_switch_fn(default_mask)
 
     # enable_nonlinear_refresh=None goes through as is: the kernel
     # stamps the Newton devices when the circuit has any, and refuses
@@ -3126,6 +3284,10 @@ def simulate(
             f"{first.reason[:200]}",
             stacklevel=2)
 
+    _warn_newton_roundoff(res, "simulate()")
+    _warn_resolution(builder, res, dt)
+    _warn_unlocated_edges(res)
+
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
         import warnings
@@ -3177,12 +3339,31 @@ def simulate(
     return res
 
 
+def _warn_newton_roundoff(res, eng) -> None:
+    """add-newton-roundoff-acceptance: say when a transient Newton
+    solve was accepted at roundoff level instead of aborting."""
+    n = int(getattr(res, "newton_roundoff_accepts", 0) or 0)
+    if n > 0:
+        import warnings
+        warnings.warn(
+            f"{eng}: {n} Newton solve(s) ran out of iterations with "
+            f"||dx|| stagnated at roundoff and were accepted: every "
+            f"row's residual is within "
+            f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
+            f"sums (at most 8 eps; worst at MNA row "
+            f"{res.newton_roundoff_row}). This replaces an abort that "
+            f"no tolerance could have passed; it is not a loosened "
+            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            stacklevel=3)
+
+
 def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
     import warnings
     eng = f"simulate(engine={engine_asked!r})"
+    _warn_newton_roundoff(res, eng)
     if stats.get("n_forced_accepts", 0) > 0:
         warnings.warn(
             f"{eng}: "
@@ -3358,7 +3539,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn, discontinuity_restart=None):
+                      switch_fn, discontinuity_restart=None,
+                      resolution_diagnostics=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3429,6 +3611,9 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if discontinuity_restart:
         why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
                     "fixed-step engine's restart rule"))
+    if resolution_diagnostics:
+        why.append(_blk("resolution_diagnostics", "resolution_diagnostics "
+                    "estimates a fixed step's truncation"))
     if store_every is not None and int(store_every) != 1:
         why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:

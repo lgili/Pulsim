@@ -46,7 +46,9 @@ namespace pulsim::solver {
 /// `t_estimated` is the linear-interpolated zero crossing of the
 /// watched signal (v_diode − turn_on_voltage for both directions on
 /// the pwl engine, see run_transient's interp_commutation_time)
-/// between two grid points. The state vectors
+/// between two grid points; with the fixed-step event split on it is
+/// the located crossing the step was split at (not a grid index). The
+/// state vectors
 /// themselves remain at the dt grid; only the COMMUTATION
 /// timestamp is sub-step accurate.
 struct CommutationEvent {
@@ -209,8 +211,24 @@ struct SolverSnapshot {
     return true;
 }
 
+/// Newton linear-algebra counters of one run
+/// (update-newton-persistent-solver). Zero on a run without Newton.
+struct NewtonCounters {
+    std::uint64_t solves            = 0;  ///< Newton calls
+    std::uint64_t iterations        = 0;  ///< Newton iterations
+    std::uint64_t analyses          = 0;  ///< symbolic analyses
+    std::uint64_t factorizations    = 0;  ///< full numeric factorisations
+    std::uint64_t partial_refactors = 0;  ///< low-rank refactors (stage B)
+    std::uint64_t lm_attempts       = 0;  ///< LM factorisation attempts
+    /// Iterations of each Newton call, in call order (saturates at 65535).
+    std::vector<std::uint16_t> iterations_per_solve;
+};
+
 struct SimulationResult {
     std::vector<Real> times;
+
+    /// Newton counters of the run (update-newton-persistent-solver).
+    NewtonCounters newton;
 
     /// v2.0 Phase 4 — the run's final state, complete enough to
     /// resume from exactly (`simulate(resume_from=...)`).
@@ -230,6 +248,49 @@ struct SimulationResult {
     /// Factorisations made for the restart stages (one per mask at
     /// 2γ·dt, more only if the segment byte budget evicts). 0 off.
     Size n_restart_factorizations = 0;
+    /// Steps split at an event inside them
+    /// (SimulationOptions::enable_substep_state_correction). 0 off.
+    Size n_split_steps = 0;
+    /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
+    /// `switch_fn` evaluations in the step loop, segment lookups the
+    /// last-segment memo did not absorb, and rollback snapshots taken.
+    /// add-fixed-step-resolution-diagnostics (`pwl` dynamic path).
+    struct RingingRecord {
+        Index var = kInvalidIndex;   ///< state-vector entry
+        Real t_start = 0;            ///< end of the run's first alternating step
+        Size length = 0;             ///< alternating steps in the run
+        Real max_delta = 0;          ///< largest |x_k − x_{k−1}| in the run
+    };
+    struct Resolution {
+        bool enabled = false;
+        /// Per stored sample: max over the steps since the previous one
+        /// of max_i (h/12)|f_{k+1} − 2f_k + f_{k−1}| / running peak |y_i|
+        /// (f = dy/dt of capacitor voltage / inductor current). 0 where
+        /// the stencil is invalid (mask change, restart, split, retry,
+        /// source jump, first two steps).
+        std::vector<Real> lte;
+        Real lte_max = 0;
+        Index lte_branch = kInvalidIndex;
+        Real lte_time = 0;
+        Size n_branches_covered = 0;
+        /// Fraction of the steps with no estimate (stencil invalid): an
+        /// unestimable run is not a resolved one.
+        Real unestimated_fraction = 0;
+        std::vector<RingingRecord> ringing;
+    };
+    Resolution resolution;
+    Size switch_fn_calls = 0;
+    Size segment_searches = 0;
+    Size rollback_snapshots = 0;
+    // Restart stage-2 fallback: backward-Euler re-tries, and those kept.
+    Size stage2_retries = 0;
+    Size stage2_be_kept = 0;
+    Size stage2_retry_failures = 0;
+    // Event splitting: steps whose gate changed with no edge oracle to
+    // locate it (taken at the next grid point), and steps whose event
+    // list overflowed (kMaxStepEvents or the per-step search cap).
+    Size unlocated_gate_steps = 0;
+    Size split_event_overflows = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or
@@ -313,6 +374,14 @@ struct SimulationResult {
     Size num_switch_bits = 0;
     std::vector<Size> switch_state_unsolved;
     bool has_switch_states = false;
+
+    /// Transient Newton solves that ended at the iteration budget and
+    /// were accepted at roundoff level (add-newton-roundoff-acceptance:
+    /// stagnated ||dx|| below 1e-6·|x|, row-wise backward error at most
+    /// 8 eps), the largest backward error among them, and its MNA row.
+    Size newton_roundoff_accepts = 0;
+    Real newton_roundoff_omega_max = 0;
+    Index newton_roundoff_row = kInvalidIndex;
 
     /// Start the record for a circuit with `num_switches` mask bits.
     /// Call once, before the first sample is stored.
@@ -404,6 +473,7 @@ struct SimulationResult {
                times.size() * sizeof(Real) +
                event_iteration_count.size() * sizeof(Size) +
                switch_state_bits.size() +
+               newton.iterations_per_solve.size() * sizeof(std::uint16_t) +
                switch_state_unsolved.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
                event_iteration_breaches.size() *

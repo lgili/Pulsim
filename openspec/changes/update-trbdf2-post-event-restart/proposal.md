@@ -37,6 +37,11 @@ for the engine is 3–4× fewer solves on PWM circuits.
 
 ## What Changes
 
+> As implemented: the refresh runs at gate-driven events only; at a
+> diode event and at the initial settle it was measured to hurt (a
+> stiff L·g_off mode in the probe) and is not applied. See
+> `DECISIONS.md` item 6.
+
 - **Derivative refresh after an event.** After a gate-edge landing, a
   diode-event landing and the initial settle, the derivative slots of
   the companion history are re-read from a solve under the post-event

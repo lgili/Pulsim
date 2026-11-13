@@ -65,7 +65,7 @@ inline Real refresh_mosfets_level1(
     Vector& f_nl,
     const topology::Graph& graph,
     const DevicePool& pool) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     return stamp_nonlinear_branches<models::MosfetLevel1>(
         x, J_nl, f_nl, graph, pool,
@@ -84,7 +84,7 @@ inline Real refresh_igbts_level1(
     Vector& f_nl,
     const topology::Graph& graph,
     const DevicePool& pool) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     return stamp_nonlinear_branches<models::IgbtLevel1>(
         x, J_nl, f_nl, graph, pool,
@@ -105,7 +105,7 @@ inline Real refresh_igbts_level1(
 make_combined_diode_mosfet_refresh() {
     return [](const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
               const topology::Graph& graph, const DevicePool& pool) -> Real {
-        if (J_nl.rows() > 0) J_nl.setZero();
+        if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
         if (f_nl.size() > 0) f_nl.setZero();
 
         const Real i_diode = stamp_nonlinear_branches<models::IdealDiode>(

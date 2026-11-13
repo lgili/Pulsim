@@ -97,6 +97,16 @@ the snubbed flyback in `test_saturable_transformer.py` aborts at
 tol_newton_res=1e-4` it completes and reports V_out = 3.53 V, while
 `engine='pwl', dt=1e-8` gives 15.31 V.
 
+Since `add-newton-roundoff-acceptance` a transient solve that runs
+out of iterations with `||dx||` stagnated at roundoff is accepted when
+every row's residual is within 8 eps of the magnitudes that row sums
+and `||dx|| <= 1e-6·|x|`; the run warns "Newton solve(s) ran out of
+iterations ... and were accepted" and counts them in
+`result.newton_roundoff_accepts`. That is a backward-error test, not a
+looser tolerance, and the DC operating point never uses it. When it
+declines, the abort message says why (the row's backward error, the
+step ceiling, whether `||dx||` stagnated).
+
 **Fix:** look at the device the message names, and cross-check on the
 other engine. An abort at `h_min` right after a hard switching edge on
 TR-BDF2 is a known engine limitation (`KNOWN_LIMITATIONS.md`,
@@ -143,6 +153,18 @@ you build the cache yourself.
 ## Time-step (`dt`) choices
 
 ### Symptom: ringing or instability with reasonable circuits
+
+With `simulate(..., resolution_diagnostics=True)` (off by default: it
+costs 5-14 %) the fixed engine reports it: `pulsim.ResolutionWarning`
+(once per run) names the variable and the time, and `res.resolution`
+holds `lte_max` (per-step truncation estimate over the variable's peak,
+floored at 1e-3 of its kind's peak; threshold 1e-2), `ringing` (runs of
+>= 4 sign-alternating steps above 1 % locally and 1e-3 of the entry's
+peak) and `unestimated_fraction` (warned above 0.5: such a run is not
+shown to be resolved). RC stepped at `dt = 10τ`: 0.35 and a run of 8 on
+`V(out)`; at `τ/10`: 3.3e-4, silent. The estimate is not a bound and
+does not cover the stateful devices' internal states: no warning is not
+a proof (halve `dt`).
 
 If `dt` is too large compared to the system's smallest time constant, the trapezoidal companion can ring (overshoot a true exponential by 10-20 %).
 

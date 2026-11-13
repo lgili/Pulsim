@@ -50,22 +50,48 @@ def _on_grid(t, y, ref):
     return g, np.interp(g, t, y), np.interp(g, tr, yr)
 
 
-def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False) -> float:
+def _inside(g, exclude):
+    """Mask of grid points strictly inside one of the ``(lo, hi)`` intervals."""
+    iv = np.asarray(exclude, dtype=float).reshape(-1, 2)
+    iv = iv[np.argsort(iv[:, 0])]
+    reach = np.maximum.accumulate(iv[:, 1])        # furthest end among intervals starting earlier
+    k = np.searchsorted(iv[:, 0], g, side="left") - 1  # last interval with lo < g
+    return (k >= 0) & (g < reach[np.maximum(k, 0)])
+
+
+def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False,
+            exclude=()) -> float:
     """``sqrt(∫(y − ref)² dt / window) / span``, span = max(ref) − min(ref)
-    floored at ``abs_scale`` (for a flat reference)."""
+    floored at ``abs_scale`` (for a flat reference).
+
+    ``exclude``: ``(lo, hi)`` time intervals left out of the integral and the
+    window (the edge DIAGNOSTIC of the differential runner, never its gate)."""
     t, y = _window(t, y, exclude_t0)
     g, a, r = _on_grid(t, y, ref)
     span = max(float(r.max() - r.min()), abs_scale)
     if span <= 0.0:
         raise ValueError("flat reference: give abs_scale > 0")
-    return float(np.sqrt(np.trapezoid((a - r) ** 2, g) / (g[-1] - g[0])) / span)
+    d2 = (a - r) ** 2
+    if not len(exclude):
+        return float(np.sqrt(np.trapezoid(d2, g) / (g[-1] - g[0])) / span)
+    seg = np.diff(g) * 0.5 * (d2[1:] + d2[:-1])
+    keep = ~_inside(0.5 * (g[1:] + g[:-1]), exclude)
+    window = float(np.diff(g)[keep].sum())
+    if window <= 0.0:
+        raise ValueError("every interval excluded")
+    return float(np.sqrt(seg[keep].sum() / window) / span)
 
 
-def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False) -> float:
-    """``max|y − ref| / span`` at the same points as :func:`err_rms`."""
+def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False,
+            exclude=()) -> float:
+    """``max|y − ref| / span`` at the same points as :func:`err_rms` (grid
+    points strictly inside an ``exclude`` interval are skipped)."""
     t, y = _window(t, y, exclude_t0)
     g, a, r = _on_grid(t, y, ref)
     span = max(float(r.max() - r.min()), abs_scale)
     if span <= 0.0:
         raise ValueError("flat reference: give abs_scale > 0")
-    return float(np.abs(a - r).max() / span)
+    d = np.abs(a - r)
+    if len(exclude):
+        d = d[~_inside(g, exclude)]
+    return float(d.max() / span)

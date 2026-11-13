@@ -91,6 +91,98 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A non-unique extremum's gradient is left out of `record.grads`.
   Interior near misses are refined, so they are flagged.
 
+### Integration fixes (batch 6b: design optimisation, exact route)
+
+* **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
+  only warns about: an opening inductor on `trbdf2` came back `ok` with
+  `v_peak.S` = 1.19e10 V. A run with an implausible node voltage, or a
+  trbdf2 run that held a diode against its commutation rule, is now
+  `failed` (`implausible_voltage: ...`, `missed_commutation: ...`); a
+  warning is shown once per call site, so an optimiser never saw it.
+* **Fixed** `engine='exact'` (the canonical name of `'dsed'`) was a
+  `ValueError` in `pulsim.design.Evaluator`, a `KeyError` in the
+  analytic benchmark cases, and read no freeze in
+  `differential_runner --engines exact`; all three alias it to `dsed`.
+  `'exact'` and `'dsed'` give the same refusal or bit-identical samples
+  on every engine-conformance cell (new test).
+* **Changed** the `V_th = 0` LC tank of
+  `test_double_crossing_inside_one_step_is_seen`: re-pinned from "the
+  stored-sample guard raises" to the right answer (event-locator fix):
+  four edges and end v(t) = -5.437946944 V, v(k) = 9.49998506 V against
+  a DOP853 reference. The -5.18 V of batch 6a was v(k).
+* **Changed** `mode_selection='lcp'` on the bridge behind an ideal
+  transformer (slice 3's passivity test): on its own tree it returned
+  11.73 V (pwl 31.88 V) silently; here the stored-sample guard raises
+  `DiodeModeInconsistentError` naming D2 at t = 10.008 ms. The test
+  checks the class on a 9 ms run (matches pwl to 5e-9 V) and the raise.
+
+### Integration fixes (batch 6a: complementarity mode selection merged)
+
+* **Changed** on the integrated tree the dsed runs that the batch-4
+  stored-sample guard refused (`DiodeModeInconsistentError`) are now
+  repaired by the default-mode guard and returned: the zero-band boost
+  at 20 / 50 / 500 Ω (V_th = 0) and 20 / 50 Ω (V_th = 1e-3) ends on
+  trbdf2 rtol 1e-10, the half-wave RL rectifiers agree
+  (`diode_half_wave_rl_load` dsed error → agree 1.35e-4; analytic
+  `halfwave_rl` dsed error → 5.7e-9). The stored-sample guard is kept:
+  the kernel guard misses the `V_th = 0` double crossing of an LC tank
+  (it returns -5.18 V where trbdf2 has 9.50 V) and the guard covers
+  `MODE_GUARD = False`. The "changed numbers" in the guard section below
+  are against the unguarded settle, not against this tree.
+* **Added** conformance cells: `mode_selection='shadow'|'lcp'` with a
+  diode on `pwl`, `trbdf2` and `auto` raises
+  `UnsupportedError(feature='mode_selection')` (pwl had no cell).
+* **Changed** the reference status after the event-splitting merge
+  (7a60a084), strict gate, agree / disagree / error: pwl 77 / 23 / 8,
+  pwl+restart 81 / 19 / 8 → 82 / 18 / 8 (`three_phase_diode_rectifier`
+  2.17 → 6.3e-3), pwl+split 85 / 15 / 8; trbdf2 and dsed unchanged.
+  `vcswitch_resistor`, `ll07`, `ll09`, `ll10`, `ll12` still disagree
+  under the split: edge diagnostic 1.1e-21–6.5e-3, timing 1 step (the
+  source-forced gate node is sampled on the step grid). The gate is
+  unchanged.
+
+### Integration fixes (batch 5: in-house LU Newton, TR-BDF2 error control)
+
+* **Fixed** `engine='trbdf2'` lands the corners of pulse and table
+  current sources as source breakpoints, like the voltage sources (it
+  clamped the step to them but did not count or restart on them).
+* **Changed** the Newton roundoff acceptance runs on the in-house-LU
+  workspace: its backward error reads the workspace's copy of the
+  iterate. A solve the Eigen path aborted can now converge (100 µH at
+  `tol_newton_dx` = 1e-11 completes; its test pin changed).
+* **Changed** the reference harness drops nothing from its gate. Batch 5
+  first gated on an `edge` measure (switching steps and source-forced
+  nodes left out) and cleared 21 `known:` cells, saying they agree; a
+  review showed that measure cannot see a late edge on a resistive load
+  (`vcswitch_resistor` pwl 0.0332 strict, 1.1e-21 edge) and drops exactly
+  the wrong intervals of a chattering trace. The gate and every freeze
+  are now the strict `interp` measure; each cell also records an edge
+  DIAGNOSTIC (edge error, excluded fraction of the span, worst
+  observable, edge-timing mismatch in s and in pwl steps; `undersampled`
+  above 10 % excluded, `chatter` when one trace has more than twice the
+  other's switch-state changes), which never decides. Of the 21 cells,
+  9 agree on the strict gate and stay cleared — trbdf2 on `ll02`,
+  `ll06`, `ll07`, `ll10`, `ll12`, `full_bridge_dc`,
+  `flying_capacitor_3level`, `t_type_3level_halfbridge` (the TR-BDF2
+  merge) and pwl `cascaded_h_bridge_5level` (its reference moved) —
+  and 12 came from the measure alone and are frozen again (pwl on nine
+  circuits, trbdf2 `ll09`, dsed `ll03` and `full_bridge_dc`); dsed
+  `ll02` (1.14e-3, moved with its reference) is frozen too.
+  `ll08_buck_mosfet` error → disagree on pwl and trbdf2. Strict counts:
+  pwl 77/23/8/0, trbdf2 96/4/2/6, dsed 38/17/14/39.
+* **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
+  grinds to `max_steps` on the SEPIC benchmark (it ran before the
+  error-control change); the harness has no reference for it, so its
+  pwl and trbdf2 cells are `error` and not frozen.
+* **Changed** `ll16_flyback_closed_loop` completes on `pwl` with
+  roundoff warnings (it aborted at 37 µs); its state is wrong from t = 0
+  on the base tree too (I(Lm_core) ≈ 2.4e13 A). Triage keeps it `error`.
+* **Changed** pinned `trbdf2` counts and ceilings, old → new with the
+  reason in each file (`analytic.yaml`, `perf_counters.yaml`, the PWM
+  conformance step counts 1104/2254 → 1031/2058). Two ceilings are
+  looser: `hard_switched_rc` 1.098e-6 → 2.224e-6, `buck_dcm` 4.136e-7 →
+  5.635e-7; ten are tighter.
+
 ### Design evaluation for optimisers (`pulsim.design`, first slice)
 
 * **Added** `pulsim.design.Evaluator(build, period=..., loads=...,
@@ -204,6 +296,134 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** `result.exact` names "a sine / pulse / table current source"
   as the reason a mask is numeric (it said "PWM / pulse source").
 
+### Fixed engine: event-splitting review fixes
+
+* **Fixed** two gate edges less than 1 % of `dt` apart (a dead-time
+  pair) merged into the earlier one and the later edge was ignored for
+  the rest of the step; the interval now samples the gate at the
+  cluster's last edge (pair at 10.37 µs: order 2, −1.24e-3 A at 1 µs).
+* **Changed** a declared `b_extra_fn` jump (`next_jump_after`) is split
+  at like a source jump (RC step at 2.037 µs: −6.36e-3 → −1.14e-4 V
+  from dt = 0.4 to 0.05 µs, order 1.97; the rule alone is first order).
+* **Added** `res.counters["unlocated_gate_steps"]` (an opaque
+  `switch_fn` with the split on; one `UserWarning`) and
+  `["split_event_overflows"]` (the per-step event list or search cap
+  ran out). The oracle answer is re-asked after a `step_observer` ran.
+
+### Fixed: restart rule overshoot on diode rectifiers
+
+With `discontinuity_restart=True`, a diode that turned off inside the
+second SDIRK stage was solved from the stage's pseudo-state: the
+`three_phase_diode_rectifier` bus reached 37.20 V on 24 V-peak phases
+at dt/τ = 10 (59.63 V on a 41.57 V line-to-line bridge). Such a stage
+is now re-tried as backward Euler from stage 1 when stage 2 only turned
+diodes OFF; it is kept when it keeps stage 1's diode mode, else the
+SDIRK stage stands (as it does after a stage-2 re-try that throws). Bus peak
+23.999 / 41.566 V; max error vs a tight trbdf2 16.66 → 0.762 V and
+18.35 → 3.44 V (flag off: 13.45 / 17.84 V). Buck CCM, DCM, tank and
+LC results bit-identical to before the fallback (the fallback never
+fires there); `res.counters` gains `stage2_retries`, `stage2_be_kept`,
+`stage2_retry_failures`. Flag off: bit-identical.
+
+### Fixed engine: resolution diagnostics (read-only, opt-in)
+
+With `resolution_diagnostics=True`, a fixed-step run that does not
+resolve its circuit says so. Off by default: it costs 5-14 % ns/step
+(the gate was 3 %).
+`res.resolution` (`engine='pwl'`; `None` for `trbdf2`/`dsed` or when
+off) holds `lte` (per stored sample), `lte_max`, `lte_branch`,
+`lte_time`, `n_branches_covered`, `unestimated_fraction` and `ringing`
+records (`var`, `t_start`, `length`, `max_delta`). The estimate is
+normalised by the running peak floored at 1e-3 of the peak of its kind
+(volts / amps), and a ringing step must exceed 1e-3 of the entry's
+peak. One `pulsim.ResolutionWarning` (a `UserWarning`) per run when
+`lte_max > 1e-2`, a ringing record exists, or over half the steps could
+not be estimated. States are bit-identical either way.
+
+| case | `lte_max` | ringing | warns |
+|---|---|---|---|
+| RC, `dt` = 10τ / τ / τ/10 / τ/100 | 0.347 / 2.67e-2 / 3.3e-4 / 3.3e-6 | runs of 8 on `V(out)`, 19 on `Is(V)` at 10τ | yes / yes / no / no |
+| buck CCM T/20 / T/100 / T/400 | 1.4e-4 / 2.7e-5 / 6.8e-6 | none | no |
+| DCM buck T/100, flag off / restart rule | 2.8e-3 / 7.4e-7 | `V(sw)` run of 52 / none | yes / no |
+| 1 nF, 1 mΩ switch, dt = 1 ns, flag off / rule | 0.66 / 5.0e-5 | 500 / none | yes / no |
+
+Cost: +5 % to +14 % ns/step with it on (design target 3 %, missed);
+none with it off.
+
+### Fixed engine: step-loop bookkeeping (results bit-identical)
+
+The `pwl` step loop does less per step; every trajectory, switch state,
+event record and retry is bit-identical to before (69 probe runs,
+restart rule off/on/split, compared by value and by bytes).
+
+- **BREAKING (type):** `res.times` is a read-only zero-copy numpy view
+  (base: the result), not a list copied on every access. Indexing,
+  `len`, slicing, `np.asarray` work as before; `list(res.times)` gives
+  the old list. A 100 k-sample access: 2.85 ms → 0.01 ms.
+- `switch_fn` is evaluated once per distinct solve time in a step (two
+  per step before: the pre-event mask, then once per event iteration).
+  Contract: `switch_fn` is a function of `t` and of state written by
+  `step_observer`; a callable that changes on each call sees fewer
+  calls.
+- No `switch_fn`: the default mask (all closed on `pwl`, all open on
+  `trbdf2`, warnings unchanged) is a C++ schedule
+  (`pulsim.make_constant_switch_fn(mask)`), not a Python lambda.
+- New `res.counters`: `switch_fn_calls`, `segment_searches`,
+  `rollback_snapshots`.
+
+| ns/step, interleaved A/B, best of 5 | before | after |
+|---|---|---|
+| buck (`make_pwm_switch_fn`) | 173 | 131 |
+| buck, restart rule / split | 210 / 196 | 140 / 140 |
+| three-phase VSI | 358 | 261 |
+| RLC n=5, no `switch_fn` | 350 | 125 |
+| RLC n=1502 | 36 015 | 34 082 |
+
+### Fixed engine: event splitting (opt-in, needs the restart rule)
+
+`simulate(..., discontinuity_restart=True,
+enable_substep_state_correction=True)` splits a fixed step at an event
+inside it: a trapezoidal sub-step to the event under the pre-event mask,
+then an SDIRK(2,2) restart step to the grid point, then the window's two
+grid steps. Samples stay at `t_start + k·dt`.
+
+Events:
+- gate edges of a schedule with `next_edge_after` (every C++ helper,
+  and a Python schedule object that defines the method); an opaque
+  `switch_fn` is not split;
+- built-in PWM/pulse source jumps;
+- diode crossings, located from the step's first solve (pre-event
+  bits) by `SwitchedDiode::crossing_signal`.
+
+Up to 8 events per step in time order; one within 1 % of `dt` of a step
+boundary is taken there. `res.n_split_steps` counts the split steps.
+
+| Engine, restart rule on | rule alone | rule + split |
+|---|---|---|
+| RL edge +0.3 dt off the grid, dt = 8/4/2/1 µs | −3.40e-2 … −4.25e-3 A, order 1.00 | +1.58e-5 … +2.58e-7 A, order 1.98 |
+| Buck CCM D = 0.4567 `v_C`, T/50 … T/400 | 8.08e-2 V (T/50…T/200), 1.96e-2 V | 1.07e-6 … 1.43e-8 V, order 2.1 |
+| DCM buck, rel. error at T/100 / T/101 / T/400 (default engine −0.023 / −0.497 / −0.022 %) | 8.6e-7 / 6.9e-6 / 2.1e-7 | 7.2e-8 / 7.3e-8 / 1.3e-9 |
+| DCM turn-off `t_estimated` vs the current zero | grid index, 0.98 dt early | < 1e-4 dt |
+| Q = 50 tank, edges 0.37 dt off the grid, T/50 / T/100 | −0.663 / −0.024 % | −0.592 / −0.011 % |
+
+Cost on the buck at T/100 (fixed off-grid duty / a duty that moves every
+period): 0.76 / 2.96 off-nominal refactorisations per period;
++10 % / +7 % wall time per step against the rule alone.
+
+* **BREAKING (with the option on): `enable_substep_state_correction`
+  is the event split.** It now requires `discontinuity_restart=True`
+  (`UnsupportedError(engine='pwl', feature=
+  'enable_substep_state_correction')`, a `ValueError`) where the rule
+  refused it before. The old sub-step correction never fired (its
+  1 %-of-dt guard always rejected the estimate) and solved Newton
+  devices linearly; it is removed.
+* `commutation_events.t_estimated` of a located crossing is the
+  crossing time, not a grid index.
+* Limits: a retried step (dt-retry ladder) is re-taken without its
+  interior events; a diode crossing inside an SDIRK interval keeps the
+  grid interpolation for its record; an even number of edges of an
+  opaque `switch_fn` inside one step is not seen.
+
 ### Fixed engine: discontinuity restart rule (opt-in)
 
 `simulate(..., discontinuity_restart=True)` (also `SolverOptions`,
@@ -263,15 +483,111 @@ backward-Euler half-steps, never shipped. It drained resonant modes:
     order.
   The callback is called once per stage time; a restart step calls it
   at `t_prev + γ·dt` (off the grid) and at `t`.
-* Refused: `discontinuity_restart=True` with
-  `enable_substep_state_correction=True` (`ValueError` naming both).
+* `enable_substep_state_correction=True` now needs the rule (event
+  splitting, above).
 * Limits:
-  - an edge off the `dt` grid stays first order (event splitting is a
-    separate change);
+  - an edge off the `dt` grid stays first order without the event
+    split (above);
   - sample 0 of a node voltage still reads 0 V;
   - `mmc_arms` refuses the flag;
   - a Jiles–Atherton core extrapolates its stage-1 flux from the
     committed state (O(h) at a loop tip).
+
+### `engine='exact'` and the exact-route record (report only)
+
+`engine='exact'` is the canonical name of the event-driven exact engine;
+`'dsed'` stays accepted as its alias everywhere (one engine,
+bit-identical runs; `result.engine_used` and refusals keep naming
+`'dsed'`, the capability-table column). Every exact run carries
+`result.exact['segments']`: one row per mask visited, `exact` or not,
+with the reason (`'device'`, `'source'`, `'extraction'`, `'cost'`), the
+device and kind, the tier and `n_segments`. `pulsim.exact_route(builder,
+t_end, ...)` returns the same record, and classifies circuits the exact
+engine refuses (a Shockley diode → `'device'`; coupled inductors, an
+inductor cut-set or a capacitor loop → `'extraction'`; a PWM / pulse
+source → `'source'`). The route of `engine='auto'` does not change.
+
+### Diode mode selection: passivity classes in the diagnostics
+
+`diagnostics['mode_guard']` and `diagnostics['mode_selection']` now
+carry `passivity = {'class', 'device', 'kind'}`: `non_passive` (a VCVS,
+a negative R/C/L, or a group of coupled inductors whose inductance
+matrix is not positive semidefinite, named `L1+L2+…`, kind
+`InductorCoupling` — pairwise `|k| ≤ 1` does not make three windings
+PSD: `k12 = k13 = 1, k23 = 0` has an eigenvalue `1 − √2`),
+`passive_nonreciprocal` (an ideal transformer, named; Lemke kept,
+nothing refused) or `passive_reciprocal`. Numbers do not change. A diode
+bridge behind an ideal transformer (n = 0.5) runs on the dsed default at
+31.876241228 V against pwl 31.876241232 V. A rectifier fed by coupled
+inductors is still refused by the dsed extractor
+(`UnsupportedError('dsed', 'extraction')`). Known: `mode_selection='lcp'`
+is wrong on that bridge (11.73 V; KNOWN_LIMITATIONS).
+
+### dsed: a diode predicate starting a step at exactly zero is located (fix)
+
+The dsed event locator skipped every armed predicate whose value was
+exactly 0 at the start of a step ("just fired"). With `V_th = 0` a
+turn-on lands at `v = 0`, so the armed turn-off predicate started the
+next step at 0 and a return through zero inside that step was never an
+event: the double-crossing LC tank held its diode ON at −18 mA from
+1.89 µs to 7.66 µs. Now only the predicate that fired at that instant is
+skipped; a diode predicate at zero is read just after the step start
+(`100·h_e` on the exact trajectory) and located when it moves into its
+admissible side, never fired at zero length. The tank's edges are now
+1.2532358877 / 1.8877214715 / 7.5370567364 / 8.1702737953 µs (solve_ivp
+DOP853 rtol 1e-13 agrees to 3e-16 s), end `v(t)` −5.17799 → −5.43795 V.
+Every other circuit of the mode-selection surveys (29 circuits × settle /
+guard / 'lcp') and `pwl`/`trbdf2` are bit-identical.
+
+### Diode mode selection: default-mode guard on dsed (BREAKING for wrong numbers)
+
+`engine='dsed'` now judges the diode mode its settle picks at `t = 0`
+and at every event (both candidate modes propagated exactly over
+`100·h_e` and `1e4·h_e`); an inconsistent mode is decided by the LCP
+instead and listed in `result.diagnostics['mode_guard']` (`checks`,
+`repairs`, `repair_times`, `repair_diodes`, `repair_violations`). Runs
+whose modes were consistent are bit-identical. Changed numbers, all
+toward trbdf2 at rtol 1e-10: the `V_th = 0` boost after 400 periods,
+R = 500 Ω 43.70907 → 44.72165 V (error −1.01 V → −1.1e-5 V), R = 50 Ω
+23.67304 → 23.80642 V, R = 20 Ω +3.6e-2 → −1.5e-6 V (D1 was held ON at
+−0.86 to −1.18 A); the `V_th = 1e-3` boost at 20/50 Ω (−0.44/−1.04 A);
+the half-wave RL rectifier (`diode_half_wave_rl_load`), whose diode was
+held OFF while forward-biased by 10 V, mean `v(out)` 2.12046 → 3.18068 V
+(trbdf2 3.18066 V); the single-phase bridges and the three-phase
+rectifier example by ≤ 1.2e-12 V. A selection refusal at a repaired
+event raises `UnsupportedError(engine, 'consistent_mode', <diode>, 'Diode')`.
+
+### Diode mode selection: `mode_selection='lcp'` on dsed
+
+The LCP decides the mode at `t = 0` and at every event in place of the
+settle (`diagnostics['mode_selection']`: `lcp_count`, pivots, `ties`,
+`widenings`, `leak_pins`, `pin_judgements`, `unfixed`, `enumerations`,
+`nonunique_modes`). New tie rule (design D5): decided ports stay fixed
+while the ties are widened, and a tie carrying the leak current that
+holds a floating node is ON unless the all-OFF mode passes the exact
+judge — the three-phase C-filter bridge's 30 wrong shadow decisions are
+0 now. Non-passive circuits (VCVS, negative R/C/L) fall back to
+enumeration up to 12 ports, then `UnsupportedError(engine,
+'non_passive_ports', <device>, <kind>)`. Event counts are equal or
+larger than the settle's (the correct mode commutes more); `pwl` and
+`trbdf2` refuse `'lcp'` by name.
+
+### Diode mode selection as a complementarity problem: shadow mode
+
+`simulate(engine='dsed', mode_selection='shadow')` keeps today's settle
+deciding (states bit-identical) and solves, at every event, the diode
+LCP of the backward-Euler companion network at `h_e = 1e-7·T_ref`
+(lexicographic Lemke, hybrid previous-mode coordinates, tie widening,
+`V_th > V_f` hysteresis). `result.diagnostics['mode_shadow']` lists each
+disagreement with both modes judged by their exact trajectories, plus
+`lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
+`widenings`, `settle_rounds_total` (add-complementarity-mode-selection
+tasks 1–4). `'shadow'` on `pwl`/`trbdf2` raises
+`UnsupportedError(engine, 'mode_selection')`. Over 19 circuits: the
+`V_th = 0` boost's 15 (R = 50 Ω) and 24 (R = 500 Ω) disagreements are
+all the settle's error (it ends 1.01 V low at R = 500 Ω); banded runs
+agree at every event; the three-phase C-filter bridge showed 30 where the
+slice-1 tie rule was wrong (0 with the rule above). Max 3 pivots per event.
 
 ### DSED: exact propagator with a stated accuracy per mask
 
@@ -788,6 +1104,43 @@ once, above the engine dispatch, and both engines consume that plan.
   +0.07 %, plateau +0.35 %; Lauritzen body diode at T_M = 0.01·TT
   against SPICE TT recovery: I_rrm −0.09 %, Q_rr +0.11 %.
 
+### Segment build: per-branch device lookups resolved once (performance)
+
+* **Changed** `SegmentAssembler` resolves each branch's device kind,
+  parameter pointer and branch-current unknown once per pool instead of
+  one `DevicePool` lookup per stamp (`update-linear-time-assembly`).
+  Bit-identical on all 19 golden cases. Per-mask eager build of the
+  switched ladder (n = 3008) 337 → 212 µs; the VSI (n = 12) is
+  unchanged within noise. Tiers 2 (first visit by `partial_refactor`)
+  and 3 (reciprocal pivots) and the low-rank Newton update were
+  measured and not landed; see the changes' DECISIONS.md.
+
+### Newton on the in-house LU, no allocation per iteration (performance)
+
+* **Changed** the engines' Newton workspace factorises the combined
+  Jacobian with the in-house Gilbert–Peierls LU (one symbolic analysis
+  per pattern, numeric refactor in place) instead of `Eigen::SparseLU`
+  (`update-newton-persistent-solver`, stage A2). Calls without a
+  workspace — the DC operating point and continuation — keep
+  `Eigen::SparseLU`. Listed as a numerical change; on the 19 golden
+  cases (every Newton case on `pwl` and `trbdf2`) states, step times,
+  switch states and the iteration count of every Newton call are
+  bit-identical to before.
+* **Changed** the device refreshers and the engines' refresh wrappers
+  zero `J_nl`'s values and keep its pattern (`sparse::zero_keep_pattern`)
+  instead of `setZero()` + re-insert. With the in-house refactor a
+  Newton iteration now performs no heap allocation after the first call
+  (was ~20 Eigen mallocs). ns/step against the previous build
+  (interleaved, best of 9): Shockley buck `pwl` 3478 → 859, `trbdf2`
+  11410 → 3186; Shockley rectifier n = 51 12153 → 4860, n = 483
+  134789 → 59458; MOSFET Level-1 3824 → 989; saturable inductor
+  3555 → 834.
+* **Added** `SimulationResult.newton` (`NewtonCounters`: `solves`,
+  `iterations`, `analyses`, `factorizations`, `partial_refactors`,
+  `lm_attempts`, and `iterations_per_solve`, the iteration count of
+  every Newton call), and `pwl::solve_with_newton_in_place`, the
+  out-parameter form of `solve_with_newton_b_extra`.
+
 ### Newton: one sparse-LU analysis per run (performance, bit-identical)
 
 * **Changed** `solve_with_newton_b_extra` takes an optional
@@ -798,7 +1151,11 @@ once, above the engine dispatch, and both engines consume that plan.
   rebuilt every iteration). Factors, states and iteration counts are
   bit-identical (`update-newton-persistent-solver`, stage A1; A2 and B
   not included). Eigen heap allocations per Newton iteration on a
-  Shockley-diode buck: 47.7 → 20.4.
+  Shockley-diode buck: 47.7 → 20.4. The workspace's line-search / LM
+  refresh target is compressed after every refill: on Eigen 3.4.x
+  (Ubuntu 24.04's `libeigen3-dev`) it otherwise grew over the run and
+  every insert copied it, which made Newton runs with line search
+  ~100–300× slower (Eigen 5 was not affected).
 
 ### TR-BDF2 event solvers: byte budget and allocation-free refactor (performance, bit-identical)
 
@@ -835,6 +1192,104 @@ once, above the engine dispatch, and both engines consume that plan.
   unchanged within noise.
 * **Added** `CacheMetrics.structure_builds`, `symbolic_analyses`,
   `symbolic_fallbacks`.
+
+### Newton roundoff acceptance (add-newton-roundoff-acceptance)
+
+* **Added** transient Newton solves (`engine='pwl'` dynamic path,
+  `'trbdf2'` / `'auto'`) that exhaust the iteration budget are accepted
+  instead of aborting when `||dx||` stagnated over the last two steps,
+  `||dx|| <= 1e-6·max(1, |x|)` and every row's residual is at most
+  8 eps of the magnitudes the row sums (Oettli–Prager backward error).
+  Two 100 µH inductors and a Shockley diode: dt = 1e-11, 1e-12, 1e-13 s
+  aborted (||dx|| 1.9e-9 … 1.2e-7 on powers of two) and now complete
+  (ω ≤ 0.75 ε) with `i_L` on the physical trend to 1e-3; 10 mH at
+  1e-9 … 1e-11 s likewise. A warning names the count;
+  `result.newton_roundoff_accepts`, `newton_roundoff_omega_max`,
+  `newton_roundoff_row`. Tolerances unchanged; the DC operating point
+  never accepts this way. A declined check is explained in the abort.
+* Not cured: the documented TR-BDF2 h_min stall (snubbed flyback with a
+  saturable transformer) now runs to 494 µs instead of 10 µs (213
+  accepted solves) and then aborts in a roundoff limit cycle that the
+  stagnation test reads as contraction (||dx|| 3.2e-7, 5.0e-7,
+  1.9e-7; ω = 0.28 ε). The known-limitations row stays. The step floor
+  `h_noise` of the design is not implemented.
+
+### TR-BDF2 error control (update-trbdf2-error-control)
+
+* **Changed (BREAKING, tolerance meaning)** `engine='trbdf2'` /
+  `'auto'`: the local error estimate gets the factor 2 of Bank et al.;
+  it was half the true local error, so `rtol` / `atol` meant twice
+  themselves. Defaults unchanged (`1e-5` / `1e-8`); pass doubled values
+  for the previous step density (measured: a diode bridge then repeats
+  its previous step sequence exactly). Up to 27 % more steps.
+* **Changed (BREAKING, step sequence)** the step floor, probe floor,
+  probe cap, chatter floor and gate-pulse floor follow the step
+  ceiling instead of `t_end − t_start` (bit-identical while the
+  ceiling is `span/1000`): with `dt` given, a buck's steps up to 39 T
+  no longer depend on `t_end`. The default ceiling is unchanged.
+  `_trbdf2_stats["h_max_basis"]`.
+* **Added** source breakpoints: pulse-source corners and PWM voltage
+  source edges are landed and restarted like gate edges. Pulse into an
+  RC: rejects 32 → 4, no accepted step below 1e-9 s before a jump
+  (1.2e-10 s before), error at rtol 1e-6 1.82e-4 → 1.16e-4 V.
+  `_trbdf2_stats["n_source_breakpoints"]`.
+* Measured against update-trbdf2-post-event-restart (default
+  tolerances, probes/trbdf2_baseline.py): buck CCM error 7.18e-5 →
+  5.98e-5 (1636 → 1651 steps); rtol 1e-8: 1.18e-6 → 7.55e-7 (9152 →
+  11628); LC tank 2.06e-1 → 1.30e-1 (2562 → 3239); MOSFET half
+  bridge 4.14e-4 → 3.12e-4 (2088 → 1692). Moved the wrong way, both
+  because the same `rtol` is now twice as strict and these two do not
+  converge monotonically in `rtol` (they did the same at `rtol/2`
+  before): Shockley rectifier 2.74e-5 → 3.73e-5, diode bridge
+  time-weighted 3.07e-2 → 5.57e-2 (1242 → 1437 steps).
+* **Fixed** a SIGSEGV in the initial diode settle when its (Newton)
+  probe failed: it read an unsized state (PMSM beside a rectifier).
+* Re-baselined, not loosened: two TR-BDF2 tests run at doubled
+  tolerances (the previous density): the Lauritzen gated buck (at the
+  new defaults it hits the known h_min stall at 15 µs, as it did
+  before at rtol 5e-6) and the kilovolt-artefact strict xfail (at
+  1e-6 the new sequence misses the spike by chance; 1897 V at the
+  defaults).
+* Not done: the Hosea–Shampine stiff filter (needs a solve on an
+  existing factor in `PwlStateSpaceCache`); `h_chatter` stays.
+
+### TR-BDF2 restart after a gate edge (update-trbdf2-post-event-restart)
+
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'` / `'auto'`:
+  after a landed gate edge the edge cascade's probe (a trapezoidal
+  solve of `h_probe` under the post-edge mask) is committed as a
+  recorded step, so the companion history's derivative slots (inductor
+  voltage, capacitor current, each stateful device's slot) hold
+  post-edge values; at a boundary-settled edge only the slots are
+  re-read. The post-edge step memory stores the controller's proposal
+  instead of the accepted step. Each gate edge therefore adds one
+  recorded sample `h_probe` after the edge (not counted in `n_accept`). The first post-edge step was sized by a stale,
+  pre-edge derivative and collapsed; the memory then pinned it (the
+  buck's rising-edge step was 8.26e-13 s for a whole run). Measured,
+  24 V buck, 400 periods, default tolerances:
+
+  | | before | after |
+  |---|---|---|
+  | accepted steps (per period) | 7241 (18.1) | 1636 (4.1) |
+  | solves | 16262 | 5018 |
+  | rejects | 82 | 65 |
+  | first step after an edge | 8.26e-13 s | ≥ 1.7e-7 s |
+  | end error vs expm | 9.84e-4 | 7.18e-5 |
+  | DCM (R = 50 Ω): accepted steps, error | 15242, 2.39e-4 | 8932, 1.62e-5 |
+
+  Variable-step step counts and results move within their tolerance;
+  circuits without gate edges (a diode bridge, pulse sources) are
+  unchanged, and `engine='pwl'` is bit-identical. Not done at diode
+  events: there the probe holds a stiff L·g_off mode and the refresh
+  was measured to multiply a bridge's diode events by 260; the DCM
+  buck's post-turn-off steps (4e-14 s) therefore remain.
+  `res._trbdf2_stats` gains `n_derivative_refreshes`,
+  `n_refresh_probes` and `h_post_event_min`.
+  The trbdf2/auto conduction losses pinned by
+  `test_diode_forward_drop.py` moved by up to 2.4e-4 relative and were
+  re-pinned (boost DCM switch: 8.7e-6 → 2.3e-6 W off the fixed-step
+  value). A 3-phase VSI on RL loads takes 3998 → 1219 steps with its
+  end error 6.28e-4 → 6.73e-4 (the one circuit whose error grew).
 
 ### PWL diode forward drop (PSIM `V_f`)
 

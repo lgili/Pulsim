@@ -199,6 +199,22 @@ public:
         }
     }
 
+    /// TR-BDF2 post-event refresh: dq_M/dt from the device law at the
+    /// probe voltage and the stored charge; q_M is not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            const Real v =
+                stamping::read_node_voltage(x_probe, e.from)
+                - stamping::read_node_voltage(x_probe, e.to);
+            const Real q_e =
+                models::LauritzenDiode::junction_charge<Real>(
+                    v, e.params);
+            const Real A = Real{1} / e.params.T_M
+                           + Real{1} / e.params.tau;
+            e.f_prev = q_e / e.params.T_M - A * e.q_m_prev;
+        }
+    }
+
     /// Seed from a DC operating point: the device sits on its
     /// steady-state curve, where dq_M/dt = 0 and q_M = i·tau.
     void seed_from_dc_op(const Vector& x) {

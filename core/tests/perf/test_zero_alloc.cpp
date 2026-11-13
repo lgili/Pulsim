@@ -44,7 +44,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/pwl/nonlinear_refresh_diode.hpp"
+#include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -273,6 +276,9 @@ TEST_CASE("run_transient hot loop: zero std-container allocations",
     opts.t_start = 0.0;
     opts.t_end   = 2e-3;
     opts.dt      = 1e-6;   // 2000 steps
+    // The resolution diagnostics' three one-off buffers are counted
+    // separately below.
+    opts.resolution_diagnostics = false;
 
     solver::SwitchScheduleFn switch_fn = [](Real t) {
         SwitchStateMask m(2);
@@ -307,6 +313,35 @@ TEST_CASE("run_transient hot loop: zero std-container allocations",
     // buffer became contiguous. Measured: 5.
     if (kCountsMeaningful) {
         REQUIRE(delta < 16);
+    }
+
+    // add-fixed-step-resolution-diagnostics: on, it adds one-off
+    // buffers (workspace, index buffer, `lte` reserve, the ringing
+    // records this every-step toggling makes), never a per-step cost.
+    {
+        std::size_t n_rec = 0;
+        auto count_on = [&](Real t_end) {
+            auto on_opts = opts;
+            on_opts.resolution_diagnostics = true;
+            on_opts.t_end = t_end;
+            const std::size_t b0 = g_new_count.load();
+            auto on = solver::run_transient(*f.cache, f.g, f.pool,
+                                              on_opts, switch_fn);
+            const std::size_t d = g_new_count.load() - b0;
+            n_rec = on.resolution.ringing.size();
+            return d;
+        };
+        const std::size_t on_2k = count_on(2e-3);
+        const std::size_t rec_2k = n_rec;
+        const std::size_t on_4k = count_on(4e-3);
+        INFO("with resolution diagnostics: " << on_2k << " / " << on_4k
+             << " (ringing records " << rec_2k << " / " << n_rec << ")");
+        if (kCountsMeaningful) {
+            // Twice the steps: at most one more growth of the ringing
+            // record vector (11 -> 20 records here), nothing per step.
+            REQUIRE(on_4k <= on_2k + 1);
+            REQUIRE(on_2k < delta + 16);
+        }
     }
 
     // Physical sanity so the run wasn't degenerate: with both
@@ -346,6 +381,7 @@ TEST_CASE("run_transient with diodes: allocation count is O(1), "
     opts.t_start = 0.0;
     opts.t_end   = 1e-3;
     opts.dt      = 1e-6;   // 1000 steps
+    opts.resolution_diagnostics = false;   // counted in the test above
 
     solver::SwitchScheduleFn switch_fn = [](Real) {
         return SwitchStateMask(1);   // diode-owned bit; user all-open
@@ -402,6 +438,7 @@ TEST_CASE("substep event correction path is allocation-free per event",
     opts.t_end   = 5e-3;   // 5 line cycles → ~10 commutations
     opts.dt      = 1e-6;
     opts.enable_substep_state_correction = true;
+    opts.discontinuity_restart = true;   // the split requires the rule
 
     solver::SwitchScheduleFn switch_fn = [](Real) {
         return SwitchStateMask(1);
@@ -437,4 +474,57 @@ TEST_CASE("substep event correction path is allocation-free per event",
         // ... and emphatically NOT proportional to the step count.
         REQUIRE(delta < 5000 / 10);
     }
+}
+
+TEST_CASE("Newton iteration on a run workspace is allocation-free",
+          "[v2][perf][zero_alloc][newton]") {
+    // update-newton-persistent-solver 3.6 / 4.4: after the first call a
+    // Newton iteration allocates nothing — J_nl keeps its pattern, the
+    // combined Jacobian is written in place, and the in-house LU
+    // refactorises into its own L/U capacity.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "p", "gnd", 24.0);
+    b.add_switch("S", "p", "sw", 1e3, 1e-9);
+    b.add_nonlinear_diode("D", "gnd", "sw", models::IdealDiode::Params{});
+    b.add_inductor("L", "sw", "o", 1e-4);
+    b.add_capacitor("C", "o", "gnd", 4.7e-5);
+    b.add_resistor("R", "o", "gnd", 10.0);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    cache.build_lazy(1e-7);
+    SwitchStateMask m(1);
+    m.set(0, true);
+    const auto& seg = cache.lookup(m);
+    const auto n = static_cast<Index>(seg.state_size);
+    NonlinearRefreshFn rf = [](const Vector& x, sparse::Matrix& J, Vector& f,
+                               const Graph& g, const DevicePool& p) {
+        return refresh_smooth_diodes(x, J, f, g, p);
+    };
+    NewtonWorkspace w;   // in-house LU
+    w.iterations_per_solve.reserve(4096);   // the run's trace, amortised
+    Vector x = Vector::Zero(n);
+    Vector be = Vector::Zero(n);
+    for (int k = 0; k < 3; ++k) {   // first calls size every buffer
+        be.setConstant(1e-3 * k);
+        solve_with_newton_in_place(seg, rf, b.graph(), b.pool(), x, be,
+                                   Size{50}, Real{1e-9}, Real{1e-9}, false,
+                                   false, &w);
+    }
+    const auto it0 = w.iterations;
+    Eigen::internal::set_is_malloc_allowed(false);
+    const std::size_t before = g_new_count.load();
+    for (int k = 3; k < 203; ++k) {
+        be.setConstant(1e-3 * k);
+        solve_with_newton_in_place(seg, rf, b.graph(), b.pool(), x, be,
+                                   Size{50}, Real{1e-9}, Real{1e-9}, false,
+                                   false, &w);
+    }
+    const std::size_t after = g_new_count.load();
+    Eigen::internal::set_is_malloc_allowed(true);
+    INFO("Newton iterations counted: " << (w.iterations - it0)
+         << ", operator-new calls: " << (after - before));
+    REQUIRE(w.iterations - it0 > 200);   // more than one iteration per call
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
+    REQUIRE(w.analyses == 1);
 }
