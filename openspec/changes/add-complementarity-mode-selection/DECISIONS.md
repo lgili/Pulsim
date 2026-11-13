@@ -180,6 +180,7 @@ choices it did not pin.
     'lcp' = 87 runs) is bit-identical to 11ab8e95
     (`probes/survey_bit_identity.out`); `bit_identity.py` 36/36. → Reverse: restore `if (g == 0) continue;` in both locators.
 
+
 20. **Cost gate on a 60-diode bank (task 8.3): the guard is affordable.**
     Ten three-phase bridges (60 diodes, phases 6° apart, each on its own
     200 µF ‖ 50 Ω, tied by 1 MΩ), `V_th = 0`, no line inductance,
@@ -212,3 +213,41 @@ choices it did not pin.
     200.01 V, no reference to check against). Recorded in
     KNOWN_LIMITATIONS. → Reverse: nothing to reverse (a measurement); a
     cheaper guard would cache the judge's two propagations per mask.
+
+21. **Passivity classes at build time (task 5.1).**
+    `CircuitBuilderAdapter::passivity()` now reports three classes,
+    exposed as `diagnostics['mode_guard'|'mode_selection']['passivity']
+    = {'class', 'device', 'kind'}`: `non_passive` (a VCVS; a negative
+    R, C or L; a group of coupled inductors — connected by couplings —
+    whose inductance matrix has an eigenvalue below `−1e-12·max L_ii`,
+    named `L1+L2+…`, kind `InductorCoupling`), `passive_nonreciprocal`
+    (an ideal transformer, named; Lemke keeps its PSD guarantee, the
+    class is reported, nothing refused), `passive_reciprocal`.
+    Pairwise couplings with `0 ≤ k ≤ 1` do not make three windings PSD:
+    `k12 = k13 = 1, k23 = 0` has eigenvalues `1 ± √2, 1` (Catch2
+    "Passivity: coupled inductors, ideal transformer, VCVS");
+    `add_multi_winding_transformer` already refuses such a matrix at
+    build time, `add_inductor_coupling` calls do not, so the check
+    belongs here. No gyrator device exists in the builder. → Measured on
+    real circuits: a four-diode bridge behind an ideal transformer
+    (n = 0.5) on dsed default: 31.876241227679 V against pwl at 0.1 µs
+    31.876241231725 V, 2 guard repairs, no diode conducting in reverse
+    or blocking forward voltage; a rectifier fed by a coupled-inductor
+    transformer is refused before any mode decision by the extractor
+    (`UnsupportedError('dsed', 'extraction')`; the inductance-matrix
+    block is add-exact-propagator-strategy task 7), so the PSD class is
+    exercised by the Catch2 test only. → Reverse: `passivity()` back to
+    the slice-2 loop.
+
+    **Finding (open, not a passivity matter):** `mode_selection='lcp'`
+    is wrong on that bridge — 11.726610 V, D2 and D3 never conduct and
+    D2 blocks +49.86 V — and identically with the transformer replaced
+    by a floating sine source between the secondary nodes (n = 0.5 /
+    1 / 2: 11.73 / 23.45 / 46.91 V against 31.88 / 63.75 / 127.50 V).
+    The result flips with `H_E_REL` (wrong at 1e-10, 1e-9, 1e-7; right
+    at 1e-8, 1e-6…1e-4). The shadow shows the LCP's open-circuit gap of
+    D2 at its turn-on event as +2.3e-4 V (reverse) where the exact
+    trajectory rises 0.31 V in 1e4·h_e: the port model's `q` at a
+    turn-on event on a bus whose common mode is set by 1 MΩ and g_off
+    leaks. The default (settle + guard) is right on all six. Recorded in
+    KNOWN_LIMITATIONS; 'lcp' stays opt-in.

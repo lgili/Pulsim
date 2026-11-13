@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Diode mode selection: passivity classes in the diagnostics
+
+`diagnostics['mode_guard']` and `diagnostics['mode_selection']` now
+carry `passivity = {'class', 'device', 'kind'}`: `non_passive` (a VCVS,
+a negative R/C/L, or a group of coupled inductors whose inductance
+matrix is not positive semidefinite, named `L1+L2+…`, kind
+`InductorCoupling` — pairwise `|k| ≤ 1` does not make three windings
+PSD: `k12 = k13 = 1, k23 = 0` has an eigenvalue `1 − √2`),
+`passive_nonreciprocal` (an ideal transformer, named; Lemke kept,
+nothing refused) or `passive_reciprocal`. Numbers do not change. A diode
+bridge behind an ideal transformer (n = 0.5) runs on the dsed default at
+31.876241228 V against pwl 31.876241232 V. A rectifier fed by coupled
+inductors is still refused by the dsed extractor
+(`UnsupportedError('dsed', 'extraction')`). Known: `mode_selection='lcp'`
+is wrong on that bridge (11.73 V; KNOWN_LIMITATIONS).
+
 ### dsed: a diode predicate starting a step at exactly zero is located (fix)
 
 The dsed event locator skipped every armed predicate whose value was

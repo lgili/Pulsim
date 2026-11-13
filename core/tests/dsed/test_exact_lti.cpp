@@ -309,3 +309,75 @@ TEST_CASE("Exact: stiff and near-defective is tier 3, with the reason",
     REQUIRE(e.tier == 3);
     REQUIRE(e.reason.find("stiff") != std::string::npos);
 }
+
+// -----------------------------------------------------------------
+// add-complementarity-mode-selection task 5.1 — passivity classes the
+// mode selection must know (D3), read at build time.
+// -----------------------------------------------------------------
+
+TEST_CASE("Passivity: coupled inductors, ideal transformer, VCVS",
+          "[v2][dsed][modes][passivity]") {
+    const auto cls = [](builder::CircuitBuilder& b) {
+        pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+        dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+        return ad.passivity();
+    };
+    const auto rect = [](builder::CircuitBuilder& b) {
+        b.add_diode("D1", "s", "o", 1e3, 1e-9);
+        b.add_capacitor("C", "o", "gnd", 1e-6);
+        b.add_resistor("R", "o", "gnd", 100.0);
+    };
+    SECTION("a coupled pair is passive and reciprocal") {
+        builder::CircuitBuilder b;
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0);
+        b.add_inductor("L1", "a", "gnd", 1e-3);
+        b.add_inductor("L2", "s", "gnd", 1e-3);
+        b.add_inductor_coupling("L1", "L2", 0.99);
+        rect(b);
+        const auto c = cls(b);
+        REQUIRE(c.passive());
+        REQUIRE(std::string(c.name()) == "passive_reciprocal");
+    }
+    SECTION("pairwise couplings that make an indefinite inductance matrix") {
+        // k12 = k13 = 1, k23 = 0: eigenvalues of [[1,1,1],[1,1,0],[1,0,1]]·mH
+        // are 1 ± sqrt(2) and 1 (one negative): the stored energy can be
+        // negative, so the ports are not certified passive.
+        builder::CircuitBuilder b;
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0);
+        b.add_inductor("L1", "a", "gnd", 1e-3);
+        b.add_inductor("L2", "s", "gnd", 1e-3);
+        b.add_inductor("L3", "t", "gnd", 1e-3);
+        b.add_resistor("R3", "t", "gnd", 10.0);
+        b.add_inductor_coupling("L1", "L2", 1.0);
+        b.add_inductor_coupling("L1", "L3", 1.0);
+        b.add_inductor_coupling("L2", "L3", 0.0);
+        rect(b);
+        const auto c = cls(b);
+        REQUIRE_FALSE(c.passive());
+        REQUIRE(c.device == "L1+L2+L3");
+        REQUIRE(c.kind == "InductorCoupling");
+        REQUIRE(std::string(c.name()) == "non_passive");
+    }
+    SECTION("an ideal transformer is passive, not reciprocal") {
+        builder::CircuitBuilder b;
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0);
+        b.add_ideal_transformer("T1", "a", "gnd", "s", "gnd", 2.0);
+        rect(b);
+        const auto c = cls(b);
+        REQUIRE(c.passive());
+        REQUIRE(c.nonreciprocal_device == "T1");
+        REQUIRE(c.nonreciprocal_kind == "IdealTransformer");
+        REQUIRE(std::string(c.name()) == "passive_nonreciprocal");
+    }
+    SECTION("a VCVS is non-passive and wins over a transformer") {
+        builder::CircuitBuilder b;
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0);
+        b.add_ideal_transformer("T1", "a", "gnd", "m", "gnd", 2.0);
+        b.add_resistor("Rm", "m", "gnd", 10.0);
+        b.add_vcvs("E1", "m", "gnd", "s", "gnd", 3.0);
+        rect(b);
+        const auto c = cls(b);
+        REQUIRE_FALSE(c.passive());
+        REQUIRE(c.device == "E1");
+    }
+}

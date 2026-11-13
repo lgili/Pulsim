@@ -606,8 +606,11 @@ def test_mode_guard_diagnostics_only_on_dsed(engine):
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
+    rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
+    assert g["passivity"] == rec        # task 5.1 class, dsed only
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
+    assert r.diagnostics["mode_selection"]["passivity"] == rec
     assert "mode_guard" not in r.diagnostics
 
 
