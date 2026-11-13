@@ -93,8 +93,8 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 15.4 Calibrate the flop constants, `m_max` and the dense budget against C++ timings with the counter harness; record them here
 
 ## 16. Exact sources (D14)
-- [ ] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events
-- [ ] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events
+- [ ] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events. Done before this change: shared oscillator pairs (sine). Open, recorded in DECISIONS (group 16 slice): polynomial / ramp states and pulse / PWM corners as time events — every mask with such a source is tier 3 today
+- [ ] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events. Sine part done (`python/tests/test_exact_sources.py`: 3.2e-13 A; a sine-driven series RLC to 2.7e-13 relative). Open: the ramp (numeric today, 8.97e-8 V) and the corner events
 
 ## 17. Output samples and controller ticks as events (D15; needs `add-unified-event-queue`)
 - [ ] 17.1 Samples evaluated from the last event (modal O(n), or a cached `Φ(dt_out)`); ticks as queue events with zero-order hold
