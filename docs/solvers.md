@@ -30,6 +30,18 @@ Pulsim's transient kernel supports two **fixed-step** integrators
 - Used for stiff systems where Tustin would oscillate at large `dt`.
 - Enabled by `opts.advanced.timestep.integrator = Bdf1`.
 
+### Newton on nonlinear devices (`pwl` and `trbdf2`)
+
+Circuits with Newton devices (Shockley diodes, MOSFET Level-1,
+saturable magnetics) solve `J_lin + J_nl` each iteration. Each run keeps
+one Newton workspace: the combined Jacobian is written in place on the
+union pattern of the two operands, and one sparse-LU analysis is reused
+for as long as that pattern holds (checked after every device refresh;
+a switch state with another pattern, or the static `dt = 0` system,
+analyses again). Results are bit-identical to analysing every
+iteration (`update-newton-persistent-solver`, stage A1). The
+Levenberg-Marquardt fallback still factorises from scratch.
+
 ## Adaptive Runge-Kutta integrators (Phase 2.4, standalone)
 
 Both integrators ship as pure-Python classes in

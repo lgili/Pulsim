@@ -685,6 +685,7 @@ inline SimulationResult run_transient_trbdf2(
 
     std::string newton_last_error;
     pwl::PwlSegment nl_seg;
+    pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
     Real nl_seg_dt = Real{-1};
     topology::SwitchStateMask nl_seg_mask(
         static_cast<std::size_t>(graph.num_switches()));
@@ -718,7 +719,7 @@ inline SimulationResult run_transient_trbdf2(
                 b_ex, opts.max_newton_iterations,
                 opts.tol_newton_dx, opts.tol_newton_res,
                 opts.enable_newton_line_search,
-                opts.enable_newton_lm);
+                opts.enable_newton_lm, &newton_ws);
         } catch (const std::runtime_error& e) {
             newton_last_error = e.what();
             return false;

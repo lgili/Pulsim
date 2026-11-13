@@ -292,6 +292,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v1/test_lazy_cache.cpp      # V6 lazy
         tests/layer4_v1/test_multi_dt_cache.cpp  # V7 multi-dt
         tests/layer4_v1/test_linear_time_assembly.cpp  # slot map + shared symbolic
+        tests/layer4_v1/test_newton_workspace.cpp  # Newton workspace (A1)
     )
     target_link_libraries(pulsim_core_layer4_v1_tests
         PRIVATE

@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Newton: one sparse-LU analysis per run (performance, bit-identical)
+
+* **Changed** `solve_with_newton_b_extra` takes an optional
+  `NewtonWorkspace*`; `run_transient` and the TR-BDF2 engine pass one per
+  run. The combined Jacobian `J_lin + J_nl` is written in place on its
+  union pattern, the residual and step vectors are reused, and the
+  `Eigen::SparseLU` analysis is kept while the pattern holds (it was
+  rebuilt every iteration). Factors, states and iteration counts are
+  bit-identical (`update-newton-persistent-solver`, stage A1; A2 and B
+  not included). Eigen heap allocations per Newton iteration on a
+  Shockley-diode buck: 47.7 → 20.4.
+
 ### TR-BDF2 event solvers: byte budget and allocation-free refactor (performance, bit-identical)
 
 * **Changed** `PwlStateSpaceCache::solve_at` (every TR-BDF2 solve) keeps

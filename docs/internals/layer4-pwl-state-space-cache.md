@@ -123,6 +123,16 @@ and a numeric `factorize` that reuses the LU's work vectors and L/U
 capacity: no allocation (`update-trbdf2-factor-reuse`, parts 1-2;
 details in `layer4-v7-multi-dt-cache.md`).
 
+Newton (`solve_with_newton_b_extra`) takes an optional
+`NewtonWorkspace*`; the engines pass one per run. It holds the combined
+Jacobian on the union pattern of `seg.J` and `J_nl` with slot arrays
+(`J[k] = L[k] + N[k]`, Eigen's per-entry sum), the hoisted residual and
+step vectors, and one `Eigen::SparseLU` analysed once per pattern.
+Invalidation: the index arrays of both operands are compared after every
+refresh; any change rebuilds the slots and analyses again. Counters on
+the workspace: `solves`, `iterations`, `analyses`, `factorizations`,
+`lm_attempts`. A call without a workspace uses a call-local one.
+
 ## V0 scope: static-only circuits
 
 Layer 4 V0 supports Resistor + VoltageSource + Switch. That covers:

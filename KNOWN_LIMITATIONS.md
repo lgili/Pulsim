@@ -258,6 +258,18 @@ LU factor per visited state, released only by the budget's LRU
 geometric step grid with factor slots) is a numerical change awaiting
 the owner's accuracy sign-off.
 
+### Newton: what the persistent analysis does not cover
+
+Since `update-newton-persistent-solver` (stage A1) a run analyses the
+Newton Jacobian once per sparsity pattern. Still per iteration: the
+numeric `Eigen::SparseLU::factorize` (which allocates its work memory
+each call) and the device refreshers' `setZero()` + re-insert of
+`J_nl`. The Levenberg-Marquardt fallback builds and analyses a fresh
+solver on every attempt. A user refresher whose stamp positions depend
+on `x` changes the pattern and re-analyses on each change (correct,
+just slower). Stages A2 (in-house LU) and B (low-rank update) are
+proposed, not implemented.
+
 ### Fixed engine: diode-mask chatter inside Newton at a small `dt`
 
 With PWL diodes (`add_diode`) in the same circuit as a Newton device
