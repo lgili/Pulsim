@@ -311,8 +311,11 @@ disagree on the strict gate, but their edge errors fall from the rule's
 from 1.5-2 steps to 1 step (0.99 on `vcswitch_resistor`). The worst
 observable is the source-forced gate node (`V(ctrl*)`, or `V(out)` of the
 resistive stage), sampled on the step grid. Read with the diagnostic:
-the states agree off the edges; what still differs is the recorded edge
-instant, one step late. The gate is not changed for it, so these cells
+the states agree off the edges. With the split on, the edge itself is
+placed exactly; what still differs is sampling on the step grid plus
+linear interpolation across the jump (the stored samples bracket the
+edge, so the trace ramps over one step; the timing column's 1 step is
+that bracket, not a late edge). The gate is not changed for it, so these cells
 stay `disagree` and stay frozen. The split alone cleared
 `boost_pfc_open_loop` (0.0304 -> 1.1e-5) and `dual_active_bridge`
 (0.0812 -> 5.8e-4). `pwl+restart` went from 81 / 19 to 82 / 18 with
