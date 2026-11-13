@@ -154,3 +154,96 @@ not arithmetic:
   them on counters. No comparison with PLECS or PSIM was measured; the
   statement that ideal-switch simulators step segments in closed form is
   general knowledge.
+
+## Re-centred scope, 2026-11-13
+
+> Appended; the sections above are unchanged and slice 1 (task groups
+> 1–6, being implemented on `feat/core-p4-exact-propagator`) is not
+> re-planned. Where this section and an earlier one disagree, this
+> section supersedes it, and the superseded statement is named.
+
+Exact propagation is now one of the two pillars of the core roadmap
+(`openspec/CORE_ROADMAP.md`, "The centre of the roadmap"). The
+strategy stops being an engine a user selects and becomes the route
+`engine='auto'` takes whenever it can, with the implicit integrators as
+the strategies for what it cannot take. Measured reasons, beyond the
+ones above:
+
+- With ideal switches and the complementarity mode selection
+  (`add-branch-form-ideal-switch`, `add-complementarity-mode-selection`)
+  the exact route reproduces 40-digit and mpmath references at the
+  1e-12 level on every family prototyped: DCM buck `v_C` +4.5e-12 V
+  and turn-off +2.0e-12·T after 4000 periods; boost CCM orbit
+  −2.5e-12 V, −6.2e-13 A after 20 000 periods; bridge event times
+  within 1.1e-14 s (single-phase) and 8.1e-15 s (three-phase)
+  (`../add-complementarity-mode-selection/probes/lcp_cases.out`).
+- The implicit routes cannot reach that at any affordable step: the
+  ideal DCM buck on the fixed grid with the best restart rule is at
+  4.3e-8 V with 400 steps per period
+  (`../add-branch-form-ideal-switch/probes/sdirk_restart_ideal.out`).
+- Large circuits need not leave the exact route
+  (`probes/expm_action_ladder.out`, RLC ladder, `h = 1 µs`): at
+  `‖A·h‖₁ = 2` the action of the exponential costs 20 matrix-vector
+  products per step and agrees with the dense propagator to 3.2e-15;
+  its flop count per step is 0.25 of the dense step at n = 200 and
+  0.02 at n = 2000, and it needs no O(n³) setup (dense setup 0.9 ms
+  at n = 200, 355 ms at n = 2000, scipy, single thread). With a 1 ns
+  snubber (`‖A·h‖₁ = 1e3`) the action costs 2492 products per step,
+  5–25 times the dense step, and the dense setup is repaid after
+  203–6027 steps: that is the case for dense or for the hand-over.
+- Sources held over a step are first order: a 100 V, 50 Hz sine into
+  an RL at `h = T/20` is 17 A off a 95.4 A peak when held, 1.6e-12 A
+  through the augmented oscillator states (same probe).
+
+### What changes (appended)
+
+- **Default route.** `engine='auto'` selects exact propagation for a
+  segment whenever every active device is linear or PWL (ideal or
+  resistor-pair switches, PWL diodes, devices on an affine region) and
+  every source is exact-capable. Supersedes "selected by `auto` when
+  … `n_state ≤ 64`" of the Applicability rules: the size limit is
+  replaced by the scaling rule below.
+- **Hybrid rule, precise.** Segments are classified at events only; an
+  implicit segment lasts to the next event; the hand-over in either
+  direction is an event with the restart rule (three consecutive
+  Alexander SDIRK(2,2) steps) on entry to an implicit segment.
+- **Scaling rule.** Per mode: dense modal (tier 1) or dense Padé/Schur
+  (tier 2) while the dense setup is repaid inside the mode's expected
+  steps and fits the cache budget; the action of the exponential
+  (truncated Taylor with scaling, Al-Mohy–Higham; Krylov variants as an
+  implementation choice) when `‖A·h‖₁` is moderate and `n` large;
+  hand-over to the implicit strategy otherwise. Every choice and its
+  inputs are counters in the result. Supersedes the Non-Goal "Krylov
+  exponentials for large sparse systems".
+- **Sources exact.** Constant, polynomial-in-time (ramps, PWL
+  segments), exponential and sinusoidal sources through an augmented
+  state (or the equivalent φ-functions); breakpoints are time events.
+  An arbitrary Python source function still makes its segments
+  implicit, now as a recorded segment-level decision.
+- **Output grid and controller ticks are events.** A recorded sample
+  is an evaluation of the exact flow at the sample time, not a step; a
+  controller tick is an event that updates its outputs (zero-order
+  hold) and may change gates.
+- **Ideal switches are the native switch model** of the exact route:
+  per-mode reduced state and explicit projection from
+  `add-branch-form-ideal-switch` (its task group 8), mode at every
+  event from `add-complementarity-mode-selection`. This supersedes the
+  slice-1 zero-band rule (D4) as the decision rule once that change is
+  the default; the zero-band rule stays as the slice-1 behaviour until
+  then.
+- **Engine names.** `engine='exact'` names the strategy explicitly;
+  `'dsed'` stays as its alias for the legacy period. `'pwl'` and
+  `'trbdf2'` select the implicit strategies (`refactor-unified-transient-stepper`).
+
+### Impact (appended)
+
+- Additional affected code: `dsed/exact_lti.hpp` (action kernel),
+  a route selector beside `python/pulsim/_dsed_dispatch.py`, the
+  recorders (samples as events), the control-tick scheduler.
+- Additional dependencies: `add-complementarity-mode-selection`,
+  `add-branch-form-ideal-switch` (task group 8), `add-unified-event-queue`
+  (sample and tick events), `fix-control-tick-semantics` (done on
+  `feat/core-integration`).
+- The default flip of the route is one of the number-changing defaults
+  that flip together in one release, re-baselined through the
+  reference harness.

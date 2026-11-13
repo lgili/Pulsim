@@ -1,0 +1,26 @@
+dense  : Phi = expm(A_aug h) once (Pade 13, scaling and squaring), then Phi x per step (n^2)
+action : expm_multiply(A_aug h, x) per step (truncated Taylor, ~||A h||_1 matvecs, sparse)
+implicit: one sparse LU of (I - h/2 A) once, trapezoid step = 1 solve (2nd order, NOT exact) -- the hand-over
+case                 n  ||Ah||_1  dense setup  dense/step  action/step  mv/step  |dense-action|  LU setup  trap/step
+ladder             200  2.00e+00        0.9ms       2.1us      318.5us     20.0         3.2e-15    0.20ms      6.8us  (trap vs exact 2.3e-02)
+ladder             500  2.00e+00        7.2ms       7.7us      367.3us     20.0         1.7e-15    0.25ms     10.4us  (trap vs exact 2.3e-02)
+ladder            1000  2.00e+00       51.0ms      35.3us      453.0us     20.0         9.0e-16    0.31ms     13.9us  (trap vs exact 2.3e-02)
+ladder            2000  2.00e+00      354.8ms     778.4us      605.3us     20.0         9.0e-16    0.52ms     27.9us  (trap vs exact 2.3e-02)
+ladder+snubber     300  1.00e+03        3.4ms       3.0us    21652.1us   2492.3         1.6e-13    0.21ms      8.1us  (trap vs exact 2.3e-02)
+ladder+snubber     750  1.00e+03       40.7ms      15.3us    26439.0us   2492.3         1.4e-13    0.29ms     13.8us  (trap vs exact 2.3e-02)
+ladder+snubber    1500  1.00e+03      356.5ms     276.6us    33036.6us   2492.3         4.6e-14    0.40ms     21.7us  (trap vs exact 2.3e-02)
+
+flop model (the scipy action call carries ~300 us of Python overhead per step, so wall time above
+overstates it): dense step 2 n^2, action step 2 nnz mv, dense setup ~ 2 n^3 (6 + log2 ||Ah||) for Pade 13
+   ladder           n=  200 nnz=   500: dense  8.08e+04 flop/step, action  2.00e+04 flop/step (action/dense    0.25); dense setup  1.1e+08 flop =       inf action steps
+   ladder           n=  500 nnz=  1250: dense  5.02e+05 flop/step, action  5.00e+04 flop/step (action/dense    0.10); dense setup  1.8e+09 flop =       inf action steps
+   ladder           n= 1000 nnz=  2500: dense  2.00e+06 flop/step, action  1.00e+05 flop/step (action/dense    0.05); dense setup  1.4e+10 flop =       inf action steps
+   ladder           n= 2000 nnz=  5000: dense  8.01e+06 flop/step, action  2.00e+05 flop/step (action/dense    0.02); dense setup  1.1e+11 flop =       inf action steps
+   ladder+snubber   n=  300 nnz=   899: dense  1.81e+05 flop/step, action  4.48e+06 flop/step (action/dense   24.73); dense setup  8.7e+08 flop =       203 action steps
+   ladder+snubber   n=  750 nnz=  2249: dense  1.13e+06 flop/step, action  1.12e+07 flop/step (action/dense    9.94); dense setup  1.4e+10 flop =      1342 action steps
+   ladder+snubber   n= 1500 nnz=  4499: dense  4.51e+06 flop/step, action  2.24e+07 flop/step (action/dense    4.98); dense setup  1.1e+11 flop =      6027 action steps
+
+Sine source: R = 1 Ohm, L = 1 mH driven by 100 sin(2 pi 50 t), exact vs closed form at h = T/20 over 5 periods
+   augmented (oscillator states, one expm per step size): max |i - exact| = 1.6e-12 A
+   source held at its step-start value:                   max |i - exact| = 1.7e+01 A  (first order in h)
+   peak current 95.403 A

@@ -424,3 +424,74 @@ Rollback: until step 13 a single switch in the engine table returns
 6. Is step-identity (not only tolerance agreement) the right bar for
    the variable-step switch? It forbids incidental clean-ups during the
    move, which is the intent.
+
+## Re-centred scope, 2026-11-13
+
+> Appended; D1–D7 stand except where named below.
+
+### D8. The kernel is event-driven first
+
+```
+run():
+  t = t0; mode = selector.select(gates(t0), x, none, t0); x = reinit.apply(mode, x, t0)
+  while t < t_end:
+     e = queue.peek()                               time events: gate edges, breakpoints,
+                                                    ticks, samples, t_end
+     seg = route(mode, x, t)                        exact | implicit (add-exact-propagator-strategy D11–D13)
+     (t_hit, x) = seg.advance(x, t, e.t, watch)     exact flow, or the step loop of D4 as the inner loop;
+                                                    watch = crossing signals of the mode; returns at e.t
+                                                    or at the first located state event before it
+     t = t_hit
+     handle every event at t (D2 order of add-unified-event-queue):
+        samples → record (no mode change)
+        ticks → controller outputs; gate edges; breakpoints
+        mode = selector.select(gates(t⁺), x, mode, t)          one LCP
+        x = reinit.apply(mode, x, t)                           projection, record
+        seg.restart()                                          SDIRK(2,2) × 3 on the implicit strategies
+```
+
+The implicit inner loop is D4 with two changes: step 2
+(`process_instant`) moves to the outer loop, and step 7's
+`IterateAtStepEnd` / `Localize` keep only the location of a crossing
+(the step is truncated to the located time and the outer loop takes
+the event).
+
+### D9. Integrators are segment strategies
+
+| Strategy | Used for | Restart | Error control |
+|---|---|---|---|
+| Exact propagator | linear / PWL segments (default) | none (exact flow; the projection is explicit) | none needed; tier and route recorded |
+| Trapezoid, fixed grid | `engine='pwl'`, and implicit segments of a fixed-`dt` run | three consecutive Alexander SDIRK(2,2) steps after every discontinuity | none (fixed grid) |
+| TR-BDF2 | `engine='trbdf2'`, and implicit segments of an `auto` run | post-event restart (`update-trbdf2-post-event-restart`) | LTE (`update-trbdf2-error-control`) |
+| Backward Euler | the `bdf1` entry point (D4 table) | — | — |
+
+`StageSpec` already expresses an SDIRK stage: `E/(γh) − J` is the
+trapezoidal matrix at `factor_dt = 2γh`, so the restart uses the
+factor cache with no new factor kind.
+
+### D10. Two shared services
+
+- `ModeSelector` (`add-complementarity-mode-selection` D11): called
+  once per event instant, after the gates and sources of the instant
+  are applied. Replaces `ModeSet::settle` of `add-unified-event-queue`
+  D6 at the default flip; until then `settle` is the legacy policy and
+  the selector can run in shadow.
+- `ReinitService` (`add-branch-form-ideal-switch` D4): called after the
+  selector; on the exact strategy it projects explicitly, on the
+  implicit ones it arms the restart and records the impulse.
+
+No strategy contains a decision loop or a projection of its own.
+
+### D11. Engine names as strategy selectors
+
+| Name | Strategy | Status |
+|---|---|---|
+| `'auto'` (default) | exact where eligible, TR-BDF2 elsewhere | default after the flip |
+| `'exact'` | exact; non-eligible segments refused unless allowed | new |
+| `'dsed'` | alias of `'exact'` | legacy, warns after the flip, removed one release later |
+| `'pwl'` | trapezoid on the fixed grid + SDIRK×3 restart | kept |
+| `'trbdf2'` | TR-BDF2 with error control | kept |
+| `'pwl-legacy'`, `'trbdf2-legacy'` (D7) | the legacy drivers | removed per task group 13 |
+
+`integrator='rk45'|'bdf2'` on `'dsed'` follow
+`add-exact-propagator-strategy` task 12.1 (deprecated, then removed).
