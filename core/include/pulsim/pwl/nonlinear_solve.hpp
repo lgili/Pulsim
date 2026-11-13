@@ -57,6 +57,20 @@ using NonlinearRefreshFn = std::function<
          const topology::Graph& graph,
          const DevicePool& pool)>;
 
+/// Transient-only acceptance of an iterate whose residual is at the
+/// roundoff of its own row (add-newton-roundoff-acceptance). Checked
+/// only where the solve would throw for an exhausted budget; DC
+/// callers pass nothing and compile to the old loop. The fields after
+/// `dx_rel_max` report the last call.
+struct NewtonRoundoffAcceptance {
+    bool enabled = false;
+    Real omega_max = Real{8} * std::numeric_limits<Real>::epsilon();
+    Real dx_rel_max = Real{1e-6};
+    bool accepted = false;
+    Real omega = 0;
+    Index row = kInvalidIndex;
+};
+
 /// Newton-iterated solve on top of a cached PwlSegment, with an
 /// explicit `b_extra` vector. This overload composes with the
 /// trap-companion history contributions from Layer 4 V1: at
@@ -79,8 +93,18 @@ using NonlinearRefreshFn = std::function<
     Real tol_dx  = Real{1e-9},
     Real tol_res = Real{1e-9},
     bool enable_line_search = false,
-    bool enable_lm = false) {
+    bool enable_lm = false,
+    NewtonRoundoffAcceptance* roundoff = nullptr) {
     const Size n = seg.state_size;
+    const bool ro_on = roundoff != nullptr && roundoff->enabled;
+    if (roundoff != nullptr) {
+        roundoff->accepted = false;
+    }
+    // Roundoff acceptance state: f(x_k), x_k and the last three ||dx||.
+    Vector ro_f, ro_x;
+    Real ro_dx[3] = {std::numeric_limits<Real>::infinity(),
+                     std::numeric_limits<Real>::infinity(),
+                     std::numeric_limits<Real>::infinity()};
     Vector x = x_init;
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
@@ -357,6 +381,10 @@ using NonlinearRefreshFn = std::function<
                 }
             }
         }
+        if (ro_on) {
+            ro_f = f_combined;
+            ro_x = x;
+        }
         x += alpha * dx;
 
         // 6. Convergence check. We use the MNA residual norm
@@ -391,6 +419,9 @@ using NonlinearRefreshFn = std::function<
             ? kInvalidIndex : static_cast<Index>(dx_at);
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
+        ro_dx[2] = ro_dx[1];
+        ro_dx[1] = ro_dx[0];
+        ro_dx[0] = last_dx_norm;
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;
         }
@@ -448,6 +479,58 @@ using NonlinearRefreshFn = std::function<
         }
     }
 
+    // Budget exhausted. Transient callers may accept x_k + dx_k when
+    // the last two steps did not contract, the step is tiny against
+    // the state, and every row's residual is within omega_max of the
+    // magnitudes that row sums (Oettli-Prager backward error): the
+    // iterate solves a system perturbed by 8 eps per coefficient. The
+    // absolute tol_dx stays the test everywhere else.
+    std::string ro_note;
+    if (ro_on && ro_x.size() == static_cast<Index>(n)
+        && ro_f.size() == static_cast<Index>(n)) {
+        const bool stagnated = ro_dx[0] >= Real{0.5} * ro_dx[1]
+                            && ro_dx[1] >= Real{0.5} * ro_dx[2];
+        const Real dx_cap = roundoff->dx_rel_max
+            * std::max(Real{1}, ro_x.cwiseAbs().maxCoeff());
+        const Vector ax = ro_x.cwiseAbs();
+        Vector scale = seg.J.cwiseAbs() * ax;
+        scale += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs()
+               + f_nl.cwiseAbs();
+        if (J_nl.nonZeros() > 0) {
+            scale += J_nl.cwiseAbs() * ax;
+        }
+        Real omega = Real{0};
+        Index row = kInvalidIndex;
+        for (Index i = 0; i < static_cast<Index>(n); ++i) {
+            const Real fi = std::abs(ro_f[i]);
+            const Real w = scale[i] > Real{0}
+                ? fi / scale[i]
+                : (fi == Real{0} ? Real{0}
+                                 : std::numeric_limits<Real>::infinity());
+            if (w > omega) {
+                omega = w;
+                row = i;
+            }
+        }
+        if (stagnated && ro_dx[0] <= dx_cap
+            && omega <= roundoff->omega_max) {
+            roundoff->accepted = true;
+            roundoff->omega = omega;
+            roundoff->row = row;
+            return x;
+        }
+        ro_note = std::format(
+            " Roundoff acceptance declined: row backward error {:.2g} eps "
+            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x|, last two "
+            "steps {} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
+            omega / std::numeric_limits<Real>::epsilon(),
+            row_equation_label(graph, pool, row),
+            roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+            ro_dx[0] <= dx_cap ? "within" : "above",
+            stagnated ? "stagnated" : "still contracting",
+            ro_dx[2], ro_dx[1], ro_dx[0]);
+    }
+
     // Report the norms RELATIVE to the circuit's own scale as well as
     // absolutely. `tol_dx` and `tol_res` are absolute, deliberately —
     // an absolute step test is what keeps Newton off a spurious branch
@@ -489,14 +572,14 @@ using NonlinearRefreshFn = std::function<
         "tolerances, reported 3.5 V instead of 15.3 V). Instead, look "
         "at the device named above, and cross-check on the other "
         "transient engine (engine='pwl' with an explicit dt, if this "
-        "came from TR-BDF2 or 'auto').",
+        "came from TR-BDF2 or 'auto').{}",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
         last_res_norm,
         row_equation_label(graph, pool, worst_res_row),
         last_dx_norm / x_scale, x_scale,
         last_res_norm / rhs_scale, rhs_scale,
-        tol_dx, tol_res));
+        tol_dx, tol_res, ro_note));
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

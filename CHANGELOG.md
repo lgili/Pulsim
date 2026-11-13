@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Newton roundoff acceptance (add-newton-roundoff-acceptance)
+
+* **Added** transient Newton solves (`engine='pwl'` dynamic path,
+  `'trbdf2'` / `'auto'`) that exhaust the iteration budget are accepted
+  instead of aborting when `||dx||` stagnated over the last two steps,
+  `||dx|| <= 1e-6·max(1, |x|)` and every row's residual is at most
+  8 eps of the magnitudes the row sums (Oettli–Prager backward error).
+  Two 100 µH inductors and a Shockley diode: dt = 1e-11, 1e-12, 1e-13 s
+  aborted (||dx|| 1.9e-9 … 1.2e-7 on powers of two) and now complete
+  (ω ≤ 0.75 ε) with `i_L` on the physical trend to 1e-3; 10 mH at
+  1e-9 … 1e-11 s likewise. A warning names the count;
+  `result.newton_roundoff_accepts`, `newton_roundoff_omega_max`,
+  `newton_roundoff_row`. Tolerances unchanged; the DC operating point
+  never accepts this way. A declined check is explained in the abort.
+* Not cured: the documented TR-BDF2 h_min stall (snubbed flyback with a
+  saturable transformer) now runs to 494 µs instead of 10 µs (213
+  accepted solves) and then aborts in a roundoff limit cycle that the
+  stagnation test reads as contraction (||dx|| 3.2e-7, 5.0e-7,
+  1.9e-7; ω = 0.28 ε). The known-limitations row stays. The step floor
+  `h_noise` of the design is not implemented.
+
 ### TR-BDF2 error control (update-trbdf2-error-control)
 
 * **Changed (BREAKING, tolerance meaning)** `engine='trbdf2'` /

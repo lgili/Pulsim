@@ -750,6 +750,14 @@ inline SimulationResult run_transient_trbdf2(
     }
 
     std::string newton_last_error;
+    // Roundoff acceptance (add-newton-roundoff-acceptance), on for every
+    // transient solve here: stages, probes, landings. Copied to the
+    // result at the end.
+    pwl::NewtonRoundoffAcceptance newton_roundoff;
+    newton_roundoff.enabled = true;
+    Size ro_accepts = 0;
+    Real ro_omega_max = 0;
+    Index ro_row = kInvalidIndex;
     pwl::PwlSegment nl_seg;
     Real nl_seg_dt = Real{-1};
     topology::SwitchStateMask nl_seg_mask(
@@ -784,7 +792,14 @@ inline SimulationResult run_transient_trbdf2(
                 b_ex, opts.max_newton_iterations,
                 opts.tol_newton_dx, opts.tol_newton_res,
                 opts.enable_newton_line_search,
-                opts.enable_newton_lm);
+                opts.enable_newton_lm, &newton_roundoff);
+            if (newton_roundoff.accepted) {
+                ++ro_accepts;
+                if (newton_roundoff.omega >= ro_omega_max) {
+                    ro_omega_max = newton_roundoff.omega;
+                    ro_row = newton_roundoff.row;
+                }
+            }
         } catch (const std::runtime_error& e) {
             newton_last_error = e.what();
             return false;
@@ -2095,8 +2110,14 @@ inline SimulationResult run_transient_trbdf2(
     } catch (const SimulationAborted&) {
         throw;
     } catch (const std::runtime_error& e) {
+        result.newton_roundoff_accepts = ro_accepts;
+        result.newton_roundoff_omega_max = ro_omega_max;
+        result.newton_roundoff_row = ro_row;
         throw SimulationAborted(e.what(), std::move(result), t);
     }
+    result.newton_roundoff_accepts = ro_accepts;
+    result.newton_roundoff_omega_max = ro_omega_max;
+    result.newton_roundoff_row = ro_row;
 
     // The complete state at the end, so either engine can continue
     // from it (this used to be left EMPTY, with `valid = false`, and

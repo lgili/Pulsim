@@ -2959,6 +2959,8 @@ def simulate(
             f"{first.reason[:200]}",
             stacklevel=2)
 
+    _warn_newton_roundoff(res, "simulate()")
+
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
         import warnings
@@ -3010,12 +3012,31 @@ def simulate(
     return res
 
 
+def _warn_newton_roundoff(res, eng) -> None:
+    """add-newton-roundoff-acceptance: say when a transient Newton
+    solve was accepted at roundoff level instead of aborting."""
+    n = int(getattr(res, "newton_roundoff_accepts", 0) or 0)
+    if n > 0:
+        import warnings
+        warnings.warn(
+            f"{eng}: {n} Newton solve(s) ran out of iterations with "
+            f"||dx|| stagnated at roundoff and were accepted: every "
+            f"row's residual is within "
+            f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
+            f"sums (at most 8 eps; worst at MNA row "
+            f"{res.newton_roundoff_row}). This replaces an abort that "
+            f"no tolerance could have passed; it is not a loosened "
+            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            stacklevel=3)
+
+
 def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
     import warnings
     eng = f"simulate(engine={engine_asked!r})"
+    _warn_newton_roundoff(res, eng)
     if stats.get("n_forced_accepts", 0) > 0:
         warnings.warn(
             f"{eng}: "

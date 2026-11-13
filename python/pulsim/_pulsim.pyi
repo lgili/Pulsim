@@ -1165,6 +1165,17 @@ class SimulationResult:
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
         """
     @property
+    def newton_roundoff_accepts(self) -> int:
+        """
+        Transient Newton solves accepted at roundoff level (stagnated dx, row backward error <= 8 eps) instead of aborting.
+        """
+    @property
+    def newton_roundoff_omega_max(self) -> float:
+        ...
+    @property
+    def newton_roundoff_row(self) -> int:
+        ...
+    @property
     def states(self) -> typing.Any:
         """
         Recorded state samples as a read-only (num_steps, state_size) numpy view — zero-copy over the kernel's contiguous buffer. Use `.copy()` for a mutable array.

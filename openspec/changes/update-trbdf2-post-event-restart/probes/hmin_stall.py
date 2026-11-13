@@ -37,5 +37,5 @@ try:
           f"min step {np.diff(t).min():.2e}; stats {var._trbdf2_stats}")
 except p.SimulationAborted as e:
     t = np.asarray(e.partial.times)
-    print("ABORTED:", str(e)[:900])
+    print("ABORTED:", str(e)[:900]); print("  roundoff accepts before the abort:", e.partial.newton_roundoff_accepts, "worst omega", e.partial.newton_roundoff_omega_max); k = str(e).find("Roundoff"); print("  ", str(e)[k:k + 300] if k >= 0 else "(no roundoff note)")
     print("last 20 steps (s):", " ".join(f"{x:.2e}" for x in np.diff(t)[-20:]))

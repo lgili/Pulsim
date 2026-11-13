@@ -2047,6 +2047,15 @@ void init_module(py::module_& m) {
                        "dt. Empty on a run that never needed one.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
+        .def_readonly("newton_roundoff_accepts",
+                       &SimulationResult::newton_roundoff_accepts,
+                       "Transient Newton solves accepted at roundoff "
+                       "level (stagnated dx, row backward error <= "
+                       "8 eps) instead of aborting.")
+        .def_readonly("newton_roundoff_omega_max",
+                       &SimulationResult::newton_roundoff_omega_max)
+        .def_readonly("newton_roundoff_row",
+                       &SimulationResult::newton_roundoff_row)
         .def("num_steps", &SimulationResult::num_steps);
 
     // ---- run_transient ---------------------------------------------------
