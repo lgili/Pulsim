@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed engine: discontinuity restart rule (opt-in)
+
+`simulate(..., discontinuity_restart=True)` (also `SolverOptions`,
+`SimulationOptions.discontinuity_restart`) takes the step after a mask
+change, a diode flip, a source jump or an inconsistent start as two
+backward-Euler half-steps of `dt/2` on the nominal trapezoidal factor
+(Marti & Lin). No new factorisation; `res.n_restart_steps` counts them;
+`SolverSnapshot.restart_pending` carries a pending restart across
+`resume_from`. Off by default: with it off every `pwl` output is bit for
+bit the previous one, and `trbdf2`/`dsed` are unchanged (both refuse the
+flag; `auto` routes it to `pwl`).
+
+| Circuit (error vs exact / `expm`) | before (flag off) | `discontinuity_restart=True` |
+|---|---|---|
+| RL edge on the grid, `dt` = 4/2/1 µs | +1.21e-2 / 6.06e-3 / 3.03e-3 A, order 1 | −2.02e-5 / −5.05e-6 / −1.26e-6 A, order 2.00 |
+| Buck CCM `i_L`, T/50 … T/800 | 1.18e-2 … 7.35e-4 A, order 1.00 | 2.20e-5 … 8.55e-8 A, order 2.00 |
+| DCM idle `v(sw)` (`v_out` 13.32 V), T/100 | alternates 0.48 / 26.1 V | 13.310 … 13.322 V |
+| Hard-switched cap loop, on-current 10 A, `dt` = 1e-8 / 1e-9 | −9.8 / +29.8 A; −79 / +99 A | 9.995 … 10.003 A; 9.82 … 10.18 A |
+| Cap-loop conduction power (exact 0.04599 W) | 0.1968 W | 0.0459 W |
+| RC pulse, jump on the grid, `dt` = τ/10 | 0.476 V | 2.19e-2 V, order 1.9 |
+| Saturable inductor edge, `dt` = 2 µs | 1.07e-2 A, order 1 | 1.24e-5 A, order 2.00 |
+| Coss `Q/(I·t)` at sample 1 / 2 / 11 | 0.5 / 0.75 / 0.955 | 1.000000 |
+| First step, RL decay | order 1.00 | 2.667e-6 relative, order 2.00 |
+
+* **BREAKING (with the flag on)** the gate of step `(t_{k-1}, t_k]` is
+  `switch_fn(t_{k-1})`, not `switch_fn(t_k)`. A closure with edges on the
+  grid (`round(t/dt) % N < Don`) keeps its duty and moves one step; a
+  left-continuous one (`t > te`) becomes one step late. The step
+  observer keeps its `(t_k, x_{k-1})` call. A pulse/PWM source whose
+  jump falls on the step end is read at its left limit. Recover the old
+  numbers with `discontinuity_restart=False` (the default today).
+* Limits: an edge off the `dt` grid stays first order (event splitting
+  is a separate change); sample 0 of a node voltage still reads 0 V;
+  `mmc_arms` refuses the flag.
+
 ### Controller ticks: one rule on every engine
 
 Source j with period `T_j` (a `ClosedLoop`'s `period`, or `step_observer`

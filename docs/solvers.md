@@ -23,6 +23,13 @@ Pulsim's transient kernel supports two **fixed-step** integrators
 - 2nd-order, A-stable, NOT L-stable.
 - Cheap: 1 sparse solve per step.
 - Used for the bread-and-butter PWM-switched-mode workflow.
+- `discontinuity_restart=True` (off by default): the step after a mask
+  change, diode flip, source jump or inconsistent start is two
+  backward-Euler half-steps of `dt/2` on the nominal factor (Marti &
+  Lin's critical damping adjustment). Order 2 across edges on the grid
+  instead of 1, no alternation after them; the gate is sampled at the
+  step start and a source reads its left limit at a jump on the step
+  end. `engine='trbdf2'` and `'dsed'` refuse it.
 
 ### BDF1 (implicit Euler)
 

@@ -1837,6 +1837,13 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("discontinuity_restart",
+                        &SimulationOptions::discontinuity_restart,
+                        "Fixed engine: take the step after a discontinuity "
+                        "(mask change, diode flip, source jump, inconsistent "
+                        "start) as two backward-Euler half-steps; gate mask "
+                        "sampled at the step start. Off = the engine before "
+                        "the rule, bit for bit.")
         .def_readwrite("inductor_freeze_di_max",
                         &SimulationOptions::inductor_freeze_di_max)
         .def_readwrite("inductor_abs_clamp",
@@ -2145,6 +2152,9 @@ void init_module(py::module_& m) {
         .def_readonly("dt_retries", &SimulationResult::dt_retries,
                        "Steps that had to be re-taken at a reduced "
                        "dt. Empty on a run that never needed one.")
+        .def_readonly("n_restart_steps", &SimulationResult::n_restart_steps,
+                       "Steps taken as two backward-Euler half-steps "
+                       "(discontinuity_restart). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def("num_steps", &SimulationResult::num_steps);
@@ -2626,6 +2636,10 @@ void init_module(py::module_& m) {
         .def_readwrite("igbt_tail_history", &SolverSnapshot::igbt_tail_history)
         .def_readwrite("pmsm_history", &SolverSnapshot::pmsm_history)
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("restart_pending", &SolverSnapshot::restart_pending,
+            "discontinuity_restart: the run ended with a diode flip "
+            "settled in its last half-step, so a resumed run's first "
+            "step restarts.")
         .def("__repr__", [](const SolverSnapshot& s) {
             std::string r = "<SolverSnapshot t=" + std::to_string(s.t)
                    + " n=" + std::to_string(s.x.size())
@@ -2648,16 +2662,18 @@ void init_module(py::module_& m) {
                     s.t, s.x, s.history, s.diode_on,
                     s.saturable_history, s.coss_history,
                     s.lauritzen_history, s.igbt_tail_history,
-                    s.pmsm_history, s.valid, s.stamped_mask);
+                    s.pmsm_history, s.valid, s.stamped_mask,
+                    s.restart_pending);
             },
             [](py::tuple t) {
                 // 10 fields: pickled before `stamped_mask` existed;
-                // it loads with the mask unknown.
-                if (t.size() != 10 && t.size() != 11) {
+                // it loads with the mask unknown. 11: before
+                // `restart_pending` (loads false).
+                if (t.size() < 10 || t.size() > 12) {
                     throw std::runtime_error(
                         "SolverSnapshot: pickled state has "
                         + std::to_string(t.size())
-                        + " fields, expected 10 or 11");
+                        + " fields, expected 10, 11 or 12");
                 }
                 SolverSnapshot s;
                 s.t = t[0].cast<Real>();
@@ -2670,8 +2686,11 @@ void init_module(py::module_& m) {
                 s.igbt_tail_history = t[7].cast<std::vector<Real>>();
                 s.pmsm_history = t[8].cast<std::vector<Real>>();
                 s.valid = t[9].cast<bool>();
-                if (t.size() == 11) {
+                if (t.size() >= 11) {
                     s.stamped_mask = t[10].cast<std::vector<bool>>();
+                }
+                if (t.size() == 12) {
+                    s.restart_pending = t[11].cast<bool>();
                 }
                 return s;
             }));

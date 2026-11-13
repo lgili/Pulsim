@@ -285,7 +285,17 @@ def runs():
         out["first_" + name.replace(" ", "_")] = fn(2e-6)[0]
     out["coss"] = coss()[0]
     out["sat_edge_2us"] = sat_edge(2e-6)[0]
-    # the other two engines: must not move at all
+    # the other two engines: must not move at all (trbdf2 also with
+    # stateful devices, whose stamps gained the BackwardEuler branch)
+    for name, mk in (("sat", lambda b: b.add_saturable_inductor("Ls", "m", "gnd", L0S, ISAT, LRES)),
+                     ("coss", lambda b: b.add_nonlinear_capacitor("Cn", "m", "gnd", C0, V0C, MC))):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_switch("S", "in", "a", GON, GOFF)
+        b.add_resistor("R", "a", "m", 1.0)
+        mk(b)
+        out[f"trbdf2_{name}_edge"] = p.simulate(b, t_end=3e-4, engine="trbdf2",
+                                                switch_fn=mask_fn(b, "S", lambda t: t >= 1e-4))
     for eng in ("trbdf2", "dsed"):
         b = p.CircuitBuilder()
         b.add_voltage_source("Vin", "vin", "gnd", VIN)

@@ -339,6 +339,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v1/test_integration_rlc.cpp
         tests/layer5_v1/test_integration_buck.cpp
         tests/layer5_v1/test_transformer.cpp          # Layer 2 V2
+        tests/layer5_v1/test_backward_euler_stage.cpp # restart rule
     )
     target_link_libraries(pulsim_core_layer5_v1_tests
         PRIVATE

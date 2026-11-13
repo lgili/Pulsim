@@ -235,6 +235,18 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### Fixed engine: first order after a discontinuity (by default)
+
+`engine='pwl'` keeps the trapezoidal derivative across a gate edge, a
+diode flip, a source jump and an inconsistent start: first order and a
+Nyquist alternation after each event (buck CCM `i_L` error 1.18e-2 A
+at T/50, order 1.00; DCM idle `v(sw)` alternating 0.48 / 26.1 V).
+`discontinuity_restart=True` takes the step after each one as two
+backward-Euler half-steps (2.20e-5 A, order 2.00; idle within 0.05 %)
+and samples the gate at the step start. Off by default until the flip
+of the migration plan; an edge off the `dt` grid stays first order
+(event splitting is a separate change).
+
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or

@@ -146,6 +146,21 @@ If `dt` is too large compared to the system's smallest time constant, the trapez
 
 **Heuristic:** use `dt ≤ min(τ) / 10` where `τ` are the RC and L/R time constants. For switching circuits, also enforce `dt ≤ T_PWM / 200` (catch the ON/OFF edge within 1 sample even when the PWM frequency drifts).
 
+### Symptom: alternation after a switching edge, or first order with `dt`
+
+By default `engine='pwl'` carries the trapezoidal derivative across a
+gate edge, a diode flip, a source jump and the start: an idle DCM
+switch node alternates between about 0.5 V and 26 V instead of sitting
+at `v_out`, and halving `dt` only halves the error.
+
+**Fix:** `simulate(..., discontinuity_restart=True)`. The step after a
+discontinuity becomes two backward-Euler half-steps on the same factor
+(buck `i_L` error 1.18e-2 A → 2.20e-5 A at T/50, order 2.00). The gate of
+step `(t_{k-1}, t_k]` is then `switch_fn(t_{k-1})`: a closure with edges
+on the grid keeps its duty and moves one step; a left-continuous one
+(`t > te`) becomes one step late. Edges off the `dt` grid stay first
+order; `res.n_restart_steps` counts the restarts.
+
 ### Symptom: wall-clock time too long
 
 `run_transient` is linear in `N_steps`. If a 100 µs simulation at `dt = 1 ns` takes too long, you have 100,000 steps — even at 10 µs per step, that's a second.

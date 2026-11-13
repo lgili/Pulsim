@@ -74,8 +74,10 @@ public:
     }
 
     /// Commit the just-solved step. `h` must be the step this
-    /// solve actually used.
-    void update_from_state(const Vector& x, Real h) {
+    /// solve actually used; `backward_euler` the restart half-step
+    /// rule (i = (Q - Q_n)/h, no i_n), as the stamp used it.
+    void update_from_state(const Vector& x, Real h,
+                           bool backward_euler = false) {
         if (entries_.empty() || !(h > Real{0})) {
             return;
         }
@@ -88,7 +90,9 @@ public:
             // The companion's own current, from the same rule the
             // stamp used — never re-derived from C(v)·dv/dt, which
             // would not conserve charge.
-            e.i_prev = (Real{2} / h) * (q - e.q_prev) - e.i_prev;
+            e.i_prev = backward_euler
+                ? (q - e.q_prev) / h
+                : (Real{2} / h) * (q - e.q_prev) - e.i_prev;
             e.v_prev = v;
             e.q_prev = q;
         }

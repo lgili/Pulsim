@@ -120,6 +120,12 @@ public:
                 e.k1 = (Real{1} / e.params.T_M) / den;
                 e.k0 = -(k.c2 * e.q_m_gamma + k.c3 * e.q_m_prev)
                        / h / den;
+            } else if (stage == TrBdf2Stage::BackwardEuler) {
+                // q_M(1 + hA) = q_M,n + h q_E/T_M: the trapezoidal
+                // pair at 2h without the stored derivative f_n.
+                const Real den = Real{1} + h * A;
+                e.k1 = (h / e.params.T_M) / den;
+                e.k0 = e.q_m_prev / den;
             } else {
                 const Real den = Real{1} + h * A / Real{2};
                 e.k1 = (h / (Real{2} * e.params.T_M)) / den;

@@ -42,9 +42,16 @@ namespace pulsim::pwl {
 
 /// Which stage of the composite step a stateful device is being
 /// stamped in.
+///
+/// `BackwardEuler` is the fixed engine's restart half-step
+/// (add-discontinuity-restart-rule): `h` is the interval the solve
+/// ADVANCES (h_e = dt/2), and the stamp is the trapezoidal one at
+/// 2·h_e with the stored derivative left out — so its conductance
+/// 1/h_e equals the trapezoidal 2/dt and the nominal factor serves.
 enum class TrBdf2Stage {
     Trapezoidal,   //!< dX/dt = (2/h)(X - X_n) - (dX/dt)_n
     Bdf2Stage2,    //!< dX/dt = (c1 X + c2 X_gamma + c3 X_n)/h
+    BackwardEuler, //!< dX/dt = (X - X_n)/h
 };
 
 struct TrBdf2Coeffs {

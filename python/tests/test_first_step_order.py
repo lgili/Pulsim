@@ -69,43 +69,43 @@ def _order(values, exacts):
     return [math.log(a / b) / math.log(2.0) for a, b in zip(rels, rels[1:])], rels
 
 
-def _rl_ic(dt):
+def _rl_ic(dt, **kw):
     b = p.CircuitBuilder()
     b.add_resistor("R", "a", "gnd", 1.0)
     b.add_inductor("L", "a", "gnd", 1e-3, i0=5.0)
-    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl").i("L"))[-1])
+    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl", **kw).i("L"))[-1])
 
 
-def _rc_ic(dt):
+def _rc_ic(dt, **kw):
     b = p.CircuitBuilder()
     b.add_resistor("R", "a", "gnd", 1000.0)
     b.add_capacitor("C", "a", "gnd", 1e-6, c0=5.0)
-    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl").v("a"))[-1])
+    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl", **kw).v("a"))[-1])
 
 
-def _rl_step(dt):
+def _rl_step(dt, **kw):
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 1.0)
     b.add_resistor("R", "a", "m", 1.0)
     b.add_inductor("L", "m", "gnd", 1e-3)
-    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl").i("L"))[-1])
+    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl", **kw).i("L"))[-1])
 
 
-def _rc_step(dt):
+def _rc_step(dt, **kw):
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "s", "gnd", 1.0)
     b.add_resistor("R", "s", "a", 1000.0)
     b.add_capacitor("C", "a", "gnd", 1e-6)
-    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl").v("a"))[-1])
+    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl", **kw).v("a"))[-1])
 
 
-def _rl_sine(dt):
+def _rl_sine(dt, **kw):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", v_dc=0.0, v_amplitude=1.0,
                               frequency=200.0, phase=0.0)
     b.add_resistor("R", "a", "m", 1.0)
     b.add_inductor("L", "m", "gnd", 1e-3)
-    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl").i("L"))[-1])
+    return float(np.asarray(p.simulate(b, t_end=5 * TAU, dt=dt, engine="pwl", **kw).i("L"))[-1])
 
 
 def _rl_sine_exact():
@@ -199,3 +199,45 @@ def test_a_resumed_run_keeps_its_exact_first_step():
     n = min(len(xf), len(xs))
     err = float(np.abs(xf[:n] - xs[:n]).max())
     assert err <= 1e-9 * float(np.abs(xf[:n]).max()), err
+
+
+# --- the fix: add-discontinuity-restart-rule (simulate(discontinuity_restart=True))
+# The first step of an inconsistent start is taken as two backward-Euler
+# half-steps of h/2 on the nominal factor — NOT the rejected trapezoid
+# at 2h: every device is told the interval the clock advances (h/2), so
+# the Coss charge test moves the RIGHT way (Q = I·t exactly, see
+# test_fixed_step_discontinuity_order.py) and the retry ladder keeps
+# its step sizes.
+
+RESTART = dict(discontinuity_restart=True)
+
+
+@pytest.mark.parametrize("name,run,exact", CASES[:4], ids=[c[0] for c in CASES[:4]])
+def test_with_the_restart_rule_every_start_is_second_order(name, run, exact):
+    vals = [run(dt, **RESTART) for dt in DTS]
+    orders, rels = _order(vals, [exact] * len(DTS))
+    assert all(o > 1.85 for o in orders), (name, orders, rels)
+    # engine: 2.667e-06 (decay cases), 1.809e-08 (DC steps)
+    assert rels[0] < 1e-5, (name, rels)
+
+
+def test_with_the_restart_rule_the_first_step_is_two_backward_euler_halves():
+    h, R, L, i0 = 1e-6, 1.0, 1e-3, 5.0
+    b = p.CircuitBuilder()
+    b.add_resistor("R", "a", "gnd", R)
+    b.add_inductor("L", "a", "gnd", L, i0=i0)
+    res = p.simulate(b, t_end=4 * h, dt=h, engine="pwl", **RESTART)
+    i = np.asarray(res.i("L"))
+    assert i[1] == pytest.approx(i0 / (1.0 + h * R / (2.0 * L)) ** 2, rel=1e-12)
+    a = h * R / (2.0 * L)
+    assert i[2] == pytest.approx(i[1] * (1.0 - a) / (1.0 + a), rel=1e-12)
+    assert res.n_restart_steps == 1
+
+
+def test_with_the_restart_rule_a_consistent_start_stays_second_order():
+    """The control again: the sine start was already consistent, so the
+    restart costs one O(h^2) backward-Euler pair (4.28e-7 -> 4.98e-7)."""
+    vals = [_rl_sine(dt, **RESTART) for dt in DTS]
+    orders, rels = _order(vals, [_rl_sine_exact()] * len(DTS))
+    assert all(o > 1.9 for o in orders), (orders, rels)
+    assert rels[0] < 1e-6, rels

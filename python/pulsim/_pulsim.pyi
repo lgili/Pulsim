@@ -903,6 +903,14 @@ class SimulationOptions:
     def atol(self, arg0: float) -> None:
         ...
     @property
+    def discontinuity_restart(self) -> bool:
+        """
+        Fixed engine: take the step after a discontinuity (mask change, diode flip, source jump, inconsistent start) as two backward-Euler half-steps; gate mask sampled at the step start. Off = the engine before the rule, bit for bit.
+        """
+    @discontinuity_restart.setter
+    def discontinuity_restart(self, arg0: bool) -> None:
+        ...
+    @property
     def dt(self) -> float:
         ...
     @dt.setter
@@ -1178,6 +1186,11 @@ class SimulationResult:
     def inductor_guard_actions(self) -> list[InductorGuardAction]:
         """
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
+        """
+    @property
+    def n_restart_steps(self) -> int:
+        """
+        Steps taken as two backward-Euler half-steps (discontinuity_restart). 0 with the rule off.
         """
     @property
     def states(self) -> typing.Any:
@@ -1667,7 +1680,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool]]:
+    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], bool]:
         ...
     def __init__(self) -> None:
         ...
@@ -1710,6 +1723,14 @@ class SolverSnapshot:
         ...
     @pmsm_history.setter
     def pmsm_history(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def restart_pending(self) -> bool:
+        """
+        discontinuity_restart: the run ended with a diode flip settled in its last half-step, so a resumed run's first step restarts.
+        """
+    @restart_pending.setter
+    def restart_pending(self, arg0: bool) -> None:
         ...
     @property
     def saturable_history(self) -> list[float]:

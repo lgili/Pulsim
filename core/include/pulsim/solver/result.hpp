@@ -175,6 +175,10 @@ struct SolverSnapshot {
     std::vector<Real> igbt_tail_history;
     /// 9 per machine: lambda_abc, i_abc, v_abc (MNA PMSM).
     std::vector<Real> pmsm_history;
+    /// The NEXT step must restart (discontinuity_restart): a diode
+    /// flip settled in the last half-step, so only one clean
+    /// backward-Euler half-step has run under the settled mask.
+    bool restart_pending = false;
     /// True once populated by a run.
     bool valid = false;
 };
@@ -219,6 +223,10 @@ struct SimulationResult {
     /// v2.0 Phase 2 — steps re-taken at a reduced dt. Empty on a run
     /// that never needed one.
     std::vector<DtRetry> dt_retries;
+
+    /// Steps taken as two backward-Euler half-steps
+    /// (SimulationOptions::discontinuity_restart). 0 with the rule off.
+    Size n_restart_steps = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

@@ -1474,6 +1474,9 @@ class SolverOptions:
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
     enable_substep_state_correction: Optional[bool] = None
+    # Fixed engine: two backward-Euler half-steps after every
+    # discontinuity, gate sampled at the step start (None = off).
+    discontinuity_restart: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1614,6 +1617,7 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    discontinuity_restart: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1906,6 +1910,8 @@ def simulate(
         if enable_substep_state_correction is None:
             enable_substep_state_correction = (
                 solver.enable_substep_state_correction)
+        if discontinuity_restart is None:
+            discontinuity_restart = solver.discontinuity_restart
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -2084,6 +2090,7 @@ def simulate(
             "inductor_abs_clamp": inductor_abs_clamp is not None,
             "enable_substep_state_correction": bool(
                 enable_substep_state_correction),
+            "discontinuity_restart": bool(discontinuity_restart),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -2190,6 +2197,7 @@ def simulate(
             on_cache=on_cache,
             enable_substep_state_correction=(
                 enable_substep_state_correction),
+            discontinuity_restart=discontinuity_restart,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -2523,6 +2531,12 @@ def simulate(
                 "re-fire), silently corrupting the capacitor "
                 "bookkeeping. The ladder is disabled automatically "
                 "when mmc_arms is set; do not request it.")
+        if discontinuity_restart:
+            raise ValueError(
+                "simulate(mmc_arms=..., discontinuity_restart=True): "
+                "the restart half-steps re-solve at dt/2 with the "
+                "arm's full-dt Thevenin stamp — the dt-halving "
+                "corruption again.")
         if enable_substep_state_correction:
             raise ValueError(
                 "simulate(mmc_arms=..., "
@@ -2614,6 +2628,8 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if discontinuity_restart is not None:
+        opts.discontinuity_restart = bool(discontinuity_restart)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -3178,7 +3194,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn):
+                      switch_fn, discontinuity_restart=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3246,6 +3262,9 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if enable_substep_state_correction:
         why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
                     "fixed-step commutation split"))
+    if discontinuity_restart:
+        why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
+                    "fixed-step engine's restart rule"))
     if store_every is not None and int(store_every) != 1:
         why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:
