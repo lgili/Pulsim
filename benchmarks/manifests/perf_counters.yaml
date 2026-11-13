@@ -1,0 +1,342 @@
+# Frozen work counters per circuit x engine (benchmarks/tools/counters.py).
+# Gate: pwl <= frozen; trbdf2 / dsed <= 1.02 x frozen. A counter that drops
+# below 0.95 x frozen prints a re-freeze reminder. Wall time is never gated.
+# `refused` records an engine that refuses the circuit today.
+# Re-freeze with `benchmarks/tools/counters.py --freeze`; review the diff.
+counters:
+  rc_charge:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 1
+      n_steps: 501
+      n_dt_retries: 0
+      n_event_iterations: 0
+      n_commutations: 0
+    trbdf2:
+      n_accept: 1009
+      n_reject: 9
+      n_solves: 2036
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      n_accept: 5000
+      n_reject: 0
+      n_events: 0
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
+  ladder500_rc:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 1
+      n_steps: 2001
+      n_dt_retries: 0
+      n_event_iterations: 0
+      n_commutations: 0
+    trbdf2:
+      n_accept: 1114
+      n_reject: 10
+      n_solves: 2248
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      n_accept: 20
+      n_reject: 0
+      n_events: 0
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
+  buck_ccm:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 4
+      n_steps: 8001
+      n_dt_retries: 0
+      n_event_iterations: 80
+      n_commutations: 80
+    trbdf2:
+      n_accept: 1374
+      n_reject: 24
+      n_solves: 2957
+      n_newton_retries: 0
+      n_gate_events: 80
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      n_accept: 80
+      n_reject: 0
+      n_events: 79
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
+  buck_dcm:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 4
+      n_steps: 8001
+      n_dt_retries: 0
+      n_event_iterations: 80
+      n_commutations: 80
+    trbdf2:
+      n_accept: 1782
+      n_reject: 269
+      n_solves: 4361
+      n_newton_retries: 0
+      n_gate_events: 80
+      n_diode_events: 19
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      n_accept: 111
+      n_reject: 0
+      n_events: 110
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
+  hard_switched_rc:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 2
+      n_steps: 50001
+      n_dt_retries: 0
+      n_event_iterations: 0
+      n_commutations: 0
+    trbdf2:
+      n_accept: 2180
+      n_reject: 27
+      n_solves: 4414
+      n_newton_retries: 0
+      n_gate_events: 10
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 10
+    dsed:
+      n_accept: 10
+      n_reject: 0
+      n_events: 9
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
+  shockley_op:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 1
+      n_steps: 101
+      n_dt_retries: 0
+      n_event_iterations: 0
+      n_commutations: 0
+    trbdf2:
+      n_accept: 1003
+      n_reject: 0
+      n_solves: 2006
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      refused: ValueError
+  saturable_rl:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 1
+      n_steps: 2001
+      n_dt_retries: 0
+      n_event_iterations: 0
+      n_commutations: 0
+    trbdf2:
+      n_accept: 1003
+      n_reject: 0
+      n_solves: 2006
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      refused: ValueError
+  half_bridge_inverter:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 2
+      n_steps: 10001
+      n_dt_retries: 0
+      n_event_iterations: 0
+      n_commutations: 0
+    trbdf2:
+      n_accept: 3130
+      n_reject: 43
+      n_solves: 6346
+      n_newton_retries: 0
+      n_gate_events: 200
+      n_diode_events: 0
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      n_accept: 206
+      n_reject: 0
+      n_events: 199
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
+  three_phase_diode_rectifier:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 12
+      n_steps: 1601
+      n_dt_retries: 0
+      n_event_iterations: 56
+      n_commutations: 54
+    trbdf2:
+      n_accept: 1213
+      n_reject: 79
+      n_solves: 3283
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 96
+      n_chatter_breaks: 0
+      n_forced_accepts: 1
+    dsed:
+      refused: RuntimeError
+  buck_mosfet_nonlinear:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 2
+      n_steps: 2501
+      n_dt_retries: 0
+      n_event_iterations: 80
+      n_commutations: 80
+    trbdf2:
+      n_accept: 1513
+      n_reject: 1024
+      n_solves: 6893
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 80
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      refused: ValueError
+  flyback_converter:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 4
+      n_steps: 20001
+      n_dt_retries: 0
+      n_event_iterations: 3809
+      n_commutations: 3808
+    trbdf2:
+      n_accept: 23352
+      n_reject: 558
+      n_solves: 49025
+      n_newton_retries: 0
+      n_gate_events: 200
+      n_diode_events: 209
+      n_chatter_breaks: 5
+      n_forced_accepts: 167
+    dsed:
+      refused: NotImplementedError
+  diode_bridge_rectifier:
+    pwl:
+      event_builds: 0
+      event_hits: 0
+      event_refactors: 0
+      rank1_hits: 0
+      multi_bit_rank1_hits: 0
+      full_refactor_hits: 0
+      fallbacks: 0
+      segment_evictions: 0
+      num_built_segments: 3
+      n_steps: 1001
+      n_dt_retries: 0
+      n_event_iterations: 20
+      n_commutations: 38
+    trbdf2:
+      n_accept: 1120
+      n_reject: 29
+      n_solves: 2424
+      n_newton_retries: 0
+      n_gate_events: 0
+      n_diode_events: 19
+      n_chatter_breaks: 0
+      n_forced_accepts: 0
+    dsed:
+      refused: RuntimeError

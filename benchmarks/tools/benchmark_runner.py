@@ -18,14 +18,12 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
-try:
-    from pulsim_python_backend import availability_error as python_backend_error
-    from pulsim_python_backend import is_available as python_backend_available
-    from pulsim_python_backend import run_from_yaml as run_pulsim_python
-except ImportError:  # pragma: no cover - local import fallback
-    python_backend_error = None
-    python_backend_available = None
-    run_pulsim_python = None
+# restore-reference-benchmark-harness: scenarios run through the harness
+# v1 reader and `pulsim.simulate` (the old backend module, never in the
+# repository, is gone).
+import time as _time
+
+import v1_reader
 
 # Onda 1 of the bench-tool refresh: optional rich-based terminal UI.
 # `benchmarks/_console.py` exposes BenchProgress + rendering helpers
@@ -83,12 +81,12 @@ class ScenarioResult:
 
 
 def can_use_pulsim_python_backend() -> bool:
-    if python_backend_available is None:
-        return False
+    """True when `pulsim` imports (the runner needs nothing else)."""
     try:
-        return bool(python_backend_available())
-    except Exception:
+        import pulsim  # noqa: F401
+    except ImportError:
         return False
+    return True
 
 
 def load_yaml(path: Path) -> Dict[str, Any]:
@@ -193,37 +191,34 @@ def run_pulsim(
     preferred_mode: Optional[str] = None,
     use_initial_conditions: bool = False,
 ) -> PulsimRunResult:
-    if run_pulsim_python is None:
-        reason = "benchmark backend module import failed"
-        if python_backend_error is not None:
-            try:
-                backend_reason = python_backend_error()
-                if backend_reason:
-                    reason = backend_reason
-            except Exception:
-                pass
-        raise RuntimeError(
-            "Pulsim Python runtime backend unavailable. "
-            "Build Python bindings and expose them via build/python or install pulsim package. "
-            f"Reason: {reason}"
-        )
+    """Run one v1 scenario file through the harness reader and write
+    ``time`` plus every node voltage and inductor current to ``output_path``.
 
-    raw_result = run_pulsim_python(
-        netlist_path,
-        output_path,
-        preferred_mode=preferred_mode,
-        use_initial_conditions=use_initial_conditions,
-    )
-
-    if not hasattr(raw_result, "runtime_s") or not hasattr(raw_result, "telemetry"):
-        raise RuntimeError("Unexpected backend response: structured telemetry result expected")
-
-    return PulsimRunResult(
-        runtime_s=float(getattr(raw_result, "runtime_s")),
-        steps=int(getattr(raw_result, "steps")),
-        mode=str(getattr(raw_result, "mode")),
-        telemetry=dict(getattr(raw_result, "telemetry")),
-    )
+    ``preferred_mode`` (shooting / harmonic balance) has no 2.0 equivalent
+    here and is refused; ``use_initial_conditions`` is read from the file.
+    """
+    if preferred_mode is not None:
+        raise RuntimeError(f"periodic mode {preferred_mode!r} is not run by the v2 harness")
+    case = v1_reader.load(netlist_path)
+    sim = load_yaml(netlist_path).get("simulation") or {}
+    variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
+    engine = "trbdf2" if variable else "pwl"
+    t0 = _time.perf_counter()
+    res = case.run(engine)
+    runtime = _time.perf_counter() - t0
+    b, _, _ = case.build()
+    cols = [c for c in b.state_var_names() if c.startswith(("V(", "I("))]
+    for c in case.observables + [case.validation.get("observable")]:
+        if c and c not in cols:
+            cols.append(c)
+    data = [v1_reader.observable(res, c) for c in cols]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as handle:
+        w = csv.writer(handle)
+        w.writerow(["time"] + cols)
+        for k, t in enumerate(res.times):
+            w.writerow([repr(float(t))] + [repr(float(d[k])) for d in data])
+    return PulsimRunResult(runtime_s=runtime, steps=len(res.times), mode=engine, telemetry={})
 
 
 def resolve_baseline_path(path: Path) -> Path:
@@ -1038,19 +1033,8 @@ def main() -> int:
     if yaml is None:
         raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
 
-    backend_reason = None
-    if python_backend_error is not None:
-        try:
-            backend_reason = python_backend_error()
-        except Exception as exc:
-            backend_reason = f"{exc.__class__.__name__}: {exc}"
-
-    if backend_reason is not None:
-        raise SystemExit(
-            "Pulsim Python runtime backend unavailable. "
-            "Build Python bindings and expose build/python on PYTHONPATH or install pulsim package. "
-            f"Reason: {backend_reason}"
-        )
+    if not can_use_pulsim_python_backend():
+        raise SystemExit("pulsim is not importable: build the bindings and put build/python on PYTHONPATH")
 
     use_ui = _HAS_CONSOLE and not args.quiet
     console = _make_console(force_plain=args.quiet) if use_ui else None

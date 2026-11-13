@@ -1,0 +1,137 @@
+# v2 triage of the 126 `schema: pulsim-v1` benchmark circuits.
+# One entry per file under benchmarks/circuits (path relative to benchmarks/).
+#   runs     - benchmarks/tools/v1_reader.py maps it and engine='pwl' completes
+#   skipped  - the reader refuses it; `reason` is the text of its Unmapped error
+#   error    - it maps, but engine='pwl' fails; `match` is in the exception text
+# `tol: {engine: x}` overrides the differential runner's default tolerance
+# (loosening one needs a `reason`); `known: {engine: outcome}` records a
+# disagree/error cell found by the runner so the nightly job flags only changes.
+# test_benchmark_harness.py keeps every entry honest (a skip that starts
+# loading, or an error that starts running, fails the test).
+circuits:
+  circuits/closed_loop/cl_boost_pi.yaml: {status: runs, known: {pwl: error}}
+  circuits/closed_loop/cl_buck_aggressive_pi.yaml: {status: runs, known: {pwl: error}}
+  circuits/closed_loop/cl_buck_hysteresis.yaml: {status: skipped, reason: "component type 'hysteresis'"}
+  circuits/closed_loop/cl_buck_integrator.yaml: {status: skipped, reason: "component type 'integrator'"}
+  circuits/closed_loop/cl_buck_limiter_chain.yaml: {status: skipped, reason: "component type 'limiter'"}
+  circuits/closed_loop/cl_buck_lookup_duty.yaml: {status: skipped, reason: "component type 'lookup_table'"}
+  circuits/closed_loop/cl_buck_pi.yaml: {status: runs, known: {pwl: error}}
+  circuits/closed_loop/cl_buck_pi_with_gain.yaml: {status: skipped, reason: "component type 'gain'"}
+  circuits/closed_loop/cl_buck_pid.yaml: {status: skipped, reason: "component type 'pid_controller'"}
+  circuits/closed_loop/cl_buck_rate_limited_ref.yaml: {status: skipped, reason: "component type 'rate_limiter'"}
+  circuits/closed_loop/cl_buck_sample_hold.yaml: {status: skipped, reason: "component type 'sample_hold'"}
+  circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: error}}
+  circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: error}}
+  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: error, match: "solve_with_newton: failed to converge", reason: "pwl: SimulationAborted: run_transient: the step ending at t = 3.7e-05 could not be taken, even split into 64 sub-steps of 3.906e-09 s (dt/64). La"}
+  circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
+  circuits/diodes/diode_bridge_rectifier.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}
+  circuits/diodes/diode_half_wave_rl_load.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/diode_rectifier.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/half_wave_rectifier_sine.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/ll05_diode_rectifier_filter.yaml: {status: error, match: "PWL diode states never settled", reason: "pwl: RuntimeError: compute_dc_operating_point: the PWL diode states never settled — 16 rounds of re-solving still flip at least one diode. The ci"}
+  circuits/diodes/voltage_doubler.yaml: {status: runs, known: {dsed: error}}
+  circuits/linear/bridge_resistive_pure.yaml: {status: runs}
+  circuits/linear/capacitor_natural_discharge.yaml: {status: runs}
+  circuits/linear/current_divider_3way.yaml: {status: runs}
+  circuits/linear/current_source_rc.yaml: {status: runs}
+  circuits/linear/current_source_rl_step.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/linear/lc_low_pass_sine.yaml: {status: runs}
+  circuits/linear/ll01_resistive_divider_dc.yaml: {status: runs}
+  circuits/linear/ll02_rc_pulse_charge.yaml: {status: runs, known: {trbdf2: disagree}}
+  circuits/linear/ll03_rl_step.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/linear/pulse_voltage_rl.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/linear/rc_dc.yaml: {status: runs}
+  circuits/linear/rc_step.yaml: {status: runs}
+  circuits/linear/rl_natural_response.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/linear/rl_step.yaml: {status: runs}
+  circuits/linear/rlc_series_resonant.yaml: {status: runs}
+  circuits/linear/sine_voltage_rc.yaml: {status: runs}
+  circuits/linear/two_stage_rc_lowpass.yaml: {status: runs}
+  circuits/linear/voltage_divider_3stage.yaml: {status: runs}
+  circuits/magnetics/core_loss_steinmetz_sine.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/magnetics/coupled_inductor_step.yaml: {status: runs}
+  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/magnetics/inductor_chain_step.yaml: {status: runs}
+  circuits/magnetics/saturating_inductor_step.yaml: {status: skipped, reason: "saturable_inductor (v1 exponent law has no 2.0 equivalent)"}
+  circuits/magnetics/transformer_leakage.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/magnetics/transformer_step_up.yaml: {status: runs}
+  circuits/motors/motor_dc_brush_step_load.yaml: {status: runs}
+  circuits/motors/motor_induction_locked_rotor.yaml: {status: runs}
+  circuits/motors/motor_pmsm_dq_open_loop.yaml: {status: runs}
+  circuits/resonance/bode_rlc_low_pass.yaml: {status: runs}
+  circuits/resonance/driven_lc_series_resonance.yaml: {status: runs}
+  circuits/resonance/lc_resonant_tank.yaml: {status: runs}
+  circuits/resonance/ll04_rlc_underdamped.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/resonance/rl_high_pass_sine.yaml: {status: runs}
+  circuits/resonance/rlc_overdamped_step.yaml: {status: runs}
+  circuits/resonance/rlc_parallel_step.yaml: {status: runs}
+  circuits/resonance/rlc_step.yaml: {status: runs}
+  circuits/stress/high_q_rlc_ringdown.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/stress/periodic_rc_pwm.yaml: {status: runs}
+  circuits/stress/stiff_rc_high_freq_switching.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/stress/stiff_rlc.yaml: {status: runs}
+  circuits/stress/stiff_two_timescale_rc.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/basic/chopper_with_rc_snubber.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/basic/mosfet_nmos_dc.yaml: {status: runs}
+  circuits/switching/basic/pwm_voltage_rc.yaml: {status: runs}
+  circuits/switching/basic/pwm_voltage_rl_filter.yaml: {status: runs}
+  circuits/switching/basic/snubber_rc.yaml: {status: runs}
+  circuits/switching/basic/vcswitch_resistor.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/boost/boost_classic.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/boost/boost_pfc_open_loop.yaml: {status: runs, known: {pwl: disagree, dsed: error}}
+  circuits/switching/boost/boost_switching_complex.yaml: {status: runs}
+  circuits/switching/boost/cascaded_boost_buck.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/boost/ll07_boost_vcswitch.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/switching/boost/ll12_pfc_boost_continuous.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/switching/boost/synchronous_boost.yaml: {status: runs}
+  circuits/switching/boost/textbook_erickson_boost_ccm.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/boost/two_phase_interleaved_boost.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck/buck_dcm.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck/buck_hard_switching_reference.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck/buck_igbt.yaml: {status: error, match: "solve_with_newton: failed to converge", reason: "pwl: SimulationAborted: run_transient: the step ending at t = 7.8e-06 could not be taken, even split into 64 sub-steps of 3.125e-09 s (dt/64). La"}
+  circuits/switching/buck/buck_mosfet_nonlinear.yaml: {status: runs}
+  circuits/switching/buck/buck_pmos.yaml: {status: skipped, reason: "component type 'pmos'"}
+  circuits/switching/buck/buck_switching.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck/buck_with_current_sense.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/buck/cascaded_buck_buck.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/buck/high_freq_gan_buck.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: error, trbdf2: error}}
+  circuits/switching/buck/sync_buck_500khz.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/buck/synchronous_buck.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/buck/textbook_erickson_buck_ccm.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck/triple_sync_buck.yaml: {status: runs}
+  circuits/switching/buck_boost/bidirectional_buck_boost.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/buck_boost/buck_boost.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/buck_boost/sepic.yaml: {status: runs}
+  circuits/switching/inverter/half_bridge_inverter.yaml: {status: runs}
+  circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs}
+  circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/inverter/lcc_resonant_inverter.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree, dsed: disagree}}
+  circuits/switching/isolated/active_clamp_forward.yaml: {status: runs}
+  circuits/switching/isolated/dual_active_bridge.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree, dsed: error}}
+  circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, trbdf2: error}}
+  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: error, match: "no DC operating point", reason: "pwl: RuntimeError: compute_dc_operating_point: no DC operating point. The direct solve failed with: solve_with_newton: failed to converge after 5"}
+  circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/switching/multilevel/mmc_4cell_chain.yaml: {status: runs, known: {pwl: disagree}}
+  circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs}
+  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  circuits/thermal/buck_electrothermal.yaml: {status: skipped, reason: "mosfet loss/thermal block"}
+  circuits/thermal/electrothermal_resistor_self_heating.yaml: {status: runs}
+  circuits/thermal/long_run_drift_buck.yaml: {status: runs}
+  circuits/three_phase/grid_pll_lock.yaml: {status: skipped, reason: "component type 'gain'"}
+  circuits/three_phase/interleaved_buck_3ph.yaml: {status: runs}
+  circuits/three_phase/pll_grid_sync.yaml: {status: skipped, reason: "component type 'pll'"}
+  circuits/three_phase/three_phase_balanced_rl_load.yaml: {status: runs}
+  circuits/three_phase/three_phase_diode_rectifier.yaml: {status: runs, known: {pwl: disagree, dsed: error}}
+  circuits/three_phase/three_phase_dq_decoupling.yaml: {status: skipped, reason: "component type 'pll'"}
+  circuits/three_phase/vector_control_open_loop.yaml: {status: skipped, reason: "component type 'pll'"}

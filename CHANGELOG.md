@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Reference benchmark harness restored
+
+* **Added** a harness-only reader for the 126 `schema: pulsim-v1`
+  benchmark circuits (`benchmarks/tools/v1_reader.py`) and a triage of
+  every file (`benchmarks/manifests/v2_triage.yaml`): 107 run on
+  `engine='pwl'`, 15 are skipped by name, 4 fail on `pwl` and are
+  recorded. `benchmark_runner.py` runs on `pulsim.simulate` (the missing
+  backend module import is gone); `benchmark_ngspice.py` works again.
+* **Added** time-weighted metrics (`benchmarks/tools/metrics.py`), the
+  differential runner circuit × engine (`differential_runner.py`), 20
+  analytic reference circuits with closed-form or exact piecewise-LTI
+  solutions and per-engine ceilings (RC step: `pwl` 1.59e-3 at 10 µs,
+  `trbdf2` 2.3e-7; underdamped RLC: `pwl` 6.13e-4, `trbdf2` 9.2e-5),
+  golden checkpoints of `engine='pwl'` for 45 circuits (exact step count,
+  commutation count and switch-state digest; values within `rtol`
+  1e-9 / 1e-6), and a counter-based performance gate on the counters the
+  kernel already reports. No wall-clock assertion.
+* **CI**: job `reference-smoke` (three platforms, non-blocking until one
+  week green) and `.github/workflows/nightly-reference.yml` (full matrix
+  and ngspice, never gates a pull request). `make reference-smoke` /
+  `make reference-nightly`. The general Python job deselects marker
+  `reference`.
+
 ### Periodic steady state by Newton shooting on the true state (slice 1)
 
 * **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,
