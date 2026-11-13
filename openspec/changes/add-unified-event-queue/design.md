@@ -385,3 +385,35 @@ both for one nightly cycle.
    `[t0, t_end)`, the rule of `fix-control-tick-semantics`: 40 ticks for
    2 kHz over 20 ms). The comment at `solver/trbdf2_transient.hpp:180-183`
    says `floor(span/T) + 1` and should be corrected there; confirm.
+
+## Re-centred scope, 2026-11-13
+
+> Appended; D1–D8 stand except where named.
+
+### D9. Samples are time events
+
+A sample source is a `TimeEventSource` with the output grid (fixed
+`dt_out`, or a user list of times). Its events have the lowest priority
+at an instant (after state events, ticks, gate edges and breakpoints,
+D2), carry no mode change and never arm a restart. On the exact
+strategy the sample is the flow evaluated at its time; on the implicit
+strategies the step lands on it as today (`Fixed`: on the grid; `Lte`:
+the controller truncates to it, as the existing output-time handling
+does).
+
+### D10. The decision at an instant
+
+D2's order gains one step at its end:
+
+1. state events located at `t` (their crossing devices marked);
+2. ticks; gate edges; breakpoints (D2 as written);
+3. **one mode selection** for the whole instant
+   (`add-complementarity-mode-selection` D6), then the
+   re-initialisation service (`add-branch-form-ideal-switch` D4);
+4. samples.
+
+`ModeSet` keeps `crossing_signal` (the location of state events) and
+loses `redecide`/`settle` at the default flip; until then
+`settle` is selected by `mode_selection='legacy'`. A device's declared
+`events()` (unified device interface) are still located by the same
+Illinois.

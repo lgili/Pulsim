@@ -129,3 +129,32 @@ Measured consequences (audit `raw/arch.md` §0, `raw/numerics.md`,
 - Results for analytic schedules on the fixed and the variable-step
   engine are unchanged at every migration step (bit-identical fixed
   goldens, identical TR-BDF2 step counters).
+
+## Re-centred scope, 2026-11-13
+
+> Appended; the sections above stand except where named.
+
+The queue becomes the driver of the one kernel
+(`refactor-unified-transient-stepper`, re-centred scope D8): the kernel
+advances exactly to the queue's next event, and every strategy
+(exact propagation, the trapezoid with the SDIRK restart, TR-BDF2)
+advances a segment between two events. Two changes to this change's
+plan follow:
+
+- **Recorded output samples and controller ticks are queue events.** A
+  sample is a time event that records the state and changes nothing
+  else; on the exact strategy it is an evaluation of the flow, not a
+  step (`add-exact-propagator-strategy` D15). Ticks already are events
+  (D4).
+- **The mode decision at an event is the complementarity service**
+  (`add-complementarity-mode-selection`), called once per event
+  instant after the instant's gates and sources are applied. This
+  supersedes `ModeSet::settle` (D6) as the decision rule at the default
+  flip; `settle` stays as the legacy policy until the settle loops are
+  deleted. The state-event locator (one Illinois, three trial
+  evaluators) is unchanged.
+
+Before the flip, the requirement "One State-Event Locator And One Mode
+Decision" is met by `settle`; after it, by the selection service. Its
+scenario "Mask cycle is reported once, the same way" applies to the
+legacy policy only: the selection service has no cycles to report.

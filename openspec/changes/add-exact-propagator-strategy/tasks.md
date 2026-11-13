@@ -73,3 +73,37 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 12.2 Measure the dense / sparse crossover on the RLC ladder (n = 5 … 482) with the counter harness and replace the `n_state ≤ 64` placeholder
 - [ ] 12.3 Docs: engine guide ("when the exact strategy is selected, when it is refused"), `docs/dsed.md`, AI_GUIDE, CHANGELOG with the 1e-10 result movement
 - [ ] 12.4 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
+
+<!-- Re-centred scope, 2026-11-13: groups 13–19 are appended; groups 1–12 are unchanged. -->
+
+## 13. Default route (re-centred scope, D11)
+- [ ] 13.1 Segment eligibility test (D11 rules 1–4) and route record `result.exact['segments']` with the reason for every implicit segment
+- [ ] 13.2 `engine='exact'` canonical, `'dsed'` alias; refusal of a non-eligible segment with `UnsupportedError` naming the rule, unless `allow_implicit_segments=True`
+- [ ] 13.3 Tests: `auto` routes the DCM buck, the boost, the single- and three-phase bridges (resistor-pair and, after `add-branch-form-ideal-switch` group 8, ideal) to exact for every segment; a Shockley rectifier is routed implicit with reason `'device'`; `auto` and explicit `'exact'` give bit-identical states on the exact-only circuits
+
+## 14. Hybrid segments (D12; needs groups 9 and 11)
+- [ ] 14.1 Classification at events; implicit segment to the next event; `affine_region` re-test at each accepted implicit step scheduling a re-entry event; SDIRK×3 on entry to an implicit segment
+- [ ] 14.2 Flapping hold (8 re-entries per period); counters `n_exact_segments`, `n_implicit_segments`, `t_exact_fraction`, hand-over list
+- [ ] 14.3 Tests: a buck whose switch is a MOSFET Level 1 and whose diode is PWL matches `trbdf2` (rtol 1e-9) within 1e-6 on `v_C`, and `t_exact_fraction` is at least the fraction of each period the MOSFET spends in cutoff (minus the event tolerance); a Shockley-diode rectifier runs with `n_exact_segments = 0`
+
+## 15. Scaling rule (D13)
+- [ ] 15.1 Action-of-the-exponential kernel (truncated Taylor with scaling and the 1-norm estimate) on the sparse `A` of a mode, augmented with the source states
+- [ ] 15.2 Cost model and route choice per mode; counters in `result.exact['routes']`
+- [ ] 15.3 Tests on the RLC ladder of `probes/expm_action_ladder.py` (h = 1 µs): n = 2000 non-stiff → action, 20 ± 2 matvecs per step, states within 1e-13 of the dense kernel on n = 200; n = 300 with snubbers and a mode visited for 10⁴ steps → dense; the same with 50 steps per visit → hand-over with reason `'cost'`
+- [ ] 15.4 Calibrate the flop constants, `m_max` and the dense budget against C++ timings with the counter harness; record them here
+
+## 16. Exact sources (D14)
+- [ ] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events
+- [ ] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events
+
+## 17. Output samples and controller ticks as events (D15; needs `add-unified-event-queue`)
+- [ ] 17.1 Samples evaluated from the last event (modal O(n), or a cached `Φ(dt_out)`); ticks as queue events with zero-order hold
+- [ ] 17.2 Tests: the DCM buck's samples at `dt_out = T/7` equal the exact flow within 1e-12 and the event count is the same as with no samples; a 20 kHz controller over 1 ms produces 21 ticks at the instants of `fix-control-tick-semantics`
+
+## 18. Ideal switches native (D16; with `add-branch-form-ideal-switch` group 8 and `add-complementarity-mode-selection` group 6)
+- [ ] 18.1 Exact route on branch-form ideal switches with reduced state per mode; mode by the selection service; D4 zero-band rule retired when the service is the default
+- [ ] 18.2 Tests (the prototype oracles): DCM buck 4000 periods from rest, `v_C` within 1e-9 V of 8.9963970815477 V and turn-off within 1e-11·T; boost CCM 20 000 periods within 1e-9 V and 1e-9 A of the mpmath orbit; three-phase overlap angle 15.479928° within 1e-6°
+
+## 19. Default flip (in the single number-changing release)
+- [ ] 19.1 `engine='auto'` default route as D11; legacy names warn where they change meaning
+- [ ] 19.2 Re-baseline through the reference harness with the other number-changing defaults; CHANGELOG

@@ -105,3 +105,21 @@ kept 0.019 of its energy after 100 periods (0.996 without it).
   told through a CHANGELOG **BREAKING** entry with the before/after
   error table, the release notes, and guide traps 9, 10 and §6.3.
 - `engine='trbdf2'` and `engine='dsed'` are not touched.
+
+## Superseded rule, 2026-11-13
+
+> Appended note; the sections above are kept as the record of the first
+> form of this change.
+
+The rule is now three consecutive Alexander SDIRK(2,2) steps
+(`γ = 1 − 1/√2`, one cached factor per mode at `dt_eq = 2γh`) at every
+mask change, source breakpoint and t = 0, not the two backward-Euler
+half-steps described above (maintainer decision of 2026-11-13,
+`openspec/CORE_ROADMAP.md` decision 2). The backward-Euler pair drains
+resonant modes; on the ideal DCM buck three SDIRK(2,2) steps are about
+400 times more accurate at the same step
+(`../add-branch-form-ideal-switch/probes/sdirk_restart_ideal.out` (3):
+4.345e-8 V against 1.707e-5 V at T/400). The rule is opt-in until the
+single number-changing release. It is implemented in this form (the
+sections above were rewritten with it; the stages run on the cache's
+event table through `solve_at(mask, 2γ·dt)`).

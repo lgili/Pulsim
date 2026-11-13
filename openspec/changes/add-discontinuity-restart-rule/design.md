@@ -445,3 +445,9 @@ today's engine, bit for bit.
    decide in `fix-control-tick-semantics`?
 6. Should the consistent-initialisation solve (sample 0, exact
    derivative refresh) be opened as its own change?
+
+## Superseded rule, 2026-11-13
+
+The restart rule is three consecutive Alexander SDIRK(2,2) steps; see
+D0 and the note at the end of proposal.md. Decisions above marked
+"superseded by D0" describe the first form of the rule.
