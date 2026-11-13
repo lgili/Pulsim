@@ -77,7 +77,12 @@ guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
 only (a no-op on `trbdf2` / `dsed`, which control the step on their own
 error estimate); `enable_nonlinear_refresh=False` with a smooth /
-Shockley diode, MOSFET or IGBT on every transient engine.
+Shockley diode, MOSFET or IGBT on every transient engine;
+`sensitivities=` on every engine but `dsed`, and on `dsed` a parameter
+that is not an R, L, C, DC-source value or trailing-edge duty
+(`sensitivity_parameter`), a time-varying source, a Newton device, an
+opaque gate or `b_extra_fn`, a mode without an exact propagator and a
+grazing diode event (`grazing_event`).
 
 ## Engines
 

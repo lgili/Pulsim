@@ -138,6 +138,23 @@ class PeriodicSteadyStateResult:
     n_engine_steps: int
     period: float
     _ctx: Any = field(default=None, repr=False)
+    #: ``{parameter: dx*/dp}`` when ``sensitivities=`` was given
+    #: (``(I - M)^-1 dP/dp``, in ``state_labels`` order).
+    dx0: dict = field(default_factory=dict)
+    #: ``{parameter: dP/dp}`` at ``x0`` (one sensitivity period).
+    dPdp: dict = field(default_factory=dict)
+    #: The orbit's :class:`pulsim.sensitivity.SensitivityResult`
+    #: (``S(0) = dx*/dp``) when ``sensitivities=`` was given.
+    sensitivity: Any = field(default=None, repr=False)
+
+    def kpi(self, signal, kind="avg", *, with_grad=True):
+        """Orbit KPI over one period with its exact gradient (the second
+        sensitivity period of D5); needs ``sensitivities=``."""
+        if self.sensitivity is None:
+            raise ValueError(
+                "kpi: solve with periodic_steady_state(..., "
+                "sensitivities=[...]) to get KPI gradients.")
+        return self.sensitivity.kpi(signal, kind, with_grad=with_grad)
 
     @property
     def snapshot(self) -> np.ndarray:
@@ -788,7 +805,8 @@ def _classify(mu):
 def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           start_from=None, max_period_runs: int = 60,
                           n_relax: int = 5,
-                          rtol: float = _RTOL) -> PeriodicSteadyStateResult:
+                          rtol: float = _RTOL,
+                          sensitivities=None) -> PeriodicSteadyStateResult:
     """Periodic steady state of a switching circuit by Newton shooting
     on the true state, on the ``dsed`` exact stepper.
 
@@ -822,6 +840,13 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         meets the same bound (or one step has been taken from such a
         residual): with a slow mode the state error is about
         ``|G| / (1 - |mu|)``, not ``|G|``.
+
+    sensitivities
+        Parameter names (``"<component>.<field>"``: ``R``, ``L``, ``C``,
+        ``V`` of linear elements and DC sources, ``"<switch>.duty"`` of a
+        trailing-edge PWM). Sets ``dx0`` = ``(I - M)^-1 dP/dp`` and
+        ``sensitivity`` (orbit KPI gradients through ``kpi``) at the
+        cost of one more period run; see ``pulsim.sensitivity``.
 
     The section is ``t = 0``: for the zero-phase built-in PWM helpers
     that is the rising gate edge.
@@ -966,4 +991,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         pattern_history=patterns, n_period_runs=s.n_runs, n_engine_steps=s.n_steps,
         period=s.T, _ctx=s)
     s.orbit_traj = traj
+    if sensitivities is not None:
+        from .sensitivity import orbit_sensitivities
+        orbit_sensitivities(res, s, sensitivities)
     return res

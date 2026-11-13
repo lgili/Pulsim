@@ -15,6 +15,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   finite-difference harness with step selection and a Richardson
   estimate; the two prototypes ported as numpy references that
   reproduce the `tasks.md` table to 1e-7.
+* **Added** transient sensitivities on the exact path:
+  `simulate(..., engine='dsed', sensitivities=["L.L", "RL.R",
+  "S.duty", ...])` returns `res.sensitivity.states` (`n × n_state ×
+  n_p`) and `res.sens(signal, param)`. R, L, C and DC-source values
+  (exact `∂A/∂p` from assemblies), the duty of a trailing-edge PWM
+  (gate-edge jump `dτ/dD = T`), Daleckii–Krein with φ₁ divided
+  differences, the block exponential on a near-defective mode, the jump
+  correction at diode events. DCM buck `∂v_C(40 T)/∂L, ∂R, ∂D` within
+  3.4e-8 of the prototype and 9e-8 of central differences of the same
+  map; RC step within 1e-9 of the closed form; critically damped RLC
+  within 1e-7 of central differences. One engine run whatever the
+  number of parameters.
+* **Added** steady-state gradients:
+  `periodic_steady_state(..., sensitivities=[...])` sets `dx0`
+  (`(I − M)⁻¹ ∂P/∂p`) and `dPdp` for one more period run; the DCM orbit's
+  three gradients within 4.9e-8 of the prototype.
+* **Added** the event rule: a grazing diode event is refused
+  (`UnsupportedError`, `feature="grazing_event"`); a near miss (the CCM
+  valley at the DCM boundary) is flagged in `sensitivity.flags` with a
+  `UserWarning`. Every other engine refuses `sensitivities=` by name.
+  Runs without `sensitivities` are bit-identical (golden probe: all
+  identical; dsed / pwl / trbdf2 / steady-state hashes unchanged).
 
 ### Design evaluation for optimisers (`pulsim.design`, first slice)
 

@@ -20,14 +20,14 @@ Reference values.
 - [x] 1.3 Port the two prototypes as reference implementations with the values above as constants
 
 ## 2. Exact path, linear-element parameters and duty (today's `dsed` adapter)
-- [ ] 2.1 `∂A/∂p`, `∂b/∂p` per mask for affine stamps (R, L, C, source value) from the exact difference of two assemblies
-- [ ] 2.2 `∂Φ/∂p`, `∂(Γ₀b)/∂p` by the Daleckii–Krein formula with φ₁ divided differences
-- [ ] 2.3 Segment recurrence and jump correction at diode events and at parameter-dependent gate edges
-- [ ] 2.4 Tests: RC values above within 1e-9 relative; DCM buck transient values within 1e-7 relative; every one equal to a central difference of the same exact map within 1e-7; `∂v_C/∂D` computed without the gate-edge jump term is 0 (regression guard), with it 43.093591 V
+- [x] 2.1 `∂A/∂p`, `∂b/∂p` per mask for affine stamps (R, L, C, source value) from the exact difference of two assemblies
+- [x] 2.2 `∂Φ/∂p`, `∂(Γ₀b)/∂p` by the Daleckii–Krein formula with φ₁ divided differences
+- [x] 2.3 Segment recurrence and jump correction at diode events and at parameter-dependent gate edges
+- [x] 2.4 Tests: RC values above within 1e-9 relative; DCM buck transient values within 1e-7 relative; every one equal to a central difference of the same exact map within 1e-7; `∂v_C/∂D` computed without the gate-edge jump term is 0 (regression guard), with it 43.093591 V
 
 ## 3. Steady-state gradients (with slice 1 of `add-periodic-steady-state-shooting`)
-- [ ] 3.1 `∂P/∂p` by one sensitivity period; `dx*/dp = (I − M)⁻¹·∂P/∂p`
-- [ ] 3.2 Tests: the three orbit gradients above within 1e-7 relative, and equal to central differences of the steady-state solve within 1e-7 (prototype: 3.4e-10, 5.5e-9, 3.5e-10)
+- [x] 3.1 `∂P/∂p` by one sensitivity period; `dx*/dp = (I − M)⁻¹·∂P/∂p`
+- [x] 3.2 Tests: the three orbit gradients above within 1e-7 relative, and equal to central differences of the steady-state solve within 1e-7 (prototype: 3.4e-10, 5.5e-9, 3.5e-10)
 
 ## 4. Parameters on the AD scalar (needs `add-unified-device-interface`)
 - [ ] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp`

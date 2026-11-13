@@ -32,7 +32,7 @@ For full control, fall back to the explicit pipeline:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from ._pulsim import (  # type: ignore[import-not-found]
     # v2.0 Phase 2 — raised when a transient cannot continue. Unlike
@@ -1756,6 +1756,8 @@ def simulate(
     resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
+    # --- forward parameter sensitivities (exact path only) ---
+    sensitivities: "Optional[Sequence[str]]" = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -1948,6 +1950,15 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    sensitivities
+        ``engine='dsed'`` only (every other engine refuses it):
+        parameter names ``"<component>.<field>"`` (``R``, ``L``,
+        ``C``, ``V``; ``"<switch>.duty"`` of a trailing-edge PWM).
+        The run is the exact stepper with events located and no event
+        projection; the result gains ``.sensitivity`` (``states``
+        ``(n, n_state, n_p)``), ``.sens(signal, param)`` and
+        ``.kpi(signal, kind, with_grad=True)``. Exact or refused, never
+        a finite difference: see :mod:`pulsim.sensitivity`.
 
     Returns
     -------
@@ -2163,6 +2174,19 @@ def simulate(
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn)
 
+    # ---- Parameter sensitivities: the exact path only. Above the
+    # dispatch (three early returns below), so every engine refuses or
+    # honours it.
+    if sensitivities is not None and engine != "dsed":
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): forward "
+            "sensitivities are computed on the exact path only "
+            "(engine='dsed'); on this engine a gradient would be a "
+            "finite difference of runs whose events sit on the step grid "
+            "(off by a factor of ten on the DCM buck). Pass "
+            "engine='dsed'.")
+
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
     # The DSED dispatcher owns its own validation; main's Phase 2.4
@@ -2235,25 +2259,34 @@ def simulate(
         # preflight report on the way out, so `result._preflight` —
         # which the warning tells every user to read — is not a
         # PWL-only attribute.
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            # Builder ICs (c0= / i0=) are a full-MNA vector: the
-            # dispatcher maps them per device onto the reduced state.
-            initial_state=None if _ic_from_builder else initial_state,
-            builder_initial_state=initial_state if _ic_from_builder else None,
-            progress=progress,
-        )
+        if sensitivities is not None:
+            from .sensitivity import simulate_sensitivities
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator)
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+            )
         try:
             _dsed_res._preflight = _preflight_report
             _dsed_res.engine_used = "dsed"
