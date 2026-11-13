@@ -27,10 +27,6 @@ import v1_reader  # noqa: E402
 SEPIC = ROOT / "benchmarks/circuits/switching/buck_boost/sepic.yaml"
 
 
-def test_imports_this_tree():
-    assert Path(pulsim.__file__).resolve().is_relative_to(ROOT)
-
-
 def test_sepic_tight_tolerance_finishes_in_bounded_steps():
     """Hit max_steps (1e7) at t = 0.776 ms before this change; takes
     28,539 accepted steps after it. Bound: twice 24,926 samples, the

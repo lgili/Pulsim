@@ -14,7 +14,6 @@ from pulsim.design import (EvaluationRecord, Evaluator, Kpi, SteadySpec,
                            as_constraints, as_objectives, evaluate)
 
 from . import _design_reference as ref
-from ._checkout import assert_pulsim_is_this_checkout
 
 T = 1e-5
 CCM = dict(L=100e-6, C=47e-6, R=1.0, R_L=0.01, T=T, D=0.5)
@@ -49,10 +48,6 @@ def shockley_buck(d):
 def _ev(**kw):
     kw.setdefault("steady", SteadySpec(method="pss"))
     return Evaluator(buck, period=T, loads=("RL",), output="vout", **kw)
-
-
-def test_the_tested_pulsim_is_this_tree():
-    assert_pulsim_is_this_checkout(p)
 
 
 # ---------------------------------------------------------------------
@@ -144,6 +139,7 @@ def test_design_ids_of_different_functions_differ():
     """Batch 6c review (d3): each pair below hashed equal before."""
     import functools
     import math
+    import os
     import subprocess
     import sys
     a = _ev()
@@ -177,14 +173,18 @@ def test_design_ids_of_different_functions_differ():
     kw2.__qualname__ = kw.__qualname__
     assert a.design_id({"f": kw}) != a.design_id({"f": kw2})
     # a nested function hashes the same in another process (its code
-    # object's repr carries an address)
+    # object's repr carries an address). The child imports the parent's
+    # pulsim first (an installed wheel, or the tree), then this tests
+    # package from the checkout.
+    path = [os.path.dirname(os.path.dirname(p.__file__)), *sys.path,
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
     src = ("import sys; sys.path[:0] = {path!r}\n"
            "from tests.test_design_evaluation import _ev\n"
            "def outer(x):\n"
            "    def inner(y):\n"
            "        return y + 1\n"
            "    return inner(x)\n"
-           "print(_ev().design_id({{'f': outer}}))\n").format(path=sys.path)
+           "print(_ev().design_id({{'f': outer}}))\n").format(path=path)
     out = {subprocess.run([sys.executable, "-c", src], capture_output=True,
                           text=True, check=True).stdout for _ in range(2)}
     assert len(out) == 1, out

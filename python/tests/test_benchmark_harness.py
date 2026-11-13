@@ -34,8 +34,6 @@ import metrics  # noqa: E402
 import v1_reader  # noqa: E402
 from analytic import BY_ID, CASES  # noqa: E402
 
-from ._checkout import assert_pulsim_is_this_checkout  # noqa: E402
-
 ANALYTIC = yaml.safe_load((BENCH / "manifests" / "analytic.yaml").read_text())["cases"]
 TRIAGE = yaml.safe_load((BENCH / "manifests" / "v2_triage.yaml").read_text())["circuits"]
 
@@ -45,10 +43,6 @@ def _quiet():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         yield
-
-
-def test_pulsim_under_test_is_this_checkout():
-    assert_pulsim_is_this_checkout(pulsim)
 
 
 # --------------------------------------------------------------- metrics ---
