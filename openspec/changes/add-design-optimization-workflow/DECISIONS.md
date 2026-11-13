@@ -82,9 +82,31 @@ failed period run, an irreproducible map). Its other `ValueError`s are
 configuration errors (a schedule that is not periodic in `period`) and
 propagate. (c) A non-finite KPI (`P_in = 0`). (d) `not_settled`.
 
-The message match of (b) is fragile; the kernel is missing a typed
-non-convergence (see "Missing from the kernel" below).
-→ Reverse: catch the typed exception once it exists.
+(b) is now typed: `periodic_steady_state` raises
+`pulsim.ConvergenceError` (still a `ValueError`) at its seven
+non-convergence sites and the evaluator catches that class; the message
+list is gone (see "Missing from the kernel", items 1 and 2).
+→ Reverse: none.
+
+Merged with integration 1aef1a52 (slice 3): one mapping. A singular
+`I − M` surfacing as `numpy.linalg.LinAlgError` is caught with
+`ConvergenceError` (failed). An unextractable state space is
+`UnsupportedError(feature="state_space")` raised by `_Solver` itself,
+so the explicit and the auto route refuse it without matching a
+message; the capability probe runs inside `_engine`. Accepted-with-
+error runs stay `ok` with a counter in the record: trbdf2
+`forced_accepts` (error estimate above tolerance at the step floor) and
+`newton_roundoff_accepts` (Newton stopped at roundoff) and
+`resolution_warnings` (the fixed-step `ResolutionWarning`), next to
+integration's `event_iteration_breaches` and `chatter_breaks`. Neither
+is failed: a forced accept is the sliver between two events and its
+error is bounded by the step floor times the slope, and a roundoff
+accept has every row's residual within 8 eps of its terms. What would
+make them failed: a forced accept whose step is more than 1e-3 of the
+period (its error is then no longer a sliver) or a roundoff accept whose
+`newton_roundoff_omega_max` exceeds 8 eps; neither is reported per step
+today, so the threshold cannot be applied yet.
+→ Reverse: move the two counters into `_raise_if_suspect`.
 
 ## 6. `build` and `period`
 
@@ -291,7 +313,120 @@ here (pymoo is not installed on this machine); its test is an
 * Not done: an energy-balance guard on `p_in − p_out − p_loss`;
   cancelling queued futures when a batch raises.
 
+## 16. The kernel period map (slice 3, kernel item 3)
+
+→ `dsed_period_map` (`core/include/pulsim/dsed/period_integrals.hpp`):
+one call runs a period of the exact stepper and post-processes it
+(x(T), events, `M`, per-observable `∫y`, `∫y²`, `∫y_a·y_b`, extrema)
+with the GIL released for both. `periodic_steady_state` runs every
+Newton and verification period on it (DC sources; a sine `b(t)` keeps
+the Python path); the evaluator reads its KPIs and loss rows from the
+verification period (`_period_kpis.py`), so an evaluation without a
+user KPI simulates no waveform. Options the integrals do not cover
+(conduction, diode and core specs, a non-scalar `Tj`, other device
+kinds) and a declined period (near-defective basis, a numeric step)
+take the sampled route with the reason in `counters["kpi_path"]`.
+
+Evidence (buck Pareto SYN-A, 64 designs, interleaved best of 5, shared
+Mac, observation, not asserted):
+
+| route | 1 thread | 4 threads | 8 threads |
+|---|---|---|---|
+| kernel | 2465 evals/s (0.41 ms) | 2050 | 1984 |
+| old (Python map + sampled KPIs) | 368 evals/s (2.72 ms) | 297 | 274 |
+
+Three-phase VSI (SPWM 2 kHz over a 20 ms fundamental, RL load, 32
+designs, kernel 82 % of an evaluation by cProfile): kernel 93.7
+evals/s on 1 thread, 180.4 on 4 (1.93x), 177.7 on 8 (1.90x, the Mac
+shared with other builds); old route 18.0 evals/s on 1 thread
+(5.2x slower; 4 designs: 1.11x on 8 threads).
+
+Buck: 6.7x per evaluation on one thread; threads still do not scale. The
+kernel is now ~11 % of an evaluation (cProfile, 16 designs: 48
+`dsed_period_map` calls, 1 ms of 9 ms): the Newton loop
+(eigvals/svd/solve on 2x2 matrices), the record and the loss rows are
+Python, and at 0.4 ms per evaluation the thread pool's own cost
+dominates. The counters prove what moved (asserted:
+`python_callbacks == 0`, `nogil_period_runs == pss_period_runs`), not
+a speed-up. The process backend cannot run the example (its
+evaluator's KPIs are lambdas, which do not pickle).
+→ What would make threads scale: the Newton loop in C++ (one call per
+design, `periodic_steady_state` group 6.2 shares the variational
+recurrence). Reverse: delete `dsed_period_map` from the module and
+`_Solver` falls back to the Python map and the sampled KPIs.
+
+KPI equality: the kernel's integrals and extrema equal
+`pulsim.sensitivity`'s closed forms on the same orbit within 3e-15 of
+the signal scale (CCM and DCM buck, asserted 1e-12). Against the
+present sampled KPIs (2000 samples per period, trapezoid): within
+1e-6, the difference being the trapezoid's O(h²) (CCM ripple_v moved
+from 6.0e-11 to 7.8e-13 off the matrix-exponential reference). `M`:
+equal to the Python segment product to 6e-16 in CCM; in DCM 2.9e-11
+from a central difference where the Python product is 5.0e-10 off
+(orbit gradients moved from 4.8e-8 to 9e-9 of the prototype).
+
+The verification period is now the same projection-off map Newton
+converged on, so its residual check is a reproducibility check of one
+code path; the independent check (`simulate`, projection on) is
+`result.orbit`, asserted to return to `x0` within 1e-8 of the state
+scale in `test_period_kernel_kpis.py`.
+
+Bug found and fixed: a one-period sampled KPI run starting at the
+section (a PWM turn-on at t = 0) never saw that edge, so every pss
+record of the buck example missed `E_on` (P_sw 4.42 W from `E_off`
+alone on the first design). The sampled route measures the second of
+two periods; the kernel reads the edge from `x(T⁻) → x(0⁺)`.
+
+## 17. Slice 3 order and review
+
+Integration was merged before the period map was written (not after,
+as the slice listed it): it rewrote `builder_adapter.hpp`,
+`dsed_bindings.cpp` and `scheduler.hpp`, the three files the map hooks.
+→ Reverse: none (history).
+
+Fresh-context review (opus, read-only) of the map: thread safety and
+the closed forms found clean (every Python object converted before the
+GIL is released; no statics or thread_locals in dsed/pwl/events; each
+evaluation builds its own builder, cache and adapter). Acted on:
+(1) the saltation picked the diode by the first differing mask bit,
+but the logged new mask is the one after the zero-time settle, so it
+could take the wrong diode or throw when the settle reverted the flip
+(`test_boost_with_a_zero_band_diode_settles` failed that way): the
+diode is now found by the event's name, and an unchanged mask is S = I;
+(2) user KPIs read a one-period run (the lost section edge again): now
+the second of two periods; (3) the lazy result was a proxy: now
+`SteadyPeriod.result` is a property that simulates on first access;
+(4) the verification no longer independent: recorded in 16 and
+covered by the `orbit` test; (5) events left unmatched now raise.
+Not acted on (recorded): extrema of a mode faster than h/16 between
+two sign changes of y' in one search cell can be missed (a log-spaced
+grid near s = 0 would fix it); an event within 1e-12 T of the section
+is neither a section edge nor an inside edge in `Period.edges`.
+
 ## Missing from the kernel (recorded, worked around in Python)
+
+Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):
+
+* `pulsim.ConvergenceError(RuntimeError)` is created by the extension
+  (`python/bindings.cpp`) and is the base of `SimulationAborted`, so
+  `except RuntimeError` keeps working. `periodic_steady_state` raises a
+  private subclass that is also a `ValueError` (what it raised before)
+  at its seven non-convergence sites; its configuration errors stay
+  plain `ValueError`s, and "the exact stepper cannot extract this
+  circuit's state space" became `UnsupportedError(feature=
+  "state_space")`. The `dsed` stepper's own non-convergences ("did not
+  settle after 64 rounds", "chattering", "no meaningful progress",
+  "exceeded max-step cap", the RK45 NaN) are still `std::runtime_error`
+  in `core/include/pulsim/dsed/scheduler.hpp`, a file this slice may
+  not edit. Hook: throw `solver::SimulationAborted` (or a new
+  `ConvergenceFailure : std::runtime_error` translated to
+  `ConvergenceError` in `bindings.cpp`) at those five sites; the
+  evaluator needs no change, it already maps every `RuntimeError` of an
+  engine call to `failed`.
+* `pulsim.periodic_steady_state_supported(builder, period, switch_fn)
+  -> (bool, reason)` runs the solver's applicability checks (the
+  `_pss_refusal` that the evaluator's `auto` route also calls) and no
+  period.
 
 1. **A typed non-convergence.** What: a `RuntimeError` subclass, e.g.
    `pulsim.ConvergenceError(where, reason, t, counters)`, raised by
@@ -308,7 +443,8 @@ here (pymoo is not installed on this machine); its test is an
    `auto` route reaches into the private `_Solver` constructor
    (decision 10). Smallest API: the two checks it already runs
    (`_check_circuit`, `_check_schedule`) behind one public name.
-3. **The period map and the period integrals without the GIL.** What:
+3. **The period map and the period integrals without the GIL** (done,
+   decision 16; the Newton loop itself is still Python). What:
    the shooting Newton (monodromy products, saltation) and the
    one-period integrals of `v·i`, `i²` with right limits, in C++ behind
    one call. Why: 87 % of an evaluation is Python, so the thread

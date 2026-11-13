@@ -649,6 +649,22 @@ def test_fixed_step_feature_refused_by_name(feature, engine):
     assert (ei.value.engine, ei.value.feature) == (engine, feature)
 
 
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto", "dsed"))
+def test_sensitivities_cell(engine):
+    """add-parameter-sensitivities: honoured on the exact path only;
+    every other engine refuses the keyword by name (a gradient there
+    would be a difference of runs with events on the step grid)."""
+    if engine != "dsed":
+        with pytest.raises(p.UnsupportedError) as ei:
+            _sim(engine, sensitivities=["R.R"])
+        assert (ei.value.engine, ei.value.feature) == (
+            engine, "sensitivities")
+        return
+    r = _sim(engine, sensitivities=["R.R"])
+    assert r.sensitivity.params == ["R.R"]
+    assert r.sensitivity.states.shape[2] == 1
+
+
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
 def test_mode_selection_lcp_refused_by_name_without_the_event_integrator(engine):
     # 'lcp' decides on the dsed event integrator only; this RC routes to "auto"

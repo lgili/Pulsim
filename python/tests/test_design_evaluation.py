@@ -182,6 +182,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
     def aborted(*a, **k):
         raise RuntimeError("did not settle after 64 rounds")
     monkeypatch.setattr(p, "simulate", aborted)
+    monkeypatch.setattr(p._pulsim, "dsed_period_map", aborted)   # pss route
     rec = _ev().evaluate(CCM)
     assert rec.status == "failed"
     assert "did not settle" in rec.reason
@@ -189,6 +190,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
     def bug(*a, **k):
         raise TypeError("a bug, not a design outcome")
     monkeypatch.setattr(p, "simulate", bug)
+    monkeypatch.setattr(p._pulsim, "dsed_period_map", bug)
     with pytest.raises(TypeError, match="a bug"):
         _ev().evaluate(CCM)
 
@@ -198,6 +200,7 @@ def test_not_implemented_and_recursion_errors_propagate(monkeypatch):
         def stub(*a, exc=exc, **k):
             raise exc("a stub or a bug")
         monkeypatch.setattr(p, "simulate", stub)
+        monkeypatch.setattr(p._pulsim, "dsed_period_map", stub)
         with pytest.raises(exc):
             _ev().evaluate(CCM)
 
@@ -338,9 +341,33 @@ def test_a_guard_held_trace_or_an_undersampled_gate_is_failed(monkeypatch):
     import sys
     pss = sys.modules["pulsim.periodic_steady_state"]   # the name is the function
 
+    # the refusal is typed at its source (_Solver), so make the
+    # extraction itself fail
     def no_extract(*a, **k):
-        raise ValueError("periodic_steady_state: cannot extract this "
-                         "circuit's state space (test)")
-    monkeypatch.setattr(pss, "periodic_steady_state", no_extract)
+        raise RuntimeError("state space extraction failed (test)")
+    monkeypatch.setattr(pss, "_labels", no_extract)
     rec = _ev(steady=SteadySpec(method="pss")).evaluate(CCM)
     assert rec.status == "refused" and rec.refusal[1] == "state_space", rec
+
+
+def test_accepted_with_error_steps_are_counted():
+    """trbdf2 forced accepts and Newton roundoff accepts stay ``ok`` but
+    are counted in the record (DECISIONS 5), so a filter can see them."""
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="pwl", n_accept=10, newton_roundoff_accepts=2,
+             _trbdf2_stats={"n_forced_accepts": 3})
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert counters["forced_accepts"] == 3
+    assert counters["newton_roundoff_accepts"] == 2
+    run.newton_roundoff_accepts, run._trbdf2_stats = 0, {}
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert "forced_accepts" not in counters
+    assert "newton_roundoff_accepts" not in counters
+    run.resolution = NS(lte_max=0.5, ringing=[], unestimated_fraction=0.0)
+    design.Evaluator._count(run, counters, None)
+    assert counters["resolution_warnings"] == 1

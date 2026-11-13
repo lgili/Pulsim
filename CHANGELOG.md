@@ -6,6 +6,137 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Datasheet loss tables in the kernel
+
+* **Added** `pulsim.LossTable3D` (`E(v, i, T_j)`) and
+  `pulsim.ConductionTable` (`V_on(i, T_j)`), header
+  `core/include/pulsim/thermal/loss_table.hpp`, read with
+  `pulsim.LossTable`'s rule (multilinear, linear extrapolation, clamp at
+  0); `LossTable.to_kernel()` converts. Bad axes, shapes, entries and
+  non-finite queries are refused by name. Group 1 of
+  `add-in-kernel-event-losses`: nothing in the kernel reads them yet.
+
+### Kernel period map: a design evaluation without the GIL
+
+* **Added** `pulsim._pulsim.dsed_period_map` (header
+  `core/include/pulsim/dsed/period_integrals.hpp`): one period of the
+  exact stepper with the GIL released for the run and its
+  post-processing, returning `x(T)`, the events, the monodromy
+  `M = Π S_k Φ_k` (saltation at diode events) and, per affine
+  observable, `∫y`, `∫y²`, `∫y_a·y_b` and the extrema with their
+  instants in closed form per step (sensitivity.py's modal formulas;
+  a near-defective eigenbasis or a numeric step declines the integrals
+  by name, never approximates them).
+* **Changed** `periodic_steady_state` runs its Newton periods and its
+  verification period on the kernel map when the sources are DC;
+  `result.orbit` is simulated on first access.
+* **Changed** `Evaluator` with `method='pss'` reads its KPIs and loss
+  rows from the kernel integrals (`counters["kpi_path"] == "kernel"`,
+  `python_callbacks`, `nogil_period_runs`); options the integrals do
+  not cover take the sampled route with the reason in `kpi_path`.
+* **Fixed** the sampled `pss` route lost the switch edge AT the section
+  (`t = 0`): a one-period run starts in the new state, so the buck's
+  turn-on energy was missing from `P_sw`. It now measures the second of
+  two periods; the kernel route reads the edge from `x(T⁻) → x(0⁺)`.
+* **Added** default KPIs `i_peak.<L>` and `i_rms.<L>` per inductor.
+
+### Design evaluator: accepted-with-error runs counted
+
+* **Added** record counters `forced_accepts` (trbdf2 steps accepted
+  above tolerance at the step floor), `newton_roundoff_accepts` and
+  `resolution_warnings` (the fixed-step `ResolutionWarning`). The run
+  stays `ok`; simulate only warns, and a warning is shown once per call
+  site, so in an optimiser loop the record is the only place left.
+* **Changed** a singular `I − M` raised as `numpy.linalg.LinAlgError`
+  by the pss route is `failed`, typed with `ConvergenceError`; an
+  unextractable state space is refused at its source
+  (`UnsupportedError(feature="state_space")`) on both routes.
+
+### Typed non-convergence and the steady-state capability check
+
+* **Added** `pulsim.ConvergenceError`, a `RuntimeError` created by the
+  extension and the base of `SimulationAborted`. `periodic_steady_state`
+  raises it at its seven non-convergence sites (no orbit within the
+  budget, no Newton progress, singular `I − M`, a non-isolated orbit, a
+  grazing event, a failed period run, an irreproducible map). It is still
+  a `ValueError` there, as before. Configuration errors stay plain
+  `ValueError`s.
+* **Added** `pulsim.periodic_steady_state_supported(builder, period,
+  switch_fn) -> (bool, reason)`. It runs the solver's applicability
+  checks without a period run, so it reaches the same refusal as the
+  solve.
+* **Changed** "the exact stepper cannot extract this circuit's state
+  space" is now an `UnsupportedError` (`feature="state_space"`). The
+  design evaluator's `auto` route and its `failed` status use the typed
+  classes, and the message list is gone.
+
+### Parameter sensitivities on the exact path (`add-parameter-sensitivities`)
+
+* **Added** characterisation and references (group 1): today's central
+  differences of the DCM buck's `v_C(40 T)` with respect to `L` are
+  pinned as a test (fixed engine at `T/100`: -9.49, -12.9, +2.00, -0.457
+  relative error at steps 1e-5 .. 1e-2; `trbdf2`: -8.8e-5); a
+  finite-difference harness with step selection and a Richardson
+  estimate; the two prototypes ported as numpy references that
+  reproduce the `tasks.md` table to 1e-7.
+* **Added** transient sensitivities on the exact path:
+  `simulate(..., engine='dsed', sensitivities=["L.L", "RL.R",
+  "S.duty", ...])` returns `res.sensitivity.states` (`n × n_state ×
+  n_p`) and `res.sens(signal, param)`. R, L, C and DC-source values
+  (exact `∂A/∂p` from assemblies), the duty of a trailing-edge PWM
+  (gate-edge jump `dτ/dD = T`), Daleckii–Krein with φ₁ divided
+  differences, the block exponential on a near-defective mode, the jump
+  correction at diode events. DCM buck `∂v_C(40 T)/∂L, ∂R, ∂D` within
+  3.4e-8 of the prototype and 9e-8 of central differences of the same
+  map; RC step within 1e-9 of the closed form; critically damped RLC
+  within 1e-7 of central differences. One engine run whatever the
+  number of parameters.
+* **Added** steady-state gradients:
+  `periodic_steady_state(..., sensitivities=[...])` sets `dx0`
+  (`(I − M)⁻¹ ∂P/∂p`) and `dPdp` for one more period run; the DCM orbit's
+  three gradients within 4.9e-8 of the prototype.
+* **Added** the event rule: a grazing diode event is refused
+  (`UnsupportedError`, `feature="grazing_event"`); a near miss (the CCM
+  valley at the DCM boundary) is flagged in `sensitivity.flags` with a
+  `UserWarning`. Every other engine refuses `sensitivities=` by name.
+  Runs without `sensitivities` are bit-identical (golden probe: all
+  identical; dsed / pwl / trbdf2 / steady-state hashes unchanged).
+* **Added** KPI gradients (group 7): `res.kpi(signal, kind, t_from=,
+  t_to=)` for `final`, `avg`, `rms`, `energy`, `peak`, `valley`,
+  `ripple` returns a `KpiValue` (`value, grad = ...`, `non_unique` for an
+  extremum attained twice); closed forms of the exact trajectory plus the
+  event-time terms of a jumping signal. Orbit KPIs:
+  `PeriodicSteadyStateResult.kpi`. `pulsim.value_and_grad` for
+  `scipy.optimize.minimize(jac=True)`. DCM buck, last ten periods:
+  avg / RMS / energy / final / peak / ripple of `v_out`, peak / RMS of
+  `i_L`, avg / RMS of `v_sw` within 7e-9 of central differences; the
+  orbit's avg / RMS / ripple within 1e-6. Eight parameters: one engine
+  run, 8 propagations per step, 29 assemblies (16 runs by central
+  differences). See `docs/sensitivities.md`.
+* **Added** `pulsim.design.Evaluator(..., gradients={var: "C.C"})`:
+  exact gradients of `v_out`, `ripple_v`, `ripple_i.<L>` in
+  `record.grads` on the `pss` route; the transient route, the thermal
+  loop and a scaled variable map are refused (`feature="gradients"`).
+* **Fixed** (sensitivity path, before release) the exact propagator of a
+  stiff mode lost 1e-9 of `v_C` per step: LAPACK's QR put the DCM idle
+  mode's -425 1/s eigenvalue 2.7e-4 off with its 5e12 1/s row last; the
+  eigenproblem is now solved in graded order (exact to 1e-15 against
+  50-digit `expm`). A peak inside the first or last sub-grid cell of a
+  step was read at the step end.
+* **Fixed** (review of the sensitivity path) cases where a gradient could
+  have been silently approximate are now refused:
+  - the duty of a dead-time pair or a bridge;
+  - an RK45 step of the stepper (the step check is now 1e-10);
+  - a non-Moebius entry (the check is now per row);
+  - an orbit sensitivity run that does not reproduce the solver's
+    events;
+  - a window edge on a moving jump;
+  - an unlocated extremum;
+  - a design variable that feeds two elements.
+
+  A non-unique extremum's gradient is left out of `record.grads`.
+  Interior near misses are refined, so they are flagged.
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
