@@ -250,7 +250,9 @@ iterations, one simulation as without the loop. `R_th·P₀·α = 0.9`:
 2424.90 °C against 2425 in 96 iterations (estimate 0.097 K).
 `R_th·P₀·α = 1.2`: ratio 1.2 above the limit at iteration 2,
 `thermal_runaway`. A switch with `R_on(T) = 50 mΩ·(1 + 0.006(T −
-25))`, `R_th = 10`: 84.79 °C in 4 iterations, 16 simulations.
+25))`, `R_th = 10`: 84.79 °C in 4 iterations, 12 simulations (16
+before the kernel period map: each iterate's sampled KPI period run
+is gone; re-measured in batch 6c).
 → Reverse: `mode='kernel'` when `add-in-kernel-event-losses` lands
 (task 7.1).
 
@@ -282,9 +284,13 @@ D8, each stated in the example's docstring:
   for 100 µF at 12 V, 300 cm³ for a 1 K/W natural-convection sink).
 
 Observation (not asserted), 512 Latin-hypercube designs, seed 0, this
-machine: 376 ok, 136 infeasible, 0 refused, 0 failed; 7 designs on the
-front, 97.91 % at 11.3 cm³ to 98.50 % at 13.2 cm³, all between 50 and
-91 kHz; 3.3 s wall (single worker). The CI test (32 designs) asserts
+machine: 376 ok, 136 infeasible, 0 refused, 0 failed; 4 designs on the
+front, 97.73 % at 13.3 cm³ to 97.90 % at 16.5 cm³, all SYN-B, between
+50 and 65 kHz; 1.3 s wall (single worker, kernel route). Re-measured
+after the section-edge fix of §16 (batch 6c, 2026-11-13): before it the
+front had 7 designs, 97.91 % at 11.3 cm³ to 98.50 % at 13.2 cm³,
+between 50 and 91 kHz, 3.3 s — the turn-on energy was missing from
+every record, which flattered the higher switching frequencies. The CI test (32 designs) asserts
 the counts, a non-empty front and the constraints of every member. The
 NSGA-II path (`pymoo`, optional extra `pulsim[opt]`) is not exercised
 here (pymoo is not installed on this machine); its test is an

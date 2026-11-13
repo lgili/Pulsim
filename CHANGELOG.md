@@ -295,7 +295,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   installed (new extra `pulsim[opt]`) and a Latin-hypercube sample with
   a numpy non-dominated filter otherwise. Its MOSFETs are SYNTHETIC
   and its volume law illustrative; it says so in its output and plot.
-  512 designs: 376 ok, 136 infeasible, a 7-design front, 3.3 s.
+  512 designs: 376 ok, 136 infeasible, a 4-design front (97.73 % at
+  13.3 cm³ to 97.90 % at 16.5 cm³, all SYN-B); before the section-edge
+  fix the front had 7 designs, 97.91 % at 11.3 cm³ to 98.50 % at
+  13.2 cm³, because the turn-on energy was missing from every record.
 * **Added** Tutorial 08, "Using Pulsim inside an optimiser" (executed):
   the contract, the four statuses, the adaptors, why derivative-free.
 * **Changed** `pulsim.sweep`'s job runner takes the job function (and
