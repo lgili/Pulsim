@@ -1242,10 +1242,10 @@ class ClosedLoop:
 _TICK_TOL = 1e-9
 
 
-def _next_tick_after(t: float, t_start: float, T: float) -> float:
-    """First instant of the t_start + k*T schedule strictly after ``t``."""
-    k = math.floor((t - t_start) / T + _TICK_TOL) + 1
-    return t_start + k * T
+def _next_tick_index(t: float, t_start: float, T: float) -> int:
+    """Integer k of the first instant t_start + k*T strictly after ``t``
+    (an integer tick counter: no accumulated or stored float time)."""
+    return math.floor((t - t_start) / T + _TICK_TOL) + 1
 
 
 def bind_pi_to_switch(
@@ -1341,7 +1341,7 @@ def bind_pi_to_switch(
     # the `[0.5]` / `[t_start - T_PWM]` lists callers used to write
     # by hand.
     duty_state = [0.5]
-    next_tick = [t_start]  # first update at t_start
+    k_next = [0]  # integer index of the next tick; tick 0 at t_start
     duty_history: "list[tuple[float, float]]" = []
     error_history: "list[tuple[float, float]]" = []
 
@@ -1366,7 +1366,7 @@ def bind_pi_to_switch(
         k·T_ctrl — calls this instead, so the update count is the
         schedule's and never depends on how close a step lands.
         """
-        next_tick[0] = _next_tick_after(t, t_start, T_PWM)
+        k_next[0] = _next_tick_index(t, t_start, T_PWM)
         m = float(measured(x))
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         error = sp - m
@@ -1378,7 +1378,7 @@ def bind_pi_to_switch(
     def step_observer(t: float, x) -> None:
         # Throttle to the t_start + k*T_PWM schedule: prevents the loop
         # from chasing PWM ripple, and keeps ticks on the carrier edges.
-        if t < next_tick[0] - _TICK_TOL * T_PWM:
+        if t < t_start + k_next[0] * T_PWM - _TICK_TOL * T_PWM:
             return
         _tick(t, x)
 
@@ -1437,7 +1437,7 @@ def bind_pi_to_duty_callable(
 
     T_PWM = 1.0 / float(freq)
     duty_state = [0.5]
-    next_tick = [t_start]
+    k_next = [0]
     duty_history: "list[tuple[float, float]]" = []
 
     def duty_get() -> float:
@@ -1455,7 +1455,7 @@ def bind_pi_to_duty_callable(
         k·T_ctrl — calls this instead, so the update count is the
         schedule's and never depends on how close a step lands.
         """
-        next_tick[0] = _next_tick_after(t, t_start, T_PWM)
+        k_next[0] = _next_tick_index(t, t_start, T_PWM)
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         new_duty = pi.update(
             setpoint=sp,
@@ -1466,7 +1466,7 @@ def bind_pi_to_duty_callable(
         duty_history.append((t, duty_state[0]))
 
     def step_observer(t: float, x) -> None:
-        if t < next_tick[0] - _TICK_TOL * T_PWM:
+        if t < t_start + k_next[0] * T_PWM - _TICK_TOL * T_PWM:
             return
         _tick(t, x)
 

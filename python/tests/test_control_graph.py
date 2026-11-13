@@ -160,3 +160,61 @@ def test_node_gain_and_limiter_compile_to_the_kernel(block, inputs):
         warnings.simplefilter("error")
         ch.make_step_observer(b, dt=1e-6)
     assert ch._cxx_chain is not None
+
+
+# ---------------------------------------------------------------------------
+# edge cases found by the step-3 review
+# ---------------------------------------------------------------------------
+
+def test_an_empty_channel_name_reads_zero_and_names_no_slot():
+    k = p._pulsim
+    ch = k.CxxBlockChain()
+    ch.add_gain(2.0, k.CxxInputRef.channel(""), "y")
+    ch.set_channel("", 5.0)          # no slot: a no-op, not a stray write
+    ch.record_channel("")
+    obs = ch.make_step_observer(1e-6)
+    obs(0.0, np.zeros(1))
+    assert ch.get_channel("y") == 0.0 and ch.get_channel("") == 0.0
+
+
+def test_a_nameless_negative_node_index_is_ground():
+    k = p._pulsim
+    ch = k.CxxBlockChain()
+    ch.add_gain(2.0, k.CxxInputRef.node_idx(-1), "y")   # node_id_of("gnd")
+    ch.make_step_observer(1e-6)(0.0, np.ones(2))
+    assert ch.get_channel("y") == 0.0
+
+
+def test_a_failed_add_leaves_no_phantom_reads():
+    k = p._pulsim
+    ch = k.CxxBlockChain()
+    with pytest.raises(p.ControlGraphBuildError, match="not resolved"):
+        ch.add_subtract(k.CxxInputRef.channel("y"), k.CxxInputRef.node("n"),
+                        "e")
+    ch.add_gain(1.0, k.CxxInputRef.const_value(1.0), "y")  # would loop
+    ch.compile()                     # on the dropped read of 'y'
+    assert list(ch.schedule()) == ["block0"]
+
+
+def test_delay_samples_below_one_is_a_typed_build_error():
+    k = p._pulsim
+    for n in (0, -2):
+        with pytest.raises(p.ControlGraphBuildError, match=f"got {n}"):
+            k.CxxBlockChain().add_delay(n, 0.0, k.CxxInputRef.const_value(1.0),
+                                        "y")
+
+
+def test_reset_zeroes_signals_and_refills_the_delay():
+    k = p._pulsim
+    ch = k.CxxBlockChain()
+    ch.add_delay(2, 0.25, k.CxxInputRef.const_value(1.0), "y")
+    obs = ch.make_step_observer(1e-6)
+    seq = []
+    for i in range(4):
+        obs(i * 1e-6, np.zeros(1))
+        seq.append(ch.get_channel("y"))
+    ch.reset()
+    assert ch.get_channel("y") == 0.0
+    obs(0.0, np.zeros(1))
+    assert seq == [0.25, 0.25, 1.0, 1.0] and ch.get_channel("y") == 0.25
+

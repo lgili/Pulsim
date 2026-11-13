@@ -9,10 +9,13 @@ Each entry: question → option taken → evidence → how to reverse.
   `blockchain::BlockChain`?
 - **Taken.** Inside `BlockChain` (`core/include/pulsim/blockchain/chain.hpp`),
   as the proposal allows for tasks 1–4 ("ships on today's structure").
-  Its public API (`add_*`, `make_step_observer`, `record_channel`,
-  `make_chain_switch_fn`) is unchanged, so the 30+ Python helpers that
-  build a `CxxBlockChain` (motors, observers, thermal, YAML) keep
-  working.
+  Its Python API (`CxxBlockChain.add_*`, `make_step_observer`,
+  `record_channel`, `make_chain_switch_fn`) is unchanged, so the 30+
+  Python helpers that build a `CxxBlockChain` (motors, observers,
+  thermal, YAML) keep working. The C++ API did change: every
+  `make_*_step` factory takes the chain first, `channels()` and
+  `register_node_ref` are gone, and `bind_nodes` resolves named node
+  inputs of the blocks added after it (no Python caller used it).
 - **Evidence.** `chain_bit_identity.py` (probes/): chains A and B
   byte-identical before/after; every chain test in the suite passes.
 - **Reverse.** Move `chain.hpp` to `core/control/graph.hpp` when the
@@ -62,3 +65,93 @@ Each entry: question → option taken → evidence → how to reverse.
   consumers, and the deque-based blocks (moving average, delay) do not
   fit fixed slices without changing their numbers.
 - **Reverse.** Give each block `xd` / `xc` slices when 6.1 lands.
+
+## G5b. The Python evaluator fallback keeps insertion order (until task 5)
+
+- **Question.** A chain with a block the kernel cannot run (or
+  `use_kernel=False`) runs on the Python evaluator, in insertion order
+  with the old implicit one-step delays. Schedule it too?
+- **Taken.** No: task 5 removes the fallback (an unknown kind becomes a
+  build error), so scheduling it would be work thrown away. Until then
+  the same chain can give different numbers on the two paths (found by
+  the step-3 review).
+- **Reverse.** n/a (removed in task 5).
+
+## G6. Which state a tick reads on the fixed engine
+
+- **Question.** The `pwl` kernel calls the observer with `(t_n, x_{n-1})`
+  before step n: the label is the step end, the state is its start.
+  Which instant is the tick?
+- **Taken.** The state's own instant: a graph with rates runs at
+  `tx = t_n - dt` (the first call, `(t_start, x0)`, at `t_start`), so a
+  tick at τ reads x(τ) and its output drives the step that starts at τ
+  (zero-order hold from τ). `dt` is inferred from the second call
+  (`run_transient_with_chain` sets it). A chain with no `Rate` keeps the
+  old protocol (every call, the label time) bit for bit.
+- **Evidence.** The discrete P loop (`test_control_graph_rates.py`)
+  lands on the exact sampled-data recursion (the closed form samples
+  v(kT) and holds u from kT), second order in dt with the restart rule
+  (G9). The label time would sample x(τ - dt) for a tick at τ.
+- **Reverse.** `BlockChain::observe_fixed_step`: use `t` for `tx`.
+
+## G7. Rate inheritance and the legacy group
+
+- **Taken.** Group 0 is the legacy every-call group (no `Rate` anywhere:
+  unchanged behaviour, `dt` from `make_step_observer(dt)`). With rates:
+  a block's own `rate=`, else (stateless kinds only) the fastest rate
+  among its producers, else the chain's `rate=`, else
+  `ControlGraphBuildError` naming the block. Groups due at the same
+  instant run in one pass of the schedule.
+- **Evidence.** Tick counts 200 and 40/400 equal the Phase 0 schedule
+  on `pwl` and `trbdf2` (characterisation 1.3); `n_block_evals` =
+  Σ ticks × blocks per group.
+- **Reverse.** `_assign_groups` in `blockchain.py`.
+
+## G8. compute_delay and offsets per engine
+
+- **Taken.** `compute_delay` defaults to 0. `"one_sample"` publishes the
+  previous tick's outputs at each tick (all engines). A time delay and
+  a group `offset` run on `pwl` (served at the first step at or after
+  the instant) and are refused on `trbdf2` (`UnsupportedError`,
+  features `compute_delay` / `control_rate_offset`): its tick scheduler
+  lands steps at `t_start + k*T` only.
+- **Hook needed** (forbidden file `solver/trbdf2_transient.hpp`): the
+  observer-period list must take an offset per source and a second
+  landing instant per tick (`tick + Td`), i.e. `observer_periods` →
+  `{period, offset, extra_landings}`.
+- **Reverse.** Drop the two checks in `ControlPlan.for_variable_step`.
+
+## G9. Driven sources: b_extra with declared jumps
+
+- **Taken.** `drive_source` sinks are summed into a `b_extra_fn`
+  (`CxxChainBExtra`, C++) merged with the caller's above the engine
+  dispatch. It declares its jumps (`next_jump_after`: each group's
+  publication instant moved to the step it is served at), so with
+  `discontinuity_restart=True` the fixed engine restarts on every tick.
+- **Evidence.** Without the restart a ZOH jump is averaged by the
+  trapezoidal history over one step, an O(dt) error that is the
+  engine's documented first-order-after-a-discontinuity behaviour
+  (known-limitations): P loop v[10] off by 6.148e-5 at dt = 1e-6 and
+  6.138e-6 at 1e-7. With the rule: 7.2e-9 at 1e-6 and 7.3e-11 at 1e-7
+  (second order; trbdf2 7.8e-9 at rtol 1e-10, 3.7e-10 at 1e-12). The
+  chain fast path `run_transient_with_chain` dropped the declaration
+  before this change (fixed: it reads it as `run_transient` does).
+  The restart is not turned on implicitly: it changes every other
+  discontinuity of the run too.
+- **Reverse.** Return the plain `make_b_extra_fn` (no declaration).
+
+## Hooks for task groups 6–7 (not in this slice)
+
+- **6.1 graph state in the solver snapshot.** `SolverSnapshot`
+  (`core/include/pulsim/solver/run_transient.hpp`, forbidden) needs an
+  opaque `std::vector<Real> control_state` plus a save/restore callback
+  pair `(BlockChain::save_state(), restore_state())`; each block then
+  needs `xd` slices (G5).
+- **6.2 continuous-rate blocks.** Their states must join the MNA
+  unknowns: a stamping hook in `run_transient` / `trbdf2_transient`
+  (`(x, h) -> rows`), not available from the observer.
+- **7.x tick and comparator events on the unified queue.**
+  `core/include/pulsim/events/*` (forbidden) needs an event source
+  interface `next_event_after(t)` that the graph implements; today the
+  ticks reach `pwl` through the observer and `trbdf2` through
+  `observer_periods`, and comparator crossings are not located.

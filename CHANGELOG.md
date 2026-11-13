@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Compiled control graph, part 2: rates (add-compiled-control-graph, 2026-11-13)
+
+* **Added** `pulsim.Rate(period, offset=0, compute_delay=0)` on a
+  `MixedDomainBlockChain` (`rate=` on the chain or per block) and
+  `drive_source(builder, signal, ("v", name, node))`. Each rate group
+  ticks at `t_start + offset + k*period` with an integer counter, on
+  `pwl` (at the tick's own state, `x(tau)`) and `trbdf2` (a landed step
+  per tick, called in C++); a stateless block inherits the fastest rate
+  feeding it, a stateful one without a rate is a build error.
+  `chain.tick_counts`; see [docs/control-graph.md](docs/control-graph.md).
+* **Added** `compute_delay`: `0`, a time (pwl), or `"one_sample"`.
+  A rate `offset` and a delay time are refused on `trbdf2`
+  (`UnsupportedError`, features `control_rate_offset`, `compute_delay`).
+* **Added** a driven source declares its tick instants
+  (`next_jump_after`): with `discontinuity_restart=True` the fixed
+  engine holds it exactly (discrete P loop `v[10]` error 6.1e-5 →
+  7.2e-9 at dt = 1 µs).
+* **Changed** the float time throttles of `control.py`'s duty observer
+  and `add_c_block` are integer tick counters (same ticks: the 3001
+  updates over 30 ms of `test_control_loop_truth.py` are unchanged).
+* **Fixed** `run_transient_with_chain` (the `pwl` path of every chain
+  observer) dropped a `b_extra_fn`'s `next_jump_after` and a native
+  schedule's edges, so `discontinuity_restart` never saw a declared
+  jump there (a 0→1 V step into an RC: 5.0e-4 → 2.5e-8 at dt = 1 µs).
+* **Fixed** (review) an empty channel name read and wrote slot -1 out of
+  bounds; a nameless node index -1 (ground) was refused; a failed block
+  add left its reads behind for the next block; `DelayBlock(samples<1)`
+  is a typed `ControlGraphBuildError` (a negative count was a
+  `TypeError` swallowed by the fallback); a YAML chain is compiled when
+  wired.
+
 ### Compiled control graph, part 1 (add-compiled-control-graph, 2026-11-13)
 
 * **Changed (BREAKING where a chain relied on it)** a

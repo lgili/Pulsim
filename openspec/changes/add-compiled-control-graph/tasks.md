@@ -32,10 +32,10 @@ Closed forms used below.
 - [x] 3.4 Tests: any insertion order of the task 1.1 chain gives bit-identical results; `Gain → Sum → Gain → (back)` raises naming the three blocks, and runs once a `DelayBlock` is inserted; the build lists pairs whose order differs from insertion
 
 ## 4. Rates
-- [ ] 4.1 `Rate` on groups; inheritance for stateless blocks; error for a stateful block with no rate
-- [ ] 4.2 Integer tick counter; ticks delivered by the Phase 0 scheduling; remove the throttles at `control.py:1350-1355`, `c_block.py:387-390` and in the chain observer
-- [ ] 4.3 `compute_delay`: zero, a time, one sample
-- [ ] 4.4 Tests: tick counts of task 1.2 exact on every engine; discrete P loop `v[10] = 0.643545722992` and `v[k] → 2/3` within 1e-9 on the exact strategy and within the engine tolerance elsewhere; with `one_sample`, `v[10] = 0.659695654069`
+- [x] 4.1 `Rate` on groups; inheritance for stateless blocks; error for a stateful block with no rate
+- [x] 4.2 Integer tick counter; ticks delivered by the Phase 0 scheduling; remove the throttles at `control.py:1350-1355`, `c_block.py:387-390` and in the chain observer
+- [x] 4.3 `compute_delay`: zero, a time, one sample
+- [x] 4.4 Tests: tick counts of task 1.2 exact on every engine; discrete P loop `v[10] = 0.643545722992` and `v[k] → 2/3` within 1e-9 on the exact strategy and within the engine tolerance elsewhere; with `one_sample`, `v[10] = 0.659695654069`
 
 ## 5. Block library
 - [ ] 5.1 Port `Comparator`, `RateLimiter`, `SampleHold`, `TransferFunction`, `StateMachine`, `OpAmp`, `DelayBlock`, `SignalMux`, `SignalDemux`, `LookupTable1D`

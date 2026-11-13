@@ -51,6 +51,7 @@ from typing import Any, Callable
 
 __all__ = [
     "BlockSpec",
+    "Rate",
     "MixedDomainBlockChain",
     "parse_block_chain",
 ]
@@ -96,6 +97,41 @@ class _InputSource:
         raise ValueError(f"Unrecognised input spec: {spec!r}")
 
 
+@dataclass(frozen=True)
+class Rate:
+    """Sample rate of a group of control-graph blocks.
+
+    The group ticks at ``t_start + offset + k*period`` (integer ``k``) on
+    every engine; ``dt`` passed to its blocks is ``period``.
+    ``compute_delay`` says when its outputs reach the circuit: ``0``
+    (at the tick), a time ``0 < Td < period`` (at the tick + Td), or
+    ``"one_sample"`` (at the next tick).
+    """
+
+    period: float
+    offset: float = 0.0
+    compute_delay: Any = 0.0
+
+    def _delay(self):
+        d = self.compute_delay
+        if d == "one_sample":
+            return 2, 0.0
+        if isinstance(d, str):
+            raise ValueError(
+                f"Rate.compute_delay must be 0, a time or 'one_sample'; "
+                f"got {d!r}")
+        return (1, float(d)) if float(d) > 0.0 else (0, 0.0)
+
+
+# Blocks with no state: they inherit the rate of their inputs.
+_STATELESS = frozenset({
+    "Gain", "Subtract", "Sum", "MathBlock", "Limiter", "OpAmp",
+    "SignalMux", "SignalDemux", "LookupTable1D", "ClarkeTransform",
+    "InverseClarkeTransform", "ParkTransform", "InverseParkTransform",
+    "SpaceVectorModulator", "PwmGenerator",
+})
+
+
 def _k_build_error():
     from ._pulsim import ControlGraphBuildError  # type: ignore[import-not-found]
     return ControlGraphBuildError
@@ -135,6 +171,7 @@ class BlockSpec:
     block: Any
     inputs: dict       # kwarg → _InputSource
     output: Any        # str OR tuple[str, ...]
+    rate: Any = None   # Rate, or None: inherited / the chain's
 
     # Internal: cached node→state_idx mapping after `bind(builder)`.
     _node_idx_cache: dict = field(default_factory=dict, repr=False)
@@ -147,7 +184,12 @@ class BlockSpec:
 class MixedDomainBlockChain:
     """Topologically-evaluated list of mixed-domain blocks."""
 
-    def __init__(self) -> None:
+    def __init__(self, rate: "Rate | None" = None) -> None:
+        # Default rate of the blocks that declare none (a stateless
+        # block inherits its inputs' rate first). No rate anywhere: the
+        # chain runs on every solver step with make_step_observer's dt.
+        self.rate = rate
+        self._sinks: list = []
         self.blocks: list[BlockSpec] = []
         self.channels: dict[str, Any] = {}
         # node-name → state-vector index (populated by bind()).
@@ -161,7 +203,7 @@ class MixedDomainBlockChain:
     # -------- authoring API ------------------------------------------------
 
     def add(self, name: str, block, *, inputs: dict,
-              output) -> "MixedDomainBlockChain":
+              output, rate: "Rate | None" = None) -> "MixedDomainBlockChain":
         """Add a block to the chain. `inputs` is a kwargs dict; each
         value follows the `_InputSource.from_spec(...)` syntax.
         Returns self for chaining."""
@@ -169,7 +211,7 @@ class MixedDomainBlockChain:
                           for kw, v in inputs.items()}
         self.blocks.append(
             BlockSpec(name=name, block=block,
-                       inputs=parsed_inputs, output=output)
+                       inputs=parsed_inputs, output=output, rate=rate)
         )
         return self
 
@@ -256,7 +298,7 @@ class MixedDomainBlockChain:
 
     # -------- callback factories ------------------------------------------
 
-    def make_step_observer(self, builder, *, dt: float,
+    def make_step_observer(self, builder, *, dt: "float | None" = None,
                               use_kernel: bool = True
                               ) -> Callable[[float, Any], None]:
         """Build the `step_observer(t, x)` callback to pass to
@@ -275,7 +317,14 @@ class MixedDomainBlockChain:
         backends).
         """
         self.bind(builder)
-        self._dt = float(dt)
+        has_rate = self.rate is not None or any(
+            spec.rate is not None for spec in self.blocks)
+        if dt is None and not has_rate:
+            raise ValueError(
+                "make_step_observer: pass dt= (the chain has no Rate, so "
+                "it runs on every solver step with this dt)")
+        dt = 0.0 if dt is None else float(dt)
+        self._dt = dt
 
         if use_kernel:
             try:
@@ -289,6 +338,21 @@ class MixedDomainBlockChain:
                     cxx_observer(t, x)
                 observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
                 observer._chain_dt = float(dt)  # type: ignore[attr-defined]
+                cxx = self._cxx_chain
+                if cxx.has_rates:
+                    # The variable-step engine ticks each group at its
+                    # period; any tick runs every group due then (C++).
+                    tick = cxx.make_tick_observer()
+                    observer._rate_ticks = [  # type: ignore[attr-defined]
+                        (tick, cxx.group_period(g))
+                        for g in sorted(self._groups.values())]
+                    observer._rate_offsets = [  # type: ignore[attr-defined]
+                        r.offset for r in self._groups]
+                    observer._rate_delays = [  # type: ignore[attr-defined]
+                        r._delay()[0] for r in self._groups]
+                if self._sinks:
+                    state_size = int(builder.pool.state_size(builder.graph))
+                    observer._b_extra_fn = cxx.make_sink_b_extra_fn(state_size)  # type: ignore[attr-defined]
                 return observer
             except _k_build_error():
                 raise
@@ -476,7 +540,92 @@ class MixedDomainBlockChain:
         # loop raises ControlGraphBuildError naming its blocks.
         cxx_chain.compile()
         _warn_reorders(cxx_chain)
+        self._assign_groups(cxx_chain)
+        from .c_block import _I_SRC_SIGN, _V_KINDS, _V_SRC_SIGN
+        for channel, wire, name in self._sinks:
+            if wire[0] in _V_KINDS:
+                bid = int(builder.branch_id_of(name))
+                row = int(builder.pool.branch_var_id_for_source(
+                    bid, builder.graph))
+                cxx_chain.add_source_sink(channel, row, _V_SRC_SIGN)
+            else:
+                cxx_chain.add_source_sink(
+                    channel, int(builder.node_id_of(wire[1])), _I_SRC_SIGN)
+                cxx_chain.add_source_sink(
+                    channel, int(builder.node_id_of(wire[2])), -_I_SRC_SIGN)
+        cxx_chain.compile()
         return cxx_chain
+
+    def _assign_groups(self, cxx_chain) -> None:
+        """Rate of every block: its own; else, if stateless, the fastest
+        rate among the blocks writing its inputs; else the chain's. A
+        stateful block left without one is a build error."""
+        if self.rate is None and all(s.rate is None for s in self.blocks):
+            return                      # every-step chain (group 0)
+        from ._pulsim import ControlGraphBuildError  # type: ignore[import-not-found]
+        writer = {}
+        for i, spec in enumerate(self.blocks):
+            outs = spec.output if isinstance(spec.output, (tuple, list)) \
+                else (spec.output,)
+            for o in outs:
+                writer[o] = i
+        rate = [spec.rate for spec in self.blocks]
+        for _ in range(len(self.blocks)):
+            changed = False
+            for i, spec in enumerate(self.blocks):
+                if rate[i] is not None or \
+                        type(spec.block).__name__ not in _STATELESS:
+                    continue
+                ups = [rate[writer[src.value]] for src in spec.inputs.values()
+                       if src.kind == "channel" and src.value in writer
+                       and rate[writer[src.value]] is not None]
+                if ups:
+                    rate[i] = min(ups, key=lambda r: (r.period, r.offset))
+                    changed = True
+            if not changed:
+                break
+        groups: dict = {}
+        for i, spec in enumerate(self.blocks):
+            r = rate[i] if rate[i] is not None else self.rate
+            if r is None:
+                raise ControlGraphBuildError(
+                    f"control graph: block '{spec.name}' "
+                    f"({type(spec.block).__name__}) has no rate: give it "
+                    "rate=Rate(...), or give the chain one "
+                    "(MixedDomainBlockChain(rate=...))")
+            if r not in groups:
+                kind, td = r._delay()
+                groups[r] = cxx_chain.add_group(float(r.period),
+                                                float(r.offset), kind, td)
+            cxx_chain.set_block_group(i, groups[r])
+        self._groups = groups
+
+    def drive_source(self, builder, channel: str, wire) -> None:
+        """Drive a controlled source from signal ``channel``: ``wire`` is
+        ``("v", n_plus, n_minus)`` or ``("i", n_plus, n_minus)``, as for
+        :func:`add_c_block`. The source is added to ``builder`` now; its
+        value is the signal held between ticks (after compute_delay)."""
+        from .c_block import _I_KINDS, _V_KINDS
+        if not isinstance(wire, (tuple, list)) or len(wire) != 3 \
+                or wire[0] not in _V_KINDS + _I_KINDS:
+            raise ValueError(
+                f"drive_source: wire must be ('v', n+, n-) or ('i', n+, n-);"
+                f" got {wire!r}")
+        name = f"graph_{channel}_{len(self._sinks)}"
+        if wire[0] in _V_KINDS:
+            builder.add_voltage_source(name, wire[1], wire[2], 0.0)
+        else:
+            builder.add_current_source(name, wire[1], wire[2], 0.0)
+        # Rows are resolved when the graph is built: the state layout
+        # moves while the circuit is still growing.
+        self._sinks.append((channel, wire, name))
+
+    @property
+    def tick_counts(self) -> list:
+        """Ticks delivered per rate group (in order of first use)."""
+        if self._cxx_chain is None:
+            return []
+        return [int(c) for c in self._cxx_chain.tick_counts()[1:]]
 
     def make_pwm_switch_fn(self, channel: str, *,
                               num_switches: int,

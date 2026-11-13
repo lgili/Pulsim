@@ -74,6 +74,8 @@ capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
+`trbdf2`; a control-graph `Rate` with an `offset`
+(`control_rate_offset`) or a `compute_delay` time (`compute_delay`) on
 `trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
 only (a no-op on `trbdf2` / `dsed`, which control the step on their own
 error estimate); `enable_nonlinear_refresh=False` with a smooth /

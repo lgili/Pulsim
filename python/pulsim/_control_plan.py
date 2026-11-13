@@ -32,6 +32,56 @@ class ControlPlan:
     every_step: List[TickFn] = field(default_factory=list)
     # Every observer, for the post-run walk that looks for motor bundles.
     inner_observers: List[TickFn] = field(default_factory=list)
+    # A control graph with rates (add-compiled-control-graph): its tick
+    # callbacks for the variable-step engine, and its driven sources.
+    rate_ticks: List[Tuple[TickFn, float]] = field(default_factory=list)
+    rate_observer: Optional[TickFn] = None
+    rate_offsets: List[float] = field(default_factory=list)
+    rate_delays: List[int] = field(default_factory=list)
+    b_extra_fn: Optional[Callable] = None
+
+    def merge_b_extra(self, user_fn):
+        """The b_extra the engines see: the graph's driven sources plus
+        the caller's ``b_extra_fn``."""
+        if self.b_extra_fn is None:
+            return user_fn
+        if user_fn is None:
+            return self.b_extra_fn
+        import numpy as np
+        g = self.b_extra_fn
+
+        def both(t):
+            return np.asarray(user_fn(t), dtype=float) + np.asarray(g(t))
+        from . import _carry_jumps
+        return _carry_jumps(both, (user_fn, g))
+
+    def for_variable_step(self, engine: str = "trbdf2") -> "ControlPlan":
+        """The plan for an engine that lands steps on tick instants: the
+        graph runs on its group ticks instead of every step. Refused:
+        a rate offset or a compute_delay time (the kernel ticks at
+        t_start + k*T and lands no second event per tick yet)."""
+        if not self.rate_ticks:
+            return self
+        from ._refusal import unsupported
+        if any(o != 0.0 for o in self.rate_offsets):
+            raise unsupported(
+                engine, "control_rate_offset",
+                f"simulate(engine={engine!r}): a control-graph Rate with an "
+                "offset needs tick events at offset + k*period, which this "
+                "engine does not schedule yet; use engine='pwl' or offset=0.")
+        if any(d == 1 for d in self.rate_delays):
+            raise unsupported(
+                engine, "compute_delay",
+                f"simulate(engine={engine!r}): a compute_delay time needs a "
+                "second event per tick, which this engine does not schedule "
+                "yet; use engine='pwl', 0 or 'one_sample'.")
+        return ControlPlan(
+            switch_fn=self.switch_fn,
+            ticks=list(self.ticks) + list(self.rate_ticks),
+            every_step=[o for o in self.every_step
+                        if o is not self.rate_observer],
+            inner_observers=self.inner_observers,
+            b_extra_fn=self.b_extra_fn)
 
 
 def compose_control(builder, closed_loops, step_observer, controller_period,
@@ -73,6 +123,13 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
             "simulate(controller_period=...) was given without a "
             "step_observer: there is nothing to call at that period. "
             "Pass step_observer=, or drop controller_period.")
+    if step_observer is not None:
+        plan.rate_ticks = list(getattr(step_observer, "_rate_ticks", []))
+        if plan.rate_ticks:
+            plan.rate_observer = step_observer
+            plan.rate_offsets = list(step_observer._rate_offsets)
+            plan.rate_delays = list(step_observer._rate_delays)
+        plan.b_extra_fn = getattr(step_observer, "_b_extra_fn", None)
     for _fn, period in plan.ticks:
         if not (period > 0.0 and math.isfinite(period)):
             raise ValueError(

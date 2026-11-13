@@ -50,7 +50,8 @@ inline StepResetPair make_delay_step(BlockChain& chain,
                                      InputRef x, std::string out_channel) {
     if (blk->samples < 1) {
         throw ControlGraphBuildError(
-            "DelayBlock: samples must be >= 1 (got 0)");
+            "DelayBlock: samples must be >= 1 (got " +
+            std::to_string(blk->samples) + ")");
     }
     const InputRef xi = chain.in(std::move(x), /*feedthrough=*/false);
     const Index o = chain.out(out_channel);

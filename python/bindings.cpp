@@ -3975,6 +3975,21 @@ void init_module(py::module_& m) {
     py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
         m, "ControlGraphBuildError", PyExc_ValueError);
 
+    py::class_<ChainTick>(m, "CxxChainTick",
+        "A control-graph tick callback the variable-step engine calls in "
+        "C++ (no Python call per tick).")
+        .def("__call__", [](ChainTick& self, Real t, const Vector& x) {
+            self.fn(t, x);
+        });
+
+    py::class_<ChainBExtra>(m, "CxxChainBExtra",
+        "A control graph's driven-source b_extra_fn(t), with the instants "
+        "its value may jump (next_jump_after), both in C++.")
+        .def("__call__", [](ChainBExtra& self, Real t) { return self.fn(t); })
+        .def("next_jump_after", [](ChainBExtra& self, Real t) {
+            return self.chain->next_jump_after(t);
+        });
+
     py::class_<BlockChain>(m, "CxxBlockChain",
         "C++ block chain executor. Build via add_<block>(...) "
         "methods, bind nodes, then pass make_step_observer(dt) to "
@@ -3993,6 +4008,26 @@ void init_module(py::module_& m) {
             "Block names in evaluation order.")
         .def("reorders", &BlockChain::reorders,
             "Pairs whose evaluation order differs from insertion order.")
+        .def("add_group", &BlockChain::add_group, py::arg("period"),
+            py::arg("offset") = 0.0, py::arg("delay_kind") = 0,
+            py::arg("delay_time") = 0.0,
+            "Add a Discrete{period, offset} rate group (delay_kind 0 = "
+            "zero, 1 = a time, 2 = one sample); returns its id (>= 1).")
+        .def("set_block_group", &BlockChain::set_block_group,
+            py::arg("block"), py::arg("group"))
+        .def_property_readonly("has_rates", &BlockChain::has_rates)
+        .def("group_period", &BlockChain::group_period, py::arg("group"))
+        .def("tick_counts", &BlockChain::tick_counts,
+            "Ticks per group (index 0: evaluations of the every-call group).")
+        .def_property_readonly("tick_jitter_max", &BlockChain::tick_jitter_max)
+        .def("add_source_sink", &BlockChain::add_source_sink,
+            py::arg("name"), py::arg("row"), py::arg("gain"),
+            "b_extra[row] += gain * (signal `name` after compute_delay).")
+        .def("set_solver_dt", &BlockChain::set_solver_dt, py::arg("dt"))
+        .def("make_tick_observer", [](BlockChain& self) {
+                return ChainTick{&self, self.make_tick_observer()};
+            }, py::keep_alive<0, 1>(),
+            "Tick callback for the variable-step engine (exact protocol).")
         .def_property_readonly("n_evals", &BlockChain::n_evals)
         .def_property_readonly("n_block_evals", &BlockChain::n_block_evals)
         .def("get_channel", &BlockChain::get_channel, py::arg("name"))
@@ -4005,12 +4040,19 @@ void init_module(py::module_& m) {
                                     node_id_of) {
             self.bind_nodes(node_id_of);
         }, py::arg("node_id_of"),
-            "Resolve every InputRef::Node by calling node_id_of(name).")
+            "Resolve InputRef::Node inputs given by name, by calling "
+            "node_id_of(name), for the blocks added AFTER this call.")
         .def("make_step_observer", [](BlockChain& self, Real dt) {
             return self.make_step_observer(dt);
         }, py::arg("dt"),
             "Return a step_observer(t, x) callable that the kernel "
             "uses to invoke the chain each step.")
+        .def("make_sink_b_extra_fn",
+            [](BlockChain& self, Size state_size) {
+                return ChainBExtra{&self, self.make_b_extra_fn(state_size)};
+            }, py::arg("state_size"), py::keep_alive<0, 1>(),
+            "Return the driven-source b_extra_fn(t) with next_jump_after(t) "
+            "(the instants the published values may change).")
         .def("make_b_extra_fn",
             [](BlockChain& self, Size state_size) {
                 return self.make_b_extra_fn(state_size);
@@ -4258,10 +4300,16 @@ void init_module(py::module_& m) {
 
         // ---- Ported from pulsim.control (add-compiled-control-graph) ----
         .def("add_delay",
-            [](BlockChain& self, Size samples, Real initial_value,
+            [](BlockChain& self, long long samples, Real initial_value,
                 InputRef x, std::string out) {
+                if (samples < 1) {
+                    throw ControlGraphBuildError(
+                        "DelayBlock: samples must be >= 1 (got " +
+                        std::to_string(samples) + ")");
+                }
                 auto blk = std::make_shared<DelayBlock>();
-                blk->samples = samples; blk->initial_value = initial_value;
+                blk->samples = static_cast<Size>(samples);
+                blk->initial_value = initial_value;
                 auto p = make_delay_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset),
                          std::move(p.update));
@@ -4718,6 +4766,10 @@ void init_module(py::module_& m) {
             }
             std::vector<std::function<void(Real, const Vector&)>> obs_fns;
             for (const auto& ob : observers) {
+                if (py::isinstance<ChainTick>(ob)) {   // control graph: C++ path
+                    obs_fns.push_back(ob.cast<ChainTick&>().fn);
+                    continue;
+                }
                 obs_fns.push_back(ob.cast<
                     std::function<void(Real, const Vector&)>>());
             }
@@ -4808,10 +4860,10 @@ void init_module(py::module_& m) {
            const topology::Graph& graph,
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
-           SwitchScheduleFn switch_fn,
+           py::object switch_fn_obj,
            BlockChain& chain,
            Real chain_dt,
-           BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
            py::object initial_state,
@@ -4820,8 +4872,29 @@ void init_module(py::module_& m) {
            py::object resume_from) {
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
+            // The declarations run_transient reads (a native schedule's
+            // edges, a b_extra_fn's next_jump_after): this path dropped
+            // them, so the restart rule never saw a declared jump here.
+            auto adapted =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            const SwitchScheduleFn switch_fn = std::move(adapted.fn);
+            std::function<Real(Real)> next_edge_fn = std::move(adapted.next_edge);
+            if (!next_edge_fn && py::hasattr(switch_fn_obj, "next_edge_after")) {
+                next_edge_fn = switch_fn_obj.attr("next_edge_after")
+                                   .cast<std::function<Real(Real)>>();
+            }
+            BExtraFn b_extra_fn;
+            std::function<Real(Real)> b_extra_next_jump;
+            if (!b_extra_obj.is_none()) {
+                b_extra_fn = b_extra_obj.cast<BExtraFn>();
+                if (py::hasattr(b_extra_obj, "next_jump_after")) {
+                    b_extra_next_jump = b_extra_obj.attr("next_jump_after")
+                                            .cast<std::function<Real(Real)>>();
+                }
+            }
             // Build a step_observer that calls the chain DIRECTLY in
             // C++ — no Python roundtrip per step.
+            chain.set_solver_dt(opts.dt);   // rate groups: state at the tick
             auto step_observer = chain.make_step_observer(chain_dt);
             // Wrap with a LiveRing push when streaming is requested.
             // Both layers are GIL-free in the hot path: chain step is
@@ -4870,14 +4943,16 @@ void init_module(py::module_& m) {
                                           observer_eff,
                                           x_init_ptr,
                                           continue_eff,
-                                          resume_ptr);
+                                          resume_ptr,
+                                          b_extra_next_jump,
+                                          next_edge_fn);
             }
             return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
         py::arg("chain"), py::arg("chain_dt"),
-        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("initial_state") = py::none(),
