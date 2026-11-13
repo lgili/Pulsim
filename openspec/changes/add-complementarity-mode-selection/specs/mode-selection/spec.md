@@ -107,8 +107,8 @@ counted in `result.diagnostics`.
 
 Without `mode_selection`, on `dsed`, the kernel SHALL judge the diode
 mode the settle selected at `t = 0` and at every event by propagating
-it exactly from the held state, and SHALL decide an inconsistent mode
-with the selection instead, recording each repair (time, diode,
+it exactly from the settled (projected) state, and SHALL decide an
+inconsistent mode with the selection from the held state instead, recording each repair (time, diode,
 violation) in `result.diagnostics['mode_guard']`. A selection refusal
 at a repaired event SHALL raise `pulsim.UnsupportedError` naming the
 diode. A run whose settled modes are all consistent SHALL be

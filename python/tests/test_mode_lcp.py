@@ -92,7 +92,7 @@ def test_lcp_buck_at_rest_stays_at_zero():
 def test_lcp_dcm_buck_4000_periods_matches_the_prototype():
     b, fn = _buck()
     r = _sim(b, 4000 * T, fn, mode_selection="lcp")
-    assert _end(r, "vout") == pytest.approx(8.996246971827961, abs=2e-6)   # measured 8.996247087
+    assert _end(r, "vout") == pytest.approx(8.996246971827961, abs=4e-7)   # measured +1.2e-7
     assert r.diagnostics["mode_selection"]["max_pivots_per_event"] <= 2
 
 
@@ -216,6 +216,7 @@ def test_lcp_banded_dcm_buck_equals_the_default():
     r0, r1 = _sim(b, 400 * T, fn), _sim(b, 400 * T, fn, mode_selection="lcp")
     assert np.array_equal(np.asarray(r0.times), np.asarray(r1.times))
     assert np.array_equal(np.asarray(r0.states), np.asarray(r1.states))
+    assert r1.diagnostics["mode_selection"]["lcp_count"] > r1.n_events      # the LCP decided
 
 
 @pytest.mark.parametrize("fam,vth,t_end", [("dcm_buck", 0.0, 400 * T), ("bridge3_cfilter", 0.0, 0.06),

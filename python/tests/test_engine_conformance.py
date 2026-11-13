@@ -577,6 +577,15 @@ def test_mode_selection_lcp_refused_by_name_without_the_event_integrator(engine)
     assert (ei.value.engine, ei.value.feature) == (engine, "mode_selection")
 
 
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+def test_mode_selection_refused_on_a_diode_free_rk45_dsed_run(mode):
+    # rk45 is the event integrator, but with no diode there is nothing to
+    # select: refused by name rather than silently ignored
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("dsed", mode_selection=mode, integrator="rk45")
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "mode_selection")
+
+
 def _half_wave():
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 500.0)

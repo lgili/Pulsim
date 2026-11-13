@@ -43,8 +43,8 @@ inline void raise_if_refused(const ModeSelection& sel, const std::string& engine
             engine, "non_passive_ports", cls.device, cls.kind,
             "mode selection at t = " + std::string(tb) + " s: the circuit is not passive at "
             "its diode ports (" + cls.kind + " '" + cls.device + "'), Lemke's method ended "
-            "at a secondary ray and " + std::to_string(diodes.size()) + " diodes exceed the "
-            "enumeration limit of 12. Reduce the number of diodes the controlled element "
+            "at a secondary ray and the free diode ports exceed the enumeration limit of 12 "
+            "(" + std::to_string(diodes.size()) + " diodes in the circuit). Reduce the number of diodes the controlled element "
             "couples, or use a passive equivalent.");
     }
     std::string names;

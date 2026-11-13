@@ -984,7 +984,8 @@ private:
             events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
         } catch (const UnsupportedError& e) {
             throw UnsupportedError(
-                "dsed", e.feature(), who.empty() ? e.device() : who,
+                "dsed", e.feature(),
+                e.feature() == "consistent_mode" && !who.empty() ? who : e.device(),
                 e.feature() == "consistent_mode" ? "Diode" : e.kind(),
                 "dsed at t = " + sci_(t) + " s: the settled diode mode violates the law of "
                 + who + " on its own trajectory (by " + sci_(worst) + " V), and the "

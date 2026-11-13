@@ -795,7 +795,8 @@ def run_dsed_from_builder(
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
                     builder)
             shadow_kw = {}
-            if mode_selection in ("shadow", "lcp") and opts.integrator != "rk45":
+            if mode_selection in ("shadow", "lcp") and (
+                    opts.integrator != "rk45" or _n_diodes == 0):
                 raise unsupported(
                     "dsed", "mode_selection", message=
                     f"simulate(engine='dsed', mode_selection="
@@ -803,7 +804,7 @@ def run_dsed_from_builder(
                     f"is wired into the event-driven integrator "
                     f"only; integrator={opts.integrator!r} has no hook. "
                     "Drop mode_selection, or run a circuit with diodes.")
-            if opts.integrator == "rk45" and (_n_diodes > 0 or mode_selection):
+            if opts.integrator == "rk45" and _n_diodes > 0:
                 h_e = _shadow_h_e(builder, sf, t_window)
                 if mode_selection == "lcp":
                     shadow_kw["mode_lcp_h_e"] = h_e
