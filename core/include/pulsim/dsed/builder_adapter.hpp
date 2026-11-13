@@ -40,6 +40,7 @@
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -338,7 +339,8 @@ private:
             }
             if (kind == K::PWMVoltageSource ||
                 kind == K::SineVoltageSource ||
-                kind == K::PulseVoltageSource) {
+                kind == K::PulseVoltageSource ||
+                sources::is_current_waveform(kind)) {
                 return true;
             }
         }
@@ -381,7 +383,8 @@ private:
                 continue;
             }
             if (kind == K::PWMVoltageSource ||
-                kind == K::PulseVoltageSource) {
+                kind == K::PulseVoltageSource ||
+                sources::is_current_waveform(kind)) {
                 return false;
             }
             if (kind == K::SineVoltageSource) {
@@ -508,6 +511,9 @@ private:
         Vector b = sources::compute_pwm_b_extra(pool_, graph_, t);
         b += sources::compute_sine_b_extra(pool_, graph_, t);
         b += sources::compute_pulse_b_extra(pool_, graph_, t);
+        Vector iw;
+        sources::compute_current_waveform_b_extra(pool_, graph_, t, iw);
+        b += iw;
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }

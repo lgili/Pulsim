@@ -52,6 +52,7 @@
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/stamping/stamp_companion.hpp"
+#include "pulsim/stamping/stamp_controlled.hpp"
 #include "pulsim/stamping/stamp_current_source.hpp"
 #include "pulsim/stamping/stamp_device.hpp"
 #include "pulsim/stamping/stamp_switch.hpp"
@@ -107,6 +108,59 @@ inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
 // Capacitor / Inductor companions contribute 0 to b at assembly;
 // the history term lives in `b_extra` at solve time.
 // -----------------------------------------------------------------------------
+/// add-controlled-source-set: stamp a VCCS / CCCS / CCVS / gyrator
+/// into J. A sine / pulse / table current source has no matrix entry:
+/// the transient overlays its value on the node rows every step
+/// (`sources/current_waveform_b_extra.hpp`), and the DC assembly
+/// (`at_dc`) stamps `source_scale` times its value at `t_eval`.
+/// Returns false for every other kind.
+inline bool stamp_controlled_source(const topology::Graph& graph,
+                                    const DevicePool& pool, Index branch_id,
+                                    sparse::Matrix& J, Vector& b,
+                                    const Vector& x,
+                                    const stamping::BranchCoord& coord,
+                                    bool at_dc = false,
+                                    Real t_eval = Real{0},
+                                    Real source_scale = Real{1}) {
+    using K = DevicePool::StoredKind;
+    switch (pool.kind_of(branch_id)) {
+    case K::VCCS: {
+        const auto [cp, cn] = pool.control_nodes(branch_id);
+        stamping::stamp_vccs(J, b, x, coord, cp, cn,
+                             pool.vccs_params(branch_id).gm);
+        return true;
+    }
+    case K::CCCS:
+        stamping::stamp_cccs(J, b, x, coord,
+                             pool.control_column(branch_id, graph),
+                             pool.cccs_params(branch_id).gain);
+        return true;
+    case K::CCVS:
+        stamping::stamp_ccvs(J, b, x, coord,
+                             pool.branch_var_id_for_source(branch_id, graph),
+                             pool.control_column(branch_id, graph),
+                             pool.ccvs_params(branch_id).rm);
+        return true;
+    case K::Gyrator: {
+        const auto [p1_pos, p1_neg] = pool.control_nodes(branch_id);
+        stamping::stamp_gyrator(J, b, x, coord, p1_pos, p1_neg,
+                                pool.gyrator_params(branch_id).g);
+        return true;
+    }
+    case K::SineCurrentSource:
+    case K::PulseCurrentSource:
+    case K::PwlCurrentSource:
+        if (at_dc) {
+            stamping::stamp_current_source(
+                b, coord,
+                source_scale * pool.current_waveform_value(branch_id, t_eval));
+        }
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline void assemble_impl(const topology::Graph& graph,
                            const DevicePool& pool,
                            const topology::SwitchStateMask& mask,
@@ -179,6 +233,10 @@ inline void assemble_impl(const topology::Graph& graph,
             // VoltageSource, CurrentSource, AND
             // PWMVoltageSource (a time-varying voltage
             // source). Dispatch on the pool's StoredKind.
+            if (stamp_controlled_source(graph, pool, branch.id, S, b, x,
+                                        coord)) {
+                break;
+            }
             const auto src_kind = pool.kind_of(branch.id);
             if (src_kind == DevicePool::StoredKind::CurrentSource) {
                 const auto& p =

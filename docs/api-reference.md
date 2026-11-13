@@ -39,6 +39,9 @@ p.CircuitBuilder()
   .add_igbt(...)
   .add_igbt_level1(...)
   .add_vcvs(...)
+  .add_vccs(...) / .add_cccs(...) / .add_ccvs(...) / .add_gyrator(...)
+  .add_sine_current_source(...) / .add_pulse_current_source(...)
+  .add_pwl_current_source(...)        # table i(t)
 
 # Topology / device handles.
 p.Graph, p.DevicePool, p.SwitchStateMask
@@ -122,6 +125,29 @@ Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device
 | `add_sine_voltage_source` | `(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0)` |
 | `add_pulse_voltage_source` | `(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0, rise_time=0, fall_time=0)` |
 | `add_vcvs` | `(name, in_pos, in_neg, out_pos, out_neg, gain)` |
+| `add_vccs` | `(name, in_pos, in_neg, n_pos, n_neg, gm)` — `gm·(V(in_pos) − V(in_neg))` leaves at `n_pos` |
+| `add_cccs` | `(name, control, n_pos, n_neg, gain)` — `gain·i(control)` leaves at `n_pos` |
+| `add_ccvs` | `(name, control, out_pos, out_neg, rm)` — `V(out_pos) − V(out_neg) = rm·i(control)` |
+| `add_gyrator` | `(name, p1_pos, p1_neg, p2_pos, p2_neg, g)` — `i1 = g·v2`, `i2 = −g·v1`, both into the `_pos` terminals; a `C` on one port is `C/g²` of inductance on the other |
+| `add_sine_current_source` | `(name, n_pos, n_neg, i_dc, i_amplitude, frequency, phase=0)` |
+| `add_pulse_current_source` | `(name, n_pos, n_neg, i_initial, i_pulsed, t_start, pulse_width, period=0, rise_time=0, fall_time=0)` |
+| `add_pwl_current_source` | `(name, n_pos, n_neg, t, i, periodic=False)` — linear between knots, `i[0]` before `t[0]`, `i[-1]` after (or repeated with period `t[-1] − t[0]`) |
+
+Every current source (DC, sine, pulse, table, `vccs`, `cccs`) drives a
+positive value OUT of `n_pos` into the circuit: 10 mA into 1 kΩ from
+`n_pos` to ground reads +10 V, and `res.i` of the source reads +10 mA.
+`control` names a branch added earlier that carries a current unknown:
+a voltage source of any kind (a 0 V one is the usual sense element), an
+inductor, a VCVS, a CCVS or an ideal-transformer secondary; the current
+is positive from that branch's first node to its second. `res.i` covers
+the new kinds; `res.i(gyrator, port=1)` gives port 1 (port 2 by default).
+A `ccvs` is a voltage source: `res.i` is its branch current, positive
+from `out_pos` through it to `out_neg`.
+
+All seven run on `pwl`, `trbdf2`, `dsed` and the DC operating point (a
+waveform source at its `t = 0` value); the AC sweep takes the four
+controlled ones, and the waveform current sources, being independent,
+add no AC excitation. `trbdf2` lands on table knots and pulse corners.
 
 ### Passive devices
 
@@ -366,6 +392,18 @@ you pass wins. The other `simulation:` fields (Newton tolerances,
 `LoadedCircuit` with no top-level `simulation:` block (or no `t_end` in
 it) is refused with a `ValueError` naming the file, unless you pass
 `t_end=`.
+
+Controlled and waveform-current-source types: `vccs` (`in_pos`,
+`in_neg`, `from`, `to`, `gm`), `ccvs` (`control`, `out_pos`, `out_neg`,
+`rm`), `cccs` (`control`, `from`, `to`, `gain`), `gyrator` (`p1_pos`,
+`p1_neg`, `p2_pos`, `p2_neg`, `g`), `sine_current_source` (`from`, `to`,
+`i_dc`, `i_amplitude`, `frequency`, `phase`), `pulse_current_source`
+(`from`, `to`, `i_initial`, `i_pulsed`, `t_start`, `pulse_width`,
+`period`, `rise_time`, `fall_time`), `pwl_current_source` (`from`, `to`,
+`t` and `i` lists, or `file:` a two-column comma- or space-separated
+table relative to the working directory, `#` comments allowed;
+`periodic`). These types are strict: an unknown key is an error naming
+the device.
 
 The YAML describes the circuit and run settings only — build any gate
 drive yourself (e.g. `make_pwm_switch_fn`) and pass it as `switch_fn=`.

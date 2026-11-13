@@ -41,7 +41,15 @@ their messages are covered in [Gotchas](gotchas.md).
 | **`make_pwm_switch_fn` edges jitter by one `dt` step.** It compares a floating-point phase. Guide trap 10. | 100 kHz, D = 0.5, `dt = 1e-7`: 49, 50 or 51 on-steps per period, where 50 were asked. `make_dead_time_pwm_pair_fn` with 200 ns dead time gives the high side 48 or 49 on-steps, where 48 are expected. | Make `D/f_sw` a whole number of steps and compute the PWM in steps (`grid_pwm`, guide 3.2). |
 | **`switch_specs` charges the soft edges of a bidirectional PWL switch at the full bus when there is no dead time.** | Guide 3.7 VSI (600 V; 4 mJ / 3.5 mJ at 600 V, 50 A). `INV__HSa` switching loss is 22.64 W with no dead time and 11.29 W with 1 µs. | Model the dead time. |
 
-## Results and loss post-processing
+## Sources
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **No behavioural sources.** The controlled sources (`add_vcvs`, `add_vccs`, `add_cccs`, `add_ccvs`, `add_gyrator`) are linear with constant gains; there is no expression source (SPICE `B`, PSIM math block) and no polynomial or table-driven gain. | `spice_to_builder` refuses `B` sources. | A nonlinear law of node voltages or branch currents: `b_extra_fn` or a closed loop. |
+| **The table source is a current source only.** There is no PWL voltage source. | `add_pwl_current_source` exists; `add_pwl_voltage_source` does not. | A voltage table: drive a 1 Ω load with the current table and use it through a VCVS (`add_vcvs`), or a `b_extra_fn`. |
+| **A controlled source on the fixed engine shows the engine's first-order start** (guide trap 9), like any reactive circuit. | Gyrator (g = 0.01 S) with 1 µF, 1 V through 10 Ω, `dt = 1e-6`: 63.19 mA at 1 ms against the exact 63.21 mA, error `dt/(2τ)`. An identical 10 mH inductor gives the same trace to 1e-9. `trbdf2` is within 1.5e-8, `dsed` within 1e-15. | Halve `dt` and compare, or run without `dt`. |
+| `dsed` runs all seven new kinds. | A circuit with every controlled kind: `trbdf2` and `dsed` agree to 1e-7 after 10 µs. Sample 0 differs by design: `dsed` reports the consistent algebraic state, the other engines 0 V. | None needed. |
+
 
 | Limitation | Measured | Workaround |
 |---|---|---|

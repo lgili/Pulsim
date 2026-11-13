@@ -860,7 +860,7 @@ def _result_v(self, name: str, t=None):
     return col[t]
 
 
-def _result_i(self, name: str, t=None):
+def _result_i(self, name: str, t=None, *, port=None):
     """Return the branch-current trace for ``name``.
 
     ``result.i()`` aims at the PLECS-style output-equation convention:
@@ -885,6 +885,16 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
+    | ``sine_current_source``,   | the source's value at each sample time  |
+    | ``pulse_current_source``,  | (positive OUT of ``n_pos``, as for      |
+    | ``pwl_current_source``     | ``current_source``)                     |
+    | ``vccs``                   | ``gm·(V_in_pos − V_in_neg)`` out of     |
+    |                            | ``n_pos``                               |
+    | ``cccs``                   | ``gain·i(control)`` out of ``n_pos``    |
+    | ``ccvs``                   | its branch unknown (a voltage source)   |
+    | ``gyrator``                | ``port=2`` (default): ``i_2 = −g·v_1``; |
+    |                            | ``port=1``: ``i_1 = g·v_2``; both INTO  |
+    |                            | the device at ``p1_pos`` / ``p2_pos``   |
     | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
     |                            | samples the solver stamped the diode    |
     |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
@@ -946,6 +956,8 @@ def _result_i(self, name: str, t=None):
     t
         Optional step selection (``int`` / ``slice`` / array-like).
         ``None`` returns the full per-sample trace.
+    port
+        Gyrator only: ``1`` or ``2`` (default ``2``, the branch).
     """
     import numpy as _np
     from ._result_views import (
@@ -973,6 +985,15 @@ def _result_i(self, name: str, t=None):
         import difflib as _difflib
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "branch", sugg) from None
+
+    if port is not None:
+        kinds = {d.get("branch_id"): d.get("kind")
+                 for d in builder.components()}
+        if kinds.get(b_id) != "gyrator" or port not in (1, 2):
+            raise ValueError(
+                f"result.i({name!r}, port={port!r}): `port` is 1 or 2 and "
+                f"only for a gyrator (this branch is "
+                f"{kinds.get(b_id)!r}).")
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family
@@ -1099,6 +1120,27 @@ def _result_i(self, name: str, t=None):
                 f"`I` ({exc!r})") from None
         return _finalize(_np.full(states.shape[0], I_A))
 
+    # ---------- add-controlled-source-set --------------------------
+    if kind in ("sine_current_source", "pulse_current_source",
+                "pwl_current_source"):
+        val = builder.pool.current_waveform_value
+        return _finalize(_np.array([val(b_id, float(tt))
+                                    for tt in _ta(self)], dtype=float))
+    if kind == "vccs":
+        v_c = (_node_v(states, int(params["in_pos"]))
+               - _node_v(states, int(params["in_neg"])))
+        return _finalize(float(params["gm"]) * v_c)
+    if kind == "cccs":
+        col = int(builder.pool.control_column(b_id, builder.graph))
+        return _finalize(float(params["gain"]) * states[:, col])
+    if kind == "gyrator":
+        g = float(params["g"])
+        if port == 1:  # i_1 = g·v_2, v_2 across the branch
+            return _finalize(g * _v_branch())
+        v_1 = (_node_v(states, int(params["p1_pos"]))
+               - _node_v(states, int(params["p1_neg"])))
+        return _finalize(-g * v_1)
+
     # ----------------------- diode -----------------------------------
     if kind == "diode":
         # PWL switched diode: g_on in series with the forward drop V_f
@@ -1181,7 +1223,8 @@ def _result_i(self, name: str, t=None):
         f"reconstruct currents for this device family, and "
         f"device_loss_summary does not report it either. Currently "
         f"supported: inductor, voltage_source (incl. pwm / sine / "
-        f"pulse variants), resistor, capacitor, current_source, "
+        f"pulse variants), resistor, capacitor, current_source (incl. "
+        f"sine / pulse / pwl), vccs, cccs, ccvs, gyrator, "
         f"diode, shockley_diode, switch. To measure this device's "
         f"current, put a small resistor in series with it (1 mOhm) "
         f"and read `res.i(<that resistor>)`; its loss is then the "

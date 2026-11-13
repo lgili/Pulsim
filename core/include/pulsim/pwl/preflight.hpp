@@ -215,8 +215,13 @@ private:
     switch (branch.kind) {
         case topology::BranchKind::PassiveLinear:
             return pool.kind_of(branch.id) != SK::Capacitor;
-        case topology::BranchKind::Source:
-            return pool.kind_of(branch.id) != SK::CurrentSource;
+        case topology::BranchKind::Source: {
+            // A current OUTPUT is no DC path (add-controlled-source-set).
+            const auto k = pool.kind_of(branch.id);
+            return k != SK::CurrentSource && k != SK::VCCS &&
+                   k != SK::CCCS && k != SK::SineCurrentSource &&
+                   k != SK::PulseCurrentSource && k != SK::PwlCurrentSource;
+        }
         case topology::BranchKind::Nonlinear:
             // A saturable inductor is a short at DC (v = dλ/dt = 0),
             // exactly like a linear one; the other Newton devices

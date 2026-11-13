@@ -6,19 +6,19 @@
 //
 // `pulsim-v2-current-source` Phase 1.
 //
-// Constant DC current source. Pumps a fixed current `I`
-// from the `from` terminal to the `to` terminal.
+// Constant DC current source. A positive `I` leaves the
+// source at `from` into the external circuit and returns at
+// `to` (inside the source it runs from `to` to `from`):
+// 10 mA with 1 kΩ from `from` to ground reads v(from) = +10 V.
 //
 // In MNA terms:
 //   * Contributes to KCL at both terminals.
 //   * Does NOT introduce a branch-current unknown (the
 //     current is GIVEN, not solved for — that's the key
 //     difference from VoltageSource).
-//   * Stamping: b[from] += +I, b[to] -= I.
-//     Then J · x = -(b_constant + b_extra) recovers the
-//     correct KCL: at from-node, sum of leaving = -I,
-//     meaning external currents must net to +I entering
-//     (= the source delivering I via the branch).
+//   * Stamping (stamp_current_source.hpp): b[from] -= I,
+//     b[to] += I, so J · x = -b puts +I into the `from`
+//     row: the external network must carry I away from it.
 //
 // Useful for:
 //   * Bias-current injection (e.g. testing op-amp inputs).

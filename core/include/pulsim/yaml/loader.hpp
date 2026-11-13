@@ -153,6 +153,70 @@ namespace detail {
     return default_value;
 }
 
+/// add-controlled-source-set: the new types are strict — a key outside
+/// `allowed` (plus `type` / `name`) is an error naming the device.
+inline void require_only_keys(const YAML::Node& dev, std::size_t idx,
+                              const std::string& type,
+                              std::initializer_list<std::string_view> allowed) {
+    for (const auto& kv : dev) {
+        const std::string key = kv.first.as<std::string>();
+        bool ok = key == "type" || key == "name";
+        for (const auto a : allowed) ok = ok || key == a;
+        if (!ok) {
+            std::string accepted;
+            for (const auto a : allowed) {
+                accepted += accepted.empty() ? "" : ", ";
+                accepted += a;
+            }
+            throw std::runtime_error(std::format(
+                "yaml::load: device {} has unknown key '{}' (accepted: "
+                "type, name, {})", device_label(dev, idx, type), key,
+                accepted));
+        }
+    }
+}
+
+[[nodiscard]] inline std::vector<Real> require_real_list(
+    const YAML::Node& dev, std::size_t idx, const std::string& type,
+    const std::string& field) {
+    if (!dev[field] || !dev[field].IsSequence()) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {} needs '{}' as a list of numbers",
+            device_label(dev, idx, type), field));
+    }
+    return dev[field].as<std::vector<Real>>();
+}
+
+/// A two-column table (t, i) from a text file: comma or whitespace
+/// separated, blank lines and lines starting with '#' skipped. A
+/// relative path is taken from the working directory.
+inline void read_table_file(const std::string& path, const std::string& who,
+                            std::vector<Real>& t, std::vector<Real>& v) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: cannot open table file '{}'", who, path));
+    }
+    std::string line;
+    for (std::size_t n = 1; std::getline(in, line); ++n) {
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos || line[first] == '#') continue;
+        for (char& c : line) {
+            if (c == ',' || c == ';') c = ' ';
+        }
+        std::istringstream row(line);
+        Real a = 0, b = 0;
+        std::string rest;
+        if (!(row >> a >> b) || (row >> rest)) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: line {} of '{}' is not two numbers",
+                who, n, path));
+        }
+        t.push_back(a);
+        v.push_back(b);
+    }
+}
+
 /// Parse a single device entry; dispatches by `type`.
 inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
@@ -228,6 +292,79 @@ inline void load_device(
             require_string(dev, idx, type, "out_pos"),
             require_string(dev, idx, type, "out_neg"),
             require_real(dev, idx, type, "gain"));
+    } else if (type == "vccs") {
+        require_only_keys(dev, idx, type,
+                          {"in_pos", "in_neg", "from", "to", "gm"});
+        b.add_vccs(name, require_string(dev, idx, type, "in_pos"),
+                   require_string(dev, idx, type, "in_neg"),
+                   require_string(dev, idx, type, "from"),
+                   require_string(dev, idx, type, "to"),
+                   require_real(dev, idx, type, "gm"));
+    } else if (type == "ccvs") {
+        require_only_keys(dev, idx, type,
+                          {"control", "out_pos", "out_neg", "rm"});
+        b.add_ccvs(name, require_string(dev, idx, type, "control"),
+                   require_string(dev, idx, type, "out_pos"),
+                   require_string(dev, idx, type, "out_neg"),
+                   require_real(dev, idx, type, "rm"));
+    } else if (type == "cccs") {
+        require_only_keys(dev, idx, type, {"control", "from", "to", "gain"});
+        b.add_cccs(name, require_string(dev, idx, type, "control"),
+                   require_string(dev, idx, type, "from"),
+                   require_string(dev, idx, type, "to"),
+                   require_real(dev, idx, type, "gain"));
+    } else if (type == "gyrator") {
+        require_only_keys(dev, idx, type,
+                          {"p1_pos", "p1_neg", "p2_pos", "p2_neg", "g"});
+        b.add_gyrator(name, require_string(dev, idx, type, "p1_pos"),
+                      require_string(dev, idx, type, "p1_neg"),
+                      require_string(dev, idx, type, "p2_pos"),
+                      require_string(dev, idx, type, "p2_neg"),
+                      require_real(dev, idx, type, "g"));
+    } else if (type == "sine_current_source") {
+        require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",
+                                           "frequency", "phase"});
+        b.add_sine_current_source(
+            name, require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "i_dc"),
+            require_real(dev, idx, type, "i_amplitude"),
+            require_real(dev, idx, type, "frequency"),
+            real_or(dev, "phase", Real{0}));
+    } else if (type == "pulse_current_source") {
+        require_only_keys(dev, idx, type,
+                          {"from", "to", "i_initial", "i_pulsed", "t_start",
+                           "pulse_width", "period", "rise_time", "fall_time"});
+        b.add_pulse_current_source(
+            name, require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "i_initial"),
+            require_real(dev, idx, type, "i_pulsed"),
+            require_real(dev, idx, type, "t_start"),
+            require_real(dev, idx, type, "pulse_width"),
+            real_or(dev, "period", Real{0}),
+            real_or(dev, "rise_time", Real{0}),
+            real_or(dev, "fall_time", Real{0}));
+    } else if (type == "pwl_current_source") {
+        require_only_keys(dev, idx, type,
+                          {"from", "to", "t", "i", "file", "periodic"});
+        std::vector<Real> t, v;
+        if (dev["file"]) {
+            if (dev["t"] || dev["i"]) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {} gives both 'file' and 't'/'i'; "
+                    "use one", device_label(dev, idx, type)));
+            }
+            read_table_file(require_string(dev, idx, type, "file"),
+                            device_label(dev, idx, type), t, v);
+        } else {
+            t = require_real_list(dev, idx, type, "t");
+            v = require_real_list(dev, idx, type, "i");
+        }
+        b.add_pwl_current_source(name, require_string(dev, idx, type, "from"),
+                                 require_string(dev, idx, type, "to"),
+                                 std::move(t), std::move(v),
+                                 bool_or(dev, "periodic", false));
     } else if (type == "op_amp_ideal") {
         b.add_op_amp_ideal(
             name,
@@ -519,7 +656,9 @@ inline void load_device(
             "inductor, saturable_inductor, hysteretic_inductor, "
             "diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "igbt, igbt_level1, vcvs, op_amp_ideal, "
+            "igbt, igbt_level1, vcvs, vccs, ccvs, cccs, gyrator, "
+            "sine_current_source, pulse_current_source, "
+            "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor");
     }

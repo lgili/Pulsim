@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Controlled sources and waveform current sources
+
+* **Added** `add_vccs(name, in_pos, in_neg, n_pos, n_neg, gm)`,
+  `add_cccs(name, control, n_pos, n_neg, gain)`,
+  `add_ccvs(name, control, out_pos, out_neg, rm)` and
+  `add_gyrator(name, p1_pos, p1_neg, p2_pos, p2_neg, g)`: linear,
+  mask-independent stamps in the cached matrix.
+  * `control` names a branch added earlier that carries a current
+    unknown. That is a voltage source of any kind (a 0 V one senses), an
+    inductor, a VCVS, a CCVS or an ideal-transformer secondary. Any
+    other control is refused, and the error names the device, the
+    control and the valid kinds. A non-finite gain is refused too.
+  * A VCCS or CCCS current leaves at `n_pos`, the `add_current_source`
+    convention. Gyrator: `i1 = g·v2` and `i2 = −g·v1`, both into `p1_pos`
+    and `p2_pos`.
+  * `res.i` covers all four; `res.i(gyrator, port=1)` gives port 1 and
+    port 2 is the default.
+* **Added** `add_sine_current_source`, `add_pulse_current_source` (the
+  voltage versions' parameters, `v_` renamed `i_`) and
+  `add_pwl_current_source(name, n_pos, n_neg, t, i, periodic=False)`.
+  * Each is evaluated in the kernel and needs no `b_extra_fn`.
+  * DC uses the value at `t = 0`.
+  * The table refuses fewer than two knots, non-increasing times,
+    non-finite values, lists of different lengths, and a `periodic`
+    table whose end values differ. Each refusal names the source.
+  * `trbdf2` lands on table knots and pulse corners.
+* **Added** YAML types `vccs`, `ccvs`, `cccs`, `gyrator`,
+  `sine_current_source`, `pulse_current_source` and `pwl_current_source`.
+  * The table is given as `t`/`i` lists or as a two-column `file:`,
+    relative to the working directory.
+  * Their keys are strict: an unknown key is an error naming the device.
+* **Engines.** pwl, trbdf2, dsed and the DC operating point run all
+  seven kinds; the AC sweep runs the four controlled ones.
+  * Gyrator with 1 µF (g = 0.01 S) against a 10 mH inductor, 1 V
+    through 10 Ω: pwl agrees with the inductor to 1e-9 on the same
+    grid. It reads 63.19 mA at 1 ms against the exact 63.21 mA, which is
+    the fixed engine's first-order start (guide trap 9): error
+    `dt/(2τ)`.
+  * trbdf2 is within 1.5e-8 of the exponential and dsed within 1e-15.
+  * A circuit with all four controlled kinds: trbdf2 and dsed agree to
+    1e-7.
+  * AC: the gyrator with 1 µF reads 62.83 Ω at +90° at 1 kHz, and a VCCS
+    stage gain `gm·R` is flat to 1e-9. Waveform current sources are
+    independent sources and add no AC excitation.
+  * Benchmark circuits are bit-identical on pwl and trbdf2.
+* **Fixed** the comments in `models/current_source.hpp` and on
+  `CircuitBuilder::add_current_source`, which described the current
+  source direction backwards or ambiguously. The behaviour is unchanged:
+  10 mA into 1 kΩ from `n_pos` to ground reads +10 V.
+
 ### Sweeps on threads; `import pulsim` without the GUI stack
 
 * **Added** `sweep(..., backend="auto")` and `monte_carlo(...,

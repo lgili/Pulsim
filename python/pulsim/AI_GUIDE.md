@@ -47,16 +47,15 @@ Short version:
 ```python
 import pulsim as p
 
-print(p.CircuitBuilder.add_sine_voltage_source.__doc__.splitlines()[0])
+print(p.CircuitBuilder.add_current_source.__doc__.splitlines()[0])
 ```
 
 ```text
-add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, v_dc: typing.SupportsFloat | typing.SupportsIndex, v_amplitude: typing.SupportsFloat | typing.SupportsIndex, frequency: typing.SupportsFloat | typing.SupportsIndex, phase: typing.SupportsFloat | typing.SupportsIndex = 0.0) -> pulsim._pulsim.CircuitBuilder
+add_current_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, I: typing.SupportsFloat | typing.SupportsIndex) -> pulsim._pulsim.CircuitBuilder
 ```
 
 `typing.SupportsFloat | typing.SupportsIndex` is pybind11's spelling of
-`float` (the stub writes `float`). `v_dc` comes before `v_amplitude`, and
-`phase` is in radians.
+`float` (the stub writes `float`).
 
 ## 2. Mental model
 
@@ -400,6 +399,11 @@ b.add_current_source(name, n_pos, n_neg, I)
 b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
 b.add_pulse_voltage_source(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0.0, rise_time=0.0, fall_time=0.0)
 b.add_pwm_voltage_source(name, n_pos, n_neg, v_high, v_low, frequency, duty, phase=0.0)
+b.add_pwl_current_source(name, n_pos, n_neg, t, i, periodic=False)
+b.add_vccs(name, in_pos, in_neg, n_pos, n_neg, gm)
+b.add_cccs(name, control, n_pos, n_neg, gain)
+b.add_ccvs(name, control, out_pos, out_neg, rm)
+b.add_gyrator(name, p1_pos, p1_neg, p2_pos, p2_neg, g)
 b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0, V_f=0.0)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on, g_off)
@@ -415,7 +419,7 @@ p.make_three_phase_spwm_fn(carrier_frequency, modulation_frequency, modulation_i
 p.ThreePhaseLegIndices(hs_a, ls_a, hs_b, ls_b, hs_c, ls_c)
 p.simulate(builder, t_end=None, dt=None, *, engine='auto', rtol=None, atol=None, ...)
 res.v(name, t=None)
-res.i(name, t=None)
+res.i(name, t=None, *, port=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
@@ -433,13 +437,16 @@ Notes: `res.i(name)` is positive from a device's first node to its
 second, through it: `add_mosfet` drain to source, `<name>_body` source
 to drain, VSI diode `INV__Dha` from `out_a` to `vdc_pos`. So
 `res.i(<voltage source>)` is negative when it delivers power (1 V into
-1 ohm reads -1 A). `add_current_source` drives `I` OUT of `n_pos` into
-the circuit, and `res.i` of it reads `I`. `t` in `res.v(name, t)` is a
+1 ohm reads -1 A). `add_sine_current_source` / `add_pulse_current_source`
+take the voltage versions' arguments, `v_` renamed `i_`. Current sources
+(also pwl, `vccs`, `cccs`) drive OUT of `n_pos`; `res.i` reads that.
+`control` names an earlier branch with a current unknown.
+Gyrator: `i1 = g*v2`, `i2 = -g*v1` into `p1_pos`/`p2_pos`;
+`port=1` reads `i1`. `t` in `res.v(name, t)` is a
 sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
 A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
-`add_capacitor(c0=)` / `add_inductor(i0=)` set initial conditions.
 Other `simulate` keywords you may need: `switch_fn`, `t_start`,
 `store_every`, `auto_regularize`, `progress`.
 
@@ -644,12 +651,9 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
-Paths are relative to the repository root; the documentation site
-mirrors `docs/`.
-
 - `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `06-igbt-boost.md` (executed, end-to-end converters).
+  `06-igbt-boost.md`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
-  `docs/losses-and-thermal.md` (how each loss is computed),
+  `docs/losses-and-thermal.md`,
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.
 - `CHANGELOG.md`: what changed in each release and why.

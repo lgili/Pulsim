@@ -215,6 +215,25 @@ for the v1.4 cycle.
 
 ---
 
+## Controlled and waveform current sources (2.x)
+
+- Linear only: VCVS, VCCS, CCCS, CCVS and the gyrator have constant
+  gains. There is no behavioural (expression) source, and SPICE `B`
+  sources are refused. Use `b_extra_fn` or a closed loop for a
+  nonlinear law.
+- The piecewise-linear table is a current source only
+  (`add_pwl_current_source`); there is no PWL voltage source.
+- Engines: `pwl`, `trbdf2`, `dsed` and the DC operating point run all
+  seven kinds. The AC sweep (`run_mna_sweep`) runs the four controlled
+  ones; the waveform current sources are independent and add no AC
+  excitation. `trbdf2` lands on table knots and pulse corners through a
+  local step clamp, until `update-trbdf2-error-control` provides
+  breakpoints.
+- A YAML `pwl_current_source` `file:` path is relative to the working
+  directory, not to the netlist, and is not echoed by `components()`.
+
+---
+
 ## Transient engines (2.0)
 
 ### TR-BDF2 stalls at `h_min` after a hard switching edge

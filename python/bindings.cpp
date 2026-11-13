@@ -63,6 +63,7 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/phase_shift_full_bridge_fn.hpp"
@@ -509,6 +510,66 @@ void init_module(py::module_& m) {
               "V(out_pos) - V(out_neg) = gain · (V(in_pos) "
               "- V(in_neg)). Linear device — no Newton "
               "refresh needed.")
+        // add-controlled-source-set
+        .def("add_vccs", &builder::CircuitBuilder::add_vccs,
+              py::arg("name"), py::arg("in_pos"), py::arg("in_neg"),
+              py::arg("n_pos"), py::arg("n_neg"), py::arg("gm"),
+              py::return_value_policy::reference,
+              "Voltage-controlled current source: gm*(V(in_pos) - "
+              "V(in_neg)) [S] flows OUT of `n_pos` into the circuit "
+              "(the add_current_source convention).")
+        .def("add_ccvs", &builder::CircuitBuilder::add_ccvs,
+              py::arg("name"), py::arg("control"), py::arg("out_pos"),
+              py::arg("out_neg"), py::arg("rm"),
+              py::return_value_policy::reference,
+              "Current-controlled voltage source: V(out_pos) - V(out_neg) "
+              "= rm * i(control) [ohm]. `control` names a branch added "
+              "earlier that carries a current unknown (a voltage source "
+              "of any kind -- a 0 V one is the sense element --, an "
+              "inductor, a VCVS, a CCVS, an ideal-transformer secondary).")
+        .def("add_cccs", &builder::CircuitBuilder::add_cccs,
+              py::arg("name"), py::arg("control"), py::arg("n_pos"),
+              py::arg("n_neg"), py::arg("gain"),
+              py::return_value_policy::reference,
+              "Current-controlled current source: gain * i(control) flows "
+              "OUT of `n_pos`. `control` as for add_ccvs.")
+        .def("add_gyrator", &builder::CircuitBuilder::add_gyrator,
+              py::arg("name"), py::arg("p1_pos"), py::arg("p1_neg"),
+              py::arg("p2_pos"), py::arg("p2_neg"), py::arg("g"),
+              py::return_value_policy::reference,
+              "Gyrator: i1 = g*v2, i2 = -g*v1 [S], currents INTO p1_pos "
+              "and p2_pos. Lossless; an impedance Z on one port appears "
+              "as 1/(g^2 Z) on the other (a capacitor C as an inductor "
+              "C/g^2). res.i(name, port=1|2).")
+        .def("add_sine_current_source",
+              &builder::CircuitBuilder::add_sine_current_source,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("i_dc"), py::arg("i_amplitude"), py::arg("frequency"),
+              py::arg("phase") = 0.0,
+              py::return_value_policy::reference,
+              "Sine current source: i_dc + i_amplitude*sin(2*pi*f*t + "
+              "phase) OUT of `n_pos`; `phase` in radians. Evaluated in "
+              "the kernel (no b_extra_fn).")
+        .def("add_pulse_current_source",
+              &builder::CircuitBuilder::add_pulse_current_source,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("i_initial"), py::arg("i_pulsed"), py::arg("t_start"),
+              py::arg("pulse_width"), py::arg("period") = 0.0,
+              py::arg("rise_time") = 0.0, py::arg("fall_time") = 0.0,
+              py::return_value_policy::reference,
+              "Pulse current source OUT of `n_pos`: the trapezoid of "
+              "add_pulse_voltage_source, same parameters and edge rules.")
+        .def("add_pwl_current_source",
+              &builder::CircuitBuilder::add_pwl_current_source,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("t"), py::arg("i"), py::arg("periodic") = false,
+              py::return_value_policy::reference,
+              "Piecewise-linear table current OUT of `n_pos`: linear "
+              "between the knots (t[k], i[k]), i[0] before t[0], then "
+              "i[-1] -- or the table repeated with period t[-1] - t[0] "
+              "when `periodic` (which needs i[0] == i[-1]). Refuses "
+              "fewer than two knots, non-increasing t and non-finite "
+              "values.")
         .def("add_op_amp_ideal",
               &builder::CircuitBuilder::add_op_amp_ideal,
               py::arg("name"),
@@ -945,6 +1006,9 @@ void init_module(py::module_& m) {
                   Vector b = sources::compute_pwm_b_extra(p, g, t);
                   b += sources::compute_sine_b_extra(p, g, t);
                   b += sources::compute_pulse_b_extra(p, g, t);
+                  Vector iw;  // sine / pulse / table current sources
+                  sources::compute_current_waveform_b_extra(p, g, t, iw);
+                  b += iw;
                   return b;
               },
               py::arg("t"),
@@ -1145,6 +1209,67 @@ void init_module(py::module_& m) {
                                   pool.ideal_transformer_params(bid).n;
                               break;
                           }
+                          // add-controlled-source-set
+                          case K::VCCS: {
+                              kind_str = "vccs";
+                              const auto [cp, cn] = pool.control_nodes(bid);
+                              params["gm"] = pool.vccs_params(bid).gm;
+                              params["in_pos"] = static_cast<int>(cp);
+                              params["in_neg"] = static_cast<int>(cn);
+                              break;
+                          }
+                          case K::CCCS:
+                              kind_str = "cccs";
+                              params["gain"] = pool.cccs_params(bid).gain;
+                              params["control"] = std::string(
+                                  self.name_of(pool.control_branch(bid)));
+                              break;
+                          case K::CCVS:
+                              kind_str = "ccvs";
+                              params["rm"] = pool.ccvs_params(bid).rm;
+                              params["control"] = std::string(
+                                  self.name_of(pool.control_branch(bid)));
+                              break;
+                          case K::Gyrator: {
+                              kind_str = "gyrator";
+                              const auto [p1, n1] = pool.control_nodes(bid);
+                              params["g"] = pool.gyrator_params(bid).g;
+                              params["p1_pos"] = static_cast<int>(p1);
+                              params["p1_neg"] = static_cast<int>(n1);
+                              break;
+                          }
+                          case K::SineCurrentSource: {
+                              kind_str = "sine_current_source";
+                              const auto& w =
+                                  pool.sine_current_source_params(bid).w;
+                              params["i_dc"] = w.v_dc;
+                              params["i_amplitude"] = w.v_amplitude;
+                              params["frequency"] = w.frequency;
+                              params["phase"] = w.phase;
+                              break;
+                          }
+                          case K::PulseCurrentSource: {
+                              kind_str = "pulse_current_source";
+                              const auto& w =
+                                  pool.pulse_current_source_params(bid).w;
+                              params["i_initial"] = w.v_initial;
+                              params["i_pulsed"] = w.v_pulsed;
+                              params["t_start"] = w.t_start;
+                              params["pulse_width"] = w.pulse_width;
+                              params["period"] = w.period;
+                              params["rise_time"] = w.rise_time;
+                              params["fall_time"] = w.fall_time;
+                              break;
+                          }
+                          case K::PwlCurrentSource: {
+                              kind_str = "pwl_current_source";
+                              const auto& w =
+                                  pool.pwl_current_source_params(bid).w;
+                              params["t"] = w.t;
+                              params["i"] = w.v;
+                              params["periodic"] = w.periodic;
+                              break;
+                          }
                           }
                       } catch (const std::exception&) {
                           // Branch present in graph but not registered
@@ -1315,6 +1440,15 @@ void init_module(py::module_& m) {
               "source branch's i_source unknown (also works "
               "for PWM/Sine/Pulse/VCVS sources, since they "
               "share the same branch-var numbering).")
+        .def("control_column",
+              &pwl::DevicePool::control_column,
+              py::arg("branch_id"), py::arg("graph"),
+              "State-vector column of the current a CCCS / CCVS senses.")
+        .def("current_waveform_value",
+              &pwl::DevicePool::current_waveform_value,
+              py::arg("branch_id"), py::arg("t"),
+              "Value [A] of a sine / pulse / table current source at "
+              "`t`, leaving at its `n_pos`.")
         .def("state_size",
               &pwl::DevicePool::state_size,
               py::arg("graph"),
@@ -1398,7 +1532,14 @@ void init_module(py::module_& m) {
         .value("ShockleyDiode",       pwl::DevicePool::StoredKind::ShockleyDiode)
         .value("LauritzenDiode",      pwl::DevicePool::StoredKind::LauritzenDiode)
         .value("PmsmMna",             pwl::DevicePool::StoredKind::PmsmMna)
-        .value("IdealTransformer",    pwl::DevicePool::StoredKind::IdealTransformer);
+        .value("IdealTransformer",    pwl::DevicePool::StoredKind::IdealTransformer)
+        .value("VCCS",                pwl::DevicePool::StoredKind::VCCS)
+        .value("CCCS",                pwl::DevicePool::StoredKind::CCCS)
+        .value("CCVS",                pwl::DevicePool::StoredKind::CCVS)
+        .value("Gyrator",             pwl::DevicePool::StoredKind::Gyrator)
+        .value("SineCurrentSource",   pwl::DevicePool::StoredKind::SineCurrentSource)
+        .value("PulseCurrentSource",  pwl::DevicePool::StoredKind::PulseCurrentSource)
+        .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource);
 
     // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
     m.def("ja_replay",

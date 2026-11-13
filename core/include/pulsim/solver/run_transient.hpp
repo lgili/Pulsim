@@ -53,6 +53,7 @@
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -732,6 +733,10 @@ inline SimulationResult run_transient(
         }
     }
     Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
+    // add-controlled-source-set: sine / pulse / table current sources.
+    const bool has_iwave =
+        sources::has_current_waveform_sources(pool, graph);
+    Vector be_iwave;
 
     // Is a smaller step even capable of helping? Reachability to
     // ground is a property of the GRAPH, not of dt, so a circuit
@@ -790,6 +795,11 @@ inline SimulationResult run_transient(
         if (has_pulse) {
             sources::compute_pulse_b_extra(pool, graph, at_t, be_pulse);
             b_extra += be_pulse;
+        }
+        if (has_iwave) {
+            sources::compute_current_waveform_b_extra(pool, graph, at_t,
+                                                      be_iwave);
+            b_extra += be_iwave;
         }
     };
 
@@ -1581,6 +1591,11 @@ inline SimulationResult run_transient(
             if (has_pulse) {
                 sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
                 b_extra += be_pulse;
+            }
+            if (has_iwave) {
+                sources::compute_current_waveform_b_extra(pool, graph, t,
+                                                          be_iwave);
+                b_extra += be_iwave;
             }
             const Vector& b_extra_user = b_extra;
 

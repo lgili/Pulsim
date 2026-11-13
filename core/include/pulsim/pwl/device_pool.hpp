@@ -35,6 +35,7 @@
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/vcvs.hpp"
+#include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/voltage_source.hpp"
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -42,6 +43,7 @@
 
 #include <array>
 #include <format>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -77,6 +79,14 @@ public:
         LauritzenDiode     = 17, // Phase 4 C.1 (reverse recovery)
         PmsmMna            = 18, // Phase 4 C.3 (MNA-native PMSM)
         IdealTransformer   = 19, // Phase 4 C.4 (v_s = n v_p, i_p = -n i_s)
+        // add-controlled-source-set (models/controlled_sources.hpp)
+        VCCS               = 20, // i = g_m·v_c, no extra unknown
+        CCCS               = 21, // i = β·i_c, no extra unknown
+        CCVS               = 22, // v = r_m·i_c, own branch unknown
+        Gyrator            = 23, // i_1 = g·v_2, i_2 = −g·v_1
+        SineCurrentSource  = 24, // overlaid on the node rows
+        PulseCurrentSource = 25, // overlaid on the node rows
+        PwlCurrentSource   = 26, // overlaid on the node rows
     };
 
     struct SwitchParams {
@@ -448,6 +458,149 @@ public:
     [[nodiscard]] const std::vector<TransformerCoupling>&
     transformer_couplings() const noexcept {
         return transformer_couplings_;
+    }
+
+    // -------- Controlled sources + waveform current sources ----------------
+    //
+    // `add-controlled-source-set`. Linear and mask-independent; stamped by
+    // `stamping/stamp_controlled.hpp`. Every output branch is
+    // `BranchKind::Source` (as for the DC current source and the VCVS);
+    // only the CCVS adds a branch-current unknown. Current outputs follow
+    // `add_current_source`: a positive value leaves at the branch `from`.
+
+    /// VCCS: `branch_id` is the output (from → to); `cp`, `cn` sense.
+    void add_vccs(Index branch_id, Index cp, Index cn,
+                  models::VCCS::Params p) {
+        entries_[branch_id] = Entry{p};
+        control_nodes_[branch_id] = std::pair<Index, Index>{cp, cn};
+    }
+
+    /// CCCS: `control_branch_id` carries a current unknown (a source with
+    /// a branch row or an inductor); the builder checks that.
+    void add_cccs(Index branch_id, Index control_branch_id,
+                  models::CCCS::Params p) {
+        entries_[branch_id] = Entry{p};
+        control_branch_[branch_id] = control_branch_id;
+    }
+
+    /// CCVS: a voltage source (own unknown) set by a sensed current.
+    void add_ccvs(Index branch_id, Index control_branch_id,
+                  models::CCVS::Params p) {
+        entries_[branch_id] = Entry{p};
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+        control_branch_[branch_id] = control_branch_id;
+    }
+
+    /// Gyrator: `branch_id` is port 2 (p2_pos → p2_neg); port 1 is a node
+    /// pair, as the ideal transformer's primary.
+    void add_gyrator(Index branch_id, Index p1_pos, Index p1_neg,
+                     models::Gyrator::Params p) {
+        entries_[branch_id] = Entry{p};
+        control_nodes_[branch_id] = std::pair<Index, Index>{p1_pos, p1_neg};
+    }
+
+    void add_sine_current_source(Index branch_id,
+                                 models::SineCurrentSource::Params p) {
+        entries_[branch_id] = Entry{std::move(p)};
+    }
+    void add_pulse_current_source(Index branch_id,
+                                  models::PulseCurrentSource::Params p) {
+        entries_[branch_id] = Entry{std::move(p)};
+    }
+    void add_pwl_current_source(Index branch_id,
+                                models::PwlCurrentSource::Params p) {
+        entries_[branch_id] = Entry{std::move(p)};
+    }
+
+    /// VCCS sense nodes, or gyrator port-1 nodes.
+    [[nodiscard]] std::pair<Index, Index> control_nodes(Index branch_id) const {
+        const auto it = control_nodes_.find(branch_id);
+        if (it == control_nodes_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::control_nodes: branch {} is not a VCCS or "
+                "a Gyrator", branch_id));
+        }
+        return it->second;
+    }
+
+    /// Branch whose current a CCCS / CCVS senses.
+    [[nodiscard]] Index control_branch(Index branch_id) const {
+        const auto it = control_branch_.find(branch_id);
+        if (it == control_branch_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::control_branch: branch {} is not a CCCS or "
+                "a CCVS", branch_id));
+        }
+        return it->second;
+    }
+
+    /// Absolute state-vector column of the sensed current.
+    [[nodiscard]] Index control_column(Index branch_id,
+                                       const topology::Graph& graph) const {
+        const Index c = control_branch(branch_id);
+        return is_voltage_source(c) ? branch_var_id_for_source(c, graph)
+                                    : branch_var_id_for_inductor(c, graph);
+    }
+
+    [[nodiscard]] const models::VCCS::Params& vccs_params(Index b) const {
+        return require_params_<models::VCCS::Params>(b, "vccs_params", "a VCCS");
+    }
+    [[nodiscard]] const models::CCCS::Params& cccs_params(Index b) const {
+        return require_params_<models::CCCS::Params>(b, "cccs_params", "a CCCS");
+    }
+    [[nodiscard]] const models::CCVS::Params& ccvs_params(Index b) const {
+        return require_params_<models::CCVS::Params>(b, "ccvs_params", "a CCVS");
+    }
+    [[nodiscard]] const models::Gyrator::Params& gyrator_params(Index b) const {
+        return require_params_<models::Gyrator::Params>(
+            b, "gyrator_params", "a Gyrator");
+    }
+    [[nodiscard]] const models::SineCurrentSource::Params&
+    sine_current_source_params(Index b) const {
+        return require_params_<models::SineCurrentSource::Params>(
+            b, "sine_current_source_params", "a SineCurrentSource");
+    }
+    [[nodiscard]] const models::PulseCurrentSource::Params&
+    pulse_current_source_params(Index b) const {
+        return require_params_<models::PulseCurrentSource::Params>(
+            b, "pulse_current_source_params", "a PulseCurrentSource");
+    }
+    [[nodiscard]] const models::PwlCurrentSource::Params&
+    pwl_current_source_params(Index b) const {
+        return require_params_<models::PwlCurrentSource::Params>(
+            b, "pwl_current_source_params", "a PwlCurrentSource");
+    }
+
+    /// Value of a sine / pulse / table current source at `t` [A],
+    /// leaving at the branch `from`.
+    [[nodiscard]] Real current_waveform_value(Index b, Real t) const {
+        const auto& e = entry_at(b);
+        if (const auto* s = std::get_if<models::SineCurrentSource::Params>(&e)) {
+            return models::SineCurrentSource::value_at(*s, t);
+        }
+        if (const auto* u = std::get_if<models::PulseCurrentSource::Params>(&e)) {
+            return models::PulseCurrentSource::value_at(*u, t);
+        }
+        if (const auto* w = std::get_if<models::PwlCurrentSource::Params>(&e)) {
+            return models::PwlCurrentSource::value_at(*w, t);
+        }
+        throw std::out_of_range(std::format(
+            "DevicePool::current_waveform_value: branch {} is not a "
+            "sine, pulse or table current source", b));
+    }
+
+    /// First declared corner strictly after `t` (pulse edges, table
+    /// knots); +inf for a sine or when none is left.
+    [[nodiscard]] Real current_waveform_next_breakpoint(Index b, Real t) const {
+        const auto& e = entry_at(b);
+        if (const auto* u = std::get_if<models::PulseCurrentSource::Params>(&e)) {
+            return models::PulseCurrentSource::next_breakpoint_after(*u, t);
+        }
+        if (const auto* w = std::get_if<models::PwlCurrentSource::Params>(&e)) {
+            return w->w.next_breakpoint_after(t);
+        }
+        return std::numeric_limits<Real>::infinity();
     }
 
     // -------- Lookups -------------------------------------------------------
@@ -922,7 +1075,14 @@ private:
                                 models::ShockleyDiode::Params,
                                 models::LauritzenDiode::Params,
                                 models::PmsmMna::Params,
-                                models::IdealTransformer::Params>;
+                                models::IdealTransformer::Params,
+                                models::VCCS::Params,
+                                models::CCCS::Params,
+                                models::CCVS::Params,
+                                models::Gyrator::Params,
+                                models::SineCurrentSource::Params,
+                                models::PulseCurrentSource::Params,
+                                models::PwlCurrentSource::Params>;
 
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
@@ -934,8 +1094,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 20,
-        "StoredKind has 20 values; Entry must list 20 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 27,
+        "StoredKind has 27 values; Entry must list 27 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -957,6 +1117,13 @@ private:
     static_assert(kind_maps_to_<StoredKind::LauritzenDiode,     models::LauritzenDiode::Params>);
     static_assert(kind_maps_to_<StoredKind::PmsmMna,            models::PmsmMna::Params>);
     static_assert(kind_maps_to_<StoredKind::IdealTransformer,   models::IdealTransformer::Params>);
+    static_assert(kind_maps_to_<StoredKind::VCCS,               models::VCCS::Params>);
+    static_assert(kind_maps_to_<StoredKind::CCCS,               models::CCCS::Params>);
+    static_assert(kind_maps_to_<StoredKind::CCVS,               models::CCVS::Params>);
+    static_assert(kind_maps_to_<StoredKind::Gyrator,            models::Gyrator::Params>);
+    static_assert(kind_maps_to_<StoredKind::SineCurrentSource,  models::SineCurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::PulseCurrentSource, models::PulseCurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::PwlCurrentSource,   models::PwlCurrentSource::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1058,6 +1225,11 @@ private:
     // pairs two already-added inductor branches with the
     // coupling parameters (L_p, L_s, k → M).
     std::vector<TransformerCoupling> transformer_couplings_;
+
+    // add-controlled-source-set: VCCS sense / gyrator port-1 nodes, and
+    // the branch a CCCS / CCVS senses.
+    numeric::Dictionary<Index, std::pair<Index, Index>> control_nodes_;
+    numeric::Dictionary<Index, Index> control_branch_;
 };
 
 }  // namespace pulsim::pwl

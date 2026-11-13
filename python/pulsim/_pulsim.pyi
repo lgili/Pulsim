@@ -233,6 +233,14 @@ class CircuitBuilder:
         capacitor — consumed by `simulate(initial_state=None)`
         to seed the cap's positive-terminal node.
         """
+    def add_cccs(self, name: str, control: str, n_pos: str, n_neg: str, gain: float) -> CircuitBuilder:
+        """
+        Current-controlled current source: gain * i(control) flows OUT of `n_pos`. `control` as for add_ccvs.
+        """
+    def add_ccvs(self, name: str, control: str, out_pos: str, out_neg: str, rm: float) -> CircuitBuilder:
+        """
+        Current-controlled voltage source: V(out_pos) - V(out_neg) = rm * i(control) [ohm]. `control` names a branch added earlier that carries a current unknown (a voltage source of any kind -- a 0 V one is the sense element --, an inductor, a VCVS, a CCVS, an ideal-transformer secondary).
+        """
     def add_current_source(self, name: str, n_pos: str, n_neg: str, I: float) -> CircuitBuilder:
         """
         Add a DC current source. I in amperes. EE convention: I flows OUT of `n_pos` (the + terminal) into the external circuit, back to `n_neg`. Does NOT add a branch-current unknown — the current is fixed at I.
@@ -244,6 +252,10 @@ class CircuitBuilder:
     def add_gapped_core_inductor(self, name: str, n_pos: str, n_neg: str, N: float, Ae: float, le: float, lg: float, mu_r0: float = 2000.0, B_sat: float = 0.35, knots: int = 128) -> CircuitBuilder:
         """
         Saturable inductor on a gapped core from geometry: N turns, Ae [m^2], le [m], TOTAL gap lg [m], initial mu_r, B_sat [T] (= mu0*Ms, the datasheet value). lambda(i) is generated from Ampere's law by sweeping the core field through M = Ms*tanh(H/H0), with exact slopes.
+        """
+    def add_gyrator(self, name: str, p1_pos: str, p1_neg: str, p2_pos: str, p2_neg: str, g: float) -> CircuitBuilder:
+        """
+        Gyrator: i1 = g*v2, i2 = -g*v1 [S], currents INTO p1_pos and p2_pos. Lossless; an impedance Z on one port appears as 1/(g^2 Z) on the other (a capacitor C as an inductor C/g^2). res.i(name, port=1|2).
         """
     def add_hysteretic_core_inductor(self, name: str, from_node: str, to_node: str, N: float, Ae: float, le: float, lg: float, Ms: float, a: float, alpha: float, c: float, k: float, substeps_min: int = 8, M0: float = 0.0) -> CircuitBuilder:
         """
@@ -310,9 +322,17 @@ class CircuitBuilder:
         """
         Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5).
         """
+    def add_pulse_current_source(self, name: str, n_pos: str, n_neg: str, i_initial: float, i_pulsed: float, t_start: float, pulse_width: float, period: float = 0.0, rise_time: float = 0.0, fall_time: float = 0.0) -> CircuitBuilder:
+        """
+        Pulse current source OUT of `n_pos`: the trapezoid of add_pulse_voltage_source, same parameters and edge rules.
+        """
     def add_pulse_voltage_source(self, name: str, n_pos: str, n_neg: str, v_initial: float, v_pulsed: float, t_start: float, pulse_width: float, period: float = 0.0, rise_time: float = 0.0, fall_time: float = 0.0) -> CircuitBuilder:
         """
         Add a pulse / step voltage source. Output is v_initial for t < t_start, v_pulsed for t ∈ [t_start + rise_time, t_start + rise + pulse_width), with optional linear ramps rise_time / fall_time (SPICE-style PULSE). If period > 0, repeats. Default rise/fall = 0 → instantaneous transition (V12 backward compat).
+        """
+    def add_pwl_current_source(self, name: str, n_pos: str, n_neg: str, t: collections.abc.Sequence[float], i: collections.abc.Sequence[float], periodic: bool = False) -> CircuitBuilder:
+        """
+        Piecewise-linear table current OUT of `n_pos`: linear between the knots (t[k], i[k]), i[0] before t[0], then i[-1] -- or the table repeated with period t[-1] - t[0] when `periodic` (which needs i[0] == i[-1]). Refuses fewer than two knots, non-increasing t and non-finite values.
         """
     def add_pwm_voltage_source(self, name: str, n_pos: str, n_neg: str, v_high: float, v_low: float, frequency: float, duty: float, phase: float = 0.0) -> CircuitBuilder:
         """
@@ -344,6 +364,10 @@ class CircuitBuilder:
 
         Add an EXPONENTIAL (Shockley) diode: i = I_S*(exp(v/(n*V_T)) - 1) + v*G_min. Unlike `add_diode` (binary PWL) and the smooth-blend nonlinear diode, the forward drop is not fixed: a real junction's V_F rises ~60 mV per decade of current, so the same device drops 0.53 V at 1 mA and 0.77 V at 10 A. Use `thermal_voltage(T_kelvin)` for a junction temperature other than ~300 K. `BV` is a POSITIVE breakdown magnitude (0 disables it) — give 5.1 for a 5.1 V Zener. No series-resistance parameter on purpose: put a resistor in series, which is exact.
         """
+    def add_sine_current_source(self, name: str, n_pos: str, n_neg: str, i_dc: float, i_amplitude: float, frequency: float, phase: float = 0.0) -> CircuitBuilder:
+        """
+        Sine current source: i_dc + i_amplitude*sin(2*pi*f*t + phase) OUT of `n_pos`; `phase` in radians. Evaluated in the kernel (no b_extra_fn).
+        """
     def add_sine_voltage_source(self, name: str, n_pos: str, n_neg: str, v_dc: float, v_amplitude: float, frequency: float, phase: float = 0.0) -> CircuitBuilder:
         """
         Add a sinusoidal AC voltage source. Output is v_dc + v_amplitude·sin(2π·f·t + φ). `phase` is in RADIANS. The time-varying value is automatically overlaid by run_transient — no b_extra_fn lambda needed. Used for AC mains analysis, rectifier studies, audio-amp testing.
@@ -355,6 +379,10 @@ class CircuitBuilder:
     def add_transformer(self, name: str, p_from: str, p_to: str, s_from: str, s_to: str, L_p: float, L_s: float, k: float = 1.0) -> CircuitBuilder:
         """
         Add a two-winding linear transformer. Creates two coupled inductors with mutual inductance M = k·√(L_p·L_s). k=1 (default) for ideal coupling; k∈[0.9, 0.99] for realistic leakage.
+        """
+    def add_vccs(self, name: str, in_pos: str, in_neg: str, n_pos: str, n_neg: str, gm: float) -> CircuitBuilder:
+        """
+        Voltage-controlled current source: gm*(V(in_pos) - V(in_neg)) [S] flows OUT of `n_pos` into the circuit (the add_current_source convention).
         """
     def add_vcvs(self, name: str, in_pos: str, in_neg: str, out_pos: str, out_neg: str, gain: float) -> CircuitBuilder:
         """
@@ -603,6 +631,14 @@ class DevicePool:
         """
         Resolve the state-vector index for a voltage-source branch's i_source unknown (also works for PWM/Sine/Pulse/VCVS sources, since they share the same branch-var numbering).
         """
+    def control_column(self, branch_id: int, graph: Graph) -> int:
+        """
+        State-vector column of the current a CCCS / CCVS senses.
+        """
+    def current_waveform_value(self, branch_id: int, t: float) -> float:
+        """
+        Value [A] of a sine / pulse / table current source at `t`, leaving at its `n_pos`.
+        """
     def has_nonlinear_devices(self) -> bool:
         """
         Return True if any registered branch is a smooth-blend IdealDiode, SH1 MOSFET, Level 1 IGBT, or saturable inductor (i.e. requires Newton iteration). Used by the Python `simulate()` wrapper to auto-enable the nonlinear-refresh pass.
@@ -668,10 +704,27 @@ class StoredKind:
       PmsmMna
 
       IdealTransformer
+
+      VCCS
+
+      CCCS
+
+      CCVS
+
+      Gyrator
+
+      SineCurrentSource
+
+      PulseCurrentSource
+
+      PwlCurrentSource
     """
+    CCCS: typing.ClassVar[StoredKind]
+    CCVS: typing.ClassVar[StoredKind]
     Capacitor: typing.ClassVar[StoredKind]
     CurrentSource: typing.ClassVar[StoredKind]
     Diode: typing.ClassVar[StoredKind]
+    Gyrator: typing.ClassVar[StoredKind]
     IdealTransformer: typing.ClassVar[StoredKind]
     IgbtLevel1: typing.ClassVar[StoredKind]
     Inductor: typing.ClassVar[StoredKind]
@@ -681,12 +734,16 @@ class StoredKind:
     NonlinearDiode: typing.ClassVar[StoredKind]
     PWMVoltageSource: typing.ClassVar[StoredKind]
     PmsmMna: typing.ClassVar[StoredKind]
+    PulseCurrentSource: typing.ClassVar[StoredKind]
     PulseVoltageSource: typing.ClassVar[StoredKind]
+    PwlCurrentSource: typing.ClassVar[StoredKind]
     Resistor: typing.ClassVar[StoredKind]
     SaturableInductor: typing.ClassVar[StoredKind]
     ShockleyDiode: typing.ClassVar[StoredKind]
+    SineCurrentSource: typing.ClassVar[StoredKind]
     SineVoltageSource: typing.ClassVar[StoredKind]
     Switch: typing.ClassVar[StoredKind]
+    VCCS: typing.ClassVar[StoredKind]
     VCVS: typing.ClassVar[StoredKind]
     VoltageSource: typing.ClassVar[StoredKind]
     __members__: typing.ClassVar[dict[str, StoredKind]]
@@ -1228,7 +1285,7 @@ class SimulationResult:
     @typing.overload
     def v(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any]) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload
-    def i(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+    def i(self, name: str, t: None = None, *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
         """
         Return the branch-current trace for ``name``.
 
@@ -1254,6 +1311,16 @@ class SimulationResult:
         | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
         | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
         | ``current_source``         | constant ``I`` from params              |
+        | ``sine_current_source``,   | the source's value at each sample time  |
+        | ``pulse_current_source``,  | (positive OUT of ``n_pos``, as for      |
+        | ``pwl_current_source``     | ``current_source``)                     |
+        | ``vccs``                   | ``gm·(V_in_pos − V_in_neg)`` out of     |
+        |                            | ``n_pos``                               |
+        | ``cccs``                   | ``gain·i(control)`` out of ``n_pos``    |
+        | ``ccvs``                   | its branch unknown (a voltage source)   |
+        | ``gyrator``                | ``port=2`` (default): ``i_2 = −g·v_1``; |
+        |                            | ``port=1``: ``i_1 = g·v_2``; both INTO  |
+        |                            | the device at ``p1_pos`` / ``p2_pos``   |
         | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
         |                            | samples the solver stamped the diode    |
         |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
@@ -1315,12 +1382,14 @@ class SimulationResult:
         t
             Optional step selection (``int`` / ``slice`` / array-like).
             ``None`` returns the full per-sample trace.
+        port
+            Gyrator only: ``1`` or ``2`` (default ``2``, the branch).
         """
         ...
     @typing.overload
-    def i(self, name: str, t: int) -> float: ...
+    def i(self, name: str, t: int, *, port: int | None = None) -> float: ...
     @typing.overload
-    def i(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any]) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
+    def i(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any], *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @property
     def switch_states(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None:
         """

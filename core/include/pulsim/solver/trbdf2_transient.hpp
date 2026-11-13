@@ -97,6 +97,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -391,6 +392,25 @@ inline SimulationResult run_transient_trbdf2(
             }
             break;
         }
+        // add-controlled-source-set: the same caps for the current
+        // sources (their corners are also landed on, below).
+        case pwl::DevicePool::StoredKind::SineCurrentSource: {
+            const Real f = pool.sine_current_source_params(b_id).w.frequency;
+            if (f > Real{0}) {
+                h_default = std::min(h_default, Real{1} / (Real{20} * f));
+            }
+            break;
+        }
+        case pwl::DevicePool::StoredKind::PulseCurrentSource: {
+            const auto& up = pool.pulse_current_source_params(b_id).w;
+            if (up.period > Real{0}) {
+                h_default = std::min(h_default, up.period / Real{20});
+            }
+            if (up.pulse_width > Real{0}) {
+                h_default = std::min(h_default, up.pulse_width / Real{3});
+            }
+            break;
+        }
         default: break;
         }
     }
@@ -475,6 +495,9 @@ inline SimulationResult run_transient_trbdf2(
     }
     Vector be_pwm, be_sine, be_pulse, b_src, b_stage, x_g, x_1,
         x_trial;
+    const bool has_iwave =
+        sources::has_current_waveform_sources(pool, graph);
+    Vector be_iwave;
 
     // Source-only overlay at time `at_t` (no history terms).
     auto accumulate_sources = [&](Real at_t, Vector& out) {
@@ -495,6 +518,11 @@ inline SimulationResult run_transient_trbdf2(
             sources::compute_pulse_b_extra(pool, graph, at_t,
                                             be_pulse);
             out += be_pulse;
+        }
+        if (has_iwave) {
+            sources::compute_current_waveform_b_extra(pool, graph, at_t,
+                                                      be_iwave);
+            out += be_iwave;
         }
     };
 
@@ -1115,6 +1143,16 @@ inline SimulationResult run_transient_trbdf2(
             if (has_ticks && t_next_tick > t
                 && t_next_tick - t < h) {
                 h = std::max(t_next_tick - t, h_min);
+            }
+            // Land the next current-source corner (pulse edge, table
+            // knot) exactly. shortcut: a local clamp; remove when
+            // update-trbdf2-error-control owns source breakpoints.
+            if (has_iwave) {
+                const Real t_bp =
+                    sources::next_current_waveform_breakpoint(pool, graph, t);
+                if (t_bp - t > h_min && t_bp - t < h) {
+                    h = t_bp - t;
+                }
             }
 
             // ---- gate-edge landing ----

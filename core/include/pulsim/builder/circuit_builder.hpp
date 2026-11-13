@@ -30,6 +30,7 @@
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/vcvs.hpp"
+#include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
 #include "pulsim/models/sine_voltage_source.hpp"
@@ -221,6 +222,137 @@ public:
         pool_.add_vcvs(
             b_id, inp_idx, inn_idx,
             models::VCVS::Params{.gain = gain});
+        return *this;
+    }
+
+    // ---- add-controlled-source-set --------------------------------------
+    //
+    // Linear controlled sources and waveform current sources
+    // (models/controlled_sources.hpp). A current output follows
+    // `add_current_source`: a positive value leaves at `n_pos` into the
+    // external circuit and returns at `n_neg`.
+
+    /// VCCS: i = gm·(V(in_pos) − V(in_neg)) out of `n_pos` [S].
+    CircuitBuilder& add_vccs(std::string_view name, std::string_view in_pos,
+                             std::string_view in_neg, std::string_view n_pos,
+                             std::string_view n_neg, Real gm) {
+        require_finite_("add_vccs", name, "gm", gm);
+        const Index cp = resolve_node_(in_pos);
+        const Index cn = resolve_node_(in_neg);
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_vccs(b_id, cp, cn, models::VCCS::Params{.gm = gm});
+        return *this;
+    }
+
+    /// CCVS: V(out_pos) − V(out_neg) = rm·i(control) [Ω]; `control` names
+    /// a branch with a current unknown, added before this one.
+    CircuitBuilder& add_ccvs(std::string_view name, std::string_view control,
+                             std::string_view out_pos,
+                             std::string_view out_neg, Real rm) {
+        require_finite_("add_ccvs", name, "rm", rm);
+        const Index c = sensed_branch_("add_ccvs", name, control);
+        const Index b_id = add_branch_(name, resolve_node_(out_pos),
+                                       resolve_node_(out_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_ccvs(b_id, c, models::CCVS::Params{.rm = rm});
+        return *this;
+    }
+
+    /// CCCS: i = gain·i(control) out of `n_pos`.
+    CircuitBuilder& add_cccs(std::string_view name, std::string_view control,
+                             std::string_view n_pos, std::string_view n_neg,
+                             Real gain) {
+        require_finite_("add_cccs", name, "gain", gain);
+        const Index c = sensed_branch_("add_cccs", name, control);
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_cccs(b_id, c, models::CCCS::Params{.gain = gain});
+        return *this;
+    }
+
+    /// Gyrator: i_1 = g·v_2, i_2 = −g·v_1 [S], currents INTO p1_pos and
+    /// p2_pos. Lossless; Z at one port appears as 1/(g²·Z) at the other.
+    /// `res.i(name)` is i_2 (port 2 is the branch).
+    CircuitBuilder& add_gyrator(std::string_view name, std::string_view p1_pos,
+                                std::string_view p1_neg,
+                                std::string_view p2_pos,
+                                std::string_view p2_neg, Real g) {
+        require_finite_("add_gyrator", name, "g", g);
+        const Index a = resolve_node_(p1_pos);
+        const Index c = resolve_node_(p1_neg);
+        const Index b_id = add_branch_(name, resolve_node_(p2_pos),
+                                       resolve_node_(p2_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_gyrator(b_id, a, c, models::Gyrator::Params{.g = g});
+        return *this;
+    }
+
+    /// i(t) = i_dc + i_amplitude·sin(2π·frequency·t + phase) out of
+    /// `n_pos`; `phase` in radians.
+    CircuitBuilder& add_sine_current_source(
+        std::string_view name, std::string_view n_pos,
+        std::string_view n_neg, Real i_dc, Real i_amplitude, Real frequency,
+        Real phase = Real{0}) {
+        for (const auto& [k, v] : {std::pair{"i_dc", i_dc},
+                                   std::pair{"i_amplitude", i_amplitude},
+                                   std::pair{"frequency", frequency},
+                                   std::pair{"phase", phase}}) {
+            require_finite_("add_sine_current_source", name, k, v);
+        }
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_sine_current_source(
+            b_id, models::SineCurrentSource::Params{
+                      {.v_dc = i_dc, .v_amplitude = i_amplitude,
+                       .frequency = frequency, .phase = phase}});
+        return *this;
+    }
+
+    /// The trapezoid of `add_pulse_voltage_source` as a current out of
+    /// `n_pos` (same parameters and edge rules).
+    CircuitBuilder& add_pulse_current_source(
+        std::string_view name, std::string_view n_pos,
+        std::string_view n_neg, Real i_initial, Real i_pulsed, Real t_start,
+        Real pulse_width, Real period = Real{0}, Real rise_time = Real{0},
+        Real fall_time = Real{0}) {
+        for (const auto& [k, v] :
+             {std::pair{"i_initial", i_initial}, std::pair{"i_pulsed", i_pulsed},
+              std::pair{"t_start", t_start}, std::pair{"pulse_width", pulse_width},
+              std::pair{"period", period}, std::pair{"rise_time", rise_time},
+              std::pair{"fall_time", fall_time}}) {
+            require_finite_("add_pulse_current_source", name, k, v);
+        }
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_pulse_current_source(
+            b_id, models::PulseCurrentSource::Params{
+                      {.v_initial = i_initial, .v_pulsed = i_pulsed,
+                       .t_start = t_start, .pulse_width = pulse_width,
+                       .period = period, .rise_time = rise_time,
+                       .fall_time = fall_time}});
+        return *this;
+    }
+
+    /// Piecewise-linear table current out of `n_pos`: linear between the
+    /// knots (t[k], i[k]), i[0] before t[0], then i[last] — or the table
+    /// repeated with period t[last] − t[0] when `periodic`.
+    CircuitBuilder& add_pwl_current_source(
+        std::string_view name, std::string_view n_pos,
+        std::string_view n_neg, std::vector<Real> t, std::vector<Real> i,
+        bool periodic = false) {
+        models::PwlWaveform w{std::move(t), std::move(i), periodic};
+        models::PwlWaveform::validate(
+            w, std::format("add_pwl_current_source(\"{}\")", name));
+        const Index b_id = add_branch_(name, resolve_node_(n_pos),
+                                       resolve_node_(n_neg),
+                                       topology::BranchKind::Source);
+        pool_.add_pwl_current_source(
+            b_id, models::PwlCurrentSource::Params{std::move(w)});
         return *this;
     }
 
@@ -788,8 +920,9 @@ public:
     }
 
     /// Add a constant DC current source (Layer 2 V3).
-    /// `I` (amperes) flows FROM `from` TO `to`. Positive `I`
-    /// means conventional current direction.
+    /// A positive `I` (amperes) leaves the source at `from` into
+    /// the circuit and returns at `to` (10 mA into 1 kΩ from
+    /// `from` to ground reads v(from) = +10 V).
     ///
     /// Unlike voltage sources, current sources do NOT add a
     /// branch-current unknown to the state vector — the
@@ -1839,6 +1972,39 @@ private:
     /// kernel, so every solver diagnostic could speak only in
     /// integer ids and mask bitstrings; now a singular factorization
     /// or a stalled Newton can name the offending device.
+    // add-controlled-source-set helpers.
+    static void require_finite_(std::string_view method,
+                                std::string_view name, std::string_view key,
+                                Real v) {
+        if (!std::isfinite(v)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): {} must be finite (got {})", method, name,
+                key, v));
+        }
+    }
+
+    /// The branch a CCCS / CCVS senses: it must exist and carry a
+    /// current unknown.
+    [[nodiscard]] Index sensed_branch_(std::string_view method,
+                                       std::string_view name,
+                                       std::string_view control) const {
+        const auto hit = branch_index_.find(control);
+        if (hit == branch_index_.end() ||
+            !(pool_.is_voltage_source(hit->second) ||
+              pool_.is_inductor(hit->second))) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): control \"{}\" {}; sense through a 0 V "
+                "voltage source (any voltage-source kind), an inductor, a "
+                "VCVS, a CCVS or an ideal-transformer secondary, added "
+                "before \"{}\"", method, name, control,
+                hit == branch_index_.end()
+                    ? "names no branch added so far"
+                    : "carries no current unknown",
+                name));
+        }
+        return hit->second;
+    }
+
     Index add_branch_(std::string_view component_name,
                       Index from, Index to,
                       topology::BranchKind kind) {
