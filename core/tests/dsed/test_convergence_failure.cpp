@@ -187,12 +187,19 @@ TEST_CASE("ConvergenceFailure: a settle that hits its round cap is kind settle",
 
 TEST_CASE("ConvergenceFailure: a chattering diode is kind chatter and named",
           "[v2][dsed][convergence]") {
-    // Ten bridges behind 0.2 mH, V_th = 1e-2, LCP at h_e = 2 ns: a diode of
-    // the first bridge chatters at t ~ 1e-19 s (bank60_cost.out).
+    // The guard counts > 32 fires of one diode inside dt_max / 100 = 100 ns.
+    // A half-wave rectifier at 500 MHz (tau = 1 ps, so the diode really
+    // commutes twice per 2 ns period) fires ~100 times per window: a
+    // deterministic burst. (The ten-bridge bank at rest chattered on Eigen 5
+    // but not on Eigen 3.4.0: rounding-dependent, so not used here.)
     builder::CircuitBuilder b;
-    bridge_bank(b, 10, 1e-2, false);
-    const auto e = run_builder(b, 0.04, 2e-9);
+    b.add_sine_voltage_source("V", "s", "gnd", 0.0, 10.0, 5e8, 0.0);
+    b.add_diode("D1", "s", "o", 1e3, 1e-9, 0.0);
+    b.add_resistor("R", "o", "gnd", 1e3);
+    b.add_capacitor("C", "o", "gnd", 1e-15);
+    const auto e = run_builder(b, 1e-6, 0.0);
     REQUIRE(e.kind() == ConvergenceKind::Chatter);
-    REQUIRE(!e.device().empty());
+    REQUIRE(e.device().rfind("D1 ", 0) == 0);   // "D1 (branch #N)"
+    REQUIRE(e.time() < 2e-7);
     REQUIRE(std::string{e.what()}.find(e.device() + " is chattering") != std::string::npos);
 }

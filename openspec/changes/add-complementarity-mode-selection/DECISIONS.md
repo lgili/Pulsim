@@ -503,3 +503,33 @@ choices it did not pin.
       for V_f > 0, V_th > V_f and series / antiparallel pairs; source
       corners on PWM and periodic pulses, and corners coinciding with a
       gate edge, were found sound.
+
+29. **Task 8.2, cost per event on the D9 families: inside the pivot
+    table; more solves than the settle, each on a factor already held.**
+    `probes/family_cost.out` (dsed; 'shadow' gives the settle's rounds
+    and the LCP's work on the same events; `'lcp'` its own run):
+
+    | family | events | settle rounds / ev | 'lcp' max pivots (D9) | pivots / ev | solves / ev |
+    |---|---|---|---|---|---|
+    | buck at rest | 1 | 2.50 | 0 (2) | 0.00 | 2.00 |
+    | DCM buck | 1178 | 2.36 | 2 (2) | 2.00 | 3.32 |
+    | boost R = 50 | 978 | 2.65 | 2 (2) | 2.16 | 3.43 |
+    | boost R = 500 | 1157 | 2.41 | 2 (2) | 2.00 | 3.31 |
+    | 1-ph bridge V_f = 0.7 | 40 | 2.33 | 3 (6) | 5.17 | 7.63 |
+    | 1-ph bridge V_f = 0 | 39 | 2.37 | 3 (6) | 5.90 | 8.40 |
+    | 3-ph bridge, C filter | 60 | 2.02 | 3 (5) | 3.98 | 6.46 |
+
+    Max pivots per event (first LCP) are within D9 on every family
+    that runs (the gate is D9 + 1). Pivots per event include the tie
+    re-solves and widenings, D9's bracketed numbers; they are higher
+    than D9's means because every event here re-poses at 100·h_e and
+    1e4·h_e. Solves follow D9's count (one for q per LCP problem, one
+    column per pivot): 0.8–3.5× the settle's rounds, but a settle round
+    re-factors the new mask while the LCP's solves reuse the event's
+    factor, so the counts do not compare cost. The three-phase overlap
+    family does not run on dsed at all (the extractor rejects the
+    all-six-ON mask: G_aa singular), so it is not measured. Wall per
+    event is reported as whole-run wall / events (exact stepping
+    included), median of 3 interleaved runs: `'lcp'` 0.9–2.6× the
+    default; the per-decision time is not separated by any counter.
+    Information, not a gate. → Reverse: n/a (measurement).

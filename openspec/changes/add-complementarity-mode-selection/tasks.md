@@ -50,7 +50,7 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 
 ## 8. Cost gate
 - [x] 8.1 Counters in `result.diagnostics`: `lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`, `widenings`, `enumerations`. Slice 2 adds `leak_pins`, `pin_judgements`, `unfixed`, `enumerations`, `nonunique_modes` (`mode_selection` and `mode_shadow`)
-- [ ] 8.2 On the five families: pivots per event within the table of design D9 (+1); solves per event against today's settle rounds on the same events; ns per event reported
+- [x] 8.2 On the five families: pivots per event within the table of design D9 (+1); solves per event against today's settle rounds on the same events; ns per event reported — `probes/family_cost.out`, DECISIONS #29: max pivots within D9 on the 7 families dsed runs (three-phase overlap: extractor rejects the all-ON mask); solves 0.8–3.5× the settle rounds on a held factor; wall per event whole-run only
 - [x] 8.3 60-diode rectifier bank: max pivots per event and wall time per event reported; gate: no event over 4·k pivots. Measured (DECISIONS #20, `probes/bank60_cost.out`): ten three-phase bridges, `V_th = 0`: max 30 pivots per event (gate 240), no enumeration; default 292 port-model solves / 699 pivots over 373 events, 'lcp' 1102 / 1177; medians 21.2 / 21.4 / 21.7 s (settle / default / 'lcp', shared machine); line-inductance variants: since DECISIONS #23 the independent-bus bank runs on the default and on 'lcp' at `V_th = 0` (since #24 within 3.4e-4 V of pwl, the false repair gone); five bridges paralleled on one bus run on both since #25; the settle alone refuses by name since #26; 'lcp' at `V_th = 1e-2` and ten paralleled bridges (a tier-3 mode at rest) do not (KNOWN_LIMITATIONS)
 
 ## 4b. Default-mode guard (slice 2)
