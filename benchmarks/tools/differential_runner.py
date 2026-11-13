@@ -63,6 +63,11 @@ def load_triage(path: Path = TRIAGE) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))["circuits"]
 
 
+def _alias(engine: str) -> str:
+    """'exact' is the canonical name of 'dsed': same manifest entries."""
+    return "dsed" if engine == "exact" else engine
+
+
 def default_tol(engine: str, switched: bool) -> float:
     if not switched:
         return 1e-3
@@ -249,7 +254,7 @@ def run(patterns, engines, triage):
         blob = json.dumps(case._components)
         switched = sw is not None or any(k in blob for k in ('"diode"', '"pwm"', '"pulse"'))
         cols = observables_of(case)
-        tols = {e: entry.get("tol", {}).get(e, default_tol(e, switched)) for e in engines}
+        tols = {e: entry.get("tol", {}).get(_alias(e), default_tol(e, switched)) for e in engines}
         ref_name, ref = reference(case, cols, min(tols.values()))
         for e in engines:
             kind, res, wall, msg = run_cell(case, e)
@@ -262,7 +267,7 @@ def run(patterns, engines, triage):
                 rec["message"] = "no converged reference"
             else:
                 classify(rec, res, case, cols, ref, tols[e], case.dt if e == "pwl" else None)
-            known = entry.get("known", {}).get(e)
+            known = entry.get("known", {}).get(_alias(e))
             rec["expected"] = rec["outcome"] in ("agree", "refused") or rec["outcome"] == known
             out.append(rec)
             print(f"{rec['outcome']:9s} {e:6s} {rel}  {rec.get('err_rms', '')}"

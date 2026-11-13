@@ -14,6 +14,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   trbdf2 run that held a diode against its commutation rule, is now
   `failed` (`implausible_voltage: ...`, `missed_commutation: ...`); a
   warning is shown once per call site, so an optimiser never saw it.
+* **Fixed** `engine='exact'` (the canonical name of `'dsed'`) was a
+  `ValueError` in `pulsim.design.Evaluator`, a `KeyError` in the
+  analytic benchmark cases, and read no freeze in
+  `differential_runner --engines exact`; all three alias it to `dsed`.
+  `'exact'` and `'dsed'` give the same refusal or bit-identical samples
+  on every engine-conformance cell (new test).
+* **Changed** the `V_th = 0` LC tank of
+  `test_double_crossing_inside_one_step_is_seen`: re-pinned from "the
+  stored-sample guard raises" to the right answer (event-locator fix):
+  four edges and end v(t) = -5.437946944 V, v(k) = 9.49998506 V against
+  a DOP853 reference. The -5.18 V of batch 6a was v(k).
+* **Changed** `mode_selection='lcp'` on the bridge behind an ideal
+  transformer (slice 3's passivity test): on its own tree it returned
+  11.73 V (pwl 31.88 V) silently; here the stored-sample guard raises
+  `DiodeModeInconsistentError` naming D2 at t = 10.008 ms. The test
+  checks the class on a 9 ms run (matches pwl to 5e-9 V) and the raise.
 
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 

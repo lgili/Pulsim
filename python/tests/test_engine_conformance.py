@@ -982,3 +982,21 @@ def test_exact_segments_only_on_the_exact_engine(engine):
     segs = ex["segments"]
     assert segs and all(s["exact"] and s["reason"] is None for s in segs)
     assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
+
+
+# Integration batch 6b: 'exact' and 'dsed' are one engine on every device cell and the
+# coupled-inductor cell -- the same refusal, or bit-identical times and samples.
+@pytest.mark.parametrize("kind", [*CELLS, "coupled"])
+def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
+    args = _args(COUPLED if kind == "coupled" else CELLS[kind])
+    out = {}
+    for eng in ("dsed", "exact"):
+        try:
+            out[eng] = _run(*args, eng)
+        except p.UnsupportedError as e:
+            out[eng] = (type(e), e.engine, e.feature, e.device, e.kind)
+    a, b = out["dsed"], out["exact"]
+    if isinstance(a[0], type):
+        assert a == b
+        return
+    assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])

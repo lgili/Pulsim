@@ -303,3 +303,14 @@ def test_a_trbdf2_missed_commutation_is_failed_not_ok():
         res = p.simulate(b, t_end=0.06, engine="trbdf2", rtol=2e-5, atol=2e-8)
     with pytest.raises(design._Failed, match="missed_commutation: .*BR__D4"):
         design._raise_if_suspect(res, b)
+
+
+def test_exact_is_the_dsed_engine_for_the_evaluator():
+    for steady in (SteadySpec(method="pss"), SteadySpec(method="auto")):
+        a = Evaluator(buck, period=T, loads=("RL",), engine="exact",
+                      steady=steady).evaluate(CCM)
+        b = Evaluator(buck, period=T, loads=("RL",), engine="dsed",
+                      steady=steady).evaluate(CCM)
+        assert a.status == "ok" and a == b
+    with pytest.raises(ValueError, match="'exact' \\(alias 'dsed'\\)"):
+        Evaluator(buck, period=T, engine="spice")

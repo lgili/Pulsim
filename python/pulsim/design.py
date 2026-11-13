@@ -404,9 +404,11 @@ class Evaluator:
         if steady.method not in ("pss", "transient", "auto"):
             raise ValueError(f"SteadySpec.method must be 'pss', 'transient' "
                              f"or 'auto', got {steady.method!r}")
+        if engine == "exact":    # the canonical name; 'dsed' its alias
+            engine = "dsed"
         if engine not in ("auto", "dsed", "trbdf2", "pwl"):
-            raise ValueError(f"engine must be 'auto', 'dsed', 'trbdf2' or "
-                             f"'pwl', got {engine!r}")
+            raise ValueError(f"engine must be 'auto', 'exact' (alias 'dsed'), "
+                             f"'trbdf2' or 'pwl', got {engine!r}")
         if steady.method == "pss" and engine not in ("auto", "dsed"):
             raise ValueError(
                 f"SteadySpec(method='pss') runs on the dsed exact stepper; "

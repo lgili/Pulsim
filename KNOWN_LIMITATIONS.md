@@ -363,8 +363,9 @@ kernel guard did not: the `V_th = 0` LC tank of
 `test_double_crossing_inside_one_step_is_seen` returned v(k) = -5.18 V at
 10 µs (trbdf2 and a DOP853 reference: 9.49998506 V); now dsed finds all
 four edges and the end state of the reference. With the kernel guard on
-it no longer fires on any circuit of the test suite or the reference set;
-it still names every case above when `MODE_GUARD = False`. It reads
+in default mode it fired on no circuit of the test suite (batch 6b); it
+names every case above when `MODE_GUARD = False`, and under
+`mode_selection='lcp'` it catches the floating-bus bridge below. It reads
 stored samples only, so a wrong mode shorter than one stored step is not
 seen.
 
@@ -394,7 +395,10 @@ by 1 MΩ ties and the diodes' `g_off` runs wrong under `'lcp'`: two diodes
 never conduct and one blocks +49.86 V (11.73 V against 31.88 V). The
 result flips with the `h_e` ratio, and the default (settle + guard) is
 right (add-complementarity-mode-selection DECISIONS #21). `'lcp'` is
-opt-in; use the default there.
+opt-in; use the default there. On the integrated tree the
+ideal-transformer bridge (`test_mode_passivity`) is loud, not wrong: the stored-sample guard raises `DiodeModeInconsistentError`
+(D2 OFF while forward-biased by 0.063 V from t = 10.008 ms); up to 9 ms
+`'lcp'` matches pwl to 5e-9 V.
 
 ### Many-diode rectifiers with line inductance on dsed
 
