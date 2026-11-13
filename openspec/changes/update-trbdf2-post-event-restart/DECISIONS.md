@@ -121,8 +121,12 @@ The open questions of `design.md` had no answer and none was marked
    | boost | 1482, 223 rejects | 1494, 270 | | |
    | VSI on RL | 1235, 30 rejects | 1300, 77 | | |
 
-   Errors are equal or better on every row at the same rtol; the cost
-   is +47 rejects on the boost and on the VSI. Applied to every
+   Only the MOSFET half bridge is a Newton circuit with diode events;
+   the other rows are piecewise linear and were measured with the step
+   forced on there (they keep TR-BDF2 in the shipped default; the
+   Shockley rectifier has a Newton law but no diode events and is
+   unchanged). Forced on, errors were equal or better on every row at
+   the same rtol, at +47 rejects on the boost and on the VSI. Applied to every
    circuit, the full suite moved 9 pins, all on piecewise-linear diode
    circuits: bridge loss energies 0.6 % (V_f = 0 identity pin), a
    reference bridge's D2 RMS current 2.4 % from pwl (2 % allowed), the

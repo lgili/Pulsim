@@ -490,8 +490,10 @@ struct NewtonRoundoffAcceptance {
         && ro_f.size() == static_cast<Index>(n)) {
         // No NET contraction over two steps. "Each step at least half
         // the previous" read a roundoff limit cycle (||dx|| 3.2e-7,
-        // 5.0e-7, 1.9e-7) as converging; quadratic or linear
-        // convergence cuts ||dx|| by far more than 4 in two steps.
+        // 5.0e-7, 1.9e-7) as converging. Quadratic convergence, or
+        // linear at a rate below 1/2, cuts ||dx|| by more than 4 in two
+        // steps; a slower rate counts as stagnated and the omega and
+        // dx-ceiling tests below decide.
         const bool stagnated = ro_dx[0] >= Real{0.25} * ro_dx[2];
         const Real dx_cap = roundoff->dx_rel_max
             * std::max(Real{1}, ro_x.cwiseAbs().maxCoeff());

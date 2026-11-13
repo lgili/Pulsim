@@ -17,7 +17,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   100x the step up to the probe cap; a cascade with no converged probe
   raises `SimulationAborted` naming the event and the row. A failed
   Newton solve on a diode-event landing rejects the step (it was
-  committed); a failed localisation trial ends the refinement.
+  committed); a failed localisation trial ends the refinement. The
+  initial settle keeps the bits it reached when its probe fails (its
+  start state is consistent with them).
   `TrBdf2Stats::n_probe_newton_retries` counts the retries. Baseline
   table: only the Level-1 MOSFET half bridge moves (54 breakpoint
   probes that failed now refresh: 1692 → 1555 steps, error 3.12e-4 →
@@ -34,8 +36,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the xfail is a test (tolerance 3 % → 0.3 %); the `h_min` abort
   message no longer points at it. The Lauritzen gated buck that stalled
   at the default tolerances runs at them again.
-* **Changed (BREAKING, step sequence)** `engine='trbdf2'`: on a circuit with a Newton device law
-  (MOSFET, Shockley diode, ...), the first step after a diode event is one
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'`: on a circuit with a nonlinear refresh
+  (a Newton device law: MOSFET, Shockley diode, ...), the first step after a diode event is one
   L-stable Alexander SDIRK(2,2) step on the same factor (embedded error
   estimate, exponent −1/2), instead of a TR-BDF2 step that read the
   pre-event derivative slots. Level-1 MOSFET half bridge (body-diode

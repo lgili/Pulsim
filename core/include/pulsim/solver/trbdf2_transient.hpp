@@ -151,8 +151,8 @@ struct TrBdf2Options {
     Real observer_period = Real{0};
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
-    /// tolerances are absolute; loosening them is not a fix for the
-    /// h_min stall (see SimulationOptions::tol_newton_dx).
+    /// tolerances are absolute; loosening them is not a fix for an
+    /// h_min abort (see SimulationOptions::tol_newton_dx).
     Size max_newton_iterations = Size{50};
     Real tol_newton_dx  = Real{1e-9};
     Real tol_newton_res = Real{1e-9};
@@ -181,7 +181,8 @@ struct TrBdf2Options {
     /// Circuits with a stateful device history (Coss, Lauritzen, IGBT
     /// tail, PMSM, saturable inductor) take none yet. One after a diode
     /// event and none after the settle won the baseline table, on
-    /// circuits with a Newton device law only (DECISIONS item 9);
+    /// circuits with a nonlinear refresh (a Newton device law) only
+    /// (DECISIONS item 9);
     /// C++-only handles.
     Size sdirk_after_diode_event = 1;
     Size sdirk_after_settle = 0;
@@ -190,7 +191,7 @@ struct TrBdf2Options {
     bool sdirk_on_linear_circuits = false;
     /// Hosea-Shampine filter W^-1 est on the stage factor (linear circuits
     /// only). C++-only, off: it lets the bridge rectifier take steps that
-    /// chatter a diode 4387 times (DECISIONS item 10).
+    /// chatter a diode 4334 times in 2 ms (DECISIONS item 10).
     bool filter_error_estimate = false;
 };
 
@@ -2334,8 +2335,10 @@ inline SimulationResult run_transient_trbdf2(
         st.probe_floor_used = h_probe_learned;
         st.n_probe_newton_retries = n_probe_newton_retries;
     } catch (const SimulationAborted&) {
+        st.n_probe_newton_retries = n_probe_newton_retries;
         throw;
     } catch (const std::runtime_error& e) {
+        st.n_probe_newton_retries = n_probe_newton_retries;
         result.newton_roundoff_accepts = ro_accepts;
         result.newton_roundoff_omega_max = ro_omega_max;
         result.newton_roundoff_row = ro_row;
