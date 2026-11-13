@@ -57,6 +57,14 @@ their messages are covered in [Gotchas](gotchas.md).
 |---|---|---|
 | **`spice_to_builder` reads a subset of SPICE.** | `Q` (BJT) and `K` (coupled inductors) raise `NotImplementedError`. A `.param` expression such as `{R*2}` raises `KeyError`. `B` sources raise `ValueError`. `.subckt` is flattened correctly. | Build those parts with `CircuitBuilder` (`add_transformer` for coupled inductors) or a YAML netlist. |
 
+## Machines
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still forward-Euler observers on `pwl` only (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
+| **`add_dc_machine` with `B = 0` triggers a needless preflight tie.** The preflight does not count the ideal transformer's primary as a DC path and ties the speed node to ground through 1 GΩ, with a warning. | A friction of 1e-9 N·m·s/rad: 9e-7 relative on the DC current. | Ignore, give `B > 0`, or pass `auto_regularize=False` (the matrix is regular). |
+| No YAML type `dc_machine`, no angle node. | — | Python API; integrate `res.v(omega_node)` for the angle. |
+
 ## Older entries
 
 [`KNOWN_LIMITATIONS.md`](https://github.com/lgili/Pulsim/blob/main/KNOWN_LIMITATIONS.md)

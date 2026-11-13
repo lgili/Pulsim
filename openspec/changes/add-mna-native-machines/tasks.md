@@ -1,14 +1,14 @@
 ## 1. DC machine composite (today's structure)
-- [ ] 1.1 `CircuitBuilder::add_dc_machine` (sub-elements `{name}.ra`, `{name}.la`, `{name}.em`, `{name}.j`, `{name}.b`, `{name}.tl`); validation by name (`R_a ≥ 0`, `L_a > 0`, `K > 0`, `J > 0`, `B ≥ 0`)
-- [ ] 1.2 Binding, stubs, `components()` entry `dc_machine`; YAML type `dc_machine`
-- [ ] 1.3 Test (accuracy): the `p5b_dcmotor.py` case at dt = 12.5 µs, speed error against the exact solution ≤ 1e-4 (measured 7.45e-5)
-- [ ] 1.4 Test (order): errors at 100, 50, 25, 12.5 µs fall by ≥ 3.5 per halving (measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5)
-- [ ] 1.5 Test (DC operating point): 10 V, `K = 0.1`, `R_a = 0.5 Ω`, `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s` within 1e-9
-- [ ] 1.6 Test (`trbdf2`): same case, error ≤ 2e-4 (measured 9.2e-5); energy check `∫v·i dt = ∫R i² dt + ΔE_L + ΔE_J` within 1e-6
-- [ ] 1.7 Test: a legacy call with `Kt ≠ Ke` routed to the native path is refused with the SI explanation
-- [ ] 1.8 Optional `theta_node` through the VCCS of `add-controlled-source-set`: `θ(t) = ∫ω dt` within 1e-6
-- [ ] 1.9 AC check: armature admittance of the composite against the analytic `1/(R_a + sL_a + K²/(sJ + B))` at 10 frequencies within 1e-6 (after `fix-mna-sweep-correctness` if the sweep needs it)
-- [ ] 1.10 Conformance rows (`add-engine-conformance-matrix`): `dc_machine` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok}
+- [x] 1.1 `CircuitBuilder::add_dc_machine` (sub-elements `{name}.ra`, `{name}.la`, `{name}.em`, `{name}.j`, `{name}.b`, `{name}.tl`); validation by name (`R_a ≥ 0`, `L_a > 0`, `K > 0`, `J > 0`, `B ≥ 0`) — as a Python method installed on `CircuitBuilder` (`python/pulsim/machines.py`), DECISIONS D1; `{name}.ra`/`.b`/`.tl` only when non-zero (D6)
+- [ ] 1.2 Binding, stubs, `components()` entry `dc_machine`; YAML type `dc_machine` — NOT DONE: no C++ binding/YAML/`components()` entry (DECISIONS D2); Python surface is `b.add_dc_machine`
+- [x] 1.3 Test (accuracy): the `p5b_dcmotor.py` case at dt = 12.5 µs, speed error against the exact solution ≤ 1e-4 (measured 7.45e-5) — measured 7.45e-5
+- [x] 1.4 Test (order): errors at 100, 50, 25, 12.5 µs fall by ≥ 3.5 per halving (measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5) — measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5 (ratios 3.99, 4.00, 4.00)
+- [x] 1.5 Test (DC operating point): 10 V, `K = 0.1`, `R_a = 0.5 Ω`, `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s` within 1e-9 — with `auto_regularize=False` (preflight false positive, DECISIONS D9)
+- [x] 1.6 Test (`trbdf2`): same case, error ≤ 2e-4 (measured 9.2e-5); energy check `∫v·i dt = ∫R i² dt + ΔE_L + ΔE_J` within 1e-6 — measured 9.19e-5; energy 4.2e-9 on `pwl` (bound 1e-8), 5.5e-6 on `trbdf2` (bound 2e-5, not 1e-6: DECISIONS D8)
+- [x] 1.7 Test: a legacy call with `Kt ≠ Ke` routed to the native path is refused with the SI explanation
+- [ ] 1.8 Optional `theta_node` through the VCCS of `add-controlled-source-set`: `θ(t) = ∫ω dt` within 1e-6 — NOT DONE: refused by name until the VCCS exists (DECISIONS D5)
+- [x] 1.9 AC check: armature admittance of the composite against the analytic `1/(R_a + sL_a + K²/(sJ + B))` at 10 frequencies within 1e-6 (after `fix-mna-sweep-correctness` if the sweep needs it) — kernel complex MNA sweep, measured 1.9e-12
+- [ ] 1.10 Conformance rows (`add-engine-conformance-matrix`): `dc_machine` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok} — NOT DONE: the conformance matrix does not exist yet
 
 ## 2. Induction machine (after `add-unified-device-interface`)
 - [ ] 2.1 `models/induction_machine_mna.hpp`: parameters, validation, `eval` with f and q for 3 stator rows, 2 rotor-flux rows and the speed-node torque; closed-form Jacobian
@@ -36,13 +36,13 @@
 - [ ] 4.5 Test: a saturating map (analytic `λ_d = ψ_pm + L_d0·I_s·tanh(i_d/I_s)`) — locked-rotor current step against an independent SciPy integration, 1e-4
 
 ## 5. Deprecation
-- [ ] 5.1 `DeprecationWarning` in `add_dc_motor`, `add_pmsm`, `add_bldc`, `add_induction_motor` and the `make_*_observer` functions, naming the native replacement and the measured first-order error
+- [ ] 5.1 `DeprecationWarning` in `add_dc_motor`, `add_pmsm`, `add_bldc`, `add_induction_motor` and the `make_*_observer` functions, naming the native replacement and the measured first-order error — PARTIAL: `add_dc_motor` and `make_dc_motor_observer` only (DECISIONS D4)
 - [ ] 5.2 `im_parameters_from_nameplate` result labelled `estimated`
 - [ ] 5.3 Next release: YAML `induction_motor` default `model: mna` (BREAKING, CHANGELOG)
 
 ## 6. Documentation
-- [ ] 6.1 `AI_GUIDE.md` (machine table: native versus observer, which engine), `docs/motors-induction.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals; no machine is validated against measurement), `CHANGELOG.md`
-- [ ] 6.2 Tutorial: DC machine as a circuit (the speed node, loads as elements)
+- [ ] 6.1 `AI_GUIDE.md` (machine table: native versus observer, which engine), `docs/motors-induction.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals; no machine is validated against measurement), `CHANGELOG.md` — PARTIAL (DC machine): AI_GUIDE row, motors-induction see-also, both limitation pages, CHANGELOG
+- [x] 6.2 Tutorial: DC machine as a circuit (the speed node, loads as elements) — `docs/tutorials/07-dc-machine.md` (executed by test_doc_snippets)
 
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check

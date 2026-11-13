@@ -441,8 +441,8 @@ A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
 `add_capacitor(c0=)` / `add_inductor(i0=)` set initial conditions.
-Other `simulate` keywords you may need: `switch_fn`, `t_start`,
-`store_every`, `auto_regularize`, `progress`.
+Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
+`auto_regularize`, `progress`.
 
 ## 5. Traps
 
@@ -614,9 +614,9 @@ abort (trap 5), a part file without provenance, a mismatched snapshot.
 
 ## 7. Coming from Pulsim 1.x or pre-1.0
 
-Retired names still raise `AttributeError` with a hint (for example
+Retired names still raise `AttributeError` with a hint (e.g.
 `Circuit`, `Simulator`, `YamlParser`, `Preset`, `PulseParams` from
-pre-1.0; the `v2` sub-namespace of 0.10). The 2.0 changes that keep
+pre-1.0; the `v2` sub-namespace of 0.10). Changes that keep
 names but change results:
 
 | 1.x habit | 2.x |
@@ -630,6 +630,7 @@ names but change results:
 | `add_three_phase_vsi` built six bare switches | it adds six freewheel diodes (`with_freewheel_diodes=True`) |
 | `p.add_hysteretic_inductor` + `p.make_hysteretic_inductor_observer` | the inductor is solved inside Newton; drop the observer, whose factory now raises |
 | `p.add_pmsm` (observer, one average L) | still there; `b.add_pmsm_mna` stamps the machine with full saliency |
+| `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` solves it in the matrix |
 | parts in `pulsim.lib` resolved by part number | they are synthetic; pass `allow_synthetic=True` to use them |
 
 ## 8. Paste this into your project's assistant config
@@ -645,11 +646,10 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
-Paths are relative to the repository root; the documentation site
-mirrors `docs/`.
+Paths are from the repository root (the site mirrors `docs/`).
 
 - `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `06-igbt-boost.md` (executed, end-to-end converters).
+  `07-dc-machine.md` (executed, end to end).
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md` (how each loss is computed),
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.

@@ -755,6 +755,11 @@ from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
 
+# add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
+# composite of existing kernel elements, solved inside the matrix).
+from . import machines as _machines  # noqa: E402
+_machines.install(CircuitBuilder)
+
 
 
 class NameNotFoundError(KeyError):

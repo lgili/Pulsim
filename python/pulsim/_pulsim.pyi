@@ -237,6 +237,27 @@ class CircuitBuilder:
         """
         Add a DC current source. I in amperes. EE convention: I flows OUT of `n_pos` (the + terminal) into the external circuit, back to `n_neg`. Does NOT add a branch-current unknown — the current is fixed at I.
         """
+    def add_dc_machine(self, name: str, a_pos: str, a_neg: str, omega_node: str, *, R_a: float, L_a: float, K: float | None = None, J: float, B: float = 0.0, T_load: float = 0.0, theta_node: str | None = None, i0: float | None = None, omega0: float = 0.0, Ke: float | None = None, Kt: float | None = None):
+        """
+        Add a permanent-magnet DC machine solved inside the matrix.
+
+        Parameters [SI]: ``R_a`` [Ω, ≥ 0], ``L_a`` [H, > 0], ``K``
+        [V·s/rad = N·m/A, > 0], ``J`` [kg·m², > 0], ``B`` [N·m·s/rad,
+        ≥ 0], ``T_load`` [N·m, constant, opposing positive speed]. ``i0``
+        is the initial armature current [A] and ``omega0`` the initial
+        speed [rad/s]. ``omega_node`` is created if new; read the speed
+        with ``result.v(omega_node)`` and the armature current with
+        ``result.i(f"{name}.la")``. A speed-dependent load is any element
+        you connect to ``omega_node`` (torque = current out of it).
+
+        ``Ke`` / ``Kt`` are the legacy ``add_dc_motor`` spellings: in SI
+        units they are the same constant, so a call with ``Kt != Ke`` is
+        refused (the coupling would not conserve power).
+
+        ``theta_node`` needs a voltage-controlled current source, which the
+        kernel does not have yet (``add-controlled-source-set``); it is
+        refused by name.
+        """
     def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0, V_f: float = 0.0) -> CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.

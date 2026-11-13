@@ -272,6 +272,20 @@ At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 
 ---
 
+## Machines (`add-mna-native-machines`, step 1)
+
+`b.add_dc_machine` is solved in the matrix; the PMSM (observer path),
+BLDC and induction-motor observers are not yet, and stay first order
+on `pwl`. Not done: YAML `dc_machine`, `theta_node` (needs a VCCS), the
+induction machine, BLDC harmonics, flux maps. With `B = 0` the
+preflight wrongly ties the speed node through 1 GΩ (it does not count
+an ideal transformer primary as a DC path); the effect is 9e-7
+relative, `auto_regularize=False` avoids it. None of the machine tests
+is a validation against a measured machine: they check analytic
+properties of the equations.
+
+---
+
 ## Open OpenSpec proposals as of v1.3.0
 
 The following proposals are accepted as in-flight work but **not**

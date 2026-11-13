@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### MNA-native DC machine (`add-mna-native-machines`, step 1)
+
+* **Added** `b.add_dc_machine(name, a_pos, a_neg, omega_node, *, R_a, L_a,
+  K, J, B=0, T_load=0, i0=None, omega0=0)`: a permanent-magnet DC machine
+  solved inside the matrix, a composite of existing elements — armature
+  `R_a`, `L_a`, an ideal transformer of ratio `K` between the speed node
+  and the armature, the inertia `J` as a capacitor on the speed node
+  (`ω` is its voltage, torque is current), friction `1/B`, the load
+  torque a current source. Second order on `pwl` (sine-driven test
+  machine from rest, speed error against the exact solution
+  4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5 — ratios 3.99, 4.00, 4.00 — at dt = 100, 50, 25, 12.5 µs), runs on `trbdf2`
+  (9.19e-5 in 1061 points; the same as `pwl` to 1e-3) and on `dsed` (1.8e-7), and has a DC operating point (10 V, `K = 0.1`, `R_a = 0.5 Ω`,
+  `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s`). Electrical energy in
+  equals copper + friction + load + stored energy to 4.2e-9 on `pwl` (5.5e-6 on `trbdf2`). The armature impedance in the
+  kernel AC sweep is `R_a + sL_a + K²/(sJ + B)` to 1e-9.
+  `Kt ≠ Ke` (legacy spellings) is refused: in SI units they are one
+  constant. `theta_node` is refused until a VCCS exists. With `B = 0` the
+  preflight ties the speed node through 1 GΩ (it misses the ideal
+  transformer's primary as a DC path; 9e-7 relative, see
+  `KNOWN_LIMITATIONS.md`).
+* **Deprecated** `p.add_dc_motor` and `p.make_dc_motor_observer`
+  (`DeprecationWarning` naming `add_dc_machine`): forward Euler from the
+  previous step, first order (13.6 % at 100 µs on the same case), `pwl`
+  only. They keep working.
+* Not in this step: YAML type `dc_machine`, the `components()` entry, the
+  induction machine, BLDC harmonics and flux maps
+  (`openspec/changes/add-mna-native-machines/DECISIONS.md`).
+
 ### Periodic steady state by Newton shooting on the true state (slice 1)
 
 * **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,

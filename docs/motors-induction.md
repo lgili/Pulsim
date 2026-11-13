@@ -107,6 +107,10 @@ rated torque, rated current, and per-phase impedance for sanity checks.
 
 ## See also
 
+- [Tutorial 07 — DC Machine](tutorials/07-dc-machine.md): the MNA-native
+  DC machine; the native induction machine is planned in
+  `openspec/changes/add-mna-native-machines/`.
+
 - [Motors — Sensorless Observers](motors-sensorless.md)
 - `python/pulsim/motors.py` — source.
 - `openspec/changes/add-induction-motor-squirrel-cage/` — proposal + spec.
