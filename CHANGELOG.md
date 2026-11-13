@@ -95,11 +95,14 @@ With `discontinuity_restart=True`, a diode that turned off inside the
 second SDIRK stage was solved from the stage's pseudo-state: the
 `three_phase_diode_rectifier` bus reached 37.20 V on 24 V-peak phases
 at dt/τ = 10 (59.63 V on a 41.57 V line-to-line bridge). Such a stage
-is now re-tried as backward Euler from stage 1; it is kept when it
-keeps stage 1's diode mode, else the SDIRK stage stands. Bus peak
+is now re-tried as backward Euler from stage 1 when stage 2 only turned
+diodes OFF; it is kept when it keeps stage 1's diode mode, else the
+SDIRK stage stands (as it does after a stage-2 re-try that throws). Bus peak
 23.999 / 41.566 V; max error vs a tight trbdf2 16.66 → 0.762 V and
-18.35 → 3.44 V (flag off: 13.45 / 17.84 V). Buck CCM/DCM, tank and
-LC acceptance unchanged. Flag off: bit-identical.
+18.35 → 3.44 V (flag off: 13.45 / 17.84 V). Buck CCM, DCM, tank and
+LC results bit-identical to before the fallback (the fallback never
+fires there); `res.counters` gains `stage2_retries`, `stage2_be_kept`,
+`stage2_retry_failures`. Flag off: bit-identical.
 
 ### Fixed engine: resolution diagnostics (read-only, on by default)
 

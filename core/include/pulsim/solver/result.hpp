@@ -279,6 +279,10 @@ struct SimulationResult {
     Size switch_fn_calls = 0;
     Size segment_searches = 0;
     Size rollback_snapshots = 0;
+    // Restart stage-2 fallback: backward-Euler re-tries, and those kept.
+    Size stage2_retries = 0;
+    Size stage2_be_kept = 0;
+    Size stage2_retry_failures = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

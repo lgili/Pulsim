@@ -2510,6 +2510,9 @@ void init_module(py::module_& m) {
                 d["switch_fn_calls"] = r.switch_fn_calls;
                 d["segment_searches"] = r.segment_searches;
                 d["rollback_snapshots"] = r.rollback_snapshots;
+                d["stage2_retries"] = r.stage2_retries;
+                d["stage2_be_kept"] = r.stage2_be_kept;
+                d["stage2_retry_failures"] = r.stage2_retry_failures;
                 return d;
             },
             "Fixed-step loop counters (pwl engine; 0 elsewhere): "

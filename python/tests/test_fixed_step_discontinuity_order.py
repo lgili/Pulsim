@@ -161,6 +161,26 @@ def test_buck_ccm_converges_at_second_order():
     assert 1.9 < off[0] / off[1] < 2.1
 
 
+def test_buck_ccm_stays_second_order_to_t_over_1600():
+    """Below T/200 the analytic reference rounds (~1e-9), so the order is
+    read from successive differences. A stage-2 fallback that kept
+    backward Euler at the zero start added a dt-independent 7e-10 A
+    (constant 7.0e-10 / 6.9e-10 / 6.9e-10 at T/50..T/200); the trigger
+    is now a diode turning OFF in stage 2 only."""
+    j = None
+    xs = []
+    for N in (100, 200, 400, 800, 1600):
+        res = _buck(1.0, 0.5, N, **ON)
+        assert res.counters["stage2_be_kept"] == 0
+        t = np.asarray(res.times)
+        j = int(np.argmin(abs(t - (T0 + 40 * TB))))
+        xs.append(float(np.asarray(res.i("L"))[j]))
+    d = [a - b for a, b in zip(xs, xs[1:])]
+    # engine: 2.285e-8, 5.817e-9, 1.460e-9, 3.479e-10 (factors 3.93, 3.98, 4.20)
+    assert abs(d[0]) < 3e-8, d
+    assert all(f >= 3.8 for f in _factors(d)), d
+
+
 def test_freewheel_diode_picks_up_the_current_in_the_first_stage():
     """The SDIRK step is not atomic for the diode event iteration: each
     stage re-decides. Decided once per step instead (stage 1 with the
@@ -466,22 +486,20 @@ def test_one_factor_per_mask_and_no_refactor():
     runs = [_buck(1.0, 0.5, 100, nper=1000, on_cache=caches.append, **kw)
             for kw in ({}, ON)]
     assert runs[1].n_restart_steps >= 6000        # 3 steps x two edges per period
-    # 5 = 4 builds + 1 refactor back to 2*gamma*dt (4 before the stage-2
-    # fallback): its backward-Euler trial at 2(1 - gamma)*dt shares the
-    # mask's event entry, an in-place numeric refactor (2 in 1000 periods).
-    assert runs[1].n_restart_factorizations == 5
+    assert runs[1].n_restart_factorizations == 4
     assert runs[0].n_restart_factorizations == 0
     off, on = caches
     m = on.metrics()
     assert m.event_builds == on.num_event_entries() == 4     # one per restart mask
-    assert m.event_refactors == 2
+    assert m.event_refactors == 0
+    # The stage-2 fallback never fires on this buck (its only stage-2
+    # flip is the diode turning ON at the zero start).
+    assert runs[1].counters["stage2_retries"] == 0
     assert m.symbolic_analyses == m.structure_builds == 1
     assert off.metrics().event_builds == 0
     # The transitional masks of the event iteration are now solved on
-    # the restart factor only: nominal segments 3 (4 without the rule);
-    # was 2 before the stage-2 fallback, whose path visits one more
-    # mask on the nominal cache (measured, not derived).
-    assert (on.num_built_segments(), off.num_built_segments()) == (3, 4)
+    # the restart factor only: nominal segments 2 (4 without the rule).
+    assert (on.num_built_segments(), off.num_built_segments()) == (2, 4)
 
 
 def test_substep_correction_requires_the_restart_rule():
@@ -727,7 +745,7 @@ def test_the_static_path_samples_the_gate_at_the_step_start():
 
 
 # --- diode mode change inside a restart step ------------------------------------
-def _rect3(dt, classic, **kw):
+def _rect3(dt, classic, full=False, **kw):
     """Three 24 V-peak phases, six diodes (5 mOhm on), 1 mF bus charged
     from 0 V: tau = 5 us. `classic`: low side on a floating DC rail (bus
     = line-to-line, peak 41.57 V); else on ground (the benchmark
@@ -744,6 +762,8 @@ def _rect3(dt, classic, **kw):
         b.add_resistor("Rref", "neg", "gnd", 1e6)
     kw.setdefault("engine", "pwl")
     res = p.simulate(b, t_end=40e-3, dt=dt, **kw)
+    if full:
+        return res
     v = np.asarray(res.v("out"))
     if classic:
         v = v - np.asarray(res.v("neg"))
@@ -762,6 +782,13 @@ def test_rectifier_bus_never_exceeds_the_source_peak(classic, peak, dt):
     the SDIRK overshoot): 23.999 / 41.566 V."""
     _, v = _rect3(dt, classic, **ON)
     assert v.max() < peak * (1 + 1e-4), v.max()
+
+
+def test_the_stage2_fallback_fires_on_the_rectifier_only_at_turn_off():
+    c = _rect3(50e-6, False, full=True, **ON).counters
+    # engine: 19 re-tries, 5 kept (40 ms; 5 also at dt = 5 us: the count
+    # does not grow as dt shrinks); L-L bridge 38 / 11
+    assert c["stage2_be_kept"] >= 1 and c["stage2_retry_failures"] == 0, c
 
 
 @pytest.mark.parametrize("classic", [False, True])

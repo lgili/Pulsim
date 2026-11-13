@@ -207,13 +207,20 @@ while applying it.
   | L-L bridge, 50 µs: err | 17.84 | 18.35 | 3.44 |
   | benchmark / bridge, 5 µs: err | 6.21 / 8.04 | 0.363 / 0.167 | 0.363 / 0.167 |
 
-  Acceptance unchanged within rounding: buck CCM 1.182e-7 / 3.015e-8 /
-  7.295e-9 A at T/50/100/200 (1.175e-7 / 2.946e-8 / 6.608e-9 before);
-  tank −0.730 % / −0.040 %; isolated LC 0.9973; DCM +2.93e-5 /
-  +6.56e-6 / +1.59e-6 (identical).
-- **Expectation moved.** → `test_one_factor_per_mask_and_no_refactor`:
-  event entries 0 → 1 (the BE trial at 2(1−γ)dt, built once, never
-  refactored); nominal segments 2 → 3 (measured).
+  The first version re-tried every stage-2 flip and, on the buck CCM,
+  kept backward Euler once, at t = 0 (the diode turning ON on
+  round-off): a dt-independent +7e-10 A (1.182e-7 / 3.015e-8 /
+  7.295e-9 A at T/50/100/200 against 1.175e-7 / 2.946e-8 / 6.608e-9),
+  and one more nominal segment (2 → 3) plus one event entry. Review
+  finding H1: the trigger is now "stage 2 turned at least one diode OFF
+  and none ON", the mechanism isolated above. Buck CCM, DCM, tank and LC
+  are bit-identical to before the fallback again (0 re-tries; order 2
+  through T/1600 by successive differences: factors 3.93 / 3.98 /
+  4.20); the factor test is back to 4 builds, 0 refactors, 2 segments.
+  The rectifier: 19 re-tries, 5 kept at dt = 50 µs, 18 / 5 at 5 µs
+  (L-L bridge 38 / 11 and 36 / 0): the count does not grow as dt
+  shrinks. A re-try that throws keeps the SDIRK stage
+  (`stage2_retry_failures`; review finding M2).
 - **Reverse.** → Delete the `has_diodes && iters_2 > 1` block in
   `run_restart` and set `be_commit_h` back to γh; the two rectifier
   tests then fail.

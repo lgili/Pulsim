@@ -1546,7 +1546,22 @@ inline SimulationResult run_transient(
                 accumulate_b_extra(t_from + h, dt_eq, true);
                 run_event_iteration(t_from + h, dt_eq, true);
                 const Size iters_2 = iters;
+                // Only a diode stage 1 conducts and stage 2 turns off,
+                // with no diode turning on: the overshoot mechanism. A
+                // turn-on in stage 2 (e.g. round-off at a zero start,
+                // buck CCM at t = 0) keeps the SDIRK stage.
+                bool on_to_off = false;
                 if (has_diodes && iters_2 > 1) {
+                    diodes.snapshot_on_bits_into(rs_bits2);
+                    for (Size q = 0; q < rs_bits.size(); ++q) {
+                        if (!rs_bits[q] && rs_bits2[q]) {
+                            on_to_off = false;
+                            break;
+                        }
+                        on_to_off = on_to_off || (rs_bits[q] && !rs_bits2[q]);
+                    }
+                }
+                if (on_to_off) {
                     // Stage 2 changed the mode. Re-take it as backward
                     // Euler from x1 under stage 1's bits; if that keeps
                     // stage 1's mode, the change was SDIRK's own overshoot
@@ -1556,8 +1571,8 @@ inline SimulationResult run_transient(
                     // x0* is accurate when the slopes are continuous
                     // (DCM turn-off: −2.4e-4 V at T/50 with backward
                     // Euler kept, +2.9e-5 V without).
+                    ++result.stage2_retries;
                     rs_x2 = x;
-                    diodes.snapshot_on_bits_into(rs_bits2);
                     const bool flipped_2 = flipped;
                     const bool cycle_2 = mask_cycle;
                     const auto stamped_2 = stamped_mask;
@@ -1574,12 +1589,22 @@ inline SimulationResult run_transient(
                     diodes.restore_on_bits(rs_bits);
                     histories_at_x0();
                     mask_cycle = cycle_1;
-                    commit_backward_euler(h_s);          // stage 1, as taken
                     const Real h_b = h - h_s;
-                    accumulate_b_extra(t_from + h, Real{2} * h_b, true);
-                    run_event_iteration(t_from + h, Real{2} * h_b, true);
-                    diodes.snapshot_on_bits_into(rs_bits_be);
-                    if (rs_bits_be == rs_bits) {
+                    // A re-try that fails (Newton, a singular factor at
+                    // the new dt) falls back to the SDIRK stage 2, which
+                    // had already succeeded.
+                    bool keep_be = false;
+                    try {
+                        commit_backward_euler(h_s);      // stage 1, as taken
+                        accumulate_b_extra(t_from + h, Real{2} * h_b, true);
+                        run_event_iteration(t_from + h, Real{2} * h_b, true);
+                        diodes.snapshot_on_bits_into(rs_bits_be);
+                        keep_be = rs_bits_be == rs_bits;
+                    } catch (const std::runtime_error&) {
+                        ++result.stage2_retry_failures;
+                    }
+                    if (keep_be) {
+                        ++result.stage2_be_kept;
                         be_commit_h = h_b;
                     } else {
                         // Back to the SDIRK stage 2, bit for bit: the
@@ -1600,7 +1625,7 @@ inline SimulationResult run_transient(
                         flipped = flipped_2;
                         mask_cycle = cycle_2;
                     }
-                    if (rs_bits_be == rs_bits) iters += iters_2 - 1;
+                    if (keep_be) iters += iters_2 - 1;
                 }
                 // A diode flip inside the step is a discontinuity of its
                 // own: the window covers this step and the next two.
