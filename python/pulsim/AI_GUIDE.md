@@ -330,8 +330,8 @@ R_load = 100.0 ohm -> V_out = 15.79 V
 
 At 100 ohm the inductor current reaches zero each cycle (discontinuous
 conduction), so `V_out` rises above `D * V_in`. That is physics, not an
-error. For R/L/C-only sweeps on one topology, `p.sweep_path_aware`
-reuses the factorisation across points.
+error. `p.sweep_path_aware` reuses the factorisation for R/L/C-only
+sweeps; `parallel=True` runs on threads when the step loop is native.
 
 ### 3.7 Three-phase inverter with sinusoidal PWM
 
@@ -423,7 +423,7 @@ p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0
 p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0)
 p.load_yaml_string(yaml_text)
 p.load_yaml_file(path)
-p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, verbose=True, **simulate_kwargs)
+p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, backend='auto', verbose=True, **simulate_kwargs)
 p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None, t_from=None, t_to=None)
 p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None, t_from=None, t_to=None)
 p.scope(builder, result, *, signals=None, title=None, save=None, stack=True, show=False, tight_lw=False)

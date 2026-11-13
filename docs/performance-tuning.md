@@ -106,6 +106,22 @@ Bounding output memory is usually the bigger lever on a long run:
 `simulate(..., store_every=m)` records every m-th step on a uniform
 `m·dt` grid, cutting the result buffer by m.
 
+## Parallel sweeps
+
+`p.sweep(..., parallel=True)` / `p.monte_carlo(..., parallel=True)` pick
+a backend from the first job (`backend="auto"`): threads when its step
+loop is native, processes when it calls Python. Threads have no start-up
+cost and need nothing to pickle; each worker process pays a full
+`import pulsim` and pickles its arguments, which made an 8-job buck sweep
+27× slower than serial in the 2026-11 review. So for speed, drive the
+switches with the native schedules (`make_pwm_switch_fn`,
+`make_dead_time_pwm_pair_fn`, …) and keep Python out of the step loop;
+check `res.step_loop_python_callbacks == ()` on one run.
+`backend="process"` restores separate processes when `builder_factory`
+or `kpi_fn` is not thread-safe. `import pulsim` no longer loads the
+LiveScope GUI stack (pyqtgraph / Qt); it is imported on first use of
+`pulsim.LiveScope`.
+
 ## DC operating-point seeding
 
 A converter that doesn't converge from `x=0` often converges from

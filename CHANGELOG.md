@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Sweeps on threads; `import pulsim` without the GUI stack
+
+* **Added** `sweep(..., backend="auto")` and `monte_carlo(...,
+  backend="auto")`: `"auto"`, `"thread"` or `"process"`, used when
+  `parallel=True`. `"auto"` runs the first job in the calling thread and
+  reads its new `res.step_loop_python_callbacks`. If that is empty (a
+  native schedule such as `make_pwm_switch_fn`), the other jobs run on
+  a thread pool, sharing the kernel that releases the GIL. If it names a
+  Python callable, they run on a `multiprocessing.Pool` as before.
+  `SweepResult.backend` says what ran.
+  * Results are in job order and `np.array_equal` to the serial run on
+    every backend.
+  * Serial and thread runs record a raising job in `failed` and go on.
+  * On threads, `builder_factory` and `kpi_fn` run concurrently in one
+    interpreter and need not pickle.
+  * Native schedules do not pickle, so `backend="process"` with one
+    fails with pickle's `TypeError`.
+  * Measured with an 8-job buck sweep (200k steps each, 4 workers),
+    on a shared Mac at load ~9 on 10 cores:
+    * threads take 0.41–0.72 × the serial time, and one run took 1.48 ×.
+      Best of the runs: serial 653 ms, threads 350 ms.
+    * With a Python `switch_fn` (50k steps), `"auto"` picks processes:
+      5.1 s against 0.41 s serial (spawn and import dominate jobs this
+      small). Threads take 4.1 × serial, because the GIL serialises the
+      callbacks.
+* **Added** `SimulationResult.step_loop_python_callbacks`: the Python
+  hooks `simulate()` put in the step loop (`"switch_fn"`,
+  `"b_extra_fn"`, `"step_observer"`, `"should_continue"`,
+  `"closed_loops"`), on every engine; `()` when the loop is native.
+  A run without a `switch_fn` reports `"switch_fn"`, because every
+  engine installs a Python default mask.
+* **Fixed** `sweep(parallel=True)` stored process results in completion
+  order (`enumerate(imap_unordered)`), so a KPI could land on another
+  job's parameters. Results are now in job order.
+* **Changed** `import pulsim` no longer imports `pulsim.scope`,
+  pyqtgraph or PySide6. `pulsim.LiveScope` resolves on first access and
+  is in `__all__` when pyqtgraph is installed. Without pyqtgraph,
+  `hasattr(pulsim, "LiveScope")` is `False` and the error names the
+  dependency. `pulsim.scope` stays the plotting function after the
+  `pulsim.scope` module is imported.
+  * Import time, best of 6 with a warm cache: 1522 ms before, 459 ms
+    after (0.30 ×).
+  * `pulsim.scope` (6.25 s cumulative in the first `-X importtime` run,
+    6.13 s of it pyqtgraph) no longer appears in the import.
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

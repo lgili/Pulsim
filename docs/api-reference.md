@@ -224,6 +224,10 @@ opts.store_every              # int
   `(num_steps, state_size)` (zero-copy view)
 - `result.commutation_events` — list[CommutationEvent] (event-detection details)
 - `result.num_steps()` — int
+- `result.step_loop_python_callbacks` — tuple naming the Python callables
+  `simulate()` put in the step loop (`"switch_fn"`, `"b_extra_fn"`,
+  `"step_observer"`, `"should_continue"`, `"closed_loops"`); `()` when the
+  loop ran fully native (e.g. a `make_pwm_switch_fn` schedule)
 
 ## Statistics over a result (time-weighted)
 
@@ -298,6 +302,35 @@ explicit `dt` the grid is uniform and `.mean()` agrees with
 `time_average` to about four significant digits (the difference is the
 half weight the trapezoid gives the two end samples) — the helpers are
 still the form that keeps working when the `dt` is dropped.
+
+## Parameter sweeps — `sweep` / `monte_carlo`
+
+```python
+out = p.sweep(builder_factory, params={"R": [5, 10, 20]}, kpi_fn=kpi,
+              parallel=True, n_workers=4, backend="auto",
+              t_end=1e-3, dt=1e-7, switch_fn=pwm)
+out.kpis["v_out"]; out.failed; out.backend   # "serial" | "thread" | "process"
+```
+
+`backend` applies when `parallel=True`:
+
+- `"auto"` (default) runs the first job in the calling thread and reads
+  its `res.step_loop_python_callbacks`. Empty (native schedule) → the
+  other jobs run on a thread pool; the kernel releases the GIL, so they
+  run in parallel. Any Python callable → a `multiprocessing.Pool`, since
+  threads would serialise on the GIL.
+- `"thread"` forces threads. `builder_factory` and `kpi_fn` then run
+  concurrently in one interpreter: they must not share mutable state.
+  Closures work (nothing is pickled).
+- `"process"` forces processes (the model before 2.1): every argument
+  must pickle, which the native schedules from `make_pwm_switch_fn` and
+  friends do not.
+
+Results are in job order and equal the serial run on every backend. A
+job that raises is recorded in `out.failed` as `(index, message)` on the
+serial and thread backends; the process backend raises. A run without a
+`switch_fn` still installs a Python default mask today, so it reports
+`("switch_fn",)` and `"auto"` keeps processes for it.
 
 ## YAML loader
 

@@ -443,24 +443,26 @@ from .mmc_thevenin import (
 # raise a clear ImportError pointing at the install command.
 from . import schematic  # noqa: F401
 
-# LiveScope is an optional import — only available when pyqtgraph
-# is installed. We tolerate the absence so headless environments
-# still load `pulsim` without complaint.
+# LiveScope is optional (pyqtgraph + a Qt binding) and slow to import
+# (about half of `import pulsim`), so `pulsim.LiveScope` is resolved on
+# first access by the module `__getattr__` below; `import pulsim` never
+# imports `pulsim.scope`. Availability is probed without importing.
 try:
-    from .scope import LiveScope  # noqa: F401  (re-exported below via __all__)
-    _HAS_SCOPE = True
-except ImportError:  # pragma: no cover
-    _HAS_SCOPE = False
+    import importlib.util as _ilu
+    _HAS_SCOPE = _ilu.find_spec("pyqtgraph") is not None
+except ValueError:  # already in sys.modules without a __spec__ (a stub)
+    import sys as _sys
+    _HAS_SCOPE = _sys.modules.get("pyqtgraph") is not None
 
-# Importing the ``pulsim.scope`` submodule (above) makes the import
-# system bind the *module* to the package attribute ``scope``, which
-# silently replaced the ``pulsim.scope(builder, result, ...)`` plotting
-# function imported from ``.plot`` -- ``p.scope(...)`` then raised
-# ``TypeError: 'module' object is not callable``. Rebind the function.
-# The submodule stays importable: it is cached in ``sys.modules``, so
-# ``import pulsim.scope`` and ``from pulsim.scope import LiveScope`` keep
-# working and do not re-bind the attribute. (``import pulsim.scope as m``
-# resolves the attribute first and therefore yields the function; use
+# Importing the ``pulsim.scope`` submodule makes the import system bind
+# the *module* to the package attribute ``scope``, which silently replaced
+# the ``pulsim.scope(builder, result, ...)`` plotting function imported
+# from ``.plot`` -- ``p.scope(...)`` then raised ``TypeError: 'module'
+# object is not callable``. The package refuses that one rebinding (see
+# `_PulsimModule` at the end of this file), so ``import pulsim.scope``
+# and ``from pulsim.scope import LiveScope`` work at any time and leave
+# the function in place. (``import pulsim.scope as m`` resolves the
+# attribute first and therefore yields the function; use
 # ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
 from .plot import scope  # noqa: E402,F811
 
@@ -1500,6 +1502,26 @@ class SolverOptions:
     dt_init: Optional[float] = None
 
 
+def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
+    """Names of the hooks that put a Python callable in the step loop.
+
+    Pass the objects actually handed to the engine. A switch_fn is
+    native when the kernel calls it in C++: a native PWM class, or a
+    `SwitchSchedule` with an edge oracle (a combination that holds a
+    Python callable has none). Any other non-None hook is Python.
+    """
+    out = []
+    for name, fn in hooks.items():
+        if fn is None:
+            continue
+        if name == "switch_fn" and (
+                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm))
+                or (isinstance(fn, SwitchSchedule) and fn.has_edges)):
+            continue
+        out.append(name)
+    return tuple(out)
+
+
 def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         label):
     """Compose an internal (observer, b_extra) pair with the user's.
@@ -2111,6 +2133,13 @@ def simulate(
             # accessors the pwl engine gets now mean the same thing
             # here. `_builder` is what they resolve names against.
             _dsed_res._builder = builder
+            # No switch_fn: the DSED dispatcher installs a Python
+            # all-closed lambda, so a placeholder stands in for it.
+            _dsed_res.step_loop_python_callbacks = (
+                _step_loop_python_callbacks(
+                    switch_fn=(switch_fn if switch_fn is not None
+                               else "default"),
+                    b_extra_fn=b_extra_fn))
         except AttributeError:  # pragma: no cover
             pass
         return _dsed_res
@@ -2351,6 +2380,11 @@ def simulate(
         res._trbdf2_stats = _stats
         res.engine_used = "trbdf2"
         res.engine_route_reason = None
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            step_observer=_auto_observer,
+            should_continue=should_continue,
+            closed_loops=closed_loops or None)
         # The implausible-voltage detector is engine-independent
         # (it reads the trace, not the stepper) and this engine's
         # new all-OPEN default mask makes the inductor-open case it
@@ -2892,6 +2926,12 @@ def simulate(
         res.engine_used = "pwl"
         res.engine_route_reason = (
             "; ".join(_route_reasons) if _route_reasons else None)
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the chain fast path runs the observer's C++ chain
+            step_observer=None if cxx_chain is not None else step_observer,
+            should_continue=should_continue,
+            closed_loops=_closed_loops_user or None)
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -3529,6 +3569,16 @@ def __getattr__(name: str):
     if name.startswith("__"):
         raise AttributeError(
             f"module 'pulsim' has no attribute {name!r}")
+    if name == "LiveScope":
+        try:
+            from .scope import LiveScope
+        except ImportError as exc:
+            raise AttributeError(
+                "pulsim.LiveScope needs the optional dependency "
+                "pyqtgraph (and a Qt binding such as PySide6): "
+                f"pip install pyqtgraph PySide6. ({exc})") from exc
+        globals()["LiveScope"] = LiveScope
+        return LiveScope
     # A name that lives in an already-imported submodule: say where.
     import sys as _sys
     homes = sorted(
@@ -3543,3 +3593,22 @@ def __getattr__(name: str):
         f"{name!r}.{where} Run `python -m pulsim.guide` for the "
         f"current API, and see docs/migration-guide.md if you're "
         f"porting v1 code.")
+
+
+import sys as _sys  # noqa: E402
+import types as _types  # noqa: E402
+
+
+class _PulsimModule(_types.ModuleType):
+    """Keeps ``pulsim.scope`` the plotting function: the import system
+    sets the package attribute to the submodule on the first
+    ``import pulsim.scope`` (see the note above ``from .plot import
+    scope``)."""
+
+    def __setattr__(self, name, value):
+        if name == "scope" and isinstance(value, _types.ModuleType):
+            return
+        super().__setattr__(name, value)
+
+
+_sys.modules[__name__].__class__ = _PulsimModule

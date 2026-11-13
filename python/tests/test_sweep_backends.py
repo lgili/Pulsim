@@ -1,0 +1,205 @@
+"""Sweep backends and the step-loop callback report they route on.
+
+`sweep` / `monte_carlo` with ``parallel=True`` run on threads when the
+step loop is native (the kernel releases the GIL) and on processes when
+it calls Python. Every check here is deterministic: results must be
+identical to the serial run, never "faster than".
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+import pulsim as p
+
+T_END, DT = 2e-4, 1e-7  # 2000 steps: tiny, the point is equality
+
+
+def build_buck(R=10.0):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("Q1", "vin", "sw", g_on=1e3, g_off=1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", R)
+    return b
+
+
+def build_rc(R=10.0):
+    """No switch at all; picklable, so it can reach a process pool (the
+    native schedules from make_pwm_switch_fn cannot)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vs", "in", "gnd", 0.0, 10.0, 5e3)
+    b.add_resistor("R", "in", "vout", R)
+    b.add_capacitor("C", "vout", "gnd", 1e-6)
+    return b
+
+
+def native_pwm(duty=0.5):
+    b = build_buck()
+    return p.make_pwm_switch_fn(100e3, duty, b.switch_index_of("Q1"),
+                                b.graph.num_switches)
+
+
+class PyPwm:
+    """A picklable Python switch_fn (a lambda would not reach a process
+    pool)."""
+
+    def __init__(self, duty):
+        b = build_buck()
+        self.duty = duty
+        self.n, self.q1 = b.graph.num_switches, b.switch_index_of("Q1")
+
+    def __call__(self, t):
+        m = p.SwitchStateMask(self.n)
+        if (t * 100e3) % 1.0 < self.duty:
+            m.set(self.q1, True)
+        return m
+
+
+def kpi(res, params):
+    v = np.asarray(res.v("vout"))
+    return {"v_end": float(v[-1]), "v_sum": float(v.sum())}
+
+
+LOADS = [5.0 + k for k in range(8)]  # every job differs: order shows
+
+
+def failing_build(R):
+    if R == LOADS[3]:
+        raise RuntimeError("job three refuses")
+    return build_buck(R)
+
+
+def _sweep(switch_fn=None, **kw):
+    return p.sweep(build_buck, params={"R": LOADS}, kpi_fn=kpi,
+                   t_end=T_END, dt=DT, switch_fn=switch_fn or native_pwm(),
+                   verbose=False, **kw)
+
+
+def _sweep_rc(**kw):
+    return p.sweep(build_rc, params={"R": LOADS}, kpi_fn=kpi,
+                   t_end=T_END, dt=DT, verbose=False, **kw)
+
+
+def _assert_same(a, b):
+    assert a.kpis.keys() == b.kpis.keys()
+    for k in a.kpis:
+        assert np.array_equal(a.kpis[k], b.kpis[k]), k
+    for k in a.params:
+        assert np.array_equal(a.params[k], b.params[k]), k
+
+
+# ---- step-loop callback report -------------------------------------------
+
+@pytest.mark.parametrize("engine,dt", [("pwl", DT), ("trbdf2", None),
+                                       ("dsed", None)])
+def test_native_schedule_reports_no_python_callback(engine, dt):
+    res = p.simulate(build_buck(), t_end=T_END, dt=dt, engine=engine,
+                     switch_fn=native_pwm())
+    assert res.step_loop_python_callbacks == ()
+
+
+@pytest.mark.parametrize("engine,dt", [("pwl", DT), ("trbdf2", None),
+                                       ("dsed", None)])
+def test_python_switch_fn_is_reported(engine, dt):
+    res = p.simulate(build_buck(), t_end=T_END, dt=dt, engine=engine,
+                     switch_fn=PyPwm(0.5))
+    assert res.step_loop_python_callbacks == ("switch_fn",)
+
+
+def test_step_observer_is_reported():
+    res = p.simulate(build_buck(), t_end=T_END, dt=DT,
+                     switch_fn=native_pwm(), step_observer=lambda t, x: None)
+    assert "step_observer" in res.step_loop_python_callbacks
+    assert "switch_fn" not in res.step_loop_python_callbacks
+
+
+def test_combination_with_a_python_callable_is_reported():
+    n = build_buck().graph.num_switches
+    mixed = p.make_combined_switch_fn(n, [native_pwm(), PyPwm(0.1)])
+    res = p.simulate(build_buck(), t_end=T_END, dt=DT, switch_fn=mixed)
+    assert res.step_loop_python_callbacks == ("switch_fn",)
+
+
+# ---- sweep backends --------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def serial():
+    return _sweep()
+
+
+def test_native_sweep_runs_on_threads_with_serial_results(serial):
+    assert serial.backend == "serial"
+    par = _sweep(parallel=True, n_workers=4)
+    assert par.backend == "thread"
+    assert par.failed == []
+    _assert_same(par, serial)
+
+
+def test_python_callback_sweep_runs_on_processes():
+    ser = _sweep(switch_fn=PyPwm(0.5))
+    par = _sweep(switch_fn=PyPwm(0.5), parallel=True, n_workers=2)
+    assert par.backend == "process"
+    _assert_same(par, ser)
+
+
+def test_forced_backends_are_honoured():
+    ser_rc = _sweep_rc()
+    assert len(set(ser_rc.kpis["v_end"])) == len(LOADS)
+    proc = _sweep_rc(parallel=True, n_workers=2, backend="process")
+    assert proc.backend == "process"
+    _assert_same(proc, ser_rc)
+    ser_py = _sweep(switch_fn=PyPwm(0.5))
+    thr = _sweep(switch_fn=PyPwm(0.5), parallel=True, n_workers=2,
+                 backend="thread")
+    assert thr.backend == "thread"
+    _assert_same(thr, ser_py)
+
+
+def test_unknown_backend_is_refused():
+    with pytest.raises(ValueError, match="backend"):
+        _sweep(parallel=True, backend="dask")
+
+
+def test_failing_job_is_isolated_on_threads():
+    out = p.sweep(failing_build, params={"R": LOADS}, kpi_fn=kpi,
+                  t_end=T_END, dt=DT, switch_fn=native_pwm(),
+                  parallel=True, n_workers=4, backend="thread",
+                  verbose=False)
+    assert [i for i, _ in out.failed] == [3]
+    assert "job three refuses" in out.failed[0][1]
+    v = out.kpis["v_end"]
+    assert np.isnan(v[3]) and np.isfinite(np.delete(v, 3)).all()
+
+
+def test_unpicklable_builder_factory_runs_on_threads(serial):
+    offset = 0.0
+
+    def closure_build(R):  # a closure: pickle refuses it
+        return build_buck(R + offset)
+
+    out = p.sweep(closure_build, params={"R": LOADS}, kpi_fn=kpi,
+                  t_end=T_END, dt=DT, switch_fn=native_pwm(),
+                  parallel=True, n_workers=4, verbose=False)
+    assert out.backend == "thread"
+    _assert_same(out, serial)
+
+
+def test_seeded_monte_carlo_is_backend_independent():
+    def run(**kw):
+        return p.monte_carlo(
+            build_rc, distributions={"R": lambda r: r.uniform(5.0, 15.0)},
+            kpi_fn=kpi, n_samples=4, seed=42, t_end=T_END, dt=DT,
+            verbose=False, **kw)
+
+    ser = run()
+    # No switch_fn: the fixed engine installs a Python default mask, so
+    # "auto" keeps processes.
+    for backend, ran in (("auto", "process"), ("thread", "thread"),
+                         ("process", "process")):
+        par = run(parallel=True, n_workers=2, backend=backend)
+        assert par.backend == ran
+        _assert_same(par, ser)

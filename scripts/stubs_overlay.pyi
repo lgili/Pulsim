@@ -35,6 +35,11 @@ class SimulationResult:
     engine_route_reason: str | None
     """Why ``engine="auto"`` did not take the variable-step path, or
     ``None`` when it did (or when the engine was chosen explicitly)."""
+    step_loop_python_callbacks: tuple[str, ...]
+    """Names of the Python callables :func:`pulsim.simulate` installed in
+    the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
+    ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
+    empty when the loop ran fully native."""
     @typing.overload
     def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload
