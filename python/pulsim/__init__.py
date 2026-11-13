@@ -803,11 +803,21 @@ _RESOLUTION_UNESTIMATED_MAX = 0.5
 
 
 def _warn_unlocated_edges(res):
-    """Event splitting without an edge oracle (review M3): say so once."""
+    """Fixed-step loop counters that mean a less accurate step: say so once.
+
+    * ``unlocated_gate_steps`` (review M3 / L4): a gate change from a
+      switch_fn without an edge oracle that happened INSIDE the previous
+      step (an edge exactly on the grid is not counted);
+    * ``split_event_overflows`` (L5): steps with more events than the
+      split takes; the rest were taken unsplit (first order there);
+    * ``stage2_retry_failures`` (M3): restart stage-2 backward-Euler
+      re-tries that failed, so the SDIRK stage 2 they were checking was
+      kept (it may carry an overshoot of the diode mode change).
+    """
     c = getattr(res, "counters", None) or {}
+    import warnings
     n = c.get("unlocated_gate_steps", 0)
     if n:
-        import warnings
         warnings.warn(
             f"simulate(enable_substep_state_correction=True): {n} gate "
             "change(s) came from a switch_fn without next_edge_after(t) "
@@ -815,6 +825,23 @@ def _warn_unlocated_edges(res):
             "at the next grid point (first order there). Give the "
             "schedule an oracle (make_pwm_switch_fn & co. have one) or "
             "put the edges on the dt grid. See res.counters.",
+            UserWarning, stacklevel=3)
+    n = c.get("split_event_overflows", 0)
+    if n:
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} step(s) "
+            "had more events than the event split takes (8 per step); "
+            "the events beyond it were taken unsplit, first order there. "
+            "Reduce dt. See res.counters['split_event_overflows'].",
+            UserWarning, stacklevel=3)
+    n = c.get("stage2_retry_failures", 0)
+    if n:
+        warnings.warn(
+            f"simulate(discontinuity_restart=True): {n} restart step(s) "
+            "changed a diode's mode in SDIRK stage 2 and the backward-Euler "
+            "re-try that checks it failed; the SDIRK stage 2 was kept and "
+            "may overshoot the mode change. Reduce dt. See "
+            "res.counters['stage2_retry_failures'].",
             UserWarning, stacklevel=3)
 
 
@@ -1172,6 +1199,14 @@ def _result_i(self, name: str, t=None, *, port=None):
             break
         except Exception:  # noqa: BLE001 — wrong device kind
             continue
+    if state_idx is None:
+        # A branch-form switch or diode solves its own current i_s.
+        fn = getattr(builder.pool, "branch_var_id_for_switch", None)
+        try:
+            k = int(fn(b_id, builder.graph)) if fn else -1
+        except Exception:  # noqa: BLE001 — not a switched branch
+            k = -1
+        state_idx = k if k >= 0 else None
     states = _sa(self)
     if state_idx is not None:
         # Owned, writable copy of the single column — see the note
@@ -1853,6 +1888,7 @@ def simulate(
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
+    on_impulse: str = "record",
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -2219,6 +2255,10 @@ def simulate(
     # column) until the default flip (DECISIONS #3).
     if engine == "exact":
         engine = "dsed"
+    # Every engine: those that refuse dependent modes never record.
+    if on_impulse not in ("record", "warn", "error"):
+        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
+                         "'record', 'warn' or 'error'")
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2523,6 +2563,13 @@ def simulate(
             #   no dt         -> the engine picks, and uses the
             #                    variable-step path when it can
             # which makes the new engine opt-in by OMISSION.
+            # A branch-form circuit trbdf2 refuses routes, not raises (review H4).
+            from . import _pulsim as _k  # type: ignore[import-not-found]
+            try:
+                _k._require_supported(builder.graph, builder.pool, "trbdf2")
+            except UnsupportedError as e:
+                if e.feature in ("branch_form", "dependent_states"):
+                    _route_reasons = [*_route_reasons, str(e)]
             if dt is not None and dt > 0:
                 _route_reasons = _route_reasons or [
                     "an explicit dt was given, which requests a "
@@ -2570,6 +2617,10 @@ def simulate(
             "engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
+        # add-branch-form-ideal-switch: a branch-form diode is refused
+        # here by name (the table's form row; the switch runs).
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _k._require_supported(builder.graph, builder.pool, "trbdf2")
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
@@ -2953,6 +3004,7 @@ def simulate(
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
+    opts.on_impulse_error = on_impulse == "error"
     if resolution_diagnostics is not None:
         opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
@@ -3297,6 +3349,15 @@ def simulate(
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
     _warn_unlocated_edges(res)
+    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
+        import warnings
+        r0 = res.reinit_records[0]
+        warnings.warn(
+            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
+            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
+            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
+            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
+            UserWarning, stacklevel=2)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

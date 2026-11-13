@@ -975,6 +975,110 @@ def test_voltage_sanity_factor_honoured_on_every_engine(engine):
                        voltage_sanity_factor=0.5, **kw)
     assert r._implausible_voltage.peak == pytest.approx(10.0)
 
+
+# ---------------------------------------------------------------------
+# The branch form (add-branch-form-ideal-switch 4.3): a FORM of the
+# Switch and Diode kinds with its own engine column, checked like the
+# kind cells (no silent cell) and against the docs block.
+# ---------------------------------------------------------------------
+def _switch_branch(on):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("Rb", "in", "gnd", 1e3)
+    if on:
+        b.add_ideal_switch("Sd", "in", "a", 1e-3, 1e-9)
+    b.add_resistor("R1", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 100e-9)
+    return b
+
+
+FORM_CELLS = {
+    "Switch": (_switch_branch, "o", "Sd", 5e-4, 1e-7, True),
+    "Diode": (_clamp(lambda b: b.add_diode("Dd", "o", "gnd", form="branch",
+                                           R_on=1e-3, g_off=1e-9,
+                                           V_th=0.701, V_f=0.7)),
+              "o", "Dd", 2e-3, 2e-7, False),
+}
+
+
+def test_branch_form_rows_cover_switch_and_diode():
+    caps = k._branch_form_capabilities()
+    assert set(caps) == set(FORM_CELLS)
+    for row in caps.values():
+        assert row["pwl"], "the reference engine runs the branch form"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("kind", list(FORM_CELLS))
+def test_branch_form_cell(kind, engine):
+    _check_cell(kind + "[branch]", FORM_CELLS[kind], engine,
+                k._branch_form_capabilities()[kind][engine])
+
+
+# Dependent modes (a switch opening an inductor cut-set, task 5.5): pwl
+# re-initialises under the restart rule; every other cell is refused by
+# name (trbdf2 statically, dsed/bdf1 because the branch form is refused).
+_DEP_REFUSAL = {"pwl": "dependent_states", "trbdf2": "dependent_states",
+                "dsed": "branch_form", "bdf1": "branch_form"}
+
+
+@pytest.mark.parametrize("engine,restart",
+                         [(e, False) for e in (*ENGINES, "exact")] + [("pwl", True)])
+def test_dependent_states_cell(engine, restart):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+    b.add_resistor("R", "a", "m", 1.0)
+    b.add_inductor("L", "m", "gnd", 1e-3)
+
+    def fn(t):
+        m = p.SwitchStateMask(1)
+        m.set(0, t < 2e-4)
+        return m
+    kw = dict(discontinuity_restart=True) if restart else {}
+    if engine in ("pwl", "dsed"):
+        kw["dt"] = 5e-6
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if engine == "bdf1":
+                r = k.run_transient_bdf1(
+                    b, k.SimulationOptions(t_start=0.0, t_end=3e-4, dt=5e-6), fn)
+            else:
+                r = p.simulate(b, 3e-4, engine=engine, switch_fn=fn, **kw)
+    except p.UnsupportedError as e:
+        named = "dsed" if engine == "exact" else engine  # the table column
+        assert (e.engine, e.feature, e.device) == (named, _DEP_REFUSAL[named], "S")
+        assert not (engine == "pwl" and restart), f"pwl+restart refused: {e}"
+        return
+    assert engine == "pwl" and restart, f"{engine} ran a dependent mode silently"
+    assert len(r.reinit_records) == 1
+
+
+@pytest.mark.parametrize("kind", list(FORM_CELLS))
+def test_branch_form_exact_alias_refuses_like_dsed(kind):
+    out = {}
+    for eng in ("dsed", "exact"):
+        with pytest.raises(p.UnsupportedError) as ei:
+            _run(*_args(FORM_CELLS[kind]), eng)
+        e = ei.value
+        out[eng] = (e.engine, e.feature, e.device, e.kind)
+    assert out["dsed"] == out["exact"] and out["dsed"][1] == "branch_form"
+
+
+def test_branch_form_matrix_equals_the_docs():
+    import pathlib
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
+           / "known-limitations.md").read_text(encoding="utf-8")
+    block = doc.split("<!-- branch-form-capabilities:begin -->")[1].split(
+        "<!-- branch-form-capabilities:end -->")[0]
+    cols = ("pwl", "trbdf2", "dsed", "bdf1", "ac_sweep")
+    doc_table = {}
+    for ln in block.strip().splitlines()[2:]:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
+    assert doc_table == k._branch_form_capabilities()
+
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
 # exact engine, 'dsed' its alias. Every keyword cell of 'dsed' holds under 'exact', and the
 # refusal keeps naming 'dsed' (the capability-table column; DECISIONS, group 13 slice).

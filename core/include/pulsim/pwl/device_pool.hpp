@@ -921,7 +921,52 @@ public:
 
     [[nodiscard]] Size state_size(const topology::Graph& graph) const noexcept {
         return static_cast<Size>(graph.num_nodes()) + num_sources_ +
-               num_inductors_;
+               num_inductors_ + num_branch_switches_;
+    }
+
+    // -------- add-branch-form-ideal-switch: branch-form switches ------------
+    //
+    // Layout: [nodes][V-source currents][inductor currents][branch-form
+    // switch currents]. A switch or diode registered here is stamped by
+    // `stamping::stamp_switch_branch_form` (design D1) instead of the
+    // conductance pair.
+
+    /// Mark an already-registered switch or diode as branch form.
+    void set_branch_form(Index branch_id, Real R_on) {
+        if (!branch_form_.contains(branch_id)) {
+            branch_form_[branch_id] = BranchForm{
+                R_on, static_cast<Index>(num_branch_switches_++)};
+        } else {
+            branch_form_[branch_id].R_on = R_on;
+        }
+    }
+
+    [[nodiscard]] bool is_branch_form(Index branch_id) const noexcept {
+        return branch_form_.contains(branch_id);
+    }
+
+    [[nodiscard]] Size num_branch_switches() const noexcept {
+        return num_branch_switches_;
+    }
+
+    [[nodiscard]] Real branch_R_on(Index branch_id) const {
+        const auto it = branch_form_.find(branch_id);
+        if (it == branch_form_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::branch_R_on: branch {} is not in branch form",
+                branch_id));
+        }
+        return it->second.R_on;
+    }
+
+    /// Absolute state index of a branch-form switch's current, or -1.
+    [[nodiscard]] Index branch_var_id_for_switch(
+        Index branch_id, const topology::Graph& graph) const noexcept {
+        const auto it = branch_form_.find(branch_id);
+        if (it == branch_form_.end()) return -1;
+        return static_cast<Index>(graph.num_nodes()) +
+               static_cast<Index>(num_sources_ + num_inductors_) +
+               it->second.rel;
     }
 
     // -------- Switch / parameter affected-column helpers (v1.4.0) -----------
@@ -950,9 +995,15 @@ public:
             if (branch.kind != topology::BranchKind::Switch) continue;
             if (cur == sw_idx) {
                 std::vector<Index> cols;
-                cols.reserve(2);
+                cols.reserve(3);
                 if (branch.from >= 0) cols.push_back(branch.from);
                 if (branch.to   >= 0) cols.push_back(branch.to);
+                // Branch form: the flip rewrites row `var` (columns from,
+                // to and var).
+                if (const Index v = branch_var_id_for_switch(branch.id, graph);
+                    v >= 0) {
+                    cols.push_back(v);
+                }
                 return cols;
             }
             ++cur;
@@ -1230,6 +1281,16 @@ private:
     numeric::Dictionary<Index, Index> inductor_branch_var_id_;
     Size num_inductors_ = 0;
 
+    // add-branch-form-ideal-switch: switches / diodes in branch form carry
+    // a current unknown AFTER the inductors (relative offset `rel`) and a
+    // series R_on (>= 0). Their g_off stays in the switch / diode params.
+    struct BranchForm {
+        Real R_on;
+        Index rel;
+    };
+    numeric::Dictionary<Index, BranchForm> branch_form_;
+    Size num_branch_switches_ = 0;
+
     // Diode branches in insertion order. Layer 5 V2's
     // DiodeEventState iterates this list to build per-diode
     // tracking entries.
@@ -1310,6 +1371,26 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"PulseCurrentSource", SolveClass::Source,         kAllEngines},
     {"PwlCurrentSource",   SolveClass::Source,         kAllEngines},
 });
+/// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
+/// Switch and Diode kinds (a form, not a kind: one row each, by the
+/// kind's name). The fixed trapezoid runs both; TR-BDF2 runs the
+/// controlled switch (its diode decision sites read the voltage only);
+/// dsed, bdf1 and the AC sweep refuse by name (`feature='branch_form'`).
+struct FormCaps {
+    std::string_view name;      // "Switch" / "Diode"
+    DevicePool::StoredKind kind;
+    std::uint8_t engines;
+    [[nodiscard]] constexpr bool supports(Engine e) const noexcept {
+        return (engines & engine_bit(e)) != 0;
+    }
+};
+inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
+    {"Switch", DevicePool::StoredKind::Switch,
+     static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
+                               engine_bit(Engine::TrBdf2))},
+    {"Diode", DevicePool::StoredKind::Diode, engine_bit(Engine::FixedTrap)},
+});
+
 static_assert(kKindCaps.size() == DevicePool::kNumKinds,
     "kKindCaps needs one row per DevicePool::StoredKind");
 

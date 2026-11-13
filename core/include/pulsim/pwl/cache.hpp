@@ -1380,7 +1380,12 @@ public:
             //     path-based attempt only when the union path covers
             //     > MAX_PATH_LENGTH_RATIO of the columns (where
             //     path-based wouldn't save work vs a fresh factorise).
-            bool try_path = can_try_partial;
+            // Branch form (add-branch-form-ideal-switch D2): a flip swaps
+            // (s, a) between 1 and -g_off and (s, s) between -R_on and 1;
+            // the path refactor keeps the old pivot order and lands on a
+            // g_off-sized pivot (|x - x_ref| = 1.3e4 on the 16-mask bridge).
+            // Refactor in full there; the conductance form is unchanged.
+            bool try_path = can_try_partial && pool_.num_branch_switches() == 0;
             if (try_path && pop > 1) {
                 const Index n_state = static_cast<Index>(
                     pool_.state_size(graph_));
@@ -2005,6 +2010,11 @@ private:
                 if (prev_mask.get(switch_idx) != curr_mask.get(switch_idx)) {
                     if (branch.from >= 0) uniq.insert(branch.from);
                     if (branch.to   >= 0) uniq.insert(branch.to);
+                    if (const Index v =
+                            pool_.branch_var_id_for_switch(branch.id, graph_);
+                        v >= 0) {
+                        uniq.insert(v);
+                    }
                 }
                 ++switch_idx;
             }

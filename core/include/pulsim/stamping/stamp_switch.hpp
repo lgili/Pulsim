@@ -76,4 +76,40 @@ inline void stamp_switch_fixed(sparse::Matrix& J, Vector& f,
     }
 }
 
+// add-branch-form-ideal-switch design D1: the switch as a branch with its
+// own current unknown `i_s` (column/row `var`), oriented from -> to.
+//   KCL(from) += i_s, KCL(to) -= i_s
+//   row var:  ON : (v_from - v_to) - R_on·i_s - V_f = 0
+//             OFF: -g_off·(v_from - v_to) + i_s     = 0
+// All five structural entries are written in BOTH states, even when the
+// value is 0 (`coeffRef(...) += 0` stores an explicit zero), so the
+// sparsity pattern is identical for every mask (one symbolic analysis).
+// R_on = 0 (a 0 V source) and g_off = 0 (i_s = 0) are legal; the (var,
+// var) entry is then 0 when ON and the numeric LU pivots.
+inline void stamp_switch_branch_form(sparse::Matrix& J, Vector& f,
+                                     const Vector& x,
+                                     const BranchCoord& coord, Index var,
+                                     bool closed, Real R_on, Real g_off,
+                                     Real v_drop_on = Real{0}) noexcept {
+    const bool from_active = node_is_active(coord.from);
+    const bool to_active   = node_is_active(coord.to);
+    const Real i_s = x[var];
+    const Real v_br = read_node_voltage(x, coord.from) -
+                      read_node_voltage(x, coord.to);
+    const Real a = closed ? Real{1} : -g_off;
+    const Real d = closed ? -R_on : Real{1};
+    if (from_active) {
+        f[coord.from] += i_s;
+        J.coeffRef(coord.from, var) += Real{1};
+        J.coeffRef(var, coord.from) += a;
+    }
+    if (to_active) {
+        f[coord.to] -= i_s;
+        J.coeffRef(coord.to, var) -= Real{1};
+        J.coeffRef(var, coord.to) -= a;
+    }
+    J.coeffRef(var, var) += d;
+    f[var] += a * v_br + d * i_s - (closed ? v_drop_on : Real{0});
+}
+
 }  // namespace pulsim::stamping

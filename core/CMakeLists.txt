@@ -526,6 +526,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v2/test_dc_assemble.cpp
         tests/layer4_v2/test_seeding.cpp
         tests/layer4_v2/test_integration_rc_dc_op.cpp
+        tests/layer4_v2/test_branch_form_switch.cpp
     )
     target_link_libraries(pulsim_core_layer4_v2_tests
         PRIVATE
