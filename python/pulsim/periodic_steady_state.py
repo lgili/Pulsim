@@ -145,6 +145,11 @@ class PeriodicSteadyStateResult:
         return self.x0
 
     @property
+    def exact(self):
+        """``orbit.exact``: the exact stepper's per-mask accuracy report."""
+        return getattr(self.orbit, "exact", None)
+
+    @property
     def floquet_radius(self) -> float:
         return float(np.abs(self.multipliers).max()) \
             if self.multipliers.size else 0.0
@@ -562,14 +567,10 @@ class _Solver:
         return g0, grad, den, fm, fp
 
     def pattern(self, traj):
-        out = []
-        for ev in traj.events:
-            t = ev["t"]
-            if ev["type"] in (_DIODE_ON, _DIODE_OFF):
-                g0, _g, den, _fm, _fp = self._saltation_terms(ev)
-                t = t - g0 / den      # one Newton step on the instant
-            out.append((ev["name"], t / self.T))
-        return out
+        # The stepper brackets each event to max(4u|t|, 1e-12 h); a Newton
+        # step on the instant moved the DCM turn-off by 3e-22 s (none on
+        # the boost), so the located instant is reported as it is.
+        return [(ev["name"], ev["t"] / self.T) for ev in traj.events]
 
     # -- monodromy (augmented with inputs) ----------------------------
     def jacobian(self, traj, inputs=()):
