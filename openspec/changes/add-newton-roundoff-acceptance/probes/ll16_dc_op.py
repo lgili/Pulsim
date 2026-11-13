@@ -8,6 +8,9 @@ DC regularisation (about 2e-12 ohm): 2.4e13 A. ll16's transient then
 starts from that state on every engine. Minimal reproducer:
 
     python ll16_dc_op.py
+
+Since 2026-11-13 the solve refuses it: pulsim.UnsupportedError naming
+V, L1 and L2 (feature 'dc_operating_point').
 """
 import numpy as np
 

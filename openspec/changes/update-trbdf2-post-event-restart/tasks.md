@@ -41,3 +41,7 @@
 
 ## 9. ll08 regression (follow-up)
 - [x] 9.1 `ll08_buck_mosfet` trbdf2 back to at most 0.00231 with the MOSFET half bridge kept at time-weighted error ≤ 3e-4 V and ≤ 200 rejects — 1.11e-4; 2.36e-4 V, 101 rejects (DECISIONS.md 13)
+
+## 10. DC operating point of a source-inductor loop (follow-up)
+- [x] 10.1 `compute_dc_op` and every DC entry refuse a loop of voltage sources, inductors, coupled windings and ideal-transformer windings by name (`UnsupportedError`, feature `dc_operating_point`), and a non-finite or absurd state; `test_dc_voltage_loop.py` (DECISIONS.md 14)
+- [x] 10.2 every caller lets the refusal through, except the v1 reader's DC start, which warns and starts from zero state; ll16 runs from zero (cells stay `error`), ll13 runs (new frozen cells)

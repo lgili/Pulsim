@@ -487,18 +487,14 @@ from control blocks other than PI → PWM (`hysteresis`, `integrator`,
 `limiter`, `lookup_table`, `gain`, `pid_controller`, `rate_limiter`,
 `sample_hold`), four PLL / dq circuits, a p-channel MOSFET, the v1
 saturable-inductor law, and a MOSFET with a loss/thermal block. Failing
-on `pwl` (3): `buck_igbt` (Newton does not converge),
-`ll05_diode_rectifier_filter` (no consistent DC diode configuration),
-`ll13_active_clamp_forward` (no DC operating point).
-`ll16_flyback_closed_loop` completes since the Newton roundoff
-acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
-The cause is the DC operating point it starts from: `compute_dc_op` on
-a voltage source across series inductors (ll16's Vin, Lleak, Lm)
-returns 2.4e13 A (the source over the inductors' DC regularisation)
-instead of refusing; reproducer
-`openspec/changes/add-newton-roundoff-acceptance/probes/ll16_dc_op.py`.
-Every Newton solve from there is at roundoff, and the run stays inside
-the acceptance's run budget (longest run 5, the budget 130).
+on `pwl` (2): `buck_igbt` (Newton does not converge),
+`ll05_diode_rectifier_filter` (no consistent DC diode configuration).
+`ll13_active_clamp_forward` and `ll16_flyback_closed_loop` have no DC
+operating point: Vin, Lleak_prim and Lm_core form a source-inductor
+loop. The DC solve refuses it by name (`UnsupportedError`, feature
+`dc_operating_point`) and the v1 reader starts both from zero state,
+with a warning. ll16 is not a flyback as written (Lm_core and Lsec are
+uncoupled): I(Lm_core) ramps to 604 A and the secondary is dead.
 The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in

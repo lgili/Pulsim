@@ -697,7 +697,7 @@ inline SimulationResult run_transient(
         auto dc = pwl::compute_dc_operating_point(
             graph, pool, switch_fn(opts.t_start), nl_static,
             dc_opts, has_diodes ? &diodes : nullptr,
-            "run_transient(start_from_dc_op)");
+            "run_transient(start_from_dc_op)", "pwl");
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
         initial_mask = dc.mask;

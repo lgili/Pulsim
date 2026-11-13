@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### DC operating point: refuse a loop that has no solution
+
+* **Fixed** `compute_dc_op`, `compute_dc_operating_point`,
+  `simulate(start_from_dc_op=True)` and `run_transient_bdf1(start_from_dc_op=True)`
+  returned a state for a voltage source across series inductors (48 V
+  across 2 µH + 158 µH: I = 2.4e13 A, the source over the inductors'
+  DC regularisation). A loop of voltage sources, inductors, coupled
+  windings and ideal-transformer windings whose voltages do not sum to
+  zero is now found before the solve and refused:
+  `pulsim.UnsupportedError` with `feature == "dc_operating_point"`,
+  naming every device in the loop. A DC state that is not finite or
+  exceeds 1e10 × the largest source is refused too. **Breaking** for
+  code that used such a state; start those circuits from zero state or
+  explicit initial conditions, or add the winding resistance. The
+  benchmark reader starts `ll13_active_clamp_forward` and
+  `ll16_flyback_closed_loop` (both such loops) from zero state with a
+  warning: ll13 now runs (it failed before), ll16 no longer starts from
+  2.4e13 A.
+
 ### TR-BDF2 event handling follow-up (update-trbdf2-post-event-restart)
 
 * **Fixed** `engine='trbdf2'` / `'auto'` on circuits with a Newton device

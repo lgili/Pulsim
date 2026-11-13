@@ -28,7 +28,7 @@ circuits:
   circuits/closed_loop/cl_buck_sample_hold.yaml: {status: skipped, reason: "component type 'sample_hold'"}
   circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
   circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
-  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}  # completes since add-newton-roundoff-acceptance (1645 accepts) but I(Lm_core) = 2.4e13 A from t = 0 (also before: it aborted at 37 us); no converged reference
+  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}  # the DC start is refused since 2026-11-13 (Vin-Lleak_prim-Lm_core is a source-inductor loop: it returned I(Lm_core) = 2.4e13 A); the v1 reader starts it from zero state. The circuit itself is not a flyback: Lm_core and Lsec are uncoupled, so I(Lm_core) ramps to 604 A (48 V x 2 ms / 160 uH) and the secondary is dead; pwl dt/2 vs dt/4 differ by 0.166, so still no converged reference
   circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
   circuits/diodes/diode_bridge_rectifier.yaml: {status: runs}
   circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}
@@ -136,7 +136,11 @@ circuits:
   # of span; 0.024 at dt/4 output).
   circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815, dsed: 0.148}}
   circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error, trbdf2: error}}
-  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: error, match: "no DC operating point", reason: "pwl: RuntimeError: compute_dc_operating_point: no DC operating point. The direct solve failed with: solve_with_newton: failed to converge after 5"}
+  # Was status error ("no DC operating point": Vin-Lleak_prim-Lm_core is a source-inductor
+  # loop). Since the DC loop refusal (2026-11-13) the v1 reader starts it from zero state, as
+  # uic does, and it runs. trbdf2 1.3e-3: worst V(ctrl_main), err_max 0.99 = a PWM source
+  # edge sampled between the two runs' grids (edge_rms 3.3e-5). pwl: V(clamp_node).
+  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 4.51, pwl+restart: 0.335, pwl+split: 0.335, trbdf2: 0.00133}}
   circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.207}}
   # pwm phase as a fraction (batch 6b): the B legs now switch half a period apart (twice the
   # edges); pwl 0.0142 -> 0.0274 on the strict gate with edge error 1.4e-8: edge timing on

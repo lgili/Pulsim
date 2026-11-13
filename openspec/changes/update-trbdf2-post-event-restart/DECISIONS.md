@@ -318,3 +318,49 @@ The open questions of `design.md` had no answer and none was marked
    reference gained samples (ll08: 0.2274 → 0.2278, 0.0843 → 0.0842).
    To reverse: drop `record_post_event()` and
    `restart_size_after_diode_event()` at the two event sites.
+
+14. **A DC operating point that does not exist is refused, not returned
+   (2026-11-13).** Question: `compute_dc_op` on 48 V across 2 µH +
+   158 µH returned I(L1) = 2.4e13 A (the source over the inductors'
+   1e-12 Ω DC regularisation), and `ll16_flyback_closed_loop` ran from
+   it. Options: (a) a residual or magnitude test on the result; (b)
+   find the loop structurally and refuse before solving; (c) both.
+   (c) taken. The structural rule: node potentials are propagated over
+   the branches whose DC voltage is fixed — voltage sources (DC, PWM,
+   sine, pulse at `t_eval`), inductors, coupled windings and saturable
+   inductors (shorts at DC) — with a weighted union-find; a branch whose
+   ends already have a fixed difference that disagrees with its own
+   closes a loop with a nonzero EMF. An ideal-transformer winding is
+   fixed once the other winding's ends are tied (v_s = n·v_p),
+   repeated to a fixpoint, and the refusal then also names the path
+   that tied the other winding. A loop whose EMF is zero (inductors in
+   parallel, a pulse source at 0 V at `t_eval`) has finite solutions
+   and is not flagged; controlled sources (VCVS, CCVS, gyrator) are not
+   followed. The refusal is `UnsupportedError(engine, 'dc_operating_point',
+   <the source>, <its kind>)`, listing every device in the loop and the
+   two ways out (zero state or explicit initial conditions; winding
+   resistance). It runs at the top of `compute_dc_op`,
+   `compute_dc_op_newton`, `compute_dc_op_with_strategy` and
+   `compute_dc_operating_point` — before any rung or direct-failure
+   handler that catches `std::exception` and would re-wrap it. After
+   the solve, a state that is not finite or exceeds 1e10 × the largest
+   source (at least 1) is refused (`runtime_error`, naming the unknown).
+   Callers: `simulate(start_from_dc_op=True)` (pwl; engine `'pwl'` in
+   the refusal), `run_transient_bdf1(start_from_dc_op=True)`,
+   `pulsim.compute_dc_op` and the AC / MNA-sweep / adaptive wrappers
+   all let it through; the only fallback is the benchmark v1 reader's
+   DC start, which catches exactly this feature, warns, and starts from
+   zero state (as `uic`). Evidence: of the 111 benchmark circuits the
+   reader builds, two are refused — ll16 (it had started from 2.4e13 A)
+   and `ll13_active_clamp_forward` (it had failed with "no DC operating
+   point" after Newton did not converge). ll16 now runs from zero; its
+   cells stay `error` (pwl dt/2 vs dt/4 differ by 0.166: no converged
+   reference) and the circuit itself is not a flyback (Lm_core and Lsec
+   are uncoupled; I(Lm_core) ramps to 604 A = 48 V·2 ms/160 µH). ll13
+   runs and is frozen at its first measured cells (pwl 4.51,
+   pwl+restart / pwl+split 0.335, trbdf2 0.00133 — worst V(ctrl_main), a
+   PWM source edge). The 11 examples and projects that start from the
+   DC operating point (`start_from_dc_op=True` or `compute_dc_op`) all
+   still run. To reverse: drop the `require_no_dc_voltage_loop` /
+   `require_sane_dc_state` calls in `pwl/dc_assemble.hpp`,
+   `pwl/dc_strategy.hpp` and `pwl/dc_operating_point.hpp`.
