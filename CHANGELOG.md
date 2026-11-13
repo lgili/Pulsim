@@ -8,6 +8,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### TR-BDF2 event handling follow-up (update-trbdf2-post-event-restart)
 
+* **Fixed** `engine='trbdf2'` / `'auto'` at tight tolerances no longer
+  grinds to `max_steps` on a node held only by OFF conductances. The
+  SEPIC benchmark at `rtol=1e-8, atol=1e-12` completes in 28,539
+  accepted steps (V_out 17.31570 V); the 325 V capacitor-input bridge
+  completes at `rtol=1e-6` and `1e-7` (bus within 0.007 V of `pwl`);
+  the Ćuk benchmark takes 12,828 steps instead of 78,414 at the
+  defaults. Causes: the error estimate's roundoff floor (h-independent
+  on such a node) sat above the scale, so every step was rejected to
+  `h_min`; zero-time diode cascades and landings that flipped no bit
+  were recorded as events and retaken. A step about to be rejected is
+  now accepted when its estimate is within its own roundoff floor
+  (`n_roundoff_floor_accepts` in `_trbdf2_stats`), and a cascade that
+  commutates nothing records no event. The step sequence changes only
+  on runs that reach those paths (the baseline bridge row: 1,437 → 1,356
+  accepted steps, time-weighted error 5.57e-2 → 2.73e-2).
 * **Fixed (silent wrong answer)** `engine='trbdf2'` / `'auto'`: a zero-time
   diode cascade decided the diode bits on a probe whose Newton solve had
   failed (its state was the warm start). A saturable inductor as a
@@ -72,7 +87,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
   grinds to `max_steps` on the SEPIC benchmark (it ran before the
   error-control change); the harness has no reference for it, so its
-  pwl and trbdf2 cells are `error` and not frozen.
+  pwl and trbdf2 cells are `error` and not frozen. Fixed in the TR-BDF2
+  event handling follow-up above.
 * **Changed** `ll16_flyback_closed_loop` completes on `pwl` with
   roundoff warnings (it aborted at 37 µs); its state is wrong from t = 0
   on the base tree too (I(Lm_core) ≈ 2.4e13 A). Triage keeps it `error`.

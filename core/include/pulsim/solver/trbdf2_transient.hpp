@@ -279,6 +279,11 @@ struct TrBdf2Stats {
     Size n_sdirk_steps = 0;
     /// Steps whose error estimate was filtered (W^-1 est).
     Size n_filtered_estimates = 0;
+    /// Steps accepted because their error estimate was within the
+    /// estimate's own roundoff floor (eps * J^-1 (|J||x| + |b|) read
+    /// through each entry), not within atol + rtol*|y|: the requested
+    /// tolerance is below what the solve can resolve at that state.
+    Size n_roundoff_floor_accepts = 0;
 };
 
 namespace detail_trbdf2 {
@@ -1393,6 +1398,8 @@ inline SimulationResult run_transient_trbdf2(
     Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
+    sparse::Matrix noise_J;
+    Vector noise_bc, noise_r, noise_rhs, noise_y, noise_y0;
     Vector b_filt, x_filt, x_filt0, b_zero;
     // est (state units: capacitor V, inductor A) -> W^-1 est: the
     // estimate as a state increment of a source-free BE step over
@@ -1834,10 +1841,72 @@ inline SimulationResult run_transient_trbdf2(
                 err_sq += w * w;
                 ++n_err;
             }
-            const Real err =
+            Real err =
                 n_err > 0 ? std::sqrt(err_sq
                                        / static_cast<Real>(n_err))
                            : Real{0};
+            // Roundoff floor of the estimate. A node tied to the rest of
+            // the circuit only through OFF conductances (a SEPIC with its
+            // switch and diode both off: sw and mid held by 2 x 1e-6 S)
+            // has a voltage error eps*(2C/h)*V/g_off from the elimination,
+            // and the estimate reads it through v_L/L as h*dv/L: constant
+            // in h (1e-10 A measured), so a scale of 1.5e-11 A (atol 1e-12,
+            // rtol 1e-8 at 1.4 mA) rejected every h down to h_min, where
+            // the noise turned an OFF diode 5 V forward and the run ground
+            // to max_steps. Only for a step about to be rejected: the
+            // floor (eps * J^-1 (|J||x| + |b|) through each entry's
+            // estimate) joins the scale, and the step is accepted when the
+            // estimate is within it. Steps that pass are unchanged.
+            if (err > Real{1} && !nl_effective && !sdirk
+                && !entries.empty()) {
+                pwl::assemble_segment(graph, pool, mask_step, hg,
+                                      noise_J, noise_bc);
+                noise_r = noise_J.cwiseAbs() * x_1.cwiseAbs();
+                noise_r += noise_bc.cwiseAbs() + b_stage.cwiseAbs();
+                noise_rhs = -noise_r;
+                cache.solve_at(mask_step, hg, noise_rhs, noise_y);
+                noise_rhs.setZero(static_cast<Index>(state_size));
+                cache.solve_at(mask_step, hg, noise_rhs, noise_y0);
+                noise_y = (noise_y - noise_y0).cwiseAbs()
+                          * std::numeric_limits<Real>::epsilon();
+                const Real kc = (Real{4} / hg) / (gamma * (Real{1} - gamma))
+                    + (std::abs(c1) + std::abs(c2) + std::abs(c3))
+                          / (h * (Real{1} - gamma));
+                const Real kl = Real{1} / gamma
+                    + Real{1} / (gamma * (Real{1} - gamma))
+                    + Real{1} / (Real{1} - gamma);
+                Real e2 = Real{0};
+                for (Size i = 0; i < entries.size(); ++i) {
+                    const auto& e = entries[i];
+                    const Real dv =
+                        stamping::read_node_voltage(noise_y, e.from)
+                        + stamping::read_node_voltage(noise_y, e.to);
+                    Real df;
+                    if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                        df = kc * dv;
+                    } else if (partner[i] == Size(-1)) {
+                        df = kl * dv / e.C_or_L;
+                    } else {
+                        const auto& ep = entries[partner[i]];
+                        const Real dvp =
+                            stamping::read_node_voltage(noise_y, ep.from)
+                            + stamping::read_node_voltage(noise_y, ep.to);
+                        const Real det = std::abs(e.C_or_L * ep.C_or_L
+                            - partner_M[i] * partner_M[i]);
+                        df = det > Real{1e-12} * e.C_or_L * ep.C_or_L
+                            ? kl * (ep.C_or_L * dv + std::abs(partner_M[i]) * dvp) / det
+                            : kl * dv / e.C_or_L;
+                    }
+                    const Real w = est_v[i]
+                        / (est_sc[i] + std::abs(Real{2} * clte * h) * df);
+                    e2 += w * w;
+                }
+                const Real err_n = std::sqrt(e2 / static_cast<Real>(entries.size()));
+                if (err_n <= Real{1}) {
+                    err = err_n;
+                    ++st.n_roundoff_floor_accepts;
+                }
+            }
 
             if (!std::isfinite(err)
                 || !x_1.allFinite()) {
@@ -1966,30 +2035,60 @@ inline SimulationResult run_transient_trbdf2(
                             ++st.n_held_diode_redecided;
                         }
                         if (chatter_n <= Size{3}) {
-                            for (Size it2 = 0;
-                                 it2 < opts.max_event_iterations;
-                                 ++it2) {
-                                // Probe, not a committed step.
-                                gates_decided = mask_at(t);
-                                require_probe(
-                                    probe_solve(gates_decided, t,
-                                                h_probe_floor, x_trial),
-                                    "a diode event,", t);
-                                x_sig = x_trial;
-                                if (!diodes.update_from_state(
-                                        x_trial)) {
+                            // The cascade decides at t; the crossing is up
+                            // to dt_floor later. When the probe at t still
+                            // reads the pre-crossing side (a turn-off whose
+                            // current is +2e-7 A at t and zero 2.4e-13 s
+                            // later), decide on a probe dt_floor long, the
+                            // post-crossing side, as a landing does. If that
+                            // changes no bit either, nothing commutated here:
+                            // no event is recorded (an OFF diode cannot "turn
+                            // off"). The SEPIC re-took such a step three
+                            // times, then guessed the bits from its end.
+                            const std::vector<bool> bits0 =
+                                diodes.snapshot_on_bits();
+                            for (const Real h_first : {h_probe_floor, dt_floor}) {
+                                for (Size it2 = 0;
+                                     it2 < opts.max_event_iterations;
+                                     ++it2) {
+                                    // Probe, not a committed step.
+                                    gates_decided = mask_at(t);
+                                    require_probe(
+                                        probe_solve(gates_decided, t,
+                                                    it2 == 0 ? h_first
+                                                             : h_probe_floor,
+                                                    x_trial),
+                                        "a diode event,", t);
+                                    x_sig = x_trial;
+                                    if (!diodes.update_from_state(
+                                            x_trial)) {
+                                        break;
+                                    }
+                                }
+                                if (diodes.snapshot_on_bits() != bits0) {
                                     break;
                                 }
                             }
-                            result.commutation_events.push_back(
-                                {t,
-                                 diodes.entries()[cross_idx]
-                                     .branch_id,
-                                 diodes.entries()[cross_idx]
-                                     .is_on});
-                            ++st.n_diode_events;
-                            sdirk_left = n_sdirk_diode;
-                            commutated = true;
+                            if (diodes.snapshot_on_bits() != bits0) {
+                                result.commutation_events.push_back(
+                                    {t,
+                                     diodes.entries()[cross_idx]
+                                         .branch_id,
+                                     diodes.entries()[cross_idx]
+                                         .is_on});
+                                ++st.n_diode_events;
+                                sdirk_left = n_sdirk_diode;
+                                commutated = true;
+                            } else {
+                                // Nothing flipped: no event, no restart.
+                                // Retake the step at the same h; the
+                                // chatter guard below bounds the retries.
+                                // (Accepting it instead moved the SEPIC's
+                                // V_out by 7.5e-5 V; localising it inside
+                                // the step landed a V_th = 0 bridge diode
+                                // riding its boundary every 1.6e-12 s.)
+                                commutated = true;
+                            }
                         }
                         else {
                             // Guard exhausted. Take a SHORT step with
@@ -2164,6 +2263,8 @@ inline SimulationResult run_transient_trbdf2(
                     x = x_trial;
                     x_sig = x;
                     t += dt_land;
+                    const std::vector<bool> bits_land =
+                        diodes.snapshot_on_bits();
                     const bool flipped =
                         diodes.update_from_state(x);
                     // Zero-time cascade at t (fixed point over the
@@ -2187,10 +2288,26 @@ inline SimulationResult run_transient_trbdf2(
                             }
                         }
                     }
-                    result.commutation_events.push_back(
-                        {t,
-                         diodes.entries()[cross_idx].branch_id,
-                         diodes.entries()[cross_idx].is_on});
+                    // A cascade that undid the landing's flip decided
+                    // on a probe at h_zero, which for a node held only
+                    // by g_off is roundoff (a floating V_th = 0 bridge:
+                    // D1 read -212 V there, +0.06 V in the landed x).
+                    // Starting the next step from that probe re-found
+                    // the same "crossing" every 4e-11 s, 1e7 times.
+                    // Nothing commutated: no event; the next step
+                    // starts from the landed x, where a diode on its
+                    // forbidden side is re-decided at t under the
+                    // chatter guard.
+                    const bool net_flip =
+                        diodes.snapshot_on_bits() != bits_land;
+                    if (!net_flip) {
+                        x_sig = x;
+                    } else {
+                        result.commutation_events.push_back(
+                            {t,
+                             diodes.entries()[cross_idx].branch_id,
+                             diodes.entries()[cross_idx].is_on});
+                    }
                     result.times.push_back(t);
                     result.states.push_back(x);
                     result.event_iteration_count.push_back(0);
@@ -2205,8 +2322,10 @@ inline SimulationResult run_transient_trbdf2(
                     x_mask = mask_step;
                     x_mask_known = true;
                     gates_decided = mask_step;
-                    ++st.n_diode_events;
-                    sdirk_left = n_sdirk_diode;
+                    if (net_flip) {
+                        ++st.n_diode_events;
+                        sdirk_left = n_sdirk_diode;
+                    }
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
                     // KEEP the controller's h (see the gate-memory

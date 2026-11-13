@@ -405,9 +405,9 @@ on `pwl` (3): `buck_igbt` (Newton does not converge),
 acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
 The differential matrix (edge measure) records 53 `disagree` / `error`
 cells over 47 circuits as `known:` in `benchmarks/manifests/v2_triage.yaml`,
-plus `sepic` on pwl and trbdf2, whose trbdf2 reference grinds to
-`max_steps` (a TR-BDF2 regression, not frozen; integrated tree,
-2026-11-13, `benchmarks/REFERENCE_STATUS.md`). Each is an
+plus `sepic` on pwl and trbdf2, whose trbdf2 reference ground to
+`max_steps` (a TR-BDF2 regression, fixed on the TR-BDF2 track; see
+`benchmarks/REFERENCE_STATUS.md` for the current cells). Each is an
 open finding, not a tolerance. Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 

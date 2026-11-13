@@ -33,3 +33,8 @@
 ## 7. Verification
 - [x] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check; reference harness on the variable-step circuits — ruff clean; pytest 2016 passed, 4 skipped, 9 xfailed; ctest 749/749; stubs up to date
 - [x] 7.2 `openspec validate update-trbdf2-post-event-restart --strict` and `openspec validate --all --strict`
+
+## 8. Follow-up: tight-tolerance grinds (DECISIONS.md 12)
+- [x] 8.1 SEPIC at rtol 1e-8 / atol 1e-12: mechanism traced (estimate at its roundoff floor on g_off-held nodes; no-change zero-time events), fixed, `test_trbdf2_roundoff_floor.py` bounds accepted steps (28,539 against `max_steps`; V_out 17.31570 V)
+- [x] 8.2 325 V floating bridge at rtol 1e-6 and 1e-7 completes (1,971 and 3,241 accepted steps; bus within 0.007 V of pwl); landing cascades that undo their flip record no event
+- [x] 8.3 DCM strict xfail kept with the measured cause (4,325 steps below 1e-11 s; L·g_off mode and edge probes)

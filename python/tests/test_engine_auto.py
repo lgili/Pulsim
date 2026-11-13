@@ -177,14 +177,17 @@ def test_vth_hysteresis_gives_tolerance_convergence():
     assert st5["n_chatter_breaks"] <= 3
 
 
-def test_sliding_mode_diode_confesses():
-    """A diode that rides its conduction boundary is averaged, and the
-    engine must WARN with the mechanism, not stay silent. The circuit
-    is the snubbed boost (100 nF across a V_th = 0.7 diode), whose
-    diode current sits at zero while the snubber rings: 10 chatter
-    breaks in 6 ms, and the average still lands on the fixed engine
-    (last 3 ms: 53.678 V against 53.666 / 53.653 V at dt = 1e-8 /
-    5e-9).
+def test_snubbed_boost_boundary_is_decided_not_averaged():
+    """The snubbed boost (100 nF across a V_th = 0.7 diode), whose
+    diode current sits at zero while the snubber rings, took 5 chatter
+    breaks in 6 ms (10 before update-trbdf2-error-control) and warned
+    that it rode its conduction boundary. Those breaks were zero-time
+    cascades whose probe at t flipped nothing; they are now decided on
+    the post-crossing probe (DECISIONS.md 12 of
+    update-trbdf2-post-event-restart): 0 breaks, so no warning, and the
+    average is unchanged (last 3 ms: 53.678 V against 53.666 / 53.653 V
+    at dt = 1e-8 / 5e-9). The warning itself is pinned in
+    test_trbdf2_robustness.py.
 
     The V_th = 0 buck this used to run is in CCM and never slid: its
     5 "boundary rides" were the crossing detector reading the step
@@ -205,8 +208,12 @@ def test_sliding_mode_diode_confesses():
         m.set(q, (t % T) < 0.5 * T)
         return m
 
-    with pytest.warns(UserWarning, match="conduction boundary"):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
         res = p.simulate(b, t_end=6e-3, switch_fn=sf, engine="auto")
+    assert not [w for w in caught
+                if "conduction boundary" in str(w.message)]
+    assert res._trbdf2_stats["n_chatter_breaks"] == 0
     assert _mean_tail(res, "out") == pytest.approx(53.66, abs=0.05)
 
 

@@ -104,9 +104,12 @@ def test_ccm_error_not_above_twice_the_previous(ccm):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "not met: the DCM steps below 1e-11 s are the gate-edge probe steps "
-    "and the diode-landing sub-steps; the SDIRK first step after a diode "
-    "event does not remove them (DECISIONS.md 9)"))
+    "not met: 4,325 accepted steps below 1e-11 s (smallest 4e-15 s) are "
+    "the stiff L*g_off mode after a turn-off with residual current "
+    "(tau ~ 2e-13 s), which the raw estimate reads as error, and the "
+    "committed gate-edge probe steps; the roundoff floor does not fire "
+    "here (0 accepts) and the filter needs the SDIRK step (DECISIONS.md "
+    "9, 12)"))
 def test_dcm_no_step_below_1e_11(dcm):
     """Runs of accepted steps between 4e-14 and 1e-12 s before this
     change."""
