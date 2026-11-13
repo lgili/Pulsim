@@ -79,6 +79,42 @@ def test_ramp_corners_are_sample_times():
         assert np.abs(t - tc).min() < 1e-15
 
 
+
+def _pulse_i_rc():
+    """The pulse RC driven by a 10 mA pulse CURRENT source into R || C:
+    the same 10 V response as `_pulse_rc`."""
+    b = p.CircuitBuilder()
+    b.add_pulse_current_source("I", "a", "gnd", 0.0, 10e-3, T_ON, T_W,
+                               0.0, 0.0, 0.0)
+    b.add_resistor("R", "a", "gnd", R)
+    b.add_capacitor("C", "a", "gnd", C)
+    return b
+
+
+def test_current_source_corners_are_landed_like_the_voltage_sources():
+    """Integration seam: the waveform current sources' corners go through
+    the same source-breakpoint landing (left limit, restart) as the
+    pulse voltage source's: both jumps are samples and counted, and the
+    error at rtol 1e-6 is the voltage-source bound."""
+    res = p.simulate(_pulse_i_rc(), t_end=100e-6, engine="trbdf2",
+                     rtol=1e-6, atol=1e-9)
+    t = np.asarray(res.times)
+    for te in (T_ON, T_ON + T_W):
+        assert np.abs(t - te).min() < 1e-15
+    assert res._trbdf2_stats["n_source_breakpoints"] == 2
+    assert np.abs(np.asarray(res.v("a")) - _pulse_rc_exact(t)).max() < 1.9e-4
+    # table knots too
+    b = p.CircuitBuilder()
+    knots = [0.0, 10e-6, 10.1e-6, 40e-6, 40.1e-6, 120e-6]   # last knot after t_end
+    b.add_pwl_current_source("I", "a", "gnd", knots, [0, 0, 1e-2, 1e-2, 0, 0])
+    b.add_resistor("R", "a", "gnd", R)
+    b.add_capacitor("C", "a", "gnd", C)
+    r2 = p.simulate(b, t_end=100e-6, engine="trbdf2")
+    t2 = np.asarray(r2.times)
+    for tk in knots[1:-1]:
+        assert np.abs(t2 - tk).min() < 1e-15
+    assert r2._trbdf2_stats["n_source_breakpoints"] == 4
+
 VIN, L, CO, T = 24.0, 100e-6, 47e-6, 1e-5
 
 

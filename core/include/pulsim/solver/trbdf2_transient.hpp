@@ -1109,6 +1109,13 @@ inline SimulationResult run_transient_trbdf2(
                 }
             }
         }
+        // The waveform current sources' corners (pulse edges, table
+        // knots): landed, read at their left limit and restarted like
+        // the voltage sources' (add-controlled-source-set).
+        if (has_iwave) {
+            best = std::min(best,
+                sources::next_current_waveform_breakpoint(pool, graph, after));
+        }
         return best;
     };
 
@@ -1389,22 +1396,11 @@ inline SimulationResult run_transient_trbdf2(
                 && t_next_tick - t < h) {
                 h = std::max(t_next_tick - t, h_min);
             }
-            // Land the next current-source corner (pulse edge, table
-            // knot) exactly. shortcut: a local clamp; remove when
-            // update-trbdf2-error-control owns source breakpoints.
-            if (has_iwave) {
-                const Real t_bp =
-                    sources::next_current_waveform_breakpoint(pool, graph, t);
-                if (t_bp - t > h_min && t_bp - t < h) {
-                    h = t_bp - t;
-                }
-            }
-
             // ---- source-breakpoint landing ----
             bool landed_on_bp = false;
             Real bp_t = Real{0};
             const Real h_pre_bp = h;
-            if (!corners.empty()) {
+            if (!corners.empty() || has_iwave) {
                 bp_t = next_breakpoint_after(t);
                 if (bp_t <= t + h) {
                     h = std::max(bp_t - t, h_min);
