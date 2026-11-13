@@ -6,8 +6,6 @@ violated bound are typed records, never a default number, and any
 other exception propagates.
 """
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -16,6 +14,7 @@ from pulsim.design import (EvaluationRecord, Evaluator, Kpi, SteadySpec,
                            as_constraints, as_objectives, evaluate)
 
 from . import _design_reference as ref
+from ._checkout import assert_pulsim_is_this_checkout
 
 T = 1e-5
 CCM = dict(L=100e-6, C=47e-6, R=1.0, R_L=0.01, T=T, D=0.5)
@@ -53,8 +52,7 @@ def _ev(**kw):
 
 
 def test_the_tested_pulsim_is_this_tree():
-    assert Path(p.__file__).resolve().is_relative_to(
-        Path(__file__).resolve().parents[1])
+    assert_pulsim_is_this_checkout(p)
 
 
 # ---------------------------------------------------------------------

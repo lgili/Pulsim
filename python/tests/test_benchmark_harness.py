@@ -34,6 +34,8 @@ import metrics  # noqa: E402
 import v1_reader  # noqa: E402
 from analytic import BY_ID, CASES  # noqa: E402
 
+from ._checkout import assert_pulsim_is_this_checkout  # noqa: E402
+
 ANALYTIC = yaml.safe_load((BENCH / "manifests" / "analytic.yaml").read_text())["cases"]
 TRIAGE = yaml.safe_load((BENCH / "manifests" / "v2_triage.yaml").read_text())["circuits"]
 
@@ -46,7 +48,7 @@ def _quiet():
 
 
 def test_pulsim_under_test_is_this_checkout():
-    assert Path(pulsim.__file__).resolve().parents[2] == BENCH.parent
+    assert_pulsim_is_this_checkout(pulsim)
 
 
 # --------------------------------------------------------------- metrics ---
@@ -217,7 +219,7 @@ def test_unmapped_construct_is_named():
 # ---------------------------------------------------------------- triage ---
 
 def test_triage_lists_every_circuit_on_disk():
-    on_disk = {str(p.relative_to(BENCH)) for p in (BENCH / "circuits").rglob("*.yaml")}
+    on_disk = {p.relative_to(BENCH).as_posix() for p in (BENCH / "circuits").rglob("*.yaml")}
     assert len(on_disk) == 126
     assert set(TRIAGE) == on_disk
     assert {e["status"] for e in TRIAGE.values()} <= {"runs", "skipped", "error"}
