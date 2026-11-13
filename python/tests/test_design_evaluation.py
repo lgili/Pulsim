@@ -122,6 +122,74 @@ def test_design_id_depends_on_design_and_options_only():
         a.design_id({"v": [1.0, 2.0]})
 
 
+_SCALE = 1.0
+
+
+def _scaled(x):
+    return _SCALE * x
+
+
+class _Laws:
+    def __init__(self, k):
+        self.k = k
+
+    def lin(self, x):
+        return self.k * x
+
+    def sq(self, x):
+        return self.k * x * x
+
+
+def test_design_ids_of_different_functions_differ():
+    """Batch 6c review (d3): each pair below hashed equal before."""
+    import functools
+    import math
+    import subprocess
+    import sys
+    a = _ev()
+
+    def ids(*fs):
+        return [a.design_id({"f": f}) for f in fs]
+
+    def kw(x, *, k=1.0):
+        return k * x
+
+    def kw2(x, *, k=2.0):
+        return k * x
+    pairs = [
+        ids(lambda x: math.sin(x), lambda x: math.cos(x)),   # co_names
+        ids(kw, kw2) if kw.__qualname__ != kw2.__qualname__ else None,
+        ids(functools.partial(kw, k=1.0), functools.partial(kw, k=2.0)),
+        ids(_Laws(1.0).lin, _Laws(1.0).sq),
+        ids(_Laws(1.0).lin, _Laws(2.0).lin),
+    ]
+    for pr in filter(None, pairs):
+        assert pr[0] != pr[1]
+    # a global read by the function is part of its identity
+    global _SCALE
+    before = a.design_id({"f": _scaled})
+    _SCALE = 2.0
+    try:
+        assert a.design_id({"f": _scaled}) != before
+    finally:
+        _SCALE = 1.0
+    # keyword-only defaults alone
+    kw2.__qualname__ = kw.__qualname__
+    assert a.design_id({"f": kw}) != a.design_id({"f": kw2})
+    # a nested function hashes the same in another process (its code
+    # object's repr carries an address)
+    src = ("import sys; sys.path[:0] = {path!r}\n"
+           "from tests.test_design_evaluation import _ev\n"
+           "def outer(x):\n"
+           "    def inner(y):\n"
+           "        return y + 1\n"
+           "    return inner(x)\n"
+           "print(_ev().design_id({{'f': outer}}))\n").format(path=sys.path)
+    out = {subprocess.run([sys.executable, "-c", src], capture_output=True,
+                          text=True, check=True).stdout for _ in range(2)}
+    assert len(out) == 1, out
+
+
 def test_user_kpi_is_time_weighted():
     def mean_vout(per):
         return per.average(per.result.v("vout"))
@@ -180,6 +248,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
     def aborted(*a, **k):
         raise RuntimeError("did not settle after 64 rounds")
     monkeypatch.setattr(p, "simulate", aborted)
+    monkeypatch.setattr(p._pulsim, "dsed_period_map", aborted)   # pss route
     rec = _ev().evaluate(CCM)
     assert rec.status == "failed"
     assert "did not settle" in rec.reason
@@ -187,6 +256,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
     def bug(*a, **k):
         raise TypeError("a bug, not a design outcome")
     monkeypatch.setattr(p, "simulate", bug)
+    monkeypatch.setattr(p._pulsim, "dsed_period_map", bug)
     with pytest.raises(TypeError, match="a bug"):
         _ev().evaluate(CCM)
 
@@ -196,6 +266,7 @@ def test_not_implemented_and_recursion_errors_propagate(monkeypatch):
         def stub(*a, exc=exc, **k):
             raise exc("a stub or a bug")
         monkeypatch.setattr(p, "simulate", stub)
+        monkeypatch.setattr(p._pulsim, "dsed_period_map", stub)
         with pytest.raises(exc):
             _ev().evaluate(CCM)
 
@@ -284,23 +355,22 @@ def test_a_run_simulate_only_warns_about_is_failed_not_ok():
     assert rec.kpis == {}
 
 
-def test_a_trbdf2_missed_commutation_is_failed_not_ok():
-    """The floating bridge of test_trbdf2_robustness (rtol 2e-5): trbdf2
-    holds a diode against its rule and only warns; design maps it to
-    failed."""
-    from pulsim import design
-    b = p.CircuitBuilder()
-    b.add_sine_voltage_source("Vac", "s", "gnd", 0.0, 325.0, 50.0)
-    b.add_resistor("Rs", "s", "a", 1e-3)
-    p.add_bridge_rectifier(b, "BR", ac_a="a", ac_b="gnd", dc_pos="dp",
-                           dc_neg="dn")
-    b.add_inductor("Lf", "dp", "dq", 1e-3)
-    b.add_capacitor("C", "dq", "dn", 470e-6)
-    b.add_resistor("RL", "dq", "dn", 1e3)
-    with pytest.warns(RuntimeWarning, match="commutation rule forbids"):
-        res = p.simulate(b, t_end=0.06, engine="trbdf2", rtol=2e-5, atol=2e-8)
+def test_a_trbdf2_missed_commutation_is_failed_not_ok(monkeypatch):
+    """A trbdf2 run that holds a diode against its rule only warns;
+    design maps it to failed. The floating bridge that held BR__D4
+    (rtol 2e-5) no longer does since the TR-BDF2 roundoff-floor fix
+    (DECISIONS.md 12 of update-trbdf2-post-event-restart; no run in the
+    suite still holds one), so the diode-state record is supplied."""
+    from types import SimpleNamespace as NS
+
+    from pulsim import _diode_state, design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2", _trbdf2_stats={})
+    monkeypatch.setattr(
+        _diode_state, "diode_state_traces",
+        lambda b, r: {4: NS(name="BR__D4", n_rule_violations=3)})
     with pytest.raises(design._Failed, match="missed_commutation: .*BR__D4"):
-        design._raise_if_suspect(res, b)
+        design._raise_if_suspect(run, p.CircuitBuilder())
 
 
 def test_exact_is_the_dsed_engine_for_the_evaluator():
@@ -336,9 +406,131 @@ def test_a_guard_held_trace_or_an_undersampled_gate_is_failed(monkeypatch):
     import sys
     pss = sys.modules["pulsim.periodic_steady_state"]   # the name is the function
 
+    # the refusal is typed at its source (_Solver), so make the
+    # extraction itself fail
     def no_extract(*a, **k):
-        raise ValueError("periodic_steady_state: cannot extract this "
-                         "circuit's state space (test)")
-    monkeypatch.setattr(pss, "periodic_steady_state", no_extract)
+        raise RuntimeError("state space extraction failed (test)")
+    monkeypatch.setattr(pss, "_labels", no_extract)
     rec = _ev(steady=SteadySpec(method="pss")).evaluate(CCM)
     assert rec.status == "refused" and rec.refusal[1] == "state_space", rec
+
+
+def test_accepted_with_error_steps_are_counted():
+    """trbdf2 forced accepts and Newton roundoff accepts stay ``ok`` but
+    are counted in the record (DECISIONS 5), so a filter can see them."""
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="pwl", n_accept=10, newton_roundoff_accepts=2,
+             _trbdf2_stats={"n_forced_accepts": 3})
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert counters["forced_accepts"] == 3
+    assert counters["newton_roundoff_accepts"] == 2
+    run.newton_roundoff_accepts, run._trbdf2_stats = 0, {}
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert "forced_accepts" not in counters
+    assert "newton_roundoff_accepts" not in counters
+    run.resolution = NS(lte_max=0.5, ringing=[], unestimated_fraction=0.0)
+    design.Evaluator._count(run, counters, None)
+    assert counters["resolution_warnings"] == 1
+
+
+# ---------------------------------------------------------------------
+# batch 6c: the warnings that used to land `ok` with no counter
+# ---------------------------------------------------------------------
+
+def _opaque_buck(d):
+    b, sf = buck(d)
+    return b, sf.__call__                # no next_edge_after
+
+
+def test_unlocated_gate_edges_are_failed_not_ok():
+    """pwl + sub-step correction with an opaque gate: each edge is taken
+    at the next grid point (up to a whole step of duty error). Before
+    batch 6c this record was ok with v_out = 4.4674 V; the same design
+    with the oracle'd schedule reads 4.3033 V (3.8 % apart). dt = 4e-7
+    sums to 7.999999999999999e-05 over 8 periods: the KPI window must
+    read the run's end (it raised 'reaches outside the simulated span')."""
+    kw = dict(period=T, loads=("RL",), output="vout", engine="pwl",
+              steady=SteadySpec(method="transient", min_periods=8,
+                                max_periods=8, tol=10.0),
+              options=dict(dt=4e-7, discontinuity_restart=True,
+                           enable_substep_state_correction=True))
+    ok = Evaluator(buck, **kw).evaluate(CCM)
+    assert ok.status == "ok", ok.reason
+    assert ok.kpis["v_out"] == pytest.approx(4.3033, abs=1e-3)
+    with pytest.warns(UserWarning, match="could not be located"):
+        rec = Evaluator(_opaque_buck, **kw).evaluate(CCM)
+    assert rec.status == "failed", rec
+    assert rec.reason.startswith("unlocated_gate_edges: ")
+    assert rec.kpis == {}
+
+
+def test_a_floating_subnet_is_failed_and_retries_are_counted():
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2", n_accept=10,
+             _trbdf2_stats={"probe_floor_used": 1e-9})
+    with pytest.raises(design._Failed, match="floating_subnet: "):
+        design._raise_if_suspect(run, None)
+    run._trbdf2_stats = {}
+    run.dt_retries = [object(), object()]
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert counters["dt_retries"] == 2
+
+
+def test_a_polled_dsed_schedule_is_counted_and_its_kpis_are_unaffected():
+    """dsed bisects every edge it polls to the instant: an opaque PWM
+    gives the KPIs of the oracle'd one (measured equal to 1e-9) and stays
+    ok, with the polled runs counted."""
+    kw = dict(period=T, loads=("RL",), output="vout", engine="dsed",
+              steady=SteadySpec(method="transient", min_periods=8,
+                                max_periods=256, tol=1e-6))
+    a = Evaluator(buck, **kw).evaluate(CCM)
+    with pytest.warns(UserWarning, match="no next_edge_after"):
+        b = Evaluator(_opaque_buck, **kw).evaluate(CCM)
+    assert a.status == b.status == "ok", (a.reason, b.reason)
+    assert "polled_switch_fn_runs" not in a.counters
+    assert b.counters["polled_switch_fn_runs"] >= 2
+    for k in ("efficiency", "p_loss", "v_out", "ripple_v"):
+        assert b.kpis[k] == pytest.approx(a.kpis[k], rel=1e-6), k
+
+
+def test_a_roundoff_budget_abort_is_a_convergence_error_and_failed(
+        monkeypatch):
+    """TR-BDF2 track: 130 consecutive Newton roundoff accepts throw
+    NewtonRoundoffBudgetExceeded, which both engines' outer catch turns
+    into SimulationAborted (a ConvergenceError since batch 6c); the
+    evaluator maps it to failed. The budget is not reachable from Python
+    (max_consecutive is not exposed), so the abort is injected."""
+    assert issubclass(p.SimulationAborted, p.ConvergenceError)
+    assert issubclass(p.ConvergenceError, RuntimeError)
+    msg = ("solve_with_newton: 131 consecutive Newton solves ended at the "
+           "iteration budget and would each have been accepted at "
+           "round-off level")
+
+    def aborted(*a, **k):
+        raise p.SimulationAborted(msg)
+    monkeypatch.setattr(p, "simulate", aborted)
+    rec = _ev(engine="trbdf2", steady=SteadySpec(
+        method="transient")).evaluate(CCM)
+    assert rec.status == "failed", rec
+    assert rec.reason.startswith("SimulationAborted: solve_with_newton: 131")
+
+
+def test_roundoff_floor_accepts_are_counted():
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2", n_accept=10,
+             _trbdf2_stats={"n_roundoff_floor_accepts": 4})
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert counters["roundoff_floor_accepts"] == 4

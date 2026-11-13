@@ -419,37 +419,6 @@ late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
 records the largest lateness); `T < dt` is refused. `trbdf2` lands every
 tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
 
-### TR-BDF2 stalls at `h_min` after a hard switching edge
-
-With a Newton device in the circuit (a saturable transformer, a
-saturable inductor, a smooth junction), `engine='trbdf2'` — and
-`engine='auto'` when it routes there — can abort right after a hard
-switching edge with `Newton failed at t = ... with h already at
-h_min`. Both Newton norms are at their noise floor; the worst residual
-sits on a LINEAR inductor row scaled by `2L/h`. Reproducer: the
-snubbed flyback in
-`python/tests/test_saturable_transformer.py::test_engines_agree_below_saturation`
-(strict xfail), characterised in
-`python/tests/test_newton_stall_and_mask_chatter.py`.
-
-**Do not loosen `tol_newton_dx` / `tol_newton_res` to get past it.**
-That flyback, re-run with `tol_newton_dx=1e-5, tol_newton_res=1e-4`,
-completes and reports V_out = 3.53 V; the fixed engine
-(`engine='pwl', dt=1e-8`) gives 15.31 V. The absolute step test is
-load-bearing: making it scale-aware lets the DC cascade stop at a
-spurious root 10.67 V away (CHANGELOG 2.0.0, *Two engine defects
-characterised, and one tempting fix refuted*).
-
-**Workaround.** Run the circuit on `engine='pwl'` with an explicit
-`dt`. **Fix.** Needs the step controller not to drive `h` to `h_min`
-after an event landing, or a row-equilibrated Jacobian — not a
-tolerance change.
-
-A saturable inductor used as a buck's own inductor loses its whole
-current at a turn-off edge on TR-BDF2 (`v_sw` = 2.6e7 V; comment above
-`_gated_buck` in `test_trbdf2_stateful_with_diodes.py`; a fix is in
-progress). Use `engine='pwl'` with a `dt`.
-
 ### TR-BDF2 still refactors on every new step size
 
 `engine='trbdf2'` solves through one event solver per switch state.
@@ -522,16 +491,23 @@ on `pwl` (3): `buck_igbt` (Newton does not converge),
 `ll05_diode_rectifier_filter` (no consistent DC diode configuration),
 `ll13_active_clamp_forward` (no DC operating point).
 `ll16_flyback_closed_loop` completes since the Newton roundoff
-acceptance, through 1,645 roundoff accepts with a diverged state
-(I(Lm_core) ≈ 2.4e13 A from t = 0); a fix that makes it loud again is in
-progress.
+acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
+The cause is the DC operating point it starts from: `compute_dc_op` on
+a voltage source across series inductors (ll16's Vin, Lleak, Lm)
+returns 2.4e13 A (the source over the inductors' DC regularisation)
+instead of refusing; reproducer
+`openspec/changes/add-newton-roundoff-acceptance/probes/ll16_dc_op.py`.
+Every Newton solve from there is at roundoff, and the run stays inside
+the acceptance's run budget (longest run 5, the budget 130).
 The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. Two circuits have no valid reference and are `unverified`
-on every engine (`reference: suspect`): `sepic`, whose trbdf2 reference
-grinds to `max_steps` (an open TR-BDF2 regression), and `cuk_converter`:
+tolerance. One circuit has no valid reference and is `unverified`
+on every engine (`reference: suspect`), `cuk_converter`. (`sepic`
+carried the mark while its trbdf2 reference ground to `max_steps`. That
+grind is fixed, and the reference now gives pwl 1.9e-3 and trbdf2
+3.0e-5, both agree; dsed is a frozen `error`.)
 
 **`cuk_converter` is ill-posed as written; its reference is marked
 suspect.** `Drect` is reversed: the file (and its ngspice deck) put the

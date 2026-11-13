@@ -48,14 +48,6 @@ __all__ = [
 
 STATUSES = ("ok", "refused", "failed", "infeasible")
 
-# Messages of periodic_steady_state that are a non-convergence of the
-# design, not a configuration error (those are re-raised).
-_PSS_FAILURES = ("no periodic orbit found", "Newton made no progress",
-                 "I - M is singular", "the orbit is not isolated",
-                 "grazing event", "a period run failed",
-                 "the verification period moved")
-
-
 class _Failed(Exception):
     """Internal: a design-specific non-convergence (-> ``failed``)."""
 
@@ -117,6 +109,10 @@ class EvaluationRecord:
     counters: Mapping[str, Any]
     provenance: Mapping[str, str]
     wall_s: float = field(default=0.0, compare=False)
+    #: kpi -> {design variable: d kpi / d variable}, exact (the
+    #: ``gradients=`` of the evaluator); empty otherwise.
+    grads: Mapping[str, Mapping[str, float]] = field(
+        default_factory=lambda: FrozenDict())
 
     @property
     def seed(self) -> int:
@@ -182,9 +178,13 @@ class Kpi:
 
 @dataclass(frozen=True)
 class SteadyPeriod:
-    """What a user KPI sees: one steady period of the design."""
+    """What a user KPI sees: one steady period of the design.
 
-    result: Any
+    ``result`` is the ``simulate`` result holding the period
+    ``[t_from, t_to]``; on the kernel KPI path it is simulated on first
+    access."""
+
+    _result: Any
     builder: Any
     design: Mapping[str, Any]
     t_from: float
@@ -193,6 +193,12 @@ class SteadyPeriod:
     #: The default KPIs and the per-device losses (read-only).
     kpis: Mapping[str, float] = field(default_factory=dict)
     losses: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+
+    @property
+    def result(self):
+        if isinstance(self._result, _Deferred):
+            object.__setattr__(self, "_result", self._result.make())
+        return self._result
 
     def average(self, y) -> float:
         """Time-weighted mean of a per-sample trace over the period."""
@@ -208,37 +214,93 @@ class SteadyPeriod:
 # hashing and provenance
 # ----------------------------------------------------------------------
 
-def _canon_value(v):
+def _code_digest(code) -> str:
+    """Bytecode, names and constants, nested code objects recursively
+    (their repr carries a memory address) and sets sorted (their order
+    follows the per-process string hash)."""
+    def const(c):
+        if isinstance(c, types.CodeType):
+            return _code_digest(c)
+        if isinstance(c, frozenset):
+            return sorted(repr(x) for x in c)
+        if isinstance(c, tuple):
+            return [const(x) for x in c]
+        return repr(c)
+    h = hashlib.sha256(code.co_code)
+    h.update(json.dumps([list(code.co_names), list(code.co_varnames),
+                         list(code.co_freevars),
+                         [const(c) for c in code.co_consts]]).encode())
+    return h.hexdigest()
+
+
+def _global_names(code, out):
+    out.update(code.co_names)
+    for c in code.co_consts:
+        if isinstance(c, types.CodeType):
+            _global_names(c, out)
+    return out
+
+
+def _opaque(v):
+    # no canonical form: type + repr, so two such values are equal only
+    # when their reprs are (an address in the repr makes it unique)
+    return {"opaque": f"{type(v).__module__}.{type(v).__qualname__}",
+            "repr": repr(v)}
+
+
+def _canon_value(v, _seen=None):
     if isinstance(v, (bool, str)) or v is None:
         return v
     if isinstance(v, (int, np.integer)):
         return int(v)
     if isinstance(v, (float, np.floating)):
         return float(v).hex()      # exact, and NaN/inf are representable
+    seen = set() if _seen is None else _seen
+    if id(v) in seen:
+        return {"recursive": f"{type(v).__qualname__}"}
+    seen = seen | {id(v)}
+
+    def canon(x):
+        return _canon_value(x, seen)
+
+    def canon_or_opaque(x):
+        try:
+            return canon(x)
+        except (TypeError, ValueError):
+            return _opaque(x)
     if isinstance(v, Mapping):
-        return {str(k): _canon_value(x) for k, x in sorted(v.items())}
+        return {str(k): canon(x) for k, x in sorted(v.items())}
     if isinstance(v, (tuple, list)):
-        return [_canon_value(x) for x in v]
+        return [canon(x) for x in v]
     if isinstance(v, np.ndarray):
-        return _canon_value(v.tolist())
+        return canon(v.tolist())
+    if isinstance(v, types.ModuleType):
+        return {"module": v.__name__}
+    if isinstance(v, functools.partial):
+        return {"partial": canon(v.func), "args": canon(list(v.args)),
+                "keywords": canon(dict(v.keywords))}
+    if isinstance(v, types.MethodType):
+        return {"method": canon(v.__func__), "self": canon_or_opaque(v.__self__)}
     if isinstance(v, types.FunctionType):
-        # name + code + defaults + captured values: two closures of one
-        # factory with different captures are different options
+        # name + code + defaults + captured values + the globals it reads:
+        # two closures of one factory, or two lambdas reading different
+        # globals, are different options
         code = v.__code__
-        cells = []
-        for c in v.__closure__ or ():
-            try:
-                cells.append(_canon_value(c.cell_contents))
-            except (TypeError, ValueError):
-                cells.append(type(c.cell_contents).__qualname__)
+        g = v.__globals__
+        glob = {n: canon_or_opaque(g[n])
+                for n in sorted(_global_names(code, set())) if n in g}
         return {"fn": f"{v.__module__}.{v.__qualname__}",
-                "code": hashlib.sha256(code.co_code + repr(
-                    code.co_consts).encode()).hexdigest(),
-                "defaults": _canon_value(list(v.__defaults__ or ())),
-                "cells": cells}
+                "code": _code_digest(code),
+                "defaults": canon(list(v.__defaults__ or ())),
+                "kwdefaults": canon(dict(v.__kwdefaults__ or {})),
+                "cells": [canon_or_opaque(c.cell_contents)
+                          for c in v.__closure__ or ()],
+                "globals": glob}
+    if isinstance(v, type):
+        return {"class": f"{v.__module__}.{v.__qualname__}"}
     if hasattr(v, "__dict__"):
         return {"type": f"{type(v).__module__}.{type(v).__qualname__}",
-                "fields": _canon_value(vars(v))}
+                "fields": canon(vars(v))}
     if callable(v):
         return f"{getattr(v, '__module__', '?')}.{getattr(v, '__qualname__', type(v).__qualname__)}"
     raise TypeError(
@@ -303,6 +365,18 @@ def _window(t, y, a, b):
 def _mean(t, y, a, b):
     from .stats import time_average
     return time_average(t, y, a, b)
+
+
+def _rms(t, y, a, b):
+    from .stats import time_rms
+    return time_rms(t, y, a, b)
+
+
+class _Deferred:
+    """A result made on first access (:attr:`SteadyPeriod.result`)."""
+
+    def __init__(self, make):
+        self.make = make
 
 
 def _extreme(tw, yw, k, sign):
@@ -387,6 +461,16 @@ class Evaluator:
         Keywords of :func:`pulsim.device_loss_summary`
         (``switch_specs``, ``diode_specs``, ``core_loss_specs``,
         ``conduction_specs``).
+    gradients
+        ``{design variable: '<component>.<field>'}`` (or a list of names
+        that are both): exact gradients of ``v_out``, ``ripple_v`` and
+        ``ripple_i.<L>`` on the ``pss`` route (the orbit sensitivities of
+        :func:`pulsim.periodic_steady_state`), in ``record.grads``; those
+        KPI values are then the closed forms the gradients belong to.
+        The circuit value must equal the design value (a scaled mapping
+        would give a scaled gradient: refused). The transient route and
+        the thermal loop are refused (``UnsupportedError``, feature
+        ``'gradients'``); no gradient is ever a finite difference.
     """
 
     def __init__(self, build: Callable, *, period,
@@ -400,7 +484,8 @@ class Evaluator:
                  engine: str = "auto",
                  samples_per_period: int = 2000,
                  options: Optional[Mapping[str, Any]] = None,
-                 loss_options: Optional[Mapping[str, Any]] = None):
+                 loss_options: Optional[Mapping[str, Any]] = None,
+                 gradients: Any = None):
         if steady.method not in ("pss", "transient", "auto"):
             raise ValueError(f"SteadySpec.method must be 'pss', 'transient' "
                              f"or 'auto', got {steady.method!r}")
@@ -434,6 +519,16 @@ class Evaluator:
         self.samples_per_period = samples_per_period
         self.options = dict(options or {})
         self.loss_options = dict(loss_options or {})
+        if gradients is not None and not isinstance(gradients, Mapping):
+            gradients = {str(g): str(g) for g in gradients}
+        self.gradients = dict(gradients) if gradients else None
+        if self.gradients and thermal is not None:
+            from ._refusal import unsupported
+            raise unsupported(
+                "design.evaluate", "gradients", "Evaluator: gradients= with "
+                "a thermal loop: the junction temperature depends on the "
+                "parameters through the loss model, which the exact path "
+                "does not differentiate (refused, never approximated).")
         self._options_digest = _digest(self._config())
 
     # -- identity --------------------------------------------------------
@@ -448,7 +543,7 @@ class Evaluator:
             constraints=self.constraints, thermal=th,
             steady=asdict(self.steady), engine=self.engine,
             samples=self.samples_per_period, options=self.options,
-            loss_options=self.loss_options)
+            loss_options=self.loss_options, gradients=self.gradients)
 
     def design_id(self, design: Mapping[str, Any]) -> str:
         return _digest({"design": dict(design),
@@ -470,16 +565,19 @@ class Evaluator:
         base = dict(design=_fz(design), design_id=did,
                     provenance=_fz(self._provenance()))
 
+        grads: dict = {}
+
         def rec(status, kpis=(), losses=(), t_j=(), violations=(),
                 reason=None, refusal=None):
             return EvaluationRecord(
                 status=status, kpis=_fz(dict(kpis)), losses=_fz(dict(losses)),
                 t_j=_fz(dict(t_j)), violations=_fz(dict(violations)),
                 reason=reason, refusal=refusal, counters=_fz(counters),
-                wall_s=time.perf_counter() - t0, **base)
+                wall_s=time.perf_counter() - t0,
+                grads=_fz({k: _fz(v) for k, v in grads.items()}), **base)
 
         try:
-            kpis, losses, t_j = self._evaluate(design, did, counters)
+            kpis, losses, t_j = self._evaluate(design, did, counters, grads)
         except UnsupportedError as e:
             return rec("refused", reason=str(e), refusal=(
                 str(e.engine), str(e.feature), str(e.device), str(e.kind)))
@@ -559,7 +657,7 @@ class Evaluator:
             return out
         return out, None
 
-    def _evaluate(self, design, did, counters):
+    def _evaluate(self, design, did, counters, grads=None):
         T = self._period_of(design)
         b, sf = self._build(design)
         run, a, z = self._steady(b, sf, T, counters)
@@ -568,6 +666,8 @@ class Evaluator:
             rows, losses = self._loss_rows(b, run, a, z)
             kpis = self._kpis(b, run, a, z, design, did, rows, losses,
                               counters)
+            if self.gradients:
+                self._gradients(b, run, design, kpis, grads, counters)
             return kpis, losses, {}
         names = {c["name"] for c in b.components()}
         for d in th.r_th:
@@ -648,7 +748,7 @@ class Evaluator:
 
     def _steady(self, b, sf, T, counters):
         """``(result, t_from, t_to)`` of one steady period."""
-        from ._refusal import UnsupportedError
+        from .periodic_steady_state import _pss_refusal
         method = self.steady.method
         if method == "auto":
             if self.engine not in ("auto", "dsed"):
@@ -656,16 +756,12 @@ class Evaluator:
                 counters["steady_route_reason"] = (
                     f"engine={self.engine!r}: pss runs on dsed only")
             else:
-                try:
-                    _engine(lambda: _pss_capability(b, T, sf))
+                # the capability probe builds the exact stepper: a kernel
+                # error there is a failed design, not a crash (_engine)
+                e = _engine(lambda: _pss_refusal(b, T, sf))
+                if e is None:
                     method = "pss"
-                except ValueError as e:
-                    if not isinstance(e, UnsupportedError) and \
-                            "cannot extract this circuit's state space" \
-                            not in str(e):
-                        raise       # a configuration error: not a route
-                    if not isinstance(e, UnsupportedError):
-                        e.feature, e.kind, e.device = "state_space", "", ""
+                else:
                     # A documented route, decided BEFORE any run: the
                     # circuit is outside the exact stepper's coverage.
                     method = "transient"
@@ -673,6 +769,13 @@ class Evaluator:
                         f"pss refused: {e.feature or e.kind or 'circuit'}"
                         f"{' (' + e.device + ')' if e.device else ''}")
         counters["steady_method"] = method
+        if self.gradients and method != "pss":
+            from ._refusal import unsupported
+            raise unsupported(
+                "design.evaluate", "gradients", "Evaluator: gradients= on "
+                f"the {method} route ({counters.get('steady_route_reason', '')}"
+                "): exact gradients exist on the pss route only (refused, "
+                "never a finite difference).")
         if method == "pss":
             return self._pss(b, sf, T, counters)
         return self._transient(b, sf, T, counters)
@@ -688,7 +791,7 @@ class Evaluator:
         while True:
             run = _engine(lambda: simulate(
                 b, t_end=n * T, engine=engine, switch_fn=sf, **kw))
-            self._count(run, counters, b)
+            self._count(run, counters, b, sf)
             counters["route"] = f"transient/{getattr(run, 'engine_used', engine)}"
             counters["periods"] = n
             err = _settle_error(b, run, T, n)
@@ -703,7 +806,11 @@ class Evaluator:
                     "SteadySpec.max_periods or use method='pss'")
             n = min(2 * n, spec.max_periods)
         if getattr(run, "engine_used", engine) != "dsed":
-            return run, (n - 1) * T, n * T
+            # a dt grid summed to n*T can stop an ulp short of it
+            # (4e-7 x 200 = 7.999999999999999e-05): read the run's end
+            t1 = float(np.asarray(run.times)[-1])
+            t1 = t1 if abs(t1 - n * T) <= 1e-9 * T else n * T
+            return run, t1 - T, t1
         # dsed: the settle run has no step cap; re-run the last period
         # from its true state with the KPI sampling.
         x0 = np.asarray(run.states_reduced, dtype=float)[-1]
@@ -711,26 +818,34 @@ class Evaluator:
             b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
             switch_fn=sf, initial_state=x0,
             **{k: v for k, v in kw.items() if k != "dt"}))
-        self._count(run2, counters, b)
+        self._count(run2, counters, b, sf)
         return run2, 0.0, T
 
     def _pss(self, b, sf, T, counters):
         from . import simulate
-        from ._refusal import UnsupportedError, unsupported
+        from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
+        from ._period_kpis import Period, Spec, spec_for
         from .periodic_steady_state import periodic_steady_state
         counters["route"] = "pss/dsed"
-        try:
-            r = _engine(lambda: periodic_steady_state(
-                b, period=T, switch_fn=sf,
-                max_period_runs=self.steady.max_period_runs))
-        except ValueError as e:
-            if _is_pss_failure(e) or isinstance(e, np.linalg.LinAlgError):
+        spec = spec_for(b, self.output, self.loss_options)
+        obs = spec if isinstance(spec, Spec) else None
+
+        def solve():
+            try:
+                return periodic_steady_state(
+                    b, period=T, switch_fn=sf,
+                    max_period_runs=self.steady.max_period_runs,
+                    sensitivities=(sorted(set(self.gradients.values()))
+                                   if self.gradients else None),
+                    _observables=obs)
+            except (ConvergenceError, np.linalg.LinAlgError) as e:
+                # typed at the source: a non-convergence of the design (a
+                # singular I - M from a degenerate design included). An
+                # unextractable state space is UnsupportedError(feature=
+                # "state_space") from _Solver and passes as a refusal.
                 raise _Failed(str(e)) from e
-            if "cannot extract this circuit's state space" in str(e) \
-                    and not isinstance(e, UnsupportedError):
-                # the same refusal the auto route turns into 'transient'
-                raise unsupported("dsed", "state_space", str(e)) from e
-            raise
+
+        r = _engine(solve)
         if not r.stable:
             # an orbit the circuit never reaches: its KPIs are no answer
             raise _Failed(
@@ -741,14 +856,118 @@ class Evaluator:
         counters["engine_steps"] = counters.get(
             "engine_steps", 0) + int(r.n_engine_steps)
         counters["simulations"] += int(r.n_period_runs)
-        run = _engine(lambda: simulate(
-            b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
-            switch_fn=sf, initial_state=r.x0, rtol=1e-11, atol=1e-14))
-        self._count(run, counters, b)
-        return run, 0.0, T
+        ctx = r._ctx
+        counters["python_callbacks"] = int(ctx.n_python_callbacks)
+        counters["nogil_period_runs"] = int(ctx.n_nogil_runs)
+        d = r._period
+
+        def sampled(n):
+            run = _engine(lambda: simulate(
+                b, t_end=n * T, dt=T / self.samples_per_period,
+                engine="dsed", switch_fn=sf, initial_state=r.x0, rtol=1e-11,
+                atol=1e-14))
+            self._count(run, counters, b)
+            return run
+
+        if obs is not None and d is not None and d["integrals_ok"]:
+            # the KPIs are the kernel's closed-form period integrals;
+            # waveforms only when a user KPI reads them
+            counters["kpi_path"] = "kernel"
+            kp = Period(obs, d, T)
+            _raise_if_suspect_kernel(kp, b)
+            # two periods, the second read: as the sampled route below
+            kp.lazy_run = _Deferred(lambda: sampled(2))
+            kp.pss_orbit = r
+            return kp, 0.0, T
+        counters["kpi_path"] = "sampled: " + (
+            spec if obs is None else
+            "no kernel period map" if d is None else d["integrals_reason"])
+        # Two periods, the second measured: a switch edge AT the section
+        # is then an edge inside the window (a one-period run starts in
+        # the new state and its turn-on is never seen: E_on was lost).
+        run = sampled(2)
+        if self.gradients:
+            run.pss_orbit = r
+        return run, T, 2 * T
+
+    def _gradients(self, b, run, design, kpis, grads, counters):
+        """``grads[kpi][variable]`` from the orbit sensitivities; the
+        KPI values are replaced by the closed forms they belong to."""
+        from .sensitivity import _prepare
+        r = run.pss_orbit
+        sr = r.sensitivity
+        vals = {p.name: p.value for p in _prepare(
+            b, list(sr.params), r._ctx.sf, r.period)}
+        base = {c["name"]: dict(c["params"]) for c in b.components()}
+        for var, name in self.gradients.items():
+            if var not in design:
+                raise KeyError(f"gradients: design variable {var!r} is not "
+                               f"in the design {sorted(design)}")
+            self._check_map(design, var, name, base, r.period)
+            dv, pv = float(design[var]), vals[name]
+            if not abs(dv - pv) <= 1e-12 * max(abs(dv), abs(pv)):
+                raise ValueError(
+                    f"gradients: design[{var!r}] = {dv!r} but {name} = "
+                    f"{pv!r} in the circuit; the gradient is with respect "
+                    "to the circuit value, so a scaled mapping would be "
+                    "wrong. Map variables that ARE the circuit value.")
+        want = {}
+        if self.output is not None:
+            want["v_out"] = (self.output, "avg")
+            want["ripple_v"] = (self.output, "ripple")
+        for c in b.components():
+            if c["kind"] == "inductor":
+                want[f"ripple_i.{c['name']}"] = (c["name"], "ripple")
+        for k, (sig, kind) in want.items():
+            kv = sr.kpi(sig, kind)
+            kpis[k] = kv.value
+            if kv.non_unique:
+                # attained at two instants: not differentiable, no gradient
+                counters["grads_refused"] = ", ".join(filter(None, (
+                    counters.get("grads_refused", ""),
+                    f"{k}: non_unique extremum")))
+                continue
+            g = {var: float(kv.grad[name])
+                 for var, name in self.gradients.items()}
+            if not all(math.isfinite(v) for v in g.values()):
+                counters["grads_refused"] = ", ".join(filter(None, (
+                    counters.get("grads_refused", ""),
+                    f"{k}: non-finite gradient")))
+                continue
+            grads[k] = g
+        # an event that nearly grazed: the gradient is exact for this
+        # event pattern but a nearby design may switch pattern; simulate
+        # warns once per call site, so the record carries it
+        nm = len(getattr(sr, "flags", None) or ())
+        if nm:
+            counters["grad_near_misses"] = nm
+
+    def _check_map(self, design, var, name, base, T):
+        """``var`` must drive exactly the field ``name``: rebuild with it
+        moved and compare every component (a variable feeding two
+        inductors would give a partial derivative as the total)."""
+        from .sensitivity import _prepare
+        dv = float(design[var])
+        b2, sf2 = self._build({**design, var: dv * (1 + 1e-6) + 1e-300})
+        moved = sorted(
+            f"{c['name']}.{k}" for c in b2.components()
+            for k, v in c["params"].items()
+            if base.get(c["name"], {}).get(k) != v)
+        comp, fld = name.rsplit(".", 1)
+        if fld == "duty":
+            d2 = _prepare(b2, [name], sf2, T)[0].value
+            ok = not moved and abs(d2 - dv * (1 + 1e-6)) <= 1e-9
+        else:
+            ok = len(moved) == 1 and moved[0].startswith(comp + ".")
+        if not ok:
+            raise ValueError(
+                f"gradients: design[{var!r}] moves {moved or 'no element'} "
+                f"in the circuit, not {name} alone; the gradient would be "
+                "a partial derivative presented as the total. Map each "
+                "variable to the one field it sets.")
 
     @staticmethod
-    def _count(run, counters, b):
+    def _count(run, counters, b, sf=None):
         counters["simulations"] += 1
         _raise_if_suspect(run, b)
         n = getattr(run, "n_accept", None)
@@ -762,6 +981,40 @@ class Evaluator:
             counters["event_iteration_breaches"] = counters.get("event_iteration_breaches", 0) + nb
         if nc:
             counters["chatter_breaks"] = counters.get("chatter_breaks", 0) + nc
+        # accepted above tolerance (h at its floor) / Newton accepted at
+        # roundoff: counted, not failed (DECISIONS: design workflow 14)
+        nf = int((getattr(run, "_trbdf2_stats", None) or {}).get("n_forced_accepts", 0))
+        nr = int(getattr(run, "newton_roundoff_accepts", 0) or 0)
+        if nf:
+            counters["forced_accepts"] = counters.get("forced_accepts", 0) + nf
+        # trbdf2 steps accepted within the error estimate's own roundoff
+        # floor (a g_off-held node): honest, counted (DECISIONS 5)
+        nfl = int((getattr(run, "_trbdf2_stats", None) or {}).get(
+            "n_roundoff_floor_accepts", 0))
+        if nfl:
+            counters["roundoff_floor_accepts"] = counters.get(
+                "roundoff_floor_accepts", 0) + nfl
+        if nr:
+            counters["newton_roundoff_accepts"] = counters.get(
+                "newton_roundoff_accepts", 0) + nr
+        # a step re-taken at dt/2^k: integrated MORE finely than asked,
+        # so the result is not less accurate -- counted, ok (DECISIONS 5)
+        nd = len(getattr(run, "dt_retries", None) or ())
+        if nd:
+            counters["dt_retries"] = counters.get("dt_retries", 0) + nd
+        # dsed polling a schedule without next_edge_after: every edge it
+        # sees is bisected to the instant; only a pulse narrower than
+        # dt_max/10 can be missed -- counted, ok (DECISIONS 5)
+        if sf is not None and getattr(run, "engine_used", None) == "dsed":
+            from ._dsed_dispatch import _has_edge_oracle
+            if not _has_edge_oracle(sf):
+                counters["polled_switch_fn_runs"] = counters.get(
+                    "polled_switch_fn_runs", 0) + 1
+        from . import _resolution_flagged
+        if _resolution_flagged(run):
+            # the fixed-step ResolutionWarning: dt may not resolve the run
+            counters["resolution_warnings"] = counters.get(
+                "resolution_warnings", 0) + 1
         counters["python_callbacks"] = len(
             tuple(getattr(run, "step_loop_python_callbacks", ()) or ()))
 
@@ -781,8 +1034,14 @@ class Evaluator:
                     spec["Tj"] = float(tj[dev])
             if ss:
                 opts["switch_specs"] = ss
-        rows = {r["name"]: r for r in device_loss_summary(
-            b, run, t_from=a, t_to=z, **opts) if "name" in r}
+        from ._period_kpis import Period, loss_rows
+        if isinstance(run, Period):
+            # the period's edge log is kernel output: an inconsistent one
+            # ("edges do not alternate") fails this design, not the batch
+            rows = _engine(lambda: loss_rows(b, run, opts))
+        else:
+            rows = {r["name"]: r for r in device_loss_summary(
+                b, run, t_from=a, t_to=z, **opts) if "name" in r}
         for n in self.loads:
             if n not in rows or "P_avg" not in rows[n]:
                 raise ValueError(f"load {n!r} has no dissipated power in "
@@ -808,7 +1067,9 @@ class Evaluator:
         return rows, losses
 
     def _kpis(self, b, run, a, z, design, did, rows, losses, counters):
+        from ._period_kpis import Period
         from ._refusal import unsupported
+        kp = run if isinstance(run, Period) else None
         comps = {c["name"]: c for c in b.components()}
         kpis: dict = {}
         src = self.sources
@@ -842,9 +1103,12 @@ class Evaluator:
                     f"{n!r} is a {c['kind']}; the input power is measured "
                     "on DC voltage sources only. Name the DC sources in "
                     "`sources=`.", device=n, kind=c["kind"])
+            # MNA branch current flows + -> - inside the source.
+            if kp is not None:
+                p_in -= float(c["params"]["V"]) * kp.mean(("i", n))
+                continue
             col = int(b.pool.branch_var_id_for_source(c["branch_id"], b.graph))
             t, i = _with_right_limits(run, lambda st, col=col: st[:, col])
-            # MNA branch current flows + -> - inside the source.
             p_in -= float(c["params"]["V"]) * _mean(t, i, a, z)
         if p_in is not None:
             kpis["p_in"] = p_in
@@ -863,23 +1127,42 @@ class Evaluator:
             kpis["efficiency"] = (p_out / (p_out + p_loss)
                                   if p_out + p_loss > 0 else math.nan)
         if self.output is not None:
-            t, v = _with_right_limits(run, _node_col(b, self.output))
-            kpis["v_out"] = _mean(t, v, a, z)
-            kpis["ripple_v"] = _p2p(t, v, a, z)
+            if kp is not None:
+                kpis["v_out"] = kp.mean(("node", self.output))
+                kpis["ripple_v"] = kp.p2p(("node", self.output))
+            else:
+                t, v = _with_right_limits(run, _node_col(b, self.output))
+                kpis["v_out"] = _mean(t, v, a, z)
+                kpis["ripple_v"] = _p2p(t, v, a, z)
         for n, c in comps.items():
             if c["kind"] == "inductor":
-                kpis[f"ripple_i.{n}"] = _p2p(
-                    np.asarray(run.times, float), np.asarray(run.i(n), float),
-                    a, z)
+                if kp is not None:
+                    key = ("i", n)
+                    kpis[f"ripple_i.{n}"] = kp.p2p(key)
+                    kpis[f"i_peak.{n}"] = kp.peak_abs(key)
+                    kpis[f"i_rms.{n}"] = kp.rms(key)
+                    continue
+                t = np.asarray(run.times, float)
+                i = np.asarray(run.i(n), float)
+                kpis[f"ripple_i.{n}"] = _p2p(t, i, a, z)
+                tw, iw = _window(t, i, a, z)
+                kpis[f"i_peak.{n}"] = float(np.abs(iw).max())
+                kpis[f"i_rms.{n}"] = _rms(t, i, a, z)
             elif c["kind"] in _SEMIS and n in rows:
                 r = rows[n]
                 kpis[f"i_peak.{n}"] = float(r["i_peak"])
                 kpis[f"i_rms.{n}"] = float(r["i_rms"])
+                if kp is not None:
+                    kpis[f"v_peak.{n}"] = kp.peak_abs(("v", n))
+                    continue
                 t, v = _with_right_limits(run, _pair_col(c["nodes"]))
                 _, vw = _window(t, v, a, z)
                 kpis[f"v_peak.{n}"] = float(np.abs(vw).max())
         if self.kpis:
-            per = SteadyPeriod(result=run, builder=b, design=design,
+            if kp is not None:
+                # the waveforms of the orbit, simulated on first access
+                run, a, z = kp.lazy_run, kp.T, 2 * kp.T
+            per = SteadyPeriod(run, builder=b, design=design,
                                t_from=a, t_to=z, seed=int(did, 16) % 2**32,
                                kpis=_fz(kpis), losses=_fz(losses))
             for k in self.kpis:
@@ -888,14 +1171,6 @@ class Evaluator:
                                      "default KPI")
                 kpis[k.name] = float(k.fn(per))
         return kpis
-
-
-def _pss_capability(b, T, sf):
-    """Raise the UnsupportedError ``periodic_steady_state`` would raise
-    for this circuit, before running anything (its applicability
-    checks of the circuit and the schedule)."""
-    from .periodic_steady_state import _Solver
-    _Solver(b, T, sf)
 
 
 def _true_state(b, run):
@@ -972,6 +1247,15 @@ def _raise_if_suspect(run, b) -> None:
     a wrong number (an implausible node voltage, e.g. an open inductor;
     a trbdf2 diode held in a state its commutation rule forbids)."""
     volt = getattr(run, "_implausible_voltage", None)
+    nu = int((getattr(run, "counters", None) or {}).get("unlocated_gate_steps", 0) or 0)
+    if nu:
+        # each such edge was moved to the next grid point: up to a whole
+        # step of duty error per edge (DECISIONS 5)
+        raise _Failed(
+            f"unlocated_gate_edges: {nu} gate change(s) from a switch_fn "
+            "without next_edge_after(t) were taken at the next grid point "
+            "under sub-step correction; give the schedule an oracle or put "
+            "the edges on the dt grid")
     if volt is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
         raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
@@ -993,18 +1277,32 @@ def _raise_if_suspect(run, b) -> None:
         bad = [tr.name for tr in diode_state_traces(b, run).values()
                if tr.n_rule_violations]
     except (AttributeError, TypeError):  # no PWL diode record
-        return
+        bad = []
     if bad:
         raise _Failed(f"missed_commutation: trbdf2 held diode(s) "
                       f"{', '.join(bad)} in a state their commutation "
                       "rule forbids; cross-check with engine='pwl' and dt")
+    pf = float(stats.get("probe_floor_used", 0.0) or 0.0)
+    if pf > 0.0:
+        # a subnet reached only through switches/diodes: its common mode
+        # is set by g_off; variants of the E3 bridge read 323.94 V vs
+        # 324.51 V and a 76.7 kV sample (DECISIONS 5)
+        raise _Failed(
+            "floating_subnet: a subnet reaches the circuit only through "
+            f"switches/diodes (the zero-time probe needed {pf:.3g} s); tie "
+            "it to ground or use engine='pwl'")
 
 
-def _is_pss_failure(e) -> bool:
-    from ._refusal import UnsupportedError
-    return (not isinstance(e, UnsupportedError)
-            and str(e).startswith("periodic_steady_state: ")
-            and any(m in str(e) for m in _PSS_FAILURES))
+def _raise_if_suspect_kernel(kp, b) -> None:
+    """:func:`_raise_if_suspect` for a kernel period: the implausible-
+    voltage detector on every node's extrema (the dsed run has no guard
+    and no trbdf2 record, so that is the only check that applies)."""
+    from . import _pulsim as _k  # type: ignore[import-not-found]
+    t, X = kp.node_extrema_trace()
+    volt = _k.find_implausible_voltage(b.graph, b.pool, t, X, 100.0)
+    if volt is not None and volt.node >= 0:
+        raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
+            b.graph, b.pool, volt))
 
 
 def _engine(fn):

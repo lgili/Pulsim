@@ -46,6 +46,7 @@
 #include "pulsim/observers/sensorless.hpp"
 #include "pulsim/solver/bdf1.hpp"
 #include "pulsim/switchgear/switchgear_adapters.hpp"
+#include "pulsim/thermal/loss_table.hpp"
 #include "pulsim/thermal/thermal_adapters.hpp"
 #include "pulsim/models/ideal_diode.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -146,8 +147,14 @@ void init_module(py::module_& m) {
     // The type is created here rather than in Python because the
     // translator has to name it at throw time, and the result object
     // it carries is a pybind-bound C++ type.
+    //
+    // `ConvergenceError` (add-parameter-sensitivities, task 5a) is the
+    // common base of every non-convergence: a RuntimeError, so the
+    // `except RuntimeError` of callers keeps working.
+    static py::object convergence_exc = py::exception<void>(
+        m, "ConvergenceError", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
-        m, "SimulationAborted", PyExc_RuntimeError);
+        m, "SimulationAborted", convergence_exc);
     py::register_exception_translator(
         [](std::exception_ptr pe) {
             if (!pe) {
@@ -415,6 +422,35 @@ void init_module(py::module_& m) {
                         "that silently rewires the circuit.")
         .def_readwrite("name_prefix",
                         &pwl::PreflightOptions::name_prefix);
+
+    // ---- add-in-kernel-event-losses group 1: datasheet tables ---------
+    py::class_<thermal::LossTable3D>(m, "LossTable3D",
+        "Switching energy E(v, i, Tj) [J] on a rectilinear grid, read like "
+        "pulsim.LossTable: multilinear, linear extrapolation past the "
+        "edges, clamped at 0. Build it with LossTable.to_kernel().")
+        .def(py::init<std::vector<Real>, std::vector<Real>,
+                      std::vector<Real>, std::vector<Real>>(),
+              py::arg("v_axis"), py::arg("i_axis"), py::arg("tj_axis"),
+              py::arg("energy"),
+              "Strictly ascending axes; energy row-major (v, i, Tj).")
+        .def("__call__", &thermal::LossTable3D::operator(), py::arg("v"),
+              py::arg("i"), py::arg("tj"), "E [J] at one point.")
+        .def_property_readonly("v_axis", &thermal::LossTable3D::v_axis)
+        .def_property_readonly("i_axis", &thermal::LossTable3D::i_axis)
+        .def_property_readonly("tj_axis", &thermal::LossTable3D::tj_axis)
+        .def_property_readonly("energy", &thermal::LossTable3D::energy);
+    py::class_<thermal::ConductionTable>(m, "ConductionTable",
+        "On-state voltage V_on(i, Tj) [V] on a rectilinear grid, read like "
+        "pulsim.LossTable (multilinear, extrapolated, clamped at 0).")
+        .def(py::init<std::vector<Real>, std::vector<Real>,
+                      std::vector<Real>>(),
+              py::arg("i_axis"), py::arg("tj_axis"), py::arg("v_on"),
+              "Strictly ascending axes; v_on row-major (i, Tj).")
+        .def("__call__", &thermal::ConductionTable::operator(), py::arg("i"),
+              py::arg("tj"), "V_on [V] at one point.")
+        .def_property_readonly("i_axis", &thermal::ConductionTable::i_axis)
+        .def_property_readonly("tj_axis", &thermal::ConductionTable::tj_axis)
+        .def_property_readonly("v_on", &thermal::ConductionTable::v_on);
 
     // ---- add-power-mosfet-datasheet-device: charge laws ----------------
     py::class_<models::ChargeTable>(m, "ChargeTable",
@@ -4746,6 +4782,10 @@ void init_module(py::module_& m) {
             d["n_derivative_refreshes"] = st.n_derivative_refreshes;
             d["n_refresh_probes"] = st.n_refresh_probes;
             d["h_post_event_min"] = st.h_post_event_min;
+            d["n_probe_newton_retries"] = st.n_probe_newton_retries;
+            d["n_sdirk_steps"] = st.n_sdirk_steps;
+            d["n_filtered_estimates"] = st.n_filtered_estimates;
+            d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

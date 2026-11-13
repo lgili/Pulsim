@@ -6,6 +6,244 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Design evaluation: review fixes (integration batch 6c)
+
+* **Fixed** a gate edge taken at the next grid point under sub-step
+  correction (opaque `switch_fn`) and a trbdf2 subnet reached only
+  through switches are `failed` (`unlocated_gate_edges`,
+  `floating_subnet`), not `ok`; step retries and a polled `dsed`
+  schedule are counted (`dt_retries`, `polled_switch_fn_runs`).
+* **Fixed** the transient route's KPI window when a `dt` grid ends an
+  ulp short of `n·T` (it raised and stopped the batch).
+* **Fixed** design ids of different functions could collide (names,
+  globals, keyword-only defaults, `functools.partial`, bound methods).
+* **Fixed** a zero-valued sensitivity parameter gave NaN gradients; it
+  is refused. Near-miss events are counted in the record.
+* **Fixed** the kernel and Python extrema search missed a fast mode's
+  peak near a step start; the grid adds `h/2^m` points.
+* **Fixed** the Python `LossTable` refuses non-finite queries and axes,
+  like the kernel table; an inconsistent kernel edge log fails one
+  design instead of the batch.
+
+### Datasheet loss tables in the kernel
+
+* **Added** `pulsim.LossTable3D` (`E(v, i, T_j)`) and
+  `pulsim.ConductionTable` (`V_on(i, T_j)`), header
+  `core/include/pulsim/thermal/loss_table.hpp`, read with
+  `pulsim.LossTable`'s rule (multilinear, linear extrapolation, clamp at
+  0); `LossTable.to_kernel()` converts. Bad axes, shapes, entries and
+  non-finite queries are refused by name. Group 1 of
+  `add-in-kernel-event-losses`: nothing in the kernel reads them yet.
+
+### Kernel period map: a design evaluation without the GIL
+
+* **Added** `pulsim._pulsim.dsed_period_map` (header
+  `core/include/pulsim/dsed/period_integrals.hpp`): one period of the
+  exact stepper with the GIL released for the run and its
+  post-processing, returning `x(T)`, the events, the monodromy
+  `M = Π S_k Φ_k` (saltation at diode events) and, per affine
+  observable, `∫y`, `∫y²`, `∫y_a·y_b` and the extrema with their
+  instants in closed form per step (sensitivity.py's modal formulas;
+  a near-defective eigenbasis or a numeric step declines the integrals
+  by name, never approximates them).
+* **Changed** `periodic_steady_state` runs its Newton periods and its
+  verification period on the kernel map when the sources are DC;
+  `result.orbit` is simulated on first access.
+* **Changed** `Evaluator` with `method='pss'` reads its KPIs and loss
+  rows from the kernel integrals (`counters["kpi_path"] == "kernel"`,
+  `python_callbacks`, `nogil_period_runs`); options the integrals do
+  not cover take the sampled route with the reason in `kpi_path`.
+* **Fixed** the sampled `pss` route lost the switch edge AT the section
+  (`t = 0`): a one-period run starts in the new state, so the buck's
+  turn-on energy was missing from `P_sw`. It now measures the second of
+  two periods; the kernel route reads the edge from `x(T⁻) → x(0⁺)`.
+* **Added** default KPIs `i_peak.<L>` and `i_rms.<L>` per inductor.
+
+### Design evaluator: accepted-with-error runs counted
+
+* **Added** record counters `forced_accepts` (trbdf2 steps accepted
+  above tolerance at the step floor), `newton_roundoff_accepts` and
+  `resolution_warnings` (the fixed-step `ResolutionWarning`). The run
+  stays `ok`; simulate only warns, and a warning is shown once per call
+  site, so in an optimiser loop the record is the only place left.
+* **Changed** a singular `I − M` raised as `numpy.linalg.LinAlgError`
+  by the pss route is `failed`, typed with `ConvergenceError`; an
+  unextractable state space is refused at its source
+  (`UnsupportedError(feature="state_space")`) on both routes.
+
+### Typed non-convergence and the steady-state capability check
+
+* **Added** `pulsim.ConvergenceError`, a `RuntimeError` created by the
+  extension and the base of `SimulationAborted`. `periodic_steady_state`
+  raises it at its seven non-convergence sites (no orbit within the
+  budget, no Newton progress, singular `I − M`, a non-isolated orbit, a
+  grazing event, a failed period run, an irreproducible map). It is still
+  a `ValueError` there, as before. Configuration errors stay plain
+  `ValueError`s.
+* **Added** `pulsim.periodic_steady_state_supported(builder, period,
+  switch_fn) -> (bool, reason)`. It runs the solver's applicability
+  checks without a period run, so it reaches the same refusal as the
+  solve.
+* **Changed** "the exact stepper cannot extract this circuit's state
+  space" is now an `UnsupportedError` (`feature="state_space"`). The
+  design evaluator's `auto` route and its `failed` status use the typed
+  classes, and the message list is gone.
+
+### Parameter sensitivities on the exact path (`add-parameter-sensitivities`)
+
+* **Added** characterisation and references (group 1): today's central
+  differences of the DCM buck's `v_C(40 T)` with respect to `L` are
+  pinned as a test (fixed engine at `T/100`: -9.49, -12.9, +2.00, -0.457
+  relative error at steps 1e-5 .. 1e-2; `trbdf2`: -8.8e-5); a
+  finite-difference harness with step selection and a Richardson
+  estimate; the two prototypes ported as numpy references that
+  reproduce the `tasks.md` table to 1e-7.
+* **Added** transient sensitivities on the exact path:
+  `simulate(..., engine='dsed', sensitivities=["L.L", "RL.R",
+  "S.duty", ...])` returns `res.sensitivity.states` (`n × n_state ×
+  n_p`) and `res.sens(signal, param)`. R, L, C and DC-source values
+  (exact `∂A/∂p` from assemblies), the duty of a trailing-edge PWM
+  (gate-edge jump `dτ/dD = T`), Daleckii–Krein with φ₁ divided
+  differences, the block exponential on a near-defective mode, the jump
+  correction at diode events. DCM buck `∂v_C(40 T)/∂L, ∂R, ∂D` within
+  3.4e-8 of the prototype and 9e-8 of central differences of the same
+  map; RC step within 1e-9 of the closed form; critically damped RLC
+  within 1e-7 of central differences. One engine run whatever the
+  number of parameters.
+* **Added** steady-state gradients:
+  `periodic_steady_state(..., sensitivities=[...])` sets `dx0`
+  (`(I − M)⁻¹ ∂P/∂p`) and `dPdp` for one more period run; the DCM orbit's
+  three gradients within 4.9e-8 of the prototype.
+* **Added** the event rule: a grazing diode event is refused
+  (`UnsupportedError`, `feature="grazing_event"`); a near miss (the CCM
+  valley at the DCM boundary) is flagged in `sensitivity.flags` with a
+  `UserWarning`. Every other engine refuses `sensitivities=` by name.
+  Runs without `sensitivities` are bit-identical (golden probe: all
+  identical; dsed / pwl / trbdf2 / steady-state hashes unchanged).
+* **Added** KPI gradients (group 7): `res.kpi(signal, kind, t_from=,
+  t_to=)` for `final`, `avg`, `rms`, `energy`, `peak`, `valley`,
+  `ripple` returns a `KpiValue` (`value, grad = ...`, `non_unique` for an
+  extremum attained twice); closed forms of the exact trajectory plus the
+  event-time terms of a jumping signal. Orbit KPIs:
+  `PeriodicSteadyStateResult.kpi`. `pulsim.value_and_grad` for
+  `scipy.optimize.minimize(jac=True)`. DCM buck, last ten periods:
+  avg / RMS / energy / final / peak / ripple of `v_out`, peak / RMS of
+  `i_L`, avg / RMS of `v_sw` within 7e-9 of central differences; the
+  orbit's avg / RMS / ripple within 1e-6. Eight parameters: one engine
+  run, 8 propagations per step, 29 assemblies (16 runs by central
+  differences). See `docs/sensitivities.md`.
+* **Added** `pulsim.design.Evaluator(..., gradients={var: "C.C"})`:
+  exact gradients of `v_out`, `ripple_v`, `ripple_i.<L>` in
+  `record.grads` on the `pss` route; the transient route, the thermal
+  loop and a scaled variable map are refused (`feature="gradients"`).
+* **Fixed** (sensitivity path, before release) the exact propagator of a
+  stiff mode lost 1e-9 of `v_C` per step: LAPACK's QR put the DCM idle
+  mode's -425 1/s eigenvalue 2.7e-4 off with its 5e12 1/s row last; the
+  eigenproblem is now solved in graded order (exact to 1e-15 against
+  50-digit `expm`). A peak inside the first or last sub-grid cell of a
+  step was read at the step end.
+* **Fixed** (review of the sensitivity path) cases where a gradient could
+  have been silently approximate are now refused:
+  - the duty of a dead-time pair or a bridge;
+  - an RK45 step of the stepper (the step check is now 1e-10);
+  - a non-Moebius entry (the check is now per row);
+  - an orbit sensitivity run that does not reproduce the solver's
+    events;
+  - a window edge on a moving jump;
+  - an unlocated extremum;
+  - a design variable that feeds two elements.
+
+  A non-unique extremum's gradient is left out of `record.grads`.
+  Interior near misses are refined, so they are flagged.
+
+### TR-BDF2 event handling follow-up (update-trbdf2-post-event-restart)
+
+* **Fixed** `engine='trbdf2'` / `'auto'` on circuits with a Newton device
+  and PWL diodes: the trace now shows a diode event where it happens.
+  The L-stable restart step after the event may be long (500 ns on
+  `ll08_buck_mosfet`), and with no sample between the event and that
+  step's end the record ramped the jump of V(sw) across the whole step:
+  the strict error of `ll08_buck_mosfet` grew from 0.00231 to 0.0252 and
+  its edge instants were 0.48 µs late. The cascade's probe under the
+  post-event bits is now recorded right after the event (not committed;
+  the record keeps one more sample per event). The restart step also
+  starts at the step that the last restart for the same diode transition
+  proposed, not at the pre-event step: on the MOSFET half bridge, 215 of
+  240 rejects were that restart step. Measured: `ll08_buck_mosfet`
+  0.0252 → 1.1e-4 (rejects 277 → 69); MOSFET half bridge time-weighted
+  output error 2.0e-4 → 2.36e-4 V, rejects 240 → 101, steps 1351 → 1412.
+* **Changed** Newton roundoff acceptance (both transient engines). The
+  row scale and the step cap now come from the solve's start state, not
+  from the iterate being checked. A growing ||dx|| is never accepted.
+  The state kept is the iterate whose residual was checked. A run of
+  more than 130 accepted solves with no converged solve between them
+  raises `SimulationAborted`; the message names the row and the
+  counts. The worst honest run measured is 13. The warning text no
+  longer claims that no tolerance could have passed.
+  `ll16_flyback_closed_loop` is still accepted at roundoff: its start
+  state, from `compute_dc_op`, is 2.4e13 A (see KNOWN_LIMITATIONS).
+* **Fixed** `engine='trbdf2'` / `'auto'` at tight tolerances no longer
+  grinds to `max_steps` on a node held only by OFF conductances. The
+  SEPIC benchmark at `rtol=1e-8, atol=1e-12` completes in 28,539
+  accepted steps (V_out 17.31570 V); the 325 V capacitor-input bridge
+  completes at `rtol=1e-6` and `1e-7` (bus within 0.007 V of `pwl`);
+  the Ćuk benchmark takes 12,828 steps instead of 78,414 at the
+  defaults. Causes: the error estimate's roundoff floor (h-independent
+  on such a node) sat above the scale, so every step was rejected to
+  `h_min`; zero-time diode cascades and landings that flipped no bit
+  were recorded as events and retaken. A step about to be rejected is
+  now accepted when its estimate is within its own roundoff floor
+  (`n_roundoff_floor_accepts` in `_trbdf2_stats`), and a cascade that
+  commutates nothing records no event. The step sequence changes only
+  on runs that reach those paths (the baseline bridge row: 1,437 → 1,356
+  accepted steps, time-weighted error 5.57e-2 → 2.73e-2).
+* **Fixed (silent wrong answer)** `engine='trbdf2'` / `'auto'`: a zero-time
+  diode cascade decided the diode bits on a probe whose Newton solve had
+  failed (its state was the warm start). A saturable inductor as a
+  buck's inductor then lost its current at a turn-off edge (7.68 V
+  reported against 12.85 V on `pwl`; 11.13 V measured with roundoff
+  acceptance off). A probe whose Newton solve fails is now retaken at
+  100x the step up to the probe cap; a cascade with no converged probe
+  raises `SimulationAborted` naming the event and the row. A failed
+  Newton solve on a diode-event landing rejects the step (it was
+  committed); a failed localisation trial ends the refinement. The
+  initial settle keeps the bits it reached when its probe fails (its
+  start state is consistent with them).
+  `TrBdf2Stats::n_probe_newton_retries` counts the retries. Baseline
+  table: only the Level-1 MOSFET half bridge moves (54 breakpoint
+  probes that failed now refresh: 1692 → 1555 steps, error 3.12e-4 →
+  4.66e-4 V at rtol 1e-5; at rtol 5e-6 it is 1.54e-4 V in 1575 steps,
+  so the work–precision curve improved; rtol 1e-7 aborted at h_min at
+  t = 5 µs and now completes with tw error 1.0e-4 V).
+* **Fixed** the documented TR-BDF2 `h_min` stall (snubbed 48 V flyback
+  with a saturable transformer, `test_engines_agree_below_saturation`,
+  a strict xfail since 2.0.0): it aborted at t = 4–24 µs, then at
+  494 µs with roundoff acceptance. With the failed cascade probes
+  handled (15 retaken in the run) it completes: V_out 15.3104 V against
+  15.31 V on `engine='pwl', dt=1e-8` (109979 accepted steps, smallest
+  1e-15 s, 6 forced accepts). The known-limitations row is deleted and
+  the xfail is a test (tolerance 3 % → 0.3 %); the `h_min` abort
+  message no longer points at it. The Lauritzen gated buck that stalled
+  at the default tolerances runs at them again.
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'`: on a circuit with a nonlinear refresh
+  (a Newton device law: MOSFET, Shockley diode, ...), the first step after a diode event is one
+  L-stable Alexander SDIRK(2,2) step on the same factor (embedded error
+  estimate, exponent −1/2), instead of a TR-BDF2 step that read the
+  pre-event derivative slots. Level-1 MOSFET half bridge (body-diode
+  events): time-weighted output error 5.73e-3 → 2.0e-4 V, 1555 → 1280
+  steps, 772 → 173 rejects. Piecewise-linear circuits keep their step
+  sequence (on them it moved nine cross-engine pins without a gain). Not
+  applied to circuits with Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor
+  devices. `result._trbdf2_stats["n_sdirk_steps"]` counts them. A
+  Hosea–Shampine filtered estimate exists as an off-by-default C++
+  option (it made a bridge diode chatter 4334 times).
+* Documented: a floating V_th = 0 diode bridge grinds to `max_steps` on
+  TR-BDF2 at rtol ≤ 1e-6 (pre-existing; fixed by the roundoff-floor entry
+  above). The
+  baseline's VSI and bridge "errors" are the reference's edge
+  quantisation and the bus common mode (DECISIONS 11). The ripple test
+  pins the engine's own peak-to-peak at 5e-3 again.
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
@@ -78,7 +316,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** the Newton roundoff acceptance runs on the in-house-LU
   workspace: its backward error reads the workspace's copy of the
   iterate. A solve the Eigen path aborted can now converge (100 µH at
-  `tol_newton_dx` = 1e-11 completes; its test pin changed).
+  dt = 1e-11 s completes; its test pin changed).
 * **Changed** the reference harness drops nothing from its gate. Batch 5
   first gated on an `edge` measure (switching steps and source-forced
   nodes left out) and cleared 21 `known:` cells, saying they agree; a
@@ -102,7 +340,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
   grinds to `max_steps` on the SEPIC benchmark (it ran before the
   error-control change); the harness has no reference for it, so its
-  pwl and trbdf2 cells are `error` and not frozen.
+  pwl and trbdf2 cells are `error` and not frozen. Fixed in the TR-BDF2
+  event handling follow-up above.
 * **Changed** `ll16_flyback_closed_loop` completes on `pwl` with
   roundoff warnings (it aborted at 37 µs); its state is wrong from t = 0
   on the base tree too (I(Lm_core) ≈ 2.4e13 A). Triage keeps it `error`.
@@ -164,7 +403,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   installed (new extra `pulsim[opt]`) and a Latin-hypercube sample with
   a numpy non-dominated filter otherwise. Its MOSFETs are SYNTHETIC
   and its volume law illustrative; it says so in its output and plot.
-  512 designs: 376 ok, 136 infeasible, a 7-design front, 3.3 s.
+  512 designs: 376 ok, 136 infeasible, a 4-design front (97.73 % at
+  13.3 cm³ to 97.90 % at 16.5 cm³, all SYN-B); before the section-edge
+  fix the front had 7 designs, 97.91 % at 11.3 cm³ to 98.50 % at
+  13.2 cm³, because the turn-on energy was missing from every record.
 * **Added** Tutorial 08, "Using Pulsim inside an optimiser" (executed):
   the contract, the four statuses, the adaptors, why derivative-free.
 * **Changed** `pulsim.sweep`'s job runner takes the job function (and
@@ -1136,12 +1378,16 @@ once, above the engine dispatch, and both engines consume that plan.
   `result.newton_roundoff_accepts`, `newton_roundoff_omega_max`,
   `newton_roundoff_row`. Tolerances unchanged; the DC operating point
   never accepts this way. A declined check is explained in the abort.
-* Not cured: the documented TR-BDF2 h_min stall (snubbed flyback with a
-  saturable transformer) now runs to 494 µs instead of 10 µs (213
-  accepted solves) and then aborts in a roundoff limit cycle that the
-  stagnation test reads as contraction (||dx|| 3.2e-7, 5.0e-7,
-  1.9e-7; ω = 0.28 ε). The known-limitations row stays. The step floor
-  `h_noise` of the design is not implemented.
+* **Changed** the stagnation test: `||dx||` must not have contracted by
+  4 over the last two steps (`||dx_k|| >= ||dx_{k-2}||/4`); "each step at
+  least half the previous" read the roundoff limit cycle 3.2e-7, 5.0e-7,
+  1.9e-7 as converging. Transient only (a C++ test asserts that no DC
+  source names the acceptance). The h_min stall reproducer (cured by the
+  TR-BDF2 probe handling, above) still gives 15.3104 V; with this rule
+  431 solves are accepted at ω ≤ 6.6 ε, forced accepts 6 → 4, failed
+  probes retaken 15 → 9. Converged runs: 0 accepts on every baseline
+  circuit, step sequences and pwl/dsed traces bit-identical. The step
+  floor `h_noise` is not implemented: no run in the evidence needs it.
 
 ### TR-BDF2 error control (update-trbdf2-error-control)
 

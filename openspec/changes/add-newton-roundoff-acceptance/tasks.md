@@ -7,7 +7,7 @@
 ## 2. Acceptance in the Newton loop
 - [x] 2.1 `NewtonRoundoffAcceptance` argument (default off) and a result record on `solve_with_newton_b_extra`; the last three `‖dx‖` are kept; the criterion is evaluated only at the points that raise for non-convergence today (budget exhausted; the LM "no improving step" exit) — budget exhaustion only (DECISIONS 4)
 - [x] 2.2 Row scale `s_i` and `ω`, computed once at that point; rows with `s_i = 0`
-- [x] 2.3 Transient callers pass it (`run_transient.hpp:989`, `:1008`; `trbdf2_transient.hpp:716`); DC callers and the static path do not; a C++ test greps or asserts the DC call sites — no such test; the DC call sites are unchanged in the diff
+- [x] 2.3 Transient callers pass it (`run_transient.hpp:989`, `:1008`; `trbdf2_transient.hpp:716`); DC callers and the static path do not; a C++ test greps or asserts the DC call sites — follow-up: `Roundoff acceptance: the DC call sites pass none` scans the six DC sources (DECISIONS 8)
 - [x] 2.4 `SimulationOptions::newton_roundoff_acceptance` (default true), `SimulationResult::newton_roundoff_accepts`; binding, stub, one Python warning per run naming the row — no options switch (DECISIONS 4); result fields count / worst ω / row; warning
 
 ## 3. Acceptance tests
@@ -19,13 +19,13 @@
 - [ ] 3.6 (not measured) Measure Newton iterations per step on the cases of 3.1 (expected: the full budget of 50 on every accepted solve) and the wall time of the stall reproducer; report whether early acceptance is worth a follow-up
 
 ## 4. Step floor
-- [ ] 4.1 (not done, DECISIONS 3) `h_roundoff` and `h_noise` from the committed inductor currents (linear and saturable); C++ test against `p7b_roundoff.py`: `h_roundoff` = 4.0e-11 s and 4.0e-9 s, `h_noise` = 4.0e-15 s and 4.0e-13 s
+- [ ] 4.1 (not done, DECISIONS 3 and 9) `h_roundoff` and `h_noise` from the committed inductor currents (linear and saturable); C++ test against `p7b_roundoff.py`: `h_roundoff` = 4.0e-11 s and 4.0e-9 s, `h_noise` = 4.0e-15 s and 4.0e-13 s
 - [ ] 4.2 (not done, DECISIONS 3) Variable-step engine: committed steps of a Newton circuit not below `max(h_min, h_noise)`; `TrBdf2Stats::n_roundoff_floor`; probes exempt
 - [ ] 4.3 (not done, DECISIONS 3) Fixed engine: the dt-retry ladder stops above `h_noise`; a user `dt` below it is refused by name (10 mH at 1e-13 s)
 - [ ] 4.4 (not done, DECISIONS 3) Test: two series 10 mH inductors and a Shockley diode on `engine='trbdf2'` — no committed step below 4e-13 s, the run completes, and a 1 H / 100 A / 400 V circuit keeps a floor below 2e-10 s
 
 ## 5. The documented stall (reported, not promised)
-- [x] 5.1 Re-run 1.3 with the change. If it completes: un-xfail `test_engines_agree_below_saturation`, delete the "TR-BDF2 stalls at `h_min`" row of `docs/known-limitations.md`, and update the abort message at `trbdf2_transient.hpp:1268-1280`. If it does not: leave all three and write down what was measured — does not complete: runs to 494 µs (213 accepts), then a roundoff limit cycle (DECISIONS 5); all three left
+- [x] 5.1 Re-run 1.3 with the change. If it completes: un-xfail `test_engines_agree_below_saturation`, delete the "TR-BDF2 stalls at `h_min`" row of `docs/known-limitations.md`, and update the abort message at `trbdf2_transient.hpp:1268-1280`. If it does not: leave all three and write down what was measured — does not complete: runs to 494 µs (213 accepts), then a roundoff limit cycle (DECISIONS 5); all three left; follow-up: completes once failed cascade probes are handled (DECISIONS 7) — 15.3104 V vs 15.31 V; xfail flipped, row deleted, message updated
 
 ## 6. Documentation
 - [x] 6.1 `CHANGELOG.md`: transient Newton accepts an iterate at roundoff level and reports it; step floor; the DC cascade and the tolerances are unchanged
@@ -35,3 +35,11 @@
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check
 - [ ] 7.2 `openspec validate add-newton-roundoff-acceptance --strict` and `openspec validate --all --strict`
+
+## 8. Follow-up: honest acceptance (DECISIONS.md 10)
+- [x] 8.1 Scale and dx cap from the call's start state and sources
+- [x] 8.2 Two-sided stagnation test; C++ test: a doubling ||dx|| is declined
+- [x] 8.3 The accepted state is the checked iterate x_k
+- [x] 8.4 Run budget (130 consecutive, 10× the worst honest run) raises `NewtonRoundoffBudgetExceeded` naming row and count; C++ test; Eigen 3.4.0 run of the Newton tests
+- [x] 8.5 ll16: cause found (compute_dc_op on a source across series inductors, `probes/ll16_dc_op.py`), known-limitations row; it stays within the budget
+- [x] 8.6 Python warning text; test parameter renamed `needs_acceptance`
