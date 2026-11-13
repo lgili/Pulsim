@@ -175,3 +175,52 @@ while applying it.
 - **Pulse current source** (add-controlled-source-set) → a jump source
   like the pulse voltage source (`source_jumps.hpp`); the table current
   source is continuous by validation and does not restart.
+
+## Stage-2 fallback (fix after the integration-branch report, 2026-11-13)
+
+- **Defect.** → With the flag on, `three_phase_diode_rectifier` at
+  dt/τ = 10 charged its bus to 37.20 V on 24 V-peak phases. Measured
+  mechanism: stage 1 (diode ON) gives x1 = 15.4 V, so the stage-2
+  pseudo-state is x0* = x0 + ((1−γ)/γ)(x1 − x0) = 37.2 V. Stage 2 ON
+  overshoots to 25 V (> the 20.7 V phase; R(−10) ≈ −0.2), the diode
+  turns OFF, and the OFF solve of an undamped capacitor returns x0*
+  itself. An OFF solve from x0* = 37.18 V reproduces 37.203 V.
+- **Fix chosen.** → When stage 2's event iteration flips a diode,
+  re-try it as backward Euler over (1−γ)h from x1. Keep the BE step only
+  when its mode equals stage 1's (the flip was the overshoot); otherwise
+  restore the SDIRK stage 2 bit for bit. → The rule keeps its per-stage
+  diode decision (deciding once per step collapsed the buck to
+  −11.9 V), and real mode changes keep SDIRK accuracy.
+- **Rejected.** → (a) BE remainder for every stage-2 flip: rectifier
+  equal, but DCM buck T/50 −2.41e-4 instead of +2.93e-5 (8× worse,
+  still order 2). (b) Recursive SDIRK on the remainder: depth 1 DCM
+  −1.67e-4 with 2948 event-LRU refactors in 1000 periods; depth 4
+  −1.26e-4 with 6412.
+- **Numbers** (probe `probes/rectifier_stage2.py`, max |err| vs trbdf2
+  rtol 1e-8 over 40 ms):
+
+  | circuit, dt | off | on, before | on, after |
+  |---|---|---|---|
+  | benchmark, 50 µs: peak | 33.99 V | 37.20 V | 23.999 V |
+  | benchmark, 50 µs: err | 13.45 | 16.66 | 0.762 |
+  | L-L bridge, 50 µs: peak | 59.35 V | 59.63 V | 41.566 V |
+  | L-L bridge, 50 µs: err | 17.84 | 18.35 | 3.44 |
+  | benchmark / bridge, 5 µs: err | 6.21 / 8.04 | 0.363 / 0.167 | 0.363 / 0.167 |
+
+  The first version re-tried every stage-2 flip and, on the buck CCM,
+  kept backward Euler once, at t = 0 (the diode turning ON on
+  round-off): a dt-independent +7e-10 A (1.182e-7 / 3.015e-8 /
+  7.295e-9 A at T/50/100/200 against 1.175e-7 / 2.946e-8 / 6.608e-9),
+  and one more nominal segment (2 → 3) plus one event entry. Review
+  finding H1: the trigger is now "stage 2 turned at least one diode OFF
+  and none ON", the mechanism isolated above. Buck CCM, DCM, tank and LC
+  are bit-identical to before the fallback again (0 re-tries; order 2
+  through T/1600 by successive differences: factors 3.93 / 3.98 /
+  4.20); the factor test is back to 4 builds, 0 refactors, 2 segments.
+  The rectifier: 19 re-tries, 5 kept at dt = 50 µs, 18 / 5 at 5 µs
+  (L-L bridge 38 / 11 and 36 / 0): the count does not grow as dt
+  shrinks. A re-try that throws keeps the SDIRK stage
+  (`stage2_retry_failures`; review finding M2).
+- **Reverse.** → Delete the `has_diodes && iters_2 > 1` block in
+  `run_restart` and set `be_commit_h` back to γh; the two rectifier
+  tests then fail.

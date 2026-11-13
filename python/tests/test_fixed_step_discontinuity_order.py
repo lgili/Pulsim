@@ -161,6 +161,26 @@ def test_buck_ccm_converges_at_second_order():
     assert 1.9 < off[0] / off[1] < 2.1
 
 
+def test_buck_ccm_stays_second_order_to_t_over_1600():
+    """Below T/200 the analytic reference rounds (~1e-9), so the order is
+    read from successive differences. A stage-2 fallback that kept
+    backward Euler at the zero start added a dt-independent 7e-10 A
+    (constant 7.0e-10 / 6.9e-10 / 6.9e-10 at T/50..T/200); the trigger
+    is now a diode turning OFF in stage 2 only."""
+    j = None
+    xs = []
+    for N in (100, 200, 400, 800, 1600):
+        res = _buck(1.0, 0.5, N, **ON)
+        assert res.counters["stage2_be_kept"] == 0
+        t = np.asarray(res.times)
+        j = int(np.argmin(abs(t - (T0 + 40 * TB))))
+        xs.append(float(np.asarray(res.i("L"))[j]))
+    d = [a - b for a, b in zip(xs, xs[1:])]
+    # engine: 2.285e-8, 5.817e-9, 1.460e-9, 3.479e-10 (factors 3.93, 3.98, 4.20)
+    assert abs(d[0]) < 3e-8, d
+    assert all(f >= 3.8 for f in _factors(d)), d
+
+
 def test_freewheel_diode_picks_up_the_current_in_the_first_stage():
     """The SDIRK step is not atomic for the diode event iteration: each
     stage re-decides. Decided once per step instead (stage 1 with the
@@ -341,7 +361,8 @@ def test_a_resonant_tank_keeps_its_peak_through_the_restarts():
         assert pk_off / ref - 1 == pytest.approx(err_off, rel=0.02)
         assert abs(pk_on / ref - 1) <= 1.5 * abs(pk_off / ref - 1), (N, pk_on, pk_off, ref)
         assert r.n_restart_steps == 2400            # 3 x 2 edges x 400 periods
-    # engine: -0.730 % at T/50, -0.040 % at T/100
+        # engine: -0.730 % at T/50, -0.040 % at T/100 (review: gate 0.75 %)
+        assert abs(pk_on / ref - 1) <= {50: 0.75e-2, 100: 0.05e-2}[N]
 
 
 def _isolated_lc(**kw):
@@ -472,22 +493,30 @@ def test_one_factor_per_mask_and_no_refactor():
     m = on.metrics()
     assert m.event_builds == on.num_event_entries() == 4     # one per restart mask
     assert m.event_refactors == 0
+    # The stage-2 fallback never fires on this buck (its only stage-2
+    # flip is the diode turning ON at the zero start).
+    assert runs[1].counters["stage2_retries"] == 0
     assert m.symbolic_analyses == m.structure_builds == 1
     assert off.metrics().event_builds == 0
     # The transitional masks of the event iteration are now solved on
-    # the restart factor only: nominal segments 2 (4 without the rule),
-    # i.e. 6 factorisations in all against 4.
+    # the restart factor only: nominal segments 2 (4 without the rule).
     assert (on.num_built_segments(), off.num_built_segments()) == (2, 4)
 
 
-def test_restart_and_substep_correction_are_refused_together():
+def test_substep_correction_requires_the_restart_rule():
+    # add-fixed-step-event-splitting: the option is now the event split,
+    # which ends every split step with the rule's SDIRK window (was:
+    # refused together with the rule).
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 1.0)
     b.add_resistor("R", "a", "c", 1.0)
     b.add_capacitor("C", "c", "gnd", 1e-6)
-    with pytest.raises(ValueError, match="discontinuity_restart.*substep|substep.*discontinuity_restart"):
+    with pytest.raises(p.UnsupportedError, match="requires discontinuity_restart") as ei:
         p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
-                   enable_substep_state_correction=True, **ON)
+                   enable_substep_state_correction=True)
+    assert (ei.value.engine, ei.value.feature) == ("pwl", "enable_substep_state_correction")
+    p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
+               enable_substep_state_correction=True, **ON)
 
 
 # --- the step observer and the recorded mask --------------------------------------
@@ -714,3 +743,65 @@ def test_the_static_path_samples_the_gate_at_the_step_start():
     # the PWM falls at 5 us and rises at 10 us: the sample ON a jump reads the left limit
     assert list(vx_off[5:11]) == [0.0, 0.0, 0.0, 0.0, 0.0, 5.0]
     assert list(vx_on[5:11]) == [5.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+# --- diode mode change inside a restart step ------------------------------------
+def _rect3(dt, classic, full=False, **kw):
+    """Three 24 V-peak phases, six diodes (5 mOhm on), 1 mF bus charged
+    from 0 V: tau = 5 us. `classic`: low side on a floating DC rail (bus
+    = line-to-line, peak 41.57 V); else on ground (the benchmark
+    `three_phase_diode_rectifier`, bus peak = phase peak 24 V)."""
+    b = p.CircuitBuilder()
+    lo = "neg" if classic else "gnd"
+    for n, ph in (("a", 0.0), ("b", 2.0943951), ("c", 4.1887902)):
+        b.add_sine_voltage_source("V" + n, n, "gnd", 0.0, 24.0, 100.0, ph)
+        b.add_diode("D" + n + "h", n, "out", 200.0, 1e-6)
+        b.add_diode("D" + n + "l", lo, n, 200.0, 1e-6)
+    b.add_capacitor("Cout", "out", lo, 1e-3)
+    b.add_resistor("Rload", "out", lo, 200.0)
+    if classic:
+        b.add_resistor("Rref", "neg", "gnd", 1e6)
+    kw.setdefault("engine", "pwl")
+    res = p.simulate(b, t_end=40e-3, dt=dt, **kw)
+    if full:
+        return res
+    v = np.asarray(res.v("out"))
+    if classic:
+        v = v - np.asarray(res.v("neg"))
+    return np.asarray(res.times), v
+
+
+@pytest.mark.parametrize("classic, peak", [(False, 24.0),
+                                           (True, 24.0 * math.sqrt(3))])
+@pytest.mark.parametrize("dt", [50e-6, 5e-6])          # dt/tau = 10 and 1
+def test_rectifier_bus_never_exceeds_the_source_peak(classic, peak, dt):
+    """Stage 2 of a restart step starts from x0* = x0 + ((1-g)/g)(x1-x0),
+    stage 1's slope. When the charging diode turns off in stage 2, the
+    OFF solve returned x0* itself: 37.20 V on the 24 V benchmark (59.63 V
+    on the 41.57 V bridge) at dt/tau = 10. Stage 2 is now re-taken as
+    backward Euler from x1 when that keeps stage 1's mode (the flip was
+    the SDIRK overshoot): 23.999 / 41.566 V."""
+    _, v = _rect3(dt, classic, **ON)
+    assert v.max() < peak * (1 + 1e-4), v.max()
+
+
+def test_the_stage2_fallback_fires_on_the_rectifier_only_at_turn_off():
+    c = _rect3(50e-6, False, full=True, **ON).counters
+    # engine: 19 re-tries, 5 kept (40 ms; 5 also at dt = 5 us: the count
+    # does not grow as dt shrinks); L-L bridge 38 / 11
+    assert c["stage2_be_kept"] >= 1 and c["stage2_retry_failures"] == 0, c
+
+
+@pytest.mark.parametrize("classic", [False, True])
+def test_rectifier_with_the_rule_agrees_with_trbdf2_better_than_without(classic):
+    tr, vr = _rect3(None, classic, engine="trbdf2", rtol=1e-8, atol=1e-10)
+
+    def err(**kw):
+        t, v = _rect3(50e-6, classic, **kw)
+        return float(np.max(abs(v - np.interp(t, tr, vr))))
+
+    off, on = err(), err(**ON)
+    # engine, max |error| over 40 ms: off 13.45 / 17.84 V; on 0.762 /
+    # 3.441 V (16.66 / 18.35 V before the stage-2 fallback)
+    assert on < 0.3 * off, (on, off)
+    assert on < (1.0 if not classic else 4.0), on

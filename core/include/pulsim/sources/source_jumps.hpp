@@ -105,6 +105,30 @@ inline bool source_jump_in(const pwl::DevicePool& pool,
     return false;
 }
 
+/// First jump of any built-in source strictly after `t` (snapped like
+/// `value_at`); +inf when none. add-fixed-step-event-splitting locates
+/// the jumps that fall inside a step with it.
+inline Real next_source_jump_after(const pwl::DevicePool& pool,
+                                   const topology::Graph& graph, Real t) {
+    Real best = std::numeric_limits<Real>::infinity();
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        if (graph.branch(b_id).kind != topology::BranchKind::Source) continue;
+        detail::for_each_family(pool, b_id,
+            [&](Real off, Real T, Real th, bool all_n) {
+                if (!(T > Real{0})) {
+                    if (detail::count_family(t, off, T, th, all_n).le == Real{0})
+                        best = std::min(best, off);
+                    return;
+                }
+                const auto pos = pwm_phase::cycle_position(t, off, T);
+                Real n = pos.k + (pwm_phase::reached(pos, th) ? Real{1} : Real{0});
+                if (!all_n && n < Real{0}) n = Real{0};
+                best = std::min(best, off + (n + th) * T);
+            });
+    }
+    return best;
+}
+
 /// Does the source on `branch_id` jump exactly at `t`?
 inline bool source_jumps_at(const pwl::DevicePool& pool, Index branch_id,
                             Real t) {

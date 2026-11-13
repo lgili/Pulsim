@@ -243,6 +243,7 @@ public:
     void build(Real dt) {
         dt_ = dt;
         lazy_mode_ = false;
+        bump_generation_();
         segments_.clear();
         event_entries_.clear();
         const Size num_switches = graph_.num_switches();
@@ -265,6 +266,7 @@ public:
     void build_lazy(Real dt) {
         dt_ = dt;
         lazy_mode_ = true;
+        bump_generation_();
         segments_.clear();
         event_entries_.clear();
     }
@@ -347,6 +349,31 @@ public:
     /// f = J·x + b_total = 0, so the solution is x = -(L^-1 ·
     /// (U^-1 · b_total)) = solver.solve(-b_total). We compute that
     /// directly: rhs = -(b_constant + b_extra), then solve.
+    /// update-fixed-step-loop-bookkeeping: changes whenever a segment
+    /// may have moved or changed (build, lazy insert/eviction,
+    /// parametric refactor). A caller that keeps a `const PwlSegment*`
+    /// from `lookup` may reuse it while the generation is unchanged.
+    [[nodiscard]] std::uint64_t generation() const noexcept {
+        return generation_.load(std::memory_order_relaxed);
+    }
+
+    /// The LRU tick a lookup hit writes, for a caller that reuses a
+    /// segment pointer instead of looking it up again.
+    void touch_segment(const PwlSegment& seg) const noexcept {
+        if (lazy_mode_) {
+            seg.touch(lru_clock_.fetch_add(
+                std::uint64_t{1}, std::memory_order_relaxed) + 1);
+        }
+    }
+
+    /// `solve(mask, …)` on a segment the caller already looked up
+    /// (same arithmetic; no LRU tick — the caller's lookup or
+    /// `touch_segment` wrote it).
+    void solve_segment(const PwlSegment& seg, const Vector& b_extra,
+                       Vector& x) const {
+        seg.solver->solve_neg_sum(seg.b_constant, b_extra, x);
+    }
+
     void solve(const topology::SwitchStateMask& mask,
                 const Vector& b_extra,
                 Vector& x) const {
@@ -1777,6 +1804,7 @@ private:
         }
         seg->touch(lru_clock_.fetch_add(
             std::uint64_t{1}, std::memory_order_relaxed) + 1);
+        bump_generation_();   // insert (and any eviction above)
         segments_.emplace(mask, std::move(*seg));
         return {};
     }
@@ -1785,6 +1813,7 @@ private:
     /// Eager `build()` calls in a loop; lazy `lookup()` on
     /// demand.
     void build_one_segment(const topology::SwitchStateMask& mask) {
+        bump_generation_();
         segments_.emplace(mask, make_segment(mask, dt_));
     }
 
@@ -1845,6 +1874,7 @@ private:
         auto it = segments_.find(mask);
         if (it != segments_.end()) {
             any_target_existed = true;
+            bump_generation_();
             sparse::Matrix new_J;
             Vector new_b;
             asm_.assemble(graph_, pool_, mask, dt_, new_J, new_b);
@@ -2099,6 +2129,10 @@ private:
     // only race benignly on recency ORDER, never on the counter
     // itself (adversarial-review finding ZA-1 hygiene).
     mutable std::atomic<std::uint64_t> lru_clock_{0};
+    std::atomic<std::uint64_t> generation_{0};
+    void bump_generation_() noexcept {
+        generation_.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // update-linear-time-assembly tier 1: one pattern template per
     // assembly regime and one symbolic analysis per regime, shared by

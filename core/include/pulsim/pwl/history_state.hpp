@@ -550,6 +550,21 @@ public:
         out.assign(entries_.begin(), entries_.end());
     }
 
+    /// Flat rollback snapshot (update-fixed-step-loop-bookkeeping):
+    /// only the two fields a step mutates, as (v_prev, i_prev) pairs.
+    void snapshot_into(std::vector<Real>& out) const {
+        out.resize(2 * entries_.size());
+        for (Size k = 0; k < entries_.size(); ++k) {
+            out[2 * k] = entries_[k].v_prev;
+            out[2 * k + 1] = entries_[k].i_prev;
+        }
+    }
+    void restore(const std::vector<Real>& snap) {
+        for (Size k = 0; k < entries_.size(); ++k) {
+            entries_[k].v_prev = snap[2 * k];
+            entries_[k].i_prev = snap[2 * k + 1];
+        }
+    }
     void restore(const std::vector<HistoryEntry>& snap) {
         // We do not enforce snap.size() == entries_.size()
         // because callers always pair snapshot/restore on the

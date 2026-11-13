@@ -283,6 +283,19 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 ## Notes
 
+**Fixed-step event splitting (pwl+split), 2026-11-13.** `pwl+split` is
+`discontinuity_restart` + `enable_substep_state_correction` (opt-in, off
+by default). Strict gate: 85 / 15 / 8 / 0 vs pwl 77 / 23 and pwl+restart
+82 / 18. Of the late-gate-edge cells only `cascaded_h_bridge_5level`
+agrees (0.0142; the rule alone 0.0402). `vcswitch_resistor` 0.0332,
+`ll07` 0.0997, `ll09` 0.0585, `ll10` 0.0496 and `ll12` 0.0806 still
+disagree, but their edge errors fall from the rule's 0.013-0.057 to
+5.9e-7-6.5e-3, and their timing falls from 1.5-2 steps to 1 step. The
+worst observable is the source-forced gate node (`V(ctrl*)`), sampled
+on the step grid. The states agree. What still differs is the recorded
+edge instant, one step late. The split alone cleared `boost_pfc_open_loop`
+(0.0304 -> 1.1e-5) and `dual_active_bridge` (0.0812 -> 5.8e-4).
+
 **Integration batch 6a: the gate is strict again, 2026-11-13.** Batch 5
 (e076241b) gated on an `edge` measure that left out every step holding a
 switch-state change. A fresh review showed it could not see a late edge

@@ -283,12 +283,54 @@ and samples the gate at the step start. Off by default until the flip
 of the migration plan.
 
 Limits with the rule on:
-- an edge off the `dt` grid stays first order (event splitting is a
-  separate change);
-- a `b_extra_fn` jump restarts only when the callable declares it
-  through `next_jump_after(t)`; undeclared ones stay first order;
-- `enable_substep_state_correction` is refused with the rule;
-- an MNA PMSM retries every fixed step at dt/2 with the rule on or off.
+- an edge off the `dt` grid stays first order unless
+  `enable_substep_state_correction=True` splits the step at it (order
+  2: RL edge +0.3 dt 1.01e-6 A at 2 µs; buck D = 0.4567 `v_C` 1.07e-6 V
+  at T/50 instead of 8.08e-2 V). The split needs an edge oracle
+  (`next_edge_after`): an opaque `switch_fn` is still taken at the next
+  grid point (counted in `res.counters["unlocated_gate_steps"]`, one
+  `UserWarning`);
+- a `b_extra_fn` jump restarts, and with the split is split at, only
+  when the callable declares it through `next_jump_after(t)` (RC step
+  at 2.037 µs: order 1.97); undeclared ones stay first order;
+- a step that needs the dt-retry ladder is re-taken without its
+  interior events (the next step restarts on the new mask);
+- the split is second order on the integrated devices (MLCC charge
+  table, DC machine, controlled sources, pulse / sine / table current
+  sources, diode with `V_f`: orders 1.9-2.0 to T/800, probe
+  `split_devices.py`) but not on a power MOSFET switched through its
+  gate: its channel crosses `V_T` between grid points, which is no
+  event, and the run is not second order with the flag off, the rule
+  or the split (identical with the edges on the grid);
+- the event table keeps one factor per mask: the split's dt1 / dt2
+  solves and the restart stages at 2γ·dt refactor the same entry in
+  turn (VSI 10 ms at 1e-7 with the split: 2395 event refactors, 307
+  ns/step against 252 with the rule alone);
+- an MNA PMSM retries every fixed step at dt/2 with the rule on or off,
+  so its steps are never split.
+- a diode that turns off inside stage 2 of a restart step because of
+  the SDIRK overshoot (dt/τ ≫ 1, a rectifier charging its bus) is
+  re-tried as backward Euler from stage 1: that step is first order
+  (bus within 1e-4 of the source peak, but 0.76 V max error vs trbdf2
+  at dt/τ = 10, 0.36 V at dt/τ = 1).
+
+Resolution diagnostics (`res.resolution`, `pulsim.ResolutionWarning`):
+the truncation estimate covers linear capacitors and inductors only
+(the stateful devices are seen by the ringing detector through their
+node voltages and branch currents); it is skipped on steps whose
+three-point stencil straddles a mask change, restart, split, retry or
+built-in source jump (an undeclared `b_extra_fn` jump is not seen); it
+is an estimate, not an error bound. Thresholds (1e-2; 1 % over four
+steps) come from one prototype and five circuits. Cost with it on:
++5 % to +14 % ns/step (design gate: 3 %), so it is OFF by default
+(`resolution_diagnostics=True` turns it on). With the shipped examples
+under the example test's all-gates-OFF drive, six warn: buck,
+buck_converter, stress_buck_switching (an inductor behind a 1e-9 S
+switch rings at Nyquist: true), half_bridge_pwm and
+stress_large_rc_ladder (truncation 0.67 / 0.056 at their dt: true), and
+flyback (`T1.s` 1.27e3: the normalisation of a winding current that is
+~0 everywhere — a false positive the 1e-3-of-kind floor does not
+remove).
 
 ### DSED exact propagator: what is still numeric or refused
 
