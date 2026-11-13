@@ -428,6 +428,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_builder_tests
         tests/builder/test_main.cpp
         tests/builder/test_circuit_builder.cpp
+        tests/builder/test_circuit_ir.cpp
     )
     target_link_libraries(pulsim_core_builder_tests
         PRIVATE

@@ -38,12 +38,14 @@
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/voltage_source.hpp"
+#include "pulsim/ir/fields.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/preflight.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <format>
@@ -56,11 +58,105 @@
 #include <utility>
 #include <vector>
 
+namespace pulsim::ir { class Circuit; }
+
 namespace pulsim::builder {
 
 class CircuitBuilder {
 public:
     CircuitBuilder() = default;
+    CircuitBuilder(CircuitBuilder&&) = default;
+    CircuitBuilder& operator=(CircuitBuilder&&) = default;
+
+    /// Deliberate deep copy (add-immutable-circuit-ir). The copy
+    /// constructor stays private so a builder is never copied by
+    /// accident (pybind, pass-by-value); `ir::Circuit` and a run's own
+    /// regularised circuit are built from clones.
+    [[nodiscard]] CircuitBuilder clone() const { return CircuitBuilder(*this); }
+
+    /// Immutable snapshot of this builder (`ir/circuit.hpp`); the
+    /// builder can keep being edited. Defined in `ir/circuit.hpp`.
+    [[nodiscard]] ir::Circuit build() const;
+
+    /// Set one value field in place: `set_value("R1.R", 2.0)`. Fields
+    /// come from the kind's row of `ir::kKindFields`; the new value
+    /// must satisfy the field's bound. Values the pool keeps twice (a
+    /// PMSM's machine record, a coupled inductor's self-inductance) are
+    /// re-derived, so the result equals rebuilding with the new literal.
+    /// Refuses, naming device and field: an unknown device or field, an
+    /// out-of-bound value, and a power-MOSFET composite (its element
+    /// values are derived from the datasheet record).
+    void set_value(std::string_view device_dot_field, Real value) {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos || dot == 0 ||
+            dot + 1 == device_dot_field.size()) {
+            throw std::invalid_argument(std::format(
+                "set_value(\"{}\"): expected \"<device>.<field>\", e.g. "
+                "\"R1.R\"", device_dot_field));
+        }
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto field = device_dot_field.substr(dot + 1);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end()) {
+            throw std::invalid_argument(std::format(
+                "set_value(\"{}\"): no device named \"{}\"",
+                device_dot_field, dev));
+        }
+        const Index b = hit->second;
+        for (const auto& [ch, rec] : power_mosfets_) {
+            const bool member = ch == b ||
+                std::find(rec.sub_elements.begin(), rec.sub_elements.end(),
+                          dev) != rec.sub_elements.end();
+            if (member) {
+                throw std::invalid_argument(std::format(
+                    "set_value(\"{}\"): \"{}\" belongs to the power MOSFET "
+                    "\"{}\", whose element values are derived from its "
+                    "datasheet record; rebuild it with the new value",
+                    device_dot_field, dev, rec.name));
+            }
+        }
+        const auto kind = pool_.kind_of(b);
+        const auto* spec = ir::find_field(kind, field);
+        if (spec == nullptr) {
+            std::string names;
+            for (const auto& f : ir::fields_of(kind)) {
+                names += names.empty() ? "" : ", ";
+                names += f.name;
+            }
+            throw std::invalid_argument(std::format(
+                "set_value(\"{}\"): device \"{}\" ({}) has no value field "
+                "\"{}\"; its fields: {}", device_dot_field, dev,
+                pwl::kKindCaps[static_cast<std::size_t>(kind)].name, field,
+                names.empty() ? std::string{"none"} : names));
+        }
+        if (!ir::within(spec->bound, value)) {
+            throw std::invalid_argument(std::format(
+                "set_value(\"{}\"): field {} of device \"{}\" must be {} "
+                "(got {})", device_dot_field, spec->name, dev,
+                ir::bound_text(spec->bound), value));
+        }
+        spec->set(pool_.params_of_mut(b), value);
+        pool_.sync_derived_values(b);
+    }
+
+    /// Read one value field (`"R1.R"`), as `set_value` resolves it.
+    [[nodiscard]] Real get_value(std::string_view device_dot_field) const {
+        const auto dot = device_dot_field.rfind('.');
+        const auto dev = dot == std::string_view::npos
+            ? device_dot_field : device_dot_field.substr(0, dot);
+        const auto hit = branch_index_.find(dev);
+        const auto* spec = (hit == branch_index_.end() ||
+                            dot == std::string_view::npos)
+            ? nullptr
+            : ir::find_field(pool_.kind_of(hit->second),
+                             device_dot_field.substr(dot + 1));
+        if (spec == nullptr) {
+            throw std::invalid_argument(std::format(
+                "get_value(\"{}\"): no such device value field",
+                device_dot_field));
+        }
+        return spec->get(pool_.params_of(hit->second));
+    }
 
     /// Return the node index for `name`, creating it if not
     /// yet registered. `"gnd"` / `"GND"` / `"0"` all map to
@@ -2148,7 +2244,24 @@ private:
         return b_id;
     }
 
-    topology::Graph                         graph_;
+    CircuitBuilder(const CircuitBuilder&) = default;
+    CircuitBuilder& operator=(const CircuitBuilder&) = default;
+
+    /// The builder's graph, copyable only through `Graph::clone` so
+    /// the builder's (private) copy constructor stays a default one:
+    /// a member added later is copied without anyone listing it.
+    struct GraphSlot_ : topology::Graph {
+        GraphSlot_() = default;
+        GraphSlot_(const GraphSlot_& o) : topology::Graph(o.clone()) {}
+        GraphSlot_& operator=(const GraphSlot_& o) {
+            static_cast<topology::Graph&>(*this) = o.clone();
+            return *this;
+        }
+        GraphSlot_(GraphSlot_&&) noexcept = default;
+        GraphSlot_& operator=(GraphSlot_&&) noexcept = default;
+    };
+
+    GraphSlot_                              graph_;
     pwl::DevicePool                         pool_;
     std::unordered_map<std::string, Index,
                         NodeKeyHash, std::equal_to<>> node_map_;
@@ -2173,3 +2286,6 @@ private:
 };
 
 }  // namespace pulsim::builder
+
+// `CircuitBuilder::build()` is defined with `ir::Circuit`.
+#include "pulsim/ir/circuit.hpp"

@@ -49,6 +49,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     UnsupportedError,
     engine_capabilities,
     # Builder API (Layer 6).
+    Circuit,
     CircuitBuilder,
     # Topology / device handles (opaque — produced by the
     # builder and consumed by the cache).
@@ -490,6 +491,7 @@ from ._ai_guide import ai_guide  # noqa: E402
 __all__ = [
     "ResolutionWarning",
     "ai_guide",
+    "Circuit",
     "CircuitBuilder",
     "Graph",
     "DevicePool",
@@ -1796,7 +1798,7 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
 
 
 def simulate(
-    builder: "CircuitBuilder | LoadedCircuit",
+    builder: "CircuitBuilder | Circuit | LoadedCircuit",
     t_end: Optional[float] = None,
     dt: Optional[float] = None,
     *,
@@ -2109,6 +2111,10 @@ def simulate(
     if isinstance(builder, LoadedCircuit):
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
+    # add-immutable-circuit-ir: a Circuit runs on a private clone of its
+    # lowered builder (the engines take a mutable CircuitBuilder).
+    if isinstance(builder, Circuit):
+        builder = builder.to_builder()
     if t_end is None:
         raise TypeError(
             "simulate(): missing required argument 't_end' (end time, s). "

@@ -8,15 +8,15 @@ lands).
 
 ## 0. Preconditions and baseline
 - [ ] 0.1 `add-kernel-simulation-object` section 10 merged (`Simulation{Circuit, RunOptions}` with `Circuit` as a view)
-- [ ] 0.2 Record: `components()` dumps of every shipped example and harness circuit; build + analyse + assemble time of a 100-point sweep on the audit's buck and on the n = 1502 ladder; the list of builder private attributes set from Python (4) and read with `getattr` (7 sites)
+- [x] 0.2 Record: `components()` dumps of every shipped example and harness circuit; build + analyse + assemble time of a 100-point sweep on the audit's buck and on the n = 1502 ladder; the list of builder private attributes set from Python (4) and read with `getattr` (7 sites) — `probes/components_baseline.json` (152 circuits, 136 load), `probes/sweep_probe.py`, BASELINE.md
 
 ## 1. Immutable snapshot of the builder
-- [ ] 1.1 `core/include/pulsim/ir/circuit.hpp`: ids, `Value` (literal only for now), `Node`, `Device`, `Scope` (root only), `InitialCondition`, `Alias`, `Circuit` handle over shared const data
-- [ ] 1.2 `CircuitBuilder::build()`; `Circuit::lowered()` reproducing `Graph` + `DevicePool` in the builder's insertion order
-- [ ] 1.3 `sim::Simulation` takes `ir::Circuit`; `simulate()` calls `build()`; binding `pulsim.Circuit`
-- [ ] 1.4 Tests: `components()`, unknown indices, switch order and `initial_state()` equal between the builder and `build().lowered()` for every example and harness circuit
-- [ ] 1.5 Oracle: suite and goldens bit-identical; zero-alloc tests green
-- [ ] 1.6 Docs: `docs/mental-model.md` (builder → circuit → lowered); stubs
+- [x] 1.1 `core/include/pulsim/ir/circuit.hpp`: ids, `Value` (literal only for now), `Node`, `Device`, `Scope` (root only), `InitialCondition`, `Alias`, `Circuit` handle over shared const data — the root scope is implicit (no `Scope` table until group 8)
+- [x] 1.2 `CircuitBuilder::build()`; `Circuit::lowered()` reproducing `Graph` + `DevicePool` in the builder's insertion order
+- [ ] 1.3 `sim::Simulation` takes `ir::Circuit`; `simulate()` calls `build()`; binding `pulsim.Circuit` — binding and `simulate(circuit)` done; the `Simulation` part waits for 0.1 (maintainer's slice decision, DECISIONS.md)
+- [x] 1.4 Tests: `components()`, unknown indices, switch order and `initial_state()` equal between the builder and `build().lowered()` for every example and harness circuit
+- [x] 1.5 Oracle: suite and goldens bit-identical; zero-alloc tests green
+- [x] 1.6 Docs: `docs/mental-model.md` (builder → circuit → lowered); stubs
 
 ## 2. Stop mutating the caller's circuit (**BREAKING**)
 - [ ] 2.1 `Circuit::with_ties`; the preflight regularises the run's own circuit; `result.circuit` and `result.plan.ties` expose it

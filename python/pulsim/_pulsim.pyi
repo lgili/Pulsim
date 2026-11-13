@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -551,6 +551,10 @@ class CircuitBuilder:
         the returned int is the post-node state-vector
         offset (`state_idx == num_nodes + branch_index_of(name)`).
         """
+    def build(self) -> Circuit:
+        """
+        Immutable snapshot of this builder (a pulsim.Circuit). The builder can keep being edited; the circuit does not change.
+        """
     def components(self) -> list[typing.Any]:
         """
         Enumerate every device in the circuit. Returns a list of dicts (kind, name, nodes, params, branch_id) in insertion order. Consumed by `pulsim.schematic`.
@@ -565,6 +569,10 @@ class CircuitBuilder:
         device the builder has accepted. Anonymous branches
         (snubber RC expansion, transformer parallels) are
         skipped. List order matches `add_*` call order.
+        """
+    def get_value(self, device_dot_field: str) -> float:
+        """
+        Value of one field, e.g. get_value("R1.R").
         """
     def ground(self) -> int:
         """
@@ -615,6 +623,10 @@ class CircuitBuilder:
         capacitor (volts) or inductor (amps). Raises
         out_of_range if the name doesn't match a registered
         branch.
+        """
+    def set_value(self, device_dot_field: str, value: float) -> None:
+        """
+        Set one value field in place, e.g. set_value("R1.R", 2.0); every field of every kind (see Circuit.devices()). Raises ValueError naming device and field on an unknown name or an out-of-bound value.
         """
     def state_var_names(self) -> list[str]:
         """
@@ -2757,6 +2769,74 @@ class _NativeCircuitBuilderAdapter:
     def num_cached_masks(self) -> int:
         """
         Number of distinct masks resolved (and thus cached) so far. Useful for tests + diagnostics.
+        """
+class Circuit:
+    """
+    Immutable circuit (add-immutable-circuit-ir). Built with `builder.build()`; a handle to shared, read-only data, cheap to copy and safe to share between threads. `simulate(circuit, ...)` runs it; the builder it came from can keep being edited.
+    """
+    def __repr__(self) -> str:
+        ...
+    def aliases(self) -> dict[typing.Any, typing.Any]:
+        """
+        {alias: (kind, target)}, as CircuitBuilder.aliases().
+        """
+    def branch_id_of(self, name: str) -> int:
+        """
+        As CircuitBuilder.branch_id_of().
+        """
+    def components(self) -> typing.Any:
+        """
+        As CircuitBuilder.components().
+        """
+    def devices(self) -> list[typing.Any]:
+        """
+        One dict per lowered branch, in insertion order: name, kind (capability-table name), pins (node indices, -1 = ground) and fields ({name: value}, the names `with_value` takes).
+        """
+    def get_value(self, device_dot_field: str) -> float:
+        """
+        Value of one field, e.g. get_value("R1.R").
+        """
+    def initial_conditions(self) -> dict[typing.Any, typing.Any]:
+        """
+        {device name: value} of the recorded initial conditions.
+        """
+    def initial_state(self) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
+        """
+        As CircuitBuilder.initial_state().
+        """
+    def node_id_of(self, name: str) -> int:
+        """
+        As CircuitBuilder.node_id_of().
+        """
+    def state_var_names(self) -> list[str]:
+        """
+        As CircuitBuilder.state_var_names().
+        """
+    def structure_hash(self) -> int:
+        """
+        64-bit hash of topology, kinds and names.
+        """
+    def switch_index_of(self, name: str) -> int:
+        """
+        As CircuitBuilder.switch_index_of().
+        """
+    def to_builder(self) -> CircuitBuilder:
+        """
+        A new, independent CircuitBuilder holding this circuit (the circuit is not affected by edits to it).
+        """
+    def value_hash(self) -> int:
+        """
+        64-bit hash of the structure and every value (fields, couplings, initial conditions, aliases).
+        """
+    @property
+    def nodes(self) -> list[typing.Any]:
+        """
+        Node names; entry i is unknown i.
+        """
+    @property
+    def num_switches(self) -> int:
+        """
+        Number of switching branches (the SwitchStateMask size).
         """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """

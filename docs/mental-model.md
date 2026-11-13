@@ -31,6 +31,25 @@ Pulsim has **four** big pieces. Once you understand what they do, the rest of th
                                         device is present.
 ```
 
+## 0. Builder → Circuit → lowered form
+
+`CircuitBuilder` is the authoring API and stays mutable. `builder.build()`
+returns a `pulsim.Circuit`: an immutable snapshot, cheap to copy (one
+shared pointer) and safe to share between threads. Its *lowered form* is
+exactly the builder's `Graph` + `DevicePool` at the time of `build()`, in
+insertion order, so unknown indices, switch order and results are the
+builder's own.
+
+```python
+c = b.build()                      # snapshot; b can keep being edited
+c.devices()                        # [{name, kind, pins, fields}, ...] per branch
+c.components()                     # same as b.components()
+res = pulsim.simulate(c, 1e-3, dt=1e-7)   # same result as simulate(b, ...)
+```
+
+`simulate()` never runs on the circuit's shared data: it runs on a
+private clone (`c.to_builder()`).
+
 ## 1. Graph + DevicePool — the circuit description
 
 The `Graph` stores topology: each branch has a `from` node id, a `to` node id, and a `kind` enum:

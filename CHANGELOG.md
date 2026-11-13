@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Immutable circuit IR (add-immutable-circuit-ir, first slice)
+
+* **Added** `pulsim.Circuit`: `builder.build()` returns an immutable
+  snapshot — one shared pointer to read-only data, safe to share between
+  threads — whose lowered form is the builder's own graph and pool in
+  insertion order. `simulate(circuit, ...)` runs it bit-identically to
+  `simulate(builder, ...)` on `pwl`, `trbdf2` and `dsed`. Queries:
+  `devices()` (per branch: name, kind, pins, value fields), `nodes`,
+  `components()`, `initial_state()`, `state_var_names()`,
+  `switch_index_of()`, `structure_hash()`, `value_hash()`,
+  `to_builder()` (an independent mutable copy).
+* **Added** `builder.set_value("R1.R", 2.0)` / `get_value(...)`: every
+  value field of every device kind by name (the table is
+  `core/include/pulsim/ir/fields.hpp`); out-of-bound values and unknown
+  names raise `ValueError` naming the device and the field.
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`

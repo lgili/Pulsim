@@ -41,6 +41,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <limits>
@@ -1123,6 +1124,40 @@ private:
 public:
     /// Number of device kinds; `kKindCaps` must have this many rows.
     static constexpr std::size_t kNumKinds = std::variant_size_v<Entry>;
+
+    // add-immutable-circuit-ir: the generic field table (ir/fields.hpp)
+    // reads and writes a branch's parameters through these.
+    using ParamsVariant = Entry;
+    [[nodiscard]] const ParamsVariant& params_of(Index branch_id) const {
+        return entry_at(branch_id);
+    }
+    /// Mutable access for `ir` value updates; the caller re-syncs the
+    /// copies the pool keeps (`sync_derived_values`).
+    [[nodiscard]] ParamsVariant& params_of_mut(Index branch_id) {
+        return require_entry_(branch_id, "params_of_mut");
+    }
+    /// Re-derive the values the pool stores twice after branch
+    /// `branch_id`'s parameters changed: a PMSM's per-machine record and
+    /// its three phase entries; the self-inductances of every coupling
+    /// that names an inductor. Each copy is what the add path writes.
+    void sync_derived_values(Index branch_id) {
+        const auto& e = entry_at(branch_id);
+        if (const auto* pm = std::get_if<models::PmsmMna::Params>(&e)) {
+            const auto p = *pm;
+            for (auto& mach : pmsm_mna_machines_) {
+                if (std::find(mach.branch_id.begin(), mach.branch_id.end(),
+                              branch_id) == mach.branch_id.end()) continue;
+                mach.params = p;
+                for (const Index b : mach.branch_id) entries_[b] = Entry{p};
+            }
+        }
+        if (const auto* ind = std::get_if<models::Inductor::Params>(&e)) {
+            for (auto& c : transformer_couplings_) {
+                if (c.primary_branch_id == branch_id) c.params.L_p = ind->L;
+                if (c.secondary_branch_id == branch_id) c.params.L_s = ind->L;
+            }
+        }
+    }
 
 private:
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------

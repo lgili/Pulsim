@@ -1,0 +1,562 @@
+{
+ "benchmarks/circuits/closed_loop/cl_boost_pi.yaml": {
+  "n": 9,
+  "sha": "db2423109b36a9da"
+ },
+ "benchmarks/circuits/closed_loop/cl_buck_aggressive_pi.yaml": {
+  "n": 10,
+  "sha": "a3b80817606b0e04"
+ },
+ "benchmarks/circuits/closed_loop/cl_buck_hysteresis.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_integrator.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_limiter_chain.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_lookup_duty.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_pi.yaml": {
+  "n": 10,
+  "sha": "fca4cf2f630305db"
+ },
+ "benchmarks/circuits/closed_loop/cl_buck_pi_with_gain.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_pid.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_rate_limited_ref.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/cl_buck_sample_hold.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/closed_loop/ll14_buck_closed_loop.yaml": {
+  "n": 7,
+  "sha": "ba55fb81883ed155"
+ },
+ "benchmarks/circuits/closed_loop/ll15_boost_closed_loop.yaml": {
+  "n": 7,
+  "sha": "95b9979507fadb55"
+ },
+ "benchmarks/circuits/closed_loop/ll16_flyback_closed_loop.yaml": {
+  "n": 9,
+  "sha": "68d266d529146ff8"
+ },
+ "benchmarks/circuits/diodes/back_to_back_diodes_sine.yaml": {
+  "n": 4,
+  "sha": "041adeadea9d62ce"
+ },
+ "benchmarks/circuits/diodes/diode_bridge_rectifier.yaml": {
+  "n": 7,
+  "sha": "8d2d135675e2d277"
+ },
+ "benchmarks/circuits/diodes/diode_clamp_overvoltage.yaml": {
+  "n": 4,
+  "sha": "bf9bd50732c7bb28"
+ },
+ "benchmarks/circuits/diodes/diode_half_wave_rl_load.yaml": {
+  "n": 4,
+  "sha": "c253be6eb3e62b97"
+ },
+ "benchmarks/circuits/diodes/diode_rectifier.yaml": {
+  "n": 4,
+  "sha": "d1331cb1f0439400"
+ },
+ "benchmarks/circuits/diodes/half_wave_rectifier_sine.yaml": {
+  "n": 4,
+  "sha": "923d990f31ffa18b"
+ },
+ "benchmarks/circuits/diodes/ll05_diode_rectifier_filter.yaml": {
+  "n": 4,
+  "sha": "9c628432109d0a0e"
+ },
+ "benchmarks/circuits/diodes/voltage_doubler.yaml": {
+  "n": 6,
+  "sha": "3208e2fcd8c54362"
+ },
+ "benchmarks/circuits/linear/bridge_resistive_pure.yaml": {
+  "n": 5,
+  "sha": "86081b96f48a9b3c"
+ },
+ "benchmarks/circuits/linear/capacitor_natural_discharge.yaml": {
+  "n": 2,
+  "sha": "fa5e3ded4b72ce89"
+ },
+ "benchmarks/circuits/linear/current_divider_3way.yaml": {
+  "n": 4,
+  "sha": "820015b787acffc1"
+ },
+ "benchmarks/circuits/linear/current_source_rc.yaml": {
+  "n": 3,
+  "sha": "5143eb925360c0a0"
+ },
+ "benchmarks/circuits/linear/current_source_rl_step.yaml": {
+  "n": 3,
+  "sha": "0987af2ff6c7426e"
+ },
+ "benchmarks/circuits/linear/lc_low_pass_sine.yaml": {
+  "n": 4,
+  "sha": "6e02fc1cbdabbb11"
+ },
+ "benchmarks/circuits/linear/ll01_resistive_divider_dc.yaml": {
+  "n": 4,
+  "sha": "f244b2c2d305c755"
+ },
+ "benchmarks/circuits/linear/ll02_rc_pulse_charge.yaml": {
+  "n": 3,
+  "sha": "1a23388f8888f2ca"
+ },
+ "benchmarks/circuits/linear/ll03_rl_step.yaml": {
+  "n": 3,
+  "sha": "aa2c005b149dad08"
+ },
+ "benchmarks/circuits/linear/pulse_voltage_rl.yaml": {
+  "n": 3,
+  "sha": "2f1dc8c3301ad453"
+ },
+ "benchmarks/circuits/linear/rc_dc.yaml": {
+  "n": 3,
+  "sha": "2cc53f5ba9550fcd"
+ },
+ "benchmarks/circuits/linear/rc_step.yaml": {
+  "n": 3,
+  "sha": "ac605ab730436c68"
+ },
+ "benchmarks/circuits/linear/rl_natural_response.yaml": {
+  "n": 2,
+  "sha": "38a0067e8de58202"
+ },
+ "benchmarks/circuits/linear/rl_step.yaml": {
+  "n": 3,
+  "sha": "380f847a87e8b668"
+ },
+ "benchmarks/circuits/linear/rlc_series_resonant.yaml": {
+  "n": 4,
+  "sha": "73f609054ecf36b1"
+ },
+ "benchmarks/circuits/linear/sine_voltage_rc.yaml": {
+  "n": 3,
+  "sha": "9ff60100aadb6c8e"
+ },
+ "benchmarks/circuits/linear/two_stage_rc_lowpass.yaml": {
+  "n": 5,
+  "sha": "fca4348b6e92a967"
+ },
+ "benchmarks/circuits/linear/voltage_divider_3stage.yaml": {
+  "n": 4,
+  "sha": "5bb8501e9d0be14f"
+ },
+ "benchmarks/circuits/magnetics/core_loss_steinmetz_sine.yaml": {
+  "n": 3,
+  "sha": "5504f6e131cff14f"
+ },
+ "benchmarks/circuits/magnetics/coupled_inductor_step.yaml": {
+  "n": 5,
+  "sha": "53a19b9493a0312f"
+ },
+ "benchmarks/circuits/magnetics/half_bridge_transformer_dc.yaml": {
+  "n": 14,
+  "sha": "18859586eed84ce0"
+ },
+ "benchmarks/circuits/magnetics/inductor_chain_step.yaml": {
+  "n": 4,
+  "sha": "57b726e004d3f402"
+ },
+ "benchmarks/circuits/magnetics/saturating_inductor_step.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/magnetics/transformer_leakage.yaml": {
+  "n": 5,
+  "sha": "b35a0f40d708f4ab"
+ },
+ "benchmarks/circuits/magnetics/transformer_step_up.yaml": {
+  "n": 4,
+  "sha": "8baee20181380413"
+ },
+ "benchmarks/circuits/motors/motor_dc_brush_step_load.yaml": {
+  "n": 4,
+  "sha": "15905f8c90885e79"
+ },
+ "benchmarks/circuits/motors/motor_induction_locked_rotor.yaml": {
+  "n": 6,
+  "sha": "a8fa175ad3104b08"
+ },
+ "benchmarks/circuits/motors/motor_pmsm_dq_open_loop.yaml": {
+  "n": 7,
+  "sha": "a3a048e7db3016da"
+ },
+ "benchmarks/circuits/resonance/bode_rlc_low_pass.yaml": {
+  "n": 5,
+  "sha": "1675356882042bf1"
+ },
+ "benchmarks/circuits/resonance/driven_lc_series_resonance.yaml": {
+  "n": 4,
+  "sha": "aa3fe7c1e0204341"
+ },
+ "benchmarks/circuits/resonance/lc_resonant_tank.yaml": {
+  "n": 3,
+  "sha": "191a6a32dc6222a9"
+ },
+ "benchmarks/circuits/resonance/ll04_rlc_underdamped.yaml": {
+  "n": 5,
+  "sha": "4f1d3e12ed5f9939"
+ },
+ "benchmarks/circuits/resonance/rl_high_pass_sine.yaml": {
+  "n": 3,
+  "sha": "a2a97a61d8ab1b8f"
+ },
+ "benchmarks/circuits/resonance/rlc_overdamped_step.yaml": {
+  "n": 4,
+  "sha": "b48a5c3c77307899"
+ },
+ "benchmarks/circuits/resonance/rlc_parallel_step.yaml": {
+  "n": 5,
+  "sha": "9d10fa7f110bdeaa"
+ },
+ "benchmarks/circuits/resonance/rlc_step.yaml": {
+  "n": 4,
+  "sha": "6735eab2da71476e"
+ },
+ "benchmarks/circuits/stress/high_q_rlc_ringdown.yaml": {
+  "n": 4,
+  "sha": "2d8759abdff65e39"
+ },
+ "benchmarks/circuits/stress/periodic_rc_pwm.yaml": {
+  "n": 3,
+  "sha": "3ee1429c4a81a627"
+ },
+ "benchmarks/circuits/stress/stiff_rc_high_freq_switching.yaml": {
+  "n": 9,
+  "sha": "3f5212033dea0d20"
+ },
+ "benchmarks/circuits/stress/stiff_rlc.yaml": {
+  "n": 4,
+  "sha": "54459b3e4b4ae5dc"
+ },
+ "benchmarks/circuits/stress/stiff_two_timescale_rc.yaml": {
+  "n": 5,
+  "sha": "ab406e26daf75065"
+ },
+ "benchmarks/circuits/switching/basic/chopper_with_rc_snubber.yaml": {
+  "n": 8,
+  "sha": "b0050934a4dde621"
+ },
+ "benchmarks/circuits/switching/basic/mosfet_nmos_dc.yaml": {
+  "n": 4,
+  "sha": "4da13032f95f9c53"
+ },
+ "benchmarks/circuits/switching/basic/pwm_voltage_rc.yaml": {
+  "n": 3,
+  "sha": "4bdb9f3ff0eeab2b"
+ },
+ "benchmarks/circuits/switching/basic/pwm_voltage_rl_filter.yaml": {
+  "n": 4,
+  "sha": "90a9c8b274e4bc75"
+ },
+ "benchmarks/circuits/switching/basic/snubber_rc.yaml": {
+  "n": 4,
+  "sha": "1d93493b3bf56563"
+ },
+ "benchmarks/circuits/switching/basic/vcswitch_resistor.yaml": {
+  "n": 4,
+  "sha": "aae404b2ee0cc1ed"
+ },
+ "benchmarks/circuits/switching/boost/boost_classic.yaml": {
+  "n": 7,
+  "sha": "74ef78490f345fc7"
+ },
+ "benchmarks/circuits/switching/boost/boost_pfc_open_loop.yaml": {
+  "n": 11,
+  "sha": "5b2d13868371bb9f"
+ },
+ "benchmarks/circuits/switching/boost/boost_switching_complex.yaml": {
+  "n": 9,
+  "sha": "4a173d6292a2fd9a"
+ },
+ "benchmarks/circuits/switching/boost/cascaded_boost_buck.yaml": {
+  "n": 16,
+  "sha": "e39c1b1474e137e4"
+ },
+ "benchmarks/circuits/switching/boost/ll07_boost_vcswitch.yaml": {
+  "n": 9,
+  "sha": "4c839261ebc5e63f"
+ },
+ "benchmarks/circuits/switching/boost/ll12_pfc_boost_continuous.yaml": {
+  "n": 14,
+  "sha": "87f558aaa40044d9"
+ },
+ "benchmarks/circuits/switching/boost/synchronous_boost.yaml": {
+  "n": 9,
+  "sha": "432158f888d009de"
+ },
+ "benchmarks/circuits/switching/boost/textbook_erickson_boost_ccm.yaml": {
+  "n": 7,
+  "sha": "acb0f86b65d80319"
+ },
+ "benchmarks/circuits/switching/boost/two_phase_interleaved_boost.yaml": {
+  "n": 11,
+  "sha": "806a5bdf3a698239"
+ },
+ "benchmarks/circuits/switching/buck/buck_dcm.yaml": {
+  "n": 7,
+  "sha": "0b3b3f4fd57b2aff"
+ },
+ "benchmarks/circuits/switching/buck/buck_hard_switching_reference.yaml": {
+  "n": 7,
+  "sha": "b37222bfcf17ee79"
+ },
+ "benchmarks/circuits/switching/buck/buck_igbt.yaml": {
+  "n": 8,
+  "sha": "319b1244ae8b48a8"
+ },
+ "benchmarks/circuits/switching/buck/buck_mosfet_nonlinear.yaml": {
+  "n": 9,
+  "sha": "811adcdc6a5e91ec"
+ },
+ "benchmarks/circuits/switching/buck/buck_pmos.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/switching/buck/buck_switching.yaml": {
+  "n": 8,
+  "sha": "c7ec9eb69fffaba9"
+ },
+ "benchmarks/circuits/switching/buck/buck_with_current_sense.yaml": {
+  "n": 9,
+  "sha": "8a1f8e264c230079"
+ },
+ "benchmarks/circuits/switching/buck/cascaded_buck_buck.yaml": {
+  "n": 14,
+  "sha": "7504c0ccf707eff1"
+ },
+ "benchmarks/circuits/switching/buck/high_freq_gan_buck.yaml": {
+  "n": 8,
+  "sha": "0e3188fe0c66b5cf"
+ },
+ "benchmarks/circuits/switching/buck/ll06_buck_vcswitch.yaml": {
+  "n": 9,
+  "sha": "4d646b78fbdbd860"
+ },
+ "benchmarks/circuits/switching/buck/ll08_buck_mosfet.yaml": {
+  "n": 9,
+  "sha": "811adcdc6a5e91ec"
+ },
+ "benchmarks/circuits/switching/buck/sync_buck_500khz.yaml": {
+  "n": 8,
+  "sha": "2f1ff22fc5a95612"
+ },
+ "benchmarks/circuits/switching/buck/synchronous_buck.yaml": {
+  "n": 8,
+  "sha": "fa97cafebf26498e"
+ },
+ "benchmarks/circuits/switching/buck/textbook_erickson_buck_ccm.yaml": {
+  "n": 7,
+  "sha": "062aba5ac888454e"
+ },
+ "benchmarks/circuits/switching/buck/triple_sync_buck.yaml": {
+  "n": 22,
+  "sha": "363168c8c7442d33"
+ },
+ "benchmarks/circuits/switching/buck_boost/bidirectional_buck_boost.yaml": {
+  "n": 12,
+  "sha": "ee57126c099d6102"
+ },
+ "benchmarks/circuits/switching/buck_boost/buck_boost.yaml": {
+  "n": 7,
+  "sha": "98cd45c4c0d494f7"
+ },
+ "benchmarks/circuits/switching/buck_boost/cuk_converter.yaml": {
+  "n": 9,
+  "sha": "ae2e377463b7371d"
+ },
+ "benchmarks/circuits/switching/buck_boost/sepic.yaml": {
+  "n": 9,
+  "sha": "12d96cd214574916"
+ },
+ "benchmarks/circuits/switching/inverter/half_bridge_inverter.yaml": {
+  "n": 8,
+  "sha": "5e535c9cfcc80f6c"
+ },
+ "benchmarks/circuits/switching/inverter/half_bridge_inverter_lc.yaml": {
+  "n": 10,
+  "sha": "ab583b5108b1b900"
+ },
+ "benchmarks/circuits/switching/inverter/half_bridge_lc_filter.yaml": {
+  "n": 8,
+  "sha": "383b2c6630741181"
+ },
+ "benchmarks/circuits/switching/inverter/lcc_resonant_inverter.yaml": {
+  "n": 9,
+  "sha": "63ed8b22a622563b"
+ },
+ "benchmarks/circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml": {
+  "n": 10,
+  "sha": "35a03ef3df2efcb8"
+ },
+ "benchmarks/circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml": {
+  "n": 13,
+  "sha": "b25fc9467bfc10f5"
+ },
+ "benchmarks/circuits/switching/isolated/active_clamp_forward.yaml": {
+  "n": 14,
+  "sha": "af9804eb56b6ed38"
+ },
+ "benchmarks/circuits/switching/isolated/dual_active_bridge.yaml": {
+  "n": 17,
+  "sha": "449cc3e6dee74902"
+ },
+ "benchmarks/circuits/switching/isolated/flyback_converter.yaml": {
+  "n": 8,
+  "sha": "456c6a48c6962e41"
+ },
+ "benchmarks/circuits/switching/isolated/forward_converter.yaml": {
+  "n": 11,
+  "sha": "7e1ede3e02eabb6b"
+ },
+ "benchmarks/circuits/switching/isolated/full_bridge_dc.yaml": {
+  "n": 13,
+  "sha": "fe68238a5e5188a2"
+ },
+ "benchmarks/circuits/switching/isolated/ll11_llc_resonant_converter.yaml": {
+  "n": 15,
+  "sha": "031d4be4bb005d52"
+ },
+ "benchmarks/circuits/switching/isolated/ll13_active_clamp_forward.yaml": {
+  "n": 14,
+  "sha": "1cf336d7e4204f35"
+ },
+ "benchmarks/circuits/switching/isolated/synchronous_flyback.yaml": {
+  "n": 9,
+  "sha": "377df63d45a1220c"
+ },
+ "benchmarks/circuits/switching/multilevel/cascaded_h_bridge_5level.yaml": {
+  "n": 21,
+  "sha": "55a9fdc879d95540"
+ },
+ "benchmarks/circuits/switching/multilevel/flying_capacitor_3level.yaml": {
+  "n": 13,
+  "sha": "6b53502d71f9dc91"
+ },
+ "benchmarks/circuits/switching/multilevel/mmc_4cell_chain.yaml": {
+  "n": 17,
+  "sha": "7ec56a630ee00435"
+ },
+ "benchmarks/circuits/switching/multilevel/npc_three_level_halfbridge.yaml": {
+  "n": 16,
+  "sha": "1bf13fb24bdcb2da"
+ },
+ "benchmarks/circuits/switching/multilevel/t_type_3level_halfbridge.yaml": {
+  "n": 13,
+  "sha": "5d9e04cb3be6384e"
+ },
+ "benchmarks/circuits/thermal/buck_electrothermal.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/thermal/electrothermal_resistor_self_heating.yaml": {
+  "n": 2,
+  "sha": "7d5179a8b11b6e05"
+ },
+ "benchmarks/circuits/thermal/long_run_drift_buck.yaml": {
+  "n": 8,
+  "sha": "fa97cafebf26498e"
+ },
+ "benchmarks/circuits/three_phase/grid_pll_lock.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/three_phase/interleaved_buck_3ph.yaml": {
+  "n": 21,
+  "sha": "5239b09000b5f097"
+ },
+ "benchmarks/circuits/three_phase/pll_grid_sync.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/three_phase/three_phase_balanced_rl_load.yaml": {
+  "n": 10,
+  "sha": "c7c78b676e1d3ca9"
+ },
+ "benchmarks/circuits/three_phase/three_phase_diode_rectifier.yaml": {
+  "n": 11,
+  "sha": "e957029b6221c6f6"
+ },
+ "benchmarks/circuits/three_phase/three_phase_dq_decoupling.yaml": "unloadable: Unmapped",
+ "benchmarks/circuits/three_phase/vector_control_open_loop.yaml": "unloadable: Unmapped",
+ "examples/boost_realistic_igbt.yaml": {
+  "n": 7,
+  "sha": "63de0768efe4a06e"
+ },
+ "examples/boost_realistic_mosfet_v14.yaml": {
+  "n": 8,
+  "sha": "de4aa67588e60e35"
+ },
+ "examples/boost_saturable_inductor.yaml": {
+  "n": 7,
+  "sha": "279d5be9911d609d"
+ },
+ "examples/buck.yaml": {
+  "n": 7,
+  "sha": "9ff8ac61ecfdd8f7"
+ },
+ "examples/buck_converter.yaml": {
+  "n": 6,
+  "sha": "5ceed6018a4f3b0c"
+ },
+ "examples/common_source_amplifier.yaml": {
+  "n": 5,
+  "sha": "80953f27a906e88f"
+ },
+ "examples/flyback.yaml": {
+  "n": 9,
+  "sha": "e1344338ecfa1297"
+ },
+ "examples/half_bridge_pwm.yaml": {
+  "n": 7,
+  "sha": "6d78b1e6926f2f1e"
+ },
+ "examples/half_wave_rectifier.yaml": {
+  "n": 3,
+  "sha": "b4410d8af1d2134f"
+ },
+ "examples/hysteretic_inductor_demo.yaml": {
+  "n": 3,
+  "sha": "3fcf4ac53c0ed9ed"
+ },
+ "examples/induction_motor_dol.yaml": {
+  "n": 13,
+  "sha": "cca987b2634abba3"
+ },
+ "examples/ldo_with_opamp.yaml": {
+  "n": 9,
+  "sha": "8e15549a591e1aae"
+ },
+ "examples/phase_shift_full_bridge.yaml": {
+  "n": 20,
+  "sha": "1d67f765dcd400e1"
+ },
+ "examples/pwm_chopper_realistic_mosfet.yaml": {
+  "n": 6,
+  "sha": "c21a9fb8c4799623"
+ },
+ "examples/rc_circuit.yaml": {
+  "n": 3,
+  "sha": "2cc53f5ba9550fcd"
+ },
+ "examples/rc_pulse.yaml": {
+  "n": 3,
+  "sha": "a9abac70f03158d4"
+ },
+ "examples/refrigerator_compressor_cc.yaml": "unloadable: RuntimeError",
+ "examples/rl_circuit.yaml": {
+  "n": 3,
+  "sha": "94a050163b78544c"
+ },
+ "examples/rlc_circuit.yaml": {
+  "n": 4,
+  "sha": "3238f46660e0826c"
+ },
+ "examples/rlc_step_response.yaml": {
+  "n": 4,
+  "sha": "8f6a2066df6e48ad"
+ },
+ "examples/stress_buck_switching.yaml": {
+  "n": 13,
+  "sha": "47f91f9a1484f18b"
+ },
+ "examples/stress_large_rc_ladder.yaml": {
+  "n": 800,
+  "sha": "89f228bf8b0560c1"
+ },
+ "examples/stress_large_resistive_ladder.yaml": {
+  "n": 2001,
+  "sha": "b585455187c8d735"
+ },
+ "examples/three_phase_diode_rectifier.yaml": {
+  "n": 12,
+  "sha": "79adb02be199aeb3"
+ },
+ "examples/three_phase_inverter.yaml": {
+  "n": 20,
+  "sha": "746c6e453acbaffa"
+ },
+ "examples/voltage_divider.yaml": {
+  "n": 3,
+  "sha": "f2b42e37889d889c"
+ }
+}

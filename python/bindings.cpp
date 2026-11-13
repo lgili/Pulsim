@@ -5114,6 +5114,9 @@ void init_module(py::module_& m) {
 namespace pulsim_dsed_bindings {
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -5121,4 +5124,5 @@ PYBIND11_MODULE(_pulsim, m) {
               "Newton refinement, and the high-level CircuitBuilder API.";
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
+    pulsim_ir_bindings::init_module(m);
 }
