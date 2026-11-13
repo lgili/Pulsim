@@ -14,6 +14,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   trbdf2 run that held a diode against its commutation rule, is now
   `failed` (`implausible_voltage: ...`, `missed_commutation: ...`); a
   warning is shown once per call site, so an optimiser never saw it.
+* **Fixed** (batch review) four more ways `pulsim.design` could return
+  a number or a raw exception for a run it should have typed: an
+  inductor trace held by `inductor_guard` and a trbdf2 gate pulse
+  narrower than its `switch_fn` sampling are `failed`
+  (`inductor_guard: ...`, `gate_undersampled: ...`); diode event-
+  iteration breaches and trbdf2 chatter breaks are counted in
+  `rec.counters`; `method='pss'` on a circuit whose state space cannot
+  be extracted is `refused` (the auto route already took the transient
+  route), and a `LinAlgError` from pss is `failed`; the auto route's pss
+  capability probe runs under the engine-error mapping. `evaluate_many`
+  no longer stops a batch on three `consistent_mode` refusals: that one
+  is met mid-run at a design-dependent state. pss period runs now carry
+  the kernel diode-mode guard that `simulate`'s dsed runs carry (CCM and
+  DCM pss KPIs bit-identical; oracles unchanged).
 * **Fixed** `engine='exact'` (the canonical name of `'dsed'`) was a
   `ValueError` in `pulsim.design.Evaluator`, a `KeyError` in the
   analytic benchmark cases, and read no freeze in

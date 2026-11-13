@@ -374,7 +374,7 @@ class Evaluator:
     steady
         A :class:`SteadySpec`.
     engine
-        ``'auto'`` (default), ``'dsed'``, ``'trbdf2'`` or ``'pwl'``:
+        ``'auto'`` (default), ``'exact'`` (alias ``'dsed'``), ``'trbdf2'`` or ``'pwl'``:
         the engine of the transient route (``'pss'`` is the ``dsed``
         exact stepper).
     samples_per_period
@@ -524,8 +524,10 @@ class Evaluator:
                               n_workers=1, verbose=False,
                               job=_evaluate_job, reraise=True)
         refs = {r.refusal for r in out}
+        # 'consistent_mode' is found mid-run, at a state that depends on
+        # the design: it never condemns the configuration
         if len(out) == 3 and all(r.status == "refused" for r in out) \
-                and len(refs) == 1:
+                and len(refs) == 1 and out[0].refusal[1] != "consistent_mode":
             e, f, d, k = out[0].refusal
             raise unsupported(
                 e, f, "evaluate_many: the first three designs were refused "
@@ -655,7 +657,7 @@ class Evaluator:
                     f"engine={self.engine!r}: pss runs on dsed only")
             else:
                 try:
-                    _pss_capability(b, T, sf)
+                    _engine(lambda: _pss_capability(b, T, sf))
                     method = "pss"
                 except ValueError as e:
                     if not isinstance(e, UnsupportedError) and \
@@ -714,6 +716,7 @@ class Evaluator:
 
     def _pss(self, b, sf, T, counters):
         from . import simulate
+        from ._refusal import UnsupportedError, unsupported
         from .periodic_steady_state import periodic_steady_state
         counters["route"] = "pss/dsed"
         try:
@@ -721,8 +724,12 @@ class Evaluator:
                 b, period=T, switch_fn=sf,
                 max_period_runs=self.steady.max_period_runs))
         except ValueError as e:
-            if _is_pss_failure(e):
+            if _is_pss_failure(e) or isinstance(e, np.linalg.LinAlgError):
                 raise _Failed(str(e)) from e
+            if "cannot extract this circuit's state space" in str(e) \
+                    and not isinstance(e, UnsupportedError):
+                # the same refusal the auto route turns into 'transient'
+                raise unsupported("dsed", "state_space", str(e)) from e
             raise
         if not r.stable:
             # an orbit the circuit never reaches: its KPIs are no answer
@@ -748,6 +755,13 @@ class Evaluator:
         if n is None:
             n = run.num_steps()
         counters["engine_steps"] = counters.get("engine_steps", 0) + int(n)
+        # accepted-with-error notes simulate only warns about (not failures)
+        nb = len(getattr(run, "event_iteration_breaches", None) or ())
+        nc = int((getattr(run, "_trbdf2_stats", None) or {}).get("n_chatter_breaks", 0))
+        if nb:
+            counters["event_iteration_breaches"] = counters.get("event_iteration_breaches", 0) + nb
+        if nc:
+            counters["chatter_breaks"] = counters.get("chatter_breaks", 0) + nc
         counters["python_callbacks"] = len(
             tuple(getattr(run, "step_loop_python_callbacks", ()) or ()))
 
@@ -962,8 +976,18 @@ def _raise_if_suspect(run, b) -> None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
         raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
             b.graph, b.pool, volt))
+    guards = list(getattr(run, "inductor_guard_actions", None) or ())
+    if guards:
+        raise _Failed(f"inductor_guard: the trace of {len(guards)} inductor(s) "
+                      "is the configured limit, not a solution")
     if getattr(run, "engine_used", None) != "trbdf2":
         return
+    stats = getattr(run, "_trbdf2_stats", None) or {}
+    if stats.get("n_gate_undersampled", 0) > 0:
+        raise _Failed(
+            f"gate_undersampled: a {float(stats.get('gate_pulse_min', 0.0)):.3g} s "
+            "gate pulse was narrower than the switch_fn sampling, so pulses "
+            "may have been stepped over; pass dt or use NativePwm2Switch")
     from ._diode_state import diode_state_traces
     try:
         bad = [tr.name for tr in diode_state_traces(b, run).values()

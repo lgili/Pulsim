@@ -314,3 +314,33 @@ def test_exact_is_the_dsed_engine_for_the_evaluator():
         assert a.status == "ok" and a == b
     with pytest.raises(ValueError, match="'exact' \\(alias 'dsed'\\)"):
         Evaluator(buck, period=T, engine="spice")
+
+
+def test_a_guard_held_trace_or_an_undersampled_gate_is_failed(monkeypatch):
+    """Batch-6b review: two more warnings that mean the number may be
+    wrong. A guard-held inductor trace is the configured limit; a gate
+    pulse narrower than trbdf2's switch_fn sampling may have hidden
+    others. The explicit pss route refuses an unextractable circuit
+    (as the auto route does) instead of raising a raw ValueError."""
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[object()],
+             engine_used="pwl")
+    with pytest.raises(design._Failed, match="inductor_guard"):
+        design._raise_if_suspect(run, None)
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2",
+             _trbdf2_stats={"n_gate_undersampled": 1, "gate_pulse_min": 2e-6})
+    with pytest.raises(design._Failed, match="gate_undersampled: a 2e-06 s"):
+        design._raise_if_suspect(run, None)
+
+    import sys
+    pss = sys.modules["pulsim.periodic_steady_state"]   # the name is the function
+
+    def no_extract(*a, **k):
+        raise ValueError("periodic_steady_state: cannot extract this "
+                         "circuit's state space (test)")
+    monkeypatch.setattr(pss, "periodic_steady_state", no_extract)
+    rec = _ev(steady=SteadySpec(method="pss")).evaluate(CCM)
+    assert rec.status == "refused" and rec.refusal[1] == "state_space", rec
