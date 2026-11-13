@@ -372,9 +372,11 @@ def test_lossless_lc_loop_is_not_isolated():
 
 def test_opaque_python_gate_is_refused():
     b = _buck(50.0)
-    with pytest.raises(ValueError, match="opaque Python callable"):
+    with pytest.raises(p.UnsupportedError, match="opaque Python callable") as ei:
         p.periodic_steady_state(b, period=T,
                                 switch_fn=_grid_gate(b, 0.3))
+    assert (ei.value.engine, ei.value.feature) == (
+        "periodic_steady_state", "switch_fn")
 
 
 def test_schedule_not_periodic_in_the_period_is_refused():
@@ -388,8 +390,9 @@ def test_schedule_not_periodic_in_the_period_is_refused():
 def test_nonlinear_device_is_refused():
     b = _buck(50.0)
     b.add_shockley_diode("Dn", "vout", "gnd")
-    with pytest.raises(ValueError, match="nonlinear or stateful.*Dn"):
+    with pytest.raises(p.UnsupportedError, match="nonlinear or stateful.*Dn") as ei:
         p.periodic_steady_state(b, period=T, switch_fn=_pwm(b, 0.3))
+    assert (ei.value.device, ei.value.kind) == ("Dn", "ShockleyDiode")
 
 
 def test_budget_exhaustion_reports_the_history():

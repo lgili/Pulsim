@@ -203,11 +203,14 @@ def add_transmission_line(self, name: str, k_pos: str, k_neg: str,
     """
     who = f"add_transmission_line({name!r})"
     if model == "bergeron":
-        raise NotImplementedError(
+        from ._refusal import unsupported
+        raise unsupported(
+            "", "model",
             f"{who}: model='bergeron' needs a travelling-wave kernel "
             "device (openspec add-realistic-passives, section 5) that "
             "is not implemented yet. Use model='pi' with "
-            "sections=recommend_line_sections(delay, t_rise).")
+            "sections=recommend_line_sections(delay, t_rise).",
+            device=name)
     if model != "pi":
         raise ValueError(f"{who}: model must be 'pi' or 'bergeron' "
                          f"(got {model!r}).")

@@ -271,9 +271,9 @@ class CircuitBuilder:
         units they are the same constant, so a call with ``Kt != Ke`` is
         refused (the coupling would not conserve power).
 
-        ``theta_node`` needs a voltage-controlled current source, which the
-        kernel does not have yet (``add-controlled-source-set``); it is
-        refused by name.
+        ``theta_node`` is not built yet and raises ``UnsupportedError``
+        (feature ``"theta_node"``); the message shows how to integrate the
+        speed with ``add_vccs`` into a 1 F capacitor.
         """
     def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0, V_f: float = 0.0) -> CircuitBuilder:
         """

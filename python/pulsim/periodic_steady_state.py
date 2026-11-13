@@ -61,6 +61,15 @@ def _err(msg: str) -> ValueError:
     return ValueError("periodic_steady_state: " + msg)
 
 
+def _unsup(feature: str, msg: str, *, device: str = "",
+           kind: str = "") -> ValueError:
+    """A capability refusal of this analysis (a ValueError subclass)."""
+    from ._refusal import unsupported
+    return unsupported("periodic_steady_state", feature,
+                       "periodic_steady_state: " + msg,
+                       device=device, kind=kind)
+
+
 # ----------------------------------------------------------------------
 # Result types
 # ----------------------------------------------------------------------
@@ -231,16 +240,16 @@ def _schedule_edges(sf, t_lo, t_hi):
 def _check_schedule(sf, T):
     from . import SwitchSchedule
     if isinstance(sf, SwitchSchedule) and not sf.has_edges:
-        raise _err(
-            "the gate schedule cannot name its edges (a "
+        raise _unsup(
+            "switch_fn", "the gate schedule cannot name its edges (a "
             "make_combined_switch_fn with a plain Python callable in "
             "it). Its edges would be found by sampling, which is not "
             "reproducible to rounding between map evaluations, so the "
             "one-period map would not be differentiable. Build it "
             "from the C++ helpers only.")
     if not hasattr(sf, "next_edge_after"):
-        raise _err(
-            "switch_fn is an opaque Python callable (no "
+        raise _unsup(
+            "switch_fn", "switch_fn is an opaque Python callable (no "
             "next_edge_after(t)). Its edges would be found by "
             "sampling, which is not reproducible to rounding between "
             "map evaluations. Use pulsim.make_pwm_switch_fn & co., "
@@ -270,21 +279,28 @@ def _check_schedule(sf, T):
 
 def _check_circuit(builder, T, comps):
     if builder.pool.has_nonlinear_devices():
-        names = [c["name"] for c in comps if c["kind"] in (
+        bad = [c for c in comps if c["kind"] in (
             "nonlinear_diode", "mosfet_level1", "igbt_level1",
             "saturable_inductor", "nonlinear_capacitor",
             "shockley_diode", "lauritzen_diode", "pmsm_mna", "unknown")]
-        raise _err(
+        names = [c["name"] for c in bad]
+        raise _unsup(
+            "", device=names[0] if names else "",
+            kind=(builder.pool.kind_of(bad[0]["branch_id"]).name
+                  if bad else ""), msg=
             "the circuit has nonlinear or stateful devices "
             f"({', '.join(names) or 'see builder.components()'}), "
             "whose state the exact-path solver cannot read or set "
-            "(slice 1 covers linear R, L, C, switches, PWL diodes, "
-            "DC and sine sources). They need the unified device "
+            "(slice 1 covers linear R, L, C, controlled sources, "
+            "switches, PWL diodes, DC, sine and current-waveform "
+            "sources). They need the unified device "
             "interface; use a long transient meanwhile.")
     for c in comps:
         kind = c["kind"]
         if kind in ("pwm_voltage_source", "pulse_voltage_source"):
-            raise _err(
+            raise _unsup(
+                "", device=c["name"],
+                kind=builder.pool.kind_of(c["branch_id"]).name, msg=
                 f"source {c['name']!r} is a {kind}: its edges are not "
                 "events of the exact stepper, so the one-period map "
                 "would not be computed exactly. Model the gate with a "

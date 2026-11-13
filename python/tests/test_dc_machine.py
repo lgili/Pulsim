@@ -155,11 +155,12 @@ def test_invalid_parameters_are_refused_by_name(bad):
         p.CircuitBuilder().add_dc_machine("M7", "a", "gnd", "w", **kw)
 
 
-def test_theta_node_is_refused_until_a_vccs_exists():
-    with pytest.raises(NotImplementedError, match="controlled"):
+def test_theta_node_is_refused_by_name():
+    with pytest.raises(p.UnsupportedError, match="add_vccs") as ei:
         p.CircuitBuilder().add_dc_machine("M", "a", "gnd", "w", R_a=R,
                                           L_a=L, K=K, J=J,
                                           theta_node="th")
+    assert (ei.value.feature, ei.value.device) == ("theta_node", "M")
 
 
 def test_observer_is_deprecated_in_favour_of_add_dc_machine():

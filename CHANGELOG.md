@@ -312,7 +312,8 @@ once, above the engine dispatch, and both engines consume that plan.
   equals copper + friction + load + stored energy to 4.2e-9 on `pwl` (5.5e-6 on `trbdf2`). The armature impedance in the
   kernel AC sweep is `R_a + sL_a + K²/(sJ + B)` to 1e-9.
   `Kt ≠ Ke` (legacy spellings) is refused: in SI units they are one
-  constant. `theta_node` is refused until a VCCS exists. YAML type
+  constant. `theta_node` is refused (`UnsupportedError`, feature
+  `theta_node`); the message shows the `add_vccs` integrator. YAML type
   `dc_machine` (same keys, expanded by the loader into the same
   elements).
 * **Fixed** the topology preflight counts an ideal transformer's primary

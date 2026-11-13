@@ -321,7 +321,7 @@ At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 
 `b.add_dc_machine` is solved in the matrix; the PMSM (observer path),
 BLDC and induction-motor observers are not yet, and stay first order
-on `pwl`. Not done: `theta_node` (needs a VCCS), the induction
+on `pwl`. Not done: `theta_node` (refused; integrate `ω` with `add_vccs` into a 1 F capacitor), the induction
 machine, BLDC harmonics, flux maps. None of the machine tests
 is a validation against a measured machine: they check analytic
 properties of the equations.

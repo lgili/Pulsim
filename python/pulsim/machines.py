@@ -72,9 +72,9 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
     units they are the same constant, so a call with ``Kt != Ke`` is
     refused (the coupling would not conserve power).
 
-    ``theta_node`` needs a voltage-controlled current source, which the
-    kernel does not have yet (``add-controlled-source-set``); it is
-    refused by name.
+    ``theta_node`` is not built yet and raises ``UnsupportedError``
+    (feature ``"theta_node"``); the message shows how to integrate the
+    speed with ``add_vccs`` into a 1 F capacitor.
     """
     given = {k: v for k, v in (("K", K), ("Ke", Ke), ("Kt", Kt))
              if v is not None}
@@ -101,11 +101,15 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
         raise ValueError(f"add_dc_machine({name!r}): T_load must be "
                          f"finite (got {T_load!r}).")
     if theta_node is not None:
-        raise NotImplementedError(
-            f"add_dc_machine({name!r}): theta_node needs a "
-            "voltage-controlled current source (openspec "
-            "add-controlled-source-set), which the kernel does not "
-            "have yet. Integrate result.v(omega_node) instead.")
+        from ._refusal import unsupported
+        raise unsupported(
+            "", "theta_node",
+            f"add_dc_machine({name!r}): theta_node is not built yet "
+            "(openspec add-mna-native-machines, task 1.8). Integrate "
+            "result.v(omega_node), or add the angle yourself: "
+            "b.add_vccs(name, omega_node, 'gnd', theta, 'gnd', 1.0) into "
+            "a 1 F capacitor on theta (v(theta) = integral of omega).",
+            device=name)
 
     l_from = f"{name}.ra_la" if r_a > 0.0 else a_pos
     emf = f"{name}.emf"

@@ -137,7 +137,7 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still forward-Euler observers on `pwl` only (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
-| No angle node on `add_dc_machine` (needs a VCCS); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)` for the angle. |
+| No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
 
 ## Passives
 

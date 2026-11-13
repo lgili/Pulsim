@@ -329,9 +329,10 @@ def test_line_from_per_metre_data_and_refusals():
                             C_per_m=100e-12, length=2.0, sections=4)
     assert sum(c["params"].get("C_farads", 0.0) for c in b.components()
                ) == pytest.approx(200e-12, rel=1e-12)
-    with pytest.raises(NotImplementedError, match="model='pi'"):
+    with pytest.raises(p.UnsupportedError, match="model='pi'") as ei:
         b.add_transmission_line("T2", "k", "gnd", "m", "gnd", Z0=Z0,
                                 delay=TAU, model="bergeron")
+    assert (ei.value.feature, ei.value.device) == ("model", "T2")
     with pytest.raises(ValueError, match="'T3'.*Z0"):
         b.add_transmission_line("T3", "k", "gnd", "m", "gnd", Z0=-1.0,
                                 delay=TAU, sections=4)
