@@ -8,9 +8,11 @@ without the absolute convergence test passing, if the step `dx` did
 not contract over its last two iterations, `‖dx‖∞` is at most 1e-6 of
 `max(1, ‖x‖∞)`, and the row-wise backward error
 `max_i |f_i| / (|J|·|x| + |b|)_i` is at most eight times the machine
-epsilon. Every such acceptance SHALL be recorded in the result (count,
-first time, largest `‖dx‖`, the row it came from) and reported to the
-user once per run. The absolute tolerances `tol_newton_dx` and
+epsilon, with `|J|·|x| + |b|` the sum of the magnitudes of the terms
+the row is made of. Every such acceptance SHALL be recorded in the
+result (count, the largest backward error, the row it came from) and
+reported to the user once per run, and an abort whose acceptance
+check declined SHALL say which condition failed. The absolute tolerances `tol_newton_dx` and
 `tol_newton_res` SHALL keep their meaning and their defaults, and a
 solve that passes the absolute test SHALL return exactly what it
 returned before.
@@ -21,8 +23,9 @@ returned before.
 - **WHEN** it runs on the fixed engine at dt = 1e-11, 1e-12 and 1e-13 s
 - **THEN** each run completes (each aborts with `‖dx‖` = 2^-29, 2^-26,
   2^-23 without this change) and reports its roundoff acceptances
-- **AND** the inductor current agrees with the dt = 1e-8 s run to 1e-6
-  relative
+- **AND** the inductor current's change over the run, divided by
+  `dt/L`, equals that of the dt = 1e-8 s, 10 mH run (no acceptance) to
+  1e-3 relative
 
 #### Scenario: A converging run is unchanged
 - **GIVEN** a circuit whose every Newton solve passed the absolute
@@ -54,41 +57,3 @@ the next stage of the cascade.
 - **THEN** the direct solve fails, gmin stepping supplies the answer,
   and the operating point equals the previous one bit for bit (it does
   not stop at the root 10.67 V away)
-
-### Requirement: Step Floor At The Newton Roundoff Bound
-
-The transient engines SHALL NOT commit a step of a Newton circuit
-shorter than `2·ε·max(L·|i_L|) / (1e-6·max(1, ‖x‖∞))`, the step below
-which the last bit of an inductor row exceeds 1e-6 of the solution,
-evaluated over the inductors of the committed state. The variable-step
-engine SHALL take a step the controller wants below that bound at the
-bound and SHALL count it; the fixed-step engine's step-reduction
-ladder SHALL stop above it and a user step below it SHALL be refused
-with a message that names the inductor and the bound. Probe solves
-that commit nothing are exempt.
-
-#### Scenario: The two bounds of a 10 mH pair
-- **GIVEN** two series 10 mH inductors carrying 0.9 A in a 10 V
-  circuit
-- **WHEN** the bounds are evaluated
-- **THEN** the absolute step test is unreachable below 4.0e-9 s (the
-  fixed engine runs at 1e-8 s and aborts at 1e-9 s without this
-  change) and the step floor is 4.0e-13 s
-
-#### Scenario: Variable-step run stays above the floor
-- **GIVEN** the same circuit on the variable-step engine
-- **WHEN** it runs
-- **THEN** no committed step is shorter than 4e-13 s and the run
-  completes
-
-#### Scenario: Step below the floor is refused
-- **GIVEN** the same circuit on the fixed engine at dt = 1e-13 s
-- **WHEN** `simulate` is called
-- **THEN** it raises an error naming the inductor and the 4.0e-13 s
-  bound (the run completes with 6e-5 V of jitter on the divider node
-  without this change)
-
-#### Scenario: Linear circuits are not floored
-- **GIVEN** a circuit with no Newton device
-- **WHEN** it runs on the variable-step engine
-- **THEN** its step floor is the engine's `h_min` as before

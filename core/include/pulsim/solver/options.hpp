@@ -85,6 +85,11 @@ struct SimulationOptions {
     /// cascade stop 10.67 V from the right answer). Do not loosen it
     /// to get past a Newton abort — that has produced silently wrong
     /// operating points (a flyback at 3.53 V instead of 15.31 V).
+    /// One ulp of an inductor current is 2L/h·ε·|i| of residual, so at
+    /// small h this test can be out of reach: transient solves that
+    /// stagnate there are accepted on a row-wise backward error of at
+    /// most 8ε instead (pwl::NewtonRoundoffAcceptance, counted in
+    /// SimulationResult::newton_roundoff_accepts). DC never is.
     Real tol_newton_dx = Real{1e-9};
 
     /// Newton convergence tolerance on ||residual||_inf.

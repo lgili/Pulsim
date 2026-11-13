@@ -97,6 +97,16 @@ the snubbed flyback in `test_saturable_transformer.py` aborts at
 tol_newton_res=1e-4` it completes and reports V_out = 3.53 V, while
 `engine='pwl', dt=1e-8` gives 15.31 V.
 
+Since `add-newton-roundoff-acceptance` a transient solve that runs
+out of iterations with `||dx||` stagnated at roundoff is accepted when
+every row's residual is within 8 eps of the magnitudes that row sums
+and `||dx|| <= 1e-6·|x|`; the run warns "Newton solve(s) ran out of
+iterations ... and were accepted" and counts them in
+`result.newton_roundoff_accepts`. That is a backward-error test, not a
+looser tolerance, and the DC operating point never uses it. When it
+declines, the abort message says why (the row's backward error, the
+step ceiling, whether `||dx||` stagnated).
+
 **Fix:** look at the device the message names, and cross-check on the
 other engine. An abort at `h_min` right after a hard switching edge on
 TR-BDF2 is a known engine limitation (`KNOWN_LIMITATIONS.md`,

@@ -733,6 +733,104 @@ once, above the engine dispatch, and both engines consume that plan.
 * **Added** `CacheMetrics.structure_builds`, `symbolic_analyses`,
   `symbolic_fallbacks`.
 
+### Newton roundoff acceptance (add-newton-roundoff-acceptance)
+
+* **Added** transient Newton solves (`engine='pwl'` dynamic path,
+  `'trbdf2'` / `'auto'`) that exhaust the iteration budget are accepted
+  instead of aborting when `||dx||` stagnated over the last two steps,
+  `||dx|| <= 1e-6·max(1, |x|)` and every row's residual is at most
+  8 eps of the magnitudes the row sums (Oettli–Prager backward error).
+  Two 100 µH inductors and a Shockley diode: dt = 1e-11, 1e-12, 1e-13 s
+  aborted (||dx|| 1.9e-9 … 1.2e-7 on powers of two) and now complete
+  (ω ≤ 0.75 ε) with `i_L` on the physical trend to 1e-3; 10 mH at
+  1e-9 … 1e-11 s likewise. A warning names the count;
+  `result.newton_roundoff_accepts`, `newton_roundoff_omega_max`,
+  `newton_roundoff_row`. Tolerances unchanged; the DC operating point
+  never accepts this way. A declined check is explained in the abort.
+* Not cured: the documented TR-BDF2 h_min stall (snubbed flyback with a
+  saturable transformer) now runs to 494 µs instead of 10 µs (213
+  accepted solves) and then aborts in a roundoff limit cycle that the
+  stagnation test reads as contraction (||dx|| 3.2e-7, 5.0e-7,
+  1.9e-7; ω = 0.28 ε). The known-limitations row stays. The step floor
+  `h_noise` of the design is not implemented.
+
+### TR-BDF2 error control (update-trbdf2-error-control)
+
+* **Changed (BREAKING, tolerance meaning)** `engine='trbdf2'` /
+  `'auto'`: the local error estimate gets the factor 2 of Bank et al.;
+  it was half the true local error, so `rtol` / `atol` meant twice
+  themselves. Defaults unchanged (`1e-5` / `1e-8`); pass doubled values
+  for the previous step density (measured: a diode bridge then repeats
+  its previous step sequence exactly). Up to 27 % more steps.
+* **Changed (BREAKING, step sequence)** the step floor, probe floor,
+  probe cap, chatter floor and gate-pulse floor follow the step
+  ceiling instead of `t_end − t_start` (bit-identical while the
+  ceiling is `span/1000`): with `dt` given, a buck's steps up to 39 T
+  no longer depend on `t_end`. The default ceiling is unchanged.
+  `_trbdf2_stats["h_max_basis"]`.
+* **Added** source breakpoints: pulse-source corners and PWM voltage
+  source edges are landed and restarted like gate edges. Pulse into an
+  RC: rejects 32 → 4, no accepted step below 1e-9 s before a jump
+  (1.2e-10 s before), error at rtol 1e-6 1.82e-4 → 1.16e-4 V.
+  `_trbdf2_stats["n_source_breakpoints"]`.
+* Measured against update-trbdf2-post-event-restart (default
+  tolerances, probes/trbdf2_baseline.py): buck CCM error 7.18e-5 →
+  5.98e-5 (1636 → 1651 steps); rtol 1e-8: 1.18e-6 → 7.55e-7 (9152 →
+  11628); LC tank 2.06e-1 → 1.30e-1 (2562 → 3239); MOSFET half
+  bridge 4.14e-4 → 3.12e-4 (2088 → 1692). Moved the wrong way, both
+  because the same `rtol` is now twice as strict and these two do not
+  converge monotonically in `rtol` (they did the same at `rtol/2`
+  before): Shockley rectifier 2.74e-5 → 3.73e-5, diode bridge
+  time-weighted 3.07e-2 → 5.57e-2 (1242 → 1437 steps).
+* **Fixed** a SIGSEGV in the initial diode settle when its (Newton)
+  probe failed: it read an unsized state (PMSM beside a rectifier).
+* Re-baselined, not loosened: two TR-BDF2 tests run at doubled
+  tolerances (the previous density): the Lauritzen gated buck (at the
+  new defaults it hits the known h_min stall at 15 µs, as it did
+  before at rtol 5e-6) and the kilovolt-artefact strict xfail (at
+  1e-6 the new sequence misses the spike by chance; 1897 V at the
+  defaults).
+* Not done: the Hosea–Shampine stiff filter (needs a solve on an
+  existing factor in `PwlStateSpaceCache`); `h_chatter` stays.
+
+### TR-BDF2 restart after a gate edge (update-trbdf2-post-event-restart)
+
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'` / `'auto'`:
+  after a landed gate edge the edge cascade's probe (a trapezoidal
+  solve of `h_probe` under the post-edge mask) is committed as a
+  recorded step, so the companion history's derivative slots (inductor
+  voltage, capacitor current, each stateful device's slot) hold
+  post-edge values; at a boundary-settled edge only the slots are
+  re-read. The post-edge step memory stores the controller's proposal
+  instead of the accepted step. Each gate edge therefore adds one
+  recorded sample `h_probe` after the edge (not counted in `n_accept`). The first post-edge step was sized by a stale,
+  pre-edge derivative and collapsed; the memory then pinned it (the
+  buck's rising-edge step was 8.26e-13 s for a whole run). Measured,
+  24 V buck, 400 periods, default tolerances:
+
+  | | before | after |
+  |---|---|---|
+  | accepted steps (per period) | 7241 (18.1) | 1636 (4.1) |
+  | solves | 16262 | 5018 |
+  | rejects | 82 | 65 |
+  | first step after an edge | 8.26e-13 s | ≥ 1.7e-7 s |
+  | end error vs expm | 9.84e-4 | 7.18e-5 |
+  | DCM (R = 50 Ω): accepted steps, error | 15242, 2.39e-4 | 8932, 1.62e-5 |
+
+  Variable-step step counts and results move within their tolerance;
+  circuits without gate edges (a diode bridge, pulse sources) are
+  unchanged, and `engine='pwl'` is bit-identical. Not done at diode
+  events: there the probe holds a stiff L·g_off mode and the refresh
+  was measured to multiply a bridge's diode events by 260; the DCM
+  buck's post-turn-off steps (4e-14 s) therefore remain.
+  `res._trbdf2_stats` gains `n_derivative_refreshes`,
+  `n_refresh_probes` and `h_post_event_min`.
+  The trbdf2/auto conduction losses pinned by
+  `test_diode_forward_drop.py` moved by up to 2.4e-4 relative and were
+  re-pinned (boost DCM switch: 8.7e-6 → 2.3e-6 W off the fixed-step
+  value). A 3-phase VSI on RL loads takes 3998 → 1219 steps with its
+  end error 6.28e-4 → 6.73e-4 (the one circuit whose error grew).
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

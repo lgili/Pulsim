@@ -109,6 +109,24 @@ public:
         }
     }
 
+    /// TR-BDF2 post-event refresh of the current slot from a
+    /// trapezoidal probe of step `h` (the probe's own companion
+    /// current); (v, q) are not touched.
+    void refresh_derivatives(const Vector& x, Real h) {
+        if (entries_.empty() || !(h > Real{0})) {
+            return;
+        }
+        for (auto& e : entries_) {
+            const Real v =
+                stamping::read_node_voltage(x, e.from)
+                - stamping::read_node_voltage(x, e.to);
+            e.i_prev = (Real{2} / h)
+                           * (models::NonlinearCapacitor::charge(e.params, v)
+                              - e.q_prev)
+                       - e.i_prev;
+        }
+    }
+
     /// Seed from a DC operating point: the device holds its bias
     /// charge and no current.
     void seed_from_dc_op(const Vector& x) {

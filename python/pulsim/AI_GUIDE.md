@@ -3,10 +3,10 @@
 This file ships inside the `pulsim` package and describes its version.
 `python -m pulsim.guide` prints it with the installed version on the
 first line; `pulsim.ai_guide()` returns the same text. When this guide
-and your memory of Pulsim disagree, the guide wins: models are trained
-on Pulsim 1.x and other simulators, and Pulsim 2 changed behaviour but
-kept most names. Every `python` block below is executed by the test
-suite, and every printed number is the one it prints.
+and your memory of Pulsim disagree, the guide wins: Pulsim 2 changed
+behaviour but kept most 1.x names. Every `python` block below is
+executed by the test suite, and every printed number is the one it
+prints.
 
 Short version:
 
@@ -22,11 +22,10 @@ Short version:
   `b.graph.num_switches`. `p.SwitchStateMask(n)` is a SIZE.
 - PWL diode `V_th` is a turn-on threshold; `V_f` is the forward drop.
   Without `dt`, rerun with `dt` on any `simulate` warning (trap 13).
-- Loss and thermal summaries average the WHOLE run, start-up included
-  (3.4).
+- Loss and thermal summaries average the WHOLE run, start-up too (3.4).
 - `run_mna_sweep(freqs=)` covers linear parts and switches at `mask=`;
   it refuses Newton devices.
-- Check every result physically (section 6) before reporting it.
+- Check every result physically (6) before reporting it.
 - A Pulsim exception is a refusal with a reason. Read it; do not catch
   it, and do not loosen `tol_newton_dx` / `tol_newton_res` to get past it.
 
@@ -86,6 +85,8 @@ That union is pybind11's `float`, as in the stub.
   must be a whole number of steps, and every edge on the grid (3.2).
 - **Omit `dt`** for passive, source-driven and diode-commutated
   circuits (trap 13), and as the second engine in a cross-check.
+  Step ceiling `min(span/1000, period/20)`; `rtol` bounds the true
+  local error.
 
 ## 3. Canonical examples
 
@@ -455,7 +456,7 @@ Each row was measured on this version. The fix column is what to write.
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
 | 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (PSIM's diode drop; losses include `V_f*I`), or `b.add_shockley_diode` for an exponential law. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. On the rectifier of 6.2 `.mean()` reads 5.007 V against 6.330 V (-21 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. On the rectifier of 6.2 `.mean()` reads 4.575 V against 6.330 V (-28 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. On a snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4` let `auto` finish at 3.53 V; the fixed engine gives 15.31 V. No error, no warning | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
@@ -575,7 +576,7 @@ for r in (fixed, var):
 
 ```text
 pwl    time-weighted 6.331 V, sample mean 6.330 V
-trbdf2 time-weighted 6.330 V, sample mean 5.007 V
+trbdf2 time-weighted 6.330 V, sample mean 4.575 V
 ```
 
 The engines agree; the sample mean on the variable grid does not.

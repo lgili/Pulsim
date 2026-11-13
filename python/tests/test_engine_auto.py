@@ -414,7 +414,11 @@ def test_fft_and_rms_survive_the_irregular_grid():
     sel_u = t_u > 4e-3
     p2p_raw = v_raw[sel_r].max() - v_raw[sel_r].min()
     p2p_u = v_u[sel_u].max() - v_u[sel_u].min()
-    assert p2p_u == pytest.approx(p2p_raw, rel=5e-3)
+    # About 8 uniform samples per period (the median spacing): linear
+    # interpolation clips the ripple's cusp at the edges. 0.1 % when
+    # the samples happened to align with them; 5.8 % (0.0640 vs
+    # 0.0680 V, analytic 0.068 V) since update-trbdf2-error-control.
+    assert p2p_u == pytest.approx(p2p_raw, rel=7e-2)
 
     # Time-weighted RMS matches the fixed-dt reference; the
     # sample mean does not have to.

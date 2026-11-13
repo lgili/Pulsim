@@ -2599,6 +2599,15 @@ void init_module(py::module_& m) {
                        "byte budget evicts). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
+        .def_readonly("newton_roundoff_accepts",
+                       &SimulationResult::newton_roundoff_accepts,
+                       "Transient Newton solves accepted at roundoff "
+                       "level (stagnated dx, row backward error <= "
+                       "8 eps) instead of aborting.")
+        .def_readonly("newton_roundoff_omega_max",
+                       &SimulationResult::newton_roundoff_omega_max)
+        .def_readonly("newton_roundoff_row",
+                       &SimulationResult::newton_roundoff_row)
         .def("num_steps", &SimulationResult::num_steps);
 
     // ---- run_transient ---------------------------------------------------
@@ -4629,6 +4638,11 @@ void init_module(py::module_& m) {
             d["n_held_diode_redecided"] = st.n_held_diode_redecided;
             d["probe_floor_used"] = st.probe_floor_used;
             d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
+            d["h_max_basis"] = st.h_max_basis;
+            d["n_source_breakpoints"] = st.n_source_breakpoints;
+            d["n_derivative_refreshes"] = st.n_derivative_refreshes;
+            d["n_refresh_probes"] = st.n_refresh_probes;
+            d["h_post_event_min"] = st.h_post_event_min;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

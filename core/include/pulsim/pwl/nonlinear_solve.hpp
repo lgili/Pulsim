@@ -113,6 +113,7 @@ struct NewtonWorkspace {
     // makeCompressed squeezes the storage back to nnz.
     sparse::Matrix J_nl_trial;
     Vector f_nl, f_nl_trial, jx, f, neg_f, dx, x_trial, f_trial;
+    Vector ro_f, ro_x;   // roundoff acceptance: f(x_k), x_k of the last iteration
     std::unique_ptr<sparse::DirectSolver> solver;   // analysed for J
     std::vector<Real> ls, ns;            // operands scattered on J
 
@@ -185,6 +186,20 @@ private:
     }
 };
 
+/// Transient-only acceptance of an iterate whose residual is at the
+/// roundoff of its own row (add-newton-roundoff-acceptance). Checked
+/// only where the solve would throw for an exhausted budget; DC
+/// callers pass nothing and compile to the old loop. The fields after
+/// `dx_rel_max` report the last call.
+struct NewtonRoundoffAcceptance {
+    bool enabled = false;
+    Real omega_max = Real{8} * std::numeric_limits<Real>::epsilon();
+    Real dx_rel_max = Real{1e-6};
+    bool accepted = false;
+    Real omega = 0;
+    Index row = kInvalidIndex;
+};
+
 /// Newton-iterated solve on top of a cached PwlSegment, with an
 /// explicit `b_extra` vector. This overload composes with the
 /// trap-companion history contributions from Layer 4 V1: at
@@ -211,8 +226,20 @@ inline void solve_with_newton_in_place(
     Real tol_res = Real{1e-9},
     bool enable_line_search = false,
     bool enable_lm = false,
-    NewtonWorkspace* ws = nullptr) {
+    NewtonWorkspace* ws = nullptr,
+    NewtonRoundoffAcceptance* roundoff = nullptr) {
     const Size n = seg.state_size;
+    const bool ro_on = roundoff != nullptr && roundoff->enabled;
+    if (roundoff != nullptr) {
+        roundoff->accepted = false;
+    }
+    // Roundoff acceptance state: whether f(x_k), x_k were recorded this
+    // call (in the workspace: no allocation per call) and the last three
+    // ||dx||.
+    bool ro_set = false;
+    Real ro_dx[3] = {std::numeric_limits<Real>::infinity(),
+                     std::numeric_limits<Real>::infinity(),
+                     std::numeric_limits<Real>::infinity()};
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
     }
@@ -545,6 +572,11 @@ inline void solve_with_newton_in_place(
                 }
             }
         }
+        if (ro_on) {
+            w.ro_f = f_combined;
+            w.ro_x = x;
+            ro_set = true;
+        }
         x += alpha * dx;
 
         // 6. Convergence check. We use the MNA residual norm
@@ -579,6 +611,9 @@ inline void solve_with_newton_in_place(
             ? kInvalidIndex : static_cast<Index>(dx_at);
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
+        ro_dx[2] = ro_dx[1];
+        ro_dx[1] = ro_dx[0];
+        ro_dx[0] = last_dx_norm;
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return;
         }
@@ -636,6 +671,61 @@ inline void solve_with_newton_in_place(
         }
     }
 
+    // Budget exhausted. Transient callers may accept x_k + dx_k when
+    // the last two steps did not contract, the step is tiny against
+    // the state, and every row's residual is within omega_max of the
+    // magnitudes that row sums (Oettli-Prager backward error): the
+    // iterate solves a system perturbed by 8 eps per coefficient. The
+    // absolute tol_dx stays the test everywhere else.
+    std::string ro_note;
+    if (ro_on && ro_set) {
+        // The terms of the residual at x_k: J_lin = seg.J, and the
+        // workspace's J_nl / f_nl, last refreshed at x_k.
+        const Vector& ro_f = w.ro_f;
+        const Vector& ro_x = w.ro_x;
+        const bool stagnated = ro_dx[0] >= Real{0.5} * ro_dx[1]
+                            && ro_dx[1] >= Real{0.5} * ro_dx[2];
+        const Real dx_cap = roundoff->dx_rel_max
+            * std::max(Real{1}, ro_x.cwiseAbs().maxCoeff());
+        const Vector ax = ro_x.cwiseAbs();
+        Vector scale = seg.J.cwiseAbs() * ax;
+        scale += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs()
+               + f_nl.cwiseAbs();
+        if (J_nl.nonZeros() > 0) {
+            scale += J_nl.cwiseAbs() * ax;
+        }
+        Real omega = Real{0};
+        Index row = kInvalidIndex;
+        for (Index i = 0; i < static_cast<Index>(n); ++i) {
+            const Real fi = std::abs(ro_f[i]);
+            const Real be = scale[i] > Real{0}
+                ? fi / scale[i]
+                : (fi == Real{0} ? Real{0}
+                                 : std::numeric_limits<Real>::infinity());
+            if (be > omega) {
+                omega = be;
+                row = i;
+            }
+        }
+        if (stagnated && ro_dx[0] <= dx_cap
+            && omega <= roundoff->omega_max) {
+            roundoff->accepted = true;
+            roundoff->omega = omega;
+            roundoff->row = row;
+            return;
+        }
+        ro_note = std::format(
+            " Roundoff acceptance declined: row backward error {:.2g} eps "
+            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x|, last two "
+            "steps {} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
+            omega / std::numeric_limits<Real>::epsilon(),
+            row_equation_label(graph, pool, row),
+            roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+            ro_dx[0] <= dx_cap ? "within" : "above",
+            stagnated ? "stagnated" : "still contracting",
+            ro_dx[2], ro_dx[1], ro_dx[0]);
+    }
+
     // Report the norms RELATIVE to the circuit's own scale as well as
     // absolutely. `tol_dx` and `tol_res` are absolute, deliberately —
     // an absolute step test is what keeps Newton off a spurious branch
@@ -677,14 +767,14 @@ inline void solve_with_newton_in_place(
         "tolerances, reported 3.5 V instead of 15.3 V). Instead, look "
         "at the device named above, and cross-check on the other "
         "transient engine (engine='pwl' with an explicit dt, if this "
-        "came from TR-BDF2 or 'auto').",
+        "came from TR-BDF2 or 'auto').{}",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
         last_res_norm,
         row_equation_label(graph, pool, worst_res_row),
         last_dx_norm / x_scale, x_scale,
         last_res_norm / rhs_scale, rhs_scale,
-        tol_dx, tol_res));
+        tol_dx, tol_res, ro_note));
 }
 
 /// By-value form of `solve_with_newton_in_place`: `x_init` is left
@@ -701,11 +791,12 @@ inline void solve_with_newton_in_place(
     Real tol_res = Real{1e-9},
     bool enable_line_search = false,
     bool enable_lm = false,
-    NewtonWorkspace* ws = nullptr) {
+    NewtonWorkspace* ws = nullptr,
+    NewtonRoundoffAcceptance* roundoff = nullptr) {
     Vector x = x_init;
     solve_with_newton_in_place(seg, refresh, graph, pool, x, b_extra,
                                max_iters, tol_dx, tol_res,
-                               enable_line_search, enable_lm, ws);
+                               enable_line_search, enable_lm, ws, roundoff);
     return x;
 }
 

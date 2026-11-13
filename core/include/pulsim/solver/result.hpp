@@ -330,6 +330,14 @@ struct SimulationResult {
     std::vector<Size> switch_state_unsolved;
     bool has_switch_states = false;
 
+    /// Transient Newton solves that ended at the iteration budget and
+    /// were accepted at roundoff level (add-newton-roundoff-acceptance:
+    /// stagnated ||dx|| below 1e-6·|x|, row-wise backward error at most
+    /// 8 eps), the largest backward error among them, and its MNA row.
+    Size newton_roundoff_accepts = 0;
+    Real newton_roundoff_omega_max = 0;
+    Index newton_roundoff_row = kInvalidIndex;
+
     /// Start the record for a circuit with `num_switches` mask bits.
     /// Call once, before the first sample is stored.
     void begin_switch_state_record(Size num_switches, Size n_reserve = 0) {

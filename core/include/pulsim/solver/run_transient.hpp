@@ -1032,6 +1032,21 @@ inline SimulationResult run_transient(
             std::array<topology::SwitchStateMask, 64> masks_seen{};
             Size n_masks_seen = 0;
 
+            // add-newton-roundoff-acceptance: a dynamic-path Newton
+            // solve that exhausts its budget at row roundoff is
+            // accepted and counted (DC and static paths: never).
+            pwl::NewtonRoundoffAcceptance newton_roundoff;
+            newton_roundoff.enabled = true;
+            auto note_roundoff = [&]() {
+                if (!newton_roundoff.accepted) return;
+                ++result.newton_roundoff_accepts;
+                if (newton_roundoff.omega
+                    >= result.newton_roundoff_omega_max) {
+                    result.newton_roundoff_omega_max = newton_roundoff.omega;
+                    result.newton_roundoff_row = newton_roundoff.row;
+                }
+            };
+
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
             // they agree. Factored out so the dt-retry path below can
@@ -1112,7 +1127,8 @@ inline SimulationResult run_transient(
                             opts.tol_newton_res,
                             opts.enable_newton_line_search,
                             opts.enable_newton_lm,
-                            &newton_ws);
+                            &newton_ws, &newton_roundoff);
+                        note_roundoff();
                     } else {
                         // Off-nominal dt: assemble the companion
                         // system for this step size. No factorization
@@ -1132,7 +1148,8 @@ inline SimulationResult run_transient(
                             opts.tol_newton_res,
                             opts.enable_newton_line_search,
                             opts.enable_newton_lm,
-                            &newton_ws);
+                            &newton_ws, &newton_roundoff);
+                        note_roundoff();
                     }
                 } else {
                     // `solve_at` delegates to `solve` bit-identically

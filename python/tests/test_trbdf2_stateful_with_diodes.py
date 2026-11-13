@@ -184,7 +184,11 @@ def test_switched_diode_turn_off_with_series_inductor_on_trbdf2(kind):
                           "event, resume from a physical step size rather than "
                           "the probe floor.")
 def test_no_kilovolt_artefact_on_the_internal_node():
-    _assert_internal_node_is_sane("linear")
+    # rtol 2e-6 / atol 2e-9: the density rtol 1e-6 had before
+    # update-trbdf2-error-control doubled the estimate (1460 V here). At
+    # 1e-6 the new step sequence happens to miss the spike (20 V), while
+    # the default tolerances show 1897 V: the defect is still there.
+    _assert_internal_node_is_sane("linear", rtol=2e-6, atol=2e-9)
 
 
 @pytest.mark.parametrize("kind", ["atan", "gapped"])
@@ -197,9 +201,72 @@ def test_a_flux_device_in_the_same_place_has_no_artefact(kind):
     _assert_internal_node_is_sane(kind)
 
 
-def _assert_internal_node_is_sane(kind):
-    res = p.simulate(_rectifier(kind), t_end=3e-3, dt=4e-6, rtol=1e-6,
-                     atol=1e-9, engine="trbdf2")
+def _assert_internal_node_is_sane(kind, rtol=1e-6, atol=1e-9):
+    res = p.simulate(_rectifier(kind), t_end=3e-3, dt=4e-6, rtol=rtol,
+                     atol=atol, engine="trbdf2")
     v_m = np.abs(np.asarray(res.v("m")))
     # Nothing in this circuit can exceed the 20 V source by much.
     assert float(v_m.max()) < 40.0, float(v_m.max())
+
+
+# ---- gate edge beside a PWL diode, one stateful device each ----
+# update-trbdf2-post-event-restart refreshes every device's derivative
+# slot from the post-edge probe (the probe goes through trap_solve, so
+# the device step and stage are set). Each run must complete, refresh
+# at the gate edges, and agree with the fixed engine. A Newton probe at
+# the edge can fail to converge (its step is far below the roundoff
+# floor of the inductor row, add-newton-roundoff-acceptance); the
+# refresh is then skipped, so the count is not one per edge. The
+# Lauritzen case aborted at h_min before the refresh (t = 135 us).
+# An IGBT-tail case is not here: in this circuit it aborts at h_min at
+# the first turn-off with and without the refresh (the documented
+# stall). Nor a saturable-inductor case: as the buck's own inductor it
+# loses its whole current at a turn-off edge on TR-BDF2, with and
+# without the refresh (the edge cascade's Newton probe does not converge
+# at its 1e-16 s step, the failure is ignored, the diode is never turned
+# on, and one 2e-11 s step under all-OFF bits cuts 10 A to zero; v_sw
+# 2.6e7 V). Reported, not fixed here.
+def _gated_buck(kind, engine):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "out", 100e-6)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    load = "out"
+    if kind == "coss":
+        b.add_nonlinear_capacitor("Cj", "vin", "sw", 1e-9, 1.0)
+    elif kind == "lauritzen":
+        b.add_lauritzen_diode("DL", "out", "x")
+        load = "x"
+    b.add_resistor("RL", load, "gnd", 2.0)
+    n, k, T = b.graph.num_switches, b.switch_index_of("S"), 1e-5
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, bool((t / T) - np.floor(t / T + 1e-9) < 0.5 - 1e-9))
+        return m
+    # trbdf2 at rtol 2e-5 / atol 2e-8, the density the defaults had
+    # before update-trbdf2-error-control: at the defaults (twice as
+    # strict now) the Lauritzen case hits the known h_min stall at
+    # t = 15 us, as it did before at rtol 5e-6.
+    kw = dict(dt=T / 400) if engine == "pwl" else dict(rtol=2e-5,
+                                                         atol=2e-8)
+    return p.simulate(b, t_end=20 * T, engine=engine, switch_fn=fn, **kw)
+
+
+@pytest.mark.parametrize("kind", ["coss", "lauritzen"])
+def test_gate_edge_refreshes_a_stateful_device(kind):
+    var = _gated_buck(kind, "trbdf2")
+    st = var._trbdf2_stats
+    assert st["n_gate_events"] >= 38
+    assert st["n_derivative_refreshes"] >= st["n_gate_events"] // 2
+    ref = _gated_buck(kind, "pwl")
+    out = []
+    for r in (var, ref):
+        t = np.asarray(r.times)
+        v = np.asarray(r.v("out"))
+        assert np.all(np.isfinite(v))
+        m = t > 10e-5
+        out.append(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
+    assert _rel(out[0], out[1]) < 2e-2

@@ -251,6 +251,15 @@ public:
         }
     }
 
+    /// TR-BDF2 post-event refresh: the stored voltage becomes the
+    /// probe's `v_from − v_to`; (λ, i, H, M) are not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            e.V_L_old = stamping::read_node_voltage(x_probe, e.from)
+                        - stamping::read_node_voltage(x_probe, e.to);
+        }
+    }
+
     /// Roll the flux back. The TR-BDF2 stepper never needs this — it
     /// commits only on accept — but the FIXED engine re-takes a
     /// non-converging step at dt/2 after the history has already
