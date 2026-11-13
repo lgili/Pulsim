@@ -538,6 +538,16 @@ sm = r.sampled_model(inputs=[("duty", "S")], outputs=["vout"])
 sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
 ```
 
+* **Other engines.** `engine="pwl", dt=T/100` (a gate edge at
+  `t = 0`, `T/dt` an integer) or `engine="trbdf2"` (step ceiling `dt`,
+  default `T/100`) shoot with that engine's own period runs — the fixed
+  engine with its restart rule — and `M` by finite differences with
+  Broyden updates: the orbit is the one that engine's transient
+  reaches (DCM buck: 12 period runs on `pwl`, 1.2e-11 of the state
+  scale from a 4000-period transient). `r.full_state` resumes a
+  transient; `sensitivities=` and nonlinear devices are refused.
+  `run_periodic_shooting` / `run_harmonic_balance` are deprecated
+  delegates of it.
 * **Multipliers.** `stable = max|μ| < 1`. An orbit with a multiplier
   outside the unit circle is returned with `stable=False`, and
   `r.unstable_multipliers` names each one: −1 side `flip

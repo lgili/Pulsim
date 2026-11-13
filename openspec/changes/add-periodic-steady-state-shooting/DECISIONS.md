@@ -116,3 +116,98 @@ marked "proposed", else the most conservative one. Each entry: question
    predicate's recovery row, read as the gradient of an affine map) and
    the sine frequency in `CircuitBuilder.components()` (to name an
    incommensurate source by frequency).
+
+## Group 5: the fixed and TR-BDF2 engines (slice 4)
+
+Measured with `.scratch` probes on the DCM buck (24 V, 100 µH, 47 µF,
+50 Ω, D = 0.3, T = 10 µs) unless stated; `python/pulsim/_transient_shooting.py`.
+
+15. **The map is one `simulate()` per period from `X(x)`, the MNA vector
+   carrying the true state `x` (minimum norm, the rest zero).** Question:
+   can the fixed engine's map be a function of the true state alone? Its
+   trapezoidal history is not in `x`. Evidence: with
+   `discontinuity_restart=True` and `enable_substep_state_correction=True`
+   the period opens with the restart rule's SDIRK steps, which read no
+   history: one period from the engine's full vector at `4000T` and from
+   `X` of its true state give the same `v_C` bit for bit
+   (8.99624640380659). That is the transient's own map only where the
+   transient restarts too, i.e. at a gate edge at `t₀`; without one the
+   fixed engine is refused (`feature='section'`). `trbdf2` keeps a step
+   controller that a one-period run restarts from `h_init`; its default
+   step ceiling is `t_end/1000`, so a one-period run and a long transient
+   would be different integrations. The shooting fixes the ceiling at
+   `dt` (default `T/100`) and the oracle runs the transient with the same
+   `dt`. Opaque gates: sampled on the grid on `pwl` (checked periodic on
+   it), refused on `trbdf2`. Nonlinear devices are refused (their state
+   is not in `x`). → Reverse: carry device states in `x` (group 6.1).
+16. **`M` by forward differences (`h = 1e-6·(scale_j + |x_j|)`), Broyden
+   rank-one updates after accepted steps, refreshed when an accepted step
+   reduces the scaled residual by less than 10×, when no backtracking
+   step is accepted with a stale `M`, and always before the stopping rule
+   reads `M`.** Evidence (period runs from zero, refresh threshold 0.5 /
+   0.3 / 0.2 / 0.1 / 0.05): DCM `pwl` 14 / 14 / 13 / 13 / 17, DCM `trbdf2`
+   21 / 21 / 16 / 13 / 18; CCM unaffected (8 / 9). The final multipliers
+   are those of a fresh difference `M` at the orbit, never a Broyden
+   estimate. → Reverse: `_SLOW` in `_transient_shooting.py`.
+17. **No separate verification period on these engines.** A period run
+   is a fresh deterministic `simulate()` from `X(x)`; re-running the
+   accepted iterate reproduces it bit for bit, so the accepted run is the
+   orbit run (`result.orbit`, `result.full_state`). Saves one run: DCM
+   buck `pwl` 13 → 12 (the 5.5 gate). → Reverse: re-run `x` in `solve`.
+18. **Delegation (5.3)**: `run_periodic_shooting` keeps its signature
+   (full MNA vectors in and out; `x_steady_state` is the engine's vector
+   at the section after the orbit period); `b_extra_fn` / `step_observer`
+   are refused by name; `tol` / `max_iterations` / `fd_step` are accepted
+   and ignored; a non-convergence is `converged=False` with an all-NaN
+   vector and the reason in `message` (it used to return the last
+   iterate). `run_harmonic_balance` takes the spectrum of `result.orbit`.
+   Both warn `DeprecationWarning`. → Reverse: the v1 code is in git
+   (`python/pulsim/periodic.py` at 3ea998c6).
+19. **Evaluator**: `SteadySpec(method='pss')` runs on the Evaluator's
+   engine (`route='pss/pwl'`, `'pss/trbdf2'`; counters
+   `pss_jacobians`, `pss_broyden_updates`); the KPIs read the second of
+   two periods from `X(x₀)` with the same restart rule. `method='auto'`
+   still takes `pss` on the exact stepper only: on `pwl` it would change
+   the route, cost and numbers of existing evaluations. `gradients=` on
+   these routes is refused (`feature='gradients'`). → Reverse:
+   `Evaluator._steady`.
+
+Measured (orbit vs the engine's own 4000-period transient, of the state
+scale; period runs from zero; max|μ| against the exact stepper's):
+
+| circuit | engine | v_out | orbit − transient | runs | max|μ| (exact) |
+|---|---|---|---|---|---|
+| buck CCM | pwl T/100 | 11.9877290506 | 1.5e-14 | 7 | 0.899035 (0.899035) |
+| buck CCM | trbdf2 | 11.9877289446 | 2.9e-9 | 10 | 0.899035 |
+| buck DCM | pwl T/100 | 8.9962464037 | 1.2e-11 | 12 | 0.988977 (0.988977) |
+| buck DCM | pwl T/101 | 8.9962464251 | 1.8e-11 | 12 | 0.988977 |
+| buck DCM | trbdf2 | 8.9962471311 | 2.6e-9 | 15 | 0.988979 |
+| boost CCM | pwl T/100 | 24.0536315741 | 4.6e-10 | 22 | 0.994645 (0.994645) |
+| boost CCM | trbdf2 | 24.0536300200 | 4.2e-9 | 25 | 0.994645 |
+| boost DCM | pwl T/100 | 36.5944019107 | 4.5e-12 (40000 periods) | 34 | 0.998942 (0.998942) |
+| boost DCM | trbdf2 | 36.5943972503 | 5.1e-9 (4000 periods from the pwl orbit) | 33 | 0.998942 |
+
+The boost DCM transient has not settled in 4000 periods (μ = 0.99894,
+period-to-period change 6.2e-6 of scale): the difference there is the
+transient's, not the shooting's; at 40000 periods it is 4.5e-12 on
+`pwl`. `trbdf2` exhausts `max_steps` (10⁷) before 40000 periods, so its
+transient starts from the `pwl` orbit (5.1e-9 after 4000 periods).
+(Table measured with decision 20's steps.)
+
+20. **The difference step and the marginal band are per engine.** A
+   variable-step run moves by its tolerance when `x` moves (its step
+   sequence changes), so a difference over `h` carries `~rtol/h` of
+   noise: max|μ| of the trbdf2 orbit against the exact stepper's, at
+   `h` = 1e-6 / 1e-5 / 1e-4 / 1e-3 of the scale: buck CCM 3.0e-5 / 4e-7
+   / 1e-7 / 3e-7, DCM 2.6e-5 / 1.4e-5 / 2e-6 / 1.4e-5. `trbdf2` takes
+   `h = 1e-4`, `pwl` keeps 1e-6 (deterministic to rounding; no change
+   between 1e-7 and 1e-5). The 1e-10 marginal test of the exact path
+   cannot be applied to a difference Jacobian: an undamped LC beside a
+   switched branch (multipliers on the unit circle, a transient that
+   never settles) read 1 − 1.8e-9 on `pwl` (returned as a stable orbit)
+   and 1 + 4.2e-5 on `trbdf2` at `h = 1e-6` (returned as an unstable
+   one). The band is `100 × run noise / h` (1e-14 per run on `pwl`,
+   `rtol` on `trbdf2`): 1e-6 and 1e-4; it also bounds the singular test
+   of `I − M`. Both now refuse that LC as not isolated. An orbit with a
+   genuine `| |μ| − 1 |` below the band is refused, never returned. →
+   Reverse: `_FD_REL`, `TransientMap.marginal`.

@@ -665,6 +665,87 @@ def test_sensitivities_cell(engine):
     assert r.sensitivity.states.shape[2] == 1
 
 
+# add-periodic-steady-state-shooting group 5: periodic_steady_state(engine=)
+# and SteadySpec(method='pss') x engine. Honoured on the exact stepper
+# ('exact' and 'dsed' one engine, bit-identical), 'pwl' and 'trbdf2' (the
+# orbit of that engine's transient); anything else refused before a run.
+_PSS_T = 1e-5
+
+
+def _pss_buck(d=None, shockley=False):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    if shockley:
+        b.add_shockley_diode("D1", "gnd", "sw")
+    else:
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 50.0)
+    return b, p.make_pwm_switch_fn(1 / _PSS_T, 0.3, b.switch_index_of("S"),
+                                   b.graph.num_switches)
+
+
+def _pss_kw(engine):
+    return {"dt": _PSS_T / 100} if engine in ("pwl", "trbdf2") else {}
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact", "bdf1"))
+def test_periodic_steady_state_engine_cell(engine):
+    b, sf = _pss_buck()
+    if engine == "bdf1":
+        with pytest.raises(ValueError, match="engine must be"):
+            p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                    engine=engine)
+        return
+    r = p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                engine=engine, **_pss_kw(engine))
+    v = r.x0[r.state_labels.index("v(vout)")]
+    assert v == pytest.approx(8.99624708728943, rel=1e-6)
+    assert r._ctx.loop == ("fd-broyden" if engine in ("pwl", "trbdf2")
+                           else "kernel")
+    # a Newton device is refused by name on every engine, before a run
+    bs, sfs = _pss_buck(shockley=True)
+    ok, why = p.periodic_steady_state_supported(
+        bs, _PSS_T, sfs, engine=engine, **_pss_kw(engine))
+    assert not ok and "D1" in why
+
+
+def test_periodic_steady_state_exact_and_dsed_are_bit_identical():
+    out = []
+    for eng in ("dsed", "exact"):
+        b, sf = _pss_buck()
+        r = p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                    engine=eng)
+        out.append((r.x0, r.monodromy, r.n_period_runs))
+    assert np.array_equal(out[0][0], out[1][0])
+    assert np.array_equal(out[0][1], out[1][1]) and out[0][2] == out[1][2]
+
+
+@pytest.mark.parametrize("engine", ("auto", "dsed", "exact", "pwl", "trbdf2"))
+def test_steady_spec_pss_engine_cell(engine):
+    from pulsim.design import Evaluator, SteadySpec
+
+    def build(_d):
+        return _pss_buck()
+    recs = {}
+    for eng in dict.fromkeys(("exact", engine)):
+        recs[eng] = Evaluator(build, period=_PSS_T, loads=("RL",),
+                              output="vout", engine=eng,
+                              options=_pss_kw(eng),
+                              steady=SteadySpec("pss")).evaluate({})
+    r = recs[engine]
+    assert r.status == "ok"
+    route = {"auto": "dsed", "exact": "dsed"}.get(engine, engine)
+    assert r.counters["route"] == f"pss/{route}"
+    assert r.counters["pss_period_runs"] >= 1
+    assert r.kpis["v_out"] == pytest.approx(recs["exact"].kpis["v_out"],
+                                            rel=1e-6)
+    if engine == "dsed":
+        assert r.kpis == recs["exact"].kpis
+
+
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
 def test_mode_selection_lcp_refused_by_name_without_the_event_integrator(engine):
     # 'lcp' decides on the dsed event integrator only; this RC routes to "auto"

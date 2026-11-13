@@ -1,50 +1,13 @@
-"""Pulsim v2 — periodic steady-state shooting solver.
+"""Pulsim v2 — ``run_periodic_shooting``, the v1-compatible front end.
 
-Restores v1's ``run_periodic_shooting`` capability. Finds the
-steady-state cycle of a periodically driven nonlinear circuit
-without waiting for the natural transient to settle.
-
-Algorithm (single-shooting Newton)
-----------------------------------
-Given a system ``dx/dt = f(x, t)`` with period T (PWM period, line
-period, etc.), the steady-state initial condition ``x*`` satisfies
-
-    G(x*) = φ(T, x*) - x* = 0,
-
-where ``φ(T, x)`` integrates one full period starting from ``x``.
-
-Newton iteration::
-
-    x_{k+1} = x_k - J(x_k)^{-1} · G(x_k)
-
-The Jacobian ``J = ∂φ/∂x - I`` is built by finite differences —
-perturb each component of ``x_k`` by ``ε``, simulate one period,
-take the finite-difference column. That costs ``(N+1)`` one-period
-simulations per Newton iteration, where ``N`` is the state size.
-
-For a buck/boost/flyback with ≤ 6 state variables, convergence in
-3-6 Newton iterations is typical → 30-50 one-period simulations
-to reach steady state. For comparison, the natural transient on a
-poorly damped converter can take **thousands** of periods to
-settle. Net speedup: typically **30-100×** in wall time.
-
-When to use
------------
-* Steady-state efficiency analysis (η as function of duty / load).
-* THD / harmonic analysis on the converter's "operating point".
-* Bode / frequency-response sweeps that need the steady-state
-  small-signal model.
-* DC operating point of a switching converter (no closed-form
-  exists; periodic shooting IS the operating point).
-
-When NOT to use
----------------
-* Transient response studies (turn-on, step load, fault) — that's
-  what :func:`simulate` is for.
-* Systems with multiple stable limit cycles (shooting finds one;
-  which one depends on the initial guess).
-* Pre-converged DC operating point: use :func:`compute_dc_op` for
-  that — it's faster on linear circuits.
+Deprecated: it delegates to :func:`pulsim.periodic_steady_state` with
+``engine='pwl'`` (or ``'trbdf2'``), add-periodic-steady-state-shooting
+task 5.3. The v1 algorithm it replaced restarted every period from the
+whole MNA vector by finite differences and converged to the wrong orbit
+on a DCM buck (8.8998 V against 8.996247 V, the trapezoidal history of
+the inductor carried across the section); the delegate shoots on the
+true state with the fixed engine's restart at the section, so the orbit
+is the one the engine's own transient reaches.
 """
 
 from __future__ import annotations
@@ -75,13 +38,13 @@ class PeriodicShootingResult:
     n_iterations
         Newton steps actually performed.
     final_residual
-        Final ``||G(x*)||_∞`` — should be ``≤ tol`` when
-        ``converged=True``.
+        ``max|P(x*) - x*|`` on the true state at the orbit.
     residual_history
         ``||G(x_k)||_∞`` at each Newton step.
     n_simulations
-        Total one-period simulations executed (= n_iterations ×
-        (state_size + 1)). The cost meter.
+        Total one-period simulations executed. The cost meter.
+    message
+        Why it did not converge (empty when it did).
     """
     x_steady_state: np.ndarray
     converged: bool
@@ -89,152 +52,95 @@ class PeriodicShootingResult:
     final_residual: float
     residual_history: List[float] = field(default_factory=list)
     n_simulations: int = 0
+    message: str = ""
 
 
 def run_periodic_shooting(builder,
-                              *,
-                              t_period: float,
-                              dt: float,
-                              switch_fn: Optional[Callable] = None,
-                              b_extra_fn: Optional[Callable] = None,
-                              step_observer: Optional[Callable] = None,
-                              x_initial: Optional[np.ndarray] = None,
-                              tol: float = 1e-6,
-                              max_iterations: int = 20,
-                              fd_step: float = 1e-6,
-                              verbose: bool = False,
-                              **simulate_kwargs,
-                              ) -> PeriodicShootingResult:
-    """Find the periodic steady-state via single-shooting Newton.
+                          *,
+                          t_period: float,
+                          dt: float,
+                          switch_fn: Optional[Callable] = None,
+                          b_extra_fn: Optional[Callable] = None,
+                          step_observer: Optional[Callable] = None,
+                          x_initial: Optional[np.ndarray] = None,
+                          tol: float = 1e-6,
+                          max_iterations: int = 20,
+                          fd_step: float = 1e-6,
+                          verbose: bool = False,
+                          **simulate_kwargs,
+                          ) -> PeriodicShootingResult:
+    """Deprecated: use ``periodic_steady_state(builder, period=T,
+    switch_fn=..., engine='pwl', dt=dt)``, which this calls.
 
-    Parameters
-    ----------
-    builder
-        Populated :class:`CircuitBuilder` whose drive is periodic
-        with period ``t_period``.
-    t_period
-        Period of the driving signal (s). For PWM converters this
-        is ``1 / f_pwm``; for line-driven circuits ``1 / f_line``.
-    dt
-        Fixed simulation step (s). Same constraints as for
-        :func:`simulate`.
-    switch_fn, b_extra_fn, step_observer
-        Forwarded to :func:`simulate` for each one-period run.
-        **All three must be deterministic functions of time** (i.e.,
-        depend only on ``t`` mod ``t_period``). A stateful
-        controller breaks the periodicity assumption — use
-        :func:`simulate` for that.
-    x_initial
-        Initial guess for the steady-state ``x*``. Default: zero
-        vector of the correct size. Pass a result of
-        :func:`compute_dc_op` for a much closer starting point on
-        nonlinear circuits.
-    tol
-        Newton convergence tolerance on ``||G||_∞``. Default 1e-6.
-    max_iterations
-        Maximum Newton steps. Default 20.
-    fd_step
-        Finite-difference perturbation magnitude. Default 1e-6.
-        Larger when ``x*`` has very large entries (e.g. 800 V cap
-        voltages); smaller can underflow.
-    verbose
-        Print per-iteration residual + Δx info. Useful for
-        diagnosing convergence problems.
-    **simulate_kwargs
-        Additional keyword arguments forwarded to :func:`simulate`
-        (``enable_nonlinear_refresh``, ``max_event_iterations``,
-        etc.).
-
-    Returns
-    -------
-    PeriodicShootingResult
-        With the converged ``x_steady_state``, plus diagnostics.
+    ``x_initial`` and ``x_steady_state`` are full MNA vectors (as
+    before); ``x_steady_state`` is the engine's vector at the section
+    after one period from the orbit. ``engine`` in ``simulate_kwargs``
+    may be ``'auto'``/``'pwl'`` (the fixed engine, the default) or
+    ``'trbdf2'``; the other keywords go to every period run.
+    ``b_extra_fn`` and ``step_observer`` are refused by name (a hidden
+    controller state is not part of the periodic state). ``tol``,
+    ``max_iterations`` and ``fd_step`` are accepted and ignored: the
+    delegate stops on its own scaled-norm rule within 60 period runs and
+    sizes its own differences. Not converged: ``converged=False``,
+    ``x_steady_state`` all NaN and the reason in ``message``.
     """
-    import pulsim as _v2  # late import (circular)
+    import warnings
 
+    import pulsim as _v2  # late import (circular)
+    from .periodic_steady_state import ConvergenceError, _unsup
+
+    warnings.warn(
+        "run_periodic_shooting is deprecated; use pulsim.periodic_"
+        "steady_state(..., engine='pwl', dt=dt), which it calls.",
+        DeprecationWarning, stacklevel=2)
     if t_period <= 0:
         raise ValueError("t_period must be > 0")
     if dt <= 0:
         raise ValueError("dt must be > 0")
-
+    for name, v in (("b_extra_fn", b_extra_fn),
+                    ("step_observer", step_observer)):
+        if v is not None:
+            raise _unsup(name, f"run_periodic_shooting: {name} is a "
+                         "Python callback whose state is not part of the "
+                         "periodic state; it is no longer supported. Use "
+                         "simulate() for closed-loop runs.")
+    engine = simulate_kwargs.pop("engine", "auto")
+    if engine not in ("auto", "pwl", "trbdf2"):
+        raise _unsup("engine", f"run_periodic_shooting: engine={engine!r};"
+                     " use periodic_steady_state(engine='exact') for the "
+                     "exact stepper.")
+    engine = "trbdf2" if engine == "trbdf2" else "pwl"
     state_size = builder.pool.state_size(builder.graph)
     if state_size == 0:
         raise ValueError(
             "Circuit has no state variables — periodic shooting "
             "has nothing to solve.")
-
-    # Initial guess.
-    if x_initial is None:
-        x_k = np.zeros(state_size, dtype=float)
-    else:
-        x_k = np.asarray(x_initial, dtype=float).copy()
-        if x_k.size != state_size:
+    start = None
+    if x_initial is not None:
+        x_full = np.asarray(x_initial, dtype=float).reshape(-1)
+        if x_full.size != state_size:
             raise ValueError(
-                f"x_initial has {x_k.size} entries; expected "
+                f"x_initial has {x_full.size} entries; expected "
                 f"{state_size}")
-
-    def phi(x_start: np.ndarray) -> np.ndarray:
-        """Integrate one period from x_start. Returns x(T)."""
-        res = _v2.simulate(
-            builder,
-            t_end=t_period, dt=dt,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            step_observer=step_observer,
-            initial_state=x_start.tolist(),
-            **simulate_kwargs)
-        last = res.states[-1]
-        if hasattr(last, "shape"):
-            return np.asarray(last, dtype=float)
-        return np.asarray(list(last), dtype=float)
-
-    residuals: List[float] = []
-    n_sims = 0
-    converged = False
-
-    for k in range(max_iterations):
-        # Evaluate G(x_k) = φ(x_k) - x_k.
-        x_end = phi(x_k)
-        n_sims += 1
-        G = x_end - x_k
-        res_norm = float(np.max(np.abs(G)))
-        residuals.append(res_norm)
-        if verbose:
-            print(f"  shoot[{k:>2d}] ||G||_∞ = {res_norm:.3e}, "
-                  f"||x|| = {np.linalg.norm(x_k):.3e}")
-        if res_norm < tol:
-            converged = True
-            break
-
-        # Build the Jacobian J = ∂φ/∂x - I by forward differences.
-        # Column j: (φ(x_k + ε e_j) - x_end) / ε.
-        J_phi = np.empty((state_size, state_size), dtype=float)
-        for j in range(state_size):
-            xj = x_k.copy()
-            # Scale ε with |x_j| to avoid loss of precision when
-            # x_j is large.
-            eps = fd_step * max(1.0, abs(x_k[j]))
-            xj[j] += eps
-            x_end_j = phi(xj)
-            n_sims += 1
-            J_phi[:, j] = (x_end_j - x_end) / eps
-        J = J_phi - np.eye(state_size)
-
-        # Newton step: solve J · dx = -G.
-        try:
-            dx = np.linalg.solve(J, -G)
-        except np.linalg.LinAlgError:
-            # Singular Jacobian — bail out, return what we have.
-            if verbose:
-                print(f"  shoot[{k}] singular Jacobian, stopping")
-            break
-        x_k = x_k + dx
-
+        from ._transient_shooting import TransientMap
+        start = TransientMap(builder, t_period, switch_fn, engine, dt,
+                             simulate_kwargs).Cm @ x_full
+    try:
+        r = _v2.periodic_steady_state(
+            builder, period=t_period, switch_fn=switch_fn, engine=engine,
+            dt=dt, options=simulate_kwargs, start_from=start)
+    except ConvergenceError as e:
+        return PeriodicShootingResult(
+            x_steady_state=np.full(state_size, np.nan), converged=False,
+            n_iterations=0, final_residual=float("nan"), message=str(e))
+    if verbose:
+        print(f"  shoot: {r.n_period_runs} period runs, residuals "
+              f"{r.residual_history}")
     return PeriodicShootingResult(
-        x_steady_state=x_k,
-        converged=converged,
-        n_iterations=len(residuals),
-        final_residual=residuals[-1] if residuals else float("inf"),
-        residual_history=residuals,
-        n_simulations=n_sims,
+        x_steady_state=np.asarray(r.full_state, dtype=float),
+        converged=True,
+        n_iterations=len(r.residual_history),
+        final_residual=r.residual,
+        residual_history=list(r.residual_history),
+        n_simulations=r.n_period_runs,
     )

@@ -264,8 +264,6 @@ def test_adapters_penalise_refused_and_failed_only(ccm):
 
 
 def test_bad_configuration_is_rejected_up_front():
-    with pytest.raises(ValueError, match="dsed exact stepper"):
-        Evaluator(buck, period=T, engine="pwl", steady=SteadySpec("pss"))
     with pytest.raises(ValueError, match="min_periods"):
         Evaluator(buck, period=T, steady=SteadySpec(min_periods=4))
     with pytest.raises(ValueError, match="name of a default KPI"):

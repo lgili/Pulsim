@@ -137,7 +137,8 @@ class SteadySpec:
     """How the steady period is reached (design D5).
 
     * ``'pss'``: :func:`pulsim.periodic_steady_state` (Newton shooting
-      on the ``dsed`` exact stepper); its refusal is ``refused`` and
+      on the ``dsed`` exact stepper, or on the Evaluator's ``'pwl'`` /
+      ``'trbdf2'`` engine); its refusal is ``refused`` and
       its non-convergence ``failed`` -- no transient fallback.
     * ``'transient'``: periods are simulated until the state at the
       period start settles (``tol``) or ``max_periods`` is reached
@@ -405,8 +406,11 @@ class Evaluator:
         A :class:`SteadySpec`.
     engine
         ``'auto'`` (default), ``'exact'`` (alias ``'dsed'``), ``'trbdf2'`` or ``'pwl'``:
-        the engine of the transient route (``'pss'`` is the ``dsed``
-        exact stepper).
+        the engine of the transient route and of ``method='pss'``
+        (``'auto'``/``'exact'``: the ``dsed`` exact stepper; ``'pwl'``,
+        ``'trbdf2'``: the orbit of that engine's own transient, route
+        ``'pss/pwl'``). ``method='auto'`` takes ``'pss'`` on the exact
+        stepper only.
     samples_per_period
         Stored samples per period of the KPI run (the ``dsed`` step
         cap is ``T / samples_per_period``).
@@ -450,10 +454,6 @@ class Evaluator:
         if engine not in ("auto", "dsed", "trbdf2", "pwl"):
             raise ValueError(f"engine must be 'auto', 'exact' (alias 'dsed'), "
                              f"'trbdf2' or 'pwl', got {engine!r}")
-        if steady.method == "pss" and engine not in ("auto", "dsed"):
-            raise ValueError(
-                f"SteadySpec(method='pss') runs on the dsed exact stepper; "
-                f"engine={engine!r} contradicts it (use method='transient').")
         if steady.min_periods < 8 or steady.max_periods < steady.min_periods:
             raise ValueError("SteadySpec needs 8 <= min_periods <= max_periods "
                              "(the settle estimate reads x(n/2) ... x(n))")
@@ -783,6 +783,8 @@ class Evaluator:
         from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
         from ._period_kpis import Period, Spec, spec_for
         from .periodic_steady_state import periodic_steady_state
+        if self.engine in ("pwl", "trbdf2"):
+            return self._pss_transient(b, sf, T, counters)
         counters["route"] = "pss/dsed"
         spec = spec_for(b, self.output, self.loss_options)
         obs = spec if isinstance(spec, Spec) else None
@@ -847,6 +849,53 @@ class Evaluator:
         run = sampled(2)
         if self.gradients:
             run.pss_orbit = r
+        return run, T, 2 * T
+
+    def _pss_transient(self, b, sf, T, counters):
+        """``method='pss'`` on the fixed or variable engine: the orbit of
+        that engine's own transient (add-periodic-steady-state-shooting
+        5.1-5.3); the KPIs read the second of two periods run from it."""
+        from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
+        from .periodic_steady_state import periodic_steady_state
+        engine = self.engine
+        counters["route"] = f"pss/{engine}"
+        if self.gradients:
+            from ._refusal import unsupported
+            raise unsupported(
+                "design.evaluate", "gradients", "Evaluator: gradients= on "
+                f"pss/{engine}: exact orbit sensitivities exist on the "
+                "exact stepper only (refused, never a finite difference).")
+        kw = dict(self.options)
+        dt = kw.pop("dt", None)
+
+        def solve():
+            try:
+                return periodic_steady_state(
+                    b, period=T, switch_fn=sf, engine=engine, dt=dt,
+                    options=kw, max_period_runs=self.steady.max_period_runs)
+            except (ConvergenceError, np.linalg.LinAlgError) as e:
+                raise _Failed(str(e)) from e
+
+        r = _engine(solve)
+        if not r.stable:
+            raise _Failed(
+                "unstable_orbit: Floquet multipliers outside the unit "
+                f"circle {[(round(abs(m), 6), k) for _, m, k in r.unstable_multipliers]}")
+        m = r._ctx
+        counters["pss_period_runs"] = counters.get(
+            "pss_period_runs", 0) + int(r.n_period_runs)
+        counters["engine_steps"] = counters.get(
+            "engine_steps", 0) + int(r.n_engine_steps)
+        counters["simulations"] += int(r.n_period_runs)
+        counters["pss_loop"] = m.loop
+        counters["pss_iterations"] = len(r.residual_history)
+        counters["pss_jacobians"] = int(m.n_jacobians)
+        counters["pss_broyden_updates"] = int(m.n_broyden)
+        counters["kpi_path"] = "sampled: pss on " + engine
+        # Two periods, the second measured (an edge AT the section is
+        # then inside the window), the same restart rule as the map.
+        run = _engine(lambda: m.simulate(r.x0, periods=2))
+        self._count(run, counters, b)
         return run, T, 2 * T
 
     def _gradients(self, b, run, design, kpis, grads, counters):

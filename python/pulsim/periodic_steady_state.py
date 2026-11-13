@@ -163,6 +163,10 @@ class PeriodicSteadyStateResult:
     #: The verification period as the kernel map returned it (with the
     #: integrals of the observables the caller asked for), or ``None``.
     _period: Any = field(default=None, repr=False)
+    #: ``engine='pwl'``/``'trbdf2'``: the engine's full MNA vector at the
+    #: section after the verification period (resume a transient from
+    #: it); ``None`` on the exact path.
+    full_state: Any = field(default=None, repr=False)
 
     @property
     def orbit(self):
@@ -956,25 +960,32 @@ def _classify(mu):
     return "flip (period-doubling)" if mu.real < 0 else "fold"
 
 
-def _pss_refusal(builder, period, switch_fn=None):
+def _pss_refusal(builder, period, switch_fn=None, engine="exact",
+                 dt=None, options=None):
     """The ``UnsupportedError`` :func:`periodic_steady_state` would raise
     for this circuit and schedule before its first run (its
     applicability checks), or ``None``."""
     from ._refusal import UnsupportedError
     try:
-        _Solver(builder, float(period), switch_fn)
+        if engine in ("exact", "dsed"):
+            _Solver(builder, float(period), switch_fn)
+        else:
+            from ._transient_shooting import TransientMap
+            TransientMap(builder, float(period), switch_fn, engine, dt,
+                         options)
     except UnsupportedError as e:
         return e
     return None
 
 
-def periodic_steady_state_supported(builder, period, switch_fn=None):
+def periodic_steady_state_supported(builder, period, switch_fn=None, *,
+                                    engine="exact", dt=None, options=None):
     """``(True, "")`` when :func:`periodic_steady_state` can solve this
-    circuit with this schedule, else ``(False, reason)`` with the
-    message of the ``UnsupportedError`` it would raise. Runs the same
-    checks, and no period; a configuration error (a bad period, a
-    schedule that is not T-periodic) still raises."""
-    e = _pss_refusal(builder, period, switch_fn)
+    circuit with this schedule on ``engine``, else ``(False, reason)``
+    with the message of the ``UnsupportedError`` it would raise. Runs
+    the same checks, and no period; a configuration error (a bad period,
+    a schedule that is not T-periodic) still raises."""
+    e = _pss_refusal(builder, period, switch_fn, engine, dt, options)
     return (True, "") if e is None else (False, str(e))
 
 
@@ -983,6 +994,9 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           n_relax: int = 5,
                           rtol: float = _RTOL,
                           sensitivities=None,
+                          engine: str = "exact",
+                          dt: float | None = None,
+                          options: dict | None = None,
                           _observables=None,
                           _python_loop: bool = False) -> PeriodicSteadyStateResult:
     """Periodic steady state of a switching circuit by Newton shooting
@@ -1026,12 +1040,36 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         ``sensitivity`` (orbit KPI gradients through ``kpi``) at the
         cost of one more period run; see ``pulsim.sensitivity``.
 
+    engine
+        ``'exact'`` (also ``'dsed'``; default): the exact stepper, ``M``
+        from its propagators and saltation matrices. ``'pwl'`` (the fixed
+        trapezoidal engine, ``dt`` required, ``T/dt`` an integer, a gate
+        edge at ``t = 0``) or ``'trbdf2'`` (variable step): the orbit of
+        THAT engine's own transient, ``M`` by finite differences with
+        Broyden updates; ``sensitivities`` are refused there.
+    dt, options
+        The step and further ``simulate`` keywords of the period runs on
+        ``'pwl'`` / ``'trbdf2'``.
+
     The section is ``t = 0``: for the zero-phase built-in PWM helpers
     that is the rising gate edge.
     """
     if not (period > 0 and math.isfinite(period)):
         raise _err(f"period must be a positive finite number, got "
                    f"{period!r}")
+    if engine not in ("exact", "dsed"):
+        if engine not in ("pwl", "trbdf2"):
+            raise _err(f"engine must be 'exact', 'dsed', 'pwl' or "
+                       f"'trbdf2', got {engine!r}")
+        from ._transient_shooting import periodic_steady_state_on
+        return periodic_steady_state_on(
+            builder, period=float(period), switch_fn=switch_fn,
+            engine=engine, dt=dt, options=options, start_from=start_from,
+            max_period_runs=max_period_runs, n_relax=n_relax, rtol=rtol,
+            sensitivities=sensitivities)
+    if dt is not None or options:
+        raise _err("dt and options set the period runs of engine='pwl' / "
+                   "'trbdf2'; the exact stepper takes neither.")
     s = _Solver(builder, period, switch_fn)
     n = s.n
     if start_from is None:
