@@ -115,6 +115,14 @@ Invalidation: templates and analyses live as long as the cache;
 `refactor_parametric` changes values only and keeps both; a new
 circuit gets a new cache.
 
+Event entries (`solve_at`, which TR-BDF2 uses for every stage) are
+bounded by the same byte budget as the segments, accounted separately,
+LRU (`event_evictions`). Each keeps its `J` and `G`/`C` scattered onto
+`J`'s pattern, so a new `dt` is an in-place `J[k] = G[k] + (1/dt)·C[k]`
+and a numeric `factorize` that reuses the LU's work vectors and L/U
+capacity: no allocation (`update-trbdf2-factor-reuse`, parts 1-2;
+details in `layer4-v7-multi-dt-cache.md`).
+
 ## V0 scope: static-only circuits
 
 Layer 4 V0 supports Resistor + VoltageSource + Switch. That covers:

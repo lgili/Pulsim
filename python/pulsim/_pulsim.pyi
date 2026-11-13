@@ -781,6 +781,11 @@ class CacheMetrics:
         solve_at calls that had to build a fresh event solver.
         """
     @property
+    def event_evictions(self) -> int:
+        """
+        solve_at entries evicted (LRU) under the byte budget.
+        """
+    @property
     def event_hits(self) -> int:
         """
         solve_at calls served by a resident factor at the same dt.

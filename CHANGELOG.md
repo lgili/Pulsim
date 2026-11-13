@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2 event solvers: byte budget and allocation-free refactor (performance, bit-identical)
+
+* **Changed** `PwlStateSpaceCache::solve_at` (every TR-BDF2 solve) keeps
+  one event solver per visited switch state, bounded by the segment byte
+  budget (`set_segment_budget_bytes`, accounted separately for this
+  table) instead of 8 entries. The three-phase VSI on `trbdf2` (20 ms)
+  now builds 87 entries — one per switch state — instead of 3,198.
+* **Changed** a refactor of a resident entry at a new `dt` writes
+  `J = G + (1/dt)·C` in place and the in-house LU reuses its work
+  vectors and L/U capacity: 0 heap allocations per refactor (was 6
+  `operator new` + 6 Eigen mallocs). Results are bit-identical
+  (`update-trbdf2-factor-reuse`, parts 1-2; the step grid of part 3 is
+  not included).
+* **Removed** `PwlStateSpaceCache::kMaxEventEntries`.
+* **Added** `CacheMetrics.event_evictions`.
+
 ### Linear-time segment assembly and one symbolic analysis per circuit (performance, bit-identical)
 
 * **Changed** `PwlStateSpaceCache` builds the sparse structure of `G`,

@@ -235,15 +235,24 @@ public:
 
         // pinv[orig_row] = pivotal position (column that chose this row
         // as pivot), or -1 while the row is still un-pivoted.
-        std::vector<Index> pinv(nz, Index{-1});
+        // Work vectors are members (update-trbdf2-factor-reuse): a
+        // refactor of a resident solver reuses their capacity, and that
+        // of the L/U arrays above, so it allocates nothing.
+        auto& pinv = fw_pinv_;
+        pinv.assign(nz, Index{-1});
         Prow_.assign(nz, Index{0});
 
         // Sparse workspace (values by ORIGINAL row id) + DFS scratch.
-        std::vector<Scalar> x(nz, Scalar{0});
-        std::vector<Index>  xi(nz, Index{0});      // reach pattern stack
-        std::vector<Index>  rstack(nz, Index{0});  // DFS node stack
-        std::vector<Index>  pstack(nz, Index{0});  // DFS position stack
-        std::vector<Index>  visit(nz, Index{-1});  // stamp = column k
+        auto& x      = fw_x_;
+        auto& xi     = fw_xi_;      // reach pattern stack
+        auto& rstack = fw_rstack_;  // DFS node stack
+        auto& pstack = fw_pstack_;  // DFS position stack
+        auto& visit  = fw_visit_;   // stamp = column k
+        x.assign(nz, Scalar{0});
+        xi.assign(nz, Index{0});
+        rstack.assign(nz, Index{0});
+        pstack.assign(nz, Index{0});
+        visit.assign(nz, Index{-1});
 
         const Index*  Ap = M.outerIndexPtr();
         const Index*  Ai = M.innerIndexPtr();
@@ -1389,6 +1398,10 @@ private:
     Index singular_column_ = kInvalidIndex;
     Index singular_row_    = kInvalidIndex;
     Real  singular_pivot_magnitude_ = Real{0};
+
+    // `factorize` work vectors, kept between calls (see factorize).
+    std::vector<Index>  fw_pinv_, fw_xi_, fw_rstack_, fw_pstack_, fw_visit_;
+    std::vector<Scalar> fw_x_;
 
     bool analyzed_         = false;
     bool factorized_       = false;

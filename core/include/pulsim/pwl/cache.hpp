@@ -96,6 +96,8 @@ struct CacheMetrics {
     std::uint64_t event_refactors       = 0;  // solve_at: dt changed,
                                               // in-place numeric refactor
     std::uint64_t event_builds          = 0;  // solve_at: fresh entry
+    std::uint64_t event_evictions       = 0;  // solve_at: LRU evictions
+                                              // under the byte budget
 
     // ---- update-linear-time-assembly tier 1 ----
     std::uint64_t structure_builds      = 0;  // sparse-structure (template)
@@ -1066,7 +1068,7 @@ public:
     /// analyze+factorize'd segment — unbounded memory AND two full
     /// symbolic analyses per event.
     ///
-    /// Now: a small LRU (≤ `kMaxEventEntries` masks) of reusable
+    /// Now: a byte-budgeted LRU of reusable
     /// EVENT SOLVERS. Each entry stores the mask's (G, C, b) split
     /// (`J(dt) = G + (1/dt)·C`, see `assemble_segment_split`) and a
     /// solver analyzed ONCE — a dt change is a value re-combine +
@@ -1103,10 +1105,21 @@ public:
             // new mask, leaving the table one entry poorer for
             // nothing (adversarial-review finding F6-c).
             EventEntry e;
-            asm_.split(graph_, pool_, mask, e.G, e.C, e.b_constant);
+            {
+                sparse::Matrix G, C;
+                asm_.split(graph_, pool_, mask, G, C, e.b_constant);
+                if (dt > Real{0}) {
+                    asm_.combine(G, C, dt, e.J);   // = G + (1/dt)·C
+                    asm_.scatter(G, C, e.gs, e.cs);
+                } else {
+                    Vector b_unused;
+                    asm_.assemble(graph_, pool_, mask, Real{0}, e.J,
+                                  b_unused);
+                }
+            }
             e.solver = sparse::make_default_solver(
                 pool_.state_size(graph_), sparse::Backend::Auto);
-            const sparse::Matrix J = combine_event_J_(e, mask, dt);
+            const sparse::Matrix& J = e.J;
             if (!analyze_shared_(*e.solver, J, dt > Real{0})) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: analyze failed "
@@ -1126,10 +1139,22 @@ public:
             e.current_dt       = dt;
             e.touch(tick);
             e.analyzed_dynamic = (dt > Real{0});
-            // Everything that can throw is behind us; NOW make room.
-            if (event_entries_.size() >=
-                static_cast<std::size_t>(kMaxEventEntries)) {
-                evict_lru_event_entry_();
+            // Everything that can throw is behind us; NOW make room
+            // (update-trbdf2-factor-reuse: the segment byte budget,
+            // accounted separately for this table; the incoming entry
+            // is always inserted).
+            if (segment_budget_bytes_ > 0) {
+                const std::size_t incoming = e.approx_bytes();
+                std::size_t resident = 0;
+                for (const auto& [m, other] : event_entries_) {
+                    resident += other.approx_bytes();
+                }
+                while (!event_entries_.empty() &&
+                       resident + incoming > segment_budget_bytes_) {
+                    resident -= evict_lru_event_entry_();
+                    event_evictions_.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
             }
             it = event_entries_.emplace(mask, std::move(e)).first;
             event_builds_.fetch_add(1, std::memory_order_relaxed);
@@ -1137,7 +1162,14 @@ public:
             // Known mask, new dt: numeric refactor on the SAME
             // symbolic analysis (pattern is dt-invariant).
             EventEntry& e = it->second;
-            const sparse::Matrix J = combine_event_J_(e, mask, dt);
+            if (dt > Real{0}) {
+                // In place on the entry's own J: no allocation.
+                SegmentAssembler::combine_scattered(e.gs, e.cs, dt, e.J);
+            } else {
+                Vector b_unused;
+                asm_.assemble(graph_, pool_, mask, Real{0}, e.J, b_unused);
+            }
+            const sparse::Matrix& J = e.J;
             if (!e.solver->factorize(J)) {
                 // The solver destroys its previous factor up-front,
                 // so the entry can no longer serve ANY dt — erase it
@@ -1146,12 +1178,14 @@ public:
                 // current_dt made a later solve_at at the previously
                 // WORKING dt hit the reuse branch and die with
                 // logic_error instead of transparently rebuilding).
-                event_entries_.erase(it);
-                throw std::runtime_error(std::format(
+                // Message first: `J` lives in the entry erased below.
+                std::string msg = std::format(
                     "PwlStateSpaceCache::solve_at: refactorize "
                     "failed (numerically singular) for mask {} "
                     "(dt={}){}", mask.to_string(), dt,
-                    explain_singular(graph_, pool_, J, nullptr)));
+                    explain_singular(graph_, pool_, J, nullptr));
+                event_entries_.erase(it);
+                throw std::runtime_error(msg);
             }
             e.current_dt = dt;
             e.touch(tick);
@@ -1164,14 +1198,9 @@ public:
         e.solver->solve_neg_sum(e.b_constant, b_extra, x);
     }
 
-    /// Maximum number of event-solver entries `solve_at` keeps
-    /// resident (LRU beyond this). Sub-step event correction
-    /// alternates between the pre- and post-commutation masks, so
-    /// a handful of slots covers real converters with headroom.
-    static constexpr Size kMaxEventEntries = 8;
-
-    /// Number of event-solver entries currently resident
-    /// (≤ `kMaxEventEntries`). Same sampling caveat as
+    /// Number of event-solver entries currently resident (bounded by
+    /// the byte budget, see `set_segment_budget_bytes`). Same sampling
+    /// caveat as
     /// `num_built_segments()` — `solve_at` mutates this container.
     [[nodiscard]] Size num_event_entries() const noexcept {
         return event_entries_.size();
@@ -1180,7 +1209,7 @@ public:
     /// Number of DISTINCT dt values currently loaded across the
     /// event-solver entries. (v2.0 Phase 1: an entry holds ONE
     /// factor at its most recent dt — dt values are no longer
-    /// accumulated, so this is bounded by `kMaxEventEntries`.)
+    /// accumulated, so this is at most `num_event_entries()`.)
     [[nodiscard]] Size num_alt_dt_values() const noexcept {
         std::set<Real> dts;
         for (const auto& [mask, e] : event_entries_) {
@@ -1414,6 +1443,8 @@ public:
                 std::memory_order_relaxed),
             .event_builds = event_builds_.load(
                 std::memory_order_relaxed),
+            .event_evictions = event_evictions_.load(
+                std::memory_order_relaxed),
             .structure_builds = asm_.structure_builds(),
             .symbolic_analyses = symbolic_analyses_.load(
                 std::memory_order_relaxed),
@@ -1439,8 +1470,9 @@ public:
     // — and every in-repo caller (run_transient's Newton path
     // included) consumes its reference before the next cache call.
     //
-    // Note: the ≤ 8 event-solver entries (`solve_at`) are OUTSIDE
-    // this budget — they are bounded by count, not bytes.
+    // The event-solver entries (`solve_at`) are bounded by the same
+    // budget, accounted separately (update-trbdf2-factor-reuse), in
+    // eager and lazy mode alike.
     //
     // Eager `build()` mode never evicts: pre-building all 2^N
     // factors is an explicit caller decision, and the eager
@@ -1951,17 +1983,18 @@ private:
     // -------------------------------------------------------------
     // v2.0 Phase 1 — event-dt solver entries (`solve_at`).
     //
-    // One entry per recently-evented mask, LRU-bounded at
-    // `kMaxEventEntries`. Each stores the (G, C, b) split so a dt
-    // change is `J = G + (1/dt)·C` + numeric factorize on the
-    // entry's ONE symbolic analysis — replacing the v1.x
+    // One entry per recently-evented mask, LRU-bounded by the byte
+    // budget. Each stores `G` and `C` scattered onto the pattern of
+    // its `J`, so a dt change is an in-place `J = G + (1/dt)·C` +
+    // numeric factorize on the entry's ONE symbolic analysis — replacing the v1.x
     // exact-Real-dt-keyed map that retained a full analyzed +
     // factorized segment per (mask, dt) pair forever.
     // `mutable` so `solve_at` (const) can populate on demand.
     // -------------------------------------------------------------
     struct EventEntry {
-        sparse::Matrix G;          // static stamps for this mask
-        sparse::Matrix C;          // 1/dt coefficients (mask-inv.)
+        sparse::Matrix J;          // J at current_dt (union pattern)
+        std::vector<Real> gs;      // G on J's pattern (dt > 0 only)
+        std::vector<Real> cs;      // 1/dt coefficients on J's pattern
         Vector b_constant;          // dt-independent source stamps
         std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
         Real current_dt = Real{-1};
@@ -1990,7 +2023,7 @@ private:
 
         EventEntry() = default;
         EventEntry(EventEntry&& o) noexcept
-            : G{std::move(o.G)}, C{std::move(o.C)},
+            : J{std::move(o.J)}, gs{std::move(o.gs)}, cs{std::move(o.cs)},
               b_constant{std::move(o.b_constant)},
               solver{std::move(o.solver)},
               current_dt{o.current_dt},
@@ -1998,8 +2031,9 @@ private:
               analyzed_dynamic{o.analyzed_dynamic} {}
         EventEntry& operator=(EventEntry&& o) noexcept {
             if (this != &o) {
-                G                = std::move(o.G);
-                C                = std::move(o.C);
+                J                = std::move(o.J);
+                gs               = std::move(o.gs);
+                cs               = std::move(o.cs);
                 b_constant       = std::move(o.b_constant);
                 solver           = std::move(o.solver);
                 current_dt       = o.current_dt;
@@ -2014,32 +2048,27 @@ private:
         void touch(std::uint64_t t) const noexcept {
             lru_tick.store(t, std::memory_order_relaxed);
         }
+        /// Estimated resident bytes (J, the scattered split, b and the
+        /// solver's factor) for the event-table budget.
+        [[nodiscard]] std::size_t approx_bytes() const noexcept {
+            const auto nnz  = static_cast<std::size_t>(J.nonZeros());
+            const auto cols = static_cast<std::size_t>(J.cols());
+            std::size_t total =
+                nnz * (sizeof(Real) + sizeof(sparse::Matrix::StorageIndex)) +
+                (cols + 1) * sizeof(sparse::Matrix::StorageIndex) +
+                (gs.size() + cs.size()) * sizeof(Real) +
+                static_cast<std::size_t>(b_constant.size()) * sizeof(Real);
+            if (solver) total += solver->factor_bytes();
+            return total;
+        }
         EventEntry(const EventEntry&) = delete;
         EventEntry& operator=(const EventEntry&) = delete;
     };
 
-    /// Recombine an event entry's split at `dt`. `dt > 0` is the
-    /// hot path (`G + (1/dt)·C`); `dt <= 0` falls back to the V0
-    /// static-only assembly (caps/inductors skipped — matching
-    /// what the v1.x aux cache produced for a static solve_at).
-    [[nodiscard]] sparse::Matrix combine_event_J_(
-        const EventEntry& e,
-        const topology::SwitchStateMask& mask,
-        Real dt) const {
-        sparse::Matrix J;
-        if (dt > Real{0}) {
-            asm_.combine(e.G, e.C, dt, J);   // bit-equal to G + (1/dt)·C
-            return J;
-        }
-        Vector b_unused;
-        asm_.assemble(graph_, pool_, mask, Real{0}, J, b_unused);
-        return J;
-    }
-
-    /// Erase the least-recently-used event entry. Called only when
-    /// the table is full and a NEW mask arrives.
-    void evict_lru_event_entry_() const {
-        if (event_entries_.empty()) return;
+    /// Erase the least-recently-used event entry; returns its bytes.
+    /// Called only when a NEW mask arrives and the budget is full.
+    std::size_t evict_lru_event_entry_() const {
+        if (event_entries_.empty()) return 0;
         auto victim = event_entries_.begin();
         for (auto it = event_entries_.begin();
              it != event_entries_.end(); ++it) {
@@ -2047,7 +2076,9 @@ private:
                 victim = it;
             }
         }
+        const std::size_t bytes = victim->second.approx_bytes();
         event_entries_.erase(victim);
+        return bytes;
     }
 
     mutable numeric::Dictionary<topology::SwitchStateMask,
@@ -2116,6 +2147,7 @@ private:
     mutable std::atomic<std::uint64_t> event_hits_{0};
     mutable std::atomic<std::uint64_t> event_refactors_{0};
     mutable std::atomic<std::uint64_t> event_builds_{0};
+    mutable std::atomic<std::uint64_t> event_evictions_{0};
 
     // v2.0 Phase 1 — lazy segment cache byte budget (audit finding
     // `no-mode-cache-eviction`). 0 disables eviction. The default

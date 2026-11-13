@@ -1524,6 +1524,10 @@ void init_module(py::module_& m) {
         .def_readonly("event_builds", &pwl::CacheMetrics::event_builds,
                        "solve_at calls that had to build a fresh "
                        "event solver.")
+        .def_readonly("event_evictions",
+                       &pwl::CacheMetrics::event_evictions,
+                       "solve_at entries evicted (LRU) under the byte "
+                       "budget.")
         .def_readonly("structure_builds",
                        &pwl::CacheMetrics::structure_builds,
                        "Sparse-structure (template) builds of G/C/J: one "

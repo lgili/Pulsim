@@ -243,6 +243,21 @@ characterised, and one tempting fix refuted*).
 after an event landing, or a row-equilibrated Jacobian — not a
 tolerance change.
 
+### TR-BDF2 still refactors on every new step size
+
+`engine='trbdf2'` solves through one event solver per switch state.
+Since `update-trbdf2-factor-reuse` (parts 1-2) the table holds every
+visited state within the segment byte budget (it used to hold 8, so
+the three-phase VSI rebuilt entries 3,198 times in 20 ms) and a refactor
+allocates nothing — but each new `h` or stage fraction is still one
+numeric factorisation (10,716 refactors in a 10 ms buck run), because
+the controller's step sizes are continuous. Landing steps at an event
+refactor whatever the grid. Memory: one `J`, its `G`/`C` values and one
+LU factor per visited state, released only by the budget's LRU
+(`CacheMetrics.event_evictions`). **Fix.** Part 3 of the proposal (a
+geometric step grid with factor slots) is a numerical change awaiting
+the owner's accuracy sign-off.
+
 ### Fixed engine: diode-mask chatter inside Newton at a small `dt`
 
 With PWL diodes (`add_diode`) in the same circuit as a Newton device

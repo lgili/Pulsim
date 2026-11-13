@@ -118,6 +118,29 @@ TEST_CASE("in-place combine equals G + (1/dt)·C byte for byte over 100 dt value
     }
 }
 
+TEST_CASE("scattered in-place combine equals G + (1/dt)·C byte for byte",
+          "[v2][layer4][assembly][slot_map][event]") {
+    // update-trbdf2-factor-reuse 3.1: the event entry's refactor path.
+    auto b = bridge();
+    SegmentAssembler sa;
+    for (unsigned v = 0; v < 256; v += 17) {
+        const auto mask = mask_of(8, v);
+        sparse::Matrix G, C, J;
+        Vector bb;
+        std::vector<Real> gs, cs;
+        sa.split(b.graph(), b.pool(), mask, G, C, bb);
+        sa.combine(G, C, 1e-6, J);
+        sa.scatter(G, C, gs, cs);
+        REQUIRE(gs.size() == static_cast<std::size_t>(J.nonZeros()));
+        Real dt = 1e-9;
+        for (int k = 0; k < 100; ++k, dt *= 1.137) {
+            const sparse::Matrix J_ref = G + (Real{1} / dt) * C;
+            SegmentAssembler::combine_scattered(gs, cs, dt, J);
+            REQUIRE(same_bytes(J, J_ref));
+        }
+    }
+}
+
 TEST_CASE("an adopted symbolic analysis gives the factor of a private one",
           "[v2][layer0][sparse][pulsim_lu][symbolic]") {
     auto b = bridge();

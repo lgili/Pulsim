@@ -500,6 +500,30 @@ public:
         for (std::size_t k = 0; k < nnz; ++k) jv[k] = jv[k] + inv_dt * cs_[k];
     }
 
+    /// `G` and `C` (from `split`, template patterns) scattered onto the
+    /// union pattern of `J`, absent entries +0.0, for `combine_scattered`.
+    void scatter(const sparse::Matrix& G, const sparse::Matrix& C,
+                 std::vector<Real>& gs, std::vector<Real>& cs) const {
+        const auto nnz = static_cast<std::size_t>(dyn_.J.nonZeros());
+        gs.assign(nnz, Real{0});
+        cs.assign(nnz, Real{0});
+        const Real* gv = G.valuePtr();
+        for (std::size_t k = 0; k < g2j_.size(); ++k) gs[g2j_[k]] = gv[k];
+        const Real* cv = C.valuePtr();
+        for (std::size_t k = 0; k < c2j_.size(); ++k) cs[c2j_[k]] = cv[k];
+    }
+
+    /// In-place `J[k] = gs[k] + (1/dt)·cs[k]` on the pattern `J` already
+    /// has: the arithmetic of `combine`, no allocation
+    /// (update-trbdf2-factor-reuse).
+    static void combine_scattered(const std::vector<Real>& gs,
+                                  const std::vector<Real>& cs, Real dt,
+                                  sparse::Matrix& J) noexcept {
+        Real* jv = J.valuePtr();
+        const Real inv_dt = Real{1} / dt;
+        for (std::size_t k = 0; k < gs.size(); ++k) jv[k] = gs[k] + inv_dt * cs[k];
+    }
+
     /// Template (sparse-structure) builds so far: one per regime unless
     /// the circuit's structure changes under the cache.
     [[nodiscard]] std::uint64_t structure_builds() const noexcept {
