@@ -43,7 +43,7 @@ with the new time split; it is not waived.
 - [ ] 6.1 Re-run 1.3–1.5. Accept when: build(n = 15,002) ÷ build(n = 1502) ≤ 12; per-mask build at n = 3008 ≤ 0.1 × baseline; first visit on the VSI ≤ 0.5 × baseline; no ns/step regression at any n — measured: ratio 10.6 ✓, n = 3008 0.042× ✓, ns/step within noise ✓, VSI first visit 0.62× ✗ (DECISIONS.md 11)
 - [x] 6.2 CI regression test on `structure_builds`, `symbolic_analyses`, `symbolic_fallbacks` only; no wall-clock assertion
 
-## 7. Tier 2 — neighbouring masks through `partial_refactor` (gated: owner sign-off; BREAKING rounding)
+## 7. Tier 2 — neighbouring masks through `partial_refactor` (gated: owner sign-off; BREAKING rounding) — prototyped 2026-11-13, not landed (DECISIONS.md 13)
 - [ ] 7.1 Baseline: first-visit cost after tier 1; path length of single-switch flips on the VSI and the switched ladder
 - [ ] 7.2 `clone()` on the in-house solver; nearest-resident-mask search on a lazy miss; path-ratio gate; counters `flip_partial_refactors`, `flip_fallbacks`
 - [ ] 7.3 Cache flag, default off; with the flag off the goldens are identical to tier 1
@@ -51,7 +51,7 @@ with the new time split; it is not waived.
 - [ ] 7.5 Measure 1.5. Accept when a first visit at n = 3008 costs ≤ 0.5 × the tier 1 figure; then default on and regenerate the goldens
 
 ## 8. Tier 3 — reciprocal pivots (gated: evidence first; BREAKING rounding)
-- [ ] 8.1 Standalone solve microbenchmark at n = 152 / 1502 / 15,002 (divide vs stored reciprocal); stop here unless the reciprocal gives ≥ 1.15× at n = 1502
+- [x] 8.1 Standalone solve microbenchmark at n = 152 / 1502 / 15,002 (divide vs stored reciprocal); stop here unless the reciprocal gives ≥ 1.15× at n = 1502 — measured 1.19–1.29× at n = 1502 (DECISIONS.md 14); 8.2–8.4 not landed: TR-BDF2 cases exceed the 1e-9 gate
 - [ ] 8.2 Store `1/U[k,k]` at `factorize` and `partial_refactor`; multiply in back substitution
 - [ ] 8.3 Gate: states within 1e-9 relative on every golden; LU residual tests at their existing tolerances; regenerate the goldens with the owner's sign-off
 - [ ] 8.4 Measure 1.4. Accept when ns/step at n = 1502 is ≤ 0.85 × the tier 1 figure
@@ -59,7 +59,7 @@ with the new time split; it is not waived.
 ## 9. Docs
 - [x] 9.1 CHANGELOG (tier 1 under performance; tiers 2–3 under numerical changes)
 - [x] 9.2 `docs/internals/layer0-numeric-and-sparse.md`, `layer3-stamping-pipeline.md`, `layer4-pwl-state-space-cache.md`: template, slot arrays, symbolic object and its invalidation; note whether the per-stamp search shows in the profile
-- [ ] 9.3 KNOWN_LIMITATIONS: tier 2 fallbacks; stubs for the new metrics
+- [x] 9.3 KNOWN_LIMITATIONS: tier 2 fallbacks; stubs for the new metrics — tier 2 not landed, so no new metrics; the limitation records why (2026-11-13)
 
 ## 10. Verification
 - [x] 10.1 `ruff`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check, `test_zero_alloc`
