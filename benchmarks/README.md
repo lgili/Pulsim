@@ -85,7 +85,9 @@ Rules the harness keeps:
   (`--metric edge`) leaves out the steps of either trace across which the
   recorded switch state changes: interpolating a jump between two sparse
   samples compares a ramp neither engine computed. The window shrinks by
-  those steps only; every other interval counts. `--metric interp` is the
+  those steps only; every other interval counts. A trace that switches
+  across more than half its span (dsed sampled at the switching rate)
+  keeps its steps: they are its only data. `--metric interp` is the
   previous measure (every interval interpolated, every node), kept for
   comparison; `reference_status.py --metric` takes the same switch.
 - **The first stored sample is excluded** where it is the initial state

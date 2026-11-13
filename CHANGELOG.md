@@ -19,6 +19,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   measure: source-forced nodes are dropped and the step that contains a
   switching edge is not interpolated (`--metric interp` keeps the old
   measure). `benchmarks/REFERENCE_STATUS.md` states which one it uses.
+  A trace that switches across more than half its span (dsed sampled at
+  the switching rate) keeps its steps. Re-frozen triage: 21 `known:`
+  cells cleared (they agree), `ll08_buck_mosfet` error → disagree.
+* **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
+  grinds to `max_steps` on the SEPIC benchmark (it ran before the
+  error-control change); the harness has no reference for it, so its
+  pwl and trbdf2 cells are `error` and not frozen.
 * **Changed** `ll16_flyback_closed_loop` completes on `pwl` with
   roundoff warnings (it aborted at 37 µs); its state is wrong from t = 0
   on the base tree too (I(Lm_core) ≈ 2.4e13 A). Triage keeps it `error`.

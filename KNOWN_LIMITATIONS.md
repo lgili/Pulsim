@@ -419,16 +419,21 @@ At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 ### Reference benchmark suite: what runs on 2.0
 
 The harness reader maps 111 of the 126 `pulsim-v1` benchmark circuits;
-107 complete on `engine='pwl'`. Skipped (15): eight closed loops built
+108 complete on `engine='pwl'`. Skipped (15): eight closed loops built
 from control blocks other than PI → PWM (`hysteresis`, `integrator`,
 `limiter`, `lookup_table`, `gain`, `pid_controller`, `rate_limiter`,
 `sample_hold`), four PLL / dq circuits, a p-channel MOSFET, the v1
 saturable-inductor law, and a MOSFET with a loss/thermal block. Failing
-on `pwl` (4): `buck_igbt` and `ll16_flyback_closed_loop` (Newton does
-not converge), `ll05_diode_rectifier_filter` (no consistent DC diode
-configuration), `ll13_active_clamp_forward` (no DC operating point).
-The differential matrix records 73 `disagree` / `error` cells over 56
-circuits (integrated tree, 2026-11-13; `benchmarks/REFERENCE_STATUS.md`) (`known:` in `benchmarks/manifests/v2_triage.yaml`); each is an
+on `pwl` (3): `buck_igbt` (Newton does not converge),
+`ll05_diode_rectifier_filter` (no consistent DC diode configuration),
+`ll13_active_clamp_forward` (no DC operating point).
+`ll16_flyback_closed_loop` completes since the Newton roundoff
+acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
+The differential matrix (edge measure) records 53 `disagree` / `error`
+cells over 47 circuits as `known:` in `benchmarks/manifests/v2_triage.yaml`,
+plus `sepic` on pwl and trbdf2, whose trbdf2 reference grinds to
+`max_steps` (a TR-BDF2 regression, not frozen; integrated tree,
+2026-11-13, `benchmarks/REFERENCE_STATUS.md`). Each is an
 open finding, not a tolerance. Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 

@@ -102,6 +102,17 @@ def test_switching_steps_bracket_every_recorded_change():
         dr.compare(dr.traces(r, ["V(sw)"]), dr.traces(r, ["V(sw)"]), ["V(sw)"], 1e-3, "bogus")
 
 
+def test_a_trace_switching_on_every_step_keeps_its_steps():
+    # dsed sampled at the switching rate: every step holds an edge, so the
+    # edge measure would exclude the whole window. It compares the samples.
+    t = np.linspace(0.0, 1.0, 11)
+    y = np.ones_like(t)
+    tr = (t, {"y": y}, [(a, b) for a, b in zip(t[:-1], t[1:])])
+    ref = (t, {"y": y + 0.01}, [])
+    er, _ = dr.compare(tr, ref, ["y"], 1.0)
+    assert er == pytest.approx(0.01 / 1.01)
+
+
 def test_exclude_t0_drops_only_the_initial_sample():
     t = np.linspace(0, 1, 11)
     y = np.ones_like(t)
