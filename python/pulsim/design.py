@@ -89,7 +89,7 @@ def _fz(m) -> FrozenDict:
     out = {}
     for k, v in m.items():
         # scalars first: an abc isinstance per KPI value was the record's
-        # largest cost (DECISIONS 18)
+        # largest cost (DECISIONS 19)
         if type(v) in _PLAIN:
             out[k] = v
         elif isinstance(v, _abc.Mapping):
@@ -227,37 +227,93 @@ class SteadyPeriod:
 # hashing and provenance
 # ----------------------------------------------------------------------
 
-def _canon_value(v):
+def _code_digest(code) -> str:
+    """Bytecode, names and constants, nested code objects recursively
+    (their repr carries a memory address) and sets sorted (their order
+    follows the per-process string hash)."""
+    def const(c):
+        if isinstance(c, types.CodeType):
+            return _code_digest(c)
+        if isinstance(c, frozenset):
+            return sorted(repr(x) for x in c)
+        if isinstance(c, tuple):
+            return [const(x) for x in c]
+        return repr(c)
+    h = hashlib.sha256(code.co_code)
+    h.update(json.dumps([list(code.co_names), list(code.co_varnames),
+                         list(code.co_freevars),
+                         [const(c) for c in code.co_consts]]).encode())
+    return h.hexdigest()
+
+
+def _global_names(code, out):
+    out.update(code.co_names)
+    for c in code.co_consts:
+        if isinstance(c, types.CodeType):
+            _global_names(c, out)
+    return out
+
+
+def _opaque(v):
+    # no canonical form: type + repr, so two such values are equal only
+    # when their reprs are (an address in the repr makes it unique)
+    return {"opaque": f"{type(v).__module__}.{type(v).__qualname__}",
+            "repr": repr(v)}
+
+
+def _canon_value(v, _seen=None):
     if isinstance(v, (bool, str)) or v is None:
         return v
     if isinstance(v, (int, np.integer)):
         return int(v)
     if isinstance(v, (float, np.floating)):
         return float(v).hex()      # exact, and NaN/inf are representable
-    if isinstance(v, _abc.Mapping):
-        return {str(k): _canon_value(x) for k, x in sorted(v.items())}
+    seen = set() if _seen is None else _seen
+    if id(v) in seen:
+        return {"recursive": f"{type(v).__qualname__}"}
+    seen = seen | {id(v)}
+
+    def canon(x):
+        return _canon_value(x, seen)
+
+    def canon_or_opaque(x):
+        try:
+            return canon(x)
+        except (TypeError, ValueError):
+            return _opaque(x)
+    if isinstance(v, Mapping):
+        return {str(k): canon(x) for k, x in sorted(v.items())}
     if isinstance(v, (tuple, list)):
-        return [_canon_value(x) for x in v]
+        return [canon(x) for x in v]
     if isinstance(v, np.ndarray):
-        return _canon_value(v.tolist())
+        return canon(v.tolist())
+    if isinstance(v, types.ModuleType):
+        return {"module": v.__name__}
+    if isinstance(v, functools.partial):
+        return {"partial": canon(v.func), "args": canon(list(v.args)),
+                "keywords": canon(dict(v.keywords))}
+    if isinstance(v, types.MethodType):
+        return {"method": canon(v.__func__), "self": canon_or_opaque(v.__self__)}
     if isinstance(v, types.FunctionType):
-        # name + code + defaults + captured values: two closures of one
-        # factory with different captures are different options
+        # name + code + defaults + captured values + the globals it reads:
+        # two closures of one factory, or two lambdas reading different
+        # globals, are different options
         code = v.__code__
-        cells = []
-        for c in v.__closure__ or ():
-            try:
-                cells.append(_canon_value(c.cell_contents))
-            except (TypeError, ValueError):
-                cells.append(type(c.cell_contents).__qualname__)
+        g = v.__globals__
+        glob = {n: canon_or_opaque(g[n])
+                for n in sorted(_global_names(code, set())) if n in g}
         return {"fn": f"{v.__module__}.{v.__qualname__}",
-                "code": hashlib.sha256(code.co_code + repr(
-                    code.co_consts).encode()).hexdigest(),
-                "defaults": _canon_value(list(v.__defaults__ or ())),
-                "cells": cells}
+                "code": _code_digest(code),
+                "defaults": canon(list(v.__defaults__ or ())),
+                "kwdefaults": canon(dict(v.__kwdefaults__ or {})),
+                "cells": [canon_or_opaque(c.cell_contents)
+                          for c in v.__closure__ or ()],
+                "globals": glob}
+    if isinstance(v, type):
+        return {"class": f"{v.__module__}.{v.__qualname__}"}
     if hasattr(v, "__dict__"):
         return {"type": f"{type(v).__module__}.{type(v).__qualname__}",
-                "fields": _canon_value(vars(v))}
+                "fields": canon(vars(v))}
     if callable(v):
         return f"{getattr(v, '__module__', '?')}.{getattr(v, '__qualname__', type(v).__qualname__)}"
     raise TypeError(
@@ -752,7 +808,7 @@ class Evaluator:
         while True:
             run = _engine(lambda: simulate(
                 b, t_end=n * T, engine=engine, switch_fn=sf, **kw))
-            self._count(run, counters, b)
+            self._count(run, counters, b, sf)
             counters["route"] = f"transient/{getattr(run, 'engine_used', engine)}"
             counters["periods"] = n
             err = _settle_error(b, run, T, n)
@@ -767,7 +823,11 @@ class Evaluator:
                     "SteadySpec.max_periods or use method='pss'")
             n = min(2 * n, spec.max_periods)
         if getattr(run, "engine_used", engine) != "dsed":
-            return run, (n - 1) * T, n * T
+            # a dt grid summed to n*T can stop an ulp short of it
+            # (4e-7 x 200 = 7.999999999999999e-05): read the run's end
+            t1 = float(np.asarray(run.times)[-1])
+            t1 = t1 if abs(t1 - n * T) <= 1e-9 * T else n * T
+            return run, t1 - T, t1
         # dsed: the settle run has no step cap; re-run the last period
         # from its true state with the KPI sampling.
         x0 = np.asarray(run.states_reduced, dtype=float)[-1]
@@ -775,7 +835,7 @@ class Evaluator:
             b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
             switch_fn=sf, initial_state=x0,
             **{k: v for k, v in kw.items() if k != "dt"}))
-        self._count(run2, counters, b)
+        self._count(run2, counters, b, sf)
         return run2, 0.0, T
 
     def _pss(self, b, sf, T, counters):
@@ -935,8 +995,20 @@ class Evaluator:
                     counters.get("grads_refused", ""),
                     f"{k}: non_unique extremum")))
                 continue
-            grads[k] = {var: float(kv.grad[name])
-                        for var, name in self.gradients.items()}
+            g = {var: float(kv.grad[name])
+                 for var, name in self.gradients.items()}
+            if not all(math.isfinite(v) for v in g.values()):
+                counters["grads_refused"] = ", ".join(filter(None, (
+                    counters.get("grads_refused", ""),
+                    f"{k}: non-finite gradient")))
+                continue
+            grads[k] = g
+        # an event that nearly grazed: the gradient is exact for this
+        # event pattern but a nearby design may switch pattern; simulate
+        # warns once per call site, so the record carries it
+        nm = len(getattr(sr, "flags", None) or ())
+        if nm:
+            counters["grad_near_misses"] = nm
 
     def _check_map(self, design, var, name, base, T):
         """``var`` must drive exactly the field ``name``: rebuild with it
@@ -963,7 +1035,7 @@ class Evaluator:
                 "variable to the one field it sets.")
 
     @staticmethod
-    def _count(run, counters, b):
+    def _count(run, counters, b, sf=None):
         counters["simulations"] += 1
         _raise_if_suspect(run, b)
         n = getattr(run, "n_accept", None)
@@ -983,9 +1055,29 @@ class Evaluator:
         nr = int(getattr(run, "newton_roundoff_accepts", 0) or 0)
         if nf:
             counters["forced_accepts"] = counters.get("forced_accepts", 0) + nf
+        # trbdf2 steps accepted within the error estimate's own roundoff
+        # floor (a g_off-held node): honest, counted (DECISIONS 5)
+        nfl = int((getattr(run, "_trbdf2_stats", None) or {}).get(
+            "n_roundoff_floor_accepts", 0))
+        if nfl:
+            counters["roundoff_floor_accepts"] = counters.get(
+                "roundoff_floor_accepts", 0) + nfl
         if nr:
             counters["newton_roundoff_accepts"] = counters.get(
                 "newton_roundoff_accepts", 0) + nr
+        # a step re-taken at dt/2^k: integrated MORE finely than asked,
+        # so the result is not less accurate -- counted, ok (DECISIONS 5)
+        nd = len(getattr(run, "dt_retries", None) or ())
+        if nd:
+            counters["dt_retries"] = counters.get("dt_retries", 0) + nd
+        # dsed polling a schedule without next_edge_after: every edge it
+        # sees is bisected to the instant; only a pulse narrower than
+        # dt_max/10 can be missed -- counted, ok (DECISIONS 5)
+        if sf is not None and getattr(run, "engine_used", None) == "dsed":
+            from ._dsed_dispatch import _has_edge_oracle
+            if not _has_edge_oracle(sf):
+                counters["polled_switch_fn_runs"] = counters.get(
+                    "polled_switch_fn_runs", 0) + 1
         from . import _resolution_flagged
         if _resolution_flagged(run):
             # the fixed-step ResolutionWarning: dt may not resolve the run
@@ -1012,7 +1104,9 @@ class Evaluator:
                 opts["switch_specs"] = ss
         from ._period_kpis import Period, loss_rows
         if isinstance(run, Period):
-            rows = loss_rows(b, run, opts)
+            # the period's edge log is kernel output: an inconsistent one
+            # ("edges do not alternate") fails this design, not the batch
+            rows = _engine(lambda: loss_rows(b, run, opts))
         else:
             rows = {r["name"]: r for r in device_loss_summary(
                 b, run, t_from=a, t_to=z, **opts) if "name" in r}
@@ -1221,6 +1315,15 @@ def _raise_if_suspect(run, b) -> None:
     a wrong number (an implausible node voltage, e.g. an open inductor;
     a trbdf2 diode held in a state its commutation rule forbids)."""
     volt = getattr(run, "_implausible_voltage", None)
+    nu = int((getattr(run, "counters", None) or {}).get("unlocated_gate_steps", 0) or 0)
+    if nu:
+        # each such edge was moved to the next grid point: up to a whole
+        # step of duty error per edge (DECISIONS 5)
+        raise _Failed(
+            f"unlocated_gate_edges: {nu} gate change(s) from a switch_fn "
+            "without next_edge_after(t) were taken at the next grid point "
+            "under sub-step correction; give the schedule an oracle or put "
+            "the edges on the dt grid")
     if volt is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
         raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
@@ -1242,11 +1345,20 @@ def _raise_if_suspect(run, b) -> None:
         bad = [tr.name for tr in diode_state_traces(b, run).values()
                if tr.n_rule_violations]
     except (AttributeError, TypeError):  # no PWL diode record
-        return
+        bad = []
     if bad:
         raise _Failed(f"missed_commutation: trbdf2 held diode(s) "
                       f"{', '.join(bad)} in a state their commutation "
                       "rule forbids; cross-check with engine='pwl' and dt")
+    pf = float(stats.get("probe_floor_used", 0.0) or 0.0)
+    if pf > 0.0:
+        # a subnet reached only through switches/diodes: its common mode
+        # is set by g_off; variants of the E3 bridge read 323.94 V vs
+        # 324.51 V and a 76.7 kV sample (DECISIONS 5)
+        raise _Failed(
+            "floating_subnet: a subnet reaches the circuit only through "
+            f"switches/diodes (the zero-time probe needed {pf:.3g} s); tie "
+            "it to ground or use engine='pwl'")
 
 
 def _raise_if_suspect_kernel(kp, b) -> None:

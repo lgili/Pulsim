@@ -3361,9 +3361,15 @@ def _warn_newton_roundoff(res, eng) -> None:
             f"row's residual is within "
             f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
             f"sums (at most 8 eps; worst at MNA row "
-            f"{res.newton_roundoff_row}). This replaces an abort that "
-            f"no tolerance could have passed; it is not a loosened "
-            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            f"{res.newton_roundoff_row}, measured against the "
+            f"magnitudes at the solve's start state). Each would "
+            f"otherwise have aborted at its iteration budget; the "
+            f"state kept is the iterate whose residual was checked. "
+            f"It is not a loosened tol_newton_dx, and it does not "
+            f"validate the state itself: a run that starts from a "
+            f"wrong state can be accepted at roundoff all the way. "
+            f"More than 130 consecutive accepts abort the run. Check "
+            f"result.newton_roundoff_accepts.",
             stacklevel=3)
 
 

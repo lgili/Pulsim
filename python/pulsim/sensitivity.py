@@ -348,6 +348,14 @@ def _harmonic(a, b, delta):
 
 def _param_derivative(builder, prm, masks, h_max, ic, base, n1):
     v0 = prm.value
+    if not (math.isfinite(v0) and v0 != 0.0):
+        # the steps are relative (v0/8, v0/16): at 0 they are 0 and the
+        # derivative 0/0 (a NaN that passed the check below)
+        raise _unsup(
+            "sensitivity_parameter",
+            f"sensitivities: {prm.name!r} = {v0!r}; its derivative is taken "
+            "from relative steps, which need a finite non-zero value",
+            device=prm.comp, kind=prm.name.rsplit(".", 1)[1])
     snaps = {}
     try:
         for f in (1 / 8, -1 / 8, 1 / 16, -1 / 16):
@@ -371,7 +379,7 @@ def _param_derivative(builder, prm, masks, h_max, ic, base, n1):
         dev = np.abs(d1 - d2).reshape(-1, w).max(axis=1)
         lim = _MOEBIUS_RTOL * D1.max(axis=1) + floor
         del D2
-        if np.any(dev > lim):
+        if not np.all(dev <= lim):      # a NaN is refused too
             j = int(np.argmax(dev - lim))
             dev, scale = float(dev[j]), float(D1.max(axis=1)[j])
             raise _unsup(
@@ -1028,6 +1036,20 @@ def _kpi(sr, row, kind, t0, t1):
     return rms, Ig / (2 * W * rms) if rms > 0 else Ig * 0.0, False, None
 
 
+def _extrema_grid(s0, s1, K, re_max):
+    """K uniform cells of [s0, s1] plus s0 + (s1 - s0)/2^m down to about
+    1/(2 re_max): a fast mode's extremum near the start is bracketed (16
+    uniform cells missed a 1.707 peak at 92 ns of a 10 us step and
+    reported 0.5). Mirrors detail::extrema_grid in
+    core/include/pulsim/dsed/period_integrals.hpp; keep the two equal."""
+    h = s1 - s0
+    g = [s0 + h * c / K for c in range(K + 1)]
+    if h * re_max > 16:
+        M = min(60, math.ceil(math.log2(h * re_max / 2)))
+        g += [s0 + math.ldexp(h, -m) for m in range(1, M + 1)]
+    return np.unique(np.asarray(g, dtype=float))
+
+
 def _extrema(sr, row, kind, t0, t1, K=16):
     """Peak / valley by a sub-grid scan refined by Newton on ``y'``;
     the gradient is ``dy/dp`` at the extremum (plus ``y' dtau/dp`` when
@@ -1056,7 +1078,8 @@ def _extrema(sr, row, kind, t0, t1, K=16):
         if Kp > 1 << 16:
             raise _unsup(kind, f"kpi: {kind} over a mode ringing "
                          f"{Kp // 8} times in one step is not searched.")
-        ss = np.linspace(s0, s1, Kp + 1)
+        ss = _extrema_grid(s0, s1, Kp, float(np.abs(mu.real).max()))
+        Kp = ss.size - 1
 
         def y(s):
             return float((alpha * np.exp(mu * s)).sum().real)

@@ -108,6 +108,34 @@ period (its error is then no longer a sliver) or a roundoff accept whose
 today, so the threshold cannot be applied yet.
 → Reverse: move the two counters into `_raise_if_suspect`.
 
+Batch 6c (2026-11-13): the four warnings that still landed `ok` with no
+trace in the record, decided one by one. A warning that says the
+RESULT may be wrong is `failed`; one that says the run was more careful
+than asked is a counter.
+
+| warning (`simulate`) | record | evidence |
+|---|---|---|
+| a step re-taken at `dt/2^k` (`res.dt_retries`) | `ok`, `counters["dt_retries"]` | the interval is integrated more finely than asked; the grid is unchanged |
+| gate edge taken at the next grid point under sub-step correction (`res.counters["unlocated_gate_steps"]`) | `failed`, `unlocated_gate_edges` | CCM buck, pwl, `dt = 4e-7`, opaque gate: was `ok` with `v_out` 4.4674 V; the oracle'd schedule gives 4.3033 V (3.8 %) |
+| `dsed` polling a schedule without `next_edge_after` | `ok`, `counters["polled_switch_fn_runs"]` | each polled change is bisected to its instant; the same CCM buck's KPIs equal the oracle'd schedule's to 1e-6 (test); only a pulse narrower than `dt_max/10` is missed, and the `pss` route refuses such a schedule outright |
+| nodes reached only through switches/diodes (trbdf2 `probe_floor_used > 0`) | `failed`, `floating_subnet` | the common mode is set by `g_off`: E3 bridge variants read 323.94 V vs 324.51 V and a 76.7 kV sample on `dn` (comment at the warning) |
+
+Found on the way: on `pwl`/`trbdf2` the transient route's KPI window
+was `[(n−1)T, nT]` while a `dt` grid summed to `nT` can end an ulp
+short (`4e-7 × 200 = 7.999999999999999e-05`), so `evaluate` raised
+`ValueError` ("reaches outside the simulated span") and stopped the
+batch. The window now ends at the run's last sample when it is within
+`1e-9·T` of `nT`.
+→ Reverse: drop the two `_Failed` branches in `_raise_if_suspect`.
+
+With the TR-BDF2 track merged (batch 6c, job 3): its
+`n_roundoff_floor_accepts` (a step accepted within the error
+estimate's own roundoff floor, a `g_off`-held node) is
+`counters["roundoff_floor_accepts"]`, `ok`; its run budget (more than
+130 consecutive Newton roundoff accepts, `NewtonRoundoffBudgetExceeded`)
+reaches Python as `SimulationAborted`, a `ConvergenceError`, so the
+record is `failed` like any engine non-convergence.
+
 ## 6. `build` and `period`
 
 → `build(design)` returns a builder or `(builder, switch_fn)`: the
@@ -250,7 +278,9 @@ iterations, one simulation as without the loop. `R_th·P₀·α = 0.9`:
 2424.90 °C against 2425 in 96 iterations (estimate 0.097 K).
 `R_th·P₀·α = 1.2`: ratio 1.2 above the limit at iteration 2,
 `thermal_runaway`. A switch with `R_on(T) = 50 mΩ·(1 + 0.006(T −
-25))`, `R_th = 10`: 84.79 °C in 4 iterations, 16 simulations.
+25))`, `R_th = 10`: 84.79 °C in 4 iterations, 12 simulations (16
+before the kernel period map: each iterate's sampled KPI period run
+is gone; re-measured in batch 6c).
 → Reverse: `mode='kernel'` when `add-in-kernel-event-losses` lands
 (task 7.1).
 
@@ -282,9 +312,13 @@ D8, each stated in the example's docstring:
   for 100 µF at 12 V, 300 cm³ for a 1 K/W natural-convection sink).
 
 Observation (not asserted), 512 Latin-hypercube designs, seed 0, this
-machine: 376 ok, 136 infeasible, 0 refused, 0 failed; 7 designs on the
-front, 97.91 % at 11.3 cm³ to 98.50 % at 13.2 cm³, all between 50 and
-91 kHz; 3.3 s wall (single worker). The CI test (32 designs) asserts
+machine: 376 ok, 136 infeasible, 0 refused, 0 failed; 4 designs on the
+front, 97.73 % at 13.3 cm³ to 97.90 % at 16.5 cm³, all SYN-B, between
+50 and 65 kHz; 1.3 s wall (single worker, kernel route). Re-measured
+after the section-edge fix of §16 (batch 6c, 2026-11-13): before it the
+front had 7 designs, 97.91 % at 11.3 cm³ to 98.50 % at 13.2 cm³,
+between 50 and 91 kHz, 3.3 s — the turn-on energy was missing from
+every record, which flattered the higher switching frequencies. The CI test (32 designs) asserts
 the counts, a non-empty front and the constraints of every member. The
 NSGA-II path (`pymoo`, optional extra `pulsim[opt]`) is not exercised
 here (pymoo is not installed on this machine); its test is an
@@ -403,7 +437,48 @@ two sign changes of y' in one search cell can be missed (a log-spaced
 grid near s = 0 would fix it); an event within 1e-12 T of the section
 is neither a section edge nor an inside edge in `Period.edges`.
 
-## 18. The Newton loop in the kernel (slice 4)
+## 18. Integration batch 6c: fresh-context review of slices 2 and 3
+
+Reviewer (opus, read-only) on 1aef1a52..3ea998c6; each fix is its own
+commit with a test proved non-vacuous against the previous code.
+
+Acted on:
+* (d3) design ids collided: `math.sin` vs `math.cos` lambdas, two
+  `functools.partial`s, two bound methods, keyword-only defaults, a
+  read global; a nested function hashed differently per process → the
+  id now covers names, nested code, kw-defaults, globals, partials and
+  methods (§15 M3 extended).
+* (a1, d1) a zero-valued parameter gave NaN sensitivities (relative
+  steps 0/0; `dev > lim` is False for NaN) → refused by name; a
+  non-finite evaluator gradient goes to `grads_refused`.
+* (a2) near-miss events were a once-per-call-site warning →
+  `counters["grad_near_misses"]`, the record stays `ok` (the gradient
+  is exact for this event pattern).
+* (b1) the extrema search used 16 uniform cells per step: a fast mode's
+  peak and the following valley in one cell were both missed (1.707 at
+  92 ns of a 10 µs step reported as 0.5) → the grid adds `h/2^m` down
+  to `1/(2 max|Re μ|)`, the same in C++ (`detail::extrema_grid`) and
+  Python (`_extrema_grid`). Still a grid: two stationary points closer
+  than one geometric cell can be missed; no root isolation.
+* (d2) an inconsistent kernel edge log raised outside the engine
+  wrapper and stopped the batch → `failed` for that design.
+* (e1) the Python `LossTable` returned NaN / inf / 0 for non-finite
+  queries where the kernel table refuses → both refuse.
+
+Recorded, not changed:
+* (c1) the pss verification period is the Newton map itself, so its
+  residual test cannot fire; periodicity is certified by the Newton
+  stop and, independently, by the `orbit` test (§16). An independent
+  per-evaluation check costs one `simulate` period.
+* (a7) two separately logged events at the same instant on one sample
+  can raise `KeyError` in the Python sensitivity jump (a crash, not a
+  wrong number); no circuit in the tests produces it.
+* (b4) the kernel attaches an event to the first sample at or after its
+  time; Python raises in that case. (a3) the grazing cosine is
+  dimensionally sound only when each state label names one device;
+  the kernel's 1e-12 test is on the raw cosine.
+
+## 19. The Newton loop in the kernel (slice 4)
 
 Question: where does the 89 % of a buck evaluation that is not the
 kernel go, and what can leave the GIL? → Profile first (64 SYN-A

@@ -449,9 +449,10 @@ def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
         assert r["outcome"] == "unverified" and r["was"] == out
         assert dr.frozen_check(r, sus, "trbdf2") == ""
     assert dr.mark_suspect({"outcome": "refused"}, sus)["outcome"] == "refused"
-    for rel in ("circuits/switching/buck_boost/cuk_converter.yaml",
-                "circuits/switching/buck_boost/sepic.yaml"):
-        assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    rel = "circuits/switching/buck_boost/cuk_converter.yaml"
+    assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    # sepic's reference grinds no more (TR-BDF2 roundoff floor): graded again
+    assert "reference" not in TRIAGE["circuits/switching/buck_boost/sepic.yaml"]
     e = {"known": {"pwl+split": "disagree"}, "known_err": {"pwl+split": 0.01}}
     assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.019}, e, "pwl+split") == ""
     assert "grew" in dr.frozen_check({"outcome": "disagree", "err_rms": 0.021}, e, "pwl+split")

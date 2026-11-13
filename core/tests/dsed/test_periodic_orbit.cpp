@@ -2,7 +2,7 @@
 // DSED — the Newton shooting loop in the kernel
 // =============================================================================
 //
-// add-design-optimization-workflow DECISIONS 18
+// add-design-optimization-workflow DECISIONS 19
 // (pulsim/dsed/periodic_orbit.hpp): the stopping rule and every typed
 // outcome on affine maps whose fixed point is known, then the whole loop
 // on the DCM buck of add-periodic-steady-state-shooting (orbit and

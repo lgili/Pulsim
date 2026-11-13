@@ -180,3 +180,38 @@ def test_kernel_map_refuses_time_varying_sources():
     with pytest.raises(ValueError, match="time-varying sources"):
         _pulsim.dsed_period_map(ad, sf, np.zeros(1), 1e-3)
 
+
+
+def test_eight_threads_on_one_evaluator_give_the_serial_records():
+    """dsed_period_map releases the GIL: 8 threads x 200 different
+    designs through ONE shared Evaluator equal the serial records
+    exactly (batch 6c stress check; no static/thread_local state in
+    period_integrals.hpp, the native PWM is read through const calls)."""
+    from concurrent.futures import ThreadPoolExecutor
+    rng = np.random.default_rng(6)
+    designs = [dict(CCM, L=float(rng.uniform(20e-6, 200e-6)),
+                    C=float(rng.uniform(10e-6, 100e-6)),
+                    R=float(rng.uniform(0.5, 50.0)),
+                    D=float(rng.uniform(0.2, 0.8))) for _ in range(1600)]
+    ev = _ev()
+    serial = [ev.evaluate(d) for d in designs]
+    with ThreadPoolExecutor(8) as pool:
+        par = list(pool.map(ev.evaluate, designs, chunksize=200))
+    assert sum(r.counters.get("kpi_path") == "kernel" for r in serial) > 1000
+    for a, b in zip(serial, par):
+        assert (a.status, a.design_id, a.reason) == (b.status, b.design_id,
+                                                     b.reason)
+        assert a.kpis == b.kpis and a.losses == b.losses
+        assert a.counters == b.counters
+
+
+def test_an_inconsistent_kernel_edge_log_fails_the_design(monkeypatch, ex):
+    """Batch 6c review (d2): Period.edges' RuntimeError was raised outside
+    the engine wrapper and stopped the whole batch."""
+    def bad(self, name, bit):
+        raise RuntimeError(f"period map: the edges of {name!r} do not "
+                           "alternate")
+    monkeypatch.setattr(pk.Period, "edges", bad)
+    rec = ex.evaluate_all(ex.latin_hypercube(1, seed=3), workers=1)[0]
+    assert rec.status == "failed", rec
+    assert "do not alternate" in rec.reason

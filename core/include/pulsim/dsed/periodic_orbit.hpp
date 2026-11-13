@@ -4,7 +4,7 @@
 // Pulsim — the whole Newton shooting for a periodic orbit, in the kernel
 // =============================================================================
 //
-// add-design-optimization-workflow, DECISIONS 16/18. `period_map_from_run`
+// add-design-optimization-workflow, DECISIONS 16/19. `period_map_from_run`
 // (period_integrals.hpp) moved one period of the exact stepper and its
 // integrals out of Python; the Newton loop around it stayed there and held
 // the GIL for most of a buck evaluation. This header is that loop,

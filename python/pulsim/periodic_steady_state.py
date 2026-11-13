@@ -1083,7 +1083,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                    f"({s.labels}).")
     s.loop = "python"
     if s._orbit is not None and not _python_loop:
-        # the whole Newton loop in the kernel, GIL released (DECISIONS 18)
+        # the whole Newton loop in the kernel, GIL released (DECISIONS 19)
         s.loop = "kernel"
         x0, M, mu, traj, history, patterns, period, residual = \
             _kernel_orbit(s, x, rtol, max_period_runs, n_relax, _observables)

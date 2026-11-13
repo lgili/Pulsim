@@ -105,8 +105,7 @@ Rules the harness keeps:
   itself wrong carries `reference: suspect` and a `reference_reason` in
   the triage manifest: every cell on it is `unverified` (none agrees,
   none disagrees) and it leaves the agree count. `cuk_converter`
-  (ill-posed as written) and `sepic` (the reference grinds to
-  `max_steps`) are marked so.
+  (ill-posed as written) is marked so.
 - **Every configuration has its own freeze, with its error.** `known:`
   is keyed by configuration (`pwl`, `pwl+restart`, `pwl+split`,
   `trbdf2`, `dsed`), and a frozen `disagree` stores its `err_rms` under

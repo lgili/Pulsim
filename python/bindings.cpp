@@ -4782,6 +4782,10 @@ void init_module(py::module_& m) {
             d["n_derivative_refreshes"] = st.n_derivative_refreshes;
             d["n_refresh_probes"] = st.n_refresh_probes;
             d["h_post_event_min"] = st.h_post_event_min;
+            d["n_probe_newton_retries"] = st.n_probe_newton_retries;
+            d["n_sdirk_steps"] = st.n_sdirk_steps;
+            d["n_filtered_estimates"] = st.n_filtered_estimates;
+            d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

@@ -328,3 +328,30 @@ def test_evaluator_refuses_a_scaled_design_variable():
                    gradients={"L_uH": "L.L"})
     with pytest.raises(ValueError, match="scaled mapping"):
         ev.evaluate({"L_uH": 100.0, "R": 50.0, "D": 0.3})
+
+
+def test_a_zero_valued_parameter_is_refused_not_nan():
+    """Batch 6c review (a1): the steps are relative, so a 0 V source gave
+    0/0 = NaN, which passed the Moebius check (NaN > lim is False) and
+    reached every gradient."""
+    b = _buck()
+    b.add_voltage_source("Vz", "vout", "vz", 0.0)        # a 0 V ammeter
+    b.add_resistor("Rz", "vz", "gnd", 1e6)
+    with pytest.raises(p.UnsupportedError, match="'Vz.V' = 0.0"):
+        p.simulate(b, 4 * T, engine="dsed", switch_fn=_pwm(b),
+                   sensitivities=["Vz.V"])
+
+
+def test_evaluator_records_near_misses():
+    """Batch 6c review (a2): at the CCM/DCM boundary simulate warns once
+    per call site; an optimiser loop sees the count in the record."""
+    from pulsim.design import Evaluator
+
+    from .test_sensitivity_exact import boundary_R as _bR
+    R = _bR.__wrapped__()
+    ev = Evaluator(_design_buck, period=T, output="vout", gradients=_GRADS)
+    with pytest.warns(UserWarning, match="near miss"):
+        r = ev.evaluate(dict(_D0, R=R))
+    assert r.status == "ok", r.reason
+    assert r.counters["grad_near_misses"] >= 1
+    assert "grad_near_misses" not in ev.evaluate(_D0).counters

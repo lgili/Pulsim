@@ -136,3 +136,27 @@ def test_evaluator_refuses_a_variable_that_feeds_two_elements():
     ev = Evaluator(build, period=T, output="vout", gradients={"R": "RL.R"})
     with pytest.raises(ValueError, match="alone"):
         ev.evaluate({"R": 50.0})
+
+
+def test_the_extrema_grid_brackets_a_fast_mode_peak():
+    """Batch 6c review (b1): y = e^{-3e8 s} - 3 e^{-3e7 s} + 2.5 e^{-3e6 s}
+    over a 10 us step peaks at 1.707 near 92 ns with y' < 0 at both ends
+    of the first of 16 uniform cells: the uniform grid reported 0.5. The
+    same grid is detail::extrema_grid in period_integrals.hpp."""
+    from pulsim.sensitivity import _extrema_grid
+    mu = np.array([-3e8, -3e7, -3e6])
+    al = np.array([1.0, -3.0, 2.5])
+
+    def dy(s):
+        return float((al * mu * np.exp(mu * s)).sum())
+
+    def brackets(ss):
+        d = [dy(s) for s in ss]
+        return [(a, b) for a, b, da, db in zip(ss[:-1], ss[1:], d[:-1], d[1:])
+                if da > 0 > db]
+    assert brackets(np.linspace(0.0, 1e-5, 17)) == []          # the miss
+    br = brackets(_extrema_grid(0.0, 1e-5, 16, 3e8))
+    assert len(br) == 1 and br[0][0] < 9.2e-8 < br[0][1], br
+    # a slow step adds nothing: the grid is the uniform one
+    assert np.array_equal(_extrema_grid(0.0, 1e-5, 16, 1e5),
+                          np.array([1e-5 * c / 16 for c in range(17)]))

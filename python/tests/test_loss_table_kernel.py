@@ -75,3 +75,18 @@ def test_kernel_refusals_name_the_axis(args, msg):
 def test_the_tables_are_exported():
     assert pulsim.LossTable3D is _pulsim.LossTable3D
     assert pulsim.ConductionTable is _pulsim.ConductionTable
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_a_non_finite_query_is_refused_by_both_tables(bad):
+    """Batch 6c review (e1): the kernel table refused a non-finite query
+    while the Python one returned NaN, inf or a clamped 0."""
+    t = _table(np.random.default_rng(2))
+    k = t.to_kernel()
+    for q in ((bad, 10.0, 75.0), (300.0, bad, 75.0), (300.0, 10.0, bad)):
+        with pytest.raises(ValueError, match="non-finite"):
+            t(*q)
+        with pytest.raises(ValueError):
+            k(*q)
+    with pytest.raises(ValueError, match="non-finite"):
+        LossTable([100.0, bad], [1.0], [25.0], np.ones((2, 1, 1)))

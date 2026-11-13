@@ -1,6 +1,6 @@
 """The Newton shooting loop in the kernel (``dsed_periodic_orbit``).
 
-add-design-optimization-workflow DECISIONS 18: the loop of
+add-design-optimization-workflow DECISIONS 19: the loop of
 ``periodic_steady_state`` moved to ``core/include/pulsim/dsed/
 periodic_orbit.hpp`` and runs with the GIL released. These tests hold it
 to the Python loop it replaces (kept behind ``_python_loop=True``): the
@@ -177,4 +177,5 @@ def test_loss_table_total_equals_the_numpy_sum():
         v, i = rng.uniform(-20, 120, n), rng.uniform(-50, 200, n)
         tj = rng.uniform(0, 200, n)
         assert t.total(v, i, tj) == float(np.sum(t(v, i, tj)))
-    assert np.isnan(t.total([np.nan], [1.0], [25.0]))
+    with pytest.raises(ValueError, match="non-finite"):
+        t.total([np.nan], [1.0], [25.0])

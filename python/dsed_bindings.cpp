@@ -1544,7 +1544,7 @@ void init_module(py::module_& m) {
         "False with a reason when a mode has no modal form or a step "
         "was numeric. DC sources only.");
 
-    // add-design-optimization-workflow DECISIONS 18: the whole Newton
+    // add-design-optimization-workflow DECISIONS 19: the whole Newton
     // shooting (pulsim/dsed/periodic_orbit.hpp) in one call, the GIL
     // released for every period run and every Newton step.
     m.def("dsed_periodic_orbit",
