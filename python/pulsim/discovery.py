@@ -486,12 +486,16 @@ _EXAMPLES: dict[str, str] = {
 
     "tune": """\
         # After sweeping a plant Bode (see `p.example('bode')`):
+        # H must be the plant the PI sees: include the feedback filter
+        # and the half-period hold (examples/scripts/run_auto_tune_buck.py).
         tune = p.tune_pi_from_bode(
             result.freqs, result.H,
-            f_crossover=2000.0, phase_margin_deg=60.0,
+            f_crossover=400.0, phase_margin_deg=60.0,
         )
         print(f"Kp={tune['Kp']:.4f}, Ki={tune['Ki']:.1f}, "
-              f"PM={tune['achieved_pm_deg']:.1f}°")
+              f"PM={tune['achieved_pm_deg']:.1f}° at the last 0 dB crossing")
+        for w in tune['warnings']:   # e.g. a second crossover at an LC peak
+            print(w)
 
         # Plug it straight into the closed loop:
         pi = tune['controller']
@@ -634,7 +638,8 @@ def tour() -> None:
 
    sweep = p.run_ac_sweep(b, freqs=..., excite_fn=..., output_idx=...)
    gains = p.tune_pi_from_bode(sweep.freqs, sweep.H,
-                                 f_crossover=2e3, phase_margin_deg=60)
+                                 f_crossover=400, phase_margin_deg=60)
+   print(gains['warnings'])   # empty = one crossover, PM as asked
    pi = gains['controller']   # ready to use
 
 7. DISCOVER MORE
