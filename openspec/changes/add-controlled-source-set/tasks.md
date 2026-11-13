@@ -31,7 +31,7 @@
 - [x] 5.3 (dsed runs all seven, DECISIONS 6) `dsed`: determine whether `dsed/builder_adapter.hpp` can take the constant stamps and the time-varying node sources; implement, or refuse through the conformance error; record the outcome in the matrix
 
 ## 6. Documentation
-- [x] 6.1 (AI_GUIDE got the signatures and the terminal convention but no per-kind example: it sits at 32744 of 32768 bytes; each kind's law and convention is in `docs/api-reference.md`, and the executed examples are `python/tests/test_controlled_sources.py`) `AI_GUIDE.md` (source table with the terminal convention and one example each), `docs/api-reference.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no behavioural sources; `dsed` status), `CHANGELOG.md`
+- [x] 6.1 (Note, integration review 2026-11-13: the terminal / sign convention is documented, but `spice_to_builder` contradicted it for current sources — `I1 a 0 10m` into 1 kΩ read +10 V where SPICE gives −10 V; the importer fix is commit 7798cb9c on `feat/core-phase0b`, not yet in this tree, so this tick is true for the builder and the docs only.) (AI_GUIDE got the signatures and the terminal convention but no per-kind example: it sits at 32744 of 32768 bytes; each kind's law and convention is in `docs/api-reference.md`, and the executed examples are `python/tests/test_controlled_sources.py`) `AI_GUIDE.md` (source table with the terminal convention and one example each), `docs/api-reference.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no behavioural sources; `dsed` status), `CHANGELOG.md`
 - [x] 6.2 Reconcile the two comments that describe the current-source direction (`models/current_source.hpp:9-10` and `stamping/stamp_current_source.hpp:50-56`) with the measured convention
 
 ## 7. Verification

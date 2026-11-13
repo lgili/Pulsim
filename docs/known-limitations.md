@@ -101,6 +101,13 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 |---|---|---|
 | **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, VCCS, CCCS, CCVS, gyrators, sources (waveform current sources add no AC excitation), and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `UnsupportedError` (a `ValueError`) naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
 
+## Periodic steady state
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`periodic_steady_state` cannot solve a boost whose diode has `V_th` at or near 0.** It fails loudly ("did not settle after 64 rounds"); the exact stepper's event handling is the cause (exact-propagator work). | Plain boost, PWL diode: fails at `V_th` = 0 and 1e-3, solves at 0.05 (integration review, 2026-11-13). | `V_th = 0.05`, or a long transient. |
+| A slow mode limits the orbit's accuracy to the map's rounding over one minus the Floquet radius. | Zero-mean sine current into 1 µF ∥ 1 TΩ (Floquet radius 1 - 1e-9): v(0) = 0.15726 V against 0.159155 V. | Add the real loss; check `floquet_radius`. |
+
 ## Devices
 
 | Limitation | Measured | Workaround |
@@ -155,7 +162,8 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 |---|---|---|
 | **The π-section line overshoots an ideal step by 27 % at any section count.** `b.add_transmission_line(model="pi")` is a lumped ladder; the exact (Bergeron) line is not implemented and `model="bergeron"` is refused. | 50 Ω, 100 ns, source-matched, open end: far-end peak 1.271 V with 50 sections (exact 1.000 V). With a 20 ns edge and `recommend_line_sections` (55) the peak is 1.046 V. | Give the source a realistic rise time and use `p.passives.recommend_line_sections(delay, t_rise)` sections. |
 | **YAML has no `rac:` ladder or `transmission_line` type.** `rac:` on an inductor is refused by name; `esr`, `esl`, `c_par` are read. Other unknown per-device keys are still ignored without a warning. | — | Build ladders and lines from Python. |
-| One ESR value (no frequency dependence), no DC-bias capacitance table, single-pair line (no coupled three-phase cable). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`. |
+| One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
+| **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
 
 ## Older entries
 

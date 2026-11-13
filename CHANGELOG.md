@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration fixes (review of the integration branch, 2026-11-13)
+
+* **Fixed** `periodic_steady_state` accepted a sine, pulse or table
+  current source that is not periodic in `period` and returned an orbit
+  that does not exist (`stable=True`); every waveform source is now
+  checked and refused with `UnsupportedError(feature="period")` naming
+  it. The sine-voltage refusal is now that type too (a `ValueError`).
+* **Fixed** `periodic_steady_state` stopped on a small residual before
+  any Newton step, so a slow mode returned the starting guess (x0 = 0
+  instead of 0.159 V for a sine current into 1 µF ∥ 1 TΩ). It now
+  stops on the Newton step or after one step from a converged residual;
+  the buck results and run counts are unchanged.
+* **Changed** `sweep` / `monte_carlo`: a job that raises is recorded in
+  `failed` on every backend (the process backend used to raise); a
+  configuration refusal (`UnsupportedError`, `RetiredDeviceError`)
+  propagates on every backend (a `RetiredDeviceError` used to fill
+  `failed`). The YAML loader's retired-device refusal is a
+  `RetiredDeviceError` that is still a `RuntimeError`.
+* **Changed** `add_inductor_coupling` refuses a winding built with
+  `rac=` (it coupled only the ladder's main inductor).
+
 ### Controller ticks: one rule on every engine
 
 Source j with period `T_j` (a `ClosedLoop`'s `period`, or `step_observer`
