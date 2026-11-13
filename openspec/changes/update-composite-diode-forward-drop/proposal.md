@@ -25,7 +25,7 @@ Measured (probe
 | Same, gate on (channel conducts) | 0.010 V, 0.10 W | 0.010 V, 0.10 W (unchanged) |
 | 10 A through the `_body` diode of `add_mosfet_level1`, gate off | 0.010 V | 0.710 V |
 | Buck 24 V → 12 V, 10 A, 100 kHz, freewheeling through a gate-off MOSFET: V_out | 11.990 V | 11.640 V |
-| Same buck: body-diode loss | 0.052 W | 3.479 W |
+| Same buck: body-diode loss (0–400 periods; last 100: 3.442 W) | 0.052 W | 3.479 W |
 
 The buck rows agree on `pwl`, `trbdf2` and `dsed` to four digits. Every
 dead-time and freewheel conduction loss computed with a composite device

@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### BREAKING: composite MOSFET / IGBT diodes — `V_F` is a conduction drop
+
+* **Changed** `add_mosfet`, `add_mosfet_with_body_diode`,
+  `add_mosfet_level1` (body diode) and `add_igbt_level1(with_fwd=True)`
+  (freewheeling diode) build their diode as `add_diode(V_th=0, V_f=V_F)`
+  (PSIM style, the mapping `add_three_phase_vsi` uses): while on,
+  `v = V_F + i/g_on`. `V_F` used to be the turn-on threshold only, so a
+  conducting body diode dropped `i/g_on` and nothing else.
+  * 10 A through the body diode of `add_mosfet(V_F=0.7)`, gate off:
+    |v_SD| 0.010 V → 0.710 V, diode power 0.10 W → 7.10 W (`pwl`,
+    `trbdf2`, DC operating point). Gate on: unchanged (0.010 V, the
+    channel carries it).
+  * 24 V buck, D = 0.5, 100 kHz, freewheeling through a gate-off
+    `add_mosfet`: V_out 11.990 V → 11.640 V; body-diode loss over the
+    last 100 of 400 periods 3.442 W, on `pwl`, `trbdf2` and `dsed`.
+  * Level-1 diodes: the hard-coded 0.5 V threshold is gone. New keyword
+    `V_F=0.7` on `add_mosfet_level1` and `add_igbt_level1` (appended, so
+    positional calls keep working); they now turn on at 0.7 V, not 0.5 V.
+  * `V_F` must be finite and ≥ 0 when a diode is built; the error names
+    the builder, the device and `V_F`.
+  * YAML: `V_F` on `mosfet`, `mosfet_level1` (with `with_body_diode`)
+    and `igbt_level1` (with `v_knee`, `with_fwd`).
+  * Migration — the old diode was a 0.7 V threshold with no drop:
+    `b.add_switch("Q", d, s, 1/R_on, 1/R_off)` plus
+    `b.add_diode("Q_body", s, d, 1e3, 1e-9, V_th=0.7, V_f=0.0)`.
+    `V_F=0.0` gives a diode that turns on at 0 V with no drop. `add_igbt`
+    is unchanged (no diode).
+
 ### Reference benchmark harness restored
 
 * **Added** a harness-only reader for the 126 `schema: pulsim-v1`

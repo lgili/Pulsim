@@ -296,6 +296,20 @@ consistent-initial-conditions solve.
 
 ---
 
+### Composite MOSFET / IGBT diodes: a zero-width band
+
+The body / freewheeling diodes of `add_mosfet`, `add_mosfet_with_body_diode`,
+`add_mosfet_level1` and `add_igbt_level1(with_fwd=True)` are
+`add_diode(V_th=0, V_f=V_F)`: they turn on and off at the same voltage
+(no hysteresis band). A diode that turns on from zero current at a
+dead time could chatter on `dsed`; an H-bridge of four `add_mosfet` with
+200 ns dead time settles (measured), and a run that does not settle
+raises a named error. For a band, build the device from `add_switch` and
+`add_diode(V_th=V_f + 1e-3, V_f=...)`. The composites keep a fixed
+1 mΩ diode slope (`g_on_diode` only on `add_mosfet_with_body_diode`).
+`add_igbt` is still a bidirectional switch with no knee and no diode;
+`add_igbt_level1` is the IGBT that blocks reverse current.
+
 ## Open OpenSpec proposals as of v1.3.0
 
 The following proposals are accepted as in-flight work but **not**
