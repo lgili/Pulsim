@@ -14,8 +14,8 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
   conduction 66.350991° to 98.970270°, inrush impulse 14.758493 J.
 
 ## 1. Oracle and characterisation (no behaviour change)
-- [ ] 1.1 Port `probes/lcp_core.py` (Lemke, enumeration, port model) to `python/tests/oracles/lcp_reference.py` as a test-only oracle; unit tests: on 200 random PSD instances (k ≤ 8) Lemke and enumeration agree; on the LCPs dumped from the five families both return the same mode
-- [ ] 1.2 Port `probes/today_dsed.py` as characterisation tests of today's kernel: `dsed` with `V_th = 0` fails "did not settle" at rest and "is chattering" at 0.996 ms on the DCM buck; marked to flip at the default stage
+- [x] 1.1 Port `probes/lcp_core.py` (Lemke, enumeration, port model) to `python/tests/oracles/lcp_reference.py` as a test-only oracle; unit tests: on 200 random PSD instances (k ≤ 8) Lemke and enumeration agree; on the LCPs dumped from the five families both return the same mode
+- [x] 1.2 Port `probes/today_dsed.py` as characterisation tests of today's kernel: `dsed` with `V_th = 0` fails "did not settle" at rest and "is chattering" at 0.996 ms on the DCM buck; marked to flip at the default stage. Re-measured on the exact-propagator kernel (slice 1): both now run; the remaining failure is silent — the boost with `V_th ≤ 1e-6` ends 1.01 V low (R = 500) and 0.13 V low (R = 50) after 400 periods on `dsed` while `pwl`/`trbdf2` match the reference (`python/tests/test_mode_selection_today.py`)
 
 ## 2. ModeSelector in C++ (dense, standalone)
 - [ ] 2.1 `core/include/pulsim/events/mode_selector.hpp`: dense Lemke with the lexicographic ratio test and warm start from a given basis; enumeration for `k ≤ 12`; circuit-scale tolerances (D4)
