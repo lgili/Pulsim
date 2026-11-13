@@ -526,12 +526,30 @@ acceptance, through 1,645 roundoff accepts with a diverged state
 (I(Lm_core) ≈ 2.4e13 A from t = 0); a fix that makes it loud again is in
 progress.
 The differential matrix (strict gate: every observable, every interval)
-records 65 `disagree` / `error` cells over 55 circuits as `known:` in
-`benchmarks/manifests/v2_triage.yaml`,
-plus `sepic` on pwl and trbdf2, whose trbdf2 reference grinds to
-`max_steps` (a TR-BDF2 regression, not frozen; integrated tree,
-2026-11-13, `benchmarks/REFERENCE_STATUS.md`). Each is an
-open finding, not a tolerance. Circuits whose v1 file has no `uic: true`
+records its `disagree` / `error` cells as `known:` per configuration in
+`benchmarks/manifests/v2_triage.yaml` (counts in
+`benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
+tolerance. Two circuits have no valid reference and are `unverified`
+on every engine (`reference: suspect`): `sepic`, whose trbdf2 reference
+grinds to `max_steps` (an open TR-BDF2 regression), and `cuk_converter`:
+
+**`cuk_converter` is ill-posed as written; its reference is marked
+suspect.** `Drect` is reversed: the file (and its ngspice deck) put the
+anode at ground and the cathode at `mid`, so the diode conducts while S1
+is ON and blocks the freewheel path while S1 is OFF. With S1 and Drect
+both OFF, L1's current (through `Ccpl`) and L2's current meet at `mid`
+with only Drect's `g_off` = 1e-6 S between them: an inductor cut-set,
+so `mid` reaches 2.6e4-3.5e6 V. The trbdf2 rtol 1e-8 reference accepts
+3,163 steps at `h_min` above tolerance and ends V(out) at +11.92 V; pwl
+does not converge with dt (0.233 / 0.232 / 0.226). With the diode turned
+round (`nodes: [mid, 0]`) both engines agree (V(out) over 1.5-2 ms:
+-17.4951 V trbdf2 rtol 1e-8, -17.4971 V pwl; `|mid|` <= 39.1 V), though
+that trbdf2 run forces 748,763 accepts, so it is not yet a clean reference.
+Reproducer (from `benchmarks/tools`): `v1_reader.load('../circuits/switching/buck_boost/cuk_converter.yaml').run('trbdf2', rtol=1e-8, atol=1e-12)`,
+then `max |v(mid)|` (3.55e6 V) and `result._trbdf2_stats['n_forced_accepts']` (3163). The manifest marks the reference `suspect`
+(every cell `unverified`); the netlist is kept as the v1 file wrote it.
+
+Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 
 ### First stored sample of algebraic nodes

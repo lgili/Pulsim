@@ -29,7 +29,13 @@ Usage::
         --out results.json
 
 Exit status 1 when a cell is ``disagree`` or ``error`` and the triage
-manifest does not list that outcome under ``known:`` for the circuit.
+manifest does not list that outcome under ``known:`` for the circuit, or
+when a frozen ``disagree`` has grown past ``GROWTH`` x its frozen error
+(``known_err:``). A circuit whose reference is itself broken carries
+``reference: suspect`` and a ``reference_reason``: every cell on it is
+``unverified`` (not agree, not disagree) and out of the agree count.
+A ``trbdf2`` cell graded against the ``trbdf2 rtol=1e-8`` reference is a
+self-consistency check of that engine, not an agreement.
 """
 
 from __future__ import annotations
@@ -55,12 +61,42 @@ import pulsim  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 TRIAGE = ROOT / "manifests" / "v2_triage.yaml"
 ENGINES = ("pwl", "trbdf2", "dsed")
+GROWTH = 2.0      # a frozen disagreement may move by this factor either way
 REFUSAL = tuple(x for x in (getattr(pulsim, "UnsupportedError", None),
                             ValueError, NotImplementedError) if x is not None)
 
 
 def load_triage(path: Path = TRIAGE) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))["circuits"]
+
+
+def mark_suspect(rec: dict, entry: dict) -> dict:
+    """``reference: suspect``: the cell is ``unverified`` whatever it scored
+    (``was`` keeps the score); a typed refusal stays a refusal."""
+    if entry.get("reference") == "suspect" and rec["outcome"] != "refused":
+        rec["was"] = rec["outcome"]
+        rec["outcome"] = "unverified"
+        rec["message"] = "reference suspect: " + entry.get("reference_reason", "")
+    return rec
+
+
+def frozen_check(rec: dict, entry: dict, key: str) -> str:
+    """'' when the cell is what its freeze says, else why not. Sets
+    ``rec['note']`` when a frozen disagreement shrank past ``GROWTH``x
+    (a prompt to re-freeze, not a failure)."""
+    out = rec["outcome"]
+    if out in ("agree", "refused", "unverified"):
+        return ""
+    if out != (entry.get("known") or {}).get(key):
+        return "new outcome"
+    ferr = (entry.get("known_err") or {}).get(key)
+    if out == "disagree" and ferr is not None:
+        e = rec["err_rms"]
+        if e > GROWTH * ferr:
+            return f"err_rms grew {ferr:.3g} -> {e:.3g} (> {GROWTH:g}x)"
+        if e < ferr / GROWTH:
+            rec["note"] = f"improved {ferr:.3g} -> {e:.3g}: re-freeze"
+    return ""
 
 
 def _alias(engine: str) -> str:
@@ -267,8 +303,11 @@ def run(patterns, engines, triage):
                 rec["message"] = "no converged reference"
             else:
                 classify(rec, res, case, cols, ref, tols[e], case.dt if e == "pwl" else None)
-            known = entry.get("known", {}).get(_alias(e))
-            rec["expected"] = rec["outcome"] in ("agree", "refused") or rec["outcome"] == known
+            mark_suspect(rec, entry)
+            why = frozen_check(rec, entry, _alias(e))
+            rec["expected"] = not why
+            if why:
+                rec["unexpected"] = why
             out.append(rec)
             print(f"{rec['outcome']:9s} {e:6s} {rel}  {rec.get('err_rms', '')}"
                   f"{'' if rec['expected'] else '   <-- NEW'}", flush=True)

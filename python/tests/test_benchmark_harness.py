@@ -439,3 +439,27 @@ def test_benchmark_runner_imports_without_the_retired_backend():
     src = (BENCH / "tools" / "benchmark_runner.py").read_text()
     assert "import pulsim_python_backend" not in src and "from pulsim_python_backend" not in src
     import benchmark_runner  # noqa: F401
+
+
+def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
+    # checkpoint review M1 / M7 (integration batch 6b)
+    sus = {"status": "runs", "reference": "suspect", "reference_reason": "broken"}
+    for out in ("agree", "disagree", "error"):
+        r = dr.mark_suspect({"outcome": out}, sus)
+        assert r["outcome"] == "unverified" and r["was"] == out
+        assert dr.frozen_check(r, sus, "trbdf2") == ""
+    assert dr.mark_suspect({"outcome": "refused"}, sus)["outcome"] == "refused"
+    for rel in ("circuits/switching/buck_boost/cuk_converter.yaml",
+                "circuits/switching/buck_boost/sepic.yaml"):
+        assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    e = {"known": {"pwl+split": "disagree"}, "known_err": {"pwl+split": 0.01}}
+    assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.019}, e, "pwl+split") == ""
+    assert "grew" in dr.frozen_check({"outcome": "disagree", "err_rms": 0.021}, e, "pwl+split")
+    assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.01}, e, "pwl") == "new outcome"
+    r = {"outcome": "disagree", "err_rms": 0.004}
+    assert dr.frozen_check(r, e, "pwl+split") == "" and "re-freeze" in r["note"]
+    # every frozen disagreement carries its error
+    for rel, ent in TRIAGE.items():
+        for cfg, out in (ent.get("known") or {}).items():
+            if out == "disagree":
+                assert (ent.get("known_err") or {}).get(cfg), (rel, cfg)
