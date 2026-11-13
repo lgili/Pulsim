@@ -94,3 +94,65 @@ choices it did not pin.
     multi-round event. → A multi-round event where both agree is not a
     finding; the counter gives the cost comparison. → Reverse: record
     every event with `settle_rounds > 1`.
+
+## Slice 2 (2026-11-13)
+
+13. **Tie rule: fixed widening, unfix, leak pins judged (D5).** Decided
+    ports stay fixed while the ties are widened; a fixed port the wider
+    pass contradicts is released (counted `unfixed`); a final tie whose
+    current pins a node (`i·R_jj > tol_w`) is ON unless the all-ties-OFF
+    mode passes the exact judge (#9). → Measured 0 wrong modes on every
+    family, prototype and engine, ideal and conductance, banded and not
+    (`probes/tie_rule.out`, `probes/shadow_survey.out`); the three-phase
+    C filter 30 → 0. The pin is real physics in the conductance form:
+    the ~49 nA leak holds the floating DC bus. → Reverse: drop the pin
+    step in `ModeSelector::select` (ties OFF, slice 1).
+
+14. **Refusals reuse `UnsupportedError`.** No consistent mode on a
+    passive circuit (secondary ray, pivot cap) raises
+    `UnsupportedError(engine, 'consistent_mode', '<diodes>', 'Diode')`
+    with `t`; a non-passive circuit (VCVS, negative R/C/L, found at build
+    time by `CircuitBuilderAdapter::passivity()`) whose Lemke run ends on
+    a ray is enumerated up to `k = 12` (`enumerations`,
+    `nonunique_modes`), then `UnsupportedError(engine,
+    'non_passive_ports', <device>, <kind>)`. → One exception type the
+    callers already route; the feature string names the cause. →
+    Reverse: a dedicated subclass in `mode_refusal.hpp`.
+
+15. **Default-mode guard judges the projected settled state.** After
+    each settle (t = 0 and every event) the kernel judges the settled
+    mode with the exact judge (#9) from the projected state; an
+    inconsistent mode is decided by the LCP from the held state instead
+    (`diagnostics['mode_guard']`: `checks`, `repairs`, `confirmed`,
+    `repair_times`, `repair_diodes`, `repair_violations`); an LCP refusal
+    there is re-raised naming the violating diode. Consistent runs are
+    bit-identical to the unguarded settle (24 of 24 surveyed correct
+    circuits). → The settle stays the decider where it is right; only
+    its wrong answers change. BREAKING for wrong numbers only. →
+    Reverse: `pulsim._dsed_dispatch.MODE_GUARD = False` (A/B switch).
+
+16. **Bridge repairs kept; double crossing is an event-location defect.**
+    The guard repairs 19–20 events on the single-phase bridges and 9 on
+    the three-phase rectifier example where the settle's mode fails the
+    judge by a rounding-level margin; the waveform moves by ≤ 1.2e-12 V.
+    → Keeping them costs nothing and the rule stays "every inconsistent
+    mode is repaired"; exempting them would need a magnitude threshold.
+    The V_th = 0 double-crossing tank stays wrong under the guard and
+    'lcp' alike: after a turn-on at exactly v = 0 the armed turn-off
+    predicate starts the next step at 0, which `locate_event_in_step_`
+    skips as "just fired", so the return through zero 0.64 µs later
+    inside that 1 µs step is never an event. → Not a mode decision;
+    recorded for the event-location owner. → Reverse: n/a.
+
+17. **'lcp' does not save events.** Settle / LCP event counts are equal
+    on every correct circuit and LARGER where the settle was wrong (boost
+    50: 969 → 978, boost 500: 1133 → 1157, single-phase bridge 78 → 80),
+    because the correct mode has more commutations. → The claim in the
+    proposal that the LCP removes settle rounds is about solves per
+    event, not events. → Reverse: n/a (a measurement).
+
+18. **'lcp' opened on dsed only.** `mode_selection='lcp'` runs on the dsed
+    event integrator (diode circuits) and is refused by name on `pwl`,
+    `trbdf2` and a diode-free dsed run (#11 still holds for the hooks).
+    → The other engines' hooks sit in files this change does not own. →
+    Reverse: refuse 'lcp' everywhere again in `pulsim.simulate`.

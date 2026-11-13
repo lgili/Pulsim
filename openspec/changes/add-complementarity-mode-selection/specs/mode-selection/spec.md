@@ -78,9 +78,14 @@ chatter guard on the selection path.
 ### Requirement: Mode Selection Tie Resolution
 
 The selection SHALL treat a port whose current and gap are both within
-the circuit-scale tolerances as a tie, SHALL re-solve the same problem
-at `100·h_e` and then `1e4·h_e` to decide it, and SHALL set a port
-still tied to OFF. Ties, widenings and the tolerances used SHALL be
+the circuit-scale tolerances as a tie, SHALL re-solve the problem on
+the ties alone at `100·h_e` and then `1e4·h_e` with the decided ports
+held in their mode (releasing a held port whose complement the wider
+solution violates), and SHALL set a port still tied to OFF unless its
+current pins a node (current times its driving-point resistance above
+the gap tolerance) and the mode with every remaining tie OFF fails the
+exact consistency judge, in which case the pinned ports SHALL be ON.
+Ties, widenings, released ports, pins and the tolerances used SHALL be
 counted in `result.diagnostics`.
 
 #### Scenario: Series pair turning off together
@@ -88,6 +93,40 @@ counted in `result.diagnostics`.
 - **WHEN** a conducting pair reaches zero current
 - **THEN** both diodes turn OFF at the same event, the tie is counted,
   and no event at the same time follows
+
+#### Scenario: Leak current holding a floating DC bus
+- **GIVEN** the three-phase bridge with a 1 mF ‖ 20 Ω DC filter,
+  `V_f = 0.7`, resistor-pair diodes (`g_off = 1e-9`), `V_th = 0`
+- **WHEN** a conducting pair turns off and one diode is left carrying
+  the ~49 nA leak that sets the DC bus potential
+- **THEN** that diode is selected ON (a pin), no OFF diode is
+  forward-biased after the event, and the shadow report over 0.06 s
+  lists 0 disagreements with 18 pins
+
+### Requirement: Default-Mode Mode Guard
+
+Without `mode_selection`, on `dsed`, the kernel SHALL judge the diode
+mode the settle selected at `t = 0` and at every event by propagating
+it exactly from the held state, and SHALL decide an inconsistent mode
+with the selection instead, recording each repair (time, diode,
+violation) in `result.diagnostics['mode_guard']`. A selection refusal
+at a repaired event SHALL raise `pulsim.UnsupportedError` naming the
+diode. A run whose settled modes are all consistent SHALL be
+bit-identical to the run without the guard.
+
+#### Scenario: Boost without a band
+- **GIVEN** the boost (12 V, 100 µH, 47 µF, 500 Ω, D = 0.5,
+  100 kHz) with `V_th = 0`, 400 periods
+- **WHEN** it is simulated on `dsed` with no `mode_selection`
+- **THEN** `diagnostics['mode_guard']['repairs']` is positive and the
+  output is within 2e-5 V of trbdf2 at rtol 1e-10 (the settle alone:
+  1.01 V low)
+
+#### Scenario: Consistent circuit unchanged
+- **GIVEN** the DCM buck with `V_th = 0`, 400 periods
+- **WHEN** it is simulated on `dsed` with the guard and without it
+- **THEN** times and states are bit-identical and the guard reports 0
+  repairs
 
 ### Requirement: Floating Islands As A Gauge
 

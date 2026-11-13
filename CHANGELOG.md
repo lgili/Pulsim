@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Diode mode selection: default-mode guard on dsed (BREAKING for wrong numbers)
+
+`engine='dsed'` now judges the diode mode its settle picks at `t = 0`
+and at every event (both candidate modes propagated exactly over
+`100·h_e` and `1e4·h_e`); an inconsistent mode is decided by the LCP
+instead and listed in `result.diagnostics['mode_guard']` (`checks`,
+`repairs`, `repair_times`, `repair_diodes`, `repair_violations`). Runs
+whose modes were consistent are bit-identical. Changed numbers, all
+toward trbdf2 at rtol 1e-10: the `V_th = 0` boost after 400 periods,
+R = 500 Ω 43.70907 → 44.72165 V (error −1.01 V → −1.1e-5 V), R = 50 Ω
+23.67304 → 23.80642 V, R = 20 Ω +3.6e-2 → −1.5e-6 V (D1 was held ON at
+−0.86 to −1.18 A); the `V_th = 1e-3` boost at 20/50 Ω (−0.44/−1.04 A);
+the half-wave RL rectifier (`diode_half_wave_rl_load`), whose diode was
+held OFF while forward-biased by 10 V, mean `v(out)` 2.12046 → 3.18068 V
+(trbdf2 3.18066 V); the single-phase bridges and the three-phase
+rectifier example by ≤ 1.2e-12 V. A selection refusal at a repaired
+event raises `UnsupportedError(engine, 'consistent_mode', <diode>, 'Diode')`.
+
+### Diode mode selection: `mode_selection='lcp'` on dsed
+
+The LCP decides the mode at `t = 0` and at every event in place of the
+settle (`diagnostics['mode_selection']`: `lcp_count`, pivots, `ties`,
+`widenings`, `leak_pins`, `pin_judgements`, `unfixed`, `enumerations`,
+`nonunique_modes`). New tie rule (design D5): decided ports stay fixed
+while the ties are widened, and a tie carrying the leak current that
+holds a floating node is ON unless the all-OFF mode passes the exact
+judge — the three-phase C-filter bridge's 30 wrong shadow decisions are
+0 now. Non-passive circuits (VCVS, negative R/C/L) fall back to
+enumeration up to 12 ports, then `UnsupportedError(engine,
+'non_passive_ports', <device>, <kind>)`. Event counts are equal or
+larger than the settle's (the correct mode commutes more); `pwl` and
+`trbdf2` refuse `'lcp'` by name.
+
 ### Diode mode selection as a complementarity problem: shadow mode
 
 `simulate(engine='dsed', mode_selection='shadow')` keeps today's settle
@@ -16,12 +49,12 @@ LCP of the backward-Euler companion network at `h_e = 1e-7·T_ref`
 disagreement with both modes judged by their exact trajectories, plus
 `lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
 `widenings`, `settle_rounds_total` (add-complementarity-mode-selection
-tasks 1–4). `'shadow'` on `pwl`/`trbdf2` and `'lcp'` everywhere raise
+tasks 1–4). `'shadow'` on `pwl`/`trbdf2` raises
 `UnsupportedError(engine, 'mode_selection')`. Over 19 circuits: the
 `V_th = 0` boost's 15 (R = 50 Ω) and 24 (R = 500 Ω) disagreements are
 all the settle's error (it ends 1.01 V low at R = 500 Ω); banded runs
-agree at every event; the three-phase C-filter bridge shows 30 where the
-LCP's tie rule is wrong (KNOWN_LIMITATIONS). Max 3 pivots per event.
+agree at every event; the three-phase C-filter bridge showed 30 where the
+slice-1 tie rule was wrong (0 with the rule above). Max 3 pivots per event.
 
 ### DSED: exact propagator with a stated accuracy per mask
 
