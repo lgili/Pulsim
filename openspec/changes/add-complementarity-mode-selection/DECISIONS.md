@@ -394,7 +394,7 @@ choices it did not pin.
     judge anything; 'lcp' ran the 5-bridge bus. Verdict on the
     paralleled bus, 5 bridges, 20 ms: 'lcp' is right (1.49e-4 V max
     from pwl extrapolated; pwl converges to 183.282915 V), the default
-    was a crash. Now, with the guard on, the cap (`SettleCapError`) is
+    was a crash. Now, with the guard on, the cap (`ConvergenceFailure`, kind settle) is
     caught in `decide_modes_` and the event is decided by the LCP from
     the held state (`mode_guard['settle_caps']`; an LCP refusal names
     the diode); with the guard off the cap still raises. → Measured:

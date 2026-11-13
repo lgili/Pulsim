@@ -61,6 +61,7 @@
 #include <utility>
 #include <vector>
 
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/events/mode_refusal.hpp"
 #include "pulsim/events/mode_selector.hpp"
@@ -136,12 +137,6 @@ struct ModeShadowReport {
 /// The default-mode guard (slice 2, task 4): after each settle, the
 /// settled mode is checked on its own exact trajectory (the shadow's
 /// judge); a mode that violates its own law is replaced by the LCP's.
-/// The settle's round cap (a pair of diodes fighting over one node). With
-/// the guard on the event is decided by the LCP instead (DECISIONS #25).
-struct SettleCapError : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
 struct ModeGuardReport {
     bool enabled = false;
     std::size_t settle_caps = 0;     // settles that hit the round cap, decided by the LCP
@@ -371,7 +366,7 @@ public:
 
         while (t < t_end) {
             if (result.n_accept + result.n_reject > kMaxSteps) {
-                throw std::runtime_error(
+                throw ConvergenceFailure(ConvergenceKind::MaxSteps, t, "",
                     "PEDSimulator: exceeded max-step cap");
             }
 
@@ -496,7 +491,7 @@ public:
                 ++nan_streak_;
                 ++result.n_reject;
                 if (nan_streak_ >= kNanMaxStreak) {
-                    throw std::runtime_error(
+                    throw ConvergenceFailure(ConvergenceKind::NaN, t, "",
                         nan_error_message_(t, h_use, "RK45"));
                 }
                 // Aggressive shrink — a NaN step usually means
@@ -555,7 +550,7 @@ public:
                                 "regardless.";
                         }
                     }
-                    throw std::runtime_error(
+                    throw ConvergenceFailure(ConvergenceKind::NoProgress, t, "",
                         "PEDSimulator: no meaningful progress — "
                         "100000 steps advanced simulated time by "
                         "only " + std::to_string(t
@@ -1003,8 +998,9 @@ private:
             settle_rounds_ = 0;
             try {
                 settle_and_project_(t, x, mask);
-            } catch (const SettleCapError&) {
-                if (!guard_ || guard_refuses_) throw;
+            } catch (const ConvergenceFailure& e) {
+                // the settle's round cap: with the guard on, the LCP decides (#25)
+                if (!guard_ || guard_refuses_ || e.kind() != ConvergenceKind::Settle) throw;
                 // the settle found no mode; the guard's arbiter decides from
                 // the held state (an LCP refusal there names the diode)
                 result.mode_guard.enabled = true;
@@ -1399,7 +1395,7 @@ private:
             diode_burst_count_[di] = Size{0};
         }
         if (++diode_burst_count_[di] > Size{32}) {
-            throw std::runtime_error(
+            throw ConvergenceFailure(ConvergenceKind::Chatter, t, diodes_[di].label,
                 "PEDSimulator: " + diodes_[di].label
                 + " is chattering at t = " + sci_(t)
                 + " s — it commutated 32 times inside "
@@ -1478,7 +1474,7 @@ private:
                     if (!culprits.empty()) culprits += ", ";
                     culprits += d.label;
                 }
-                throw SettleCapError(
+                throw ConvergenceFailure(ConvergenceKind::Settle, t, "",
                     "PEDSimulator: diode configuration did not "
                     "settle after 64 rounds at t = "
                     + sci_(t) + " s (diodes: " + culprits

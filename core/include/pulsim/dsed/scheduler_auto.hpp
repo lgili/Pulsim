@@ -52,6 +52,7 @@
 #include <utility>
 #include <vector>
 
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/dsed/bdf2_integrator.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/dsed/rk45_dormand_prince.hpp"
@@ -198,7 +199,7 @@ public:
 
         while (t < t_end) {
             if (result.n_accept + result.n_reject > kMaxSteps) {
-                throw std::runtime_error(
+                throw ConvergenceFailure(ConvergenceKind::MaxSteps, t, "",
                     "PEDSimulatorAuto: exceeded max-step cap");
             }
 
@@ -343,7 +344,7 @@ public:
                     ++nan_streak_;
                     ++result.n_reject;
                     if (nan_streak_ >= kNanMaxStreakAuto) {
-                        throw std::runtime_error(
+                        throw ConvergenceFailure(ConvergenceKind::NaN, t, "",
                             std::string{"PEDSimulator (auto/RK45): step "}
                             + "produced NaN/Inf for "
                             + std::to_string(kNanMaxStreakAuto)
@@ -383,7 +384,7 @@ public:
                     if (!std::isfinite(x_new(i))) { finite_b = false; break; }
                 }
                 if (!finite_b) {
-                    throw std::runtime_error(
+                    throw ConvergenceFailure(ConvergenceKind::NaN, t, "",
                         std::string{"PEDSimulator (auto/BDF2): step "}
                         + "produced NaN/Inf at t="
                         + std::to_string(t)

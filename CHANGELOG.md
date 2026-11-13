@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### dsed give-up sites throw one typed C++ exception
+
+The event-driven engine's own failures (diode settle round cap, diode
+chatter, no progress, the 10M-step cap, a non-finite RK45 / BDF2 step)
+now throw `pulsim::ConvergenceFailure` (`core/include/pulsim/errors/
+convergence.hpp`) with `kind()` = settle | chatter | no_progress |
+max_steps | nan, `time()` and `device()` (the chattering diode). It
+derives from `std::runtime_error` and keeps every message, so Python
+still sees `RuntimeError` with the same text; a Python translator is not
+registered in this change.
+
 ### dsed diode modes: no early release, no crash on a paralleled bus, no silent settle
 
 Three fixes to the diode-mode decision on `engine='dsed'`
