@@ -47,12 +47,49 @@
 #include <string>
 #include <type_traits>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <string_view>
 #include <variant>
 #include <vector>
 
 namespace pulsim::pwl {
+
+/// The transient drivers (and the kernel AC sweep) a device kind can
+/// declare support for. Names: `engine_name`.
+enum class Engine : std::uint8_t { FixedTrap, TrBdf2, Dsed, Bdf1, AcSweep };
+inline constexpr std::array<std::string_view, 5> kEngineNames{
+    "pwl", "trbdf2", "dsed", "bdf1", "ac_sweep"};
+[[nodiscard]] constexpr std::string_view engine_name(Engine e) noexcept {
+    return kEngineNames[static_cast<std::size_t>(e)];
+}
+[[nodiscard]] constexpr std::uint8_t engine_bit(Engine e) noexcept {
+    return static_cast<std::uint8_t>(1u << static_cast<unsigned>(e));
+}
+inline constexpr std::uint8_t kAllEngines = 0x1F;
+inline constexpr std::uint8_t kNewtonEngines =
+    engine_bit(Engine::FixedTrap) | engine_bit(Engine::TrBdf2);
+
+/// How a device kind enters the solve.
+enum class SolveClass : std::uint8_t {
+    Linear, Source, Switch, PwlDiode, NewtonStatic, NewtonStateful };
+inline constexpr std::array<std::string_view, 6> kSolveClassNames{
+    "Linear", "Source", "Switch", "PwlDiode", "NewtonStatic",
+    "NewtonStateful"};
+
+/// One row of `kKindCaps` (defined after `DevicePool`).
+struct KindCaps {
+    std::string_view name;
+    SolveClass       cls;
+    std::uint8_t     engines;  // bit per Engine
+    [[nodiscard]] constexpr bool supports(Engine e) const noexcept {
+        return (engines & engine_bit(e)) != 0;
+    }
+    [[nodiscard]] constexpr bool newton() const noexcept {
+        return cls == SolveClass::NewtonStatic
+            || cls == SolveClass::NewtonStateful;
+    }
+};
 
 class DevicePool {
 public:
@@ -455,25 +492,18 @@ public:
 
     // -------- Lookups -------------------------------------------------------
 
-    /// Proposal #3.4 ergonomics: scan the pool to see if any
-    /// device requires Newton (smooth-blend diode, SH1 MOSFET,
-    /// Level 1 IGBT, or saturable inductor). Used by the
-    /// Python `simulate()` wrapper to auto-enable the
-    /// nonlinear-refresh pass.
+    /// Does any device need a Newton solve? Read from `kKindCaps`
+    /// (classes NewtonStatic / NewtonStateful), never from a hand list:
+    /// the list this replaced omitted NonlinearCapacitor, and two
+    /// engines then ran a junction capacitor as if it were absent.
+    [[nodiscard]] bool requires_newton() const noexcept;
+    /// Does any device need the static Newton chain
+    /// (`make_combined_diode_mosfet_refresh`)? The stateful kinds bring
+    /// their own wrappers inside the transient kernels.
+    [[nodiscard]] bool requires_static_refresh() const noexcept;
+    /// Alias of `requires_newton()`, kept for the bound Python API.
     [[nodiscard]] bool has_nonlinear_devices() const noexcept {
-        for (const auto& [branch_id, entry] : entries_) {
-            const auto k = static_cast<StoredKind>(entry.index());
-            if (k == StoredKind::NonlinearDiode ||
-                k == StoredKind::ShockleyDiode  ||
-                k == StoredKind::LauritzenDiode ||
-                k == StoredKind::PmsmMna        ||
-                k == StoredKind::MosfetLevel1   ||
-                k == StoredKind::IgbtLevel1     ||
-                k == StoredKind::SaturableInductor) {
-                return true;
-            }
-        }
-        return false;
+        return requires_newton();
     }
 
     /// Non-throwing companion to `kind_of`: is there a device
@@ -927,6 +957,11 @@ private:
                                 models::PmsmMna::Params,
                                 models::IdealTransformer::Params>;
 
+public:
+    /// Number of device kinds; `kKindCaps` must have this many rows.
+    static constexpr std::size_t kNumKinds = std::variant_size_v<Entry>;
+
+private:
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
     // to `StoredKind`, so the enum and the `Entry` alternative list MUST stay
@@ -1063,20 +1098,62 @@ private:
     std::vector<TransformerCoupling> transformer_couplings_;
 };
 
+/// One row per `StoredKind`, in enum order: the kind's name (spelled as
+/// the Python `StoredKind` member), its solve class and the engines that
+/// simulate it. Every "does this circuit need Newton" and "can engine E
+/// run kind K" decision is derived from this table; a new kind is one
+/// added row (the static_assert below fails the build until it exists).
+inline constexpr auto kKindCaps = std::to_array<KindCaps>({
+    {"Resistor",           SolveClass::Linear,         kAllEngines},
+    {"VoltageSource",      SolveClass::Source,         kAllEngines},
+    {"Switch",             SolveClass::Switch,         kAllEngines},
+    {"Capacitor",          SolveClass::Linear,         kAllEngines},
+    {"Inductor",           SolveClass::Linear,         kAllEngines},
+    // BDF1 has no diode event iteration: the bit would stay frozen.
+    {"Diode",              SolveClass::PwlDiode,       kAllEngines & ~engine_bit(Engine::Bdf1)},
+    {"NonlinearDiode",     SolveClass::NewtonStatic,   kNewtonEngines},
+    {"CurrentSource",      SolveClass::Source,         kAllEngines},
+    {"PWMVoltageSource",   SolveClass::Source,         kAllEngines},
+    {"SineVoltageSource",  SolveClass::Source,         kAllEngines},
+    {"PulseVoltageSource", SolveClass::Source,         kAllEngines},
+    {"MosfetLevel1",       SolveClass::NewtonStatic,   kNewtonEngines},
+    {"IgbtLevel1",         SolveClass::NewtonStatic,   kNewtonEngines},
+    {"VCVS",               SolveClass::Linear,         kAllEngines},
+    {"SaturableInductor",  SolveClass::NewtonStateful, kNewtonEngines},
+    {"NonlinearCapacitor", SolveClass::NewtonStateful, kNewtonEngines},
+    {"ShockleyDiode",      SolveClass::NewtonStatic,   kNewtonEngines},
+    {"LauritzenDiode",     SolveClass::NewtonStateful, kNewtonEngines},
+    {"PmsmMna",            SolveClass::NewtonStateful, kNewtonEngines},
+    {"IdealTransformer",   SolveClass::Linear,         kAllEngines},
+});
+static_assert(kKindCaps.size() == DevicePool::kNumKinds,
+    "kKindCaps needs one row per DevicePool::StoredKind");
+
+[[nodiscard]] constexpr const KindCaps&
+kind_caps(DevicePool::StoredKind k) noexcept {
+    return kKindCaps[static_cast<std::size_t>(k)];
+}
+
 /// Name of a stored kind, identical to the Python `StoredKind` enum
 /// member, for refusals that must name the device kind.
 [[nodiscard]] constexpr std::string_view
 stored_kind_name(DevicePool::StoredKind k) noexcept {
-    constexpr std::string_view names[] = {
-        "Resistor", "VoltageSource", "Switch", "Capacitor", "Inductor",
-        "Diode", "NonlinearDiode", "CurrentSource", "PWMVoltageSource",
-        "SineVoltageSource", "PulseVoltageSource", "MosfetLevel1",
-        "IgbtLevel1", "VCVS", "SaturableInductor", "NonlinearCapacitor",
-        "ShockleyDiode", "LauritzenDiode", "PmsmMna", "IdealTransformer"};
-    static_assert(std::size(names) ==
-                  static_cast<std::size_t>(DevicePool::StoredKind::IdealTransformer) + 1);
     const auto i = static_cast<std::size_t>(k);
-    return i < std::size(names) ? names[i] : std::string_view{"Unknown"};
+    return i < kKindCaps.size() ? kKindCaps[i].name : std::string_view{"Unknown"};
+}
+
+inline bool DevicePool::requires_newton() const noexcept {
+    for (const auto& [branch_id, entry] : entries_) {
+        if (kKindCaps[entry.index()].newton()) return true;
+    }
+    return false;
+}
+
+inline bool DevicePool::requires_static_refresh() const noexcept {
+    for (const auto& [branch_id, entry] : entries_) {
+        if (kKindCaps[entry.index()].cls == SolveClass::NewtonStatic) return true;
+    }
+    return false;
 }
 
 }  // namespace pulsim::pwl

@@ -47,6 +47,7 @@
 #include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
 #include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
@@ -468,7 +469,15 @@ inline SimulationResult run_transient(
     if (resume_snap != nullptr) tail_history.from_flat(resume_snap->igbt_tail_history);
     const bool has_igbt_tail = !tail_history.empty();
 
-    pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
+    // The static Newton chain is the kernel's: with no callback from
+    // the caller, Newton devices get the standard one instead of being
+    // simulated as open circuits (the raw binding used to default to
+    // that: 10.000 V on a clamp that reads 0.594 V).
+    const pwl::NonlinearRefreshFn nl_static =
+        (nl_refresh || !pool.requires_static_refresh())
+            ? nl_refresh
+            : pwl::make_combined_diode_mosfet_refresh();
+    pwl::NonlinearRefreshFn nl_refresh_effective = nl_static;
     if (has_coss) {
         nl_refresh_effective =
             [user_refresh = nl_refresh_effective, &coss_history,
@@ -650,7 +659,7 @@ inline SimulationResult run_transient(
         dc_opts.enable_lm          = opts.enable_newton_lm;
 
         auto dc = pwl::compute_dc_operating_point(
-            graph, pool, switch_fn(opts.t_start), nl_refresh,
+            graph, pool, switch_fn(opts.t_start), nl_static,
             dc_opts, has_diodes ? &diodes : nullptr,
             "run_transient(start_from_dc_op)");
         x = std::move(dc.x);

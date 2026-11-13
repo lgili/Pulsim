@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Engine conformance: one capability table, one typed refusal
+
+* **Added** `pulsim.UnsupportedError` (a `ValueError`; C++
+  `pulsim::UnsupportedError`, a `std::invalid_argument`) with `engine`,
+  `feature`, `device` (branch name) and `kind`. Every device-kind and
+  feature refusal of `simulate()`, the DSED dispatch, `run_transient`,
+  `run_transient_trbdf2`, `run_transient_bdf1` and the kernel AC sweep
+  raises it; `except ValueError` keeps catching it. Catch it by name, not
+  with `except Exception`.
+* **Added** `pulsim.engine_capabilities()`: the kernel's table, one row
+  per device kind with its solve class and a boolean per engine (`pwl`,
+  `trbdf2`, `dsed`, `bdf1`, `ac_sweep`). `DevicePool.has_nonlinear_devices()`
+  is now derived from it (alias of the new `requires_newton()`), beside
+  `requires_static_refresh()`.
+* **Fixed (BREAKING)** silent wrong answers that now refuse:
+  - a junction capacitor (`add_nonlinear_capacitor`) on `engine='dsed'`
+    and `run_transient_bdf1` was simulated as absent: 10 V, 1 kΩ, 100 nF
+    plus `Cn` (1 µF, 1 V, 0.5) read `v(100 µs)` = 6.3186 V / 6.3002 V
+    (the value without `Cn`) where `pwl` gives 1.0216 V. Use `pwl` or
+    `trbdf2`;
+  - `simulate(engine='pwl', enable_nonlinear_refresh=False)` on a circuit
+    with a smooth / Shockley diode, MOSFET or IGBT simulated them as open
+    circuits (10.000 V on a Shockley clamp that reads 0.5937 V). Drop the
+    keyword (`None` lets the kernel decide);
+  - C blocks on `engine='dsed'` were a warning followed by an open-loop
+    run. Use `pwl`.
+  - coupled inductors on `run_transient_bdf1` ran uncoupled (9.38 V off
+    on an 18 V span);
+  - a PWL diode with `V_f > V_th` on `engine='dsed'` stayed ON through
+    reverse bias (a sine clamp read 0.70 V for the whole negative
+    half-cycle, 10.37 V off). Pass `V_th = V_f + 1e-3`;
+  - the fixed-step guards `inductor_freeze_di_max`, `inductor_abs_clamp`
+    and `enable_substep_state_correction` were silently ignored on
+    `engine='dsed'`.
+* **Changed (BREAKING, numbers)** the raw `_pulsim.run_transient`,
+  `run_transient_trbdf2` and `run_transient_with_chain` default
+  `enable_nonlinear_refresh` to `None`: the kernel stamps Newton devices
+  itself (the Shockley clamp above: 10.000 V → 0.5937 V). A C++ caller of
+  `run_transient` / `run_transient_trbdf2` that passes no refresh gets the
+  same.
+* **Fixed** `NativeMultiMaskPwm` on `engine='trbdf2'` was an opaque
+  callable sampled every `h/4`: a 1 µs window in a 1 ms period gave 0 of
+  40 gate events. One switch-function adapter now serves the three
+  engine bindings, so its edges are landed exactly (40 of 40).
+  `NativePwm2Switch` runs are unchanged (1104 steps, 2254 solves).
+* **Changed** refusals that raised `NotImplementedError` in the DSED
+  extractor (e.g. coupled inductors) raise an `UnsupportedError` that is
+  also a `NotImplementedError`.
+
 ### `engine='dsed'`: `integrator='auto'` takes the exact stepper; BDF2 starts L-stable
 
 * **Fixed (BREAKING, numbers)** with the default `integrator='auto'` the

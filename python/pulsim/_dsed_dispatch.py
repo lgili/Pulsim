@@ -46,7 +46,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
     NativeMultiMaskPwm,
     NativePwm2Switch,
     SwitchSchedule,
+    UnsupportedError,
 )
+from ._refusal import _UnsupportedNotImplemented, unsupported
 
 
 # =============================================================================
@@ -573,7 +575,8 @@ def run_dsed_from_builder(
         # 'auto' quietly becomes 'rk45'; an EXPLICIT 'bdf2' request
         # is refused rather than silently downgraded.
         if integrator == "bdf2":
-            raise ValueError(
+            raise unsupported(
+                "dsed", "integrator", kind="Diode", message=
                 f"simulate(engine='dsed', integrator='bdf2'): this "
                 f"circuit has {_n_diodes} PWL diode(s), and diode "
                 f"commutation is only implemented on the RK45 "
@@ -583,14 +586,11 @@ def run_dsed_from_builder(
                 f"integrator='bdf2' (the default routes correctly) "
                 f"or use engine='pwl'.")
         integrator = "rk45"
-    if builder.pool.has_nonlinear_devices():
-        raise ValueError(
-            "simulate(engine='dsed'): this circuit has nonlinear "
-            "devices (smooth diode / MOSFET / IGBT / saturable "
-            "inductor), which the dsed engine's LTI extraction "
-            "silently treats as ABSENT — the run would simulate a "
-            "different circuit. Use the default engine "
-            "(engine='pwl'), which Newton-iterates them.")
+    # Device kinds: the kernel's capability table, before any adapter
+    # is built (the Python adapter below would extract the LTI system
+    # with every Newton device silently ABSENT). The native adapter
+    # repeats the check for C++ callers.
+    _kern._require_supported(builder.graph, builder.pool, "dsed")
 
     opts = _resolve_dsed_options(
         dt=dt,
@@ -691,7 +691,9 @@ def run_dsed_from_builder(
     try:
         _ = adapter.A_matrix()
     except NotImplementedError as e:
-        raise NotImplementedError(_BRIDGE_FALLBACK_MESSAGE.format(
+        raise unsupported(
+            "dsed", "extraction", cls=_UnsupportedNotImplemented,
+            message=_BRIDGE_FALLBACK_MESSAGE.format(
             rtol=opts.rtol,
             atol=opts.atol,
             dt_max=opts.dt_max,
@@ -788,6 +790,10 @@ def run_dsed_from_builder(
                 n_exact_steps=native_res.get("n_exact_steps", 0),
                 cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
             )
+        except UnsupportedError:
+            # A refusal is an answer, not a reason to try the next
+            # bridge (which would run the circuit without the device).
+            raise
         except (RuntimeError, ValueError):
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
             # device that the C++ extractor can't handle). Silently fall
@@ -860,7 +866,8 @@ def run_dsed_from_builder(
     # fallback that used to live here was demoted to the test
     # tree in v1.6.3 (see `python/tests/_dsed_reference/`); the
     # production path is C++-only.
-    raise NotImplementedError(
+    raise unsupported(
+        "dsed", "extraction", cls=_UnsupportedNotImplemented, message=
         "pulsim.simulate(engine='dsed'): both the native C++ "
         "builder adapter (Bridge.11) and the Python builder "
         "adapter (Bridge.10) rejected this circuit. This usually "

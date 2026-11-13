@@ -66,6 +66,8 @@ from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
 
+from ._refusal import UnsupportedError
+
 
 __all__ = [
     "SweepResult",
@@ -207,6 +209,8 @@ def sweep(builder_factory: Callable[..., Any],
         for i, args in enumerate(args_iter):
             try:
                 kpi_list.append(_run_one_simulation(args))
+            except UnsupportedError:
+                raise   # a refusal holds for every point
             except Exception as exc:
                 failed.append((i, str(exc)))
                 # Push placeholder NaN KPIs for this row.
@@ -302,6 +306,8 @@ def monte_carlo(builder_factory: Callable[..., Any],
         for i, args in enumerate(args_iter):
             try:
                 kpi_list.append(_run_one_simulation(args))
+            except UnsupportedError:
+                raise   # a refusal holds for every point
             except Exception as exc:
                 failed.append((i, str(exc)))
                 kpi_list.append({})
@@ -587,6 +593,8 @@ def sweep_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"sweep point {i} {p_dict}")
             kpi_list.append(kpi_fn(sim, p_dict))
+        except UnsupportedError:
+            raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
             kpi_list.append({})
@@ -733,6 +741,8 @@ def monte_carlo_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"MC sample {i}")
             kpi_list.append(kpi_fn(sim, sample))
+        except UnsupportedError:
+            raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
             kpi_list.append({})

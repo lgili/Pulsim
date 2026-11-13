@@ -43,6 +43,11 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    # add-engine-conformance-matrix: the typed refusal (a ValueError
+    # carrying engine / feature / device / kind) and the kernel's
+    # device-kind capability table it is raised from.
+    UnsupportedError,
+    engine_capabilities,
     # Builder API (Layer 6).
     CircuitBuilder,
     # Topology / device handles (opaque — produced by the
@@ -510,6 +515,8 @@ __all__ = [
     "Cancelled",
     "RetiredDeviceError",
     "SimulationAborted",
+    "UnsupportedError",
+    "engine_capabilities",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
     "ClosedLoop",
@@ -751,6 +758,7 @@ from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
+from ._refusal import unsupported as _unsupported  # noqa: E402
 
 
 
@@ -1781,8 +1789,11 @@ def simulate(
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
     enable_nonlinear_refresh
-        PWL-only: Force-enable/-disable the Newton refresh pass.
-        ``None`` (default) means auto-detect.
+        ``None`` (default): the kernel stamps the Newton devices when
+        the circuit has any. ``True`` forces the static chain.
+        ``False`` on a circuit with a smooth / Shockley diode, MOSFET
+        or IGBT raises :class:`UnsupportedError` (it would simulate
+        them as open circuits).
     max_newton_iterations, max_event_iterations
         PWL-only: forwarded to :class:`SimulationOptions`.
     tol_newton_dx, tol_newton_res
@@ -1811,10 +1822,15 @@ def simulate(
         When DSED-only kwargs are passed with ``engine='pwl'`` (they
         are silently ignored — the warning is informational so
         scripts that copy-paste kwargs don't break suddenly).
+    UnsupportedError
+        A ``ValueError`` naming ``engine`` and the ``device`` (branch)
+        or ``feature`` (keyword) the engine cannot simulate or honour;
+        ``pulsim.engine_capabilities()`` is the device-kind table.
+        Catch it by name, never with ``except Exception``.
     NotImplementedError
         On ``engine='dsed'`` from a :class:`CircuitBuilder` when
         the per-mask (A, b) extractor rejects the circuit (e.g.
-        nonlinear device the extractor doesn't yet support). For
+        coupled inductors); it is also an ``UnsupportedError``. For
         PED today with a user-supplied LTI system, use
         :func:`pulsim.dsed.run_user_lti` directly.
     """
@@ -1973,7 +1989,8 @@ def simulate(
                 "populated). Resuming from it would start from zero "
                 "without saying so.")
         if engine == "dsed":
-            raise ValueError(
+            raise _unsupported(
+                "dsed", "resume_from",
                 'simulate(engine="dsed"): resume_from is not supported '
                 "by the event-driven engine, which has no snapshot of "
                 'its own; use engine="pwl" (exact resume) or '
@@ -1999,20 +2016,16 @@ def simulate(
     # adaptive-RK selector below is PWL-specific and must NOT apply
     # to DSED integrator names.
     if engine == "dsed":
-        if getattr(builder, "_c_blocks", None):
-            import warnings
-            warnings.warn(
-                "simulate(engine='dsed'): C blocks added via add_c_block() "
-                "are not yet wired into the DSED engine (their outputs use "
-                "b_extra, which DSED does not consume). Use engine='pwl' to "
-                "run C blocks.")
         # Hard-fail on kwargs the DSED path cannot honor. Silently
         # dropping these is the worst failure mode a simulator can
         # have: a closed-loop circuit would run OPEN-loop and return
-        # plausible-looking (wrong) waveforms. Mirror of the C-block
-        # warning above, but these change the *physics* of the run,
-        # so they raise instead of warn.
+        # plausible-looking (wrong) waveforms. C blocks were a warning
+        # followed by an open-loop run until add-engine-conformance-
+        # matrix; they change the physics, so they refuse too.
         _dsed_unsupported = {
+            # C blocks drive the circuit through b_extra, which the
+            # DSED engine does not consume.
+            "c_blocks": bool(getattr(builder, "_c_blocks", None)),
             "step_observer": step_observer is not None,
             "closed_loops": bool(closed_loops),
             "should_continue": should_continue is not None,
@@ -2043,10 +2056,17 @@ def simulate(
             # no such cache, so the hook would never be called and
             # the coupling it was meant to close would stay open.
             "on_cache": on_cache is not None,
+            # Fixed-step post-solve guards and the commutation split:
+            # nothing in the DSED engine reads them.
+            "inductor_freeze_di_max": inductor_freeze_di_max is not None,
+            "inductor_abs_clamp": inductor_abs_clamp is not None,
+            "enable_substep_state_correction": bool(
+                enable_substep_state_correction),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
-            raise ValueError(
+            raise _unsupported(
+                "dsed", _offending[0],
                 f"simulate(engine='dsed'): {', '.join(_offending)} "
                 "is/are not supported by the DSED engine yet — the "
                 "run would silently ignore them (e.g. a closed-loop "
@@ -2076,7 +2096,8 @@ def simulate(
             # wrong for floating ones — which is the failure this
             # message exists to stop. Refuse by name until the
             # projection is built and tested.
-            raise ValueError(
+            raise _unsupported(
+                "dsed", "initial_conditions",
                 "simulate(engine='dsed'): this circuit declares "
                 "initial conditions (c0= / i0= / set_initial), and "
                 "the DSED engine cannot apply them yet — it would "
@@ -2193,7 +2214,8 @@ def simulate(
             else:
                 engine = "trbdf2"
         elif _route_reasons:
-            raise ValueError(
+            raise _unsupported(
+                "trbdf2", getattr(_route_reasons[0], "feature", ""),
                 "simulate(engine='trbdf2'): "
                 + "; ".join(_route_reasons)
                 + ". Use engine='auto' to route to the fixed-step "
@@ -2249,7 +2271,8 @@ def simulate(
             if _p_obs is not None:
                 _auto_periods.append(float(_p_obs))
         if _auto_obs_list and not _auto_periods:
-            raise ValueError(
+            raise _unsupported(
+                "trbdf2", "step_observer",
                 "simulate(engine='auto'): a step_observer needs a "
                 "cadence. This engine has no fixed grid to ride, "
                 "so pass controller_period=<T_ctrl seconds> (the "
@@ -2287,9 +2310,6 @@ def simulate(
                         m = m | _f(t)
                     return m
 
-        _auto_nl = (enable_nonlinear_refresh
-                     if enable_nonlinear_refresh is not None
-                     else builder.pool.has_nonlinear_devices())
         _span = float(t_end) - float(t_start)
         # 0 = let the kernel pick: it knows the circuit's fastest
         # periodic source and caps the ceiling at 20 steps per
@@ -2330,7 +2350,8 @@ def simulate(
                 should_continue=should_continue,
                 observer_period=_auto_period,
                 step_observer=_auto_observer,
-                enable_nonlinear_refresh=_auto_nl,
+                # None: the kernel stamps the Newton devices itself.
+                enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
                 tol_newton_dx=float(tol_newton_dx or 0.0),
                 tol_newton_res=float(tol_newton_res or 0.0),
@@ -2678,9 +2699,9 @@ def simulate(
             default_mask.set(i, True)
         switch_fn = lambda _t: default_mask  # noqa: E731
 
-    # Auto-detect nonlinear devices (proposal #3.4).
-    if enable_nonlinear_refresh is None:
-        enable_nonlinear_refresh = builder.pool.has_nonlinear_devices()
+    # enable_nonlinear_refresh=None goes through as is: the kernel
+    # stamps the Newton devices when the circuit has any, and refuses
+    # False on such a circuit (it used to simulate them as open).
 
     # Progress bar via step_observer: print a percentage at
     # configurable intervals. The user can pass:
@@ -3180,6 +3201,12 @@ def _floating_subnets(builder) -> list:
                   for grp in groups.values() if storage.intersection(grp))
 
 
+class _Blocker(str):
+    """A `_trbdf2_blockers` reason; `.feature` is the keyword name."""
+
+    feature = ""
+
+
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                      on_cache=None,
                       controller_period, live_stream, progress,
@@ -3199,6 +3226,13 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     asked for it wants to know.
     """
     why = []
+
+    def _blk(feature, text):
+        # A route reason that also names the keyword behind it, so the
+        # explicit-engine refusal can say which feature it refuses.
+        r = _Blocker(text)
+        r.feature = feature
+        return r
     # No device-kind blockers remain. Every nonlinear device is
         # served on the variable-step engine now: the diodes /
     # MOSFETs / IGBTs were always fine (each stage is a Newton solve
@@ -3224,41 +3258,41 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # was still inside that guard: an import failure would have
     # dropped a real blocker in silence. It is a plain check now.
     if on_cache is not None:
-        why.append(
+        why.append(_blk("on_cache",
             "on_cache refactors the fixed-step engine's PWL cache "
             "mid-run; TR-BDF2 has no such cache, so the hook would "
             "never fire and whatever it was closing (an "
             "electro-thermal loop, usually) would silently stay "
-            "open")
+            "open"))
     if getattr(builder, "_c_blocks", None):
-        why.append("C blocks sample on a fixed dt grid")
+        why.append(_blk("c_blocks", "C blocks sample on a fixed dt grid"))
     if live_stream is not None:
-        why.append("live_stream needs the fixed-step kernel's "
-                    "per-step ring push")
+        why.append(_blk("live_stream", "live_stream needs the fixed-step kernel's "
+                    "per-step ring push"))
     if progress:
-        why.append("progress has no per-step hook here")
+        why.append(_blk("progress", "progress has no per-step hook here"))
     if start_from_dc_op:
-        why.append("start_from_dc_op is a fixed-step entry point")
+        why.append(_blk("start_from_dc_op", "start_from_dc_op is a fixed-step entry point"))
     if strict_event_iterations:
-        why.append("strict_event_iterations belongs to the "
-                    "fixed-step diode iteration")
+        why.append(_blk("strict_event_iterations", "strict_event_iterations belongs to the "
+                    "fixed-step diode iteration"))
     if max_dt_halvings is not None and int(max_dt_halvings) > 0:
-        why.append("max_dt_halvings re-solves at sub-dt against a "
-                    "full-dt companion")
+        why.append(_blk("max_dt_halvings", "max_dt_halvings re-solves at sub-dt against a "
+                    "full-dt companion"))
     if enable_substep_state_correction:
-        why.append("enable_substep_state_correction is the "
-                    "fixed-step commutation split")
+        why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
+                    "fixed-step commutation split"))
     if store_every is not None and int(store_every) != 1:
-        why.append("store_every decimates a uniform grid")
+        why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:
-        why.append("mmc_arms drives the fixed-step observer/"
-                    "b_extra pair")
+        why.append(_blk("mmc_arms", "mmc_arms drives the fixed-step observer/"
+                    "b_extra pair"))
     if inductor_freeze_di_max is not None:
-        why.append("inductor_freeze_di_max is a fixed-step "
-                    "post-solve guard")
+        why.append(_blk("inductor_freeze_di_max", "inductor_freeze_di_max is a fixed-step "
+                    "post-solve guard"))
     if inductor_abs_clamp is not None:
-        why.append("inductor_abs_clamp is a fixed-step post-solve "
-                    "guard")
+        why.append(_blk("inductor_abs_clamp", "inductor_abs_clamp is a fixed-step post-solve "
+                    "guard"))
     # An observer needs a CADENCE here — there is no grid to ride.
     _has_cadence = controller_period is not None
     if closed_loops:
@@ -3267,12 +3301,12 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                 _has_cadence = True
     if step_observer is not None and not _has_cadence:
         if getattr(step_observer, "period", None) is None:
-            why.append(
+            why.append(_blk("step_observer",
                 "a step_observer with no cadence (pass "
                 "controller_period=<T_ctrl>, or use a ClosedLoop, "
-                "which carries its own)")
+                "which carries its own)"))
     if closed_loops and not _has_cadence:
-        why.append("closed_loops whose handles carry no period")
+        why.append(_blk("closed_loops", "closed_loops whose handles carry no period"))
     if switch_fn is None and not closed_loops:
         # (A ClosedLoop brings its own switch_fn, so the circuit is
         # driven even when the caller passed none.)
@@ -3287,10 +3321,10 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
         except Exception:  # noqa: BLE001 — test doubles
             _ctl = []
         if _ctl:
-            why.append(
+            why.append(_blk("switch_fn",
                 f"{len(_ctl)} controlled switch(es) with no "
                 "switch_fn (the two engines' undriven-switch "
-                "defaults differ)")
+                "defaults differ)"))
     del dt
     return why
 

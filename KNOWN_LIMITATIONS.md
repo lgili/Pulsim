@@ -219,6 +219,22 @@ for the v1.4 cycle.
 
 ## Transient engines (2.0)
 
+### Which engine runs which device: one table, typed refusals
+
+The kernel's capability table (`pulsim.engine_capabilities()`, mirrored
+in `docs/known-limitations.md` and checked by
+`test_engine_conformance.py`) decides which engine simulates which
+device kind. Newton devices (smooth / Shockley / Lauritzen diode,
+level-1 MOSFET / IGBT, saturable inductor, junction capacitor, PMSM) run
+on `pwl` and `trbdf2` only; `dsed`, `run_transient_bdf1` and the kernel
+AC sweep refuse them with `pulsim.UnsupportedError`. Before the table, a
+junction capacitor on `dsed` / `bdf1` was silently absent (6.3186 V
+instead of 1.0216 V). The retired `add_nonlinear_diode` is opt-in only
+(`allow_non_passive=True`). Feature keywords an engine cannot honour
+refuse the same way, with `feature` set to the keyword. Three control
+cells (`controller_period` on `pwl`, two `ClosedLoop`s and loops at two
+rates on `trbdf2`) are strict xfails owned by `fix-control-tick-semantics`.
+
 ### TR-BDF2 stalls at `h_min` after a hard switching edge
 
 With a Newton device in the circuit (a saturable transformer, a

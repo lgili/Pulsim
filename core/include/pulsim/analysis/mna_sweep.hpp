@@ -38,6 +38,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -81,11 +82,11 @@ namespace detail {
 /// a junction capacitor absent: the transfer function of another circuit.
 inline void require_linear_for_sweep(const topology::Graph& graph,
                                       const pwl::DevicePool& pool) {
-    for (Index bid = 0; bid < graph.num_branches(); ++bid) {
-        if (graph.branch(bid).kind != topology::BranchKind::Nonlinear) {
-            continue;
-        }
-        throw std::invalid_argument(std::format(
+    const auto bad = find_unsupported(graph, pool, pwl::Engine::AcSweep);
+    if (!bad) return;
+    const Index bid = *bad;
+    throw unsupported_device(graph, pool, pwl::Engine::AcSweep, bid,
+        std::format(
             "run_mna_sweep: branch '{}' is a {} (a Newton device); the "
             "kernel AC sweep stamps only linear elements and switches at a "
             "fixed mask and does not linearise it at an operating point, so "
@@ -96,7 +97,6 @@ inline void require_linear_for_sweep(const topology::Graph& graph,
             "use_kernel=False, dt=..., t_end=...) (impulse-FFT).",
             graph.branch_name(bid),
             pwl::stored_kind_name(pool.kind_of(bid))));
-    }
 }
 
 /// The sweep's matrices: `G` (every dt-independent stamp) and the mass

@@ -521,22 +521,27 @@ def test_dsed_without_a_band_refuses_or_matches_and_never_reverses():
 def test_dsed_forced_turn_on_without_a_band_names_the_band():
     """Pinned limitation: a capacitor charged by a current source into a
     V_th = 0, V_f = 0.7 diode reaches V_f with zero ON current, and the
-    Jacobi settle cycles; the error must name the band advice."""
+    Jacobi settle cycles. Since add-engine-conformance-matrix dsed
+    refuses V_f > V_th up front (it held the diode ON through reverse
+    bias, 10.4 V off); the refusal must still name the band advice."""
     b = p.CircuitBuilder()
     b.add_current_source("I1", "a", "gnd", 10.0)
     b.add_diode("D1", "a", "gnd", G_ON, 1e-9, V_f=V_F)
     b.add_capacitor("C", "a", "gnd", 1e-6)
-    with pytest.raises(RuntimeError, match=r"V_th = V_f \+ 1e-3"):
+    with pytest.raises(p.UnsupportedError, match=r"V_th = V_f \+ 1e-3") as e:
         _sim(b, 2e-3, "dsed")
+    assert (e.value.engine, e.value.feature, e.value.device) == \
+        ("dsed", "V_f", "D1")
 
 
 def test_dsed_t0_settle_with_a_drop():
     """A zero IC is strictly inside OFF when V_f > 0: the t = 0 settle
-    of a forward-driven diode passes (DC source, no band)."""
+    of a forward-driven diode passes. dsed needs the band V_th > V_f
+    (V_th = 0 is refused, see above); the drop is unchanged by it."""
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "s", "gnd", 12.0)
     b.add_resistor("R1", "s", "a", 10.0)
-    b.add_diode("D", "a", "k", 1e3, 1e-9, V_f=V_F)
+    b.add_diode("D", "a", "k", 1e3, 1e-9, V_th=V_F + 1e-3, V_f=V_F)
     b.add_capacitor("C", "k", "gnd", 10e-6)
     b.add_resistor("RL", "k", "gnd", 100.0)
     r = _sim(b, 5e-3, "dsed")

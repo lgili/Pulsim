@@ -17,6 +17,53 @@ pulsim.guide`). How to check a result is in its
 [section 6](ai-guide.md#6-how-to-verify-a-result). Newton failures and
 their messages are covered in [Gotchas](gotchas.md).
 
+## Engine capability matrix
+
+Which engine simulates which device kind. This table is the kernel's
+(`pulsim.engine_capabilities()`); `test_engine_conformance.py` checks
+that it equals this page and that every "yes" agrees with `engine='pwl'`
+within 1 % of the observable's span and every "no" raises
+`pulsim.UnsupportedError` naming the engine and the branch. `ac_sweep` is
+the kernel AC sweep (`run_mna_sweep` with `freqs=`), which refuses every
+Newton device. `NonlinearDiode` is retired: `add_nonlinear_diode` refuses
+unless called with `allow_non_passive=True`.
+
+<!-- engine-capabilities:begin -->
+| Kind | Class | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
+|---|---|---|---|---|---|---|
+| Resistor | Linear | yes | yes | yes | yes | yes |
+| VoltageSource | Source | yes | yes | yes | yes | yes |
+| Switch | Switch | yes | yes | yes | yes | yes |
+| Capacitor | Linear | yes | yes | yes | yes | yes |
+| Inductor | Linear | yes | yes | yes | yes | yes |
+| Diode | PwlDiode | yes | yes | yes | no | yes |
+| NonlinearDiode | NewtonStatic | yes | yes | no | no | no |
+| CurrentSource | Source | yes | yes | yes | yes | yes |
+| PWMVoltageSource | Source | yes | yes | yes | yes | yes |
+| SineVoltageSource | Source | yes | yes | yes | yes | yes |
+| PulseVoltageSource | Source | yes | yes | yes | yes | yes |
+| MosfetLevel1 | NewtonStatic | yes | yes | no | no | no |
+| IgbtLevel1 | NewtonStatic | yes | yes | no | no | no |
+| VCVS | Linear | yes | yes | yes | yes | yes |
+| SaturableInductor | NewtonStateful | yes | yes | no | no | no |
+| NonlinearCapacitor | NewtonStateful | yes | yes | no | no | no |
+| ShockleyDiode | NewtonStatic | yes | yes | no | no | no |
+| LauritzenDiode | NewtonStateful | yes | yes | no | no | no |
+| PmsmMna | NewtonStateful | yes | yes | no | no | no |
+| IdealTransformer | Linear | yes | yes | yes | yes | yes |
+<!-- engine-capabilities:end -->
+
+Circuit-level limits, also raised as `UnsupportedError` (with `feature`
+set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
+`dsed` and `bdf1`; builder initial conditions on `dsed`; PWL diodes with
+`integrator='bdf2'`, or with `V_f > V_th` (use `V_th = V_f + 1e-3`), on
+`dsed`; C blocks, controllers
+(`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
+`live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
+guards and `enable_substep_state_correction` on `dsed`; the fixed-step
+keywords on `trbdf2`; `enable_nonlinear_refresh=False` with a smooth /
+Shockley diode, MOSFET or IGBT on every transient engine.
+
 ## Engines
 
 | Limitation | Measured | Workaround |
@@ -38,7 +85,7 @@ their messages are covered in [Gotchas](gotchas.md).
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, sources, and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `ValueError` naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
+| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, sources, and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `UnsupportedError` (a `ValueError`) naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
 
 ## Devices
 

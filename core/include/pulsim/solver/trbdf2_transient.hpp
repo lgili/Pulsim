@@ -86,6 +86,7 @@
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
@@ -318,34 +319,14 @@ inline SimulationResult run_transient_trbdf2(
     // fixed — the state is now λ(i) with a derived BDF2 stage, and
     // the history snapshots like the other four — so the refusal is
     // gone rather than relaxed.
-    bool has_nonlinear = false;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind
-            == topology::BranchKind::Nonlinear) {
-            has_nonlinear = true;
-            break;
-        }
-    }
-    // A charge-based Coss brings its own refresh (wired below), so
-    // it does not need one from the caller; every other nonlinear
-    // device does.
-    bool has_only_coss = has_nonlinear;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind
-                == topology::BranchKind::Nonlinear
-            && pool.kind_of(b_id)
-                != pwl::DevicePool::StoredKind::NonlinearCapacitor) {
-            has_only_coss = false;
-            break;
-        }
-    }
-    if (has_nonlinear && !nl_refresh && !has_only_coss) {
-        throw std::invalid_argument(
-            "run_transient_trbdf2: the circuit has nonlinear "
-            "devices but no nonlinear-refresh callback was "
-            "supplied — the stages would solve the linear "
-            "skeleton and silently return the wrong answer.");
-    }
+    // The static Newton chain (smooth / Shockley diodes, MOSFET,
+    // IGBT) is the kernel's: a caller that supplies none gets the
+    // standard one, so the stages never solve the linear skeleton.
+    // The stateful kinds bring their own wrappers below.
+    const pwl::NonlinearRefreshFn nl_static =
+        (nl_refresh || !pool.requires_static_refresh())
+            ? nl_refresh
+            : pwl::make_combined_diode_mosfet_refresh();
 
     const Real span  = opts.t_end - opts.t_start;
     // Default step ceiling. span/1000 alone is a TRAP on a long
@@ -585,10 +566,10 @@ inline SimulationResult run_transient_trbdf2(
     auto dev_stage = pwl::TrBdf2Stage::Trapezoidal;
     Real dev_h = Real{0};
 
-    pwl::NonlinearRefreshFn nl_effective = nl_refresh;
+    pwl::NonlinearRefreshFn nl_effective = nl_static;
     if (has_coss) {
         nl_effective =
-            [user = nl_refresh, &coss, &q_gamma, &coss_stage,
+            [user = nl_static, &coss, &q_gamma, &coss_stage,
              &coss_h](const Vector& xx, sparse::Matrix& J_nl,
                         Vector& f_nl, const topology::Graph& g,
                         const pwl::DevicePool& pp) -> Real {

@@ -75,7 +75,7 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `switch_fn` | `Callable[[float], SwitchStateMask]` | all closed | Switch driver. |
 | `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step constant residual extras. |
 | `start_from_dc_op` | `bool` | `False` | Seed initial state from DC OP. |
-| `enable_nonlinear_refresh` | `bool` or `None` | auto-detect | Force-enable Newton refresh. `None` = auto via `pool.has_nonlinear_devices()`. |
+| `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
 
@@ -165,7 +165,8 @@ Opaque parameter store. Most methods are not exposed to Python — you go throug
 
 | Method | Returns | Use case |
 |---|---|---|
-| `has_nonlinear_devices()` | `bool` | Auto-detect by `simulate()`. |
+| `has_nonlinear_devices()` | `bool` | Alias of `requires_newton()`: any kind the capability table (`pulsim.engine_capabilities()`) marks NewtonStatic / NewtonStateful. |
+| `requires_static_refresh()` | `bool` | Any smooth / Shockley diode, MOSFET or IGBT (the kernel then builds the static Newton chain). |
 
 ## Source-helper factories
 

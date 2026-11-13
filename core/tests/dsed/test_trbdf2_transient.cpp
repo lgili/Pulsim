@@ -234,8 +234,11 @@ TEST_CASE("TR-BDF2: half-wave rectifier localizes diode edges",
     REQUIRE(worst_on < 2e-2);
 }
 
-TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
+TEST_CASE("TR-BDF2: nonlinear devices are stamped without a callback",
           "[v2][trbdf2]") {
+    // add-engine-conformance-matrix: the kernel owns the static Newton
+    // chain. This call used to be refused (and the raw fixed engine ran
+    // the diode as an open circuit, 5.000 V); now the diode clamps.
     builder::CircuitBuilder b;
     b.add_voltage_source("V", "in", "gnd", 5.0);
     b.add_resistor("R", "in", "n1", 1e3);
@@ -245,11 +248,12 @@ TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
     solver::TrBdf2Options o;
     o.t_end = 1e-3;
     const Size n_sw = b.graph().num_switches();
-    REQUIRE_THROWS_AS(
-        solver::run_transient_trbdf2(
-            cache, b.graph(), b.pool(), o,
-            [&](Real) { return all_open(n_sw); }),
-        std::invalid_argument);
+    const auto r = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); });
+    const Real v = r.states.back()[b.node_id_of("n1")];
+    REQUIRE(v > 0.3);
+    REQUIRE(v < 1.0);
 }
 
 // -----------------------------------------------------------------------------
