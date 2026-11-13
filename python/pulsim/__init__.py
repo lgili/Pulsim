@@ -774,6 +774,28 @@ from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
+
+
+def _yaml_retired_as_retired_error(native):
+    import functools
+
+    @functools.wraps(native)
+    def load(*args, **kwargs):
+        try:
+            return native(*args, **kwargs)
+        except RuntimeError as e:
+            # The C++ loader's refusal of a retired type stays a
+            # RuntimeError (every YAML refusal is) and is also the
+            # builder's RetiredDeviceError, so one except catches both.
+            if " is retired: " in str(e) and not isinstance(
+                    e, RetiredDeviceError):
+                raise _berg.RetiredYamlDeviceError(str(e)) from None
+            raise
+    return load
+
+
+load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
+load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import FixedStepTicks as _FixedStepTicks  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402

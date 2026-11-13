@@ -66,7 +66,13 @@ from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
 
+from ._builder_ergonomics import RetiredDeviceError
 from ._refusal import UnsupportedError
+
+# Configuration refusals hold for every point: they propagate out of
+# sweep() / monte_carlo() on every backend. Anything else a job raises
+# is a per-job failure, recorded in `failed` on every backend.
+_REFUSALS = (UnsupportedError, RetiredDeviceError)
 
 
 __all__ = [
@@ -125,17 +131,27 @@ def _run_one_simulation(args):
             tuple(getattr(res, "step_loop_python_callbacks", ("unknown",))))
 
 
+def _run_one_captured(args):
+    """Process-pool worker: ``("ok", result)`` or ``("failed", message)``;
+    a configuration refusal is raised (and re-raised in the parent)."""
+    try:
+        return "ok", _run_one_simulation(args)
+    except _REFUSALS:
+        raise
+    except Exception as exc:  # noqa: BLE001 — recorded, as on threads
+        return "failed", str(exc)
+
+
 _BACKENDS = ("auto", "thread", "process")
 
 
 def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
     """Run every job; returns ``(kpi_list, failed, backend_used)``.
 
-    Results are in job order on every backend. The serial and thread
-    paths record a raising job in ``failed`` and go on, except an
-    ``UnsupportedError``, which holds for every point and propagates;
-    the process path propagates the first failure (its behaviour
-    before ``backend`` existed).
+    Results are in job order on every backend. Every backend records a
+    raising job in ``failed`` and goes on, except a configuration
+    refusal (``UnsupportedError``, ``RetiredDeviceError``), which holds
+    for every point and propagates.
     """
     if backend not in _BACKENDS:
         raise ValueError(
@@ -147,7 +163,7 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
     def run_captured(i):
         try:
             kpis, cbs = _run_one_simulation(args_iter[i])
-        except UnsupportedError:
+        except _REFUSALS:
             raise   # a refusal holds for every point
         except Exception as exc:
             failed.append((i, str(exc)))
@@ -188,10 +204,13 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
         from multiprocessing import Pool
         with Pool(nw) as pool:
             try:
-                for k, (i, (kpis, _)) in enumerate(zip(rest, pool.imap(
-                        _run_one_simulation,
+                for k, (i, (status, out)) in enumerate(zip(rest, pool.imap(
+                        _run_one_captured,
                         [args_iter[i] for i in rest])), first + 1):
-                    kpi_list[i] = kpis
+                    if status == "ok":
+                        kpi_list[i] = out[0]
+                    else:
+                        failed.append((i, out))
                     progress(k)
             except Exception:
                 pool.terminate()
@@ -245,8 +264,9 @@ def sweep(builder_factory: Callable[..., Any],
         callable that caches an unpicklable object on its first call
         (a ``SwitchStateMask``) must drop it in ``__getstate__``.
         Results are in job order and equal the serial ones on every
-        backend; serial and thread runs record a raising job in
-        ``failed``, a process run raises.
+        backend; every backend records a raising job in ``failed``,
+        and a configuration refusal (``UnsupportedError``,
+        ``RetiredDeviceError``) propagates.
     **simulate_kwargs
         Forwarded to `simulate(...)` for each run (t_end, dt,
         switch_fn, etc.).
@@ -636,7 +656,7 @@ def sweep_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"sweep point {i} {p_dict}")
             kpi_list.append(kpi_fn(sim, p_dict))
-        except UnsupportedError:
+        except _REFUSALS:
             raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
@@ -784,7 +804,7 @@ def monte_carlo_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"MC sample {i}")
             kpi_list.append(kpi_fn(sim, sample))
-        except UnsupportedError:
+        except _REFUSALS:
             raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))

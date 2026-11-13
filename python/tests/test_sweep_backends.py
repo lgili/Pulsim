@@ -73,6 +73,24 @@ def failing_build(R):
     return build_buck(R)
 
 
+def failing_rc(R):
+    if R == LOADS[3]:
+        raise RuntimeError("job three refuses")
+    return build_rc(R)
+
+
+def retired_rc(R):
+    b = build_rc(R)
+    b.add_nonlinear_diode("Dn", "vout", "gnd", p.IdealDiodeParams())  # retired
+    return b
+
+
+def shockley_rc(R):
+    b = build_rc(R)
+    b.add_shockley_diode("D", "vout", "gnd")
+    return b
+
+
 def _sweep(switch_fn=None, **kw):
     return p.sweep(build_buck, params={"R": LOADS}, kpi_fn=kpi,
                    t_end=T_END, dt=DT, switch_fn=switch_fn or native_pwm(),
@@ -232,3 +250,45 @@ def test_seeded_monte_carlo_is_backend_independent():
         par = run(parallel=True, n_workers=2, backend=backend)
         assert par.backend == ran
         _assert_same(par, ser)
+
+
+# One rule on every backend: a configuration refusal propagates, any
+# other raising job is recorded in `failed`. Before, the process backend
+# raised on a per-job failure, a RetiredDeviceError was recorded as a
+# failed point (empty KPIs) on serial / thread, and backend="auto" did
+# one or the other depending on job 0.
+_ALL = [(False, "auto"), (True, "thread"), (True, "process")]
+
+
+@pytest.mark.parametrize("parallel,backend", _ALL)
+def test_failing_job_is_recorded_on_every_backend(parallel, backend):
+    out = p.sweep(failing_rc, params={"R": LOADS}, kpi_fn=kpi,
+                  t_end=T_END, dt=DT, parallel=parallel, n_workers=2,
+                  backend=backend, verbose=False)
+    assert [i for i, _ in out.failed] == [3]
+    assert "job three refuses" in out.failed[0][1]
+    v = out.kpis["v_end"]
+    assert np.isnan(v[3]) and np.isfinite(np.delete(v, 3)).all()
+
+
+@pytest.mark.parametrize("parallel,backend", _ALL)
+def test_retired_device_propagates_on_every_backend(parallel, backend):
+    with pytest.raises(p.RetiredDeviceError):
+        p.sweep(retired_rc, params={"R": LOADS[:3]}, kpi_fn=kpi,
+                t_end=T_END, dt=DT, parallel=parallel, n_workers=2,
+                backend=backend, verbose=False)
+
+
+def test_unsupported_error_propagates_from_a_process_pool():
+    with pytest.raises(p.UnsupportedError):
+        p.sweep(shockley_rc, params={"R": LOADS[:3]}, kpi_fn=kpi,
+                t_end=1e-5, parallel=True, n_workers=2,
+                backend="process", verbose=False, engine="dsed")
+
+
+def test_retired_device_propagates_from_monte_carlo():
+    with pytest.raises(p.RetiredDeviceError):
+        p.monte_carlo(retired_rc,
+                      distributions={"R": lambda r: r.uniform(9.0, 11.0)},
+                      n_samples=3, kpi_fn=kpi, seed=1, t_end=T_END,
+                      dt=DT, verbose=False)
