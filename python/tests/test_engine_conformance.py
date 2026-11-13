@@ -611,6 +611,8 @@ _REFUSED = {
                                ("trbdf2", "dsed")),
     "enable_substep_state_correction": (
         {"enable_substep_state_correction": True}, ("trbdf2", "dsed")),
+    "discontinuity_restart": (
+        {"discontinuity_restart": True}, ("trbdf2", "dsed")),
 }
 
 

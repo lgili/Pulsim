@@ -73,8 +73,11 @@ set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed`; C blocks, controllers
 (`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
-guards and `enable_substep_state_correction` on `dsed`; the fixed-step
-keywords on `trbdf2`; `enable_nonlinear_refresh=False` with a smooth /
+guards, `enable_substep_state_correction` and `discontinuity_restart` on
+`dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
+`trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
+only (a no-op on `trbdf2` / `dsed`, which control the step on their own
+error estimate); `enable_nonlinear_refresh=False` with a smooth /
 Shockley diode, MOSFET or IGBT on every transient engine.
 
 ## Engines
