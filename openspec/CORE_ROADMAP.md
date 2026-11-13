@@ -45,7 +45,8 @@ without a warning. With ideal switches, one LCP per event (Lemke,
 lexicographic rule; a passive network gives a positive-semidefinite,
 hence copositive-plus, port matrix, so it terminates) and a
 conservative re-initialisation, the prototype runs the five failing
-families with no band: at most 6 pivots per event, no wrong mode, the
+families with no band: at most 6 pivots per event (15 counting tie
+re-solves), no wrong mode, the
 DCM buck within 4.5e-12 V of its 40-digit orbit after 4000 periods,
 bridge event times within 1.1e-14 s of the closed form.
 
@@ -143,7 +144,7 @@ defaults flip together in one release (decision 3 below).
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-complementarity-mode-selection` | One LCP per event on the diode ports of the event-step companion network, solved by Lemke (lexicographic), shared by every engine and the DC operating point; enumeration fallback and typed refusal for non-passive ports; ties by widened event step; floating islands as a gauge; shadow mode, then opt-in, then default (**B** at the flip) | — | `mode-selection` (new), `device-models` | M–L | conformance; harness (shadow comparison) | not started |
+| `add-complementarity-mode-selection` | One LCP per event on the diode ports of the event-step companion network, solved by Lemke (lexicographic), shared by every engine and the DC operating point; enumeration fallback and typed refusal for non-passive ports; ties by widened event step; floating islands as a gauge; shadow mode, then opt-in, then default (**B** at the flip) | — | `mode-selection` (new), `device-models` | M–L | conformance; harness (shadow comparison); linear-time assembly (event-step factor per mode) | not started |
 | `add-branch-form-ideal-switch` | Branch-form switch and diode with legal `R_on = 0`, `g_off = 0` on a mask-invariant pattern; per-mode floating-node and ideal-loop refusals; one re-initialisation service (explicit projection on the exact route, SDIRK(2,2)×3 on the implicit routes) with impulse records; switching energies from tables at the event; the default switch model at the flip (**B**) | P11 | `device-models`, `linear-solver` | L | conformance; complementarity; restart rule and TR-BDF2 post-event restart (for `g_off = 0` on implicit routes) | not started |
 
 ## CORE B — exact propagation as the default
@@ -222,11 +223,16 @@ scope or the claim of a change.
   the error) — a second breaking change. Prototype of the first form
   (two backward-Euler half-steps): buck CCM order 2.00, error
   1.28e-2 → 2.20e-5 A at the coarsest step. **Superseded 2026-11-13**:
-  the pair drains resonant modes (Q = 50 tank at T/50: −11.9 % against
-  −0.86 %); the rule is three consecutive Alexander SDIRK(2,2) steps
-  (tank −0.56 % / −0.04 %, RL edge error 30–48 times smaller; on the
-  ideal DCM buck about 400 times more accurate than the pair,
-  `add-branch-form-ideal-switch/probes/sdirk_restart_ideal.out`).
+  the pair drains resonant modes; the rule is three consecutive
+  Alexander SDIRK(2,2) steps. Q = 50 tank energy error after the
+  restart: −11.75 % / −3.13 % / −0.78 % for the pair against
+  −0.56 % / −0.04 % / +0.01 % for SDIRK; RL edge error 30–48 times
+  smaller (prototypes `p30_restart_sdirk_proto.py` and
+  `p31_restart_sdirk_multi.py` behind the decision, kept in the
+  maintainer's plan outside this repository). Reproducible here: on the
+  ideal DCM buck SDIRK×3 is about 400 times more accurate than the pair
+  at the same step
+  (`add-branch-form-ideal-switch/probes/sdirk_restart_ideal.out`).
 - `add-fixed-step-event-splitting`: with the restart rule alone the DCM
   buck is already second order in the prototype; the measured value of
   the split is the off-grid gate edge (8.0e-2 V → 7.3e-6 V).
@@ -279,8 +285,8 @@ scope or the claim of a change.
 - `add-mna-native-machines`: BLDC uses a PM-flux harmonic series, not a
   flux table (a trapezoidal back-EMF table is only C¹).
 - `refactor-unified-transient-stepper` retires `core/integrators/`,
-  which the change `add-adaptive-runge-kutta-solvers` built on; that
-  change is not on this branch (see decision 9).
+  which the open change `add-adaptive-runge-kutta-solvers` builds on
+  (see decision 9).
 - `add-external-device-abi` adds requirements to `device-interface`,
   which exists only after `add-unified-device-interface` is archived.
 
@@ -329,8 +335,8 @@ Where the earlier list of owner questions now stands:
    Control delay (old 10) → stays an open question of
    `add-compiled-control-graph`.
 9. `add-adaptive-runge-kutta-solvers` (old 7): withdrawn in favour of
-   the stepper's strategies if it is reintroduced; `core/integrators/`
-   retires with the stepper.
+   the stepper's strategies (its archival is a separate step);
+   `core/integrators/` retires with the stepper.
 
 ## Still the owner's
 

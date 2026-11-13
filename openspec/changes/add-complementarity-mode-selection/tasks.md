@@ -24,7 +24,8 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 ## 3. Port model on the conductance form, and the `h_e` band
 - [ ] 3.1 Build `(M, q)` from the event's companion matrix (BE at `h_e`) through the cached factor: one solve for `q`, one per requested column; hybrid coordinates from the previous mode
 - [ ] 3.2 Measure, on the five families with resistor-pair diodes (`R_on = 1/g_on`), the range of `h_e/T_ref` over which every event returns the same mode; set the default `h_e` inside it and record the band in this file
-- [ ] 3.3 Tie widening (100×, 1e4×), OFF on a remaining tie, counted
+- [ ] 3.3 Tie widening (100×, 1e4×), OFF on a remaining tie, counted; record the current of every classified tie on the five families and count the ties decided differently with a 10× smaller `tol_w`
+- [ ] 3.4 Hysteresis (D8): port held OFF, one bounded re-solve when `v ≥ V_th`, `v − V_th` as its crossing signal; Lemke-level test on the half-wave rectifier of the device-models scenario (turn-on at 15.9155 µs, off at T/2)
 
 ## 4. Shadow mode (first user-visible slice; numbers unchanged)
 - [ ] 4.1 `mode_selection='shadow'` on `dsed` settle: after today's settle, the selector runs on the same held state; disagreements in `result.diagnostics['mode_shadow']`
@@ -33,14 +34,14 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 
 ## 5. Passivity and refusals
 - [ ] 5.1 Structural passivity classification at build time (device kinds, parameter signs, coupled-inductor matrix PSD)
-- [ ] 5.2 Non-passive: Lemke, then enumeration to `k = 12`, then `UnsupportedError(engine, 'non_passive_ports', device, kind)` naming the controlled source and its device kind
+- [ ] 5.2 Non-passive (including the passive-but-non-reciprocal gyrator and ideal transformer, which keep Lemke but report non-unique voltages): Lemke, then enumeration to `k = 12` (no solution → typed error; several → fewest flips, counted), then `UnsupportedError(engine, 'non_passive_ports', device, kind)` naming the controlled source and its device kind
 - [ ] 5.3 No consistent mode on a passive circuit (secondary ray) → typed error naming the diodes and `t`; test with a current source forced into two blocking diodes
 
 ## 6. Opt-in `mode_selection='lcp'`
 - [ ] 6.1 `dsed`: settle replaced by the selector; the chatter guard stays as an assertion that never fires
 - [ ] 6.2 Tests on `dsed` (resistor pair, `V_th = 0`): buck at rest runs and stays at 0; DCM buck 4000 periods runs; boost `R = 50` and `500` with `V_th = 0` run; L·(1 ± δ), δ ∈ {1e-5, 1e-4, 1e-2}, all six complete; single- and three-phase bridges with `V_th = 0` run
 - [ ] 6.3 Fixed engine and TR-BDF2 with `mode_selection='lcp'`; the same tests; mask-cycle and round caps unused (counter 0)
-- [ ] 6.4 Hysteresis (D8): DCM buck with `V_th = 0.5 V`, `V_f = 0`: the diode turns on at `v = 0.5 V` (located within the event tolerance) and off at `i = 0`; result equals today's within 1e-9 where today runs
+- [ ] 6.4 Hysteresis end to end: the half-wave rectifier with `V_th = 0.5 V` on every engine; the banded DCM buck (`V_th = 1e-2`) equals today's run within 1e-9
 - [ ] 6.5 Ideal elements (with `add-branch-form-ideal-switch` task 3): the prototype oracles on `dsed` — DCM buck `v_C` within 1e-9 V of 8.9963970815477 V and turn-off within 1e-11·T; boost CCM within 1e-9 V; bridge event times within 1e-12 s of the closed form; inrush record 14.758493 J within 1e-9 relative
 
 ## 7. Gauge islands

@@ -182,8 +182,11 @@ What changes in this change's plan:
   `'trbdf2'`; `'dsed'` and the hidden legacy names keep working for a
   legacy period with a deprecation warning.
 - `RestartPolicy::Cda` (the backward-Euler pair) is superseded by
-  `RestartPolicy::Sdirk22x3`; this supersedes the row "`Cda` —
-  `add-discontinuity-restart-rule`" of D4.
+  `RestartPolicy::Sdirk22x3`, the restart rule of three consecutive
+  Alexander SDIRK(2,2) steps; this supersedes the row "`Cda` —
+  `add-discontinuity-restart-rule`" of D4, D2's backward-Euler restart
+  paragraph and the spec scenario "Restart half-steps reuse the
+  nominal factor", which remain only as the legacy policy.
 
 The equality proofs of D7 (bit-identical fixed engine, step-identical
 variable-step engine) are unchanged: they are proved with the legacy

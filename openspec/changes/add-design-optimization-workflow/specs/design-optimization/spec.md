@@ -12,12 +12,13 @@ time-weighted integrals, the constraint violations, the solver and
 route counters, and the provenance (version, build hash, options).
 
 #### Scenario: Buck KPIs against a reference
-- **GIVEN** a buck with ideal switches and a 10 mΩ inductor resistance
-  as its only loss
+- **GIVEN** a CCM buck with resistor-pair switches (`g_on = 1e3`,
+  `g_off = 1e-9`) and a 10 mΩ inductor resistance, evaluated with
+  `engine='dsed'` and `method='pss'`
 - **WHEN** it is evaluated
 - **THEN** the status is `ok` and efficiency, loss and output ripple
-  agree with a matrix-exponential reference of the periodic orbit
-  within 1e-9 relative
+  agree with a matrix-exponential reference of the same periodic orbit
+  within 1e-8 relative
 
 ### Requirement: Deterministic And Thread-Safe Evaluation
 
@@ -48,7 +49,7 @@ evaluations are refused with identical fields.
 
 #### Scenario: Refusal recorded
 - **GIVEN** a design whose circuit contains Shockley diodes, evaluated
-  with `engine='exact'`
+  with `engine='dsed'` (refused by today's capability table)
 - **WHEN** it is evaluated
 - **THEN** the record has status `refused`, the four refusal fields,
   and no KPIs

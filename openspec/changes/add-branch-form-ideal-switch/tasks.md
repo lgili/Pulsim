@@ -34,7 +34,7 @@ Reference values.
 
 ## 4. API, structural checks, first slice
 - [ ] 4.1 `add_ideal_switch`, `add_diode(form='branch')`, YAML `form: branch`, `components()` fields, stubs
-- [ ] 4.2 Per-mode structural pass (D3): islands bounded by OFF diodes marked as gauge; islands bounded only by open gated switches → `UnsupportedError(engine, 'floating_node', switch, 'switch')`; loops of closed ideal switches and voltage sources → `UnsupportedError(engine, 'ideal_voltage_loop', switch, 'switch')`; capacitors for the transient matrix, not for DC
+- [ ] 4.2 Per-mode structural pass (D3): islands bounded by OFF diodes marked as gauge; islands bounded only by open gated switches → `UnsupportedError(engine, 'floating_node', switch, 'Switch')`; loops of closed ideal switches and voltage sources → `UnsupportedError(engine, 'ideal_voltage_loop', switch, 'Switch')`; capacitors for the transient matrix, not for DC
 - [ ] 4.3 Capability-table row for the branch form; `g_off = 0` and `R_on = 0` across a capacitor refused on the implicit strategies with `feature = 'dependent_states'` until group 5
 - [ ] 4.4 Tests (`R_on = 0`, `g_off = 1e-9`): RL current 9.99954600 A at 10 ms within 1e-6 on `trbdf2` (rtol 1e-9) and, on the fixed engine at `h = τ/80`, max error at most 2e-3 A (prototype 1.51e-3); two open ideal switches in series with nothing between them raise `floating_node` naming the node and both switches; two closed ideal switches in parallel across a source raise `ideal_voltage_loop`; each check runs once per mode (5 runs for a converter visiting 5 modes)
 
@@ -43,7 +43,7 @@ Reference values.
 - [ ] 5.2 Enable `g_off = 0` and `R_on = 0` across capacitors on `pwl` and `trbdf2`
 - [ ] 5.3 Tests, inductor cut-set at `h = τ/20` on `pwl`: `i_L = 0` exactly from the first step after the event; the node-voltage samples are 0 within 1e-9 V from the second step on (no ±397 V ringing); the SDIRK quadrature of the node voltage over the first step equals `−L·i_L(t⁻)` within 1e-12 relative; the record reports `½·L·i_L(t⁻)²` within 1e-9 relative (49.3120 mJ at this step); `on_impulse='error'` raises naming the switch and the inductor
 - [ ] 5.4 Tests, capacitor loop: both capacitors at 4.000000 V within 1e-12; record 6.0 µC and 24.0 µJ within 1e-9 relative; switch current below 1e-9 A from the second step after the event
-- [ ] 5.5 Same two tests on `trbdf2`, and the explicit projection equals the restart's end state within the engine tolerance
+- [ ] 5.5 Same two tests on `trbdf2` (SDIRK×3 after these impulsive events, not the TR stage), and the explicit projection equals the restart's end state within the engine tolerance
 - [ ] 5.6 Test: a consistent commutation (diode off at `i = 0` in DCM) produces no record
 
 ## 6. Branch-form diode with complementarity, outputs, losses (needs `add-complementarity-mode-selection` groups 2–6)

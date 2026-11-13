@@ -39,8 +39,9 @@ ground that is bounded only by open gated switches SHALL raise
 `pulsim.UnsupportedError` with `feature = 'floating_node'`, and a loop
 of closed ideal switches and voltage sources SHALL raise it with
 `feature = 'ideal_voltage_loop'`, each naming the mode, the nodes and
-the switches. A node set bounded by at least one OFF diode SHALL be
-treated as a gauge and listed in `result.diagnostics['gauge_nodes']`.
+the switches. A node set bounded by at least one OFF diode with
+`g_off = 0` SHALL be treated as a gauge and listed in
+`result.diagnostics['gauge_nodes']`.
 The check SHALL run once per mode and be cached with its segment.
 
 #### Scenario: Floating node

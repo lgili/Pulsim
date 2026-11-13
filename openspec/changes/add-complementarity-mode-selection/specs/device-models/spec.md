@@ -20,7 +20,8 @@ legacy period.
   `g_off·v` = 1.7e-9 A
 
 #### Scenario: Hysteresis threshold kept
-- **GIVEN** the DCM buck with a diode of `V_f = 0`, `V_th = 0.5 V`
-- **WHEN** the switch turns off
-- **THEN** the diode turns on when its voltage reaches 0.5 V and off
-  when its current reaches 0
+- **GIVEN** a half-wave rectifier: 100 V, 50 Hz sine, one diode with
+  `V_f = 0`, `V_th = 0.5 V`, `R_on = 0`, `g_off = 0`, and 10 Ω
+- **WHEN** it is simulated for one period
+- **THEN** the diode turns on at `t = asin(0.005)/ω` (15.9155 µs) and
+  off at `t = T/2` within the event tolerance

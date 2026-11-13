@@ -100,8 +100,8 @@ second pass finds loops of closed ideal switches and voltage sources.
 | Finding | Result |
 |---|---|
 | island whose boundary contains an OFF diode | gauge (`add-complementarity-mode-selection` D10): the potential is reported at the centre of the interval the diodes allow, the nodes are listed in `diagnostics['gauge_nodes']` |
-| island bounded only by open gated switches | `UnsupportedError(engine, 'floating_node', switch, 'switch')`, naming the mode, the nodes, every switch on the boundary and the two remedies (`g_off > 0` on one of them, or a component to ground) |
-| loop of closed ideal switches (`R_on = 0`) and voltage sources | `UnsupportedError(engine, 'ideal_voltage_loop', switch, 'switch')`, naming the switches and sources and the remedy (`R_on > 0`); a shoot-through gate pattern is the usual cause |
+| island bounded only by open gated switches | `UnsupportedError(engine, 'floating_node', switch, 'Switch')`, naming the mode, the nodes, every switch on the boundary and the two remedies (`g_off > 0` on one of them, or a component to ground) |
+| loop of closed ideal switches (`R_on = 0`) and voltage sources | `UnsupportedError(engine, 'ideal_voltage_loop', switch, 'Switch')`, naming the switches and sources and the remedy (`R_on > 0`); a shoot-through gate pattern is the usual cause |
 | loop of capacitors closed by ideal switches | legal: dependent states, D4 |
 | cut-set of inductors opened by ideal switches | legal: dependent states, D4 |
 
@@ -154,7 +154,11 @@ stops at `i = 0` in DCM) produces no record.
 - *Implicit strategies* (fixed trapezoid, TR-BDF2): the MNA dimension
   never changes (D1 keeps the pattern). The projection is realised by
   the restart rule: three consecutive Alexander SDIRK(2,2) steps
-  (`γ = 1 − 1/√2`) after the event, then the trapezoidal rule. The
+  (`γ = 1 − 1/√2`) after the event, then the strategy's own method. On
+  TR-BDF2 this applies to events with dependent states (an impulse):
+  its first stage is a trapezoid, which rings on the algebraic unknown
+  (7.0e10 V measured, proposal); after other events TR-BDF2 keeps the
+  restart of `update-trbdf2-post-event-restart`. The
   stage matrix `E/(γh) − J` is the trapezoidal matrix at
   `dt_eq = 2γh`, so the factor cache serves it. Measured
   (`probes/sdirk_restart_ideal.out`): the flux removed in the cut-set
@@ -223,14 +227,14 @@ reproduced by the branch form with the same values.
 |---|---|---|---|
 | Exact propagator (`dsed`, `engine='auto'` exact route) | supported (task 8) | reduced per mode, explicit projection | none needed (exact flow) |
 | Fixed trapezoid (`pwl`) | supported | full MNA, fixed | SDIRK(2,2) × 3 |
-| TR-BDF2 | supported | full MNA, fixed | post-event restart (`update-trbdf2-post-event-restart`) |
+| TR-BDF2 | supported | full MNA, fixed | SDIRK(2,2) × 3 after an event with dependent states; otherwise the post-event restart of `update-trbdf2-post-event-restart` |
 | DC operating point, AC sweep | supported (same stamp) | — | — |
 | Newton segments with nonlinear devices | supported (the switch is linear) | full MNA | as the implicit strategy |
 
 Before task 5 lands (the restart on the implicit strategies), the
 capability table refuses `g_off = 0` and `R_on = 0` across a capacitor
 on the implicit strategies with `UnsupportedError(engine,
-'dependent_states', switch, 'switch')`.
+'dependent_states', switch, 'Switch')`.
 
 ### D8. Losses
 
@@ -263,7 +267,8 @@ today's numbers states the values (task 3.4 shows the agreement).
 With the complementarity service the ideal switch needs no band and no
 leak to run (prototype: every family runs with `R_on = 0`, `g_off = 0`,
 `V_th = 0`), the exact route gets smaller, non-stiff modes, and ports
-from PSIM and PLECS agree with their reference. The price is new
+from PSIM and PLECS meet the same ideal model as their reference (that
+those tools use ideal switches is general knowledge, not measured). The price is new
 refusals on circuits that relied on the leak for a path (D3) and one
 more unknown per switch on the implicit route (D7). Both are measured
 before the flip (tasks 7 and 9.1): every example, tutorial and test

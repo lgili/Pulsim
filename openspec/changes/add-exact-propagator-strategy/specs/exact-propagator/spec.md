@@ -249,7 +249,7 @@ an exact source class, the mode's extraction succeeds and the scaling
 rule finds an exact kernel; otherwise it SHALL take the segment with
 the implicit strategy and record the reason. With an explicit
 `engine='exact'` (alias `'dsed'`) a non-eligible segment SHALL raise
-`pulsim.UnsupportedError` naming the failed rule unless
+`pulsim.UnsupportedError` naming the failed rule in `feature` unless
 `allow_implicit_segments=True`.
 
 #### Scenario: Converters routed exact
@@ -270,8 +270,9 @@ the implicit strategy and record the reason. With an explicit
 
 The kernel SHALL classify segments as exact or implicit at events
 only, SHALL keep an implicit segment until the next event, SHALL start
-every implicit segment with the restart rule of three consecutive
-Alexander SDIRK(2,2) steps, SHALL apply the re-initialisation service
+every implicit segment with its strategy's post-event restart (the
+restart rule of three consecutive Alexander SDIRK(2,2) steps on the
+fixed trapezoid, and after any event with dependent states), SHALL apply the re-initialisation service
 on entry to an exact segment whose mode has dependent states, and
 SHALL report `n_exact_segments`, `n_implicit_segments`,
 `t_exact_fraction` and every hand-over with its time, device and
