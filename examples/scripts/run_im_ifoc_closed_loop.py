@@ -54,8 +54,14 @@ What you should see
 * At handoff (t ≈ 300 ms): smooth (no glitch) transition; PI integrators
   take over.
 * In IFOC phase: i_d tracks ~i_d_ref (sets rotor flux); i_q produces real
-  torque (~Lm²/Lr · i_d_ref · i_q_ref); ω_m continues to accelerate
-  toward synchronous because T_load = 0.
+  torque (~Lm²/Lr · i_d_ref · i_q_ref); ω_m accelerates toward
+  T_em / B (B = 0.1 Nm·s/rad, mechanical time constant J/B ≈ 0.8 s).
+
+Known limitation: pulsim's induction-motor observer integrates the
+rotor flux by forward Euler, which inflates |ψ_r| and T_em by an error
+first order in dt. Measured here: T_em = 12.9 / 12.2 / 11.9 / 11.7 Nm
+at dt = 50 / 25 / 12.5 / 6.25 µs, converging on the textbook 11.6 Nm
+(see KNOWN_LIMITATIONS).
 """
 
 from __future__ import annotations
@@ -90,7 +96,11 @@ HANDOFF_TIME = T_BOOTSTRAP + T_HANDOFF_HOLD
 
 # ---------- IFOC PI tuning (sized from plant) ------------------------------
 
-OMEGA_CL = 2.0 * math.pi * 20.0   # closed-loop bandwidth 20 Hz (conservative)
+# Current-loop bandwidth 100 Hz. At 20 Hz the loop is too slow for the
+# stator/rotor-flux coupling (at low frequency the d axis looks like L_s,
+# not σ·L_s): i_q swung 0.7–15 A at ~11 Hz and grew. 100 Hz is still
+# 1/200 of the 20 kHz update rate.
+OMEGA_CL = 2.0 * math.pi * 100.0
 
 # ---------- Simulation -----------------------------------------------------
 
@@ -278,9 +288,12 @@ def main():
             v_a = v_alpha
             v_b = -0.5 * v_alpha + (sqrt3 / 2.0) * v_beta
             v_c = -0.5 * v_alpha - (sqrt3 / 2.0) * v_beta
-        out[src_a_idx] += v_a
-        out[src_b_idx] += v_b
-        out[src_c_idx] += v_c
+        # A voltage source's b_extra row carries -V (the convention of
+        # builder.compute_time_varying_b_extra): `+= v` applied -v, which
+        # V/f tolerates (a 180° shift) but which inverts the current loop.
+        out[src_a_idx] -= v_a
+        out[src_b_idx] -= v_b
+        out[src_c_idx] -= v_c
         return out
 
     print("  IM IFOC indirect closed-loop (V/f bootstrap → IFOC handoff):")
@@ -324,6 +337,8 @@ def main():
     expected_torque = 1.5 * PP * (L_m * L_m / kw["L_r"]) * I_D_REF * I_Q_REF
     print(f"    Expected T = {expected_torque:+.3f} Nm "
           f"(= 1.5·pp·(Lm²/Lr)·i_d_ref·i_q_ref)")
+    print("    NOTE: T_em and |ψ_r| read high — the IM observer's forward-Euler"
+          " rotor flux is first order in dt (12.9/12.2/11.9/11.7 Nm at dt=50/25/12.5/6.25 µs)")
     print(f"    ω_sync     = {diag['omega_sync_rad_s']:.2f} rad/s")
     print(f"    steps      = {res.num_steps():,}")
 

@@ -60,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         m.set(0, bool((t % T_SW) < 0.5 * T_SW))
         return m
 
-    # Long enough to settle the slow Foster pole.
+    # 50 ms: settles the 2 ms stage, but only 0.6 τ of the 80 ms one —
+    # T_j is still rising at the end (compared with Z_th(t_end) below).
     N_PERIODS = 1_000
     res = p.simulate(b, t_end=N_PERIODS * T_SW, dt=T_SW / 50,
                        switch_fn=pwm)
@@ -90,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{e['name']:<8} {e['kind']:<10} "
               f"{e['P_avg']:>8.3f} W  {P_sw:>8.3f} W  "
               f"{duty:>6.3f}")
+    # Exact: R_line 1129.3 W, M1 P_cond 11.293 W (I = 48/1.01 A, D = 0.5).
+    print("NOTE: R_line reads ~1.3 % low — resistor losses join each PWM "
+          "edge with a one-step ramp (first order in dt; see KNOWN_LIMITATIONS)")
 
     # ------------------------------------------------------------
     # 4. Thermal pipeline — Foster Z_th(t) → T_j(t).
@@ -119,11 +123,16 @@ def main(argv: list[str] | None = None) -> int:
               f"{e['T_j_avg']:>7.2f} °C  "
               f"{e['T_j_peak']:>8.2f} °C")
 
-    # Sanity: T_j_steady_state asymptote = T_amb + P_total · R_th.
+    # Sanity: constant-power Foster response at t_end,
+    # T_amb + P · Σ R_i (1 − e^(−t/τ_i)); the asymptote is P · R_th.
     e = therm[0]
+    t_end = N_PERIODS * T_SW
+    T_end = e["T_ambient_C"] + e["P_total_avg"] * sum(
+        st.R_th_K_per_W * (1 - np.exp(-t_end / st.tau_s)) for st in foster)
     T_inf = e["T_ambient_C"] + e["P_total_avg"] * e["R_th_total"]
-    print(f"\nExpected steady-state asymptote: {T_inf:.2f} °C "
-          f"(actual T_j_peak: {e['T_j_peak']:.2f} °C)")
+    print(f"\nExpected T_j at t_end: {T_end:.2f} °C "
+          f"(actual T_j_peak: {e['T_j_peak']:.2f} °C); "
+          f"steady-state asymptote {T_inf:.2f} °C")
 
     # ------------------------------------------------------------
     # 5. Optional plot.

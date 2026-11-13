@@ -7,12 +7,11 @@
 
 Speed setpoint → PI(ω) → duty → PWM → switch on/off the HS leg.
 
-The motor (`p.add_dc_motor`) carries the mechanical state (J, B,
-T_load, ω, θ). At each sim step the observer:
-  1. Reads i_armature from the kernel state vector.
-  2. Computes T_em = Kt · i_armature.
-  3. Integrates ω forward by dt with J·dω/dt = T_em − T_load − B·ω.
-  4. Sets the back-EMF source value to Ke · ω for the next step.
+The motor (`CircuitBuilder.add_dc_machine`) is solved inside the
+matrix: armature R_a + L_a + back-EMF K·ω, and the shaft
+J·dω/dt = K·i − B·ω − T_load as an analogue node whose voltage is ω
+[rad/s]. (The retired `add_dc_motor` observer integrated ω by forward
+Euler outside the matrix and is deprecated.)
 
 Plant parameters (small geared DC motor):
   R_a = 1 Ω         L_a = 5 mH
@@ -20,7 +19,11 @@ Plant parameters (small geared DC motor):
   J = 1e-4 kg·m²    B = 1e-5 Nm·s/rad
   Load: constant 0.1 Nm
 
-Target: ramp speed from 0 → 100 rad/s in ~0.5 s with overshoot < 5 %.
+What it does (measured): the duty saturates at 0.95 and ω reaches the
+100 rad/s setpoint in ~15 ms, overshoots ~20 % (peak 120 rad/s at
+~21 ms), and is within ±2 % by ~40 ms; steady state ω = 100.00 rad/s,
+i_a = (T_load + B·ω)/K = 2.02 A. (The old text promised a ~0.5 s ramp
+with < 5 % overshoot; these gains do not do that.)
 """
 
 from __future__ import annotations
@@ -64,18 +67,16 @@ def build_plant() -> p.CircuitBuilder:
     # Freewheel diode for the inductive armature.
     b.add_diode("D_FW", "gnd", "leg",
                   g_on=1e3, g_off=1e-9, V_th=0.7)
-    # Motor armature between `leg` and `gnd`.
-    motor = p.add_dc_motor(
-        b, name="M",
-        armature_pos="leg", armature_neg="gnd",
-        R_a=R_A, L_a=L_A, Ke=KE,
-        J=J_MOT, B=B_MOT, T_load=T_LOAD,
-    )
-    return b, motor
+    # Motor armature between `leg` and `gnd`; speed on node "omega".
+    b.add_dc_machine("M", "leg", "gnd", "omega",
+                     R_a=R_A, L_a=L_A, K=KE,
+                     J=J_MOT, B=B_MOT, T_load=T_LOAD)
+    return b
 
 
 def main() -> None:
-    b, motor = build_plant()
+    b = build_plant()
+    omega_idx = b.node_id_of("omega")
     num_switches = b.graph.num_switches
     print(f"  state_size: {b.pool.state_size(b.graph)}, "
           f"switches: {num_switches}")
@@ -102,16 +103,9 @@ def main() -> None:
         output="gate",
     )
 
-    # Motor observer: integrates mechanical + sets back-EMF + also
-    # writes the live ω onto the chain so the PI can read it.
-    motor_obs, motor_b_extra = p.make_dc_motor_observer(
-        b, motor, dt=DT)
-
     def combined_observer(t, x):
-        # Run motor mechanical update first.
-        motor_obs(t, x)
-        # Expose ω to the chain via a channel.
-        chain.channels["omega"] = motor.mech.omega_rad_s
+        # Expose the solved ω (node voltage) to the chain via a channel.
+        chain.channels["omega"] = float(x[omega_idx])
         chain.update(t, x)
 
     chain.bind(b); chain._dt = DT
@@ -125,39 +119,28 @@ def main() -> None:
         b, t_end=T_END, dt=DT,
         switch_fn=switch_fn,
         step_observer=combined_observer,
-        b_extra_fn=motor_b_extra,
         max_event_iterations=8,
         progress=10,
     )
 
     times = np.asarray(res.times)
-    i_arm = res.i("M_L")
+    i_arm = res.i("M.la")
+    omega_trace = res.v("omega")
     v_leg = res.v("leg")
-
-    # Reconstruct ω(t) by re-running motor.mech in a clean pass.
-    # (The original `motor` object holds only the FINAL state.)
-    mech_replay = p.Mechanical(
-        J_kgm2=J_MOT, B_Nms_per_rad=B_MOT, T_load_Nm=T_LOAD)
-    omega_trace = np.zeros_like(times)
-    for k in range(len(times)):
-        omega_trace[k] = mech_replay.omega_rad_s
-        T_em = KE * i_arm[k]   # Kt = Ke
-        mech_replay.integrate(times[k], T_em, DT)
 
     # KPI
     # Window means are time-weighted (p.time_average): correct on any
     # grid, unlike a plain mean over the samples of a variable-step run.
     t_ss = T_END - 0.2
-    print(f"\n  KPI (last 200 ms):")
+    print("\n  KPI (last 200 ms):")
     print(f"    ω mean        = {p.time_average(times, omega_trace, t_from=t_ss):.2f} rad/s  "
           f"(target {OMEGA_REF})")
     print(f"    ω peak (overshoot) = {omega_trace.max():.2f} rad/s "
           f"({100*(omega_trace.max()/OMEGA_REF-1):+.1f} %)")
     print(f"    i_armature mean = {p.time_average(times, i_arm, t_from=t_ss):.3f} A")
-    print(f"    Final mechanical ω = "
-          f"{motor.mech.omega_rad_s:.2f} rad/s")
-    print(f"    Final θ = {motor.mech.theta_rad:.2f} rad "
-          f"({motor.mech.theta_rad/(2*math.pi):.2f} revolutions)")
+    theta = float(np.trapezoid(omega_trace, times))
+    print(f"    Final ω = {omega_trace[-1]:.2f} rad/s")
+    print(f"    Final θ = {theta:.2f} rad ({theta/(2*math.pi):.2f} revolutions)")
 
     # Plot
     try:

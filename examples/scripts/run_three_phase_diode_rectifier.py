@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""3-phase 6-pulse diode bridge rectifier — 100 V phase peak → ~232 V DC.
+"""3-phase 6-pulse diode bridge rectifier — 100 V phase peak → ~171 V DC.
 
 Three V11 SineVoltageSource (120° apart at 50 Hz) feed a 6-diode
 full-bridge that produces a 300 Hz-ripple DC output through a
 C-R filter.
 
-Analytical V_dc = (3·√6/π) · V_peak ≈ 2.34 · 100 ≈ 234 V (minus
-~1.4 V for two diode drops at any time, so ~232 V real).
+With C_out = 1 mF the bridge peak-charges: V_dc sits just below the
+line-to-line peak √3 · 100 = 173.2 V, less about half the 300 Hz
+ripple (≤ I_dc / (6·f·C) = 5.7 V pp), i.e. ~171 V. (2.34 · V_rms =
+165.4 V is the unfiltered average; the diodes here are ideal.)
 """
 
 from __future__ import annotations
@@ -81,7 +83,9 @@ def main() -> None:
     # the variable-step one simulate() uses when no dt is given -- a plain
     # mean over the samples is not.
     v_dc_mean = p.steady_state_stats(res, v_dc, last=0.3 * (t_end - t_start)).mean
-    print(f"  V_dc mean ≈ {v_dc_mean:.1f} V (target ≈ 232 V)")
+    ss = p.steady_state_stats(res, v_dc, last=0.3 * (t_end - t_start))
+    print(f"  V_dc mean ≈ {v_dc_mean:.1f} V (line-line peak 173.2 V; "
+          f"ripple {ss.ripple_pp:.1f} V pp)")
 
     try:
         import matplotlib.pyplot as plt

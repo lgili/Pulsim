@@ -13,6 +13,12 @@ measure the AC amplitude, and compare:
 If (1)==(2)==(3) but ≠ (4), the plant response really is bigger
 than analytical predicts → averaged-model error.
 If (1)==(2) but (3) ≠ them → DFT bug.
+
+Outcome on this tree: the +10 dB offset is gone. The DFT phasor reads
+0.954× the textbook ε·V_in·|H| (−0.41 dB) because the gate edge is
+quantised to dt (ε·T_PWM/dt = 4 levels); with the duty actually
+applied the prediction matches to ~0.1 %. (peak-to-peak/2 includes
+the quantisation steps and is not a sine amplitude.)
 """
 
 from __future__ import annotations
@@ -80,7 +86,7 @@ def main() -> None:
             m.set(0, True)
         return m
 
-    print(f"Buck Bode debug:")
+    print("Buck Bode debug:")
     print(f"  V_in = {V_IN}V, D_op = {D_OP}, ε = {EPS_DUTY}")
     print(f"  f_test = {F_TEST} Hz  (T = {T_TEST*1e3:.1f} ms)")
     print(f"  t_end = {T_END*1e3:.1f} ms, dt = {DT*1e9:.0f} ns")
@@ -142,6 +148,16 @@ def main() -> None:
                     + (L_VAL / R_LOAD) * (1j*omega) + 1.0)
     amp_analytical = EPS_DUTY * V_IN * abs(H_LC)
 
+    # The gate edge falls on the dt grid, so the applied duty is the latched
+    # sine rounded up to whole dt slots: ε·T_PWM/dt = 4 levels here, whose
+    # fundamental is only ~0.954·ε. Predict with the duty actually applied.
+    n_cyc = np.arange(int(round(T_SETTLE / T_PWM)), int(round(T_END / T_PWM)))
+    t_cyc = n_cyc * T_PWM
+    d_cyc = D_OP + EPS_DUTY * np.sin(2 * math.pi * F_TEST * t_cyc)
+    d_applied = np.ceil(d_cyc * samples_per_pwm - 1e-9) / samples_per_pwm
+    eps_applied = 2 * abs(np.mean(d_applied * np.exp(-1j * omega * t_cyc)))
+    amp_quantised = eps_applied * V_IN * abs(H_LC)
+
     print(f"\nMeasured V_out AC amplitude at f={F_TEST} Hz:")
     print(f"  peak-to-peak/2 (cycle-avg):    {amp_pp:.5f} V")
     print(f"  RMS √2 (cycle-avg):            {amp_rms:.5f} V")
@@ -155,6 +171,10 @@ def main() -> None:
     # DC level time-weighted on the raw trace (p.time_average). The block
     # averaging and DC removal above are sample-count based and assume this
     # script's fixed dt; they are signal processing, not a steady-state figure.
+    print(f"  applied duty fundamental:      {eps_applied:.5f} "
+          f"(= {eps_applied/EPS_DUTY:.3f}·ε, dt-grid quantisation)")
+    print(f"  ANALYTICAL with applied duty:  {amp_quantised:.5f} V  "
+          f"(ratio {amp_phasor/amp_quantised:.3f}x)")
     print(f"  V_out DC:                      {p.time_average(t_w, v_w):.3f} V "
           f"(target D·V_in = {D_OP*V_IN:.1f})")
 

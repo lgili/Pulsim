@@ -27,6 +27,10 @@ circuit:
     - {type: resistor, name: Rs, from: a, to: n1, R: 1.0}
 
     # Ferrite-N87 core, 100 turns, 50 mm path, 1 cm² cross-section.
+# NOTE: 50 V / 50 Hz needs a peak flux density V/(ω·N·A) ≈ 16 T, ~30×
+# what this core can carry, so the core is saturated nearly all cycle
+# and the current is set by Rs (peak ≈ 50 V / 1 Ω = 50 A; B peaks
+# ≈ 0.63 T). It exercises the device, not a realistic operating point.
     # L_0 = N²·A·μ_0/l_m = 100²·1e-4·1.26e-6/0.05 ≈ 25.2 µH.
     - type: hysteretic_inductor
       name: L_core

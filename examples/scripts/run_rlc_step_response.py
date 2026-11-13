@@ -87,10 +87,15 @@ def main() -> None:
 
     # Quick steady-state check via the v1.5 named accessor.
     v_c = res.v("vc")
-    # Time-weighted mean over the last 10 % of the run (correct on any grid).
-    v_c_final = p.steady_state_stats(res, "vc", last=0.1 * (t_end - t_start)).mean
-    print(f"  V_C (last 10% mean) = {v_c_final:.3f} V "
-          f"(target 10.000 V)")
+    # Analytic underdamped step response (the ring decays with
+    # τ = 2L/R = 2 ms, so 3 ms does not reach the 10 V final value).
+    t = np.asarray(res.times) - 1.0e-4
+    zeta, wn = 0.05, 1.0e4
+    wd = wn * np.sqrt(1.0 - zeta**2)
+    v_an = np.where(t > 0, 10.0 * (1.0 - np.exp(-zeta * wn * t) * (
+        np.cos(wd * t) + zeta / np.sqrt(1.0 - zeta**2) * np.sin(wd * t))), 0.0)
+    print(f"  max |V_C - analytic| = {np.max(np.abs(v_c - v_an)) * 1e3:.1f} mV "
+          f"(of a 10 V step)")
     overshoot = v_c.max() - 10.0
     print(f"  V_C peak overshoot   = {overshoot:.3f} V "
           f"(analytical ≈ 8.5 V)")

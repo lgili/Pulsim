@@ -91,7 +91,12 @@ def main(argv: list[str] | None = None) -> int:
     F_SW = 100_000.0           # 100 kHz buck
     T_SW = 1.0 / F_SW
     V_REF = 12.0
-    KP, KI = 0.02, 200.0
+    # Plant G_vd = V_in/(LCs² + (L/R)s + 1): f0 = 1.59 kHz, Q = 4.
+    # Integral-dominant PI, crossover ω_c = KI·V_in ≈ 2π·100 Hz; the
+    # loop gain at the resonance peak, (KI/ω0 + KP)·V_in·Q ≈ 0.4, keeps
+    # ~8 dB margin. The old KP=0.02, KI=200 had |L(jω0)| ≈ 4.8 and
+    # limit-cycled at ~5 V pp around 12 V.
+    KP, KI = 0.001, 13.0
 
     # Mutable closure state.
     duty_state = [0.0]
@@ -122,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     # --------------------------------------------------------------
     # 4. Run + timing.
     # --------------------------------------------------------------
-    T_END = 2e-3
+    # The PI (crossover ~100 Hz) needs ~10 ms to settle.
+    T_END = 15e-3
     t0 = time.perf_counter()
     res = p.simulate(b, t_end=T_END, dt=DT,
                        switch_fn=switch_fn,
@@ -130,11 +136,16 @@ def main(argv: list[str] | None = None) -> int:
     dt_sim = time.perf_counter() - t0
     print(f"simulated {T_END*1e3:.1f} ms in {dt_sim:.2f} s "
             f"({res.num_steps()} samples)")
-    print(f"final v_out = "
-            f"{float(res.states[-1][vout_idx]):.3f} V "
-            f"(ref = {V_REF:.1f} V)")
-    print(f"final duty  = {duty_state[0]:.3f} "
-            f"(D_steady_state ≈ {V_REF/V_IN:.3f})")
+    # Settled window: the last 2 ms, time-weighted.
+    t_from = T_END - 2e-3
+    v_late = p.time_average(res.times, res.v("vout"), t_from=t_from)
+    d_late = float(np.mean([d for tt, d in zip(t_log, duty_log)
+                            if tt >= t_from]))   # one sample per PWM period
+    v_pp = float(np.ptp(res.v("vout")[np.asarray(res.times) >= t_from]))
+    print(f"v_out (last 2 ms) = {v_late:.3f} V (ref = {V_REF:.1f} V), "
+          f"{v_pp:.3f} V pp")
+    print(f"duty  (last 2 ms) = {d_late:.3f} "
+            f"(ideal V_REF/V_IN = {V_REF/V_IN:.3f})")
     print(f"PI integrator state = {pi_state[0]:.3f}")
 
     # --------------------------------------------------------------

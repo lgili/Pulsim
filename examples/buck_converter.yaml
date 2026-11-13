@@ -1,4 +1,8 @@
-# Pulsim v2 example: 48 V → buck → ~24 V (open-loop, 50% duty).
+# Pulsim v2 example: 48 V → buck → ~25.9 V (open-loop, 50% duty).
+# 100 µH is below L_crit = (1−D)·R/(2·f) = 125 µH at 20 kHz / 10 Ω, so
+# the buck runs in DCM: M = 2/(1+√(1+4K/D²)), K = 2L/(R·T) = 0.4 →
+# 25.8 V, not D·V_in = 24 V (measured 25.9 V, settled at 20 ms; the
+# 2 ms run below is still settling).
 #
 # Migrated from the legacy `schema: pulsim-v1` format. The old file
 # drove an ideal `vcswitch` from a `pulse` voltage source on a `ctrl`

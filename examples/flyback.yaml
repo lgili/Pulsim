@@ -1,6 +1,9 @@
 # Pulsim v2 example: isolated flyback converter
 # ---
-# 48 V → flyback → 12 V at 5 Ω load.
+# 48 V → flyback (2:1 turns: L_p/L_s = 4) → ~20 V at 5 Ω load,
+# 100 kHz / 50 % duty. Ideal CCM (k = 1) would give 24 V; the
+# leakage of k = 0.95 (~10 µH on the primary) is dumped into the RCD
+# clamp (~17 W), leaving 19.8 V (energy balance closes to 0.1 %).
 #
 # Topology:
 #   Vin → primary (T1: L_p=100µH, L_s=25µH, k=0.95)
@@ -9,7 +12,7 @@
 #   vout || Cout || R_L → secondary's ground reference
 #
 # The user supplies switch_fn(t) for Q1 (typical: 100 kHz
-# PWM with 50% duty cycle for a 24V output target).
+# PWM with 50% duty cycle).
 
 circuit:
   devices:
@@ -64,6 +67,27 @@ circuit:
       to: sec_neg
       R: 5.0
 
+    # RCD clamp: without it the leakage current has no path when Q1
+    # opens and the idealised switch node reaches ~26 kV.
+    - type: diode
+      name: D_cl
+      anode: sw
+      cathode: clamp
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    - type: capacitor
+      name: C_cl
+      from: clamp
+      to: vin
+      C: 1.0e-6
+
+    - type: resistor
+      name: R_cl
+      from: clamp
+      to: vin
+      R: 2.0e3
+
     # Tie secondary reference to primary ground via small
     # ohmic link (optical-isolation in a real circuit; for
     # the simulator this just provides a return path).
@@ -75,5 +99,5 @@ circuit:
 
 simulation:
   t_start: 0.0
-  t_end: 2.0e-4
+  t_end: 5.0e-3    # output settles in ~3 ms (R_L·Cout = 0.5 ms)
   dt: 1.0e-8

@@ -18,8 +18,16 @@ Stress points vs buck:
   - **Ramped gate drive** (PulseVoltageSource with rise_time) means
     the gate isn't really a single-bit switch — the duty is encoded
     in the pulse-width of a soft-edged source. We sweep that width.
-  - The setpoint step EXERCISES the RHPZ — V_out will undershoot
-    before climbing.
+  - The setpoint step exercises the RHPZ. With this deliberately slow
+    PI the duty moves gently, so the dip below the old setpoint is
+    small (measured ~0.05 V, below the duty-quantisation dither).
+
+The loop needs ~10 ms to settle from a cold start, so the step comes
+at 20 ms and both KPI windows sit in the last 5 ms before/after it.
+Gate edges land on the dt grid (one duty LSB = dt/T_PWM = 0.005, i.e.
+~0.3 V at 28 V): the PI dithers between two duty levels and excites
+the LC (~0.6 kHz), so V_out shows ~1.5 V pp at dt = 100 ns (0.6 V at
+25 ns). The window means are not affected (28.00 V at both dt).
 """
 
 from __future__ import annotations
@@ -37,11 +45,11 @@ import pulsim as p
 V_IN     = 12.0
 V_REF    = 20.0               # initial setpoint
 V_REF_2  = 28.0               # post-step setpoint (RHPZ stress)
-T_STEP   = 2.0e-3
+T_STEP   = 20.0e-3
 F_PWM    = 50e3               # 50 kHz (slower so we can resolve dynamics)
 T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7
-T_END    = 4.0e-3
+T_END    = 40.0e-3
 
 # Boost design point: V_in=12, V_out=20, D=0.4, L=100µH, C=100µF, R=20Ω.
 #   ω_RHPZ = R·(1-D)²/L = 20·0.36/100µH = 72000 rad/s ≈ 11 kHz
@@ -129,7 +137,7 @@ def main() -> None:
         lpf.update(input_value=float(x[vout_idx]), dt=DT)
         loop.step_observer(t, x)
 
-    print(f"\n  Closed-loop boost:")
+    print("\n  Closed-loop boost:")
     print(f"    PI(Kp={KP}, Ki={KI}), duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
     print(f"    setpoint {V_REF} V → {V_REF_2} V at t = {T_STEP*1e3:.1f} ms")
     res = p.simulate(
@@ -157,15 +165,15 @@ def main() -> None:
     # KPI
     # Time-weighted window means (p.time_average): correct on any grid,
     # unlike a plain mean over the samples of a variable-step run.
-    pre_step  = p.time_average(res.times, v_out_arr, 1.0e-3, T_STEP)
-    post_step = p.time_average(res.times, v_out_arr, t_from=3.5e-3)
+    pre_step  = p.time_average(res.times, v_out_arr, T_STEP - 5e-3, T_STEP)
+    post_step = p.time_average(res.times, v_out_arr, t_from=T_END - 5e-3)
     rhpz_dip = v_out_arr[(times >= T_STEP*1e3) & (times < T_STEP*1e3 + 0.5)].min()
-    print(f"\n  KPI:")
-    print(f"    V_out @ pre-step  (1–{T_STEP*1e3:.0f} ms):    mean={pre_step:.2f} V "
+    print("\n  KPI:")
+    print(f"    V_out @ pre-step  ({T_STEP*1e3-5:.0f}–{T_STEP*1e3:.0f} ms):  mean={pre_step:.2f} V "
           f"(target {V_REF:.1f})")
-    print(f"    V_out @ post-step (3.5–4 ms):  mean={post_step:.2f} V "
+    print(f"    V_out @ post-step ({T_END*1e3-5:.0f}–{T_END*1e3:.0f} ms):  mean={post_step:.2f} V "
           f"(target {V_REF_2:.1f})")
-    print(f"    RHPZ undershoot just after step: min = {rhpz_dip:.2f} V")
+    print(f"    min V_out in 0.5 ms after step: {rhpz_dip:.2f} V (RHPZ dip)")
 
     try:
         import matplotlib.pyplot as plt

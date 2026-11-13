@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Closed-loop buck — PI voltage regulation, load step, CCM↔DCM transition.
+"""Closed-loop buck — PI voltage regulation and a setpoint step.
 
 Pedagogical AND stress test:
 
@@ -9,24 +9,27 @@ Pedagogical AND stress test:
                                   │              │
                                   gnd ───────────┴── gnd
 
-The plant: 24 V → 12 V buck (D ≈ 0.5 at steady state, then jumps
-when the load changes). PI regulator runs in a `step_observer(t, x)`
-callback at every dt; its output is the duty command for the next
-PWM cycle. The PWM `switch_fn` reads the latest duty.
+The plant: 24 V → 12 V buck (D ≈ 0.5), 5 Ω load. A first-order
+low-pass on the feedback runs every dt; the PI runs once per PWM
+period (`bind_pi_to_switch`, ticks at k·T_PWM) and its output is the
+duty of the period that starts at that tick.
 
 Stress points for the kernel:
-  - **Duty varies every step** → each switch_fn(t) call may hit a
-    different cached PWL segment. Exercises cache lookup.
-  - **Load step at t = 1 ms** → R_load drops 10× → output sags →
-    PI ramps duty to recover. The transient inductor current spikes
-    and probably pushes the converter into DCM briefly (diode
-    starts skipping). Exercises event detection.
-  - **PI must integrate stably** across all this without windup.
+  - **Duty changes every period** → switch_fn(t) visits different
+    cached PWL segments. Exercises cache lookup.
+  - **Cold start from 0 V** → the duty saturates at 0.95 and V_out
+    overshoots to ~19 V before the loop pulls it back (anti-windup).
+  - **Setpoint step 12 → 14 V at t = 10 ms.**
 
-What to look for:
-  - V_out should track the setpoint (target 12 V).
-  - During the load step, V_out dips briefly then recovers.
-  - The duty cycle plot shows the PI tracking the disturbance.
+What to look for (checked by the KPI printout, time-weighted):
+  - V_out settles to 12.00 V before the step and 14.00 V after it,
+    within ±0.05 V. The loop needs ~5 ms to settle (crossover
+    391 Hz), so both windows sit at the end of a 10 ms interval:
+    an earlier version measured 0.5–1 ms into a cold start and
+    printed 16.47 V against its 12 V target.
+  - The ~0.2 V pp slow wander is the duty quantisation of a
+    fixed-step run: dt = T_PWM/100 gives duty steps of 0.01, i.e.
+    0.24 V, and the integrator hunts between two of them.
 """
 
 from __future__ import annotations
@@ -46,31 +49,27 @@ V_REF    = 12.0
 F_PWM    = 100e3              # 100 kHz switching
 T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7             # 100 ns step (1000 samples/PWM cycle)
-T_END    = 3.0e-3             # 3 ms total
-T_LOAD_STEP = 1.0e-3          # setpoint step at t = 1 ms (12 V → 14 V)
-R_LOAD_PRE  = 5.0
-R_LOAD_POST = 50.0
+T_END    = 20.0e-3            # 20 ms total
+T_STEP   = 10.0e-3            # setpoint step at t = 10 ms (12 V → 14 V)
+R_LOAD   = 5.0
 
-# Tuning analysis:
-#   LC resonance:  ω_LC = 1/√(100µ·47µ) ≈ 2.3 kHz
-#   ζ ≈ 0.15 (lightly damped, R_load = 5 Ω) → 7.5 dB resonance peak
-#   Plant DC gain (duty → V_out) ≈ V_in = 24
-#   Strategy: low-pass-filter the feedback at 500 Hz (τ = 320 µs) so
-#   the PI never sees the LC ring, then tune for crossover ≈ 300 Hz
-#   well below the LC resonance.
-#   With τ_LPF = 320 µs and Kp = 0.025, crossover ≈ 200 Hz, Ki = 200
-#   gives PI-zero at 8 kHz (well above LC — actually above crossover,
-#   so the integrator dominates the low-frequency phase).
+# Tuning analysis (averaged model, p.loop_gain-style, LPF included):
+#   LC resonance:  f_LC = 1/(2π√(100µ·47µ)) ≈ 2.32 kHz, Q = R·√(C/L)
+#   ≈ 3.4 at R_load = 5 Ω (+10.7 dB peak). Plant DC gain = V_in = 24.
+#   Strategy: low-pass the feedback (τ = 500 µs, 318 Hz) so the PI
+#   sees the LC peak attenuated, and cross over well below f_LC.
+#   L(s) = (Kp + Ki/s)·G_vd(s)/(1 + sτ): crossover 391 Hz, PM 54°
+#   (53° with a 10 µs sampling delay), GM 11.5 dB; PI zero at
+#   Ki/(2π·Kp) = 1.19 kHz.
 KP       = 0.020
 KI       = 150.0
-TAU_LPF  = 500.0e-6           # 320 Hz cutoff
+TAU_LPF  = 500.0e-6           # 318 Hz cutoff
 DUTY_MIN = 0.05
 DUTY_MAX = 0.95
 
 
 def build_plant() -> p.CircuitBuilder:
-    """Buck topology — same as the open-loop run_buck.py but with a
-    SwitchedDiode load resistor we can toggle for the load step."""
+    """Buck topology — the open-loop run_buck.py plant."""
     b = p.CircuitBuilder()
     b.add_voltage_source        ("Vin", "vin", "gnd", V_IN)
     b.add_mosfet_with_body_diode("Q1",  "vin", "sw",
@@ -81,13 +80,7 @@ def build_plant() -> p.CircuitBuilder:
     # Two parallel load resistors with an extra switch in series with
     # the second one — start with switch OFF (only heavy load), turn
     # ON at t_load_step to add the lighter load.
-    b.add_resistor("R_heavy", "vout", "gnd", R_LOAD_PRE)
-    # The "light load adder" is a switch + R in series — when the
-    # switch closes the parallel combination drops resistance.
-    # But to keep the topology simple, just toggle a single load via
-    # b_extra_fn at runtime. Easier: leave a fixed R_load and let
-    # the step happen entirely on the SETPOINT (which also stresses
-    # the loop). Use the simpler version.
+    b.add_resistor("R_load", "vout", "gnd", R_LOAD)
     return b
 
 
@@ -119,7 +112,7 @@ def main() -> None:
     lpf = p.FirstOrderLowPass(tau=TAU_LPF)
 
     setpoint_fn = make_setpoint_with_step(
-        T_LOAD_STEP, v_pre=V_REF, v_post=V_REF + 2.0,
+        T_STEP, v_pre=V_REF, v_post=V_REF + 2.0,
     )
 
     # `bind_pi_to_switch` packages the throttled PI update + PWM
@@ -142,9 +135,9 @@ def main() -> None:
         loop.step_observer(t, x)
 
     # --- Run ---------------------------------------------------------------
-    print(f"\n  Closed-loop buck:")
+    print("\n  Closed-loop buck:")
     print(f"    Kp={KP}, Ki={KI},  duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
-    print(f"    setpoint = {V_REF} V until t={T_LOAD_STEP*1e3:.1f} ms, "
+    print(f"    setpoint = {V_REF} V until t={T_STEP*1e3:.1f} ms, "
           f"then {V_REF + 2.0} V")
     res = p.simulate(
         builder,
@@ -174,11 +167,14 @@ def main() -> None:
     # --- Quick KPI ---------------------------------------------------------
     # Time-weighted window means (p.time_average): correct on any grid,
     # unlike a plain mean over the samples of a variable-step run.
-    pre_step  = p.time_average(res.times, v_out_arr, 0.5e-3, 1.0e-3)
-    post_step = p.time_average(res.times, v_out_arr, t_from=2.5e-3)
-    print(f"\n  KPI:")
-    print(f"    V_out @ pre-step  (0.5–1 ms):  mean={pre_step:.3f} V (target 12.0)")
-    print(f"    V_out @ post-step (2.5–3 ms):  mean={post_step:.3f} V (target 14.0)")
+    pre_step  = p.time_average(res.times, v_out_arr, T_STEP - 2e-3, T_STEP)
+    post_step = p.time_average(res.times, v_out_arr, t_from=T_END - 2e-3)
+    print("\n  KPI (settled windows, time-weighted):")
+    print(f"    V_out @ pre-step  (8–10 ms):   mean={pre_step:.3f} V (target 12.0 ± 0.05)")
+    print(f"    V_out @ post-step (18–20 ms):  mean={post_step:.3f} V (target 14.0 ± 0.05)")
+    n_ticks = len(loop.duty_history)
+    print(f"    PI updates: {n_ticks} (schedule t = k·T_PWM: "
+          f"{int(round(T_END * F_PWM)) + 1})")
     print(f"    max V_out during transient:    {v_out_arr.max():.3f} V")
     print(f"    min V_out during transient:    {v_out_arr.min():.3f} V")
 
@@ -199,7 +195,7 @@ def main() -> None:
     ax_vout.set_ylabel("V_out [V]"); ax_vout.grid(alpha=0.3)
     ax_vout.legend(loc="lower right")
     ax_vout.set_title(f"Buck closed-loop — PI(Kp={KP}, Ki={KI}), "
-                       f"setpoint step at t={T_LOAD_STEP*1e3:.1f} ms")
+                       f"setpoint step at t={T_STEP*1e3:.1f} ms")
 
     ax_duty.plot(times, duty_history, color="tab:purple", lw=0.7)
     ax_duty.axhline(DUTY_MIN, color="k", ls=":", lw=0.5)

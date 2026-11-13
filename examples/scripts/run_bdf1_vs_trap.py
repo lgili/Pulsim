@@ -5,19 +5,16 @@ Plant: 1V step → R(1mΩ) → L(1µH) → C(1µF) → R_load(1kΩ) → gnd.
 LC resonance: ω_n = 1/√(LC) = 1e6 rad/s, ζ = R/(2·√(L/C)) ≈ 0.0005
 (VERY underdamped — natural ring).
 
-For dt > 1/(2 ω_n) ≈ 0.5 µs, trapezoidal struggles:
-  * The natural decay is so slow that even small numerical artifacts
-    accumulate visibly.
-  * Trap's lack of L-stability lets a ZIPPER-like alternating-sign
-    ringing appear at the timestep frequency.
+Trapezoidal is A-stable but not L-stable: on a stiff step with
+dt ≫ 1/ω_n it can leave a zipper (alternating-sign ringing at the
+step rate). BDF1 (implicit Euler) is L-stable but first order: it
+damps any ringing, physical or not.
 
-BDF1 (implicit Euler):
-  * 1st-order → more dispersion error (lower accuracy on smooth
-    parts), but L-stable → kills the trap zipper entirely.
-
-This example simulates the same plant with BOTH methods and a
-deliberately chosen `dt` that's stiff for trap (close to the
-resonant period). Compare overlaid plots.
+At the dt used here (100 ns, ω_n·dt = 0.1) the ring is resolved and
+trapezoidal is the ACCURATE one: its peak (1.996 V) matches the
+analytic 1 + exp(−πζ/√(1−ζ²)) = 1.997 V (ζ = 0.001 with the load),
+while BDF1's numerical damping (ζ_eff ≈ ω_n·dt/2 = 0.05, 50× the
+circuit's) cuts the peak to 1.853 V.
 """
 
 from __future__ import annotations
@@ -27,7 +24,7 @@ from pathlib import Path
 import numpy as np
 
 import pulsim as p
-from pulsim._pulsim import v2_kernel as _k
+from pulsim import _pulsim as _k
 
 
 R     = 1e-3       # 1 mΩ series
@@ -75,11 +72,11 @@ def main() -> None:
     print(f"  ζ = {zeta:.4f}  (very underdamped → ringing)")
     print(f"  dt = {DT*1e9:.0f} ns, T_end = {T_END*1e6:.0f} µs")
 
-    print(f"\n  Running trap…")
+    print("\n  Running trap…")
     res_trap = run_trap(b1)
     print(f"    {res_trap.num_steps()} samples")
 
-    print(f"  Running BDF1…")
+    print("  Running BDF1…")
     res_bdf1 = run_bdf1(b2)
     print(f"    {res_bdf1.num_steps()} samples")
 
@@ -90,11 +87,13 @@ def main() -> None:
     v_bdf1 = np.asarray(res_bdf1.states)[:,
                                               b2.node_id_of("vout")]
 
-    print(f"\n  Peak overshoot:")
+    print("\n  Peak overshoot:")
     print(f"    trap = {v_trap.max():.4f} V")
     print(f"    BDF1 = {v_bdf1.max():.4f} V "
-          f"(BDF1 damps faster → smaller overshoot)")
-    print(f"  Final V_out:")
+          f"(numerical damping of the first-order method)")
+    zeta_tot = zeta + np.sqrt(L / C) / (2 * R_LOAD)
+    print(f"    analytic = {1 + np.exp(-np.pi * zeta_tot / np.sqrt(1 - zeta_tot**2)):.4f} V")
+    print("  Final V_out:")
     print(f"    trap = {v_trap[-1]:.4f} V")
     print(f"    BDF1 = {v_bdf1[-1]:.4f} V")
 

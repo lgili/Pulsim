@@ -6,8 +6,17 @@ Primary-side MOSFET driven by software-defined PWM whose duty is
 set by a PI controller comparing V_out to a setpoint.
 
    V_in (48 V) → T1.primary → Q1 (LS MOSFET) → gnd
-   T1.secondary → D1 → vout
+   T1.secondary (wound sec_neg → sec_anode) → D1 → vout
    vout || Cout || R_L → secondary_gnd ── R_iso → gnd
+   sw → D_cl → (C_cl || R_cl) → vin        (RCD leakage clamp)
+
+The secondary is wound so that the ON-time voltage reverse-biases D1
+(flyback action: store while Q1 is on, release while it is off). The
+leakage inductance (k = 0.97: ~12 µH on the primary) needs the RCD
+clamp; without it the switch node reaches ~10 kV in this idealised
+model and the leakage energy disappears into that spike.
+The loop needs ~10 ms to settle, so the step comes at 20 ms and the
+KPI windows are the last 5 ms before / after it.
 
 Why flyback is the hardest stress test of the three:
 
@@ -21,8 +30,10 @@ Why flyback is the hardest stress test of the three:
     span many mask combinations (Q1 ON + diode ON/OFF + body diodes
     of Q1, etc.).
   - **Galvanic isolation** numerical artifact: the secondary ground
-    is tied to primary ground via a 1 µΩ link — pathological matrix
-    conditioning that stresses KLU.
+    is tied to primary ground via a 1 µΩ link. A single tie carries
+    no current (no other path joins the windings) but it is a hard
+    galvanic bond; a real design would leave the secondary floating
+    (see AI_GUIDE trap 7).
 """
 
 from __future__ import annotations
@@ -37,18 +48,25 @@ import pulsim as p
 V_IN     = 48.0
 V_REF    = 20.0               # easier target — D ≈ 0.45
 V_REF_2  = 26.0               # +6V step — D ≈ 0.52
-T_STEP   = 2.0e-3
+T_STEP   = 20.0e-3
 F_PWM    = 50e3
 T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7
-T_END    = 4.0e-3             # more settling time
+T_END    = 40.0e-3            # ~10 ms settling per setpoint
 
-# Flyback: V_out = V_in · D/(1−D) · (L_s/L_p) = 48 · D/(1−D) · 0.5
-# Target 24 V → D ≈ 0.5; Target 32 V → D ≈ 0.57
+# Flyback (ideal CCM): V_out = V_in · D/(1−D) · √(L_s/L_p) = 48 · D/(1−D) · 0.5
+# Target 20 V → D ≈ 0.45; Target 26 V → D ≈ 0.52 (leakage and the
+# clamp take a few % more duty in practice).
 # Plant nonlinear (D in numerator AND denominator).
 # Soft-start setpoint avoids cold-start integrator windup.
-KP       = 0.0008
-KI       = 400.0
+# Loop design: dV_out/dD = V_in·n/(1−D)² ≈ 80 V; the output LC
+# (secondary-referred L_m = 50 µH, 220 µF) resonates at ~0.8 kHz with
+# Q ≈ 11. Integral crossover Ki·80 ≈ 640 rad/s (~100 Hz) keeps the
+# loop gain at the resonance below 1. (The earlier Kp=8e-4/Ki=400 was
+# tuned on a forward-polarity winding and oscillates 15–43 V on the
+# real flyback.)
+KP       = 0.0002
+KI       = 8.0
 TAU_LPF  = 200.0e-6           # 800 Hz LPF on V_out feedback
 DUTY_MIN = 0.10
 DUTY_MAX = 0.75
@@ -61,9 +79,13 @@ def build_plant() -> p.CircuitBuilder:
     b.add_transformer(
         "T1",
         p_from="vin", p_to="sw",
-        s_from="sec_anode", s_to="sec_neg",
+        s_from="sec_neg", s_to="sec_anode",
         L_p=200e-6, L_s=50e-6, k=0.97,
     )
+    # RCD clamp for the leakage inductance.
+    b.add_diode    ("D_cl", "sw", "clamp", 1e3, 1e-9)
+    b.add_capacitor("C_cl", "clamp", "vin", 1e-6)
+    b.add_resistor ("R_cl", "clamp", "vin", 2e3)
     b.add_diode    ("D1",   "sec_anode", "vout",    1e3, 1e-9, V_th=0.7)
     b.add_capacitor("Cout", "vout",      "sec_neg", 220e-6)
     b.add_resistor ("R_L",  "vout",      "sec_neg", 10.0)
@@ -111,7 +133,7 @@ def main() -> None:
         lpf.update(input_value=float(x[vout_idx]), dt=DT)
         loop.step_observer(t, x)
 
-    print(f"\n  Closed-loop flyback:")
+    print("\n  Closed-loop flyback:")
     print(f"    PI(Kp={KP}, Ki={KI}), duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
     print(f"    setpoint {V_REF} V → {V_REF_2} V at t = {T_STEP*1e3:.1f} ms")
     res = p.simulate(
@@ -137,13 +159,14 @@ def main() -> None:
 
     # Time-weighted window means (p.time_average): correct on any grid,
     # unlike a plain mean over the samples of a variable-step run.
-    pre  = p.time_average(res.times, v_out_arr, 1.0e-3, T_STEP)
-    post = p.time_average(res.times, v_out_arr, t_from=T_STEP + 0.5e-3)
-    print(f"\n  KPI:")
-    print(f"    V_out pre-step  ({1.0}–{T_STEP*1e3:.1f} ms): "
+    pre  = p.time_average(res.times, v_out_arr, T_STEP - 5e-3, T_STEP)
+    post = p.time_average(res.times, v_out_arr, t_from=T_END - 5e-3)
+    print("\n  KPI:")
+    print(f"    V_out pre-step  ({T_STEP*1e3-5:.0f}–{T_STEP*1e3:.0f} ms): "
           f"mean = {pre:.2f} V (target {V_REF:.1f})")
-    print(f"    V_out post-step (>{T_STEP*1e3 + 0.5} ms): "
+    print(f"    V_out post-step ({T_END*1e3-5:.0f}–{T_END*1e3:.0f} ms): "
           f"mean = {post:.2f} V (target {V_REF_2:.1f})")
+    print(f"    max V_sw = {v_sw_arr.max():.0f} V (RCD clamp)")
 
     try:
         import matplotlib.pyplot as plt

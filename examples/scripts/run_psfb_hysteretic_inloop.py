@@ -4,9 +4,8 @@
 Companion to ``run_psfb_ja_loss_analysis.py`` — which post-processes
 the inductor current OFFLINE through the JA model to estimate core
 loss. THIS demo wires the JA hysteresis **inside the kernel loop**:
-the dummy voltage source modulated by the JA observer participates
-in every step's MNA solve, so the hysteresis voltage drop actively
-shapes the simulated current waveform.
+the core is solved inside the Newton iteration of every step, so the
+hysteresis actively shapes the simulated current waveform.
 
 Topology
 --------
@@ -19,10 +18,8 @@ Topology
 
 The HystereticInductor replaces the conventional ``L_leak`` linear
 inductor between the H-bridge midpoint and the transformer primary.
-The Jiles-Atherton magnetisation state ``M`` is integrated each
-simulation step and the hysteresis-derived "back-EMF"
-``v_M = N·A·μ_0·dM/dt`` is injected via ``b_extra`` at the dummy
-voltage-source row.
+The Jiles-Atherton magnetisation state ``M`` is part of the device's
+own state, solved with the circuit (no observer, no one-step lag).
 
 What this demonstrates (vs the offline-loss demo)
 --------------------------------------------------
@@ -38,15 +35,12 @@ Honest caveats
   multiple materials offline. Use THIS approach when the
   hysteresis voltage drop matters for the operating point (e.g.
   ferrorresonance, inrush, saturable-reactor design).
-* **Parameter scaling note**: the JA inductor with the demo's
-  ferrite-N87 + N=12 turns + tight 0.10 m mean path acts as a
-  **full magnetizing inductor** (L_eff ≈ L_0·μ_r ≈ 1.27 mH), not
-  the ~1 µH leakage that the original PSFB design assumes. The
-  output voltage (~5 V steady state) is therefore reduced
-  compared to the linear-leakage PSFB (~15 V). This demo
-  validates the **in-loop hysteresis wiring**; using the JA
-  inductor as a true leakage replacement would require either a
-  gapped core (low effective μ_r) or a much smaller turn count.
+* **Parameter scaling note**: even gapped (1.5 mm), the JA
+  inductor (ferrite N87, N = 12) is ~38 µH, not the 1 µH leakage of
+  ``run_phase_shift_full_bridge.py``. The longer current reversal
+  eats duty, so the output is ~6.9 V (measured across the load)
+  instead of ~15 V. This demo validates the **in-loop hysteresis
+  wiring**, not a PSFB design.
 """
 
 from __future__ import annotations
@@ -97,8 +91,8 @@ def build_plant():
     # magnetising branch that saturates at ~3 A — not a resonant
     # inductor at all. (It only ever "worked" here because the old
     # observer injected its EMF with the sign inverted, turning it
-    # into a small negative-L correction.) With a 1.5 mm gap it is the
-    # ~38 µH the linear demo uses, with a knee near 30 A.
+    # into a small negative-L correction.) With a 1.5 mm gap it is
+    # ~38 µH (the linear demo's leakage is 1 µH), knee near 30 A.
     ja_params = p.reference_material("ferrite_n87")
     hyst = p.add_hysteretic_inductor(
         b, name="L_leak_JA",
@@ -169,23 +163,24 @@ def main():
     # Save trace: t, i_L, the live JA states (M, B, H), and the
     # output voltage so we can verify the PSFB still operates
     # correctly with the hysteresis device wired in.
+    # Across the load: the secondary floats (auto 1 GΩ reference),
+    # so v(vout) alone is only ~half of it.
+    v_out = res.v("vout") - res.v("rect_neg")
+    print(f"    v_out_avg = "
+          f"{p.time_average(times, v_out, t_from=0.9 * T_END):.3f} V "
+          f"(across R_L, last 10%)")
+    import csv
+    out_path = Path(__file__).with_name("psfb_hysteretic_inloop_trace.csv")
+    stride = max(1, len(times) // 4000)
     try:
-        import csv
-        out_path = Path(__file__).with_name(
-            "psfb_hysteretic_inloop_trace.csv")
-        v_out = res.v("vout")
-        stride = max(1, len(times) // 4000)
         with out_path.open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["t_s", "i_L_A", "v_out_V"])
             for k in range(0, len(times), stride):
                 w.writerow([times[k], i_L[k], v_out[k]])
         print(f"    trace     → {out_path}")
-        print(f"    v_out_avg = {float(np.mean(v_out[-len(v_out)//10:])):.3f} V "
-              f"(steady-state, last 10%)")
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         print(f"    (CSV export skipped: {exc})")
-
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Electro-thermal co-simulation — buck with MOSFET conduction loss.
 
-   V_DC ── HS(R_on=10mΩ) ── L ── R_load ── gnd
+   V_DC ── HS(R_on=50mΩ) ── L ── R_load ── gnd
                  │
                  ▼
        P_loss = R_on · i² (when HS is ON)
@@ -18,8 +18,9 @@ TO-247 SiC MOSFET on a heatsink:
        1  0.30        0.005     (case-to-heatsink medium)
        2  0.80        0.5       (heatsink-to-ambient slow)
 
-Total R_th(∞) = 1.15 K/W. For ~5 W average loss the steady-state
-junction-temperature rise is ≈ 5.75 K above 25 °C ambient.
+Total R_th(∞) = 1.15 K/W. The ~13.7 W conduction loss gives a
+steady-state rise of 15.8 K; at t = 1.5 s (3 τ of the slow stage) the
+Foster response is P · Σ R_i (1 − e^(−t/τ_i)) ≈ 15.2 K.
 
 This example does NOT close the feedback loop (R_DS_ON does not
 update with T_j) — that requires kernel-side support for live
@@ -152,18 +153,22 @@ def main() -> None:
 
     # Window means are time-weighted (p.time_average): correct on any
     # grid, unlike a plain mean over the samples of a variable-step run.
-    print(f"\n  KPI (last 50 ms):")
+    print("\n  KPI (last 50 ms):")
     t_ss = T_END - 50e-3
     P_loss = p.time_average(times, P_inst, t_from=t_ss)
-    print(f"    V_out mean:  {p.time_average(times, v_out, t_from=t_ss):.3f} V "
-          f"(target {V_DC*DUTY:.1f})")
+    v_out_mean = p.time_average(times, v_out, t_from=t_ss)
+    print(f"    V_out mean:  {v_out_mean:.3f} V "
+          f"(D·V_in − D·R_on·I_out = "
+          f"{V_DC*DUTY - DUTY*R_ON_MOS*v_out_mean/R_LOAD:.3f})")
     print(f"    I_L mean:    {p.time_average(times, i_L, t_from=t_ss):.3f} A")
     print(f"    P_loss avg:  {P_loss:.3f} W")
     print(f"    T_j final:   {T_j[-1]:.2f} °C")
     print(f"    T_j rise:    {T_j[-1] - T_AMB_C:.2f} K")
     R_th_total = sum(s.R_th_K_per_W for s in THERMAL_STAGES)
-    print(f"    expected rise = P_avg · R_th(∞) = "
-          f"{P_loss * R_th_total:.2f} K")
+    rise_t = P_loss * sum(s.R_th_K_per_W * (1 - math.exp(-T_END / s.tau_s))
+                          for s in THERMAL_STAGES)
+    print(f"    Foster rise at t_end = P_avg · Σ R_i(1−e^(−t/τ_i)) = {rise_t:.2f} K "
+          f"(∞: P_avg · R_th(∞) = {P_loss * R_th_total:.2f} K)")
 
     # Plot.
     try:

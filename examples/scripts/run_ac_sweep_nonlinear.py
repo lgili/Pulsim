@@ -11,8 +11,8 @@ plants because of the saturable inductor:
 
   Operating point A: D = 0.30
     V_out_avg = V_in / (1−D) = 17.1 V
-    I_L_avg   ≈ V_out / R_load = 17.1 / 30 = 0.57 A
-    Since 0.57 A < I_sat = 1.5 A, the small-signal L ≈ L_0 = 100 µH
+    I_L_avg   = V_out / ((1−D)·R_load) = 17.1 / (0.7·30) = 0.82 A
+    Below I_sat = 1.5 A: incremental L(0.82 A) ≈ 77 µH (L_0 = 100 µH)
     → ω_LC = (1−D)/√(LC) = 0.7/√(1e-8) ≈ 7000 rad/s → f_LC ≈ 1.1 kHz
 
   Operating point B: D = 0.50
@@ -29,6 +29,21 @@ analysis would miss entirely.
 This is the kind of measurement a power engineer makes with a
 network analyzer on a real prototype to find where their
 loop's plant changes versus load.
+
+KNOWN LIMITATION (examples audit, 2026-11): the sweep below does NOT
+yet measure the small-signal plant, and the printed peaks are not the
+LC pole:
+  * every point starts cold and settles only 4 test cycles, while this
+    plant rings down with τ = 2·R·C = 6 ms (above ~2 kHz the result is
+    the start-up ring: phase ≈ 0°, flat magnitude);
+  * the resonance has Q = (1−D)·R·√(C/L) ≈ 15–21, so ε = 0.04 swings
+    i_L to zero near it (DCM): a large-signal describing function.
+    Even settled from the periodic steady state for 30 ms per point, a
+    LINEAR 100 µH boost at D = 0.3 reads its −90° crossing at ~0.82 kHz
+    where the averaged model puts the pole at 1.11 kHz;
+  * dt = ε·T_PWM/4 quantises the duty sine (fundamental 0.954·ε).
+A valid measurement needs ε ≲ 0.001 at the peak (dt ~ ns) or a lower-Q
+plant; treat the plot as qualitative only.
 """
 
 from __future__ import annotations
@@ -138,19 +153,19 @@ def main() -> None:
     # Find resonance peaks.
     f_peak_A = res_A.freqs[int(np.argmax(res_A.mag_dB))]
     f_peak_B = res_B.freqs[int(np.argmax(res_B.mag_dB))]
-    print(f"\nResonance peaks:")
+    print("\nResonance peaks:")
     print(f"  D={D_OP_A}: f_peak ≈ {f_peak_A:.0f} Hz  "
           f"(peak {res_A.mag_dB.max():.1f} dB)")
     print(f"  D={D_OP_B}: f_peak ≈ {f_peak_B:.0f} Hz  "
           f"(peak {res_B.mag_dB.max():.1f} dB)")
-    print(f"  shift: {f_peak_B/f_peak_A:.2f}x (saturable L SHIFTS the LC pole)")
+    print(f"  ratio: {f_peak_B/f_peak_A:.2f}x  (NOT a small-signal LC pole: "
+          f"large-signal and unsettled, see KNOWN LIMITATION in the docstring)")
 
     # Analytical (using L_0 for both, for reference — shows
     # the small-signal model would predict the SAME resonance,
     # but reality moves with saturation).
     def analytical(D, L_used):
         s = 1j * 2 * np.pi * res_A.freqs
-        omega_LC2 = (1 - D)**2 / (L_used * C_OUT)
         # G_vd ~ V_in / ((1-D)² · (LC s² + L/R s + (1-D)²))
         return V_IN / (L_used * C_OUT * s**2
                        + (L_used / R_LOAD) * s

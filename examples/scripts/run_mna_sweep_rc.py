@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Fast frequency sweep via MNA-style impulse response + FFT.
+"""Fast frequency sweep of the linear MNA system.
 
-Compares ``run_mna_sweep`` (impulse + FFT, single transient) against the
-analytic transfer function of a 1-pole RC filter. Validates the
-mathematical equivalence with the future C++ kernel MNA sweep.
+Compares ``run_mna_sweep`` against the analytic transfer function of a
+1-pole RC filter. By default (``use_kernel=True``) it solves the complex
+MNA system at each frequency with the kernel's sparse LU — exact for an
+LTI plant (the errors print as 0.000); ``use_kernel=False`` falls back
+to the older impulse-response + FFT path.
 
 KPI: max |mag| error ≤ 0.5 dB and max |phase| error ≤ 5° across
 100 Hz – 30 kHz (about 5τ of the filter's bandwidth).
 
-Compared to ``run_ac_sweep_rc.py`` (swept-sine), this example:
-  * runs ~200× faster (one transient vs. one-per-frequency),
-  * produces results across the full band in a single FFT.
+Compared to ``run_ac_sweep_rc.py`` (swept-sine), this example needs
+no transient per frequency, so it is orders of magnitude faster.
 
 Trade-off: only works for LTI (or linearised-at-x_op) plants. For
 heavily switching converters with time-varying duty, fall back to the
@@ -68,7 +69,7 @@ def main() -> None:
     mag_err = np.abs(res.mag_dB - mag_an)
     ph_err  = np.abs(((res.phase_deg - ph_an) + 180) % 360 - 180)
     band    = (freqs >= 100) & (freqs <= 30000)
-    print(f"\n  In-band (100Hz – 30kHz):")
+    print("\n  In-band (100Hz – 30kHz):")
     print(f"    max |mag err|   = {mag_err[band].max():.3f} dB")
     print(f"    max |phase err| = {ph_err[band].max():.3f}°")
 
@@ -81,7 +82,7 @@ def main() -> None:
 
     fig, (ax_mag, ax_ph) = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
     ax_mag.semilogx(freqs, mag_an,        "k-",  lw=2,   label="analytic")
-    ax_mag.semilogx(freqs, res.mag_dB,    "C0o", ms=4,   label="MNA (impulse + FFT)")
+    ax_mag.semilogx(freqs, res.mag_dB,    "C0o", ms=4,   label="MNA sweep (kernel complex LU)")
     ax_mag.axhline(-3, color="g", ls=":", lw=0.5)
     ax_mag.axvline(FC, color="g", ls=":", lw=0.5,
                     label=f"fc = {FC:.0f} Hz")

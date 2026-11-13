@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LDO with op-amp feedback — 12 V → 7.5 V at 50 Ω load (150 mA).
+"""LDO with op-amp feedback — 12 V → ~7.2 V at 50 Ω load (~144 mA).
 
 Closed-loop feedback:
    V_in ── M1 (drain) ── V_out ─┬── R1 ── fb ── R2 ── gnd
@@ -9,7 +9,8 @@ Closed-loop feedback:
         op-amp out = M1.gate     gnd
 
 Design: V_ref = 2.5 V, R1 = 10 kΩ, R2 = 5 kΩ
-        → V_out = V_ref · (R1+R2)/R2 = 7.5 V
+        → V_out = V_ref · (R1+R2)/R2 = 7.5 V for an infinite-gain op-amp;
+          the gain-100 op-amp of the YAML leaves it ~4 % low (7.19 V).
 
 Demonstrates: V15 op-amp ideal (VCVS with high gain) + V13 SH1 MOSFET
 + negative-feedback virtual-short. Newton refresh auto-enabled by
@@ -89,7 +90,25 @@ def main() -> None:
     # the variable-step one simulate() uses when no dt is given -- a plain
     # mean over the samples is not.
     v_mean = p.steady_state_stats(res, "vout", last=0.3 * (t_end - t_start)).mean
-    print(f"  V_out DC ≈ {v_mean:.3f} V (target 7.5)")
+    # With op-amp gain A = 100 the loop is not a virtual short:
+    # V_out = (A·V_ref − V_GS) / (1 + A·β), β = R2/(R1+R2) = 1/3.
+    # Independent prediction: V_GS from the MOSFET saturation law at the
+    # load current, I = K·(V_GS − V_T)²·(1 + λ·(V_in − V_out)), solved
+    # with the loop equation by bisection (YAML values).
+    A, V_REF, K, V_T, LAM = 100.0, 2.5, 0.1, 2.0, 0.02
+
+    def loop_residual(vo: float) -> float:
+        i_d = vo / 50.0 + vo / 15e3
+        v_gs = V_T + np.sqrt(i_d / (K * (1.0 + LAM * (12.0 - vo))))
+        return A * (V_REF - vo / 3.0) - vo - v_gs
+
+    lo, hi = 0.1, 7.5          # residual > 0 at lo, < 0 at hi
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if loop_residual(mid) > 0 else (lo, mid)
+    v_pred = 0.5 * (lo + hi)
+    print(f"  V_out DC ≈ {v_mean:.3f} V (finite-gain prediction from the "
+          f"MOSFET law {v_pred:.3f} V; 7.5 V needs infinite gain)")
 
     try:
         import matplotlib.pyplot as plt

@@ -34,21 +34,30 @@ make the run fast on commodity hardware):
 
   * V_dc       = 800 V        ; DC bus
   * N          = 10 SMs/arm   ; half-bridge
-  * C_SM       = 1 mF         ; ⇒ C_arm = 100 µF
+  * C_SM       = 20 mF        ; ⇒ C_arm = 2 mF
   * v_c0       = 800 V        ; matched to DC bus
-  * L_b        = 1 mH         ; arm inductor
+  * L_b        = 5 mH         ; arm inductor
   * f_grid     = 50 Hz        ; AC fundamental
   * M          = 0.8          ; modulation depth
-  * Y load     = 5 Ω + 5 mH   ; per phase
-  * t_end      = 60 ms        ; 3 grid periods
+  * Y load     = 20 Ω + 5 mH  ; per phase
+  * t_end      = 80 ms        ; 4 grid periods
   * dt         = 50 µs        ; 400 samples per period
 
 Expected results:
   * Phase voltages: balanced 50 Hz, peak ≈ M·V_dc/2 ≈ 320 V.
-  * Capacitor sums: stay near 800 V; each arm rides a small 50 Hz +
-    2·50 Hz ripple per Sousa eq (2.43); peak-to-peak ≈ a few V.
-  * Mean DC drift over 3 periods should be ≪ 1 % thanks to the
-    balanced top/bottom modulation.
+  * Capacitor sums: stay near 800 V with a 50 Hz + 2·50 Hz ripple.
+    The arm-energy formula (printed, see report()) predicts ≈ 4.9 V pp
+    for DC + fundamental arm currents. The simulated ripple is larger
+    and varies period to period (≈ 7–15 V pp, still at 400 ms): with
+    open-loop modulation, no circulating-current control and no arm
+    resistance, the circulating current carries a lightly damped
+    oscillation the formula excludes. Treat the measured ripple as
+    the behaviour of this open-loop plant, not as Sousa eq (2.43).
+  * Arm-sum means wander by a few volts (open loop, no energy
+    balancing) for the same reason.
+  * The DC source and load float (no ground); simulate() adds a 1 GΩ
+    reference. Grounding dc_n through 1 mΩ instead changes the
+    printed values by < 0.01 V: the single tie carries no current.
 """
 
 from __future__ import annotations
@@ -148,6 +157,11 @@ def run() -> "dict[str, np.ndarray]":
     # the showcase we'll reconstruct v_phase ≈ v_arm_p - V_dc/2 (i.e.
     # the modulated arm voltage minus the DC midpoint).
     v_arm_p_log = np.zeros((3, n_samples))
+    # Arm currents (source branch currents, top → bottom), looked up
+    # after the full build so the indices are final.
+    src_idx = [b.pool.branch_var_id_for_source(arm.source_branch_id, b.graph)
+               for arm in mmc.all_arms]
+    i_arm_log = np.zeros((6, n_samples))
 
     counter = [0]
 
@@ -160,6 +174,8 @@ def run() -> "dict[str, np.ndarray]":
                 v_C_log[k, i] = arm.v_C
             for k, arm in enumerate(mmc.upper_arms):
                 v_arm_p_log[k, i] = arm.v_b
+            for k in range(6):
+                i_arm_log[k, i] = x[src_idx[k]]
         counter[0] += 1
 
     p.simulate(
@@ -172,6 +188,7 @@ def run() -> "dict[str, np.ndarray]":
         "t": time[:counter[0]],
         "v_C": v_C_log[:, :counter[0]],
         "v_arm_p": v_arm_p_log[:, :counter[0]],
+        "i_arm": i_arm_log[:, :counter[0]],
     }
 
 
@@ -210,6 +227,30 @@ def report(data: "dict[str, np.ndarray]") -> None:
 
     # v_C statistics — should stay near V_C0.
     print("Capacitor-sum voltage (last grid period):")
+    # Reference: the standard arm-energy ripple of an MMC arm
+    # (e.g. Ilves et al., IEEE TPEL 2012), assuming each arm current is
+    # DC + fundamental only (no circulating harmonics) and M·v_C const:
+    #   ΔW_arm,pp = S/(3·M·ω) · (1 − (M·cosφ/2)²)^(3/2),  S = 3/2·V̂·Î
+    #   Δv_sum,pp ≈ ΔW_arm,pp / (C_arm · v_sum)
+    t0 = T_END - 1.0 / F_AC
+    w = t >= t0
+    i_p, i_n = data["i_arm"][0, w], data["i_arm"][3, w]
+    I_ac = p.extract_phasor(t[w], i_p - i_n, F_AC)
+    # The arm drops v_arm_p from dc_p to ac_a: v_ac = V_dc/2 − v_arm_p.
+    V_ac = p.extract_phasor(t[w], -v_phase[0, w], F_AC)
+    i_circ = 0.5 * (i_p + i_n)
+    I_2f = abs(p.extract_phasor(t[w], i_circ - i_circ.mean(), 2 * F_AC))
+    cos_phi = math.cos(np.angle(V_ac) - np.angle(I_ac))
+    S = 1.5 * abs(V_ac) * abs(I_ac)
+    C_arm = C_SM / N_SM
+    dW = S / (3 * M * OMEGA) * (1 - (M * cos_phi / 2) ** 2) ** 1.5
+    print(f"Reference (arm-energy formula, DC + fundamental arm current): "
+          f"S = {S/1e3:.2f} kVA, cosφ = {cos_phi:.3f}, "
+          f"Δv_sum,pp ≈ {dW / (C_arm * V_C0):.1f} V")
+    print(f"  but the open-loop arms also carry a 2·f circulating current "
+          f"of {I_2f:.2f} A peak (phase a, vs Î_ac/2 = {abs(I_ac)/2:.2f} A per arm),")
+    print("  plus a lightly damped circulating oscillation (open loop): the formula")
+    print("  excludes both, so the ripple below is larger and varies per period.")
     print(f"  {'arm':<10} {'mean [V]':>12} {'pk-pk [V]':>12} "
           f"{'drift [V]':>12}")
     arm_names = ("a_p", "b_p", "c_p", "a_n", "b_n", "c_n")
@@ -234,7 +275,7 @@ def report(data: "dict[str, np.ndarray]") -> None:
 
 
 def main() -> None:
-    print("Building circuit + running 60 ms simulation...")
+    print(f"Building circuit + running {T_END*1e3:.0f} ms simulation...")
     data = run()
     report(data)
 

@@ -7,13 +7,15 @@ Sim horizon: 500 ms (50 τ — way more than needed).
 
 A fixed-dt solver with dt = 1 µs needs 500 000 steps. With variable
 dt, the driver picks tiny steps during the early exponential rise
-and grows dt by 10–100× once the state has settled — typically 10×
-fewer total steps with the same accuracy vs analytic.
+and grows dt by ~100× once the state has settled: 4 001 samples
+instead of 500 000. The price is accuracy: the worst error against
+the analytic i(t) is 2.0e-2 A near t = τ (0.2 % of the 10 A final
+value), against 5.0e-4 A for a fixed 1 µs run — the rtol = 1e-4 is a
+per-step target, not a bound on the accumulated error.
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -66,14 +68,13 @@ def main() -> None:
     i_num = res.states[:, i_idx]
     i_ref = analytic_i(times)
     err = np.abs(i_num - i_ref)
-    rel_err = err / (np.abs(i_ref) + 1e-12)
 
     n_samples_fixed = int(T_END / 1e-6)  # equivalent fixed-dt count
-    print(f"\n  Adaptive transient KPI:")
+    print("\n  Adaptive transient KPI:")
     print(f"    segments:        {len(res.dt_history)}")
     print(f"    samples kept:    {res.num_steps()} "
           f"(vs ~{n_samples_fixed} for fixed-dt at 1 µs)")
-    print(f"    speedup:         "
+    print(f"    sample ratio:    "
           f"{n_samples_fixed / res.num_steps():.1f}×")
     print(f"    initial dt:      {res.dt_history[0]*1e6:.2f} µs")
     print(f"    final dt:        {res.dt_history[-1]*1e6:.2f} µs")
@@ -81,7 +82,7 @@ def main() -> None:
           f"{res.dt_history[-1] / res.dt_history[0]:.1f}×")
     print(f"    accepted / rej:  {res.n_accepted} / {res.n_rejected}")
     print(f"    max |i − i_an|:  {err.max():.3e} A")
-    print(f"    max rel err:     {rel_err.max():.3e}")
+    print(f"    max err / I_final: {err.max() / (V_IN / R):.2%}")
 
     # Plot
     try:

@@ -24,10 +24,12 @@
 #   Lower bridge diodes (D4, D6, D2): anode = vdc_n,
 #                                      cathode = phase
 #
-# Expected steady-state V_dc on the load:
-#   V_dc = (3·√6/π) · V_phase_peak ≈ 2.34 · 100 ≈ 234 V
-#   minus ~1.4 V (two diode forward drops on the conducting
-#   pair at any time) → ~232 V real.
+# Expected steady-state V_dc on the load: with C_out = 1 mF the
+# bridge peak-charges, so V_dc sits just below the line-to-line peak
+#   √3 · V_phase_peak = 173.2 V
+# less about half the 300 Hz ripple (≤ I_dc/(6·f·C) = 5.7 V pp) → ~171 V.
+# (2.34 · V is the UNFILTERED average for a phase RMS V: 165.4 V here.)
+# The diodes are ideal (no V_f), so there is no forward-drop term.
 #
 # Ripple frequency: 6·f_line = 300 Hz.
 
@@ -110,7 +112,7 @@ circuit:
       name: R_load
       from: vdc_p
       to: vdc_n
-      R: 100.0       # 100 Ω → ~2.3 A DC load
+      R: 100.0       # 100 Ω → ~1.7 A DC load
 
     # vdc_n needs a high-impedance path to gnd for KCL
     # closure, but it MUST be able to swing to ~−V_phase_peak

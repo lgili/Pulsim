@@ -41,10 +41,11 @@ Control loop (every dt):
      objects; the L1 observer dispatches the PS-PWM staircase
      accordingly.
 
-Setpoint sequence:
-   0–15 ms : i_d_ref = 10 A, i_q_ref = 0  (turn on, settle)
-   15 ms   : i_d_ref steps to 20 A         (doubles active current)
-   30 ms   : i_q_ref steps to -5 A         (adds capacitive reactive)
+Setpoint sequence (the cold start takes ~20 ms, a step ~10 ms; each
+KPI window is the 10 ms before the next event):
+   0–30 ms : i_d_ref = 5 A, i_q_ref = 0   (turn on, settle)
+   30 ms   : i_d_ref steps to 10 A         (doubles active current)
+   60 ms   : i_q_ref steps to -3 A         (adds capacitive reactive)
 
 KPIs at the end of the run show mean d-axis and q-axis currents
 tracking their setpoints. Plot panels: three phase currents, dq
@@ -79,7 +80,7 @@ L_FILT    = 5e-3            # output filter [H]
 R_LOAD    = 5.0             # Y-phase load [Ω]
 
 DT        = 5e-6            # 5 µs sim step (resolves the 40 kHz f_switch)
-T_END     = 45e-3           # 45 ms = ~2.25 grid periods
+T_END     = 90e-3           # 90 ms = 4.5 grid periods
 
 
 # =============================================================================
@@ -94,8 +95,8 @@ I_D_REF_1 = 5.0
 I_D_REF_2 = 10.0
 I_Q_REF_1 = 0.0
 I_Q_REF_2 = -3.0
-T_STEP_D  = 15e-3
-T_STEP_Q  = 30e-3
+T_STEP_D  = 30e-3
+T_STEP_Q  = 60e-3
 
 # PI tuning identical to the 6-switch dq reference. The L1 staircase
 # at 40 kHz/arm has negligible extra phase lag relative to that test
@@ -181,18 +182,20 @@ def build_plant():
         arms.append(arm_n)
 
     # Output filter + Y-connected RL load.
-    iL_indices: "list[int]" = []
     for ph in "abc":
-        # Capture the branch id of the filter inductor *before* adding it.
-        l_filt_id = b.graph.num_branches
         b.add_inductor(f"Lfilt_{ph}", f"ac_{ph}", f"rphase_{ph}", L_FILT)
         b.add_resistor(f"R_{ph}", f"rphase_{ph}", "star", R_LOAD)
-        iL_indices.append(
-            b.pool.branch_var_id_for_inductor(l_filt_id, b.graph),
-        )
 
     # Star tie to dc_n — weakly grounded so the MNA matrix is well-posed.
     b.add_resistor("R_star", "star", "dc_n", 1e6)
+
+    # Resolve the state indices only now: an inductor's index is
+    # num_nodes + (its rank among sources/inductors), so every node added
+    # after the lookup shifts it. Looked up right after each add, the
+    # controller read (26, 28, 30) instead of (28, 29, 30) — the wrong
+    # currents — and missed its setpoints by up to 50 %.
+    iL_indices = [b.pool.branch_var_id_for_inductor(
+        b.branch_id_of(f"Lfilt_{ph}"), b.graph) for ph in "abc"]
 
     return b, arms, m_refs, tuple(iL_indices)
 
@@ -291,7 +294,7 @@ def main() -> None:
                 log["v_C"][armk, idx] = arms[armk].v_C
         counter[0] += 1
 
-    print(f"3-φ MMC DC/AC inverter — dq current control:")
+    print("3-φ MMC DC/AC inverter — dq current control:")
     print(f"  V_dc             = {V_DC:.0f} V")
     print(f"  N_SM per arm     = {N_SM}, f_switch = "
           f"{N_SM*F_CARRIER:.0f} Hz/arm")
@@ -325,22 +328,22 @@ def main() -> None:
     times_ms = log["t"] * 1e3
     # Window means are time-weighted (p.time_average): correct on any
     # grid, unlike a plain mean over the samples of a variable-step run.
-    i_d_pre  = p.time_average(log["t"], log["i_d"], 5e-3, T_STEP_D)
-    i_d_btwn = p.time_average(log["t"], log["i_d"], T_STEP_D + 3e-3, T_STEP_Q)
-    i_q_post = p.time_average(log["t"], log["i_q"], t_from=T_STEP_Q + 3e-3)
+    i_d_pre  = p.time_average(log["t"], log["i_d"], T_STEP_D - 10e-3, T_STEP_D)
+    i_d_btwn = p.time_average(log["t"], log["i_d"], T_STEP_Q - 10e-3, T_STEP_Q)
+    i_q_post = p.time_average(log["t"], log["i_q"], t_from=T_END - 10e-3)
 
-    print(f"\nKPIs:")
-    print(f"  i_d  pre-step   (5–{T_STEP_D*1e3:.0f} ms): "
+    print("\nKPIs:")
+    print(f"  i_d  pre-step   ({T_STEP_D*1e3-10:.0f}–{T_STEP_D*1e3:.0f} ms): "
           f"mean = {i_d_pre:.2f} A "
           f"(target {I_D_REF_1:.1f})")
-    print(f"  i_d  mid window ({T_STEP_D*1e3+3:.0f}–"
+    print(f"  i_d  mid window ({T_STEP_Q*1e3-10:.0f}–"
           f"{T_STEP_Q*1e3:.0f} ms): "
           f"mean = {i_d_btwn:.2f} A "
           f"(target {I_D_REF_2:.1f})")
-    print(f"  i_q  post-step  (>{T_STEP_Q*1e3+3:.0f} ms): "
+    print(f"  i_q  post-step  ({T_END*1e3-10:.0f}–{T_END*1e3:.0f} ms): "
           f"mean = {i_q_post:.2f} A "
           f"(target {I_Q_REF_2:.1f})")
-    print(f"  v_C drift (per arm, start → end):")
+    print("  v_C drift (per arm, start → end):")
     for k, name in enumerate(("a_p", "b_p", "c_p", "a_n", "b_n", "c_n")):
         print(f"    arm_{name}: {log['v_C'][k][0]:.2f} → "
               f"{log['v_C'][k][-1]:.2f} V  "

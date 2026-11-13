@@ -27,17 +27,16 @@ What you should see
 * **Step count**: Radau IIA(3) accepts ~15-30 steps, DOPRI5
   ~50-80 steps, fixed-step Euler needs ~1000+ at the same
   tolerance.
-* **Wall-clock**: depends on platform but typically Radau is
-  3-5× faster than DOPRI5 on stiff problems despite each step
-  being more expensive (Newton solve), because of the dramatically
-  smaller step count. DOPRI5 wins on non-stiff problems (not
-  shown here — use the SHO test in
-  ``test_dopri5_simple_harmonic_oscillator`` for that case).
+* **Wall-clock**: on this window Radau takes ~3× fewer steps but
+  about as many f evaluations (~400) as DOPRI5, and each Radau step
+  pays a Newton solve, so it is NOT faster here (measured: DOPRI5
+  ~3 ms, Radau ~9 ms). The window stays on the slow manifold
+  (x: 2 → 1.997); the step-count gap grows on windows that cross the
+  fast jumps (period ≈ (3 − 2 ln 2)·μ ≈ 160 s at μ = 100).
 """
 
 from __future__ import annotations
 
-import math
 import time
 from pathlib import Path
 
@@ -48,7 +47,7 @@ import pulsim as p
 
 MU = 100.0
 X0 = np.array([2.0, 0.0])
-T_END = 0.5      # half a stiff cycle — enough to see both fast + slow regimes
+T_END = 0.5      # a short stretch of the slow manifold (the cycle is ~160 s)
 
 
 def vdp(t, x):
@@ -92,7 +91,7 @@ def main():
     t0 = time.perf_counter()
     r_d = dopri.solve(t_span=(0.0, T_END), x0=X0)
     t_d = time.perf_counter() - t0
-    print(f"\n  DormandPrince5 (rtol=1e-4, atol=1e-7):")
+    print("\n  DormandPrince5 (rtol=1e-4, atol=1e-7):")
     print(f"    final state  : {r_d.x[-1]}")
     print(f"    steps        : {r_d.n_accepted} accepted, "
           f"{r_d.n_rejected} rejected ({r_d.n_f_evals} f evals)")
@@ -103,14 +102,14 @@ def main():
     t0 = time.perf_counter()
     r_r = radau.solve(t_span=(0.0, T_END), x0=X0)
     t_r = time.perf_counter() - t0
-    print(f"\n  RadauIIA3 (rtol=1e-4, atol=1e-7):")
+    print("\n  RadauIIA3 (rtol=1e-4, atol=1e-7):")
     print(f"    final state  : {r_r.x[-1]}")
     print(f"    steps        : {r_r.n_accepted} accepted, "
           f"{r_r.n_rejected} rejected ({r_r.n_f_evals} f evals)")
     print(f"    wall-clock   : {t_r*1e3:.1f} ms")
 
     # --- Summary -----------------------------------------------------
-    print(f"\n  Summary:")
+    print("\n  Summary:")
     print(f"    Euler           : {n_eul:>6} steps, "
           f"{t_eul*1e3:>6.1f} ms wall")
     print(f"    DOPRI5 adaptive : {r_d.n_accepted:>6} steps, "

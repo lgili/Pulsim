@@ -20,13 +20,17 @@ Stress points for the kernel:
     independently every step. Three independent PWM bits flipping
     out of phase.
   - **Two PI controllers** + abc-dq transform every step.
-  - **Y-connected load** — neutral floats; small ohmic tie to gnd
-    means the matrix is ill-conditioned. KLU stress.
+  - **Y-connected load** — the neutral floats; a 1 MΩ tie to gnd
+    gives it a reference without loading it. (A milliohm tie is a
+    galvanic bond: it drove ~63 A of common-mode DC through every
+    phase — invisible in i_d/i_q, since Clarke drops the zero
+    sequence, but not in the phase currents. AI_GUIDE trap 7.)
 
-Setpoint sequence:
-  0–10 ms: i_d_ref = 5 A, i_q_ref = 0  (turn on, settle)
-  10 ms:   i_d_ref steps to 10 A         (doubles the active current)
-  20 ms:   i_q_ref steps to -3 A         (adds capacitive reactive current)
+Setpoint sequence (the cold start takes ~20 ms, a step ~10 ms; each
+KPI window is the 10 ms before the next event):
+  0–30 ms: i_d_ref = 5 A, i_q_ref = 0  (turn on, settle)
+  30 ms:   i_d_ref steps to 10 A         (doubles the active current)
+  60 ms:   i_q_ref steps to -3 A         (adds capacitive reactive current)
 """
 
 from __future__ import annotations
@@ -46,10 +50,10 @@ import pulsim as p
 V_DC      = 600.0
 F_OUT     = 50.0                 # 50 Hz output fundamental
 F_CARRIER = 5000.0               # 5 kHz carrier (10× lower than usual,
-                                  # makes the dq dynamics visible in 25 ms)
+                                  # makes the dq dynamics visible)
 T_CARR    = 1.0 / F_CARRIER
 DT        = 5.0e-6               # 5 µs → 200 samples/cycle
-T_END     = 25.0e-3
+T_END     = 90.0e-3
 
 R_PHASE   = 5.0
 L_PHASE   = 5.0e-3
@@ -58,11 +62,12 @@ I_D_REF_1 = 5.0
 I_D_REF_2 = 10.0
 I_Q_REF_1 = 0.0
 I_Q_REF_2 = -3.0
-T_STEP_D  = 10.0e-3
-T_STEP_Q  = 20.0e-3
+T_STEP_D  = 30.0e-3
+T_STEP_Q  = 60.0e-3
 
-# PI tuning for current loop (decoupled per axis — bandwidth ~500 Hz).
-# Aggressive: pushes the kernel through fast duty changes every step.
+# PI tuning for current loop (per axis, no ωL decoupling): the zero
+# Ki/Kp = 1000 rad/s cancels the R/L pole, so the crossover is
+# Kp/L = 400 rad/s (~64 Hz). The PI runs every dt.
 KP_I = 2.0
 KI_I = 2000.0
 M_MAX = 0.95           # modulation depth limit
@@ -94,7 +99,7 @@ def build_plant() -> p.CircuitBuilder:
                         f"mid_{phase}", f"r{phase}_lend", R_PHASE)
         b.add_inductor(f"L_{phase}",
                         f"r{phase}_lend", "n", L_PHASE)
-    b.add_resistor("R_neutral", "n", "gnd", 1.0e-3)
+    b.add_resistor("R_neutral", "n", "gnd", 1.0e6)
     return b
 
 
@@ -204,7 +209,7 @@ def main() -> None:
         else:                m.set(5, True)
         return m
 
-    print(f"\n  3-φ dq current control:")
+    print("\n  3-φ dq current control:")
     print(f"    PI(Kp={KP_I}, Ki={KI_I}), carrier={F_CARRIER/1e3:.0f} kHz")
     print(f"    setpoint i_d: {I_D_REF_1} A → {I_D_REF_2} A at "
           f"t = {T_STEP_D*1e3:.0f} ms")
@@ -237,15 +242,15 @@ def main() -> None:
     # Window means are time-weighted (p.time_average): correct on any
     # grid, unlike a plain mean over the samples of a variable-step run.
     t_s = res.times
-    pre_d  = p.time_average(t_s, i_d_arr, 5e-3, T_STEP_D)
-    post_d = p.time_average(t_s, i_d_arr, T_STEP_D + 3e-3, T_STEP_Q)
-    post_q = p.time_average(t_s, i_q_arr, t_from=T_STEP_Q + 3e-3)
-    print(f"\n  KPI:")
-    print(f"    i_d  pre-step  (5–{T_STEP_D*1e3:.0f} ms): mean = {pre_d:.2f} A "
+    pre_d  = p.time_average(t_s, i_d_arr, T_STEP_D - 10e-3, T_STEP_D)
+    post_d = p.time_average(t_s, i_d_arr, T_STEP_Q - 10e-3, T_STEP_Q)
+    post_q = p.time_average(t_s, i_q_arr, t_from=T_END - 10e-3)
+    print("\n  KPI:")
+    print(f"    i_d  pre-step  ({T_STEP_D*1e3-10:.0f}–{T_STEP_D*1e3:.0f} ms): mean = {pre_d:.2f} A "
           f"(target {I_D_REF_1:.1f})")
-    print(f"    i_d  post-step ({T_STEP_D*1e3+3:.0f}–{T_STEP_Q*1e3:.0f} ms): "
+    print(f"    i_d  post-step ({T_STEP_Q*1e3-10:.0f}–{T_STEP_Q*1e3:.0f} ms): "
           f"mean = {post_d:.2f} A (target {I_D_REF_2:.1f})")
-    print(f"    i_q  post-step (>{T_STEP_Q*1e3+3:.0f} ms): "
+    print(f"    i_q  post-step ({T_END*1e3-10:.0f}–{T_END*1e3:.0f} ms): "
           f"mean = {post_q:.2f} A (target {I_Q_REF_2:.1f})")
 
     try:

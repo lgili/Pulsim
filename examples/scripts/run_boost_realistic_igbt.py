@@ -50,7 +50,7 @@ def build_from_python() -> tuple[p.CircuitBuilder, float, float, float]:
                         V_T=5.0, kappa=15.0)
     b.add_capacitor  ("C_out",   "vout", "gnd", 100e-6)
     b.add_resistor   ("R_load",  "vout", "gnd", 20.0)
-    return b, 0.0, 5e-3, 1e-7
+    return b, 0.0, 20e-3, 1e-7
 
 
 def main() -> None:
