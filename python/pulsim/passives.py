@@ -13,6 +13,9 @@ the DC and AC analyses exactly like the elements it is made of.
   winding's ``R_ac(f)`` curve (a fit reproduces its own data by
   construction: that is not a validation).
 * ``add_transmission_line(..., model="pi")``: lumped π sections.
+* ``odd_charge_table``: the DC-bias C(v) of an MLCC as an odd
+  ``ChargeTable`` for the existing charge-law ``NonlinearCapacitor``
+  (a Newton device, so pwl / trbdf2 only, unlike the composites above).
 
 ``{name}`` stays the ideal element, so ``c0``, ``i0`` and
 ``result.i(name)`` keep their meaning; a parameter left at zero adds
@@ -34,6 +37,7 @@ if TYPE_CHECKING:
 __all__ = [
     "RacLadder",
     "fit_rac_ladder",
+    "odd_charge_table",
     "recommend_line_sections",
     "install",
 ]
@@ -152,6 +156,36 @@ def fit_rac_ladder(f: Sequence[float], R_ac: Sequence[float], *, L: float,
     return RacLadder(R_dc=ladder.R_dc, L_hf=ladder.L_hf, R_k=ladder.R_k,
                      L_k=ladder.L_k, band=ladder.band, residual=res,
                      source=source)
+
+
+# ---------------------------------------------------------------------------
+# Capacitance against DC bias (odd charge table)
+# ---------------------------------------------------------------------------
+
+def odd_charge_table(v: Sequence[float], Q: Sequence[float],
+                     C: Sequence[float]):
+    """A :class:`pulsim.ChargeTable` that is odd in ``v``: knots
+    ``(v_k, Q_k, C_k)`` for ``v ≥ 0`` (the first at ``v = 0``, ``Q = 0``)
+    mirrored to ``(−v_k, −Q_k, C_k)``; linear tails at the last ``C``.
+    For a capacitor whose value falls with the magnitude of its DC bias
+    (an MLCC): pass it as ``ChargeLaw.table(...)`` to
+    ``add_nonlinear_capacitor``. A datasheet ``C(v_bias)`` curve is a
+    small-signal capacitance; its integral is exact around any bias and
+    an approximation for large swings (no hysteresis)."""
+    from ._pulsim import ChargeTable
+
+    v = np.asarray(v, dtype=float)
+    q = np.asarray(Q, dtype=float)
+    c = np.asarray(C, dtype=float)
+    if v.ndim != 1 or v.shape != q.shape or v.shape != c.shape or v.size < 2:
+        raise ValueError("odd_charge_table: v, Q and C must be 1-D of equal "
+                         "length >= 2.")
+    if v[0] != 0.0 or q[0] != 0.0:
+        raise ValueError("odd_charge_table: the first knot must be v = 0, "
+                         "Q = 0 (the table is odd).")
+    return ChargeTable(np.concatenate([-v[:0:-1], v]).tolist(),
+                       np.concatenate([-q[:0:-1], q]).tolist(),
+                       np.concatenate([c[:0:-1], c]).tolist())
 
 
 # ---------------------------------------------------------------------------

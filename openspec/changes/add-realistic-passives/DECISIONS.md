@@ -76,6 +76,12 @@ Each entry: question → option taken → why → how to reverse.
 - Option: not started; it depends on the `ChargeTable` /
   charge-law `NonlinearCapacitor` of `add-power-mosfet-datasheet-device`,
   being implemented by another change.
+- Update (integration, after both changes met): 4.1 and 4.3 done as
+  `passives.odd_charge_table(v, Q, C)` (knots for v >= 0 mirrored into
+  a `ChargeTable`; tails are the table's end-knot slopes). Open: 4.2
+  `fit_mlcc_dc_bias`, 4.4 (ripple, charge conservation at 1e-9, which
+  add-power-mosfet-datasheet-device measured as unreachable on pwl,
+  2.2e-8, its DECISIONS 17), 4.5 YAML.
 
 ## D10. Default `n_cells` (task 3.4)
 

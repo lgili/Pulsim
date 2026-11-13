@@ -22,9 +22,9 @@
 - [x] 3.5 The fitted points are reported as fitted; no agreement with them is reported as validation — docstrings, CHANGELOG and limitation pages say so
 
 ## 4. Capacitance against DC bias (after the charge-law variant)
-- [ ] 4.1 Odd charge table for `NonlinearCapacitor` (knots for `v ≥ 0`, odd extension, linear tail); `Q(v)` strictly increasing at 1 pV spacing around 0 and around the knee — NOT STARTED: needs the charge-law variant from `add-power-mosfet-datasheet-device` (D9)
+- [x] 4.1 Odd charge table for `NonlinearCapacitor` (knots for `v ≥ 0`, odd extension, linear tail); `Q(v)` strictly increasing at 1 pV spacing around 0 and around the knee — `pulsim.passives.odd_charge_table` mirrors the knots into a `ChargeTable` for `ChargeLaw.table` (D9); odd / even to 1e-14 relative (each Hermite segment is evaluated from its left knot)
 - [ ] 4.2 `fit_mlcc_dc_bias(v_bias, c_ratio, C_nominal)` returning the table and its residual
-- [ ] 4.3 Test: `C0/(1 + (v/V1)²)`, `C0` = 10 µF, `V1` = 10 V, 64 knots → `Q(20 V)` = 110.71 µC (1e-4), `C(20 V)` = 2.000 µF (1e-3), stored energy 0.8047 mJ (1e-4)
+- [x] 4.3 Test: `C0/(1 + (v/V1)²)`, `C0` = 10 µF, `V1` = 10 V, 64 knots → `Q(20 V)` = 110.71 µC (1e-4), `C(20 V)` = 2.000 µF (1e-3), stored energy 0.8047 mJ (1e-4) — 64 knots on 0..40 V
 - [ ] 4.4 Test: small-signal ripple on a 20 V bias corresponds to 2.000 µF (1e-3); charge conserved over a ±20 V cycle (1e-9); `pwl` against `trbdf2` (1e-6)
 - [ ] 4.5 YAML: `nonlinear_capacitor` with `table:` or `dc_bias:` curve
 

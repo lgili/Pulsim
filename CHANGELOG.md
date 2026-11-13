@@ -292,8 +292,13 @@ once, above the engine dispatch, and both engines consume that plan.
   `inductor`, expanded by the C++ loader into the same elements as the
   Python keywords (pinned by comparing `components()`); `rac:` is refused
   by name (it used to be ignored like every unknown key).
-* Not in this pass: YAML `rac:` and `transmission_line`, the
-  MLCC DC-bias table (needs `ChargeTable`), the Bergeron line
+* **Added** `pulsim.passives.odd_charge_table(v, Q, C)`: an MLCC's
+  DC-bias C(v) as an odd `ChargeTable` (knots for v >= 0 mirrored) for
+  `add_nonlinear_capacitor(..., ChargeLaw.table(t))`; a Newton device,
+  so `pwl` / `trbdf2` only. C0/(1+(v/V1)^2) at 64 knots: Q(20 V)
+  110.71 uC, C(20 V) 2.000 uF, stored energy 0.8047 mJ.
+* Not in this pass: YAML `rac:` and `transmission_line`,
+  `fit_mlcc_dc_bias` and the MLCC ripple / YAML tasks, the Bergeron line
   (`openspec/changes/add-realistic-passives/DECISIONS.md`).
 
 ### MNA-native DC machine (`add-mna-native-machines`, step 1)

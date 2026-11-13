@@ -339,3 +339,44 @@ def test_line_from_per_metre_data_and_refusals():
     with pytest.raises(ValueError, match="'T4'.*sections"):
         b.add_transmission_line("T4", "k", "gnd", "m", "gnd", Z0=Z0,
                                 delay=TAU)
+
+
+# ---------------------------------------------------------------------------
+# Capacitance against DC bias (tasks 4.1, 4.3): odd charge table
+# ---------------------------------------------------------------------------
+
+def _mlcc_table(n=64, C0=10e-6, V1=10.0, v_max=40.0):
+    from pulsim.passives import odd_charge_table
+
+    v = np.linspace(0.0, v_max, n)
+    return odd_charge_table(v, C0 * V1 * np.arctan(v / V1),
+                            C0 / (1.0 + (v / V1) ** 2))
+
+
+def test_odd_charge_table_known_bias_law():
+    # C0/(1 + (v/V1)^2): Q = C0·V1·atan(v/V1), W = C0·V1²/2·ln(1 + (v/V1)²).
+    t = _mlcc_table()
+    assert t.charge(20.0) == pytest.approx(110.71e-6, rel=1e-4)
+    assert t.capacitance(20.0) == pytest.approx(2.000e-6, rel=1e-3)
+    v = np.linspace(0.0, 20.0, 20001)
+    W = float(np.trapezoid(v * np.array([t.capacitance(x) for x in v]), v))
+    assert W == pytest.approx(0.8047e-3, rel=1e-4)
+    for x in (0.3, 7.0, 20.0, 55.0):          # odd Q, even C, tails included
+        # to rounding: each segment is evaluated from its left knot
+        assert t.charge(-x) == pytest.approx(-t.charge(x), rel=1e-14)
+        assert t.capacitance(-x) == pytest.approx(t.capacitance(x), rel=1e-14)
+
+
+def test_odd_charge_table_is_strictly_increasing_at_1_pV():
+    t = _mlcc_table()
+    for v0 in (0.0, 10.0, -10.0):              # around 0 and the knee V1
+        v = v0 + 1e-12 * np.arange(-50, 51)
+        q = np.array([t.charge(float(x)) for x in v])
+        assert np.all(np.diff(q) > 0), v0
+
+
+def test_odd_charge_table_refuses_a_table_not_starting_at_zero():
+    from pulsim.passives import odd_charge_table
+
+    with pytest.raises(ValueError, match="v = 0"):
+        odd_charge_table([1.0, 2.0], [1e-6, 2e-6], [1e-6, 1e-6])
