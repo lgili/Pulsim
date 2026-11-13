@@ -27,6 +27,7 @@ import hashlib
 import json
 import math
 import time
+import types
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence
 
@@ -89,7 +90,8 @@ class FrozenDict(dict):
 
 
 def _fz(m) -> FrozenDict:
-    return FrozenDict({k: _fz(v) if isinstance(v, Mapping) else v
+    return FrozenDict({k: _fz(v) if isinstance(v, Mapping)
+                       else tuple(v) if isinstance(v, list) else v
                        for k, v in m.items()})
 
 
@@ -188,6 +190,9 @@ class SteadyPeriod:
     t_from: float
     t_to: float
     seed: int
+    #: The default KPIs and the per-device losses (read-only).
+    kpis: Mapping[str, float] = field(default_factory=dict)
+    losses: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
     def average(self, y) -> float:
         """Time-weighted mean of a per-sample trace over the period."""
@@ -214,11 +219,31 @@ def _canon_value(v):
         return {str(k): _canon_value(x) for k, x in sorted(v.items())}
     if isinstance(v, (tuple, list)):
         return [_canon_value(x) for x in v]
+    if isinstance(v, np.ndarray):
+        return _canon_value(v.tolist())
+    if isinstance(v, types.FunctionType):
+        # name + code + defaults + captured values: two closures of one
+        # factory with different captures are different options
+        code = v.__code__
+        cells = []
+        for c in v.__closure__ or ():
+            try:
+                cells.append(_canon_value(c.cell_contents))
+            except (TypeError, ValueError):
+                cells.append(type(c.cell_contents).__qualname__)
+        return {"fn": f"{v.__module__}.{v.__qualname__}",
+                "code": hashlib.sha256(code.co_code + repr(
+                    code.co_consts).encode()).hexdigest(),
+                "defaults": _canon_value(list(v.__defaults__ or ())),
+                "cells": cells}
+    if hasattr(v, "__dict__"):
+        return {"type": f"{type(v).__module__}.{type(v).__qualname__}",
+                "fields": _canon_value(vars(v))}
     if callable(v):
-        return f"{getattr(v, '__module__', '?')}.{getattr(v, '__qualname__', repr(v))}"
+        return f"{getattr(v, '__module__', '?')}.{getattr(v, '__qualname__', type(v).__qualname__)}"
     raise TypeError(
-        f"design values must be numbers, strings or booleans (or "
-        f"mappings / sequences of them), got {type(v).__name__}: {v!r}")
+        f"values must be numbers, strings, booleans, arrays, functions or "
+        f"mappings / sequences of them, got {type(v).__name__}: {v!r}")
 
 
 def _digest(obj) -> str:
@@ -386,6 +411,9 @@ class Evaluator:
             raise ValueError(
                 f"SteadySpec(method='pss') runs on the dsed exact stepper; "
                 f"engine={engine!r} contradicts it (use method='transient').")
+        if steady.min_periods < 8 or steady.max_periods < steady.min_periods:
+            raise ValueError("SteadySpec needs 8 <= min_periods <= max_periods "
+                             "(the settle estimate reads x(n/2) ... x(n))")
         if not (isinstance(samples_per_period, int) and samples_per_period >= 4):
             raise ValueError("samples_per_period must be an int >= 4")
         self.build = build
@@ -543,7 +571,7 @@ class Evaluator:
                 raise KeyError(f"ThermalSpec.r_th names {d!r}, which is not "
                                f"a device of the circuit")
         tj = {d: float(th.t_amb) for d in th.r_th}
-        omega, prev = 1.0, math.inf
+        omega, prev, dist = 1.0, math.inf, math.inf
         for k in range(1, th.max_iter + 1):
             rows, losses = self._loss_rows(b, run, a, z, tj)
             losses = self._losses_at(losses, tj)
@@ -552,19 +580,27 @@ class Evaluator:
                 t_hat = th.t_amb + float(r) * sum(losses[d].values())
                 new[d] = tj[d] + omega * (t_hat - tj[d])
             inc = max(abs(new[d] - tj[d]) for d in tj)
-            if inc > prev:
-                omega *= 0.5        # the increment grew: damp
+            if not math.isfinite(inc):
+                raise _Failed(f"non-finite thermal loss at T_j = {tj}")
+            q = inc / prev if prev > 0 else 0.0
             prev, tj = inc, new
             counters["thermal_iterations"] = k
             counters["thermal_increment"] = inc
             hot = max(tj[d] - th.t_limit for d in tj)
-            if hot > 0:
-                raise _Infeasible(
-                    f"thermal_runaway: T_j = {max(tj.values()):.4g} C exceeds "
-                    f"t_limit = {th.t_limit:g} C at iteration {k}",
-                    {"thermal_runaway": hot})
-            if inc < th.tol:
-                break
+            if q >= 1.0:
+                # the increments do not shrink: above the limit, or with
+                # damping exhausted, there is no fixed point to reach
+                if hot > 0 or omega < 1.0 / 64:
+                    raise _Infeasible(
+                        f"thermal_runaway: T_j = {max(tj.values()):.4g} C and "
+                        f"rising (increment ratio {q:.3g}) at iteration {k}",
+                        {"thermal_runaway": max(hot, inc)})
+                omega *= 0.5        # the increment grew: damp
+            elif k >= 2:
+                # distance to the fixed point of a contraction with ratio q
+                dist = inc * q / (1.0 - q)
+                if dist < th.tol:
+                    break
             if th.temperature_dependent:
                 # the electrical solution depends on T_j: re-simulate
                 b, sf = self._build({**design, "_T_j": _fz(tj)})
@@ -572,8 +608,14 @@ class Evaluator:
         else:
             raise _Infeasible(
                 f"thermal_runaway: no fixed point within {th.max_iter} "
-                f"iterations (last increment {inc:.4g} K)",
-                {"thermal_runaway": inc})
+                f"iterations (last increment {inc:.4g} K, estimated "
+                f"distance {dist:.4g} K)", {"thermal_runaway": inc})
+        counters["thermal_distance"] = dist
+        hot = max(tj[d] - th.t_limit for d in tj)
+        if hot > 0:
+            raise _Infeasible(
+                f"thermal_limit: the fixed point T_j = {max(tj.values()):.4g} C "
+                f"exceeds t_limit = {th.t_limit:g} C", {"thermal_limit": hot})
         # the losses AT the converged temperatures (no re-simulation:
         # the run is within th.tol of them)
         rows, losses = self._loss_rows(b, run, a, z, tj)
@@ -613,7 +655,13 @@ class Evaluator:
                 try:
                     _pss_capability(b, T, sf)
                     method = "pss"
-                except UnsupportedError as e:
+                except ValueError as e:
+                    if not isinstance(e, UnsupportedError) and \
+                            "cannot extract this circuit's state space" \
+                            not in str(e):
+                        raise       # a configuration error: not a route
+                    if not isinstance(e, UnsupportedError):
+                        e.feature, e.kind, e.device = "state_space", "", ""
                     # A documented route, decided BEFORE any run: the
                     # circuit is outside the exact stepper's coverage.
                     method = "transient"
@@ -674,6 +722,11 @@ class Evaluator:
             if _is_pss_failure(e):
                 raise _Failed(str(e)) from e
             raise
+        if not r.stable:
+            # an orbit the circuit never reaches: its KPIs are no answer
+            raise _Failed(
+                "unstable_orbit: Floquet multipliers outside the unit "
+                f"circle {[(round(abs(m), 6), k) for _, m, k in r.unstable_multipliers]}")
         counters["pss_period_runs"] = counters.get(
             "pss_period_runs", 0) + int(r.n_period_runs)
         counters["engine_steps"] = counters.get(
@@ -810,8 +863,12 @@ class Evaluator:
                 kpis[f"v_peak.{n}"] = float(np.abs(vw).max())
         if self.kpis:
             per = SteadyPeriod(result=run, builder=b, design=design,
-                               t_from=a, t_to=z, seed=int(did, 16) % 2**32)
+                               t_from=a, t_to=z, seed=int(did, 16) % 2**32,
+                               kpis=_fz(kpis), losses=_fz(losses))
             for k in self.kpis:
+                if k.name in kpis:
+                    raise ValueError(f"user KPI {k.name!r} has the name of a "
+                                     "default KPI")
                 kpis[k.name] = float(k.fn(per))
         return kpis
 
@@ -825,20 +882,21 @@ def _pss_capability(b, T, sf):
 
 
 def _true_state(b, run):
-    """``(t, X)``: inductor currents and capacitor voltages per sample
-    (continuous across events, so interpolation is exact at them)."""
+    """``(t, X)``: inductor currents, capacitor voltages and every
+    column of the engine's state vector (node voltages, branch
+    currents, the internal states of stateful devices) per sample.
+    A Python ``switch_fn``'s own memory is not in it (DECISIONS 9)."""
+    from ._result_views import states_as_array
+    st = np.asarray(states_as_array(run), dtype=float)
     cols = []
-    st = None
     for c in b.components():
         if c["kind"] == "inductor":
             cols.append(np.asarray(run.i(c["name"]), dtype=float))
         elif c["kind"] == "capacitor":
-            if st is None:
-                from ._result_views import states_as_array
-                st = states_as_array(run)
             cols.append(_pair_col(c["nodes"])(st))
     t = np.asarray(run.times, dtype=float)
-    return t, (np.stack(cols, axis=1) if cols else np.zeros((t.size, 0)))
+    X = np.stack(cols, axis=1) if cols else np.zeros((t.size, 0))
+    return t, np.hstack([X, st.reshape(t.size, -1)])
 
 
 def _settle_error(b, run, T, n):
@@ -903,8 +961,8 @@ def _engine(fn):
     from . import Cancelled
     try:
         return fn()
-    except Cancelled:
-        raise
+    except (Cancelled, NotImplementedError, RecursionError):
+        raise      # a stub, a refusal (_UnsupportedNotImplemented), a bug
     except RuntimeError as e:
         if type(e).__name__ == "_CxxCancelled":
             raise

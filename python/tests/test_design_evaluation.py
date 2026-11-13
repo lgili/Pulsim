@@ -115,6 +115,14 @@ def test_design_id_depends_on_design_and_options_only():
     assert a.design_id(CCM) != a.design_id({**CCM, "C": 48e-6})
     assert a.design_id(CCM) != _ev(samples_per_period=500).design_id(CCM)
 
+    def law(k):
+        return lambda x: k * x
+    # two closures of one factory are two designs; the same capture is one
+    assert a.design_id({"f": law(1.0)}) != a.design_id({"f": law(2.0)})
+    assert a.design_id({"f": law(1.0)}) == a.design_id({"f": law(1.0)})
+    assert a.design_id({"v": np.array([1.0, 2.0])}) == \
+        a.design_id({"v": [1.0, 2.0]})
+
 
 def test_user_kpi_is_time_weighted():
     def mean_vout(per):
@@ -185,6 +193,31 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
         _ev().evaluate(CCM)
 
 
+def test_not_implemented_and_recursion_errors_propagate(monkeypatch):
+    for exc in (NotImplementedError, RecursionError):
+        def stub(*a, exc=exc, **k):
+            raise exc("a stub or a bug")
+        monkeypatch.setattr(p, "simulate", stub)
+        with pytest.raises(exc):
+            _ev().evaluate(CCM)
+
+
+def test_an_unstable_orbit_is_failed_not_ok(monkeypatch):
+    import dataclasses
+    import sys
+    pss = sys.modules["pulsim.periodic_steady_state"]   # the module
+    real = pss.periodic_steady_state
+
+    def unstable(*a, **k):
+        return dataclasses.replace(real(*a, **k), stable=False,
+                                   unstable_multipliers=[(0, 1.3 + 0j, "real")])
+    monkeypatch.setattr(pss, "periodic_steady_state", unstable)
+    rec = _ev(steady=SteadySpec(method="pss")).evaluate(CCM)
+    assert rec.status == "failed"
+    assert rec.reason.startswith("unstable_orbit")
+    assert rec.kpis == {}
+
+
 def test_build_errors_propagate():
     def broken(d):
         raise ZeroDivisionError("in the user's build")
@@ -227,5 +260,9 @@ def test_adapters_penalise_refused_and_failed_only(ccm):
 def test_bad_configuration_is_rejected_up_front():
     with pytest.raises(ValueError, match="dsed exact stepper"):
         Evaluator(buck, period=T, engine="pwl", steady=SteadySpec("pss"))
+    with pytest.raises(ValueError, match="min_periods"):
+        Evaluator(buck, period=T, steady=SteadySpec(min_periods=4))
+    with pytest.raises(ValueError, match="name of a default KPI"):
+        _ev(kpis=[Kpi("efficiency", lambda per: 1.0)]).evaluate(CCM)
     with pytest.raises(KeyError, match="names no KPI"):
         _ev(constraints={"nope": (0, 1)}).evaluate(CCM)

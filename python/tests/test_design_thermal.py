@@ -34,9 +34,11 @@ def test_fixed_point_equals_the_closed_form():
     assert t_star == pytest.approx(63.043478, abs=1e-6)
     rec = _ev(r_th).evaluate(CCM)
     assert rec.status == "ok", rec.reason
-    assert rec.t_j["S"] == pytest.approx(t_star, abs=0.01)
+    # stops on the estimated DISTANCE, which is exact for a linear map
+    assert abs(rec.t_j["S"] - t_star) < 0.1
+    assert rec.counters["thermal_distance"] == pytest.approx(
+        abs(rec.t_j["S"] - t_star), rel=1e-6)
     assert rec.kpis["t_j.S"] == rec.t_j["S"]
-    assert rec.counters["thermal_increment"] < 0.1
     assert 2 <= rec.counters["thermal_iterations"] <= 20
     # the record's loss is the loss AT the junction temperature
     assert sum(rec.losses["S"].values()) == pytest.approx(
@@ -51,6 +53,17 @@ def test_runaway_is_infeasible():
     assert rec.reason.startswith("thermal_runaway")
     assert rec.kpis == {}                 # no number for an unsettled T_j
     assert list(as_objectives(rec, ["efficiency"], penalty=3.0)) == [3.0]
+
+
+def test_a_slow_contraction_stops_on_the_distance_not_the_increment():
+    """Contraction 0.9: the increment is 9x smaller than the distance;
+    stopping on the increment ended 0.9 K short of the fixed point."""
+    r_th = 0.9 / (P0 * ALPHA)
+    t_star = (T_AMB + r_th * P0 * (1 - 25 * ALPHA)) / (1 - r_th * P0 * ALPHA)
+    rec = _ev(r_th, t_limit=1e9, max_iter=400).evaluate(CCM)
+    assert rec.status == "ok", rec.reason
+    assert abs(rec.t_j["S"] - t_star) < 0.1
+    assert rec.counters["thermal_increment"] < 0.012
 
 
 def test_runaway_without_crossing_the_limit_is_caught_by_the_budget():

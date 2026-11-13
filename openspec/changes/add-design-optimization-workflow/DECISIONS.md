@@ -118,7 +118,9 @@ helpers. → Reverse: let `kpis=` replace the defaults.
 2× the cost of the final run, and deterministic) until the estimated
 distance to the engine's own orbit is below `tol`, relative to each
 state's magnitude over the last period (inductor currents, capacitor
-voltages); `max_periods = 4096`, then `failed`, `not_settled`.
+voltages and every column of the engine's state vector, so a
+stateful device's internal state counts; a Python `switch_fn`'s own
+memory is invisible and is the user's to settle, review H2); `max_periods = 4096`, then `failed`, `not_settled`.
 Default `tol = 1e-6`. The estimate is the larger of two geometric
 extrapolations per state: over the last period (`d1·ρ/(1 − ρ)`) and
 over the last half (`d_a·r/(1 − r)`, quarters). The state is read at
@@ -202,9 +204,14 @@ iteration: the loss summary at `T_j` (a switch's 3-D `E_on_table` /
 `E_off_table` read at the device's `T_j`), then `loss_at(device, P,
 T_j)` if given (it scales the device's categories), then
 `T̂ = T_amb + R_th·P`, `T_j += ω(T̂ − T_j)`, `ω` halved when the
-increment grows. `T_j > t_limit` at any iterate, or no increment
-below `tol` in `max_iter`, is `infeasible` with `thermal_runaway` and
-NO KPIs (a number at an unsettled `T_j` is not a number); the adaptors
+increment grows. It stops when the estimated DISTANCE to the fixed
+point, `inc·q/(1 − q)` with `q` the ratio of successive increments,
+is below `tol` (at least 2 iterations); stopping on the increment
+alone ended 0.9 K short at `q = 0.9` (review H3). Increments that do
+not shrink with `T_j > t_limit`, or with `ω < 1/64`, or no stop in
+`max_iter`, are `infeasible`, `thermal_runaway`; a fixed point above
+`t_limit` is `infeasible`, `thermal_limit`; a non-finite loss is
+`failed`. All carry NO KPIs (a number at an unsettled `T_j` is not a number); the adaptors
 give the penalty for a record without KPIs. `temperature_dependent`
 means `build` reads `design['_T_j']` (device → °C) and the steady
 state is re-run per iterate; otherwise one simulation serves every
@@ -215,13 +222,74 @@ simplest form; `device_thermal_summary`'s Foster chains are
 transient, so their steady value is their `R` sum.
 
 Evidence: `P = 10·(1 + 0.004·(T − 25))` W, `R_th = 2`, `T_amb = 40`:
-`T_j` = 63.042534 °C against the closed form 63.043478 (9.4e-4 K) in 4
-iterations, one simulation as without the loop. `R_th·P₀·α = 1.2`:
-358 °C at the first iterate, `thermal_runaway` 208 K. A switch with
-`R_on(T) = 50 mΩ·(1 + 0.006(T − 25))`, `R_th = 10`: 84.85 °C in 5
-iterations, `T_j = T_amb + R_th·P(T_j)` to 0.06 K, 20 simulations.
+`T_j` = 63.031680 °C against the closed form 63.043478 (0.0118 K, the
+estimated distance 0.0117983, exact for a linear map) in 3
+iterations, one simulation as without the loop. `R_th·P₀·α = 0.9`:
+2424.90 °C against 2425 in 96 iterations (estimate 0.097 K).
+`R_th·P₀·α = 1.2`: ratio 1.2 above the limit at iteration 2,
+`thermal_runaway`. A switch with `R_on(T) = 50 mΩ·(1 + 0.006(T −
+25))`, `R_th = 10`: 84.79 °C in 4 iterations, 16 simulations.
 → Reverse: `mode='kernel'` when `add-in-kernel-event-losses` lands
 (task 7.1).
+
+## 14. The worked example (design D8)
+
+→ `examples/optimization/buck_pareto.py` + notebook. Deviations from
+D8, each stated in the example's docstring:
+
+* **Parts.** D8 names "two synthetic MOSFET entries of `lib/data`";
+  this tree ships none (its catalog holds one 1200 V IGBT and one SiC
+  diode, both synthetic, neither sensible in a 48 V buck). The example
+  builds two MOSFETs ("SYN-A": 4 mΩ, 24 + 12 µJ at 48 V / 10 A;
+  "SYN-B": 10 mΩ, 8 + 4 µJ) through `pulsim.lib.parts.part_from_mapping`
+  with `provenance.method: synthetic` (so `Part.is_synthetic`), 3-D
+  straight-line energy tables `E·(v/48)(i/10)(1 + 0.003(T_j − 25))`.
+  The real-part decision stays the owner's.
+* **Thermal.** The heatsink is SIZED so the hotter switch sits at
+  125 °C (`R_th,sa = (85 K − R_jc·P_max)/P_total`), so `R_on` and the
+  tables are read at 125 °C and no fixed point is needed; the `T_j`
+  constraint becomes `R_th,sa ≥ 0.05 K/W`. The fixed point is tested
+  on its own oracle (tasks 3.2).
+* **Circuit.** Open loop, D = 0.25, no dead time, no body diode; the
+  low-side switch's switching loss is neglected (it commutates at
+  near-zero voltage in a synchronous buck); inductor DCR 3 mΩ.
+* **User KPIs see the default KPIs.** `SteadyPeriod.kpis` / `.losses`
+  (read-only) so the volume law can size the sink from the losses.
+* Volume constants `K_L = 3e-4 m³/J^0.75`, `K_C = 7e-5 m³/(F·V²)`,
+  `K_HS = 3e-4 m³·K/W`: assumptions (2 cm³ for 10 µH at 12/10 A, 1 cm³
+  for 100 µF at 12 V, 300 cm³ for a 1 K/W natural-convection sink).
+
+Observation (not asserted), 512 Latin-hypercube designs, seed 0, this
+machine: 376 ok, 136 infeasible, 0 refused, 0 failed; 7 designs on the
+front, 97.91 % at 11.3 cm³ to 98.50 % at 13.2 cm³, all between 50 and
+91 kHz; 3.3 s wall (single worker). The CI test (32 designs) asserts
+the counts, a non-empty front and the constraints of every member. The
+NSGA-II path (`pymoo`, optional extra `pulsim[opt]`) is not exercised
+here (pymoo is not installed on this machine); its test is an
+`importorskip`.
+
+## 15. Fresh-context review (opus, read-only) and what was done
+
+* H1 an unstable `pss` orbit came back `ok` → `failed`,
+  `unstable_orbit` (test by a monkeypatched result).
+* H2 the settle check saw only L/C states → all state columns (§9).
+* H3 thermal stop on the increment → on the estimated distance (§13).
+* M1 `NotImplementedError` / `RecursionError` became `failed` → they
+  propagate (and `_UnsupportedNotImplemented` reaches the refusal).
+* M2 a non-finite thermal loss, a first-iterate overshoot read as a
+  runaway → §13.
+* M3 a callable in a design hashed by its name only → name, code,
+  defaults and captured values; arrays as lists; objects by type and
+  `vars()`.
+* M4 the example's volume was `inf` at `R_th,sa ≤ 0` → floored at the
+  constraint's bound, so the constraint flags it.
+* L1 `auto` raised on "cannot extract this circuit's state space" →
+  routed to the transient with that reason (no circuit in the tests
+  triggers it; the branch is untested).
+* L3 a user KPI named like a default one, `min_periods < 8`, list
+  values in a design → rejected / frozen to tuples.
+* Not done: an energy-balance guard on `p_in − p_out − p_loss`;
+  cancelling queued futures when a batch raises.
 
 ## Missing from the kernel (recorded, worked around in Python)
 

@@ -21,9 +21,9 @@
 - [x] 5.2 Tests: 64 designs on 1 and on 8 workers give equal records (all fields except `wall_s`); two calls of `evaluate` on the same design give equal records; a batch with one refusing design completes with one `refused` record
 
 ## 6. Worked example
-- [ ] 6.1 `examples/optimization/buck_pareto.py` and a notebook (design D8); optional extra `pulsim[opt]` for pymoo; numpy fallback
-- [ ] 6.2 Test (CI, small): 32 Latin-hypercube designs run, status counts printed, the non-dominated set is non-empty and every member satisfies the constraints
-- [ ] 6.3 Docs: "Using Pulsim inside an optimiser" (contract, statuses, determinism, why derivative-free, the finite-difference table, synthetic parts)
+- [x] 6.1 `examples/optimization/buck_pareto.py` and a notebook (design D8); optional extra `pulsim[opt]` for pymoo; numpy fallback
+- [x] 6.2 Test (CI, small): 32 Latin-hypercube designs run, status counts printed, the non-dominated set is non-empty and every member satisfies the constraints
+- [x] 6.3 Docs: "Using Pulsim inside an optimiser" (contract, statuses, determinism, why derivative-free, the finite-difference table, synthetic parts)
 
 ## 7. Integration with later changes
 - [ ] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design
@@ -31,4 +31,4 @@
 - [ ] 7.3 With `add-parameter-sensitivities`: `gradients=True`; test against the sensitivities change's oracle
 
 ## 8. Verification
-- [ ] 8.1 ruff, pytest, `openspec validate --all --strict`
+- [x] 8.1 ruff, pytest, `openspec validate --all --strict`

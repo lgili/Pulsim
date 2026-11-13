@@ -47,10 +47,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** `ThermalSpec`: junction temperatures by a damped fixed
   point between the losses at `T_j` (3-D switching tables read at each
   device's `T_j`, an optional `loss_at(device, P, T_j)`) and
-  `T_amb + R_th·P`, to 0.1 K in at most 20 iterations; re-simulated
-  only when `build` reads `design['_T_j']`. Linear loss model: 63.0425 °C
-  against the closed form 63.0435 °C; `R_th·P₀·α = 1.2` is `infeasible`
-  with `thermal_runaway`.
+  `T_amb + R_th·P`, stopped when the estimated distance to the fixed
+  point is below 0.1 K; re-simulated only when `temperature_dependent`.
+  Linear loss model: 63.0317 °C against the closed form 63.0435 °C;
+  `R_th·P₀·α = 1.2` is `infeasible` with `thermal_runaway`. An
+  unstable `pss` orbit is `failed`, `unstable_orbit`.
+* **Added** `examples/optimization/buck_pareto.py` (+ notebook): a
+  synchronous 48 V → 12 V buck's efficiency-against-volume front over
+  `f_sw`, `L`, `C` and two MOSFETs, with NSGA-II when `pymoo` is
+  installed (new extra `pulsim[opt]`) and a Latin-hypercube sample with
+  a numpy non-dominated filter otherwise. Its MOSFETs are SYNTHETIC
+  and its volume law illustrative; it says so in its output and plot.
+  512 designs: 376 ok, 136 infeasible, a 7-design front, 3.3 s.
+* **Added** Tutorial 08, "Using Pulsim inside an optimiser" (executed):
+  the contract, the four statuses, the adaptors, why derivative-free.
 * **Changed** `pulsim.sweep`'s job runner takes the job function (and
   an option to let every exception propagate); `sweep` / `monte_carlo`
   are unchanged.
