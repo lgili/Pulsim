@@ -34,6 +34,12 @@ their messages are covered in [Gotchas](gotchas.md).
 | `simulate(engine='dsed')` with no `switch_fn` warns that it will poll "this plain Python switch_fn". | RC plus diode, no `switch_fn`: the run is correct but prints that warning. | Ignore it. |
 | `start_from_dc_op=True` works only on the fixed engine. | Without `dt` it raises `ValueError: ... start_from_dc_op is a fixed-step entry point`. | Pass `dt`. |
 
+## AC analysis
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, sources, and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `ValueError` naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
+
 ## Switching helpers
 
 | Limitation | Measured | Workaround |

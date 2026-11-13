@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Kernel AC sweep answers only for the circuit it models
+
+* **Fixed** `run_mna_sweep(freqs=, v_in_branch_id=)` (kernel path) took
+  its mass matrix from a private stamper that knew capacitors and
+  inductors only, so a coupled transformer's mutual inductance was
+  missing: `|H|` of a k = 0.99 transformer between 10 Ω source and load
+  read 0 / 0 / 0 at 100 Hz / 1 kHz / 10 kHz instead of 0.0617 / 0.3885 /
+  0.4949. The sweep now takes `(G, C)` from the transient assembler and
+  uses `E = C/2`, so it integrates exactly the elements the transient
+  does. R, L, C, VCVS and ideal-transformer sweeps are unchanged to
+  rounding.
+* **Changed (BREAKING)** `run_mna_sweep` takes `mask=`
+  (`SwitchStateMask`). A circuit with switches or PWL diodes and no
+  `mask` now raises `ValueError` naming them; it used to be swept with
+  every switch open (an RC through a closed switch read 0 / 0 / 0).
+* **Changed (BREAKING)** a circuit with a Newton device (smooth,
+  Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor,
+  junction capacitor, PMSM) is refused by the kernel sweep with
+  `ValueError` naming the branch and its kind; it used to be dropped (a
+  Shockley diode at 1 A read `|H| = 1`, exact 0.0252). Use `run_ac_sweep`, `pulsim.fra.run_fra`,
+  `frequency_response`, or `run_mna_sweep(use_kernel=False, dt=, t_end=)`.
+* **Fixed** a kernel error inside `run_mna_sweep` is no longer swallowed
+  by a broad `except` and turned into an impulse-FFT run; the FFT path
+  runs only when asked for (`use_kernel=False`, or no `freqs` /
+  `v_in_branch_id`).
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

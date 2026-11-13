@@ -7,11 +7,12 @@
 // cached MNA matrix without running a transient per frequency. This
 // header provides the C++ kernel implementation:
 //
-//   1. Reassemble the DC MNA matrix `J` at the supplied operating
-//      point + switch mask.
-//   2. Partition J into linear-RLC and constraint contributions so we
-//      can treat dynamic (capacitor / inductor) rows as `jω·E` and
-//      everything else as `A`.
+//   1. Refuse any Newton-stamped branch (it would be dropped, not
+//      linearised).
+//   2. Take (G, C) from the transient assembler `assemble_segment_split`
+//      at the caller's switch mask; the mass matrix is E = C/2 (the
+//      split stores the trapezoidal 2/dt coefficients), so capacitors,
+//      inductors and coupled windings are the transient's own.
 //   3. For each test frequency ω_k = 2π·f_k, build the complex matrix
 //      `M_k = jω_k·E − A`, solve `M_k · X = B` (with B sourced from
 //      the unit-impulse on the input branch), and read off the output
@@ -35,7 +36,7 @@
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
-#include "pulsim/pwl/dc_assemble.hpp"
+#include "pulsim/pwl/assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -44,6 +45,7 @@
 
 #include <Eigen/Sparse>
 #include <complex>
+#include <format>
 #include <stdexcept>
 #include <vector>
 
@@ -73,73 +75,67 @@ struct MnaSweepResult {
 
 namespace detail {
 
-/// Build the descriptor-form mass matrix E for the MNA system.
-///
-/// Walks the graph + pool and stamps:
-///   * Each Capacitor between nodes (a, b) contributes a `C`-weighted
-///     conductance block: E(a,a) += C, E(b,b) += C, E(a,b) -= C,
-///     E(b,a) -= C. Ground endpoints (a == -1 or b == -1) are skipped.
-///   * Each Inductor contributes `−L` on the diagonal of its branch-
-///     current row, because the constraint reads
-///     `v_a − v_b = L · d/dt(i_L)`, rearranged as
-///     `v_a − v_b − L · d/dt(i_L) = 0`. In E·ẋ = A·x form that's an
-///     entry of `-L` on the inductor's diagonal of E.
-///
-/// All other rows (resistors, voltage sources, KCL at R-only nodes,
-/// algebraic constraint rows) leave E unchanged → those rows are
-/// purely algebraic in the resulting `(jωE − A)` matrix.
-[[nodiscard]] inline ComplexSparseMatrix
-assemble_E_matrix(const topology::Graph& graph,
-                    const pwl::DevicePool& pool) {
-    const Index n = static_cast<Index>(pool.state_size(graph));
-    ComplexSparseMatrix E(n, n);
-    std::vector<Eigen::Triplet<Complex, Index>> triplets;
-
-    auto stamp_block = [&](Index from, Index to, Real value) {
-        const bool from_active = from >= 0;
-        const bool to_active   = to   >= 0;
-        if (from_active) {
-            triplets.emplace_back(from, from,
-                                    Complex{value, Real{0}});
-            if (to_active) {
-                triplets.emplace_back(from, to,
-                                        Complex{-value, Real{0}});
-            }
-        }
-        if (to_active) {
-            if (from_active) {
-                triplets.emplace_back(to, from,
-                                        Complex{-value, Real{0}});
-            }
-            triplets.emplace_back(to, to,
-                                    Complex{value, Real{0}});
-        }
-    };
-
-    const Index nb = graph.num_branches();
-    for (Index bid = 0; bid < nb; ++bid) {
-        const auto& branch = graph.branch(bid);
-        if (branch.kind != topology::BranchKind::PassiveLinear) {
+/// Refuse a circuit with a Newton-stamped branch. The sweep linearises
+/// nothing: `assemble_segment_split` stamps only the linear devices, so a
+/// smooth diode would be an open circuit, a saturable inductor a short and
+/// a junction capacitor absent: the transfer function of another circuit.
+inline void require_linear_for_sweep(const topology::Graph& graph,
+                                      const pwl::DevicePool& pool) {
+    for (Index bid = 0; bid < graph.num_branches(); ++bid) {
+        if (graph.branch(bid).kind != topology::BranchKind::Nonlinear) {
             continue;
         }
-        const auto stored = pool.kind_of(branch.id);
-        if (stored == pwl::DevicePool::StoredKind::Capacitor) {
-            const auto& cp = pool.capacitor_params(branch.id);
-            stamp_block(branch.from, branch.to, cp.C);
-        } else if (stored ==
-                     pwl::DevicePool::StoredKind::Inductor) {
-            const auto& lp = pool.inductor_params(branch.id);
-            const Index branch_var = pool.branch_var_id_for_inductor(
-                branch.id, graph);
-            // E(branch_var, branch_var) += -L
-            triplets.emplace_back(branch_var, branch_var,
-                                    Complex{-lp.L, Real{0}});
+        throw std::invalid_argument(std::format(
+            "run_mna_sweep: branch '{}' is a {} (a Newton device); the "
+            "kernel AC sweep stamps only linear elements and switches at a "
+            "fixed mask and does not linearise it at an operating point, so "
+            "it would return the transfer function of a different circuit. "
+            "Use a time-domain routine instead: pulsim.run_ac_sweep, "
+            "pulsim.fra.run_fra, "
+            "pulsim.frequency_response, or run_mna_sweep(..., "
+            "use_kernel=False, dt=..., t_end=...) (impulse-FFT).",
+            graph.branch_name(bid),
+            pwl::stored_kind_name(pool.kind_of(bid))));
+    }
+}
+
+/// The sweep's matrices: `G` (every dt-independent stamp) and the mass
+/// matrix `E`, both from the transient assembler. Its split stores the
+/// trapezoidal coefficients of 1/dt in `C` (J = G + C/dt), and 2/dt is
+/// the trapezoidal companion of d/dt, so `E = C/2`: capacitors, inductors
+/// and the mutual terms of every coupled winding pair, the same elements
+/// the transient integrates.
+struct SweepMatrices {
+    sparse::Matrix G;
+    sparse::Matrix E;
+};
+
+[[nodiscard]] inline SweepMatrices
+assemble_sweep_matrices(const topology::Graph& graph,
+                         const pwl::DevicePool& pool,
+                         const topology::SwitchStateMask& mask) {
+    SweepMatrices m;
+    sparse::Matrix C;
+    Vector b;
+    pwl::assemble_segment_split(graph, pool, mask, m.G, C, b);
+    m.E = Real{0.5} * C;
+    m.E.makeCompressed();
+    return m;
+}
+
+[[nodiscard]] inline ComplexSparseMatrix to_complex(const sparse::Matrix& A) {
+    ComplexSparseMatrix out(A.rows(), A.cols());
+    std::vector<Eigen::Triplet<Complex, Index>> triplets;
+    triplets.reserve(static_cast<std::size_t>(A.nonZeros()));
+    for (Index k = 0; k < A.outerSize(); ++k) {
+        for (sparse::Matrix::InnerIterator it(A, k); it; ++it) {
+            triplets.emplace_back(it.row(), it.col(),
+                                   Complex{it.value(), Real{0}});
         }
     }
-
-    E.setFromTriplets(triplets.begin(), triplets.end());
-    E.makeCompressed();
-    return E;
+    out.setFromTriplets(triplets.begin(), triplets.end());
+    out.makeCompressed();
+    return out;
 }
 
 }  // namespace detail
@@ -174,16 +170,17 @@ assemble_E_matrix(const topology::Graph& graph,
     Size output_node_idx,
     const ShouldContinueFn& should_continue = {}) {
 
-    // 1. Assemble the static (R + algebraic-constraint) MNA matrix.
-    //    dt=0 → no trap-companion contribution from L/C, so J
-    //    contains only the static parts (R conductances, KCL at
-    //    R-only nodes, source constraints, switch g_on/g_off).
-    sparse::Matrix J;
-    Vector b;
-    pwl::dc_assemble(graph, pool, mask, J, b, Real{0});
-    sparse::compress_in_place(J);
+    // 1. Newton devices are refused, not dropped.
+    detail::require_linear_for_sweep(graph, pool);
 
-    const Index n = J.rows();
+    // 2. (G, E) from the transient assembler at the caller's mask. The
+    //    descriptor form reads E·dx/dt + G·x + b = 0; substituting
+    //    x -> x_op + x̂·e^{jωt} gives (jω·E + G)·x̂ = −b̂, read at
+    //    output_node_idx for b̂ = e_input.
+    const detail::SweepMatrices sm =
+        detail::assemble_sweep_matrices(graph, pool, mask);
+
+    const Index n = sm.G.rows();
     if (n <= 0) {
         throw std::runtime_error(
             "run_mna_sweep: empty MNA matrix");
@@ -193,33 +190,8 @@ assemble_E_matrix(const topology::Graph& graph,
         throw std::runtime_error(
             "run_mna_sweep: input/output index out of range");
     }
-
-    // 2. Convert J to a complex sparse matrix. The MNA system in
-    //    DAE descriptor form reads
-    //      E·ẋ + J·x + b = 0
-    //    Linearise around x_op (= -J⁻¹·b at DC) and substitute
-    //    `x → x_op + x̂·e^{jωt}` and `b → b + b̂·e^{jωt}`:
-    //      (jω·E + J) · x̂ = -b̂
-    //    The transfer to output_node_idx is the corresponding row
-    //    of the solution when b̂ = e_input (unit impulse at input).
-    ComplexSparseMatrix J_c(n, n);
-    {
-        std::vector<Eigen::Triplet<Complex, Index>> triplets;
-        triplets.reserve(static_cast<std::size_t>(J.nonZeros()));
-        for (Index k = 0; k < J.outerSize(); ++k) {
-            for (sparse::Matrix::InnerIterator it(J, k); it; ++it) {
-                triplets.emplace_back(
-                    it.row(), it.col(),
-                    Complex{it.value(), Real{0}});
-            }
-        }
-        J_c.setFromTriplets(triplets.begin(), triplets.end());
-    }
-    J_c.makeCompressed();
-
-    // 3. Build the descriptor mass matrix E (from L/C devices).
-    const ComplexSparseMatrix E_c = detail::assemble_E_matrix(graph,
-                                                                  pool);
+    const ComplexSparseMatrix J_c = detail::to_complex(sm.G);
+    const ComplexSparseMatrix E_c = detail::to_complex(sm.E);
 
     // 4. Per-frequency factor + solve.
     MnaSweepResult result;

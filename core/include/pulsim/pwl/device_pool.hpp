@@ -46,6 +46,9 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <cstddef>
+#include <iterator>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -1059,5 +1062,21 @@ private:
     // coupling parameters (L_p, L_s, k → M).
     std::vector<TransformerCoupling> transformer_couplings_;
 };
+
+/// Name of a stored kind, identical to the Python `StoredKind` enum
+/// member, for refusals that must name the device kind.
+[[nodiscard]] constexpr std::string_view
+stored_kind_name(DevicePool::StoredKind k) noexcept {
+    constexpr std::string_view names[] = {
+        "Resistor", "VoltageSource", "Switch", "Capacitor", "Inductor",
+        "Diode", "NonlinearDiode", "CurrentSource", "PWMVoltageSource",
+        "SineVoltageSource", "PulseVoltageSource", "MosfetLevel1",
+        "IgbtLevel1", "VCVS", "SaturableInductor", "NonlinearCapacitor",
+        "ShockleyDiode", "LauritzenDiode", "PmsmMna", "IdealTransformer"};
+    static_assert(std::size(names) ==
+                  static_cast<std::size_t>(DevicePool::StoredKind::IdealTransformer) + 1);
+    const auto i = static_cast<std::size_t>(k);
+    return i < std::size(names) ? names[i] : std::string_view{"Unknown"};
+}
 
 }  // namespace pulsim::pwl

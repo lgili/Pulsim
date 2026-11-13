@@ -159,6 +159,7 @@ if(PULSIM_BUILD_TESTS)
         tests/analysis/test_main.cpp
         tests/analysis/test_core_loss.cpp
         tests/analysis/test_mna_sweep.cpp   # v1.4.0 — in-house complex solver integration
+        tests/analysis/test_mna_sweep_assembly.cpp  # fix-mna-sweep-correctness
     )
     target_link_libraries(pulsim_core_analysis_tests
         PRIVATE
