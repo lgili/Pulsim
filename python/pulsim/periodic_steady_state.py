@@ -317,6 +317,15 @@ def _check_circuit(builder, T, comps):
                 "and schedules.")
 
 
+def _scaled(v, x, scale, rtol):
+    """``max_i |v_i| / (rtol (scale_i + |x_i|))``, the solver's norm."""
+    den = rtol * (scale + np.abs(x))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        q = np.where(v == 0.0, 0.0, np.abs(v) / np.where(
+            den > 0, den, 1e-300))
+    return float(q.max())
+
+
 def _divides(P, T):
     """Is ``P`` a period of the section, i.e. ``T/P`` a positive integer?"""
     if not (P > 0 and math.isfinite(P)):
@@ -808,7 +817,10 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     rtol
         Scaled-norm tolerance: stop when every
         ``|G_i| <= rtol (scale_i + |x_i|)``, ``scale_i`` the largest
-        ``|x_i(t)|`` seen over the period runs.
+        ``|x_i(t)|`` seen over the period runs, AND the Newton step
+        meets the same bound (or one step has been taken from such a
+        residual): with a slow mode the state error is about
+        ``|G| / (1 - |mu|)``, not ``|G|``.
 
     The section is ``t = 0``: for the zero-phase built-in PWM helpers
     that is the rising gate edge.
@@ -855,12 +867,11 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
 
     traj = s.run(x)
     relax_rounds = 0
+    polished = False
     while True:
         r = norm(traj)
         history.append(float(np.abs(traj.x_end - traj.x0).max()))
         patterns.append([ev["name"] for ev in traj.events])
-        if r <= 1.0:
-            break
         M = s.jacobian(traj)
         mu = np.linalg.eigvals(M)
         last["mu"] = mu
@@ -868,21 +879,37 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                            for ev in traj.events]
         IM = np.eye(n) - M
         U, sig, Vt = np.linalg.svd(IM)
-        if sig[-1] <= 1e-10 * max(1.0, sig[0]):
+        singular = sig[-1] <= 1e-10 * max(1.0, sig[0])
+        G = traj.x_end - traj.x0
+        if r <= 1.0:
+            # A small residual is not a small state error: with a slow
+            # mode (|mu| -> 1) the error is about residual/(1 - |mu|).
+            # Stop when the Newton step itself is within tolerance, or
+            # once one step has been taken from a converged residual
+            # (exact on a linear map; with |mu| -> 1 the step is
+            # rounding noise times 1/(1 - |mu|) and never gets
+            # smaller). A marginal orbit is left to the multiplier
+            # check below the loop.
+            if singular or polished or _scaled(
+                    np.linalg.solve(IM, G), traj.x0, scale, rtol) <= 1.0:
+                break
+        if singular:
             raise _err(
                 "I - M is singular: a Floquet multiplier equals 1, so "
                 "the orbit is not isolated (a floating capacitor, an "
                 "inductor loop with no resistance, an integrator with "
                 "no path to its input). States of the marginal "
                 f"direction: {s.name_states(Vt[-1], scale)}.")
-        G = traj.x_end - traj.x0
         delta = np.linalg.solve(IM, G)    # (M - I) delta = -G
         accepted = False
         lam = 1.0
         for _ in range(_N_LAMBDA):
             budget()
             tt = s.run(traj.x0 + lam * delta)
-            if norm(tt) <= (1.0 - _ARMIJO * lam) * norm(traj):
+            r_new = norm(tt)
+            if r_new <= (1.0 - _ARMIJO * lam) * norm(traj) or (
+                    r <= 1.0 and r_new <= 1.0):
+                polished = r <= 1.0
                 traj = tt
                 accepted = True
                 break

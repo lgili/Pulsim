@@ -482,3 +482,19 @@ def test_current_source_not_periodic_in_the_period_is_refused(case):
         p.periodic_steady_state(b, period=TP)
     e = ei.value
     assert (e.feature, e.device, e.kind) == ("period", "I", kind)
+
+
+def test_slow_mode_is_not_accepted_on_a_small_residual():
+    """Zero-mean sine current into 1 uF || 1 TOhm (|mu| = 1 - 1e-9): from
+    zero the residual is already within rtol, and the solver used to
+    return x0 = 0 with stable=True. The state error is residual/(1 - |mu|);
+    one Newton step finds the orbit, whose v(0) is i_pk/(omega C) =
+    0.159155 V. The map's rounding (~1e-12 V) is amplified 1e9 times, so
+    the answer is good to about 1 % (measured 0.15726 V)."""
+    b = p.CircuitBuilder()
+    b.add_sine_current_source("I", "gnd", "o", 0.0, 1e-3, 1 / TP)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    b.add_resistor("Rbig", "o", "gnd", 1e12)
+    r = p.periodic_steady_state(b, period=TP)
+    assert r.floquet_radius == pytest.approx(1 - 1e-9, abs=1e-12)
+    assert r.x0[0] == pytest.approx(1e-3 / (2 * np.pi / TP * 1e-6), rel=2e-2)
