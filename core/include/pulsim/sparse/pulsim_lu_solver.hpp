@@ -64,6 +64,7 @@
 #include <complex>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <queue>
 #include <set>
 #include <span>
@@ -447,12 +448,96 @@ public:
         // workspace silently corrupted concurrent same-cache
         // solves that were numerically safe with the old
         // stack-local vector).
-        static thread_local VectorType y_ws;
-        y_ws.resize(static_cast<Index>(n_));
-        VectorType& y = y_ws;
+        VectorType& y = solve_ws_();
         for (Index i = 0; i < n_; ++i) {
             y[i] = b[Prow_[static_cast<std::size_t>(i)]];
         }
+        substitute_(y, x);
+    }
+
+    /// Fused form of `solve(−(a + c), x)`: the right-hand side is formed
+    /// inside the row-permutation pass, `y[i] = −(a[P[i]] + c[P[i]])` —
+    /// the same arithmetic per element, one pass and no rhs vector
+    /// (update-linear-time-assembly tier 1).
+    void solve_neg_sum(const VectorType& a, const VectorType& c,
+                       VectorType& x) const override {
+        if (!factorized_) {
+            throw std::logic_error(
+                "PulsimSparseLuSolverT::solve called before factorize "
+                "(or factorize returned false). Call factorize(M) first "
+                "and check its return value.");
+        }
+        VectorType& y = solve_ws_();
+        for (Index i = 0; i < n_; ++i) {
+            const Index r = Prow_[static_cast<std::size_t>(i)];
+            y[i] = -(a[r] + c[r]);
+        }
+        substitute_(y, x);
+    }
+
+    /// The analysis of the last `analyze(M)`, with `M`'s pattern.
+    [[nodiscard]] std::shared_ptr<const SymbolicAnalysis>
+    export_symbolic(const MatrixType& M) const override {
+        if (!analyzed_ || !M.isCompressed() || M.rows() != n_) {
+            return nullptr;
+        }
+        auto sym = std::make_shared<SymbolicAnalysis>();
+        const Index* op = M.outerIndexPtr();
+        const Index* ip = M.innerIndexPtr();
+        sym->outer.assign(op, op + n_ + 1);
+        sym->inner.assign(ip, ip + M.nonZeros());
+        sym->col_perm     = Pcol_;
+        sym->col_perm_inv = Pinv_col_;
+        sym->etree        = etree_parent_;
+        sym->ordering     = static_cast<int>(ordering_);
+        return sym;
+    }
+
+    /// Adopt a shared analysis after checking `M` has its pattern.
+    /// Skips COLAMD, the elimination tree and the symbolic L/U fill
+    /// (which `factorize` rebuilds anyway); `factorize` depends only on
+    /// the column ordering, so the factor is bit-equal to the one after
+    /// a private `analyze(M)`.
+    [[nodiscard]] bool adopt_symbolic(const SymbolicAnalysis& sym,
+                                      const MatrixType& M) override {
+        analyzed_   = false;
+        factorized_ = false;
+        const auto n = static_cast<std::size_t>(M.rows());
+        if (!M.isCompressed() || M.rows() != M.cols() || n == 0 ||
+            sym.ordering != static_cast<int>(ordering_) ||
+            sym.outer.size() != n + 1 ||
+            sym.inner.size() != static_cast<std::size_t>(M.nonZeros()) ||
+            !std::equal(sym.outer.begin(), sym.outer.end(),
+                        M.outerIndexPtr()) ||
+            !std::equal(sym.inner.begin(), sym.inner.end(),
+                        M.innerIndexPtr())) {
+            return false;
+        }
+        n_ = static_cast<Index>(n);
+        Pcol_         = sym.col_perm;
+        Pinv_col_     = sym.col_perm_inv;
+        etree_parent_ = sym.etree;
+        l_col_ptr_.clear();
+        l_row_idx_.clear();
+        u_col_ptr_.clear();
+        u_row_idx_.clear();
+        invalidate_path_cache_();
+        analyzed_ = true;
+        return true;
+    }
+
+private:
+    // Thread-local solve workspace (v2.0 Phase 1, audit finding
+    // `per-step-heap-allocations`; review ZA-1: an instance member
+    // corrupted concurrent same-cache solves).
+    [[nodiscard]] VectorType& solve_ws_() const {
+        static thread_local VectorType y_ws;
+        y_ws.resize(static_cast<Index>(n_));
+        return y_ws;
+    }
+
+    // Steps 2-4 of `solve` on the row-permuted right-hand side `y`.
+    void substitute_(VectorType& y, VectorType& x) const {
 
         // ---- Step 2: forward substitution (L unit-lower triangular) ---
         // For each column k of L, propagate the now-known y[k] downward:
@@ -491,6 +576,8 @@ public:
             x[Pcol_[static_cast<std::size_t>(k)]] = y[k];
         }
     }
+
+public:
 
     /// Select the fill-reducing ordering for the NEXT analyze() call.
     /// Default: COLAMD (Phase-1). `LuOrdering::Rcm` restores the

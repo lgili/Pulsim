@@ -89,6 +89,32 @@ struct PwlSegment {
 Move-only. The cache stores one segment per switch state in an
 `unordered_map<SwitchStateMask, PwlSegment>`.
 
+## Assembly template and shared analysis
+
+`update-linear-time-assembly` (tier 1). The cache owns a
+`SegmentAssembler` with one pattern template per assembly regime
+(dynamic `dt > 0`: `G` and `C` plus their union `J`; static `dt = 0`:
+`J`). The first assembly of a regime is a fresh, reserved assembly and
+becomes the template; every later mask copies the template, zeroes its
+values and stamps into existing entries, and `J = G + (1/dt)·C` is
+written through slot arrays onto the union pattern. Values are
+bit-identical to the fresh assembly (`+0.0 + v`, and Eigen's `a + 0` /
+`0 + b` per entry). A stamp outside the template is detected by the
+entry count and rebuilds it.
+
+The cache also keeps one `SymbolicAnalysis` per regime (column
+ordering, inverse, elimination tree, the pattern it belongs to). The
+first solver of a regime analyses and exports it; every later segment,
+event entry and the rank-1 solver adopts it after the index-array
+check. A mismatch analyses privately and counts a fallback.
+
+Counters in `CacheMetrics`: `structure_builds` (template builds,
+≤ 1 per regime), `symbolic_analyses` (≤ 1 per regime),
+`symbolic_fallbacks` (0 unless the circuit changed under the cache).
+Invalidation: templates and analyses live as long as the cache;
+`refactor_parametric` changes values only and keeps both; a new
+circuit gets a new cache.
+
 ## V0 scope: static-only circuits
 
 Layer 4 V0 supports Resistor + VoltageSource + Switch. That covers:

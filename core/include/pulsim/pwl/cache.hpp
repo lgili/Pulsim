@@ -96,6 +96,14 @@ struct CacheMetrics {
     std::uint64_t event_refactors       = 0;  // solve_at: dt changed,
                                               // in-place numeric refactor
     std::uint64_t event_builds          = 0;  // solve_at: fresh entry
+
+    // ---- update-linear-time-assembly tier 1 ----
+    std::uint64_t structure_builds      = 0;  // sparse-structure (template)
+                                              // builds of G/C/J, ≤ 1 per regime
+    std::uint64_t symbolic_analyses     = 0;  // symbolic analyses run
+                                              // (shared: ≤ 1 per regime)
+    std::uint64_t symbolic_fallbacks    = 0;  // shared analysis refused
+                                              // (pattern mismatch) → private
 };
 
 /// Result of `PwlStateSpaceCache::refactor_parametric` (v1.4.0,
@@ -341,16 +349,10 @@ public:
                 const Vector& b_extra,
                 Vector& x) const {
         const PwlSegment& seg = lookup(mask);
-        // Thread-local rhs workspace (v2.0 Phase 1, audit finding
-        // `per-step-heap-allocations`): the expression assigns
-        // directly into the reused buffer — no temporary, no heap
-        // traffic once sized. thread_local (not an instance
-        // member) so concurrent GIL-released transients sharing a
-        // cache stay numerically correct (adversarial-review
-        // finding ZA-1).
-        Vector& rhs = solve_rhs_tls_();
-        rhs = -(seg.b_constant + b_extra);
-        seg.solver->solve(rhs, x);
+        // Fused rhs + row permutation (update-linear-time-assembly):
+        // same arithmetic as `solve(-(b_constant + b_extra))`, on the
+        // solver's thread-local workspace (review ZA-1).
+        seg.solver->solve_neg_sum(seg.b_constant, b_extra, x);
     }
 
     // -------------------------------------------------------------
@@ -1101,12 +1103,11 @@ public:
             // new mask, leaving the table one entry poorer for
             // nothing (adversarial-review finding F6-c).
             EventEntry e;
-            assemble_segment_split(graph_, pool_, mask,
-                                    e.G, e.C, e.b_constant);
+            asm_.split(graph_, pool_, mask, e.G, e.C, e.b_constant);
             e.solver = sparse::make_default_solver(
                 pool_.state_size(graph_), sparse::Backend::Auto);
             const sparse::Matrix J = combine_event_J_(e, mask, dt);
-            if (!e.solver->analyze(J)) {
+            if (!analyze_shared_(*e.solver, J, dt > Real{0})) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: analyze failed "
                     "(structurally singular) for mask {} (dt={}){}",
@@ -1160,9 +1161,7 @@ public:
             event_hits_.fetch_add(1, std::memory_order_relaxed);
         }
         const EventEntry& e = it->second;
-        Vector& rhs = solve_rhs_tls_();
-        rhs = -(e.b_constant + b_extra);
-        e.solver->solve(rhs, x);
+        e.solver->solve_neg_sum(e.b_constant, b_extra, x);
     }
 
     /// Maximum number of event-solver entries `solve_at` keeps
@@ -1245,10 +1244,11 @@ public:
     void solve_rank1(const topology::SwitchStateMask& mask,
                       const Vector& b_extra,
                       Vector& x) const {
+        // Template assembly: no structure is built after the cache's
+        // first assembly of this regime (update-linear-time-assembly).
         sparse::Matrix J;
         Vector b;
-        assemble_segment(graph_, pool_, mask, dt_, J, b);
-        sparse::compress_in_place(J);
+        asm_.assemble(graph_, pool_, mask, dt_, J, b);
 
         if (!rank1_initialized_) {
             // First call: fresh analyze + factorize on a new solver
@@ -1259,7 +1259,7 @@ public:
             // The caller may override via set_rank1_backend(...).
             rank1_solver_ = sparse::make_default_solver(
                 pool_.state_size(graph_), rank1_backend_hint_);
-            if (!rank1_solver_->analyze(J)) {
+            if (!analyze_shared_(*rank1_solver_, J, dt_ > Real{0})) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial analyze "
                     "failed (structurally singular) for mask {}",
@@ -1373,9 +1373,7 @@ public:
             }
         }
 
-        Vector& rhs = solve_rhs_tls_();
-        rhs = -(rank1_b_constant_ + b_extra);
-        rank1_solver_->solve(rhs, x);
+        rank1_solver_->solve_neg_sum(rank1_b_constant_, b_extra, x);
     }
 
     /// Override the backend `solve_rank1` uses for its sliding solver.
@@ -1415,6 +1413,11 @@ public:
             .event_refactors = event_refactors_.load(
                 std::memory_order_relaxed),
             .event_builds = event_builds_.load(
+                std::memory_order_relaxed),
+            .structure_builds = asm_.structure_builds(),
+            .symbolic_analyses = symbolic_analyses_.load(
+                std::memory_order_relaxed),
+            .symbolic_fallbacks = symbolic_fallbacks_.load(
                 std::memory_order_relaxed),
         };
     }
@@ -1648,8 +1651,7 @@ private:
     try_make_segment(const topology::SwitchStateMask& mask, Real dt) {
         sparse::Matrix J;
         Vector b;
-        assemble_segment(graph_, pool_, mask, dt, J, b);
-        sparse::compress_in_place(J);
+        asm_.assemble(graph_, pool_, mask, dt, J, b);
 
         // v1.4.0: each segment's solver is the Pulsim in-house LU
         // (`Backend::Auto` → Pulsim since v1.3.0). This gives
@@ -1663,7 +1665,7 @@ private:
         // paper-comparison purposes.
         auto solver = sparse::make_default_solver(
             pool_.state_size(graph_), sparse::Backend::Auto);
-        if (!solver->analyze(J)) {
+        if (!analyze_shared_(*solver, J, dt > Real{0})) {
             return std::unexpected(make_cache_error_(
                 CacheError::Kind::StructurallySingular, mask, dt, J,
                 solver.get()));
@@ -1804,8 +1806,7 @@ private:
             any_target_existed = true;
             sparse::Matrix new_J;
             Vector new_b;
-            assemble_segment(graph_, pool_, mask, dt_, new_J, new_b);
-            sparse::compress_in_place(new_J);
+            asm_.assemble(graph_, pool_, mask, dt_, new_J, new_b);
             const bool ok = refactor_solver_(
                 it->second.solver.get(),
                 it->second.J, it->second.b_constant,
@@ -1823,8 +1824,7 @@ private:
             any_target_existed = true;
             sparse::Matrix new_J;
             Vector new_b;
-            assemble_segment(graph_, pool_, mask, dt_, new_J, new_b);
-            sparse::compress_in_place(new_J);
+            asm_.assemble(graph_, pool_, mask, dt_, new_J, new_b);
             // The rank-1 sliding solver doesn't cache J (it
             // re-assembles every solve_rank1 call), but its
             // factor + b_constant are stateful and must be
@@ -2026,14 +2026,13 @@ private:
         const EventEntry& e,
         const topology::SwitchStateMask& mask,
         Real dt) const {
+        sparse::Matrix J;
         if (dt > Real{0}) {
-            sparse::Matrix J = e.G + (Real{1} / dt) * e.C;
+            asm_.combine(e.G, e.C, dt, J);   // bit-equal to G + (1/dt)·C
             return J;
         }
-        sparse::Matrix J;
         Vector b_unused;
-        assemble_segment(graph_, pool_, mask, Real{0}, J, b_unused);
-        sparse::compress_in_place(J);
+        asm_.assemble(graph_, pool_, mask, Real{0}, J, b_unused);
         return J;
     }
 
@@ -2061,17 +2060,38 @@ private:
     // itself (adversarial-review finding ZA-1 hygiene).
     mutable std::atomic<std::uint64_t> lru_clock_{0};
 
-    // v2.0 Phase 1 — thread-local rhs workspace shared by solve /
-    // solve_at / solve_rank1 (audit finding
-    // `per-step-heap-allocations`). Function-local thread_local
-    // (NOT an instance member): each thread owns its buffer, so
-    // concurrent solves on a shared warm cache remain numerically
-    // correct exactly as they were with the old stack-local rhs
-    // (adversarial-review finding ZA-1). The buffer is fully
-    // consumed within each call — no live use spans a nested call.
-    [[nodiscard]] static Vector& solve_rhs_tls_() {
-        static thread_local Vector rhs;
-        return rhs;
+    // update-linear-time-assembly tier 1: one pattern template per
+    // assembly regime and one symbolic analysis per regime, shared by
+    // segments, event entries and the rank-1 solver. Mutated only on the
+    // miss paths, which already mutate the cache.
+    mutable SegmentAssembler asm_;
+    mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_dynamic_;
+    mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_static_;
+    mutable std::atomic<std::uint64_t> symbolic_analyses_{0};
+    mutable std::atomic<std::uint64_t> symbolic_fallbacks_{0};
+
+    /// Analyse `J` on `solver`, adopting the regime's shared analysis
+    /// when `J` has its pattern. Returns `analyze`'s verdict.
+    [[nodiscard]] bool analyze_shared_(sparse::DirectSolver& solver,
+                                       const sparse::Matrix& J,
+                                       bool dynamic) const {
+        auto& sym = dynamic ? sym_dynamic_ : sym_static_;
+        if (sym && solver.adopt_symbolic(*sym, J)) {
+            return true;
+        }
+        if (!solver.analyze(J)) {
+            return false;
+        }
+        symbolic_analyses_.fetch_add(1, std::memory_order_relaxed);
+        auto mine = solver.export_symbolic(J);
+        if (!sym) {
+            sym = std::move(mine);
+        } else if (mine) {
+            // A sharing-capable backend refused the shared analysis:
+            // the pattern differs from the regime's.
+            symbolic_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return true;
     }
 
     // Layer 4 V8: sliding solver + state for the rank-1 fast-path

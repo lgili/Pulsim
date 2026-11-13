@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Linear-time segment assembly and one symbolic analysis per circuit (performance, bit-identical)
+
+* **Changed** `PwlStateSpaceCache` builds the sparse structure of `G`,
+  `C` and `J` once per assembly regime (dynamic `dt > 0`, static
+  `dt = 0`); every later switch state stamps into that template and
+  writes `J = G + (1/dt)·C` through slot arrays. The first structure is
+  assembled with a per-column reserve, so assembly is linear in the
+  number of stamps instead of quadratic. One symbolic analysis (column
+  ordering, elimination tree) per regime is shared by every segment,
+  event entry and the rank-1 solver; a new switch state costs a numeric
+  factorisation. The cached solve forms the right-hand side inside the
+  LU's row-permutation pass. Matrices, factors and every result are
+  bit-identical (`update-linear-time-assembly`, tier 1).
+  Measured: segment build at 15,002 unknowns 123 ms → 3.9 ms (build
+  cost now grows 10.6× per 10× unknowns, was 85×); per switch state on
+  a 3008-unknown switched ladder 5.7 ms → 0.24 ms; per-step cost
+  unchanged within noise.
+* **Added** `CacheMetrics.structure_builds`, `symbolic_analyses`,
+  `symbolic_fallbacks`.
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

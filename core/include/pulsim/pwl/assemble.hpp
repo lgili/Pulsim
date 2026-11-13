@@ -61,6 +61,10 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 namespace pulsim::pwl {
 
 namespace detail {
@@ -83,6 +87,22 @@ inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
                                      pool.switch_g_on(branch_id),
                                      pool.switch_g_off(branch_id));
     }
+}
+
+// Per-column reserve from the node incidence (update-linear-time-assembly
+// tier 1). An estimate: a column that overflows is grown by Eigen, so
+// correctness never depends on it; it only removes the O(nnz) shift of
+// every insert into an unreserved matrix.
+inline void reserve_by_incidence(const topology::Graph& graph,
+                                 sparse::Matrix& M) {
+    const Index n = M.cols();
+    Eigen::VectorXi per_col = Eigen::VectorXi::Constant(n, 4);
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        const auto& br = graph.branch(b_id);
+        if (br.from >= 0 && br.from < n) per_col[br.from] += 2;
+        if (br.to >= 0 && br.to < n) per_col[br.to] += 2;
+    }
+    M.reserve(per_col);
 }
 
 // -----------------------------------------------------------------------------
@@ -336,6 +356,8 @@ inline void assemble_segment_split(const topology::Graph& graph,
     const auto n = static_cast<Index>(pool.state_size(graph));
     G = sparse::Matrix(n, n);
     C = sparse::Matrix(n, n);
+    detail::reserve_by_incidence(graph, G);
+    detail::reserve_by_incidence(graph, C);
     b = Vector::Zero(n);
     detail::assemble_impl(graph, pool, mask, G, &C, b);
     G.makeCompressed();
@@ -364,6 +386,7 @@ inline void assemble_segment(const topology::Graph& graph,
         return;
     }
     J = sparse::Matrix(n, n);
+    detail::reserve_by_incidence(graph, J);
     b = Vector::Zero(n);
     detail::assemble_impl(graph, pool, mask, J, nullptr, b);
 }
@@ -382,5 +405,152 @@ inline void assemble_segment(const topology::Graph& graph,
                               Vector& b) {
     assemble_segment(graph, pool, mask, Real{0}, J, b);
 }
+
+// -----------------------------------------------------------------------------
+// SegmentAssembler — stamp-slot map (update-linear-time-assembly tier 1).
+//
+// Stamp positions depend on the topology only (a switch stamps the same
+// four entries with g_on or g_off), so the first assembly of a regime
+// (dynamic dt > 0: G and C; static dt = 0: J) becomes a pattern template.
+// Later assemblies copy the template, zero its values and stamp in the
+// same order: `coeffRef` finds an existing entry and `+0.0 + v` is the
+// sum a fresh entry gets, so values are bit-identical to stamping into
+// an empty matrix. `J = G + (1/dt)·C` is written through two slot arrays
+// onto the union pattern with absent operands as +0.0 — the per-entry
+// arithmetic of Eigen's sparse sum (`a + b`, `a + 0`, `0 + b`).
+//
+// A stamp outside the template inserts and changes the entry count; the
+// assembler then rebuilds the template from a fresh assembly
+// (`structure_builds` + 1). Not thread-safe: callers use it on the
+// paths that already mutate the cache.
+// -----------------------------------------------------------------------------
+class SegmentAssembler {
+public:
+    /// Same result as `assemble_segment_split`.
+    void split(const topology::Graph& graph, const DevicePool& pool,
+               const topology::SwitchStateMask& mask,
+               sparse::Matrix& G, sparse::Matrix& C, Vector& b) {
+        const auto n = static_cast<Index>(pool.state_size(graph));
+        if (dyn_.ready && dyn_.G.rows() == n) {
+            G = dyn_.G;
+            C = dyn_.C;
+            zero_values_(G);
+            zero_values_(C);
+            b = Vector::Zero(n);
+            detail::assemble_impl(graph, pool, mask, G, &C, b);
+            if (G.nonZeros() == dyn_.G.nonZeros() &&
+                C.nonZeros() == dyn_.C.nonZeros()) {
+                return;
+            }
+        }
+        assemble_segment_split(graph, pool, mask, G, C, b);
+        build_dynamic_(G, C);
+    }
+
+    /// Same result as `assemble_segment` followed by `compress_in_place`.
+    void assemble(const topology::Graph& graph, const DevicePool& pool,
+                  const topology::SwitchStateMask& mask, Real dt,
+                  sparse::Matrix& J, Vector& b) {
+        if (dt > Real{0}) {
+            split(graph, pool, mask, G_, C_, b);
+            combine(G_, C_, dt, J);
+            return;
+        }
+        const auto n = static_cast<Index>(pool.state_size(graph));
+        if (stat_ready_ && stat_J_.rows() == n) {
+            J = stat_J_;
+            zero_values_(J);
+            b = Vector::Zero(n);
+            detail::assemble_impl(graph, pool, mask, J, nullptr, b);
+            if (J.nonZeros() == stat_J_.nonZeros()) {
+                return;
+            }
+        }
+        assemble_segment(graph, pool, mask, Real{0}, J, b);
+        sparse::compress_in_place(J);
+        stat_J_ = J;
+        stat_ready_ = true;
+        ++structure_builds_;
+    }
+
+    /// `J = G + (1/dt)·C` on the dynamic union pattern, bit-equal to the
+    /// Eigen expression. `G` and `C` must come from `split` (template
+    /// patterns); `J` keeps its storage when it already has the pattern.
+    void combine(const sparse::Matrix& G, const sparse::Matrix& C,
+                 Real dt, sparse::Matrix& J) {
+        if (G.nonZeros() != dyn_.G.nonZeros() ||
+            C.nonZeros() != dyn_.C.nonZeros() || G.rows() != dyn_.J.rows()) {
+            // Operands from before a template rebuild: Eigen's sum.
+            J = G + (Real{1} / dt) * C;
+            return;
+        }
+        if (J.rows() != dyn_.J.rows() || !J.isCompressed() ||
+            J.nonZeros() != dyn_.J.nonZeros()) {
+            J = dyn_.J;
+        }
+        const auto nnz = static_cast<std::size_t>(J.nonZeros());
+        Real* jv = J.valuePtr();
+        cs_.assign(nnz, Real{0});
+        std::fill_n(jv, nnz, Real{0});
+        const Real* gv = G.valuePtr();
+        for (std::size_t k = 0; k < g2j_.size(); ++k) jv[g2j_[k]] = gv[k];
+        const Real* cv = C.valuePtr();
+        for (std::size_t k = 0; k < c2j_.size(); ++k) cs_[c2j_[k]] = cv[k];
+        const Real inv_dt = Real{1} / dt;
+        for (std::size_t k = 0; k < nnz; ++k) jv[k] = jv[k] + inv_dt * cs_[k];
+    }
+
+    /// Template (sparse-structure) builds so far: one per regime unless
+    /// the circuit's structure changes under the cache.
+    [[nodiscard]] std::uint64_t structure_builds() const noexcept {
+        return structure_builds_;
+    }
+
+private:
+    static void zero_values_(sparse::Matrix& M) noexcept {
+        std::fill_n(M.valuePtr(), static_cast<std::size_t>(M.nonZeros()),
+                    Real{0});
+    }
+
+    // Position in the union pattern `U` of every stored entry of `A`
+    // (both compressed, sorted inner indices, A ⊆ U).
+    static void slots_(const sparse::Matrix& A, const sparse::Matrix& U,
+                       std::vector<Index>& out) {
+        out.resize(static_cast<std::size_t>(A.nonZeros()));
+        const Index* ap = A.outerIndexPtr();
+        const Index* ai = A.innerIndexPtr();
+        const Index* up = U.outerIndexPtr();
+        const Index* ui = U.innerIndexPtr();
+        for (Index j = 0; j < A.outerSize(); ++j) {
+            Index q = up[j];
+            for (Index p = ap[j]; p < ap[j + 1]; ++p) {
+                while (ui[q] != ai[p]) ++q;
+                out[static_cast<std::size_t>(p)] = q;
+            }
+        }
+    }
+
+    void build_dynamic_(const sparse::Matrix& G, const sparse::Matrix& C) {
+        dyn_.G = G;
+        dyn_.C = C;
+        dyn_.J = G + C;   // union pattern; values are overwritten
+        dyn_.J.makeCompressed();
+        slots_(dyn_.G, dyn_.J, g2j_);
+        slots_(dyn_.C, dyn_.J, c2j_);
+        dyn_.ready = true;
+        ++structure_builds_;
+    }
+
+    struct {
+        bool ready = false;
+        sparse::Matrix G, C, J;
+    } dyn_;
+    std::vector<Index> g2j_, c2j_;
+    std::vector<Real> cs_;
+    bool stat_ready_ = false;
+    sparse::Matrix stat_J_;
+    sparse::Matrix G_, C_;   // scratch of `assemble` at dt > 0
+    std::uint64_t structure_builds_ = 0;
+};
 
 }  // namespace pulsim::pwl

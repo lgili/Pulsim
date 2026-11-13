@@ -807,6 +807,21 @@ class CacheMetrics:
         """
         Lazy-mode segments dropped by the byte-budget LRU.
         """
+    @property
+    def structure_builds(self) -> int:
+        """
+        Sparse-structure (template) builds of G/C/J: one per assembly regime.
+        """
+    @property
+    def symbolic_analyses(self) -> int:
+        """
+        Symbolic analyses run: one per assembly regime, shared by every switch state.
+        """
+    @property
+    def symbolic_fallbacks(self) -> int:
+        """
+        Matrices whose pattern refused the shared analysis and were analysed privately.
+        """
 class PwlStateSpaceCache:
     """
     PWL state-space cache. Pre-factors the MNA matrix for every reachable switch combination + dt.
