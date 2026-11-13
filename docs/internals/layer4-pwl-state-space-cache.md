@@ -127,11 +127,17 @@ Newton (`solve_with_newton_b_extra`) takes an optional
 `NewtonWorkspace*`; the engines pass one per run. It holds the combined
 Jacobian on the union pattern of `seg.J` and `J_nl` with slot arrays
 (`J[k] = L[k] + N[k]`, Eigen's per-entry sum), the hoisted residual and
-step vectors, and one `Eigen::SparseLU` analysed once per pattern.
-Invalidation: the index arrays of both operands are compared after every
-refresh; any change rebuilds the slots and analyses again. Counters on
-the workspace: `solves`, `iterations`, `analyses`, `factorizations`,
-`lm_attempts`. A call without a workspace uses a call-local one.
+step vectors, and one direct solver analysed once per pattern: the
+in-house LU (`backend = Pulsim`, stage A2), refactorised in place. The
+refreshers zero `J_nl`'s values with `sparse::zero_keep_pattern` and
+stamp into existing entries, so after the first call an iteration
+allocates nothing (`test_zero_alloc`). Invalidation: the index arrays of
+both operands are compared after every refresh; any change rebuilds the
+slots and analyses again. Counters on the workspace: `solves`,
+`iterations`, `analyses`, `factorizations`, `lm_attempts` and the
+per-call `iterations_per_solve`; the engines move them into
+`SimulationResult.newton`. A call without a workspace (DC, continuation)
+uses a call-local one on `Eigen::SparseLU`.
 
 ## V0 scope: static-only circuits
 

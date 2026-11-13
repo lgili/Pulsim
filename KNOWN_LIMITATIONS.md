@@ -260,15 +260,18 @@ the owner's accuracy sign-off.
 
 ### Newton: what the persistent analysis does not cover
 
-Since `update-newton-persistent-solver` (stage A1) a run analyses the
-Newton Jacobian once per sparsity pattern. Still per iteration: the
-numeric `Eigen::SparseLU::factorize` (which allocates its work memory
-each call) and the device refreshers' `setZero()` + re-insert of
-`J_nl`. The Levenberg-Marquardt fallback builds and analyses a fresh
-solver on every attempt. A user refresher whose stamp positions depend
-on `x` changes the pattern and re-analyses on each change (correct,
-just slower). Stages A2 (in-house LU) and B (low-rank update) are
-proposed, not implemented.
+Since `update-newton-persistent-solver` (stages A1 and A2) a run
+analyses the Newton Jacobian once per sparsity pattern and refactorises
+it in place with the in-house LU, without allocating. Still per
+iteration: one full numeric factorisation, although only the device
+columns change (stage B, the low-rank update, see that change's
+DECISIONS.md). The Levenberg-Marquardt fallback and the line-search
+trial refresh build their matrices afresh on every attempt. A user
+refresher whose stamp positions depend on `x` changes the pattern and
+re-analyses on each change (correct, just slower); a refresher that
+stamps nothing on a call keeps the explicit zeros of earlier calls in
+`J_nl`. The DC operating point and continuation (calls without a run
+workspace) still use `Eigen::SparseLU`.
 
 ### Fixed engine: diode-mask chatter inside Newton at a small `dt`
 

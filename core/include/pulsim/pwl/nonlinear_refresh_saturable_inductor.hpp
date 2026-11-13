@@ -134,7 +134,7 @@ inline Real refresh_saturable_inductors(
     const SaturableInductorHistory& history,
     Real dt,
     TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     Real max_abs_i = Real{0};
     for (const auto& e : history.entries()) {

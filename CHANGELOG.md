@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Newton on the in-house LU, no allocation per iteration (performance)
+
+* **Changed** the engines' Newton workspace factorises the combined
+  Jacobian with the in-house Gilbert–Peierls LU (one symbolic analysis
+  per pattern, numeric refactor in place) instead of `Eigen::SparseLU`
+  (`update-newton-persistent-solver`, stage A2). Calls without a
+  workspace — the DC operating point and continuation — keep
+  `Eigen::SparseLU`. Listed as a numerical change; on the 19 golden
+  cases (every Newton case on `pwl` and `trbdf2`) states, step times,
+  switch states and the iteration count of every Newton call are
+  bit-identical to before.
+* **Changed** the device refreshers and the engines' refresh wrappers
+  zero `J_nl`'s values and keep its pattern (`sparse::zero_keep_pattern`)
+  instead of `setZero()` + re-insert. With the in-house refactor a
+  Newton iteration now performs no heap allocation after the first call
+  (was ~20 Eigen mallocs). ns/step against the previous build
+  (interleaved, best of 9): Shockley buck `pwl` 3478 → 859, `trbdf2`
+  11410 → 3186; Shockley rectifier n = 51 12153 → 4860, n = 483
+  134789 → 59458; MOSFET Level-1 3824 → 989; saturable inductor
+  3555 → 834.
+* **Added** `SimulationResult.newton` (`NewtonCounters`: `solves`,
+  `iterations`, `analyses`, `factorizations`, `partial_refactors`,
+  `lm_attempts`, and `iterations_per_solve`, the iteration count of
+  every Newton call), and `pwl::solve_with_newton_in_place`, the
+  out-parameter form of `solve_with_newton_b_extra`.
+
 ### Newton: one sparse-LU analysis per run (performance, bit-identical)
 
 * **Changed** `solve_with_newton_b_extra` takes an optional

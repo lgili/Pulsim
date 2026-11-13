@@ -205,8 +205,24 @@ struct SolverSnapshot {
     return true;
 }
 
+/// Newton linear-algebra counters of one run
+/// (update-newton-persistent-solver). Zero on a run without Newton.
+struct NewtonCounters {
+    std::uint64_t solves            = 0;  ///< Newton calls
+    std::uint64_t iterations        = 0;  ///< Newton iterations
+    std::uint64_t analyses          = 0;  ///< symbolic analyses
+    std::uint64_t factorizations    = 0;  ///< full numeric factorisations
+    std::uint64_t partial_refactors = 0;  ///< low-rank refactors (stage B)
+    std::uint64_t lm_attempts       = 0;  ///< LM factorisation attempts
+    /// Iterations of each Newton call, in call order (saturates at 65535).
+    std::vector<std::uint16_t> iterations_per_solve;
+};
+
 struct SimulationResult {
     std::vector<Real> times;
+
+    /// Newton counters of the run (update-newton-persistent-solver).
+    NewtonCounters newton;
 
     /// v2.0 Phase 4 — the run's final state, complete enough to
     /// resume from exactly (`simulate(resume_from=...)`).
@@ -393,6 +409,7 @@ struct SimulationResult {
                times.size() * sizeof(Real) +
                event_iteration_count.size() * sizeof(Size) +
                switch_state_bits.size() +
+               newton.iterations_per_solve.size() * sizeof(std::uint16_t) +
                switch_state_unsolved.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
                event_iteration_breaches.size() *

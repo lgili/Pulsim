@@ -1919,6 +1919,25 @@ void init_module(py::module_& m) {
         .def_readonly("new_state",
                        &CommutationEvent::new_state);
 
+    py::class_<solver::NewtonCounters>(m, "NewtonCounters",
+        "Newton linear-algebra counters of one run "
+        "(update-newton-persistent-solver). All zero without Newton.")
+        .def_readonly("solves", &solver::NewtonCounters::solves)
+        .def_readonly("iterations", &solver::NewtonCounters::iterations)
+        .def_readonly("analyses", &solver::NewtonCounters::analyses)
+        .def_readonly("factorizations",
+                      &solver::NewtonCounters::factorizations)
+        .def_readonly("partial_refactors",
+                      &solver::NewtonCounters::partial_refactors)
+        .def_readonly("lm_attempts", &solver::NewtonCounters::lm_attempts)
+        .def_property_readonly("iterations_per_solve",
+            [](const solver::NewtonCounters& c) {
+                return py::array_t<std::uint16_t>(
+                    static_cast<py::ssize_t>(c.iterations_per_solve.size()),
+                    c.iterations_per_solve.data());
+            },
+            "Iterations of each Newton call, in call order (uint16).");
+
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
@@ -1979,6 +1998,8 @@ void init_module(py::module_& m) {
             "Bytes held by the contiguous sample buffer.")
         .def_readonly("event_iteration_count",
                        &SimulationResult::event_iteration_count)
+        .def_readonly("newton", &SimulationResult::newton,
+                      "Newton counters of the run (NewtonCounters).")
         // Per-sample record of the STAMPED switch / diode mask
         // (result.hpp, `switch_state_bits`). Unpacked here into a
         // (num_steps, num_switches) bool array; column j is bit j of

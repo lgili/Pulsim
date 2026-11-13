@@ -29,6 +29,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/solver/result.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -37,6 +38,7 @@
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <optional>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -61,24 +63,43 @@ using NonlinearRefreshFn = std::function<
          const topology::Graph& graph,
          const DevicePool& pool)>;
 
-/// Per-run Newton workspace (update-newton-persistent-solver, stage A1).
+/// Per-run Newton workspace (update-newton-persistent-solver, stages A1
+/// and A2).
 ///
 /// Holds the combined Jacobian `J = J_lin + J_nl` on the union pattern
-/// of the two operands, written in place through two slot arrays, and
-/// one `Eigen::SparseLU` analysed once per pattern. The backend is the
-/// one `make_default_solver()` gives today, so pivots and rounding are
-/// unchanged: the per-entry sum is Eigen's (`a + b`, `a + 0`, `0 + b`),
-/// and `factorize` on a reused `analyzePattern` gives the factor of a
-/// fresh object. The pattern is checked after every refresh (index
-/// arrays of both operands); a change rebuilds the slots and analyses
-/// again. One workspace per run: never shared between threads.
+/// of the two operands, written in place through two slot arrays (the
+/// per-entry sum is Eigen's: `a + b`, `a + 0`, `0 + b`), and one direct
+/// solver analysed once per pattern and refactorised in place. The
+/// pattern is checked after every refresh (index arrays of both
+/// operands); a change rebuilds the slots and analyses again.
+///
+/// `backend` (stage A2): the engines' run workspaces use the in-house
+/// Gilbert–Peierls LU (`Pulsim`), whose refactor allocates nothing; a
+/// call without a workspace (DC paths, continuation) keeps
+/// `Eigen::SparseLU`, so the DC cascade is unchanged. One workspace per
+/// run: never shared between threads.
 struct NewtonWorkspace {
+    sparse::Backend backend = sparse::Backend::Pulsim;
+
     // Counters, monotonic over the workspace's life.
     std::uint64_t solves         = 0;   // solve_with_newton_b_extra calls
     std::uint64_t iterations     = 0;   // Newton iterations
     std::uint64_t analyses       = 0;   // symbolic analyses (plain path)
     std::uint64_t factorizations = 0;   // numeric factorisations (plain path)
     std::uint64_t lm_attempts    = 0;   // LM factorisation attempts
+    std::vector<std::uint16_t> iterations_per_solve;   // per call
+
+    /// Move the counters out, for `SimulationResult::newton`.
+    [[nodiscard]] solver::NewtonCounters take_counters() {
+        solver::NewtonCounters c;
+        c.solves = solves;
+        c.iterations = iterations;
+        c.analyses = analyses;
+        c.factorizations = factorizations;
+        c.lm_attempts = lm_attempts;
+        c.iterations_per_solve = std::move(iterations_per_solve);
+        return c;
+    }
 
     sparse::Matrix J;                    // combined Jacobian
     sparse::Matrix J_nl;                 // refresh target
@@ -167,12 +188,15 @@ private:
 /// identical to `cache.solve(mask, b_extra, x)`.
 ///
 /// Throws `std::runtime_error` on non-convergence.
-[[nodiscard]] inline Vector solve_with_newton_b_extra(
+///
+/// In-place form (task 2.4): `x` is the initial iterate on entry and the
+/// solution on return; on a throw it holds the last iterate.
+inline void solve_with_newton_in_place(
     const PwlSegment& seg,
     const NonlinearRefreshFn& refresh,
     const topology::Graph& graph,
     const DevicePool& pool,
-    const Vector& x_init,
+    Vector& x,
     const Vector& b_extra,
     Size max_iters = Size{50},
     Real tol_dx  = Real{1e-9},
@@ -181,19 +205,38 @@ private:
     bool enable_lm = false,
     NewtonWorkspace* ws = nullptr) {
     const Size n = seg.state_size;
-    Vector x = x_init;
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
     }
 
     // A call without a run workspace gets a call-local one: the same
-    // code path, with the analysis reused across this call's iterations.
-    NewtonWorkspace local_ws;
-    NewtonWorkspace& w = ws != nullptr ? *ws : local_ws;
+    // code path, with the analysis reused across this call's iterations,
+    // on Eigen's LU (the DC paths keep their factorisation).
+    // Built only when needed: an Eigen sparse matrix allocates on
+    // default construction.
+    std::optional<NewtonWorkspace> local_ws;
+    if (ws == nullptr) {
+        local_ws.emplace();
+        local_ws->backend = sparse::Backend::Eigen;
+    }
+    NewtonWorkspace& w = ws != nullptr ? *ws : *local_ws;
     ++w.solves;
+    // Records this call's iteration count on every exit, throws included.
+    struct TraceGuard {
+        NewtonWorkspace& w;
+        std::uint64_t start;
+        ~TraceGuard() {
+            const auto k = std::min<std::uint64_t>(w.iterations - start, 65535);
+            w.iterations_per_solve.push_back(static_cast<std::uint16_t>(k));
+        }
+    } trace_guard{w, w.iterations};
     sparse::Matrix& J_nl = w.J_nl;
-    J_nl.resize(static_cast<Index>(n), static_cast<Index>(n));
-    J_nl.setZero();
+    // J_nl keeps its pattern between calls of one run (task 2.3): the
+    // refreshers zero its values and stamp into existing entries.
+    if (J_nl.rows() != static_cast<Index>(n) || J_nl.cols() != static_cast<Index>(n)) {
+        J_nl.resize(static_cast<Index>(n), static_cast<Index>(n));
+    }
+    sparse::zero_keep_pattern(J_nl);
     Vector& f_nl = w.f_nl;
     f_nl.setZero(static_cast<Index>(n));
     Vector& dx = w.dx;
@@ -265,12 +308,12 @@ private:
         //    union pattern (bit-equal to `J = seg.J; J += J_nl`).
         //    A caller's uncompressed `seg.J` is compressed in a copy,
         //    as the old path did.
-        sparse::Matrix L_compressed;
+        std::optional<sparse::Matrix> L_compressed;   // see local_ws
         const sparse::Matrix* L = &seg.J;
         if (!seg.J.isCompressed()) {
-            L_compressed = seg.J;
-            L_compressed.makeCompressed();
-            L = &L_compressed;
+            L_compressed.emplace(seg.J);
+            L_compressed->makeCompressed();
+            L = &*L_compressed;
         }
         const bool reuse_analysis = w.combine(*L, J_nl);
         const sparse::Matrix& J_combined = w.J;
@@ -354,11 +397,13 @@ private:
             if (baseline_norm < tol_res) {
                 last_dx_norm  = Real{0};
                 last_res_norm = baseline_norm;
-                return x;
+                return;
             }
             sparse::Matrix& J_nl_trial = w.J_nl_trial;
-            J_nl_trial.resize(static_cast<Index>(n), static_cast<Index>(n));
-            J_nl_trial.setZero();
+            if (J_nl_trial.rows() != static_cast<Index>(n)) {
+                J_nl_trial.resize(static_cast<Index>(n), static_cast<Index>(n));
+            }
+            sparse::zero_keep_pattern(J_nl_trial);
             Vector& f_nl_trial = w.f_nl_trial;
             f_nl_trial.setZero(static_cast<Index>(n));
             bool accepted = false;
@@ -427,7 +472,7 @@ private:
             // Plain Newton + optional line search. One analysis per
             // pattern, reused while the pattern holds (stage A1).
             if (!reuse_analysis || !w.solver) {
-                w.solver = sparse::make_default_solver();
+                w.solver = sparse::make_default_solver(n, w.backend);
                 ++w.analyses;
                 if (!w.solver->analyze(J_combined)) {
                     auto& solver = w.solver;
@@ -461,9 +506,11 @@ private:
 
             if (enable_line_search) {
                 sparse::Matrix& J_nl_trial = w.J_nl_trial;
-                J_nl_trial.resize(static_cast<Index>(n),
-                                  static_cast<Index>(n));
-                J_nl_trial.setZero();
+                if (J_nl_trial.rows() != static_cast<Index>(n)) {
+                    J_nl_trial.resize(static_cast<Index>(n),
+                                      static_cast<Index>(n));
+                }
+                sparse::zero_keep_pattern(J_nl_trial);
                 Vector& f_nl_trial = w.f_nl_trial;
                 f_nl_trial.setZero(static_cast<Index>(n));
                 bool accepted = false;
@@ -523,7 +570,7 @@ private:
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
-            return x;
+            return;
         }
         // SCALE-RELATIVE residual acceptance. `tol_res` is
         // ABSOLUTE, and a residual is a current: on a converter
@@ -555,7 +602,7 @@ private:
                     ? Real{0}
                     : b_extra.cwiseAbs().maxCoeff()});
             if (last_res_norm < tol_res * scale) {
-                return x;
+                return;
             }
         }
         // Auto-LM promotion #2: near-miss stall (GUI T1.2).
@@ -628,6 +675,28 @@ private:
         last_dx_norm / x_scale, x_scale,
         last_res_norm / rhs_scale, rhs_scale,
         tol_dx, tol_res));
+}
+
+/// By-value form of `solve_with_newton_in_place`: `x_init` is left
+/// untouched when the solve throws.
+[[nodiscard]] inline Vector solve_with_newton_b_extra(
+    const PwlSegment& seg,
+    const NonlinearRefreshFn& refresh,
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const Vector& x_init,
+    const Vector& b_extra,
+    Size max_iters = Size{50},
+    Real tol_dx  = Real{1e-9},
+    Real tol_res = Real{1e-9},
+    bool enable_line_search = false,
+    bool enable_lm = false,
+    NewtonWorkspace* ws = nullptr) {
+    Vector x = x_init;
+    solve_with_newton_in_place(seg, refresh, graph, pool, x, b_extra,
+                               max_iters, tol_dx, tol_res,
+                               enable_line_search, enable_lm, ws);
+    return x;
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

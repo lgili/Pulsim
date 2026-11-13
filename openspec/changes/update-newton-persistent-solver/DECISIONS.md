@@ -1,4 +1,4 @@
-# Decisions taken while implementing (stage A1 only)
+# Decisions taken while implementing (stage A1; stage 2: A2, B)
 
 Format: question → option taken → why → how to reverse.
 
@@ -94,3 +94,94 @@ Format: question → option taken → why → how to reverse.
     in-house LU with an allocation-free `factorize`) is the proposal's
     next lever. The n = 1503 rectifier is not in the golden set; n = 483
     stands in for it.
+
+## Stage 2 (2026-11-13)
+
+Decided by the maintainer on 2026-11-13: take the rounding-changing
+stages now, behind these gates, re-baselining the Newton goldens once.
+Gates: Newton iteration count of every call identical to the stage-1
+build on every Newton case of the golden probe; step counts and
+switch-state sequences identical; states within 1e-9 relative (per
+variable, scaled by its range over the run) on the cases whose rounding
+may change, `np.array_equal` elsewhere; the absolute dx rule and the DC
+cascade untouched.
+
+11. **Counters on the result** → `SimulationResult.newton`
+    (`solver::NewtonCounters`: the five workspace counters,
+    `partial_refactors`, and `iterations_per_solve`, one `uint16` per
+    Newton call). The engines move the workspace's counters in at the
+    end of the run (one line in each of `run_transient.hpp` and
+    `trbdf2_transient.hpp`). → The gate needs per-call iteration counts,
+    and a `uint16` per call is small next to the stored states. → Drop
+    the field and the two lines.
+
+12. **`J_nl` keeps its pattern (task 2.3)** → `sparse::zero_keep_pattern`
+    (values set to `+0`, pattern kept when compressed) replaces
+    `J_nl.setZero()` in the diode, MOSFET/IGBT Level-1 and saturable
+    refreshers, in the five refresh wrappers of each engine (ten one-line
+    hunks in `run_transient.hpp` / `trbdf2_transient.hpp`), and at the
+    start of each Newton call (`J_nl` is resized only when `n` changes).
+    Bit-identical: a stamp `+= v` on a kept `+0` gives the value a fresh
+    insert gives, the positions are unconditional, and the union pattern
+    of `J` is the same. Golden compare against the pre-stage-2 goldens:
+    ALL IDENTICAL, with the Eigen backend still in place. A refresher that
+    stamps nothing on a call leaves explicit zeros (KNOWN_LIMITATIONS).
+
+13. **Out-parameter overload (task 2.4)** → `solve_with_newton_in_place(
+    ..., Vector& x, ...)`; `solve_with_newton_b_extra` copies `x_init`
+    and delegates. The engines keep the by-value form, which leaves
+    `x_init` untouched on a throw (their failure handling was written
+    against that; the in-place form leaves the last iterate). → The copy
+    is one per call, not per iteration, and their call sites are other
+    tracks' files.
+
+14. **Allocations (tasks 3.6, 4.4)** → zero. `test_zero_alloc` "Newton
+    iteration on a run workspace is allocation-free": 200 calls (> 400
+    iterations) on a diode buck after three warm-up calls, operator new
+    0 and the Eigen malloc guard silent (was 20.4 Eigen mallocs per
+    iteration with A1). Needed besides the backend and task 2.3: the
+    call-local workspace and the "compress a caller's uncompressed
+    `seg.J`" copy are now built only when used (an Eigen sparse matrix
+    allocates on default construction), and `partial_refactor` reuses
+    the factorize work vectors. The run's `iterations_per_solve` grows
+    amortised (the test reserves it).
+
+15. **Gate A2 → passed, and bit-identical.** Golden probe `gate` mode
+    against goldens re-recorded from the stage-1 numerics with the
+    per-call trace (themselves `compare` ALL IDENTICAL to the stage-1
+    goldens):
+
+    | Case | iterations per call | largest relative state difference |
+    |---|---|---|
+    | Shockley buck, pwl / trbdf2 | identical (27540 / 31087) | 0 / 0 |
+    | Shockley rectifier n = 51, pwl / trbdf2 | identical (11521 / 8012) | 0 / 0 |
+    | Shockley rectifier n = 483, pwl | identical (1265) | 0 |
+    | MOSFET Level-1, pwl | identical (13054) | 0 |
+    | saturable inductor, pwl | identical (65645) | 0 |
+    | the 12 cases without Newton (incl. the `mosl1_trbdf2` refusal) | — | byte-identical |
+
+    The in-house LU (COLAMD, partial pivoting, ties to the diagonal)
+    chooses the same pivots as `Eigen::SparseLU` on these Jacobians and
+    forms each factor entry with the same operations, so nothing changed
+    and no golden needed re-baselining. The C++ test on a two-diode buck
+    (200 calls, both masks) also shows identical iteration counts and a
+    relative difference below 1e-9. This is a property of these
+    circuits, not a guarantee: a Jacobian where the two pivot rules
+    disagree will round differently, which is why the stage stays listed
+    as a numerical change.
+
+16. **Acceptance 4.5** → met. ns/step, interleaved stage-1 build vs A2,
+    3 rounds × best of 3 (`.scratch/ab.sh`, shared machine):
+
+    | Case | pre-track baseline | stage 1 (A1) | A2 | A2 ÷ baseline | target |
+    |---|---|---|---|---|---|
+    | Shockley buck, pwl | 6034 | 3478 | 859 | 0.14 | ≤ 0.3 ✓ |
+    | Shockley buck, trbdf2 | 20338 | 11410 | 3186 | 0.16 | — |
+    | Shockley rectifier n = 51, pwl | 22355 | 12153 | 4860 | 0.22 | — |
+    | Shockley rectifier n = 483, pwl | 245789 | 134789 | 59458 | 0.24 | (n = 1503: ≤ 0.6) |
+    | MOSFET Level-1, pwl | 6657 | 3824 | 989 | 0.15 | — |
+    | saturable inductor, pwl | 6487 | 3555 | 834 | 0.13 | — |
+    | buck / transformer (no Newton) | 152 / 168 | 160 / 169 | 152 / 171 | ≈ 1 | no regression ✓ |
+
+    Most of the gain over A1 is the allocation and supernodal-setup
+    overhead of `Eigen::SparseLU::factorize` on small matrices.

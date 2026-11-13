@@ -39,8 +39,13 @@ union pattern of the two operands, and one sparse-LU analysis is reused
 for as long as that pattern holds (checked after every device refresh;
 a switch state with another pattern, or the static `dt = 0` system,
 analyses again). Results are bit-identical to analysing every
-iteration (`update-newton-persistent-solver`, stage A1). The
-Levenberg-Marquardt fallback still factorises from scratch.
+iteration (`update-newton-persistent-solver`, stage A1). Since stage
+A2 the factorisation is the in-house sparse LU, refactorised in place
+with no allocation per iteration; the DC operating point keeps
+`Eigen::SparseLU`. `result.newton` reports the run's counters
+(`iterations`, `analyses`, `factorizations`, …) and the iteration count
+of every Newton call (`iterations_per_solve`). The Levenberg-Marquardt
+fallback still factorises from scratch.
 
 ## Adaptive Runge-Kutta integrators (Phase 2.4, standalone)
 
