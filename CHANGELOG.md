@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration fixes (batch 5: in-house LU Newton, TR-BDF2 error control)
+
+* **Fixed** `engine='trbdf2'` lands the corners of pulse and table
+  current sources as source breakpoints, like the voltage sources (it
+  clamped the step to them but did not count or restart on them).
+* **Changed** the Newton roundoff acceptance runs on the in-house-LU
+  workspace: its backward error reads the workspace's copy of the
+  iterate. A solve the Eigen path aborted can now converge (100 µH at
+  `tol_newton_dx` = 1e-11 completes; its test pin changed).
+* **Changed** the reference harness compares on an edge-tolerant
+  measure: source-forced nodes are dropped and the step that contains a
+  switching edge is not interpolated (`--metric interp` keeps the old
+  measure). `benchmarks/REFERENCE_STATUS.md` states which one it uses.
+* **Changed** `ll16_flyback_closed_loop` completes on `pwl` with
+  roundoff warnings (it aborted at 37 µs); its state is wrong from t = 0
+  on the base tree too (I(Lm_core) ≈ 2.4e13 A). Triage keeps it `error`.
+* **Changed** pinned `trbdf2` counts and ceilings, old → new with the
+  reason in each file (`analytic.yaml`, `perf_counters.yaml`, the PWM
+  conformance step counts 1104/2254 → 1031/2058). Two ceilings are
+  looser: `hard_switched_rc` 1.098e-6 → 2.224e-6, `buck_dcm` 4.136e-7 →
+  5.635e-7; ten are tighter.
+
 ### Integration fixes (review of the integration branch, 2026-11-13)
 
 * **Fixed** `periodic_steady_state` accepted a sine, pulse or table

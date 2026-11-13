@@ -261,6 +261,14 @@ opts.store_every              # int
 - `result.n_restart_steps` / `result.n_restart_factorizations` — SDIRK
   restart steps taken and the factorisations they caused, with
   `discontinuity_restart=True` (0 otherwise)
+- `result.newton` — `NewtonCounters` of the run's Newton workspace
+  (`pwl` / `trbdf2`): `solves`, `iterations`, `analyses`,
+  `factorizations`, `partial_refactors`, `lm_attempts` and
+  `iterations_per_solve` (the iteration count of every Newton call)
+- `result.newton_roundoff_accepts` / `result.newton_roundoff_omega_max` /
+  `result.newton_roundoff_row` — transient Newton solves accepted at row
+  roundoff (row-wise backward error ≤ 8 eps) instead of aborting, the
+  worst backward error and its MNA row (DC never accepts)
 
 ## Statistics over a result (time-weighted)
 
