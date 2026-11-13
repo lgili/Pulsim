@@ -44,6 +44,7 @@
 #include "pulsim/pwl/preflight.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <format>
@@ -1096,8 +1097,8 @@ public:
     /// Returns a `Vector` of size
     /// `num_nodes + num_state_branches` (the same shape
     /// `pulsim.simulate(initial_state=…)` expects). Capacitor ICs
-    /// land on the *node* voltage column of the capacitor's
-    /// positive terminal; inductor and source ICs land on their
+    /// set node voltages so that v(from) - v(to) = c0 for every cap
+    /// (see the walk below); inductor and source ICs land on their
     /// pool-mapped current state-vector slot.
     [[nodiscard]] pulsim::Vector initial_state() const {
         // State size: node voltages + every state-branch current.
@@ -1112,6 +1113,9 @@ public:
         }
         pulsim::Vector x0 = pulsim::Vector::Zero(
             static_cast<int>(n_nodes + n_state_extras));
+        struct CapEdge { Index other; Real v_ab; Index branch; };
+        std::unordered_map<Index, std::vector<CapEdge>> cap_adj;
+        std::unordered_map<Index, bool> is_from;
         for (const auto& [b_id, value] : initial_conditions_) {
             if (b_id < 0 || b_id >= graph_.num_branches()) continue;
             // Inductor / source: write into the pool-mapped state
@@ -1129,13 +1133,57 @@ public:
                     x0(col) = value;
                 }
             } else if (pool_.is_capacitor(b_id)) {
-                // Cap IC → node voltage of the positive terminal.
                 const auto& br = graph_.branch(b_id);
-                if (br.from >= 0 && br.from < n_nodes) {
-                    x0(br.from) = value;
-                }
+                cap_adj[br.from].push_back({br.to, value, b_id});
+                cap_adj[br.to].push_back({br.from, -value, b_id});
+                is_from[br.from] = true;
+                is_from.try_emplace(br.to, false);
             }
             // Resistors and other kinds: silently ignored.
+        }
+        // A cap IC is a node-voltage DIFFERENCE, v(from) - v(to) = c0.
+        // Writing c0 into the positive terminal alone zeroed the upper
+        // cap of a series pair given 10 V / 10 V. Walk each group of
+        // caps joined by shared nodes from ground or, when it does not
+        // reach ground, from a node that is only ever a negative
+        // terminal, held at 0 V (a lone floating cap keeps its old
+        // placement, v(from) = c0, v(to) = 0). A loop of ICs that
+        // breaks KVL is refused.
+        std::unordered_map<Index, Real> known;
+        std::vector<Index> roots;
+        for (const auto& kv : is_from) {
+            if (kv.first != kGround) roots.push_back(kv.first);
+        }
+        std::sort(roots.begin(), roots.end(), [&](Index a, Index b) {
+            return std::pair{is_from.at(a), a} < std::pair{is_from.at(b), b};
+        });
+        if (cap_adj.contains(kGround)) roots.insert(roots.begin(), kGround);
+        for (const Index root : roots) {
+            if (known.contains(root)) continue;
+            known[root] = 0.0;
+            std::vector<Index> stack{root};
+            while (!stack.empty()) {
+                const Index a = stack.back();
+                stack.pop_back();
+                for (const auto& e : cap_adj.at(a)) {
+                    const Real vb = known.at(a) - e.v_ab;
+                    const auto it = known.find(e.other);
+                    if (it == known.end()) {
+                        known[e.other] = vb;
+                        stack.push_back(e.other);
+                    } else if (std::abs(it->second - vb) >
+                               1e-9 * std::max(Real{1}, std::abs(vb))) {
+                        throw std::invalid_argument(std::format(
+                            "initial_state: the capacitor initial voltages "
+                            "around '{}' break KVL (a loop of c0 values does "
+                            "not sum to zero)",
+                            name_of(e.branch)));
+                    }
+                }
+            }
+        }
+        for (const auto& [node, v] : known) {
+            if (node >= 0 && node < n_nodes) x0(node) = v;
         }
         return x0;
     }
