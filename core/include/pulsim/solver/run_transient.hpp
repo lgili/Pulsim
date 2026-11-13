@@ -868,7 +868,7 @@ inline SimulationResult run_transient(
         }
         if (has_iwave) {
             sources::compute_current_waveform_b_extra(pool, graph, at_t,
-                                                      be_iwave);
+                                                      be_iwave, left_by);
             b_extra += be_iwave;
         }
     };
@@ -940,7 +940,7 @@ inline SimulationResult run_transient(
             !restart_rule ? Size{0}
             : resume_snap != nullptr ? resume_snap->restart_steps_left
             : start_from_dc_op ? Size{0} : kRestartSteps;
-        const bool has_jump_sources = restart_rule && (has_pwm || has_pulse);
+        const bool has_jump_sources = restart_rule && (has_pwm || has_pulse || has_iwave);
         // Both SDIRK stages solve on the trapezoidal factor of 2γ·dt: a
         // second FIXED step, so a second lazy cache keeps one factor per
         // mask under the same byte budget. (On the 8-entry event LRU a
@@ -1853,7 +1853,7 @@ inline SimulationResult run_transient(
             }
             if (has_iwave) {
                 sources::compute_current_waveform_b_extra(pool, graph, t,
-                                                          be_iwave);
+                                                          be_iwave, src_left);
                 b_extra += be_iwave;
             }
             const Vector& b_extra_user = b_extra;

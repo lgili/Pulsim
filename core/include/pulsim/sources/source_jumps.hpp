@@ -7,12 +7,14 @@
 // add-discontinuity-restart-rule, task 3. The fixed engine restarts
 // (three SDIRK(2,2) steps) after a source jump, and the step
 // that ENDS on a jump reads the source's left limit. Jumps come from
-// PWM voltage sources (period start and duty edge) and pulse sources
-// with a zero rise or fall time; `b_extra_fn` and the sine source
-// contribute none. Edges on a grid point are snapped exactly as
+// PWM voltage sources (period start and duty edge) and pulse voltage
+// and current sources with a zero rise or fall time; `b_extra_fn`, the
+// sine sources and the table current source (continuous by validation:
+// a periodic table must end where it starts) contribute none. Edges on a grid point are snapped exactly as
 // `value_at` snaps them (pwm_phase.hpp), so "a jump at t" here and
 // "the value changes at t" there are the same statement.
 
+#include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
 #include "pulsim/numeric/pwm_phase.hpp"
@@ -65,8 +67,11 @@ void for_each_family(const pwl::DevicePool& pool, Index branch_id, Fn&& fn) {
             fn(p.phase, T, Real{0}, true);
             fn(p.phase, T, p.duty, true);
         }
-    } else if (kind == K::PulseVoltageSource) {
-        const auto& p = pool.pulse_voltage_source_params(branch_id);
+    } else if (kind == K::PulseVoltageSource || kind == K::PulseCurrentSource) {
+        // The pulse current source is the same trapezoid (and edge rules).
+        const auto& p = kind == K::PulseVoltageSource
+            ? pool.pulse_voltage_source_params(branch_id)
+            : pool.pulse_current_source_params(branch_id).w;
         const Real fall_at = p.rise_time + p.pulse_width;
         if (p.period > Real{0}) {
             if (p.rise_time == Real{0}) fn(p.t_start, p.period, Real{0}, false);
