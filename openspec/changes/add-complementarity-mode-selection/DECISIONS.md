@@ -180,3 +180,35 @@ choices it did not pin.
     'lcp' = 87 runs) is bit-identical to 11ab8e95
     (`probes/survey_bit_identity.out`); `bit_identity.py` 36/36. → Reverse: restore `if (g == 0) continue;` in both locators.
 
+20. **Cost gate on a 60-diode bank (task 8.3): the guard is affordable.**
+    Ten three-phase bridges (60 diodes, phases 6° apart, each on its own
+    200 µF ‖ 50 Ω, tied by 1 MΩ), `V_th = 0`, no line inductance,
+    `t_end = 0.04 s` (`probes/bank60_cost.py`, `.out`). All three modes
+    end at 173.198150009 V − 2.71e-11 V against trbdf2 rtol 1e-9.
+
+    | mode | events | guard checks / repairs | LCP problems = port-model solves | pivots (max / event) | widenings | enumerations | masks = eigendecompositions | median wall (7 interleaved rounds) | per event |
+    |---|---|---|---|---|---|---|---|---|---|
+    | settle (guard off) | 435 | — | 0 | 0 | 0 | 0 | 221 | 21.2 s | 48.6 ms |
+    | default (settle + guard) | 373 | 374 / 98 | 292 | 699 (30) | 188 | 0 | 204 | 21.4 s | 57.5 ms |
+    | 'lcp' | 373 | — | 1102 | 1177 (30) | 728 | 0 | 126 | 21.7 s | 58.2 ms |
+
+    Gate "no event over `4·k` pivots": max 30 against 240, passes. The
+    enumeration limit (`k ≤ 12`) is never reached: the bank is passive,
+    Lemke always terminates. The machine was shared; the min/max spread
+    was 13–37 s per mode, so the medians differ by noise, and the
+    counters decide: the guard adds 292 port-model solves and 699 pivots
+    to a run whose cost is one eigendecomposition per new mask (221 /
+    204 / 126). The 62 fewer events under the guard are settle detours
+    the repaired mode no longer takes. The guard is affordable; nothing
+    was made cheaper. Per-event time is dominated by mask extraction
+    (add-exact-propagator-strategy owns the mask cache).
+
+    Variants that do not run on dsed in any mode, identical on the HEAD
+    11ab8e95 extension (not caused by #19): 0.2 mH line inductors
+    chatter ("commutated 32 times") at `V_th = 0` and `1e-2`; the same
+    bank paralleled onto one 2 mF ‖ 5 Ω bus does not settle at `t = 0`
+    (settle, guard) or makes no progress ('lcp'); trbdf2 aborts on both
+    ("non-finite step … h_min"); pwl at `dt = 1 µs` runs both (181.81 V /
+    200.01 V, no reference to check against). Recorded in
+    KNOWN_LIMITATIONS. → Reverse: nothing to reverse (a measurement); a
+    cheaper guard would cache the judge's two propagations per mask.

@@ -260,6 +260,17 @@ first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is
 not seen. The guard repairs only the modes it judges inconsistent over
 `1e4·h_e`; a mode consistent that long and wrong later is not caught.
 
+### Many-diode rectifiers with line inductance on dsed
+
+Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter
+at a natural commutation ("is chattering at t = 4.33 ms") from five
+bridges on, at `V_th = 0` and `1e-2`, in every mode; paralleled onto one
+DC bus they fail to settle at `t = 0` from five bridges on, and
+`trbdf2` aborts on them ("non-finite step … h_min"). The same bank
+without line inductance runs (add-complementarity-mode-selection
+DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
+`dt = 1 µs`); no reference was available to check them.
+
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or
