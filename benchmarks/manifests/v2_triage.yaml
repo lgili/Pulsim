@@ -24,13 +24,16 @@ circuits:
   circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: error}}
   circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: error, match: "solve_with_newton: failed to converge", reason: "pwl: SimulationAborted: run_transient: the step ending at t = 3.7e-05 could not be taken, even split into 64 sub-steps of 3.906e-09 s (dt/64). La"}
   circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
-  circuits/diodes/diode_bridge_rectifier.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/diode_bridge_rectifier.yaml: {status: runs}
   circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}
+  # dsed: the exact-propagator slice 1 runs it silently wrong (D1 held OFF while forward-biased by
+  # 10 V, V(out) off by 0.97 of span pointwise); the diode-law guard raises
+  # DiodeModeInconsistentError (before the slice: "did not settle").
   circuits/diodes/diode_half_wave_rl_load.yaml: {status: runs, known: {dsed: error}}
-  circuits/diodes/diode_rectifier.yaml: {status: runs, known: {dsed: error}}
-  circuits/diodes/half_wave_rectifier_sine.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/diode_rectifier.yaml: {status: runs}
+  circuits/diodes/half_wave_rectifier_sine.yaml: {status: runs}
   circuits/diodes/ll05_diode_rectifier_filter.yaml: {status: error, match: "PWL diode states never settled", reason: "pwl: RuntimeError: compute_dc_operating_point: the PWL diode states never settled — 16 rounds of re-solving still flip at least one diode. The ci"}
-  circuits/diodes/voltage_doubler.yaml: {status: runs, known: {dsed: error}}
+  circuits/diodes/voltage_doubler.yaml: {status: runs}
   circuits/linear/bridge_resistive_pure.yaml: {status: runs}
   circuits/linear/capacitor_natural_discharge.yaml: {status: runs}
   circuits/linear/current_divider_3way.yaml: {status: runs}
@@ -71,8 +74,9 @@ circuits:
   circuits/stress/periodic_rc_pwm.yaml: {status: runs}
   circuits/stress/stiff_rc_high_freq_switching.yaml: {status: runs, known: {dsed: disagree}}
   circuits/stress/stiff_rlc.yaml: {status: runs}
-  circuits/stress/stiff_two_timescale_rc.yaml: {status: runs, known: {dsed: disagree}}
-  circuits/switching/basic/chopper_with_rc_snubber.yaml: {status: runs, known: {dsed: disagree}}
+  circuits/stress/stiff_two_timescale_rc.yaml: {status: runs}
+  # dsed: disagree (0.0216) -> error "did not settle" at 1.637e-4 s since the exact-propagator slice.
+  circuits/switching/basic/chopper_with_rc_snubber.yaml: {status: runs, known: {dsed: error}}
   circuits/switching/basic/mosfet_nmos_dc.yaml: {status: runs}
   circuits/switching/basic/pwm_voltage_rc.yaml: {status: runs}
   circuits/switching/basic/pwm_voltage_rl_filter.yaml: {status: runs}
@@ -104,8 +108,10 @@ circuits:
   circuits/switching/buck/triple_sync_buck.yaml: {status: runs}
   circuits/switching/buck_boost/bidirectional_buck_boost.yaml: {status: runs, known: {dsed: disagree}}
   circuits/switching/buck_boost/buck_boost.yaml: {status: runs, known: {dsed: error}}
-  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, known: {pwl: disagree}}
-  circuits/switching/buck_boost/sepic.yaml: {status: runs}
+  # dsed refused the builder ICs until the exact-propagator slice; now "no meaningful progress".
+  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, known: {pwl: disagree, dsed: error}}
+  # dsed refused the builder ICs until the exact-propagator slice; now "did not settle" at 2.35e-4 s.
+  circuits/switching/buck_boost/sepic.yaml: {status: runs, known: {dsed: error}}
   circuits/switching/inverter/half_bridge_inverter.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs, known: {dsed: disagree}}
@@ -116,12 +122,16 @@ circuits:
   circuits/switching/isolated/dual_active_bridge.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
   circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree}}
   circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree}}
-  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree, dsed: error}}
+  # dsed disagree is the metric: sparse exact samples interpolated across edges (pointwise < 5e-5
+  # of span; 0.024 at dt/4 output).
+  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree, dsed: disagree}}
   circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, trbdf2: error}}
   circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: error, match: "no DC operating point", reason: "pwl: RuntimeError: compute_dc_operating_point: no DC operating point. The direct solve failed with: solve_with_newton: failed to converge after 5"}
   circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}}
   circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs, known: {pwl: disagree}}
-  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
+  # dsed (runs since builder ICs are honoured): disagree is the metric, as full_bridge_dc
+  # (pointwise < 5e-5 of span; 0.0275 at dt/4 output).
+  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree, dsed: disagree}}
   circuits/switching/multilevel/mmc_4cell_chain.yaml: {status: runs, known: {pwl: disagree}}
   circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs}
   circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}}
@@ -132,6 +142,6 @@ circuits:
   circuits/three_phase/interleaved_buck_3ph.yaml: {status: runs}
   circuits/three_phase/pll_grid_sync.yaml: {status: skipped, reason: "component type 'pll'"}
   circuits/three_phase/three_phase_balanced_rl_load.yaml: {status: runs}
-  circuits/three_phase/three_phase_diode_rectifier.yaml: {status: runs, known: {pwl: disagree, dsed: error}}
+  circuits/three_phase/three_phase_diode_rectifier.yaml: {status: runs, known: {pwl: disagree}}
   circuits/three_phase/three_phase_dq_decoupling.yaml: {status: skipped, reason: "component type 'pll'"}
   circuits/three_phase/vector_control_open_loop.yaml: {status: skipped, reason: "component type 'pll'"}

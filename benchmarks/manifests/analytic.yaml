@@ -25,7 +25,8 @@ cases:
       ceiling: 2.93e-06
       measured: 1.467e-06
     dsed:
-      refused: ValueError
+      ceiling: 1.0e-06
+      measured: 1.184e-14
   rl_step:
     pwl:
       ceiling: 0.00223
@@ -64,7 +65,8 @@ cases:
       ceiling: 0.00012
       measured: 5.993e-05
     dsed:
-      refused: ValueError
+      ceiling: 1.0e-06
+      measured: 4.996e-14
   sine_rc:
     pwl:
       ceiling: 1.93e-06
@@ -167,9 +169,10 @@ cases:
       measured: 4.43e-06
     dsed:
       known: error
-      reason: 'PEDSimulator: diode configuration did not settle after 64 rounds at t = 0 (V_th = 0 PWL
-        diode)'
-      measured: RuntimeError
+      reason: 'exact-propagator slice 1 settles D ON through -0.85 A reverse current after the 2nd
+        cycle (err_rms 0.3995, silently); the integration batch-4 diode-law guard turns that into
+        DiodeModeInconsistentError (before the slice: "did not settle after 64 rounds")'
+      measured: DiodeModeInconsistentError
   hard_switched_rc:
     pwl:
       known: disagree
@@ -180,10 +183,8 @@ cases:
       ceiling: 2.2e-06
       measured: 1.098e-06
     dsed:
-      known: disagree
-      reason: '52 samples, rms 0.44 of span: the 1 ps on-state mode is not followed; review D8 / exact-propagator
-        robustness'
-      measured: 0.4386
+      ceiling: 1.0e-06
+      measured: 1.071e-13
   buck_ccm:
     pwl:
       ceiling: 0.000512

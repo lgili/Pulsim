@@ -119,9 +119,9 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 111
+      n_accept: 99
       n_reject: 0
-      n_events: 110
+      n_events: 98
       n_rk45_steps: 0
       n_bdf2_steps: 0
   hard_switched_rc:
@@ -261,7 +261,11 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      refused: RuntimeError
+      n_accept: 80042
+      n_reject: 0
+      n_events: 96
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
   buck_mosfet_nonlinear:
     pwl:
       event_builds: 0
@@ -339,4 +343,8 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      refused: RuntimeError
+      n_accept: 50010
+      n_reject: 0
+      n_events: 19
+      n_rk45_steps: 0
+      n_bdf2_steps: 0

@@ -408,7 +408,7 @@ CASES = [
     Case("rc_charge", "RC charge, 10 V, 1 kOhm, 1 uF", _rc, _v("o"),
          lambda t: 10 * (1 - np.exp(-np.asarray(t) / 1e-3)), 5e-3, 1e-5, ALL),
     Case("rc_discharge", "RC discharge from 5 V", _rc_dis, _v("o"),
-         lambda t: 5 * np.exp(-np.asarray(t) / 1e-3), 5e-3, 1e-5, NO_DSED),
+         lambda t: 5 * np.exp(-np.asarray(t) / 1e-3), 5e-3, 1e-5, ALL),
     Case("rl_step", "RL step, 10 V, 10 Ohm, 1 mH", _rl, _i("L"),
          lambda t: 1.0 * (1 - np.exp(-np.asarray(t) / 1e-4)), 1e-3, 1e-6, ALL),
     Case("rlc_underdamped", "series RLC, 1 Ohm, 1 mH, 10 uF", _rlc(1.0), _v("o"),
@@ -420,7 +420,7 @@ CASES = [
          lambda t: 10 * (1 - (_S2 * np.exp(_S1 * np.asarray(t)) - _S1 * np.exp(_S2 * np.asarray(t)))
                          / (_S2 - _S1)), 15e-3, 1e-6, ALL),
     Case("lc_lossless", "LC tank from 10 V", _lc, _v("o"),
-         lambda t: 10 * np.cos(_W0 * np.asarray(t)), 2e-3, 1e-6, NO_DSED),
+         lambda t: 10 * np.cos(_W0 * np.asarray(t)), 2e-3, 1e-6, ALL),
     Case("sine_rc", "sine-driven RC from rest", _sine_rc, _v("o"),
          lambda t: 10 / math.sqrt(1 + (_W7 * _T7) ** 2) * (np.sin(_W7 * np.asarray(t) - _P7)
                                                            + math.sin(_P7) * np.exp(-np.asarray(t) / _T7)),
