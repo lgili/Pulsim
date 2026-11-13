@@ -1565,6 +1565,9 @@ class SolverOptions:
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
     enable_substep_state_correction: Optional[bool] = None
+    # Fixed engine: two backward-Euler half-steps after every
+    # discontinuity, gate sampled at the step start (None = off).
+    discontinuity_restart: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1623,6 +1626,20 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     return tuple(out)
 
 
+def _carry_jumps(fn, parts):
+    """Give a composed b_extra_fn the declared jumps of its parts.
+
+    A part declares its jump instants with `next_jump_after(t)` (first
+    jump strictly after t); the composition jumps at the earliest.
+    Undeclared parts stay undeclared (the restart rule cannot see them).
+    """
+    nj = [q.next_jump_after for q in parts
+          if q is not None and hasattr(q, "next_jump_after")]
+    if nj:
+        fn.next_jump_after = lambda t, _nj=nj: min(f(t) for f in _nj)
+    return fn
+
+
 def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         label):
     """Compose an internal (observer, b_extra) pair with the user's.
@@ -1657,7 +1674,7 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         f"b_extra_fn returned shape {u.shape}, "
                         f"expected ({_n},) when composed with {_lbl}")
                 return _np.asarray(_i(t)) + u
-            b_extra_fn = _b
+            b_extra_fn = _carry_jumps(_b, (b, _u_b))
     return step_observer, b_extra_fn
 
 
@@ -1725,6 +1742,7 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    discontinuity_restart: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -2017,6 +2035,8 @@ def simulate(
         if enable_substep_state_correction is None:
             enable_substep_state_correction = (
                 solver.enable_substep_state_correction)
+        if discontinuity_restart is None:
+            discontinuity_restart = solver.discontinuity_restart
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -2195,6 +2215,7 @@ def simulate(
             "inductor_abs_clamp": inductor_abs_clamp is not None,
             "enable_substep_state_correction": bool(
                 enable_substep_state_correction),
+            "discontinuity_restart": bool(discontinuity_restart),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -2310,6 +2331,7 @@ def simulate(
             on_cache=on_cache,
             enable_substep_state_correction=(
                 enable_substep_state_correction),
+            discontinuity_restart=discontinuity_restart,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -2596,7 +2618,7 @@ def simulate(
             return total if total is not None else []
 
         step_observer = _cblock_observer
-        b_extra_fn = _cblock_b_extra
+        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -2649,6 +2671,12 @@ def simulate(
                 "re-fire), silently corrupting the capacitor "
                 "bookkeeping. The ladder is disabled automatically "
                 "when mmc_arms is set; do not request it.")
+        if discontinuity_restart:
+            raise ValueError(
+                "simulate(mmc_arms=..., discontinuity_restart=True): "
+                "the restart half-steps re-solve at dt/2 with the "
+                "arm's full-dt Thevenin stamp — the dt-halving "
+                "corruption again.")
         if enable_substep_state_correction:
             raise ValueError(
                 "simulate(mmc_arms=..., "
@@ -2740,6 +2768,8 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if discontinuity_restart is not None:
+        opts.discontinuity_restart = bool(discontinuity_restart)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -3310,7 +3340,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn):
+                      switch_fn, discontinuity_restart=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3378,6 +3408,9 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if enable_substep_state_correction:
         why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
                     "fixed-step commutation split"))
+    if discontinuity_restart:
+        why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
+                    "fixed-step engine's restart rule"))
     if store_every is not None and int(store_every) != 1:
         why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:

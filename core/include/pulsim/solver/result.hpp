@@ -175,6 +175,10 @@ struct SolverSnapshot {
     std::vector<Real> igbt_tail_history;
     /// 9 per machine: lambda_abc, i_abc, v_abc (MNA PMSM).
     std::vector<Real> pmsm_history;
+    /// Restart steps still owed (discontinuity_restart): the rule takes
+    /// the step of a discontinuity and the next two as SDIRK(2,2)
+    /// steps, so a run stopped inside that window resumes it. 0 = none.
+    Size restart_steps_left = 0;
     /// True once populated by a run.
     bool valid = false;
 };
@@ -219,6 +223,13 @@ struct SimulationResult {
     /// v2.0 Phase 2 — steps re-taken at a reduced dt. Empty on a run
     /// that never needed one.
     std::vector<DtRetry> dt_retries;
+
+    /// Steps taken as SDIRK(2,2) restart steps
+    /// (SimulationOptions::discontinuity_restart). 0 with the rule off.
+    Size n_restart_steps = 0;
+    /// Factorisations made for the restart stages (one per mask at
+    /// 2γ·dt, more only if the segment byte budget evicts). 0 off.
+    Size n_restart_factorizations = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

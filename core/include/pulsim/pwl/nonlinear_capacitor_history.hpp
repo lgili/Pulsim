@@ -74,8 +74,10 @@ public:
     }
 
     /// Commit the just-solved step. `h` must be the step this
-    /// solve actually used.
-    void update_from_state(const Vector& x, Real h) {
+    /// solve actually used; `backward_euler` a restart stage
+    /// rule (i = (Q - Q_n)/h, no i_n), as the stamp used it.
+    void update_from_state(const Vector& x, Real h,
+                           bool backward_euler = false) {
         if (entries_.empty() || !(h > Real{0})) {
             return;
         }
@@ -88,9 +90,22 @@ public:
             // The companion's own current, from the same rule the
             // stamp used — never re-derived from C(v)·dv/dt, which
             // would not conserve charge.
-            e.i_prev = (Real{2} / h) * (q - e.q_prev) - e.i_prev;
+            e.i_prev = backward_euler
+                ? (q - e.q_prev) / h
+                : (Real{2} / h) * (q - e.q_prev) - e.i_prev;
             e.v_prev = v;
             e.q_prev = q;
+        }
+    }
+
+    /// SDIRK restart: pseudo previous charge q0 + c·(q1 − q0) (see
+    /// HistoryState::extrapolate_previous).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            e.q_prev += c * (models::NonlinearCapacitor::charge(e.params, v)
+                             - e.q_prev);
         }
     }
 

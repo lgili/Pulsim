@@ -458,16 +458,16 @@ Each row was measured on this version. The fix column is what to write.
 | 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. On the rectifier of 6.2 `.mean()` reads 5.007 V against 6.330 V (-21 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
-| 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. On a snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4` let `auto` finish at 3.53 V; the fixed engine gives 15.31 V. No error, no warning | Keep the defaults; read the abort; run `engine='pwl'` with a `dt`; fix gate edges, body diodes, initial state |
-| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` is the plotting function (needs matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
-| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. On the VSI of Tutorial 04 a 1 mOhm neutral-to-rail tie drove 58.8 A of DC through every phase (0.0 A floating or with 1 MOhm) | Leave it to `auto_regularize` (default on): it ties each floating subnet with 1 GOhm and warns. Your own tie: 1 MOhm or larger |
-| 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. A bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V on both engines. Without `dt` it warns the rails "reach the rest of the circuit only through switches/diodes"; with 10 mF: 323.94 V, 324.51 V with `dt` | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
-| 9 | A fixed-step run is second order from t = 0 | It starts from an inconsistent state and is first order globally, ICs included: RL decay with `i0=1`, error at 1 ms 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6`; sample 0 of node voltages reads 0 V | Halve `dt` and compare (6.3); discard the start-up; or omit `dt` |
-| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid. Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 6.24 V with `dt=2e-7` (on-time 12.5 steps, run as 13), 6.00 V with `dt=1e-7` | Make `D/f_sw` a whole number of steps; the helpers then hold it exactly (3.2) |
+| 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. On a snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4` let `auto` finish at 3.53 V; the fixed engine gives 15.31 V. No error, no warning | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
+| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
+| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. On Tutorial 04's VSI a 1 mOhm neutral-to-rail tie drove 58.8 A DC through each phase (0.0 A floating or with 1 MOhm) | Leave it to `auto_regularize` (default on): it ties each floating subnet with 1 GOhm and warns. Own tie: 1 MOhm or more |
+| 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V on both engines. Without `dt` it warns the rails "reach the rest of the circuit only through switches/diodes"; with 10 mF: 323.94 V, 324.51 V with `dt` | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
+| 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
+| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid (restart rule: exact on it, first order off it). Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 6.24 V with `dt=2e-7` (on-time 12.5 steps, run as 13), 6.00 V with `dt=1e-7` | Make `D/f_sw` a whole number of steps; helpers then hold it exactly (3.2) |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `pulsim.UnsupportedError` (`.engine`, `.feature`); never `Exception` |
-| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or was held in a state "its commutation rule forbids" (a missed commutation, also named by `res.i`), a `switch_fn` pulse narrower than its sampling. No warning is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else at most `t_end/1000`) can be skipped silently (2 us in 20 ms: 11 of 20 phases) | Rerun with `dt` and compare (6.2); `dt` at most 4x the narrowest pulse |
-| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | It joins samples with lines, so each hard edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, analytic 1.5044 A. Same for `device_loss_summary`'s `i_rms` (not its `P_avg`) | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three. Keep `time_rms` for smooth or variable-grid traces; halve `dt` to check |
+| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or held a state "its commutation rule forbids" (also named by `res.i`), a `switch_fn` pulse narrower than its sampling. Silence is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else at most `t_end/1000`) can be skipped silently (2 us in 20 ms: 11 of 20 phases) | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
+| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Samples joined by lines make each hard edge a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three. Keep `time_rms` for smooth or variable-grid traces; halve `dt` to check |
 | 15 | Controllers run each step | A source ticks at `t_start + k*T`, `ceil(span/T)` times | `step_observer` needs `controller_period=`; see `res.control_tick_counts` |
 
 Traps 1, 3 and 4, executed:
@@ -588,8 +588,8 @@ run, or `np.interp` onto a uniform grid.
 
 ### 6.3 Step-size convergence
 
-Halve `dt` and rerun. A figure that moves by more than you need is not
-converged. The fixed engine is first order from the start (trap 9):
+Halve `dt` and rerun. A figure that moves more than you need is not
+converged. The fixed engine is first order unless it restarts (trap 9):
 
 ```python
 def rl():
@@ -599,14 +599,14 @@ def rl():
     return b
 
 for dt in (1e-5, 5e-6):
-    r = p.simulate(rl(), t_end=2e-3, dt=dt)
+    r = p.simulate(rl(), t_end=2e-3, dt=dt, discontinuity_restart=True)
     err = np.interp(1e-3, r.times, r.i("L")) - np.exp(-1)
     print(f"dt = {dt:.0e}: i_L(tau) error {err:.2e} A")
 ```
 
 ```text
-dt = 1e-05: i_L(tau) error 1.85e-03 A
-dt = 5e-06: i_L(tau) error 9.21e-04 A
+dt = 1e-05: i_L(tau) error -3.02e-06 A
+dt = 5e-06: i_L(tau) error -7.61e-07 A
 ```
 
 ### 6.4 When `simulate` raises

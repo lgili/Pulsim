@@ -2214,6 +2214,13 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("discontinuity_restart",
+                        &SimulationOptions::discontinuity_restart,
+                        "Fixed engine: take the step after a discontinuity "
+                        "(mask change, diode flip, source jump, inconsistent "
+                        "start) as two backward-Euler half-steps; gate mask "
+                        "sampled at the step start. Off = the engine before "
+                        "the rule, bit for bit.")
         .def_readwrite("inductor_freeze_di_max",
                         &SimulationOptions::inductor_freeze_di_max)
         .def_readwrite("inductor_abs_clamp",
@@ -2538,6 +2545,14 @@ void init_module(py::module_& m) {
         .def_readonly("dt_retries", &SimulationResult::dt_retries,
                        "Steps that had to be re-taken at a reduced "
                        "dt. Empty on a run that never needed one.")
+        .def_readonly("n_restart_steps", &SimulationResult::n_restart_steps,
+                       "Steps taken as SDIRK(2,2) restart steps "
+                       "(discontinuity_restart). 0 with the rule off.")
+        .def_readonly("n_restart_factorizations",
+                       &SimulationResult::n_restart_factorizations,
+                       "Factorisations made for the restart stages: one "
+                       "per mask at 2*gamma*dt (more only if the segment "
+                       "byte budget evicts). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def("num_steps", &SimulationResult::num_steps);
@@ -3019,6 +3034,14 @@ void init_module(py::module_& m) {
         .def_readwrite("igbt_tail_history", &SolverSnapshot::igbt_tail_history)
         .def_readwrite("pmsm_history", &SolverSnapshot::pmsm_history)
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("restart_steps_left",
+            &SolverSnapshot::restart_steps_left,
+            "discontinuity_restart: SDIRK restart steps still owed when "
+            "the run ended (the rule takes a discontinuity's step and the "
+            "next two); a resumed run takes them first. 0 = none.")
+        .def_property_readonly("restart_pending",
+            [](const SolverSnapshot& s) { return s.restart_steps_left > 0; },
+            "True when restart_steps_left > 0.")
         .def("__repr__", [](const SolverSnapshot& s) {
             std::string r = "<SolverSnapshot t=" + std::to_string(s.t)
                    + " n=" + std::to_string(s.x.size())
@@ -3041,16 +3064,20 @@ void init_module(py::module_& m) {
                     s.t, s.x, s.history, s.diode_on,
                     s.saturable_history, s.coss_history,
                     s.lauritzen_history, s.igbt_tail_history,
-                    s.pmsm_history, s.valid, s.stamped_mask);
+                    s.pmsm_history, s.valid, s.stamped_mask,
+                    s.restart_steps_left);
             },
             [](py::tuple t) {
                 // 10 fields: pickled before `stamped_mask` existed;
-                // it loads with the mask unknown.
-                if (t.size() != 10 && t.size() != 11) {
+                // it loads with the mask unknown. 11: before the
+                // restart state (loads 0). Field 12 was a bool
+                // `restart_pending` (the BE-pair rule: one step owed)
+                // before it became the SDIRK step count.
+                if (t.size() < 10 || t.size() > 12) {
                     throw std::runtime_error(
                         "SolverSnapshot: pickled state has "
                         + std::to_string(t.size())
-                        + " fields, expected 10 or 11");
+                        + " fields, expected 10, 11 or 12");
                 }
                 SolverSnapshot s;
                 s.t = t[0].cast<Real>();
@@ -3063,8 +3090,14 @@ void init_module(py::module_& m) {
                 s.igbt_tail_history = t[7].cast<std::vector<Real>>();
                 s.pmsm_history = t[8].cast<std::vector<Real>>();
                 s.valid = t[9].cast<bool>();
-                if (t.size() == 11) {
+                if (t.size() >= 11) {
                     s.stamped_mask = t[10].cast<std::vector<bool>>();
+                }
+                if (t.size() == 12) {
+                    s.restart_steps_left =
+                        py::isinstance<py::bool_>(t[11])
+                            ? (t[11].cast<bool>() ? Size{3} : Size{0})
+                            : t[11].cast<Size>();
                 }
                 return s;
             }));
@@ -3075,7 +3108,7 @@ void init_module(py::module_& m) {
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
            py::object switch_fn_obj,         // Bridge.13: was SwitchScheduleFn
-           BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
            StepObserverFn step_observer,
@@ -3087,6 +3120,20 @@ void init_module(py::module_& m) {
             // Python __call__); the detection is shared by every engine.
             const SwitchScheduleFn switch_fn =
                 pulsim_bindings_common::adapt_switch_fn(switch_fn_obj).fn;
+            // add-discontinuity-restart-rule: a b_extra_fn may DECLARE
+            // its jumps with a `next_jump_after(t)` attribute (first
+            // jump strictly after t, inf when none); the restart rule
+            // then restarts on them and reads their left limit.
+            BExtraFn b_extra_fn;
+            std::function<Real(Real)> b_extra_next_jump;
+            if (!b_extra_obj.is_none()) {
+                b_extra_fn = b_extra_obj.cast<BExtraFn>();
+                if (py::hasattr(b_extra_obj, "next_jump_after")) {
+                    b_extra_next_jump =
+                        b_extra_obj.attr("next_jump_after")
+                            .cast<std::function<Real(Real)>>();
+                }
+            }
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
             // Convert optional initial_state to a Vector pointer.
@@ -3149,13 +3196,14 @@ void init_module(py::module_& m) {
                                           observer_eff,
                                           x_init_ptr,
                                           continue_eff,
-                                          resume_ptr);
+                                          resume_ptr,
+                                          b_extra_next_jump);
             }
             return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
-        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("step_observer") = StepObserverFn{},
@@ -3170,7 +3218,12 @@ void init_module(py::module_& m) {
         "of every step BEFORE switch_fn/b_extra_fn evaluate "
         "— use it to update Python-side controller state "
         "(PI, comparator, etc.) so the next switch_fn call "
-        "reads the new duty. `enable_nonlinear_refresh`: "
+        "reads the new duty. A `b_extra_fn` may declare its jump "
+        "instants with a `next_jump_after(t)` attribute (first jump "
+        "strictly after t, inf when none): with "
+        "discontinuity_restart they restart the step and are read "
+        "at their left limit; an undeclared jump is not restarted. "
+        "`enable_nonlinear_refresh`: "
         "None (default) lets the kernel stamp the Newton "
         "devices (smooth / Shockley diode, MOSFET, IGBT) "
         "when the circuit has any; True forces the chain; "

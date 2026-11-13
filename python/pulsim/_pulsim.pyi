@@ -1095,6 +1095,14 @@ class SimulationOptions:
     def atol(self, arg0: float) -> None:
         ...
     @property
+    def discontinuity_restart(self) -> bool:
+        """
+        Fixed engine: take the step after a discontinuity (mask change, diode flip, source jump, inconsistent start) as two backward-Euler half-steps; gate mask sampled at the step start. Off = the engine before the rule, bit for bit.
+        """
+    @discontinuity_restart.setter
+    def discontinuity_restart(self, arg0: bool) -> None:
+        ...
+    @property
     def dt(self) -> float:
         ...
     @dt.setter
@@ -1370,6 +1378,16 @@ class SimulationResult:
     def inductor_guard_actions(self) -> list[InductorGuardAction]:
         """
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
+        """
+    @property
+    def n_restart_factorizations(self) -> int:
+        """
+        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts). 0 with the rule off.
+        """
+    @property
+    def n_restart_steps(self) -> int:
+        """
+        Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
         """
     @property
     def states(self) -> typing.Any:
@@ -1876,7 +1894,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool]]:
+    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], int]:
         ...
     def __init__(self) -> None:
         ...
@@ -1919,6 +1937,19 @@ class SolverSnapshot:
         ...
     @pmsm_history.setter
     def pmsm_history(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def restart_pending(self) -> bool:
+        """
+        True when restart_steps_left > 0.
+        """
+    @property
+    def restart_steps_left(self) -> int:
+        """
+        discontinuity_restart: SDIRK restart steps still owed when the run ended (the rule takes a discontinuity's step and the next two); a resumed run takes them first. 0 = none.
+        """
+    @restart_steps_left.setter
+    def restart_steps_left(self, arg0: int) -> None:
         ...
     @property
     def saturable_history(self) -> list[float]:
@@ -2736,9 +2767,9 @@ def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typ
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """
-def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
+def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
     """
-    Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True forces the chain; False with such devices raises UnsupportedError.
+    Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True forces the chain; False with such devices raises UnsupportedError.
     """
 def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_fn: collections.abc.Callable[[float], SwitchStateMask], b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None) -> SimulationResult:
     """

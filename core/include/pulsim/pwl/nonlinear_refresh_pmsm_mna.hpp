@@ -81,7 +81,9 @@ inline Real refresh_pmsm_mna(
     // c1/h in the BDF2 stage, 2/h in the trapezoidal one. The two
     // coincide when h is the stage's own step, which is what makes
     // one factor serve both.
-    const Real d_coef = bdf2 ? kc.c1 / h : Real{2} / h;
+    // Backward Euler over h (restart stage): 1/h, no dλ_n.
+    const bool be = (stage == TrBdf2Stage::BackwardEuler);
+    const Real d_coef = bdf2 ? kc.c1 / h : be ? Real{1} / h : Real{2} / h;
     for (const auto& e : history.entries()) {
         const auto& p = e.params;
         const Real theta_e = PmsmMnaHistory::theta_e_of(e, x);
@@ -111,7 +113,8 @@ inline Real refresh_pmsm_mna(
             const Real hist =
                 bdf2 ? (kc.c2 * e.lambda_gamma[k]
                         + kc.c3 * e.lambda_old[k]) / h
-                     : -e.dlam_old[k] - (Real{2} / h) * e.lambda_old[k];
+                     : (be ? Real{0} : -e.dlam_old[k])
+                           - d_coef * e.lambda_old[k];
             const Real R_row =
                 (v[k] - p.R_s * i[k]) - d_coef * lam - hist;
             const Index row = e.cur_row[k];

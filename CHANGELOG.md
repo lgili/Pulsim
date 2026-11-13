@@ -29,6 +29,75 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** `add_inductor_coupling` refuses a winding built with
   `rac=` (it coupled only the ladder's main inductor).
 
+### Fixed engine: discontinuity restart rule (opt-in)
+
+`simulate(..., discontinuity_restart=True)` (also `SolverOptions`,
+`SimulationOptions.discontinuity_restart`) takes the step containing a
+mask change, a diode flip, a source jump or an inconsistent start, and
+the next two steps, as Alexander SDIRK(2,2) steps (γ = 1 − 1/√2,
+L-stable, second order). Each step is two backward-Euler-like stages of
+γ·dt; both use one factor per mask at 2γ·dt.
+
+Counters and state:
+- `res.n_restart_steps` counts the restart steps;
+- `res.n_restart_factorizations` counts the factorisations made for
+  them;
+- `SolverSnapshot.restart_steps_left` carries an unfinished window
+  across `resume_from` and pickle (`restart_pending` is now a read-only
+  `restart_steps_left > 0`).
+
+Off by default. With it off, every `pwl` output is bit for bit the
+previous one and `trbdf2`/`dsed` are unchanged (both refuse the flag;
+`auto` routes it to `pwl`). A first version of this rule, two
+backward-Euler half-steps, never shipped. It drained resonant modes:
+- a Q = 50 tank driven by a PWM source lost −11.9 % of its peak at T/50
+  (−0.86 % without the rule);
+- an LC beside an isolated PWM source kept 1.9 % of its energy.
+
+| Circuit (error vs exact / `expm`) | before (flag off) | `discontinuity_restart=True` |
+|---|---|---|
+| RL edge on the grid, `dt` = 4/2/1 µs | +1.21e-2 / 6.06e-3 / 3.03e-3 A, order 1 | +4.01e-6 / 1.01e-6 / 2.58e-7 A, order 1.98 |
+| Buck CCM `i_L`, T/50 … T/200 | 1.18e-2 … 2.9e-3 A, order 1.00 | 1.17e-7 … 6.6e-9 A, order 2.0 |
+| DCM idle `v(sw)` (`v_out` 13.32 V), T/100 | alternates 0.48 / 26.1 V | 13.310 … 13.323 V |
+| Hard-switched cap loop, on-current 10 A, `dt` = 1e-8 / 1e-9 | −9.8 / +29.8 A; −79 / +99 A | 9.999 A; 9.994 … 10.004 A |
+| Cap-loop conduction power (exact 0.04599 W) | 0.1968 W | 0.0459 W |
+| RC pulse, jump on the grid, `dt` = τ/10 | 0.476 V | 2.63e-3 V, order 1.9 |
+| Saturable inductor edge, `dt` = 2 µs | 1.07e-2 A, order 1 | 2.31e-5 A, order 2.00 |
+| Coss `Q/(I·t)` at sample 1 / 2 / 11 | 0.5 / 0.75 / 0.955 | 1.000000 |
+| First step, RL decay | order 1.00 | 6.66e-6 relative, order 2.00 |
+| Q = 50 tank peak, T/50 / T/100 | −0.855 % / −0.055 % | −0.730 % / −0.040 % |
+| LC beside an isolated PWM, E(100 T)/E(0) | 0.9961 | 0.9973 |
+
+* **BREAKING (with the flag on): gate sampling.** The gate of step
+  `(t_{k-1}, t_k]` is `switch_fn(t_{k-1})`, not `switch_fn(t_k)`, on the
+  static path (no L/C) too.
+  - A closure with edges on the grid (`round(t/dt) % N < Don`) keeps its
+    duty and moves one step.
+  - A left-continuous one (`t > te`) becomes one step late.
+  - The step observer keeps its `(t_k, x_{k-1})` call.
+  - A pulse/PWM source whose jump falls on the step end is read at its
+    left limit.
+  - Recover the old numbers with `discontinuity_restart=False` (the
+    default today).
+* **`b_extra_fn` jumps** are restarted only when declared:
+  - give the callable a `next_jump_after(t)` attribute (next jump
+    strictly after `t`, or `inf`);
+  - it is then read at its left limit like a built-in source;
+  - composed hooks and C-blocks carry their parts' declarations;
+  - an undeclared jump in a callback is integrated as before, first
+    order.
+  The callback is called once per stage time; a restart step calls it
+  at `t_prev + γ·dt` (off the grid) and at `t`.
+* Refused: `discontinuity_restart=True` with
+  `enable_substep_state_correction=True` (`ValueError` naming both).
+* Limits:
+  - an edge off the `dt` grid stays first order (event splitting is a
+    separate change);
+  - sample 0 of a node voltage still reads 0 V;
+  - `mmc_arms` refuses the flag;
+  - a Jiles–Atherton core extrapolates its stage-1 flux from the
+    committed state (O(h) at a loop tip).
+
 ### Controller ticks: one rule on every engine
 
 Source j with period `T_j` (a `ClosedLoop`'s `period`, or `step_observer`

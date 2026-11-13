@@ -30,7 +30,7 @@ import pulsim as p
 ISOLATED_SAT = "an electrically disconnected saturable inductor"
 
 
-def _igbt_eoff(with_sat, *, tail=True):
+def _igbt_eoff(with_sat, *, tail=True, others=False, **kw):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vdc", "dc", "gnd", 600.0)
     b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 15.0, 0.0,
@@ -45,9 +45,23 @@ def _igbt_eoff(with_sat, *, tail=True):
         b.add_voltage_source("Vs", "s", "gnd", 1.0)
         b.add_resistor("Rs", "s", "sm", 10.0)
         b.add_saturable_inductor("Lsat", "sm", "gnd", 1e-3, 5.0, 5e-5)
+    if others:
+        # Two more stateful kinds, isolated from the power stage. (An
+        # isolated MNA PMSM is left out: at dt = 1 ns it sends every
+        # step of the whole circuit to a dt/2 retry, flag on or off,
+        # which moves E_off by 4e-5 for reasons unrelated to the chain.
+        # Its BackwardEuler stamp has its own oracle in
+        # core/tests/layer5_v1/test_backward_euler_stage.cpp.)
+        b.add_voltage_source("Vo", "o", "gnd", 5.0)
+        b.add_resistor("Ro", "o", "on", 100.0)
+        b.add_nonlinear_capacitor("Cn", "on", "gnd", 1e-9, 25.0, 0.5)
+        b.add_lauritzen_diode("Dl", "on", "gnd")
     n = b.graph.num_switches
     res = p.simulate(b, t_end=6e-6, dt=1e-9, engine="pwl",
-                     switch_fn=lambda _t: p.SwitchStateMask(n))
+                     switch_fn=lambda _t: p.SwitchStateMask(n), **kw)
+    if kw.get("discontinuity_restart"):
+        # the zero start and every Dfw flip restart
+        assert res.n_restart_steps >= 2, res.n_restart_steps
     t = np.asarray(res.times)
     v = np.asarray(res.v("c"))
     i = np.asarray(res.i("Rsense"))
@@ -94,3 +108,17 @@ def test_the_saturable_inductor_itself_still_works_alongside():
     assert np.abs(i).max() > 25.0, np.abs(i).max()
     first, last = cyc(0), cyc(39)
     assert abs(last - first) / 40 < 1e-7 * abs(first), (first, last)
+
+
+def test_the_chain_composes_on_a_restart_step():
+    """add-discontinuity-restart-rule: the SDIRK restart stages hand every
+    wrapper a BackwardEuler stage through the same refresh_stage. With
+    four stateful kinds in the chain (IGBT tail, saturable inductor,
+    Coss, Lauritzen diode) the IGBT tail must still give the E_off it
+    gives alone, restart steps included."""
+    kw = dict(discontinuity_restart=True)
+    alone = _igbt_eoff(with_sat=False, **kw)
+    all_four = _igbt_eoff(with_sat=True, others=True, **kw)
+    no_tail = _igbt_eoff(with_sat=False, tail=False, **kw)
+    assert alone > 100 * no_tail, (alone, no_tail)
+    assert abs(all_four - alone) < 1e-6 * alone, (alone, all_four)
