@@ -26,7 +26,7 @@
 - [x] 4.4 YAML / Python parity test: each kind built both ways gives identical `components()`
 
 ## 5. Conformance
-- [ ] 5.1 (the matrix of `add-engine-conformance-matrix` is not in the tree yet; the rows are in CHANGELOG and `docs/known-limitations.md`) Rows in the matrix of `add-engine-conformance-matrix`: seven kinds × {pwl, trbdf2, dsed, DC, AC}
+- [x] 5.1 (closed at integration: seven rows in `kKindCaps`, `docs/known-limitations.md` and `test_engine_conformance.py` CELLS, plus an AC-sweep cell per kind) Rows in the matrix of `add-engine-conformance-matrix`: seven kinds × {pwl, trbdf2, dsed, DC, AC}
 - [x] 5.2 (the 25 v2 example netlists, 43 runs bit-identical, 7 identical refusals; the v1 benchmark set does not load, DECISIONS 9) Existing-circuit identity: the benchmark set's results are bit-identical
 - [x] 5.3 (dsed runs all seven, DECISIONS 6) `dsed`: determine whether `dsed/builder_adapter.hpp` can take the constant stamps and the time-varying node sources; implement, or refuse through the conformance error; record the outcome in the matrix
 

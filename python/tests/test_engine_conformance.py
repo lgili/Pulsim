@@ -237,6 +237,45 @@ def _ndiode_clamp(on):
     return b
 
 
+def _ctl(add):
+    # add-controlled-source-set: a 1 V source (its current, 1 mA through
+    # Ra, is the CCCS/CCVS control) drives "x" only through the device.
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "a", "gnd", 1.0)
+        b.add_resistor("Ra", "a", "gnd", 1e3)
+        b.add_resistor("Rx", "x", "gnd", 1e3)
+        if on:
+            add(b)
+        _rc_tail(b, "x")
+        return b
+    return build
+
+
+def _gyrator(on):
+    # A gyrator loaded by 1 uF is an inductor of C/g^2 = 1.11 mH at port 1.
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R1", "in", "o", 10.0)
+    b.add_resistor("R2", "o", "gnd", 1e3)
+    if on:
+        b.add_gyrator("Gd", "o", "gnd", "y", "gnd", 0.03)
+        b.add_capacitor("Cy", "y", "gnd", 1e-6)
+        b.add_resistor("Ry", "y", "gnd", 1e6)
+    return b
+
+
+def _iwave(add):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_resistor("R1", "o", "gnd", 1e3)
+        b.add_capacitor("C", "o", "gnd", 100e-9)
+        if on:
+            add(b)
+        return b
+    return build
+
+
 # kind -> (build, observable node, device branch, t_end, reference dt,
 #          needs a switch_fn)
 CELLS = {
@@ -279,6 +318,26 @@ CELLS = {
         "Dd", "o", "gnd")), "o", "Dd", 2e-3, 2e-7, False),
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
+    "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
+             "o", "Gd", 5e-4, 1e-7, False),
+    "CCCS": (_ctl(lambda b: b.add_cccs("Fd", "V", "x", "gnd", 5.0)),
+             "o", "Fd", 5e-4, 1e-7, False),
+    "CCVS": (_ctl(lambda b: b.add_ccvs("Hd", "V", "x", "gnd", 5e3)),
+             "o", "Hd", 5e-4, 1e-7, False),
+    "Gyrator": (_gyrator, "o", "Gd", 5e-4, 1e-7, False),
+    "SineCurrentSource": (
+        _iwave(lambda b: b.add_sine_current_source(
+            "Id", "o", "gnd", 0.0, 10e-3, 1e3)),
+        "o", "Id", 2e-3, 2e-7, False),
+    "PulseCurrentSource": (
+        _iwave(lambda b: b.add_pulse_current_source(
+            "Id", "o", "gnd", 0.0, 10e-3, 1e-4, 2e-4, 0.0, 2e-5, 2e-5)),
+        "o", "Id", 5e-4, 1e-7, False),
+    "PwlCurrentSource": (
+        _iwave(lambda b: b.add_pwl_current_source(
+            "Id", "o", "gnd", [0.0, 1e-4, 3e-4, 5e-4],
+            [0.0, 10e-3, -5e-3, 0.0])),
+        "o", "Id", 5e-4, 1e-7, False),
 }
 # Circuit-level cell (not a kind): coupled inductors.
 COUPLED = (_coupled, "x", "Kd", 3e-3, 1e-6, False)
@@ -694,3 +753,37 @@ def test_known_limitations_matrix_equals_the_kernel_table():
         doc_table[cells[0]] = {"class": cells[1], **{
             c: v == "yes" for c, v in zip(cols, cells[2:])}}
     assert doc_table == p.engine_capabilities()
+
+
+# ---------------------------------------------------------------------
+# The kernel AC sweep column for the add-controlled-source-set kinds
+# (task 5.1): the controlled ones are stamped, the waveform current
+# sources are independent sources and add no AC excitation.
+# ---------------------------------------------------------------------
+
+_AC_NEW = ("VCCS", "CCCS", "CCVS", "Gyrator", "SineCurrentSource",
+           "PulseCurrentSource", "PwlCurrentSource")
+
+
+@pytest.mark.parametrize("kind", _AC_NEW)
+def test_ac_sweep_cell_of_the_controlled_source_kinds(kind):
+    assert p.engine_capabilities()[kind]["ac_sweep"]
+    build = CELLS[kind][0]
+
+    def H(on):
+        b = build(on)
+        if kind in ("VCCS", "CCCS", "CCVS"):
+            inp = b.pool.branch_var_id_for_source(b.branch_index_of("V"),
+                                                  b.graph)
+        else:   # unit current injected at the observable node
+            inp = b.node_id_of("o")
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], inp, b.node_id_of("o"))
+        return np.asarray(r.H, dtype=complex)
+
+    on, off = H(True), H(False)
+    if kind.endswith("CurrentSource"):
+        assert np.array_equal(on, off)
+    else:
+        assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))

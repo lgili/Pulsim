@@ -51,6 +51,13 @@ unless called with `allow_non_passive=True`.
 | LauritzenDiode | NewtonStateful | yes | yes | no | no | no |
 | PmsmMna | NewtonStateful | yes | yes | no | no | no |
 | IdealTransformer | Linear | yes | yes | yes | yes | yes |
+| VCCS | Linear | yes | yes | yes | yes | yes |
+| CCCS | Linear | yes | yes | yes | yes | yes |
+| CCVS | Linear | yes | yes | yes | yes | yes |
+| Gyrator | Linear | yes | yes | yes | yes | yes |
+| SineCurrentSource | Source | yes | yes | yes | yes | yes |
+| PulseCurrentSource | Source | yes | yes | yes | yes | yes |
+| PwlCurrentSource | Source | yes | yes | yes | yes | yes |
 <!-- engine-capabilities:end -->
 
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
@@ -86,7 +93,7 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, sources, and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `UnsupportedError` (a `ValueError`) naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
+| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, VCCS, CCCS, CCVS, gyrators, sources (waveform current sources add no AC excitation), and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `UnsupportedError` (a `ValueError`) naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
 
 ## Devices
 

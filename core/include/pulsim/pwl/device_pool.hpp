@@ -1297,6 +1297,15 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"LauritzenDiode",     SolveClass::NewtonStateful, kNewtonEngines},
     {"PmsmMna",            SolveClass::NewtonStateful, kNewtonEngines},
     {"IdealTransformer",   SolveClass::Linear,         kAllEngines},
+    // add-controlled-source-set: linear stamps in the cached matrix and
+    // current waveforms overlaid on the node rows (no AC excitation).
+    {"VCCS",               SolveClass::Linear,         kAllEngines},
+    {"CCCS",               SolveClass::Linear,         kAllEngines},
+    {"CCVS",               SolveClass::Linear,         kAllEngines},
+    {"Gyrator",            SolveClass::Linear,         kAllEngines},
+    {"SineCurrentSource",  SolveClass::Source,         kAllEngines},
+    {"PulseCurrentSource", SolveClass::Source,         kAllEngines},
+    {"PwlCurrentSource",   SolveClass::Source,         kAllEngines},
 });
 static_assert(kKindCaps.size() == DevicePool::kNumKinds,
     "kKindCaps needs one row per DevicePool::StoredKind");
