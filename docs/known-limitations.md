@@ -165,6 +165,22 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 | One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
 
+## Found by the examples audit (2026-11-13)
+
+Reproducers are the snippets quoted; each example affected says so where
+it prints the number.
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`compute_dc_op(strategy='pseudo_trans')` diverges on a linear circuit.** | 10 V, 1 kΩ / 5 kΩ divider: the residual reaches 1.4e84; `'auto'` and Newton give 8.3333 V (notebook 07). | `strategy='auto'` or `'newton'`. |
+| **`run_transient_adaptive` reads a switched buck about 1 % low.** | 8.045 V on `pwl`, `trbdf2` and `dsed`; 7.962 V adaptive (notebooks 24/25). | Use `simulate`. |
+| **The induction-motor observer integrates the rotor flux by forward Euler** (first order; see Machines). | `|ψ_r|` = 0.9432 / 0.9290 / 0.9220 Wb at `dt` = 50 / 25 / 12.5 µs; IFOC torque 12.9 → 11.7 N·m from 50 to 6.25 µs, the textbook value 11.6 (`run_im_ifoc_closed_loop.py`). | Halve `dt` until the quantity you report stops moving. |
+| **`device_loss_summary`'s resistor `P_avg` is first order in `dt` on PWM currents** (each edge becomes a one-step ramp; the switch `P_avg` is exact). | R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W (`run_device_loss_to_thermal.py`). | `p.time_average(t, R * i**2)` with `i` from `res.i`, or halve `dt`. |
+| **A `b_extra_fn` entry on a voltage-source row adds −v.** The source row carries −V. | Writing +10 on the row gives `v_a` = −10 V; three induction-motor scripts had it inverted. | Write −v on source rows. |
+| **`pool.branch_var_id_for_inductor` indices go stale when nodes are added afterwards.** | The MMC dq script looked up (26, 28, 30) before the build finished; the real slots were (28, 29, 30). | Look indices up after the last `add_*`, or use `res.i(name)`. |
+| **Tightly coupled half bridge: `trbdf2` aborts and a coarse fixed step is unconverged without warning.** | Half bridge, k = 0.999 and 0.99999: `trbdf2` raises `refactorize failed (numerically singular)` at h ≈ 5e-14 s. At k = 0.99999, `dt` = 2e-8 gives 4.17 V against 4.99 V at 1e-8 (ideal 5.0 V). | `engine='pwl'`; halve `dt` and compare. |
+| **`run_ac_sweep` restarts every frequency from the initial state.** `settling_cycles` counts test periods, so high-frequency points settle for a shorter time than the plant's start-up. | Buck, 8 settling cycles: the 11 kHz point (0.7 ms) still carried the cold-start LC ring (τ = 2RC = 0.47 ms) and read −16 dB / +10 dB off. | One call per frequency with `settling_cycles = ceil(T_settle * f)`, and seed `i0=` / `c0=` at the operating point (`run_auto_tune_buck.py`). |
+
 ## Older entries
 
 [`KNOWN_LIMITATIONS.md`](https://github.com/lgili/Pulsim/blob/main/KNOWN_LIMITATIONS.md)

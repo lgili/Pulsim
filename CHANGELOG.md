@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Control helpers: report the loop they build (examples audit, 2026-11-13)
+
+* **Fixed** `tune_pi_from_bode` returned `achieved_pm_deg` "by
+  construction" (the target) without looking at the loop it built. On
+  the buck of `run_auto_tune_buck.py` (Q = 3.4) asked for 60° at 2 kHz,
+  |L| rises above 1 again at the LC peak and the last 0 dB crossing has
+  6.0° (37.9° on the measured Bode); the fallback branch printed 172.8°
+  for a loop with 23.6°. It now reads the margin off
+  `loop_gain(freqs, H, Kp, Ki)` at its last crossing, warns when the
+  loop crosses 0 dB anywhere but `f_crossover`, and returns
+  `loop_crossovers_hz`. The plant phase is unwrapped along the sweep.
+* **Fixed** `phase_margin_from_loop` read the wrapped angle: a loop
+  lagging 205° at crossover (unstable) reported +335° instead of −25°.
+* **Fixed** the self-throttle of `bind_pi_to_switch` /
+  `bind_pi_to_duty_callable` (`loop.step_observer` called every step)
+  skipped a tick whenever a step landed a floating-point hair before
+  k·T: 2978 PI updates instead of 3000 over 30 ms at dt = T/100, each
+  late one a step off the carrier edge. It now follows the
+  t_start + k·T schedule (3001 updates, k = 0..3000).
+* **Fixed** `add_foster_network` (and `add_shared_heatsink` given
+  `FosterStage` values) put every stage capacitor to ambient, which is
+  a Cauer ladder: 10 W into (0.05 K/W, 0.1 ms), (0.3, 5 ms), (0.8, 0.5 s)
+  read 0.016 / 0.159 / 2.79 K at 1 ms / 10 ms / 0.2 s against the
+  Foster 1.06 / 3.25 / 6.14 K. Each capacitor now sits across its own
+  R (1.057 / 3.252 / 6.137 K at `dt` = 10 µs). Thermal numbers from
+  `make_thermal_observer` runs move (e.g. `run_thermal_buck.py`).
+* **Fixed** `compute_temperature` heated sample 0 with `P[0]`, so the
+  trace led `t` by one step (1.90 K at t = 0 for 20 W into 1 K/W, 1 s,
+  `dt` = 0.1 s). Sample 0 is now the start; negligible on fine grids.
+* **Fixed** `CircuitBuilder.initial_state()` wrote a capacitor's `c0`
+  into its positive node alone: two series capacitors given 10 V each
+  started at 0 V and 10 V, in either build order. `c0` now sets
+  v(from) − v(to) for every capacitor (each group walked from ground);
+  a loop of `c0` values that breaks KVL raises `ValueError`.
+
 ### Integration fixes (review of the integration branch, 2026-11-13)
 
 * **Fixed** `periodic_steady_state` accepted a sine, pulse or table
