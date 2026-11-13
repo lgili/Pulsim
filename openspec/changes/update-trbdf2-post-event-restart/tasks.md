@@ -1,8 +1,8 @@
 ## 1. Characterisation (committed first)
-- [ ] 1.1 `python/tests/test_trbdf2_post_event_restart.py`: pin `p6_ratchet.py` — buck CCM, 400 periods, default tolerances: 7241 accepted steps (18 per period), 16262 solves, rising-edge post-edge step 8.26e-13 s at every listed period; strict xfail of the targets in 4.1
-- [ ] 1.2 Pin `p5_trbdf2_edges.py` DCM: the run of consecutive steps between 4e-14 and 1e-12 s; strict xfail of "no accepted step below 1e-11 s"
-- [ ] 1.3 Record the output error against the `expm` reference at rtol 1e-4, 1e-6, 1e-8 (8e-4, 9e-5, 2e-6 V) as the accuracy "before"
-- [ ] 1.4 Reproduce the `h_min` stall (`test_saturable_transformer.py::test_engines_agree_below_saturation`) and record the step sequence of the last 20 steps before the abort
+- [x] 1.1 `python/tests/test_trbdf2_post_event_restart.py`: pin `p6_ratchet.py` — buck CCM, 400 periods, default tolerances: 7241 accepted steps (18 per period), 16262 solves, rising-edge post-edge step 8.26e-13 s at every listed period; strict xfail of the targets in 4.1
+- [x] 1.2 Pin `p5_trbdf2_edges.py` DCM: the run of consecutive steps between 4e-14 and 1e-12 s; strict xfail of "no accepted step below 1e-11 s"
+- [x] 1.3 Record the output error against the `expm` reference at rtol 1e-4, 1e-6, 1e-8 (8e-4, 9e-5, 2e-6 V) as the accuracy "before" — `probes/trbdf2_baseline.json` (max of the i_L and v_C end errors: 8.46e-3, 1.31e-4, 2.09e-6)
+- [x] 1.4 Reproduce the `h_min` stall (`test_saturable_transformer.py::test_engines_agree_below_saturation`) and record the step sequence of the last 20 steps before the abort — `probes/hmin_stall.py`: on this branch it aborts at t = 24 µs (not 4 µs), `||dx||` = 3.729e-7 at T1.pm, residual 6.1e-5 on T1.m (3.2e-15 relative); last 20 steps rise from 2.2e-8 to 4.1e-7 s then shrink to 2.5e-7 s before the Newton rejects walk h to h_min
 
 ## 2. Derivative refresh, linear L/C
 - [ ] 2.1 `HistoryState::refresh_derivatives(x_probe, h_probe)`; C++ test on an RL and an RC with a mask change: the refreshed slot equals the analytic `v_L(t⁺)` and `i_C(t⁺)`
