@@ -13,12 +13,12 @@
 - [ ] 3.2 Tests: linear loss model `P = P₀·(1 + α·(T − 25))` with `R_th` — the fixed point equals `(T_amb + R_th·P₀·(1 − 25α)) / (1 − R_th·P₀·α)` within 0.01 K; `R_th·P₀·α = 1.2` gives `infeasible` with `thermal_runaway`; a circuit without temperature dependence runs one simulation (counter)
 
 ## 4. Steady state
-- [ ] 4.1 `SteadySpec` `pss`, `transient`, `auto`; the route in the counters; no silent fallback after a failure
-- [ ] 4.2 Tests: DCM buck with `method='pss'` reaches `v_C` within 1e-9 of 8.99624708728943 V; `method='transient'` reaches it within the settle tolerance; `auto` picks `pss` for it and `transient` for a circuit `pss` refuses
+- [x] 4.1 `SteadySpec` `pss`, `transient`, `auto`; the route in the counters; no silent fallback after a failure
+- [x] 4.2 Tests: DCM buck with `method='pss'` reaches `v_C` within 1e-9 of 8.99624708728943 V; `method='transient'` reaches it within the settle tolerance; `auto` picks `pss` for it and `transient` for a circuit `pss` refuses
 
 ## 5. Batch, determinism, thread safety
-- [ ] 5.1 `evaluate_many` on the sweep job runner, thread backend, order kept, stop rule for three identical refusals
-- [ ] 5.2 Tests: 64 designs on 1 and on 8 workers give equal records (all fields except `wall_s`); two calls of `evaluate` on the same design give equal records; a batch with one refusing design completes with one `refused` record
+- [x] 5.1 `evaluate_many` on the sweep job runner, thread backend, order kept, stop rule for three identical refusals
+- [x] 5.2 Tests: 64 designs on 1 and on 8 workers give equal records (all fields except `wall_s`); two calls of `evaluate` on the same design give equal records; a batch with one refusing design completes with one `refused` record
 
 ## 6. Worked example
 - [ ] 6.1 `examples/optimization/buck_pareto.py` and a notebook (design D8); optional extra `pulsim[opt]` for pymoo; numpy fallback

@@ -30,6 +30,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   any other exception propagates. `as_objectives` / `as_constraints`
   map records to an optimiser's vectors (`penalty` for `refused` /
   `failed`).
+* **Added** steady-state routes (`SteadySpec`): `pss`
+  (`periodic_steady_state`, DCM buck orbit within 1e-9 V in 6 period
+  runs), `transient` (doubling runs until the estimated distance to the
+  orbit is below `tol`, else `failed` / `not_settled`) and `auto` (`pss`
+  when its capability check accepts the circuit, else the transient;
+  the route and the reason are in the counters; never a fallback after
+  a failure). A device whose power no loss model covers (a Lauritzen
+  diode) refuses the efficiency instead of reading 0.99989 without it.
+* **Added** `Evaluator.evaluate_many(designs, workers=..., backend=...)`
+  on the sweep job runner: input order kept, 64 designs give equal
+  records on 1 and 8 threads and on processes; a design-specific
+  refusal does not stop the batch, three identical refusals at its
+  start do. Threads do not speed up the `pss` route (87 % of an
+  evaluation is Python), see DECISIONS 12.
 * **Changed** `pulsim.sweep`'s job runner takes the job function (and
   an option to let every exception propagate); `sweep` / `monte_carlo`
   are unchanged.

@@ -531,7 +531,8 @@ class Evaluator:
         T = self._period_of(design)
         b, sf = self._build(design)
         run, a, z = self._steady(b, sf, T, counters)
-        kpis, losses = self._kpis(b, run, a, z, design, did)
+        rows, losses = self._loss_rows(b, run, a, z)
+        kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters)
         return kpis, losses, {}
 
     def _steady(self, b, sf, T, counters):
@@ -628,17 +629,27 @@ class Evaluator:
             tuple(getattr(run, "step_loop_python_callbacks", ()) or ()))
 
     # -- KPIs ------------------------------------------------------------
-    def _kpis(self, b, run, a, z, design, did):
-        from ._refusal import unsupported
+    def _loss_rows(self, b, run, a, z, tj=None):
+        """``(rows, losses)``: :func:`device_loss_summary` rows by name
+        and the per-device categories of every non-load device. ``tj``
+        (device -> deg C) is the temperature the switches' 3-D loss
+        tables are read at (the thermal loop, design D4)."""
         from .losses import device_loss_summary
-        comps = {c["name"]: c for c in b.components()}
+        opts = dict(self.loss_options)
+        if tj:
+            ss = {k: dict(v) for k, v in (opts.get("switch_specs") or {}
+                                          ).items()}
+            for dev, spec in ss.items():
+                if dev in tj and ("E_on_table" in spec or "E_off_table" in spec):
+                    spec["Tj"] = float(tj[dev])
+            if ss:
+                opts["switch_specs"] = ss
         rows = {r["name"]: r for r in device_loss_summary(
-            b, run, t_from=a, t_to=z, **self.loss_options) if "name" in r}
+            b, run, t_from=a, t_to=z, **opts) if "name" in r}
         for n in self.loads:
             if n not in rows or "P_avg" not in rows[n]:
                 raise ValueError(f"load {n!r} has no dissipated power in "
                                  f"device_loss_summary (a resistor?)")
-        kpis: dict = {}
         losses: dict = {}
         for n, r in rows.items():
             if n in self.loads:
@@ -657,14 +668,35 @@ class Evaluator:
                 cat["core"] = float(r["P_core_avg"])
             if cat:
                 losses[n] = cat
-        p_out = sum(float(rows[n]["P_avg"]) for n in self.loads)
-        p_loss = sum(sum(c.values()) for c in losses.values())
+        return rows, losses
+
+    def _kpis(self, b, run, a, z, design, did, rows, losses, counters):
+        from ._refusal import unsupported
+        comps = {c["name"]: c for c in b.components()}
+        kpis: dict = {}
         src = self.sources
         if src is None:
             src = [n for n, c in comps.items() if c["kind"] in (
                 "voltage_source", "pwm_voltage_source", "pulse_voltage_source",
                 "sine_voltage_source")]
-        p_in = 0.0
+        # A device that can dissipate or deliver power and that neither
+        # the loss summary nor the source measurement covers would make
+        # the loss total and the efficiency silently wrong (a Lauritzen
+        # diode's 1.36 W of 28.4 W was missing): refused, never summed.
+        uncovered = [n for n, c in comps.items()
+                     if c["kind"] not in ("inductor", "capacitor",
+                                          "voltage_source")
+                     and "P_avg" not in rows.get(n, {}) and n not in src]
+        if uncovered and self.loads:
+            c = comps[uncovered[0]]
+            raise unsupported(
+                "design.evaluate", "losses", "design.evaluate: the power of "
+                f"{', '.join(uncovered)} ({c['kind']}...) is in neither "
+                "device_loss_summary nor the measured sources, so the loss "
+                "total and the efficiency would be incomplete. Evaluate "
+                "without `loads=` for the other KPIs.",
+                device=uncovered[0], kind=c["kind"])
+        p_in = 0.0 if src else None
         for n in src:
             c = comps[n]
             if c["kind"] != "voltage_source":
@@ -677,11 +709,22 @@ class Evaluator:
             t, i = _with_right_limits(run, lambda st, col=col: st[:, col])
             # MNA branch current flows + -> - inside the source.
             p_in -= float(c["params"]["V"]) * _mean(t, i, a, z)
-        kpis["p_in"] = p_in
-        kpis["p_loss"] = p_loss
+        if p_in is not None:
+            kpis["p_in"] = p_in
+        if uncovered:
+            counters["losses_not_covered"] = ", ".join(uncovered)
+        else:
+            p_loss = sum(sum(c.values()) for c in losses.values())
+            kpis["p_loss"] = p_loss
         if self.loads:
+            p_out = sum(float(rows[n]["P_avg"]) for n in self.loads)
             kpis["p_out"] = p_out
-            kpis["efficiency"] = p_out / p_in if p_in != 0 else math.nan
+            # P_out / (P_out + losses): with a datasheet model or a
+            # loss table the losses include what the resistor-pair
+            # circuit does not dissipate; without them it equals
+            # P_out / P_in at the orbit (DECISIONS 4).
+            kpis["efficiency"] = (p_out / (p_out + p_loss)
+                                  if p_out + p_loss > 0 else math.nan)
         if self.output is not None:
             t, v = _with_right_limits(run, _node_col(b, self.output))
             kpis["v_out"] = _mean(t, v, a, z)
@@ -703,7 +746,7 @@ class Evaluator:
                                t_from=a, t_to=z, seed=int(did, 16) % 2**32)
             for k in self.kpis:
                 kpis[k.name] = float(k.fn(per))
-        return kpis, losses
+        return kpis
 
 
 def _pss_capability(b, T, sf):
@@ -732,25 +775,51 @@ def _true_state(b, run):
 
 
 def _settle_error(b, run, T, n):
-    """Extrapolated distance of the state at ``nT`` to the orbit, in
-    units of each state's magnitude over the last period:
-    ``|dx_n| / (1 - rho)``, ``rho = |dx_n| / |dx_(n-1)|`` (geometric
-    decay; ``inf`` when not contracting). A small period-to-period
-    change alone is not a small error with a slow mode."""
+    """Estimated distance of the state at ``nT`` to the periodic orbit,
+    in units of each state's magnitude over the last period, the
+    largest over the states (DECISIONS 9).
+
+    Per state, two geometric extrapolations, ``x(k) = x* + mu^k c``:
+    the last period, ``d1 = |x(n) - x(n-1)|``, ``rho = d1 / d0``,
+    distance ``d1 rho / (1 - rho)``; and the last half, ``d_a =
+    |x(n) - x(3n/4)|``, ``r = d_a / d_b``, distance ``d_a r / (1 - r)``.
+    The larger is taken: during a start-up overshoot the quarters
+    contract fast (r = 0.19 on the DCM buck at 32 periods) while each
+    period still moves 1.1 % of the way (rho = 0.989), and the quarter
+    estimate alone read 6e-3 for a state 51 % off. A ratio >= 1 (the
+    engine's noise, or a drift) gives the sum of the two differences.
+    A small period-to-period change alone is not a small error with a
+    slow mode."""
+    from .stats import time_average
     t, X = _true_state(b, run)
     if X.shape[1] == 0:
         return 0.0
-    xs = np.array([[np.interp(k * T, t, X[:, j]) for j in range(X.shape[1])]
-                   for k in (n - 2, n - 1, n)])
+    ks = (n // 2, (3 * n) // 4, n - 2, n - 1, n)
+    if all(np.min(np.abs(t - k * T)) <= 1e-9 * T for k in ks):
+        # the engine landed every period start: the state there is exact
+        xs = np.array([[np.interp(k * T, t, X[:, j])
+                        for j in range(X.shape[1])] for k in ks])
+    else:
+        # an edge between two samples: interpolating across its kink
+        # reads 1e-4 of the state (trbdf2, PWM source); the mean over
+        # the period ending at kT converges like the state and is not
+        # sensitive to where the grid falls
+        xs = np.array([[time_average(t, X[:, j], (k - 1) * T, k * T)
+                        for j in range(X.shape[1])] for k in ks])
     last = (t >= (n - 1) * T) & (t <= n * T)
     scale = np.abs(X[last]).max(axis=0)
     scale = np.maximum(scale, 1e-12 * max(scale.max(), 1e-300))
-    d1 = float((np.abs(xs[1] - xs[0]) / scale).max())
-    d2 = float((np.abs(xs[2] - xs[1]) / scale).max())
-    if d2 <= 1e-13:     # rounding: the ratio below is noise
-        return d2
-    rho = d2 / d1 if d1 > 0 else math.inf
-    return d2 / (1.0 - rho) if rho < 1.0 else math.inf
+    d = np.abs(np.diff(xs, axis=0)) / scale   # rows: b, (skip), 0, 1
+
+    def geo(new, old):
+        if new <= 1e-13:     # rounding: a ratio would be noise
+            return new
+        q = new / old if old > 0 else math.inf
+        return new * q / (1.0 - q) if q < 1.0 else new + old
+
+    xa = np.abs(xs[4] - xs[1]) / scale       # x(n) - x(3n/4)
+    return float(max(max(geo(xa[j], d[0, j]), geo(d[3, j], d[2, j]))
+                     for j in range(X.shape[1])))
 
 
 def _is_pss_failure(e) -> bool:
