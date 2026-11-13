@@ -33,7 +33,7 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 
 ## 5. Passivity and refusals
 - [ ] 5.1 Structural passivity classification at build time (device kinds, parameter signs, coupled-inductor matrix PSD)
-- [ ] 5.2 Non-passive: Lemke, then enumeration to `k = 12`, then `UnsupportedError(engine, 'mode_selection', device, 'non_passive_ports')` naming the controlled source
+- [ ] 5.2 Non-passive: Lemke, then enumeration to `k = 12`, then `UnsupportedError(engine, 'non_passive_ports', device, kind)` naming the controlled source and its device kind
 - [ ] 5.3 No consistent mode on a passive circuit (secondary ray) → typed error naming the diodes and `t`; test with a current source forced into two blocking diodes
 
 ## 6. Opt-in `mode_selection='lcp'`

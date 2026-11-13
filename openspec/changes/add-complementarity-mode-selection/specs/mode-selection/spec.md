@@ -53,9 +53,9 @@ reported as a typed error naming the diodes and the time (no
 consistent mode exists). For a circuit not classified passive the
 selection SHALL fall back to enumeration of the modes for at most 12
 diode ports and SHALL otherwise raise
-`pulsim.UnsupportedError(engine, 'mode_selection', device,
-'non_passive_ports')` naming the device that makes the circuit
-non-passive. There SHALL be no round limit, mask-cycle detector or
+`pulsim.UnsupportedError` with `feature = 'non_passive_ports'`, the
+device that makes the circuit non-passive as `device` and its device
+kind as `kind`. There SHALL be no round limit, mask-cycle detector or
 chatter guard on the selection path.
 
 #### Scenario: No consistent mode
@@ -71,8 +71,7 @@ chatter guard on the selection path.
   secondary ray
 - **WHEN** an event requires a selection
 - **THEN** `pulsim.UnsupportedError` is raised with `feature =
-  'mode_selection'`, `kind = 'non_passive_ports'` and the VCVS named
-  as `device`
+  'non_passive_ports'` and the VCVS named as `device`
 
 ### Requirement: Mode Selection Tie Resolution
 

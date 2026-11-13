@@ -147,7 +147,8 @@ passive structurally at build time (device kinds and parameter signs).
 For a non-passive circuit it uses Lemke first and, on a secondary ray,
 enumerates the `2^k` modes for `k ≤ 12` (4096 solves, each one
 back-substitution in the event's factor); above 12 it raises
-`UnsupportedError(engine, 'mode_selection', device, 'non_passive_ports')`
+`UnsupportedError(engine, 'non_passive_ports', device, kind)` (`kind`
+the device kind, as everywhere in the capability table)
 naming the controlled sources that make it non-passive. Enumeration is
 also the test oracle for every `k ≤ 12` circuit in the suite.
 
