@@ -869,6 +869,10 @@ def run_dsed_from_builder(
                 from ._exact_route import segments_from_exact
                 res.exact["segments"] = segments_from_exact(
                     res.exact, native_res.get("switch_states"))
+                # 13.3, report only: would 'auto' route this run exact? (every
+                # segment exact; the default route does not read it)
+                res.exact["auto_would_route"] = bool(res.exact["segments"]) and all(
+                    seg["exact"] for seg in res.exact["segments"])
             res.initial_condition_adjustment = ic_adjustment
             et = native_res.get("event_times")
             res.event_times = (None if et is None

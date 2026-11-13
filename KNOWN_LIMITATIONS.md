@@ -275,6 +275,17 @@ settle is still judged and refuses where the guard would repair
 inconsistent over `1e4·h_e`; a mode consistent that long and wrong
 later is not caught.
 
+### dsed: a diode island tied to ground through a huge resistor
+
+On `engine='dsed'` a diode island whose only path to ground is R_tie
+(a floating DC bus) is decided through G + C/h; its rounding error on
+the island gap is about ε·C·|dv/dt|/G_tie. Where that exceeds the tie
+tolerance (1e-9 × the voltage scale) the run stops with RuntimeError
+"factorize failed (numerically singular)" naming the node, e.g. 1e12 Ω
+with 2 mF, and at 1e9 Ω only at some `h_e`. Use `pwl`, or a smaller
+R_tie (1 MΩ runs within 6.2e-9 V of pwl). The failure is a
+`RuntimeError`, not a typed `UnsupportedError`.
+
 ### Many-diode rectifiers with line inductance on dsed
 
 Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors, each

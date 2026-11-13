@@ -18,6 +18,18 @@ minutes into "no meaningful progress", are now refused at their first
 segment. `integrator='bdf2'` is unaffected. The keyword is refused by name
 on `pwl`, `trbdf2` and `auto`. Reference runs are unchanged.
 
+### Exact-engine record: `auto_would_route`; floating-island bound recorded
+
+Every exact run now carries `result.exact['auto_would_route']`: `True`
+when every mask it visited was exact. Report only: `engine='auto'` still
+picks `pwl`. On the 25 loadable `examples/*.yaml`, 13 would route exact;
+7 hold a Newton device and 5 are rejected by the extractor
+(add-exact-propagator-strategy DECISIONS, group 13). The diode-mode
+port factor on an island tied to ground through a large resistor is
+bounded by ε·C·|dv/dt|/G_tie; beyond the tie tolerance the run fails
+with the singular-factor error naming the node, never a rounded mode
+decision (add-complementarity-mode-selection DECISIONS #27).
+
 ### dsed give-up sites throw one typed C++ exception
 
 The event-driven engine's own failures (diode settle round cap, diode

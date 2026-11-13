@@ -437,3 +437,36 @@ choices it did not pin.
     `test_guard_leaves_consistent_runs_bit_identical`
     now also checks that the judged guard-off run counts the same checks.
     → Reverse: pass `mode_guard_refuse=False` from the dispatch.
+
+27. **The port factor's cancellation on a floating island is bounded,
+    and beyond the bound the run refuses; nothing rounds a decision.**
+    An island tied to ground only through a large R_tie (a bridge on a
+    floating DC bus) is decided by the port factor of G + C/h_e. The
+    tie current is the difference of two O(C·|dv/dt|) terms, so its
+    rounding error is ε·C·|dv/dt| and the error on the island's gap is
+    ε·C·|dv/dt|/G_tie, independent of h_e (it cancels between the C/h
+    stamp and the h-scaled history). The selector decides ties at
+    tol_w = 1e-9·vscale (5e-8 V on a 50 V bus); the bound has to stay
+    under it. Sweep on a single-phase bridge island (`lcp` − pwl dt
+    1e-7 at end, H_E_REL = 1e-10 / 1e-9 / 1e-7 / 1e-5):
+
+    | R_tie | C | bound | result |
+    |---|---|---|---|
+    | 1e6 Ω | 1e-4 F | 3.5e-10 V | −3.9e-9 V at every h_e |
+    | 1e6 Ω | 2e-3 F | 7.0e-9 V | −6.1e-9 V at every h_e |
+    | 1e9 Ω | 1e-4 F | 3.5e-7 V | refuses at 1e-9; −3.9e-9 V otherwise |
+    | 1e9 Ω | 2e-3 F | 7e-6 V | refuses at 1e-10, 1e-9; agrees otherwise |
+    | 1e12 Ω | 1e-4 F | 3.5e-4 V | refuses except at 1e-5 |
+    | 1e12 Ω | 2e-3 F | 7e-3 V | refuses at every h_e |
+
+    The refusal is `PwlStateSpaceCache::solve_at` "factorize failed
+    (numerically singular)" naming the island node; it appears only
+    where the bound exceeds tol_w, and every run that completes is
+    within 6.2e-9 V of pwl. No change to the factor: compensated
+    summation would move the bound by one ε without changing who
+    refuses, and the refusal already names the node. Recorded as the
+    contract instead: `test_port_factor_cancellation_stays_below_the_tie_tolerance`
+    (1 MΩ, 2 mF, H_E_REL 1e-10 and 1e-5, within 2e-8 V of pwl) and
+    `test_port_factor_beyond_the_bound_refuses_instead_of_rounding`
+    (1e12 Ω, 2 mF → the singular-factor error). → Reverse: n/a (no code
+    change); if the factor is made compensated, re-run the sweep.

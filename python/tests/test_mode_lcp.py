@@ -359,3 +359,39 @@ def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp():
         r = p.simulate(bank(), t_end=t_end, engine="dsed")
     assert np.abs(bus(r) - (2 * b2 - a)).max() <= 1e-3
     assert r.diagnostics["mode_guard"]["settle_caps"] > 0
+
+
+def _island_bridge(r_tie, c_bus):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "s", "r", 0.0, 50.0, 50.0)
+    b.add_resistor("Rr", "r", "gnd", r_tie)
+    for name, an, ca in (("D1", "s", "p"), ("D2", "n", "s"), ("D3", "r", "p"), ("D4", "n", "r")):
+        b.add_diode(name, an, ca, GON, GOFF)
+    b.add_capacitor("C", "p", "n", c_bus)
+    b.add_resistor("R", "p", "n", 100.0)
+    b.add_resistor("Rn", "n", "r", r_tie)
+    return b
+
+
+@pytest.mark.parametrize("h_e_rel", [1e-10, 1e-5])
+def test_port_factor_cancellation_stays_below_the_tie_tolerance(h_e_rel, monkeypatch):
+    """DECISIONS #27. The factor G + C/h cancels on a floating island's pivot: the island gap
+    carries eps*C*|dv/dt|/G_tie of rounding, independent of h_e (the 1/h of the cancellation
+    and the h of the increment cancel). 2 mF on a 1 uS island at 1.6e4 V/s: 7.0e-9 V, under the
+    tie tolerance 1e-9*vscale = 5e-8 V, so no mode is decided by rounding at any h_e: 'lcp'
+    ends 6.1e-9 V from pwl at H_E_REL 1e-10 and 1e-5 alike. Where the bound exceeds the
+    tolerance the factor's pivot check refuses by name (below)."""
+    monkeypatch.setattr(DD, "H_E_REL", h_e_rel)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = p.simulate(_island_bridge(1e6, 2e-3), t_end=0.04, engine="pwl", dt=1e-7)
+    r = _sim(_island_bridge(1e6, 2e-3), 0.04, mode_selection="lcp")
+    assert _end(r, "p-n") == pytest.approx(_end(ref, "p-n"), abs=2e-8)
+
+
+def test_port_factor_beyond_the_bound_refuses_instead_of_rounding():
+    """The same bridge on 1 Tohm ties (bound 7e-3 V, 1.4e5 x the tie tolerance): the port
+    factor is numerically singular at the island's node and says so; no run returns a mode
+    chosen by rounding (DECISIONS #27, the sweep)."""
+    with pytest.raises(RuntimeError, match="numerically singular"):
+        _sim(_island_bridge(1e12, 2e-3), 0.04, mode_selection="lcp")

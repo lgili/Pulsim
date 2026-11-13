@@ -771,3 +771,4 @@ def test_exact_segments_only_on_the_exact_engine(engine):
     segs = ex["segments"]
     assert segs and all(s["exact"] and s["reason"] is None for s in segs)
     assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
+    assert ex["auto_would_route"] is True               # 13.3 report-only field, same on both names

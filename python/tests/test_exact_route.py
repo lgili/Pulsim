@@ -252,3 +252,24 @@ def test_allow_implicit_segments_refused_off_the_exact_engine(engine):
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(b, t_end=1e-4, engine=engine, allow_implicit_segments=True, **kw)
     assert ei.value.feature == "allow_implicit_segments"
+
+
+def test_auto_would_route_is_reported_and_read_by_nothing():
+    """Task 13.3, report only: result.exact['auto_would_route'] is True when every segment is
+    exact (the buck), False with a numeric segment (a b_extra_fn, allowed); 'exact' and 'dsed'
+    agree, and engine='auto' still routes the buck to the fixed / TR-BDF2 engines."""
+    b, fn, t_end = _buck()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=t_end, engine="exact", switch_fn=fn)
+        b2, fn2, _ = _buck()
+        r2 = p.simulate(b2, t_end=t_end, engine="dsed", switch_fn=fn2)
+        b3, fn3, _ = _buck()
+        ra = p.simulate(b3, t_end=t_end, switch_fn=fn3)
+    assert r.exact["auto_would_route"] is True and r2.exact["auto_would_route"] is True
+    assert ra.engine_used != "dsed"
+    b, fx = _rc_with_b_extra()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=1e-3, engine="exact", b_extra_fn=fx, allow_implicit_segments=True)
+    assert r.exact["auto_would_route"] is False

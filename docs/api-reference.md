@@ -90,7 +90,9 @@ exact-eligible or not (add-exact-propagator-strategy D11, report only —
 law, named), `'source'` (a user `b_extra_fn`; sine, PWM and pulse sources are exact),
 `'extraction'` (coupled inductors, a capacitor loop, an inductor
 cut-set), `'cost'` (the mask's propagator outside its accuracy tiers).
-The same rows ride on every exact run as `result.exact["segments"]`.
+The same rows ride on every exact run as `result.exact["segments"]`, with
+`result.exact["auto_would_route"]`: `True` when every visited mask was
+exact (what `'auto'` would route to exact; report only, read by nothing).
 
 Returns a `SimulationResult` with parallel arrays:
 - `result.times` — `list[float]`. With a fixed `dt`: length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on. Without one the grid is **variable-step** and the spacing is not uniform — average with [the time-weighted helpers](#statistics-over-a-result-time-weighted), not `.mean()`.
