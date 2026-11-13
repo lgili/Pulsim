@@ -289,7 +289,7 @@ def test_split_steps_agree_with_trbdf2_on_dcm():
 
 
 # --- several diodes in one step ----------------------------------------------
-def test_bridge_rectifier_at_coarse_dt_has_no_breach():
+def _bridge(**kw):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "b", v_dc=0.0, v_amplitude=20.0,
                               frequency=50.0, phase=0.0)
@@ -298,11 +298,20 @@ def test_bridge_rectifier_at_coarse_dt_has_no_breach():
         b.add_diode(name, an, ca, GON, GOFF)
     b.add_capacitor("C", "p", "gnd", 100e-6)
     b.add_resistor("RL", "p", "gnd", 50.0)
-    res = p.simulate(b, t_end=0.1, dt=2e-4, engine="pwl", **SPLIT)
+    return p.simulate(b, t_end=0.1, **kw)
+
+
+def test_bridge_rectifier_at_coarse_dt_has_no_breach():
+    res = _bridge(dt=2e-4, engine="pwl", **SPLIT)
     assert len(res.event_iteration_breaches) == 0
     assert res.n_split_steps > 0
     v = np.asarray(res.v("p"))
-    assert np.all(np.isfinite(v)) and v.max() < 20.0
+    ref = _bridge(engine="trbdf2", rtol=1e-8, atol=1e-10)
+    tr, vr = np.asarray(ref.times), np.asarray(ref.v("p"))
+    # engine: peak 19.99920 V (source 20 V; trbdf2 19.99869); max |err|
+    # vs trbdf2 2.45e-3 V (flag off: peak 20.019 V, 7.88e-2 V)
+    assert np.all(np.isfinite(v)) and v.max() < 20.0 * (1 + 1e-4)
+    assert float(np.abs(v - np.interp(np.asarray(res.times), tr, vr)).max()) < 5e-3
 
 
 # --- resonant modes through split steps (the restart rule's gates) ----------

@@ -361,7 +361,8 @@ def test_a_resonant_tank_keeps_its_peak_through_the_restarts():
         assert pk_off / ref - 1 == pytest.approx(err_off, rel=0.02)
         assert abs(pk_on / ref - 1) <= 1.5 * abs(pk_off / ref - 1), (N, pk_on, pk_off, ref)
         assert r.n_restart_steps == 2400            # 3 x 2 edges x 400 periods
-    # engine: -0.730 % at T/50, -0.040 % at T/100
+        # engine: -0.730 % at T/50, -0.040 % at T/100 (review: gate 0.75 %)
+        assert abs(pk_on / ref - 1) <= {50: 0.75e-2, 100: 0.05e-2}[N]
 
 
 def _isolated_lc(**kw):

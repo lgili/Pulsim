@@ -829,8 +829,15 @@ inline SimulationResult run_transient(
     auto add_source_rows = [&](Vector& b, Real src_t, Real sine_t,
                                Real lb) {
         const auto read_t = [&](Index id) {
-            return lb > Real{0} && sources::source_jumps_at(pool, id, src_t)
-                ? src_t - lb : src_t;
+            const bool jumps = lb > Real{0} &&
+                sources::source_jumps_at(pool, id, src_t);
+            // src_t != sine_t: a jump snapped to the step end; only the
+            // source that jumps there is re-timed (review: a ramped
+            // pulse was read up to 0.01 dt early).
+            if (src_t != sine_t && !jumps) {
+                return sine_t;
+            }
+            return jumps ? src_t - lb : src_t;
         };
         for (const auto& [id, row] : pwm_rows) {
             b[row] += Real{0} + -models::PWMVoltageSource::value_at(
@@ -1572,11 +1579,16 @@ inline SimulationResult run_transient(
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
                     history.snapshot_into(rs_hist);
-                    rs_coss = coss_history.snapshot();
-                    rs_laur = laur_history.snapshot();
-                    rs_pmsm = pmsm_history.snapshot();
-                    rs_tail = tail_history.snapshot();
-                    rs_sat = sat_history.snapshot();
+                    // assign() keeps the buffers' capacity (snapshot()
+                    // returned a fresh vector per restart step).
+                    auto keep = [](auto& dst, const auto& src) {
+                        dst.assign(src.begin(), src.end());
+                    };
+                    keep(rs_coss, coss_history.entries());
+                    keep(rs_laur, laur_history.entries());
+                    keep(rs_pmsm, pmsm_history.entries());
+                    keep(rs_tail, tail_history.entries());
+                    keep(rs_sat, sat_history.entries());
                 }
                 const bool cycle_1 = mask_cycle;
                 constexpr Real c = (Real{1} - kGamma) / kGamma;
