@@ -16,9 +16,9 @@ Closed forms used below.
   200.6707 µs` each, period 401.3414 µs.
 
 ## 1. Characterisation (no behaviour change)
-- [ ] 1.1 Tests of today's behaviour: a three-block chain inserted in reverse order differs from the same chain inserted in order (records the size of the difference); a channel read before it is written reads 0
-- [ ] 1.2 Tick-count tests on every engine for one loop (10 kHz, 20 ms: 200 ticks due) and two rates (2 kHz PI + 20 kHz monitor, 20 ms: 40 and 400 due); expected-failure where `fix-control-tick-semantics` has not landed (198 on pwl; 400 PI ticks on trbdf2)
-- [ ] 1.3 Count Python calls per run for a C++ chain, a `ClosedLoop` and a C block (baseline for the gate in 9.2)
+- [x] 1.1 Tests of today's behaviour: a three-block chain inserted in reverse order differs from the same chain inserted in order (records the size of the difference); a channel read before it is written reads 0
+- [x] 1.2 Tick-count tests on every engine for one loop (10 kHz, 20 ms: 200 ticks due) and two rates (2 kHz PI + 20 kHz monitor, 20 ms: 40 and 400 due); expected-failure where `fix-control-tick-semantics` has not landed (198 on pwl; 400 PI ticks on trbdf2)
+- [x] 1.3 Count Python calls per run for a C++ chain, a `ClosedLoop` and a C block (baseline for the gate in 9.2)
 
 ## 2. Index slots and typed inputs
 - [ ] 2.1 Signals as slots in a flat array; `Input = Signal | Const | Probe | Time`; names kept in the builder only
