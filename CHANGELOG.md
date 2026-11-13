@@ -78,6 +78,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   baseline's VSI and bridge "errors" are the reference's edge
   quantisation and the bus common mode (DECISIONS 11). The ripple test
   pins the engine's own peak-to-peak at 5e-3 again.
+### Integration fixes (batch 6a: complementarity mode selection merged)
+
+* **Changed** on the integrated tree the dsed runs that the batch-4
+  stored-sample guard refused (`DiodeModeInconsistentError`) are now
+  repaired by the default-mode guard and returned: the zero-band boost
+  at 20 / 50 / 500 Ω (V_th = 0) and 20 / 50 Ω (V_th = 1e-3) ends on
+  trbdf2 rtol 1e-10, the half-wave RL rectifiers agree
+  (`diode_half_wave_rl_load` dsed error → agree 1.35e-4; analytic
+  `halfwave_rl` dsed error → 5.7e-9). The stored-sample guard is kept:
+  the kernel guard misses the `V_th = 0` double crossing of an LC tank
+  (it returns -5.18 V where trbdf2 has 9.50 V) and the guard covers
+  `MODE_GUARD = False`. The "changed numbers" in the guard section below
+  are against the unguarded settle, not against this tree.
+* **Added** conformance cells: `mode_selection='shadow'|'lcp'` with a
+  diode on `pwl`, `trbdf2` and `auto` raises
+  `UnsupportedError(feature='mode_selection')` (pwl had no cell).
+* **Changed** the reference status after the event-splitting merge
+  (7a60a084), strict gate, agree / disagree / error: pwl 77 / 23 / 8,
+  pwl+restart 81 / 19 / 8 → 82 / 18 / 8 (`three_phase_diode_rectifier`
+  2.17 → 6.3e-3), pwl+split 85 / 15 / 8; trbdf2 and dsed unchanged.
+  `vcswitch_resistor`, `ll07`, `ll09`, `ll10`, `ll12` still disagree
+  under the split: edge diagnostic 1.1e-21–6.5e-3, timing 1 step (the
+  source-forced gate node is sampled on the step grid). The gate is
+  unchanged.
+
 ### Integration fixes (batch 5: in-house LU Newton, TR-BDF2 error control)
 
 * **Fixed** `engine='trbdf2'` lands the corners of pulse and table
@@ -87,13 +112,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workspace: its backward error reads the workspace's copy of the
   iterate. A solve the Eigen path aborted can now converge (100 µH at
   dt = 1e-11 s completes; its test pin changed).
-* **Changed** the reference harness compares on an edge-tolerant
-  measure: source-forced nodes are dropped and the step that contains a
-  switching edge is not interpolated (`--metric interp` keeps the old
-  measure). `benchmarks/REFERENCE_STATUS.md` states which one it uses.
-  A trace that switches across more than half its span (dsed sampled at
-  the switching rate) keeps its steps. Re-frozen triage: 21 `known:`
-  cells cleared (they agree), `ll08_buck_mosfet` error → disagree.
+* **Changed** the reference harness drops nothing from its gate. Batch 5
+  first gated on an `edge` measure (switching steps and source-forced
+  nodes left out) and cleared 21 `known:` cells, saying they agree; a
+  review showed that measure cannot see a late edge on a resistive load
+  (`vcswitch_resistor` pwl 0.0332 strict, 1.1e-21 edge) and drops exactly
+  the wrong intervals of a chattering trace. The gate and every freeze
+  are now the strict `interp` measure; each cell also records an edge
+  DIAGNOSTIC (edge error, excluded fraction of the span, worst
+  observable, edge-timing mismatch in s and in pwl steps; `undersampled`
+  above 10 % excluded, `chatter` when one trace has more than twice the
+  other's switch-state changes), which never decides. Of the 21 cells,
+  9 agree on the strict gate and stay cleared — trbdf2 on `ll02`,
+  `ll06`, `ll07`, `ll10`, `ll12`, `full_bridge_dc`,
+  `flying_capacitor_3level`, `t_type_3level_halfbridge` (the TR-BDF2
+  merge) and pwl `cascaded_h_bridge_5level` (its reference moved) —
+  and 12 came from the measure alone and are frozen again (pwl on nine
+  circuits, trbdf2 `ll09`, dsed `ll03` and `full_bridge_dc`); dsed
+  `ll02` (1.14e-3, moved with its reference) is frozen too.
+  `ll08_buck_mosfet` error → disagree on pwl and trbdf2. Strict counts:
+  pwl 77/23/8/0, trbdf2 96/4/2/6, dsed 38/17/14/39.
 * **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
   grinds to `max_steps` on the SEPIC benchmark (it ran before the
   error-control change); the harness has no reference for it, so its
@@ -162,6 +200,134 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** `result.exact` names "a sine / pulse / table current source"
   as the reason a mask is numeric (it said "PWM / pulse source").
 
+### Fixed engine: event-splitting review fixes
+
+* **Fixed** two gate edges less than 1 % of `dt` apart (a dead-time
+  pair) merged into the earlier one and the later edge was ignored for
+  the rest of the step; the interval now samples the gate at the
+  cluster's last edge (pair at 10.37 µs: order 2, −1.24e-3 A at 1 µs).
+* **Changed** a declared `b_extra_fn` jump (`next_jump_after`) is split
+  at like a source jump (RC step at 2.037 µs: −6.36e-3 → −1.14e-4 V
+  from dt = 0.4 to 0.05 µs, order 1.97; the rule alone is first order).
+* **Added** `res.counters["unlocated_gate_steps"]` (an opaque
+  `switch_fn` with the split on; one `UserWarning`) and
+  `["split_event_overflows"]` (the per-step event list or search cap
+  ran out). The oracle answer is re-asked after a `step_observer` ran.
+
+### Fixed: restart rule overshoot on diode rectifiers
+
+With `discontinuity_restart=True`, a diode that turned off inside the
+second SDIRK stage was solved from the stage's pseudo-state: the
+`three_phase_diode_rectifier` bus reached 37.20 V on 24 V-peak phases
+at dt/τ = 10 (59.63 V on a 41.57 V line-to-line bridge). Such a stage
+is now re-tried as backward Euler from stage 1 when stage 2 only turned
+diodes OFF; it is kept when it keeps stage 1's diode mode, else the
+SDIRK stage stands (as it does after a stage-2 re-try that throws). Bus peak
+23.999 / 41.566 V; max error vs a tight trbdf2 16.66 → 0.762 V and
+18.35 → 3.44 V (flag off: 13.45 / 17.84 V). Buck CCM, DCM, tank and
+LC results bit-identical to before the fallback (the fallback never
+fires there); `res.counters` gains `stage2_retries`, `stage2_be_kept`,
+`stage2_retry_failures`. Flag off: bit-identical.
+
+### Fixed engine: resolution diagnostics (read-only, opt-in)
+
+With `resolution_diagnostics=True`, a fixed-step run that does not
+resolve its circuit says so. Off by default: it costs 5-14 % ns/step
+(the gate was 3 %).
+`res.resolution` (`engine='pwl'`; `None` for `trbdf2`/`dsed` or when
+off) holds `lte` (per stored sample), `lte_max`, `lte_branch`,
+`lte_time`, `n_branches_covered`, `unestimated_fraction` and `ringing`
+records (`var`, `t_start`, `length`, `max_delta`). The estimate is
+normalised by the running peak floored at 1e-3 of the peak of its kind
+(volts / amps), and a ringing step must exceed 1e-3 of the entry's
+peak. One `pulsim.ResolutionWarning` (a `UserWarning`) per run when
+`lte_max > 1e-2`, a ringing record exists, or over half the steps could
+not be estimated. States are bit-identical either way.
+
+| case | `lte_max` | ringing | warns |
+|---|---|---|---|
+| RC, `dt` = 10τ / τ / τ/10 / τ/100 | 0.347 / 2.67e-2 / 3.3e-4 / 3.3e-6 | runs of 8 on `V(out)`, 19 on `Is(V)` at 10τ | yes / yes / no / no |
+| buck CCM T/20 / T/100 / T/400 | 1.4e-4 / 2.7e-5 / 6.8e-6 | none | no |
+| DCM buck T/100, flag off / restart rule | 2.8e-3 / 7.4e-7 | `V(sw)` run of 52 / none | yes / no |
+| 1 nF, 1 mΩ switch, dt = 1 ns, flag off / rule | 0.66 / 5.0e-5 | 500 / none | yes / no |
+
+Cost: +5 % to +14 % ns/step with it on (design target 3 %, missed);
+none with it off.
+
+### Fixed engine: step-loop bookkeeping (results bit-identical)
+
+The `pwl` step loop does less per step; every trajectory, switch state,
+event record and retry is bit-identical to before (69 probe runs,
+restart rule off/on/split, compared by value and by bytes).
+
+- **BREAKING (type):** `res.times` is a read-only zero-copy numpy view
+  (base: the result), not a list copied on every access. Indexing,
+  `len`, slicing, `np.asarray` work as before; `list(res.times)` gives
+  the old list. A 100 k-sample access: 2.85 ms → 0.01 ms.
+- `switch_fn` is evaluated once per distinct solve time in a step (two
+  per step before: the pre-event mask, then once per event iteration).
+  Contract: `switch_fn` is a function of `t` and of state written by
+  `step_observer`; a callable that changes on each call sees fewer
+  calls.
+- No `switch_fn`: the default mask (all closed on `pwl`, all open on
+  `trbdf2`, warnings unchanged) is a C++ schedule
+  (`pulsim.make_constant_switch_fn(mask)`), not a Python lambda.
+- New `res.counters`: `switch_fn_calls`, `segment_searches`,
+  `rollback_snapshots`.
+
+| ns/step, interleaved A/B, best of 5 | before | after |
+|---|---|---|
+| buck (`make_pwm_switch_fn`) | 173 | 131 |
+| buck, restart rule / split | 210 / 196 | 140 / 140 |
+| three-phase VSI | 358 | 261 |
+| RLC n=5, no `switch_fn` | 350 | 125 |
+| RLC n=1502 | 36 015 | 34 082 |
+
+### Fixed engine: event splitting (opt-in, needs the restart rule)
+
+`simulate(..., discontinuity_restart=True,
+enable_substep_state_correction=True)` splits a fixed step at an event
+inside it: a trapezoidal sub-step to the event under the pre-event mask,
+then an SDIRK(2,2) restart step to the grid point, then the window's two
+grid steps. Samples stay at `t_start + k·dt`.
+
+Events:
+- gate edges of a schedule with `next_edge_after` (every C++ helper,
+  and a Python schedule object that defines the method); an opaque
+  `switch_fn` is not split;
+- built-in PWM/pulse source jumps;
+- diode crossings, located from the step's first solve (pre-event
+  bits) by `SwitchedDiode::crossing_signal`.
+
+Up to 8 events per step in time order; one within 1 % of `dt` of a step
+boundary is taken there. `res.n_split_steps` counts the split steps.
+
+| Engine, restart rule on | rule alone | rule + split |
+|---|---|---|
+| RL edge +0.3 dt off the grid, dt = 8/4/2/1 µs | −3.40e-2 … −4.25e-3 A, order 1.00 | +1.58e-5 … +2.58e-7 A, order 1.98 |
+| Buck CCM D = 0.4567 `v_C`, T/50 … T/400 | 8.08e-2 V (T/50…T/200), 1.96e-2 V | 1.07e-6 … 1.43e-8 V, order 2.1 |
+| DCM buck, rel. error at T/100 / T/101 / T/400 (default engine −0.023 / −0.497 / −0.022 %) | 8.6e-7 / 6.9e-6 / 2.1e-7 | 7.2e-8 / 7.3e-8 / 1.3e-9 |
+| DCM turn-off `t_estimated` vs the current zero | grid index, 0.98 dt early | < 1e-4 dt |
+| Q = 50 tank, edges 0.37 dt off the grid, T/50 / T/100 | −0.663 / −0.024 % | −0.592 / −0.011 % |
+
+Cost on the buck at T/100 (fixed off-grid duty / a duty that moves every
+period): 0.76 / 2.96 off-nominal refactorisations per period;
++10 % / +7 % wall time per step against the rule alone.
+
+* **BREAKING (with the option on): `enable_substep_state_correction`
+  is the event split.** It now requires `discontinuity_restart=True`
+  (`UnsupportedError(engine='pwl', feature=
+  'enable_substep_state_correction')`, a `ValueError`) where the rule
+  refused it before. The old sub-step correction never fired (its
+  1 %-of-dt guard always rejected the estimate) and solved Newton
+  devices linearly; it is removed.
+* `commutation_events.t_estimated` of a located crossing is the
+  crossing time, not a grid index.
+* Limits: a retried step (dt-retry ladder) is re-taken without its
+  interior events; a diode crossing inside an SDIRK interval keeps the
+  grid interpolation for its record; an even number of edges of an
+  opaque `switch_fn` inside one step is not seen.
+
 ### Fixed engine: discontinuity restart rule (opt-in)
 
 `simulate(..., discontinuity_restart=True)` (also `SolverOptions`,
@@ -221,15 +387,65 @@ backward-Euler half-steps, never shipped. It drained resonant modes:
     order.
   The callback is called once per stage time; a restart step calls it
   at `t_prev + γ·dt` (off the grid) and at `t`.
-* Refused: `discontinuity_restart=True` with
-  `enable_substep_state_correction=True` (`ValueError` naming both).
+* `enable_substep_state_correction=True` now needs the rule (event
+  splitting, above).
 * Limits:
-  - an edge off the `dt` grid stays first order (event splitting is a
-    separate change);
+  - an edge off the `dt` grid stays first order without the event
+    split (above);
   - sample 0 of a node voltage still reads 0 V;
   - `mmc_arms` refuses the flag;
   - a Jiles–Atherton core extrapolates its stage-1 flux from the
     committed state (O(h) at a loop tip).
+
+### Diode mode selection: default-mode guard on dsed (BREAKING for wrong numbers)
+
+`engine='dsed'` now judges the diode mode its settle picks at `t = 0`
+and at every event (both candidate modes propagated exactly over
+`100·h_e` and `1e4·h_e`); an inconsistent mode is decided by the LCP
+instead and listed in `result.diagnostics['mode_guard']` (`checks`,
+`repairs`, `repair_times`, `repair_diodes`, `repair_violations`). Runs
+whose modes were consistent are bit-identical. Changed numbers, all
+toward trbdf2 at rtol 1e-10: the `V_th = 0` boost after 400 periods,
+R = 500 Ω 43.70907 → 44.72165 V (error −1.01 V → −1.1e-5 V), R = 50 Ω
+23.67304 → 23.80642 V, R = 20 Ω +3.6e-2 → −1.5e-6 V (D1 was held ON at
+−0.86 to −1.18 A); the `V_th = 1e-3` boost at 20/50 Ω (−0.44/−1.04 A);
+the half-wave RL rectifier (`diode_half_wave_rl_load`), whose diode was
+held OFF while forward-biased by 10 V, mean `v(out)` 2.12046 → 3.18068 V
+(trbdf2 3.18066 V); the single-phase bridges and the three-phase
+rectifier example by ≤ 1.2e-12 V. A selection refusal at a repaired
+event raises `UnsupportedError(engine, 'consistent_mode', <diode>, 'Diode')`.
+
+### Diode mode selection: `mode_selection='lcp'` on dsed
+
+The LCP decides the mode at `t = 0` and at every event in place of the
+settle (`diagnostics['mode_selection']`: `lcp_count`, pivots, `ties`,
+`widenings`, `leak_pins`, `pin_judgements`, `unfixed`, `enumerations`,
+`nonunique_modes`). New tie rule (design D5): decided ports stay fixed
+while the ties are widened, and a tie carrying the leak current that
+holds a floating node is ON unless the all-OFF mode passes the exact
+judge — the three-phase C-filter bridge's 30 wrong shadow decisions are
+0 now. Non-passive circuits (VCVS, negative R/C/L) fall back to
+enumeration up to 12 ports, then `UnsupportedError(engine,
+'non_passive_ports', <device>, <kind>)`. Event counts are equal or
+larger than the settle's (the correct mode commutes more); `pwl` and
+`trbdf2` refuse `'lcp'` by name.
+
+### Diode mode selection as a complementarity problem: shadow mode
+
+`simulate(engine='dsed', mode_selection='shadow')` keeps today's settle
+deciding (states bit-identical) and solves, at every event, the diode
+LCP of the backward-Euler companion network at `h_e = 1e-7·T_ref`
+(lexicographic Lemke, hybrid previous-mode coordinates, tie widening,
+`V_th > V_f` hysteresis). `result.diagnostics['mode_shadow']` lists each
+disagreement with both modes judged by their exact trajectories, plus
+`lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
+`widenings`, `settle_rounds_total` (add-complementarity-mode-selection
+tasks 1–4). `'shadow'` on `pwl`/`trbdf2` raises
+`UnsupportedError(engine, 'mode_selection')`. Over 19 circuits: the
+`V_th = 0` boost's 15 (R = 50 Ω) and 24 (R = 500 Ω) disagreements are
+all the settle's error (it ends 1.01 V low at R = 500 Ω); banded runs
+agree at every event; the three-phase C-filter bridge showed 30 where the
+slice-1 tie rule was wrong (0 with the rule above). Max 3 pivots per event.
 
 ### DSED: exact propagator with a stated accuracy per mask
 

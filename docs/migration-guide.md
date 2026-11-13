@@ -27,6 +27,15 @@ The 1.0 surface is **flat** — there's no `pulsim.v2` namespace. All
 device builders, analyses, and helpers live directly on the
 `pulsim` module.
 
+### `res.times` is a numpy array (Unreleased)
+
+`SimulationResult.times` is a read-only, zero-copy `numpy.ndarray`
+(it was a list). `len`, indexing, slicing and `np.asarray(res.times)`
+are unchanged; list-only idioms (`res.times + [...]`, `.index`,
+`if res.times:`) need `list(res.times)`. `np.asarray(res.times)` is now
+the read-only view itself: use `np.array(res.times)` or `.copy()` before
+writing into it.
+
 ## Top-level objects
 
 ### `pulsim.Circuit` → `pulsim.CircuitBuilder`

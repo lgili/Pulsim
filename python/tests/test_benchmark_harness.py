@@ -82,35 +82,78 @@ def test_edge_measure_drops_only_the_steps_that_hold_a_jump():
     assert metrics.err_rms(ts, ys + 0.1, (tr, yr), exclude=[(0.45, 0.55)]) == pytest.approx(0.1)
 
 
-def test_default_observables_drop_source_forced_nodes():
+def test_gate_observables_keep_source_forced_nodes():
+    # The gate compares everything; only the edge diagnostic drops them.
     case = v1_reader.load(BENCH / "circuits/switching/buck/ll06_buck_vcswitch.yaml")
     assert dr.source_forced(case) == {"V(vin)", "V(ctrl)"}
-    new, old = dr.observables_of(case), dr.observables_of(case, "interp")
-    assert set(old) - set(new) == {"V(vin)", "V(ctrl)"}
-    assert "V(sw)" in new and "I(L1)" in new
+    assert {"V(vin)", "V(ctrl)", "V(sw)", "I(L1)"} <= set(dr.observables_of(case))
 
 
 def test_switching_steps_bracket_every_recorded_change():
     case = v1_reader.load(BENCH / "circuits/switching/buck/ll06_buck_vcswitch.yaml")
     r = case.run("pwl")
     t = np.asarray(r.times)
-    steps = dr.switching_steps(r, t)
-    s = np.asarray(r.switch_states)
+    s = dr.switch_record(r, t)
+    steps = dr.switching_steps(s, t)
     assert len(steps) == int(np.any(s[1:] != s[:-1], axis=1).sum()) > 100
     assert all(b - a == pytest.approx(case.dt, rel=1e-6) for a, b in steps)
-    with pytest.raises(ValueError, match="metric"):
-        dr.compare(dr.traces(r, ["V(sw)"]), dr.traces(r, ["V(sw)"]), ["V(sw)"], 1e-3, "bogus")
 
 
-def test_a_trace_switching_on_every_step_keeps_its_steps():
-    # dsed sampled at the switching rate: every step holds an edge, so the
-    # edge measure would exclude the whole window. It compares the samples.
-    t = np.linspace(0.0, 1.0, 11)
-    y = np.ones_like(t)
-    tr = (t, {"y": y}, [(a, b) for a, b in zip(t[:-1], t[1:])])
-    ref = (t, {"y": y + 0.01}, [])
-    er, _ = dr.compare(tr, ref, ["y"], 1.0)
-    assert er == pytest.approx(0.01 / 1.01)
+def _sw(t, on):
+    return np.asarray(on, dtype=int).reshape(-1, 1)
+
+
+def test_one_step_late_edge_on_a_resistive_load_disagrees_with_one_step_of_timing():
+    # R load behind an ideal switch: the output IS the switch state. The
+    # reference lands the edge at 0.5; the engine (dt = 0.02) applies it one
+    # step late. Inside the excluded step the late edge is invisible, so the
+    # edge diagnostic reads 0: only the gate and the timing column show it.
+    tr_ = np.union1d(np.linspace(0.0, 1.0, 1001), [0.5 + 1e-9])
+    ref = (tr_, {"V(out)": (tr_ > 0.5) * 1.0}, _sw(tr_, tr_ > 0.5))
+    dt = 0.02
+    t = np.linspace(0.0, 1.0, 51)
+    eng = (t, {"V(out)": (t > 0.5 + dt / 2) * 1.0}, _sw(t, t > 0.5 + dt / 2))
+    er, _ = dr.compare(eng, ref, ["V(out)"], 1e-3)
+    assert er == pytest.approx(np.sqrt(dt / 3 / 0.98), rel=1e-3)
+    assert er > dr.default_tol("pwl", True)                         # DISAGREE on the gate
+    d = dr.diagnose(eng, ref, ["V(out)"], 1e-3, step=dt)
+    assert d["edge"] == "ok" and d["edge_rms"] == pytest.approx(0.0, abs=1e-12)
+    assert d["excluded_frac"] == pytest.approx((dt + 1e-9) / 0.98, rel=1e-6)
+    assert d["edge_timing_steps"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_a_chattering_trace_is_reported_chatter_not_agree():
+    # The reference conducts throughout; the engine's diode mask flips on
+    # every step of [0.3, 0.7] and is wrong on half of them. Dropping the
+    # switching steps would drop exactly the wrong intervals.
+    tr_ = np.linspace(0.0, 1.0, 1001)
+    ref = (tr_, {"y": np.ones_like(tr_)}, _sw(tr_, np.ones_like(tr_)))
+    t = np.linspace(0.0, 1.0, 101)
+    on = np.where((t > 0.3) & (t < 0.7), np.arange(t.size) % 2, 1)
+    eng = (t, {"y": on * 1.0}, _sw(t, on))
+    er, _ = dr.compare(eng, ref, ["y"], 1e-3)
+    assert er > dr.default_tol("pwl", True)
+    d = dr.diagnose(eng, ref, ["y"], 1e-3)
+    assert d["edge"] == "chatter" and d["edge_rms"] is None
+    assert d["excluded_frac"] > 0.3
+
+
+def test_a_trace_that_never_switches_is_missed_edges_not_chatter():
+    t = np.linspace(0.0, 1.0, 101)
+    ref = (t, {"y": np.ones_like(t)}, _sw(t, (t * 4).astype(int) % 2))  # 3 edges
+    eng = (t, {"y": np.ones_like(t)}, _sw(t, np.zeros_like(t)))
+    assert dr.diagnose(eng, ref, ["y"], 1e-3)["edge"] == "missed edges"
+
+
+def test_union_of_excluded_steps_covering_the_span_does_not_raise():
+    # Each trace alone switches on less than half its span; together they
+    # cover it all (the old measure raised "every interval excluded").
+    t = np.linspace(0.0, 1.0, 21)
+    a = (t, {"y": np.ones_like(t)}, _sw(t, (t > 0.5) | ((t * 20).round() % 2 == 1) & (t < 0.5)))
+    b = (t, {"y": np.ones_like(t)}, _sw(t, (t < 0.5) | ((t * 20).round() % 2 == 1) & (t > 0.5)))
+    d = dr.diagnose(a, b, ["y"], 1e-3)
+    assert d["edge"] == "undersampled" and d["edge_rms"] is None
+    assert d["excluded_frac"] > 0.9
 
 
 def test_exclude_t0_drops_only_the_initial_sample():
