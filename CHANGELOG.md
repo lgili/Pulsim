@@ -34,6 +34,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the xfail is a test (tolerance 3 % → 0.3 %); the `h_min` abort
   message no longer points at it. The Lauritzen gated buck that stalled
   at the default tolerances runs at them again.
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'`: on a circuit with a Newton device law
+  (MOSFET, Shockley diode, ...), the first step after a diode event is one
+  L-stable Alexander SDIRK(2,2) step on the same factor (embedded error
+  estimate, exponent −1/2), instead of a TR-BDF2 step that read the
+  pre-event derivative slots. Level-1 MOSFET half bridge (body-diode
+  events): time-weighted output error 5.73e-3 → 2.0e-4 V, 1555 → 1280
+  steps, 772 → 173 rejects. Piecewise-linear circuits keep their step
+  sequence (on them it moved nine cross-engine pins without a gain). Not
+  applied to circuits with Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor
+  devices. `result._trbdf2_stats["n_sdirk_steps"]` counts them. A
+  Hosea–Shampine filtered estimate exists as an off-by-default C++
+  option (it made a bridge diode chatter 4334 times).
 
 ### Newton roundoff acceptance (add-newton-roundoff-acceptance)
 

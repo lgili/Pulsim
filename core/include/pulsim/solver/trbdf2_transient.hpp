@@ -173,6 +173,25 @@ struct TrBdf2Options {
     /// bisect handle (`false` = abort or reject at an exhausted budget,
     /// as before that change).
     bool newton_roundoff_acceptance = true;
+    /// L-stable restart (maintainer decision 1 of the TR-BDF2 follow-up):
+    /// the number of Alexander SDIRK(2,2) steps taken after a diode
+    /// event and after the initial diode settle, instead of TR-BDF2
+    /// steps that read the stale pre-event derivative slots. Same factor
+    /// as a TR-BDF2 step (gamma_s = gamma/2). 0 = previous behaviour.
+    /// Circuits with a stateful device history (Coss, Lauritzen, IGBT
+    /// tail, PMSM, saturable inductor) take none yet. One after a diode
+    /// event and none after the settle won the baseline table, on
+    /// circuits with a Newton device law only (DECISIONS item 9);
+    /// C++-only handles.
+    Size sdirk_after_diode_event = 1;
+    Size sdirk_after_settle = 0;
+    /// Also on piecewise-linear circuits (no Newton law): off, it moved
+    /// the bridges' event sequences and gained nothing there.
+    bool sdirk_on_linear_circuits = false;
+    /// Hosea-Shampine filter W^-1 est on the stage factor (linear circuits
+    /// only). C++-only, off: it lets the bridge rectifier take steps that
+    /// chatter a diode 4387 times (DECISIONS item 10).
+    bool filter_error_estimate = false;
 };
 
 struct TrBdf2Stats {
@@ -248,6 +267,10 @@ struct TrBdf2Stats {
     /// Probe solves retaken at 100x the step because Newton did not
     /// converge (see `probe_solve`).
     Size n_probe_newton_retries = 0;
+    /// Accepted SDIRK(2,2) restart steps (see TrBdf2Options).
+    Size n_sdirk_steps = 0;
+    /// Steps whose error estimate was filtered (W^-1 est).
+    Size n_filtered_estimates = 0;
 };
 
 namespace detail_trbdf2 {
@@ -1312,6 +1335,64 @@ inline SimulationResult run_transient_trbdf2(
         gates_decided = m_probe;
     };
 
+    // ---- L-stable SDIRK(2,2) restart (Alexander, gamma_s = 1 - 1/sqrt2) ----
+    // Stage 1: backward Euler over gamma_s*h from x_n; stage 2: backward
+    // Euler over gamma_s*h from x_n + ((1-gs)/gs)(X_1 - x_n). C/(gs h)
+    // equals 2C/(gamma h), so both stages are the trapezoidal companion
+    // at dt = gamma*h with the DERIVATIVE slots zeroed and the STATE slots
+    // set to the stage's base: the same factor, no new history method.
+    const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
+    const bool sdirk_ok = !has_coss && !has_laur && !has_tail && !has_pmsm
+                          && !has_sat
+                          && (opts.sdirk_on_linear_circuits || nl_effective);
+    const Size n_sdirk_diode = opts.sdirk_after_diode_event;
+    Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
+    std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
+    std::vector<Real> est_v, est_sc;
+    Vector b_filt, x_filt, x_filt0, b_zero;
+    // est (state units: capacitor V, inductor A) -> W^-1 est: the
+    // estimate as a state increment of a source-free BE step over
+    // gamma_s*h = gamma*h/2, i.e. the companion at gamma*h with the state
+    // slots = est and the derivative slots 0; solved on the step's
+    // factor. solve_at adds b_constant, so the source-free part is
+    // removed by linearity (one more solve on the same factor).
+    auto filter_estimate = [&](const SwitchStateMask& m, Real dt,
+                               std::vector<Real>& est) {
+        history.snapshot_into(hist_snap);
+        hist_f = hist_snap;
+        for (Size i = 0; i < hist_f.size(); ++i) {
+            auto& e = hist_f[i];
+            if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                e.v_prev = est[i];
+                e.i_prev = Real{0};
+            } else {
+                e.i_prev = est[i];
+                e.v_prev = Real{0};
+            }
+        }
+        history.restore(hist_f);
+        history.compute_b_extra(dt, b_filt);
+        history.restore(hist_snap);
+        b_zero.setZero(static_cast<Index>(state_size));
+        cache.solve_at(m, dt, b_filt, x_filt);
+        cache.solve_at(m, dt, b_zero, x_filt0);
+        x_filt -= x_filt0;
+        for (Size i = 0; i < hist_f.size(); ++i) {
+            const auto& e = hist_f[i];
+            est[i] = e.kind == pwl::DevicePool::StoredKind::Capacitor
+                ? entry_v(e, x_filt) : x_filt[e.inductor_branch_var_id];
+        }
+    };
+    auto zero_derivatives = [](std::vector<pwl::HistoryEntry>& es) {
+        for (auto& e : es) {
+            if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                e.i_prev = Real{0};
+            } else {
+                e.v_prev = Real{0};
+            }
+        }
+    };
+
     try {
         while (t < opts.t_end - h_min && steps < opts.max_steps) {
             if (should_continue && !should_continue()) {
@@ -1483,10 +1564,19 @@ inline SimulationResult run_transient_trbdf2(
                     diode_owned);
             }
 
-            // ---- stage 1: TR over γh ----
+            // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
             const Real hg = gamma * h;
+            const bool sdirk = sdirk_left > 0 && sdirk_ok;
+            // Where x_g sits in time (the crossing detector reads it).
+            const Real h_pt = sdirk ? gs * h : hg;
+            if (sdirk) {
+                history.snapshot_into(hist_snap);
+                hist_s1 = hist_snap;
+                zero_derivatives(hist_s1);
+                history.restore(hist_s1);
+            }
             history.compute_b_extra(hg, b_stage);
-            accumulate_sources(t + hg, b_src);
+            accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
             x_g = x;                 // Newton warm start
             coss_stage = pwl::CossStage::Trapezoidal;
@@ -1502,7 +1592,24 @@ inline SimulationResult run_transient_trbdf2(
                 landed_on_bp = false;
             }
             // ---- stage 2: BDF2 over the remainder, SAME factor ----
-            history.compute_b_extra_trbdf2_stage2(h, x_g, b_stage);
+            if (sdirk) {
+                // BE from x_n + ((1-gs)/gs)(X_1 - x_n), derivative slots 0.
+                const Real r = (Real{1} - gs) / gs;
+                hist_s2 = hist_s1;
+                for (auto& e : hist_s2) {
+                    if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                        e.v_prev += r * (entry_v(e, x_g) - e.v_prev);
+                    } else {
+                        e.i_prev += r * (x_g[e.inductor_branch_var_id]
+                                         - e.i_prev);
+                    }
+                }
+                history.restore(hist_s2);
+                history.compute_b_extra(hg, b_stage);
+                history.restore(hist_snap);
+            } else {
+                history.compute_b_extra_trbdf2_stage2(h, x_g, b_stage);
+            }
             // A step landed on a source jump reads its LEFT limit; the
             // jump applies from the next step.
             accumulate_sources(
@@ -1573,11 +1680,40 @@ inline SimulationResult run_transient_trbdf2(
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
             Size n_err = 0;
+            est_v.assign(entries.size(), Real{0});
+            est_sc.assign(entries.size(), Real{1});
             for (Size i = 0; i < entries.size(); ++i) {
                 const auto& e = entries[i];
                 const Real vg1 = entry_v(e, x_g);
                 const Real v11 = entry_v(e, x_1);
                 Real f_n, f_g, f_1, y_old, y_new;
+                if (sdirk) {
+                    // Embedded first-order estimate h(1-gs)(k1 - k2)
+                    // (design D3), exponent -1/2 below.
+                    const auto& e1 = hist_s1[i];
+                    const auto& e2 = hist_s2[i];
+                    Real k1, k2;
+                    if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                        k1 = (Real{2} / hg) * (vg1 - e1.v_prev);
+                        k2 = (Real{2} / hg) * (v11 - e2.v_prev);
+                        y_old = e.v_prev;
+                        y_new = v11;
+                    } else {
+                        const Real vp_g = partner[i] == Size(-1) ? Real{0}
+                            : entry_v(entries[partner[i]], x_g);
+                        const Real vp_1 = partner[i] == Size(-1) ? Real{0}
+                            : entry_v(entries[partner[i]], x_1);
+                        k1 = inductor_didt(i, vg1, vp_g, Real{0});
+                        k2 = inductor_didt(i, v11, vp_1, Real{0});
+                        y_old = e.i_prev;
+                        y_new = x_1[e.inductor_branch_var_id];
+                    }
+                    const Real sc = opts.atol + opts.rtol
+                        * std::max(std::abs(y_old), std::abs(y_new));
+                    est_v[i] = h * (Real{1} - gs) * (k1 - k2);
+                    est_sc[i] = sc;
+                    continue;
+                }
                 if (e.kind
                     == pwl::DevicePool::StoredKind::Capacitor) {
                     const Real C = e.C_or_L;
@@ -1624,7 +1760,21 @@ inline SimulationResult run_transient_trbdf2(
                     + opts.rtol
                           * std::max(std::abs(y_old),
                                      std::abs(y_new));
-                const Real w = lte / sc;
+                est_v[i] = lte;
+                est_sc[i] = sc;
+            }
+            // Hosea-Shampine filter: W^-1 est with W the stage matrix (the
+            // (mask, gamma*h) factor both stages used). A stiff mode the
+            // L-stable stages damp is not error; raw, the estimate reads a
+            // 1e-13 s L*g_off mode as error at any h. Linear circuits
+            // only (a Newton circuit's factor is not kept).
+            if (opts.filter_error_estimate && !nl_effective
+                && !entries.empty()) {
+                filter_estimate(mask_step, hg, est_v);
+                ++st.n_filtered_estimates;
+            }
+            for (Size i = 0; i < entries.size(); ++i) {
+                const Real w = est_v[i] / est_sc[i];
                 err_sq += w * w;
                 ++n_err;
             }
@@ -1655,7 +1805,8 @@ inline SimulationResult run_transient_trbdf2(
             if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
                 const Real fac = std::clamp(
-                    Real{0.9} * std::pow(err, Real{-1.0 / 3.0}),
+                    Real{0.9} * std::pow(err, sdirk ? Real{-0.5}
+                                                    : Real{-1.0 / 3.0}),
                     Real{0.1}, Real{0.9});
                 h = std::max(h * fac, h_lo);
                 ++st.n_reject;
@@ -1717,7 +1868,7 @@ inline SimulationResult run_transient_trbdf2(
                     // the two sub-intervals that crosses.
                     Real ta = t, sa = s0, tb = t + h, sb = s1;
                     if ((s0 > Real{0}) != (sg > Real{0})) {
-                        tb = t + hg;
+                        tb = t + h_pt;
                         sb = sg;
                     }
                     const Real est =
@@ -1781,6 +1932,7 @@ inline SimulationResult run_transient_trbdf2(
                                  diodes.entries()[cross_idx]
                                      .is_on});
                             ++st.n_diode_events;
+                            sdirk_left = n_sdirk_diode;
                             commutated = true;
                         }
                         else {
@@ -1841,7 +1993,7 @@ inline SimulationResult run_transient_trbdf2(
                             detail_trbdf2::crossing_signal(
                                 diodes, cross_idx, x_g);
                         if ((sa > Real{0}) != (sg > Real{0})) {
-                            tb = t + hg;
+                            tb = t + h_pt;
                             sb = sg;
                         }
                     }
@@ -1998,6 +2150,7 @@ inline SimulationResult run_transient_trbdf2(
                     x_mask_known = true;
                     gates_decided = mask_step;
                     ++st.n_diode_events;
+                    sdirk_left = n_sdirk_diode;
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
                     // KEEP the controller's h (see the gate-memory
@@ -2020,7 +2173,17 @@ inline SimulationResult run_transient_trbdf2(
 
             if (!commutated) {
                 // ---- accept ----
-                history.commit_trbdf2(x_1, h, x_g);
+                if (sdirk) {
+                    // Stage-2 base, derivative 0: update_from_state then
+                    // stores k2 = f(t + h, x_1), the derivative the next
+                    // TR-BDF2 step needs.
+                    history.restore(hist_s2);
+                    history.update_from_state(x_1, hg);
+                    --sdirk_left;
+                    ++st.n_sdirk_steps;
+                } else {
+                    history.commit_trbdf2(x_1, h, x_g);
+                }
                 if (has_coss) {
                     commit_coss(x_1, h);
                 }
@@ -2126,8 +2289,8 @@ inline SimulationResult run_transient_trbdf2(
                         std::max(err, Real{1e-4});
                     const Real fac = std::clamp(
                         Real{0.9}
-                            * std::pow(e_used,
-                                        Real{-1.0 / 3.0}),
+                            * std::pow(e_used, sdirk ? Real{-0.5}
+                                                     : Real{-1.0 / 3.0}),
                         Real{0.2}, Real{5.0});
                     const Real h_done = h;
                     h = h * fac;

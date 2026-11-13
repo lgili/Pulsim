@@ -104,10 +104,42 @@ def test_ccm_error_not_above_twice_the_previous(ccm):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "not met: the DCM steps below 1e-11 s follow the diode turn-off at "
-    "zero inductor current, and the derivative refresh is not applied at "
-    "diode events (it excites the L*g_off mode; DECISIONS.md)"))
+    "not met: the DCM steps below 1e-11 s are the gate-edge probe steps "
+    "and the diode-landing sub-steps; the SDIRK first step after a diode "
+    "event does not remove them (DECISIONS.md 9)"))
 def test_dcm_no_step_below_1e_11(dcm):
     """Runs of accepted steps between 4e-14 and 1e-12 s before this
     change."""
     assert np.diff(np.asarray(dcm.times)).min() > 1e-11
+
+
+def _mosfet_half_bridge(engine, **kw):
+    T = 1e-5
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "vdc", "gnd", 48.0)
+    b.add_mosfet_level1("M1", "vdc", "sw", "g1", K=20.0, V_T=3.0)
+    b.add_mosfet_level1("M2", "sw", "gnd", "g2", K=20.0, V_T=3.0)
+    b.add_pulse_voltage_source("Vg1", "g1", "sw", 0.0, 12.0, 0.2e-6, 4.6e-6, T)
+    b.add_pulse_voltage_source("Vg2", "g2", "gnd", 0.0, 12.0, 5.2e-6, 4.6e-6, T)
+    b.add_inductor("L", "sw", "out", 100e-6)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", 5.0)
+    return p.simulate(b, t_end=50 * T, engine=engine, **kw)
+
+
+def _time_mean(res, node):
+    t = np.asarray(res.times)
+    return float(np.trapezoid(np.asarray(res.v(node)), t) / (t[-1] - t[0]))
+
+
+def test_body_diode_events_restart_with_an_l_stable_step():
+    """One SDIRK(2,2) step after each diode event: TR-BDF2's first step
+    read the pre-event derivative of the body-diode commutation. The
+    output mean was 5.7 mV off the fixed engine at T/4000 (2.0e-4 V
+    with the SDIRK step), in 1555 steps and 772 rejects (1280, 173)."""
+    ref = _time_mean(_mosfet_half_bridge("pwl", dt=1e-5 / 4000), "out")
+    res = _mosfet_half_bridge("trbdf2")
+    st = res._trbdf2_stats
+    assert st["n_sdirk_steps"] > 0
+    assert abs(_time_mean(res, "out") - ref) < 1e-3
+    assert st["n_reject"] < 400

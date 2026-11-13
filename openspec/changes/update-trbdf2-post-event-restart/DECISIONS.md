@@ -100,3 +100,57 @@ The open questions of `design.md` had no answer and none was marked
    both builds are right (probes/sat_buck.py). C++-only
    `TrBdf2Options::newton_roundoff_acceptance` (default true) exists to
    run that test.
+9. **One L-stable SDIRK(2,2) step after each diode event on circuits
+   with a Newton device law; none after the initial settle; none on
+   piecewise-linear circuits.** Alexander SDIRK(2,2), γs = 1−1/√2 = γ/2, so
+   C/(γs h) = 2C/(γh): both stages are the trapezoidal companion at
+   dt = γh with the derivative slots zeroed and the state slots set to
+   the stage base (stage 2 base x0 + ((1−γs)/γs)(x1−x0)). Same factor,
+   no new device stage form. Error estimate: the embedded
+   h(1−γs)(k1−k2), unfiltered, with exponent −1/2 in the controller
+   (design D3). Circuits with Coss, Lauritzen, IGBT tail, PMSM or a
+   saturable inductor take TR-BDF2 steps as before. Measured, rtol
+   1e-5, diode × N / settle × M (err, time-weighted err, steps,
+   rejects; `probes/trbdf2_baseline.py`):
+
+   | circuit | today (0/0) | diode ×1 | diode ×2 | diode ×3, settle ×3 |
+   |---|---|---|---|---|
+   | MOSFET half bridge | 4.66e-4, 5.73e-3, 1555, 772 | 3.30e-4, 2.0e-4, 1280, 173 | —, 1.5e-4, 1312 | — |
+   | DCM buck | 1.25e-5, 1.07e-4, 9457, 4745 | 1.26e-5, 1.07e-4, 9373, 4432 | | |
+   | 325 V bridge | tw 5.57e-2, 1437, 501, 34 events | tw 2.87e-2, 1672, 378, 163 events | tw 5.71e-2, 1375 | `max_steps` grind |
+   | boost | 1482, 223 rejects | 1494, 270 | | |
+   | VSI on RL | 1235, 30 rejects | 1300, 77 | | |
+
+   Errors are equal or better on every row at the same rtol; the cost
+   is +47 rejects on the boost and on the VSI. Applied to every
+   circuit, the full suite moved 9 pins, all on piecewise-linear diode
+   circuits: bridge loss energies 0.6 % (V_f = 0 identity pin), a
+   reference bridge's D2 RMS current 2.4 % from pwl (2 % allowed), the
+   doubled-tolerance density 1242 → 1682 steps, a V_th-hysteresis
+   event count 612 → 608, a reverse-recovery turn-off on a step longer
+   than t_rr, forced accepts in a held-diode run. None of those rows
+   gained accuracy, so the step is limited to circuits where a Newton
+   law is present (the MOSFET half bridge is the measured gain);
+   `sdirk_on_linear_circuits` (default false) turns it on elsewhere. A settle SDIRK step
+   turns the bridge into a `max_steps` grind (its chaotic event
+   sequence, item 6), so the settle keeps its TR-BDF2 restart. The
+   derivative refresh at diode events stays off (item 6: 5814 bridge
+   events). Not cured: the DCM steps below 1e-11 s (strict xfail kept;
+   they are the gate-edge probe steps and the diode-landing sub-steps,
+   not the first step) and the kilovolt landing artefact (SDIRK: 11919
+   → 168 V at default tolerances, 1460 → 989 V at rtol 2e-6: the
+   2L/h·(residual µA) is in the landing state, not in the stage
+   order). C++-only `TrBdf2Options::sdirk_after_diode_event` (default
+   1) and `sdirk_after_settle` (default 0); 0 restores the old run.
+10. **Hosea–Shampine filter: implemented, off by default.** `solve_at`
+   allows it on linear circuits: the estimate goes into the companion
+   as a state increment (derivative slots zero), and the source terms
+   cancel by linearity, x_f = solve(b_f) − solve(0). With the SDIRK
+   step: DCM buck 9457 → 3301 steps, 4745 → 862 rejects; boost 223 →
+   57 rejects. But the 325 V bridge then reported a time-weighted
+   error of 13 V: one diode turned off 4334 times in 2 ms at t = 33.4
+   ms (the filter lets the step grow onto the L·g_off mode). TR-BDF2
+   steps alone filtered: DCM rejects 4745 → 14178. The kilovolt
+   artefact is not a filter question: filtered, its peak is 20 V at
+   rtol 2e-6 and at default tolerances but 1029 V at rtol 1e-6, so the
+   strict xfail stays. C++-only `TrBdf2Options::filter_error_estimate`.

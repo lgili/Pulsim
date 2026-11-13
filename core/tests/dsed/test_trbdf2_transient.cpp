@@ -604,3 +604,51 @@ TEST_CASE("TR-BDF2: a failed Newton probe at a gate edge is retried, "
         REQUIRE(v == Approx(12.849).epsilon(1e-3));
     }
 }
+
+TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
+          "[v2][trbdf2]") {
+    // Half-wave RL rectifier: linear, so the filtered estimate applies.
+    // The variants must agree on the output; the counters prove each
+    // path ran (one SDIRK step per diode event, filter off by default).
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 10.0, 50.0, 0.0);
+    b.add_diode("D", "ac", "a", 1e3, 1e-9, 0.7);
+    b.add_inductor("L", "a", "out", 10e-3);
+    b.add_resistor("Rl", "out", "gnd", 10.0);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto run = [&](Size n_sdirk, bool filter, solver::TrBdf2Stats& st) {
+        solver::TrBdf2Options o;
+        o.t_end = 60e-3;
+        o.sdirk_after_diode_event = n_sdirk;
+        o.filter_error_estimate = filter;
+        o.sdirk_on_linear_circuits = true;
+        const auto res = solver::run_transient_trbdf2(
+            cache, b.graph(), b.pool(), o,
+            [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st);
+        return tail_mean(res, b.node_id_of("out"), 20e-3);
+    };
+    solver::TrBdf2Stats s_def, s_off, s_filt;
+    const Real v_def = run(solver::TrBdf2Options{}.sdirk_after_diode_event,
+                           false, s_def);
+    const Real v_off = run(0, false, s_off);
+    const Real v_filt = run(1, true, s_filt);
+    REQUIRE(s_def.n_diode_events >= 4);
+    REQUIRE(s_def.n_sdirk_steps > 0);
+    REQUIRE(s_def.n_sdirk_steps <= s_def.n_diode_events);
+    REQUIRE(s_def.n_filtered_estimates == 0);
+    REQUIRE(s_off.n_sdirk_steps == 0);
+    REQUIRE(s_filt.n_filtered_estimates > 0);
+    REQUIRE(v_def > 1.0);
+    REQUIRE(v_def == Approx(v_off).epsilon(1e-3));
+    REQUIRE(v_filt == Approx(v_off).epsilon(1e-3));
+    // Default: a piecewise-linear circuit takes no SDIRK step.
+    solver::TrBdf2Options o;
+    o.t_end = 60e-3;
+    solver::TrBdf2Stats s_lin;
+    (void)solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &s_lin);
+    REQUIRE(s_lin.n_sdirk_steps == 0);
+}
