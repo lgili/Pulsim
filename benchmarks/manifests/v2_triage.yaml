@@ -107,7 +107,7 @@ circuits:
   circuits/switching/buck/cascaded_buck_buck.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00169}}
   circuits/switching/buck/high_freq_gan_buck.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.0538}}
   circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}}
-  circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842, trbdf2: 0.00231}}  # was error: the roundoff acceptance lets it finish
+  circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842}}  # was error: the roundoff acceptance lets it finish; trbdf2 agrees (1.1e-4) since the post-event sample (update-trbdf2-post-event-restart DECISIONS 13)
   circuits/switching/buck/sync_buck_500khz.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00114}}
   circuits/switching/buck/synchronous_buck.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00122}}
   circuits/switching/buck/textbook_erickson_buck_ccm.yaml: {status: runs, known: {dsed: error}}

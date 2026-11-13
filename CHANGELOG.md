@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### TR-BDF2 event handling follow-up (update-trbdf2-post-event-restart)
 
+* **Fixed** `engine='trbdf2'` / `'auto'` on circuits with a Newton device
+  and PWL diodes: the trace now shows a diode event where it happens.
+  The L-stable restart step after the event may be long (500 ns on
+  `ll08_buck_mosfet`), and with no sample between the event and that
+  step's end the record ramped the jump of V(sw) across the whole step:
+  the strict error of `ll08_buck_mosfet` grew from 0.00231 to 0.0252 and
+  its edge instants were 0.48 µs late. The cascade's probe under the
+  post-event bits is now recorded right after the event (not committed;
+  the record keeps one more sample per event). The restart step also
+  starts at the step that the last restart for the same diode transition
+  proposed, not at the pre-event step: on the MOSFET half bridge, 215 of
+  240 rejects were that restart step. Measured: `ll08_buck_mosfet`
+  0.0252 → 1.1e-4 (rejects 277 → 69); MOSFET half bridge time-weighted
+  output error 2.0e-4 → 2.36e-4 V, rejects 240 → 101, steps 1351 → 1412.
 * **Changed** Newton roundoff acceptance (both transient engines). The
   row scale and the step cap now come from the solve's start state, not
   from the iterate being checked. A growing ||dx|| is never accepted.

@@ -144,5 +144,23 @@ def test_body_diode_events_restart_with_an_l_stable_step():
     res = _mosfet_half_bridge("trbdf2")
     st = res._trbdf2_stats
     assert st["n_sdirk_steps"] > 0
-    assert abs(_time_mean(res, "out") - ref) < 1e-3
-    assert st["n_reject"] < 400
+    # 2.36e-4 V and 101 rejects with the restart size remembered per
+    # diode transition (240 rejects before: 215 of them the restart
+    # step taken at the pre-event h and rejected once).
+    assert abs(_time_mean(res, "out") - ref) < 3e-4
+    assert st["n_reject"] < 200
+
+
+def test_diode_event_is_recorded_where_it_happens():
+    """ll08_buck_mosfet: the SDIRK restart step after a diode event may be
+    long (500 ns), and V(sw) jumps at the event. With no sample between
+    the event and that step's end the record ramped across it (strict
+    error 0.00231 -> 0.0252, edge instants 0.48 us late). The cascade's
+    probe under the post-event bits is recorded right after the event."""
+    res = _mosfet_half_bridge("trbdf2")
+    t = np.asarray(res.times)
+    ev = np.array([e.t_estimated for e in res.commutation_events])
+    assert ev.size > 100
+    assert np.all(np.diff(t) > 0)
+    nxt = t[np.searchsorted(t, ev, side="right")]
+    assert (nxt - ev).max() < 1e-9

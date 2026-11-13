@@ -272,3 +272,49 @@ The open questions of `design.md` had no answer and none was marked
    The held-diode warning's subnet naming has no run left that reaches
    it; `test_diode_state_reconstruction.py` still covers the warning
    itself.
+13. **The ll08 regression: a long restart step and no sample at the event
+   (2026-11-13).** `ll08_buck_mosfet` on trbdf2 went from 0.00231 to
+   0.0252 (strict measure against trbdf2 at rtol 1e-8; edge mismatch
+   9.6e-9 → 4.8e-7 s) with item 9's SDIRK step; with the step off it was
+   0.00231 again. Engine trace at the first turn-on of D1 (gate corner at
+   4.42 µs): the step from the corner finds D1 held OFF on its forbidden
+   side, the zero-time cascade turns it ON at t, and the SDIRK restart is
+   taken at the pre-event h = 5e-7 s and accepted (err 0.19). TR-BDF2
+   read stale derivatives there and was rejected down to ~10 ns. The
+   integration was right; the record was not: V(sw) is algebraic and
+   jumps from +24 V to −0.1 V at the event, and with no sample between
+   the event and the end of the 500 ns step the trace ramped across it
+   (first sample in the new state 4.92 µs: the 0.48 µs "late" edge).
+   The reference (rtol 1e-8) had a 33 ns ramp of its own.
+   Options: (a) a short restart step (cost: steps on every event, and it
+   only shortens the ramp); (b) record the cascade's last probe — a real
+   solve under the post-event bits from the committed state,
+   `last_probe_dt` long — as a sample, not committed (the step still
+   starts from x; a later commit that would not lie after it replaces
+   it). (b) taken, on circuits that take the SDIRK restart (the only
+   ones whose post-event step can be long). The sample records the
+   post-event mask (`mask_at(t)`; a landing has already reset
+   `gates_decided` to the pre-commutation mask — recording that made a
+   49.4 V held-diode warning out of a correct sample).
+   The MOSFET half bridge on the merged tree had 240 rejects, not the
+   173 of item 9: 215 were the SDIRK restart step itself, taken at the
+   pre-event h (err 2.4–3.5 at 4–5e-7 s, then accepted at about half).
+   Like the post-gate-edge memory (item 4.1), the controller's proposal
+   after the last accepted restart step of the same diode turning the
+   same way now starts the next restart step (`h_mem_diode`, 2 slots per
+   diode).
+
+   | run | before | after |
+   |---|---|---|
+   | ll08 trbdf2, strict vs rtol 1e-8 | 0.0252, edge 4.8e-7 s, 277 rejects | 1.11e-4, edge 2.1e-11 s, 69 rejects, 2001 steps |
+   | ll08 trbdf2 vs pwl dt = 2.5e-9 s (independent) | 0.0245 | 0.0141 (= the rtol 1e-8 run's own 0.0141) |
+   | MOSFET half bridge, tw / final error, steps, rejects | 2.01e-4, 8.66e-5, 1351, 240 | 2.36e-4, 5.44e-5, 1412, 101 |
+
+   Held-diode warnings on the half bridge are unchanged (16 and 81
+   samples, ≤ 3.1 V, as before). Every golden trajectory is
+   byte-identical (none has an event followed by an SDIRK step); in the
+   reference status only `buck_mosfet_nonlinear` trbdf2 moved (5.04e-7
+   → 5.08e-7, agree) and the pwl cells of the two circuits whose
+   reference gained samples (ll08: 0.2274 → 0.2278, 0.0843 → 0.0842).
+   To reverse: drop `record_post_event()` and
+   `restart_size_after_diode_event()` at the two event sites.

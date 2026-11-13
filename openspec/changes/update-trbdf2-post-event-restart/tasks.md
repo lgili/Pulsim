@@ -38,3 +38,6 @@
 - [x] 8.1 SEPIC at rtol 1e-8 / atol 1e-12: mechanism traced (estimate at its roundoff floor on g_off-held nodes; no-change zero-time events), fixed, `test_trbdf2_roundoff_floor.py` bounds accepted steps (28,539 against `max_steps`; V_out 17.31570 V)
 - [x] 8.2 325 V floating bridge at rtol 1e-6 and 1e-7 completes (1,971 and 3,241 accepted steps; bus within 0.007 V of pwl); landing cascades that undo their flip record no event
 - [x] 8.3 DCM strict xfail kept with the measured cause (4,325 steps below 1e-11 s; L·g_off mode and edge probes)
+
+## 9. ll08 regression (follow-up)
+- [x] 9.1 `ll08_buck_mosfet` trbdf2 back to at most 0.00231 with the MOSFET half bridge kept at time-weighted error ≤ 3e-4 V and ≤ 200 rejects — 1.11e-4; 2.36e-4 V, 101 rejects (DECISIONS.md 13)

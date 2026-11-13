@@ -1287,6 +1287,25 @@ inline SimulationResult run_transient_trbdf2(
     // (see the crossing detector).
     Real held_redecide_t = opts.t_start - span;
 
+    // Time of a post-diode-event sample (see record_post_event below) that
+    // is not a committed state: a sample the next commit would not lie
+    // after is dropped, so the record stays increasing.
+    Real event_sample_t = -std::numeric_limits<Real>::infinity();
+    auto drop_superseded_event_sample = [&](Real t_new) {
+        if (event_sample_t >= t_new && !result.times.empty()
+            && result.times.back() == event_sample_t) {
+            result.times.pop_back();
+            result.states.pop_back();
+            result.event_iteration_count.pop_back();
+            if (result.has_switch_states) {
+                result.switch_state_bits.resize(
+                    result.switch_state_bits.size()
+                    - result.switch_state_stride);
+            }
+        }
+        event_sample_t = -std::numeric_limits<Real>::infinity();
+    };
+
     // ---- post-gate-edge restart ----
     // A gate edge leaves the companion history holding the PRE-edge
     // derivatives (inductor v, capacitor i, each stateful device's
@@ -1379,6 +1398,7 @@ inline SimulationResult run_transient_trbdf2(
         x = x_trial;
         x_sig = x;
         t += dtp;
+        drop_superseded_event_sample(t);
         result.times.push_back(t);
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
@@ -1399,6 +1419,58 @@ inline SimulationResult run_transient_trbdf2(
                           && !has_sat
                           && (opts.sdirk_on_linear_circuits || nl_effective);
     const Size n_sdirk_diode = opts.sdirk_after_diode_event;
+    // ---- the SDIRK restart size, remembered per diode transition ----
+    // The restart step was taken at the PRE-event h, which the step
+    // controller sized for a smooth interval: on the MOSFET half bridge
+    // 215 of 240 rejects were that step (err 2.4-3.5 at 4-5e-7 s, then
+    // accepted at about half). Like the post-gate-edge memory, the
+    // controller's proposal after the last accepted restart step for
+    // the same diode turning the same way starts the next one.
+    std::vector<Real> h_mem_diode;
+    Size diode_slot = Size(-1);
+    auto restart_size_after_diode_event = [&](Size d) {
+        if (!sdirk_ok || n_sdirk_diode == 0) {
+            return;
+        }
+        const Size nd = diodes.entries().size();
+        if (h_mem_diode.size() != 2 * nd) {
+            h_mem_diode.assign(2 * nd, Real{0});
+        }
+        diode_slot = 2 * d + (diodes.entries()[d].is_on ? 1 : 0);
+        if (h_mem_diode[diode_slot] > Real{0}) {
+            h = std::min(h, h_mem_diode[diode_slot]);
+        }
+    };
+    // ---- the post-event sample (ll08_buck_mosfet, 2026-11-13) ----
+    // An SDIRK restart step is L-stable and its estimate sees the
+    // differential variables only, so it may be long (500 ns on ll08,
+    // where TR-BDF2 read stale derivatives and was rejected down to
+    // ~10 ns). The algebraic variables JUMP at the event (V(sw) from
+    // +24 V to -0.1 V when the freewheeling diode turns on), and with no
+    // sample between the event and the end of that step the record
+    // ramped across it: ll08's strict error 0.00231 -> 0.0252, its edge
+    // instants 0.48 us late. The cascade's last probe is a real solve
+    // under the post-event bits from the committed state, last_probe_dt
+    // long: record it (not committed — the step still starts from x), so
+    // the trace shows the jump where it happens.
+    auto record_post_event = [&]() {
+        if (!sdirk_ok || n_sdirk_diode == 0 || !last_probe_ok
+            || !x_sig.allFinite()) {
+            return;
+        }
+        const Real tp = t + last_probe_dt;
+        if (tp >= opts.t_end - h_min
+            || (has_ticks && tp >= t_next_tick - h_min)) {
+            return;
+        }
+        result.times.push_back(tp);
+        result.states.push_back(x_sig);
+        result.event_iteration_count.push_back(0);
+        // The bits the probe was solved under (a landing has already
+        // reset gates_decided to its pre-commutation mask).
+        result.record_switch_state(mask_at(t));
+        event_sample_t = tp;
+    };
     Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
@@ -2082,6 +2154,8 @@ inline SimulationResult run_transient_trbdf2(
                                          .is_on});
                                 ++st.n_diode_events;
                                 sdirk_left = n_sdirk_diode;
+                                record_post_event();
+                                restart_size_after_diode_event(cross_idx);
                                 commutated = true;
                             } else {
                                 // Nothing flipped: no event, no restart.
@@ -2267,6 +2341,7 @@ inline SimulationResult run_transient_trbdf2(
                     x = x_trial;
                     x_sig = x;
                     t += dt_land;
+                    drop_superseded_event_sample(t);
                     const std::vector<bool> bits_land =
                         diodes.snapshot_on_bits();
                     const bool flipped =
@@ -2329,6 +2404,8 @@ inline SimulationResult run_transient_trbdf2(
                     if (net_flip) {
                         ++st.n_diode_events;
                         sdirk_left = n_sdirk_diode;
+                        record_post_event();
+                        restart_size_after_diode_event(cross_idx);
                     }
                     ++st.n_accept;
                     // One-step method: no history to rebuild.
@@ -2390,6 +2467,7 @@ inline SimulationResult run_transient_trbdf2(
                 x = x_1;
                 x_sig = x;
                 t += h;
+                drop_superseded_event_sample(t);
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(0);
@@ -2473,6 +2551,9 @@ inline SimulationResult run_transient_trbdf2(
                         Real{0.2}, Real{5.0});
                     const Real h_done = h;
                     h = h * fac;
+                    if (sdirk && diode_slot != Size(-1)) {
+                        h_mem_diode[diode_slot] = std::min(h, h_max);
+                    }
                     if (landed_on_bp && !landed_on_edge) {
                         // Landed on a source jump or corner: restart as
                         // after a gate edge (commit a probe under the
@@ -2495,8 +2576,14 @@ inline SimulationResult run_transient_trbdf2(
                         pending_gate_slot = -1;
                     }
                 }
+                if (sdirk) {
+                    diode_slot = Size(-1);
+                }
             }
         }
+        // A run stopped by should_continue right after an event: the
+        // record ends on the committed state, as the snapshot does.
+        drop_superseded_event_sample(-std::numeric_limits<Real>::infinity());
         if (steps >= opts.max_steps) {
             throw std::runtime_error(
                 "run_transient_trbdf2: max_steps ("
