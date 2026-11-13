@@ -89,10 +89,12 @@ accurate, order 2):
 Details:
 - **Factor.** The stage conductance `C/(γh)` is the trapezoidal
   companion at `2γh`, so both stages use one factor per mask at that
-  fixed step. A second lazy `PwlStateSpaceCache` keeps them under the
-  same byte budget. The 8-entry event LRU of `solve_at` refactored on
-  every restart step of a VSI: 3172 builds in 3157 restart steps at
-  dt = 1e-6.
+  fixed step. The cache's event table (`solve_at`, one entry per mask
+  under the segment byte budget since update-trbdf2-factor-reuse)
+  keeps them; the 8-entry LRU it replaced refactored on every restart
+  step of a VSI: 3172 builds in 3157 restart steps at dt = 1e-6. (A
+  second lazy cache served this until the integration of
+  update-trbdf2-factor-reuse; see DECISIONS.)
 - **Stateful devices.** `HistoryState` and the five devices get
   `extrapolate_previous(x1, c)`: capacitor `v_prev`, inductor `i_prev`,
   Coss `q_prev`, Lauritzen `q_M`, IGBT tail `Q`, PMSM `λ` (abc) and

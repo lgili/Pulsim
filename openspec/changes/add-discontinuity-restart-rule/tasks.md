@@ -64,7 +64,7 @@
 - [x] 10.2 `extrapolate_previous(x1, c)` on `HistoryState` and the five stateful histories; flux row kept in conductance form
 - [x] 10.3 Window counter `restart_left` (3 per trigger, `max(left, 2)` on a flip in either stage); `SolverSnapshot::restart_steps_left`, pickle field 12 (legacy bool True → 3), read-only `restart_pending`
 - [x] 10.4 Per-stage vs per-step diode decisions measured on the buck; per stage kept (DECISIONS.md)
-- [x] 10.5 One factor per mask at 2γ·dt in a second lazy cache; `SimulationResult::n_restart_factorizations`; VSI counters measured
+- [x] 10.5 One factor per mask at 2γ·dt (a second lazy cache, then the event table at integration); `SimulationResult::n_restart_factorizations`; VSI counters measured
 - [x] 10.6 `b_extra_fn.next_jump_after(t)`: detection, left-limit read, composition through `_carry_jumps`; undeclared jumps documented as not restarted; test
 - [x] 10.7 Restart + `enable_substep_state_correction` refused by name; test
 - [x] 10.8 Engine tests through a restart: Lauritzen, IGBT tail, transformer, MNA PMSM (Richardson ratios, flag on and off)

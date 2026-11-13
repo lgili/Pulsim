@@ -43,8 +43,8 @@ kept 0.019 of its energy after 100 periods (0.996 without it).
   - stage 2 ends at `t0 + h` and starts from the pseudo previous state
     `x0* = x0 + ((1 − γ)/γ)(x1 − x0)`.
   The stage conductance `C/(γh)` is the trapezoidal companion at
-  `2γh`. Both stages share one factor per mask, kept by a second lazy
-  cache at that fixed step. Stateful devices extrapolate their
+  `2γh`. Both stages share one factor per mask, kept by the cache's
+  event table at that fixed step. Stateful devices extrapolate their
   charge/flux the same way; the flux row stays in conductance form. The
   trapezoidal rule is unchanged inside smooth segments.
 - **Triggers:**

@@ -255,6 +255,12 @@ opts.store_every              # int
   `simulate()` put in the step loop (`"switch_fn"`, `"b_extra_fn"`,
   `"step_observer"`, `"should_continue"`, `"closed_loops"`); `()` when the
   loop ran fully native (e.g. a `make_pwm_switch_fn` schedule)
+- `result.control_tick_counts` / `result.control_tick_jitter_max` — ticks
+  delivered per controller source, and the largest lateness on the `dt`
+  grid
+- `result.n_restart_steps` / `result.n_restart_factorizations` — SDIRK
+  restart steps taken and the factorisations they caused, with
+  `discontinuity_restart=True` (0 otherwise)
 
 ## Statistics over a result (time-weighted)
 

@@ -156,3 +156,22 @@ while applying it.
   - first-step test: the SDIRK amplification on steps 1–3, trapezoid
     on step 4, `n_restart_steps` 3.
   - snapshot `restart_pending` → `restart_steps_left`.
+
+## Integration with update-trbdf2-factor-reuse (2026-11-13)
+
+- **Where the stage factors live, revisited.** → The second lazy
+  cache is removed; the stages call `cache.solve_at(mask, 2γ·dt)`. →
+  The 8-entry LRU that motivated it became a byte-budgeted per-mask
+  table with an in-place refactor and the regime's shared symbolic
+  analysis. Measured, VSI 10 ms at dt = 1e-7: results bit-identical
+  (golden `vsi_pwl_restart`, `buck_pwl_restart`); 56 restart
+  factorisations = 56 event builds, 0 refactors; one symbolic analysis
+  and one structure build per run (the second cache ran its own). A
+  `refactor_parametric` (on_cache) now reaches the restart steps: it
+  clears the event table, which the private cache never saw.
+  `n_restart_factorizations` counts the event builds + refactors of the
+  restart solves. → Reverse: restore `restart_cache` in
+  `run_transient.hpp` (and refuse `on_cache` with the rule).
+- **Pulse current source** (add-controlled-source-set) → a jump source
+  like the pulse voltage source (`source_jumps.hpp`); the table current
+  source is continuous by validation and does not restart.
