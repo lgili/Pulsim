@@ -159,10 +159,11 @@ def render(diff, ana, notes):
     if L[-1].startswith("|---|---|---|---|"):
         L.append("| (none) | | | | |")
     L += ["", "### Edge diagnostic of every cell that disagrees on the gate", "",
-          "`edge err`: err_rms with the steps holding a recorded switch-state change (either",
-          "trace) and the source-forced nodes left out; `undersampled` when more than",
+          "`worst observable`: the one with the largest strict err_rms. `edge err`: err_rms",
+          "with the steps holding a recorded switch-state change (either trace) and the",
+          "source-forced nodes left out; `undersampled` when more than",
           f"{dr.EDGE_CAP:.0%} of the span is excluded, `chatter` when one trace records more than",
-          f"{dr.CHATTER:g}x the other's switch-state changes. `timing`: max |t_edge - t_edge,ref| over",
+          f"{dr.CHATTER:g}x the other's switch-state changes, `missed edges` when one never switches. `timing`: max |t_edge - t_edge,ref| over",
           "matched switching instants (`unmatched`: an instant without a partner), in s and in",
           "the engine's `dt` (pwl). Edge err within the tolerance and timing <= 1 step: the",
           "cell disagrees by edge timing; edge err above it: the states differ.", "",
@@ -196,7 +197,13 @@ def main(argv=None) -> int:
     warnings.simplefilter("ignore")
     if args.from_json:
         d = json.loads(Path(args.from_json).read_text())
+        if d.get("measure") != "interp":
+            raise SystemExit(f"{args.from_json}: not written on the strict gate (measure "
+                             f"{d.get('measure', d.get('metric'))!r}); re-run it")
         diff, ana = d["differential"], d["analytic"]
+        triage = dr.load_triage()                  # freezes as they are now, not as saved
+        for r in diff:
+            r["known"] = (triage[r["circuit"]].get("known") or {}).get(CONFIGS[r["config"]][0])
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in args.circuits.split(",")]
         diff, ana = differential(pats), analytic()

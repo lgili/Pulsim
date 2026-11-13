@@ -453,7 +453,7 @@ acceptance, through 1,645 roundoff accepts with a diverged state
 (I(Lm_core) ≈ 2.4e13 A from t = 0); a fix that makes it loud again is in
 progress.
 The differential matrix (strict gate: every observable, every interval)
-records 66 `disagree` / `error` cells over 56 circuits as `known:` in
+records 65 `disagree` / `error` cells over 55 circuits as `known:` in
 `benchmarks/manifests/v2_triage.yaml`,
 plus `sepic` on pwl and trbdf2, whose trbdf2 reference grinds to
 `max_steps` (a TR-BDF2 regression, not frozen; integrated tree,

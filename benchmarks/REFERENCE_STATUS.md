@@ -61,10 +61,11 @@ diagnostic below explains a disagreement and never decides one.
 
 ### Edge diagnostic of every cell that disagrees on the gate
 
-`edge err`: err_rms with the steps holding a recorded switch-state change (either
-trace) and the source-forced nodes left out; `undersampled` when more than
+`worst observable`: the one with the largest strict err_rms. `edge err`: err_rms
+with the steps holding a recorded switch-state change (either trace) and the
+source-forced nodes left out; `undersampled` when more than
 10% of the span is excluded, `chatter` when one trace records more than
-2x the other's switch-state changes. `timing`: max |t_edge - t_edge,ref| over
+2x the other's switch-state changes, `missed edges` when one never switches. `timing`: max |t_edge - t_edge,ref| over
 matched switching instants (`unmatched`: an instant without a partner), in s and in
 the engine's `dt` (pwl). Edge err within the tolerance and timing <= 1 step: the
 cell disagrees by edge timing; edge err above it: the states differ.
@@ -337,7 +338,9 @@ strict gate pwl, pwl+restart and trbdf2 are unchanged cell for cell
 repairs 2 events), and the analytic `halfwave_rl` error -> 5.7e-9. No
 `disagree` cell moves: the dsed disagreements are interpolation of
 switching-rate samples (`undersampled`, 16-100 % of the span in
-switching steps) or sit on a source node; none moved with the guard.
+switching steps), sit on a source node, or are linear-source accuracy
+(`pulse_voltage_rl` V(out) 1.97e-3, `core_loss_steinmetz_sine` I(L1)
+0.0106, 0 % excluded); none moved with the guard.
 The other 13 dsed `error` cells are unchanged: 8 "diode configuration
 did not settle" (the settle fails before the guard judges anything) and
 5 "no meaningful progress".

@@ -19,7 +19,8 @@ trace) and the nodes a voltage source ties to ground left out, the
 excluded fraction of the compared span, and the edge-timing mismatch
 between matched switching instants. Above ``EDGE_CAP`` excluded, or when
 one trace records ``CHATTER`` times the other's switch-state changes, the
-diagnostic is the word ``undersampled`` / ``chatter``, not a number. The
+diagnostic is the word ``undersampled`` / ``chatter`` (``missed edges`` when
+one trace never switches), not a number. The
 ngspice comparison is ``benchmark_ngspice.py`` (nightly job).
 
 Usage::
@@ -184,7 +185,13 @@ def diagnose(tr, ref, cols, scale, forced=(), step=None):
     fa, fb = (int(np.sum(s[1:] != s[:-1])) if s is not None else 0 for s in (sa, sb))
     d = dict(worst=worst, excluded_frac=frac, edge_rms=None,
              edge_timing_s=edge_timing(t, sa, tr_, sb, hi), edge_timing_steps=None)
-    if max(fa, fb) > CHATTER * max(min(fa, fb), 1):
+    busy = sa if fa >= fb else sb
+    if sa is not None and sb is not None and min(fa, fb) == 0 and max(fa, fb) > 1:
+        # one trace never switches: chatter if the other mostly undoes each change
+        # at the next sample, else it switches where this one does not
+        rev = int(np.sum((busy[1:-1] != busy[:-2]) & (busy[2:] == busy[:-2])))
+        d["edge"] = "chatter" if 2 * rev > max(fa, fb) else "missed edges"
+    elif min(fa, fb) > 0 and max(fa, fb) > CHATTER * min(fa, fb):
         d["edge"] = "chatter"
     elif frac > EDGE_CAP:
         d["edge"] = "undersampled"
