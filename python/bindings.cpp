@@ -2237,6 +2237,11 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("resolution_diagnostics",
+                        &SimulationOptions::resolution_diagnostics,
+                        "Record SimulationResult.resolution (truncation "
+                        "estimate + ringing detector) on the pwl engine. "
+                        "Read-only: states are bit-identical either way.")
         .def_readwrite("discontinuity_restart",
                         &SimulationOptions::discontinuity_restart,
                         "Fixed engine: take the step after a discontinuity "
@@ -2444,12 +2449,75 @@ void init_module(py::module_& m) {
                     c.iterations_per_solve.data());
             },
             "Iterations of each Newton call, in call order (uint16).");
+    py::class_<SimulationResult::RingingRecord>(m, "RingingRecord",
+        "A run of >= 4 sign-alternating steps of one state entry "
+        "(add-fixed-step-resolution-diagnostics).")
+        .def_readonly("var", &SimulationResult::RingingRecord::var)
+        .def_readonly("t_start", &SimulationResult::RingingRecord::t_start)
+        .def_readonly("length", &SimulationResult::RingingRecord::length)
+        .def_readonly("max_delta",
+                       &SimulationResult::RingingRecord::max_delta);
+    py::class_<SimulationResult::Resolution>(m, "ResolutionRecord",
+        "Fixed-step resolution diagnostics. `lte` is an ESTIMATE of "
+        "the per-step truncation relative to each variable's running "
+        "peak, not an error bound; stateful devices are not covered.")
+        .def_property_readonly("lte",
+            [](const SimulationResult::Resolution& r) {
+                return py::array_t<Real>(
+                    static_cast<py::ssize_t>(r.lte.size()), r.lte.data());
+            })
+        .def_readonly("lte_max", &SimulationResult::Resolution::lte_max)
+        .def_readonly("lte_branch",
+                       &SimulationResult::Resolution::lte_branch)
+        .def_readonly("lte_time", &SimulationResult::Resolution::lte_time)
+        .def_readonly("n_branches_covered",
+                       &SimulationResult::Resolution::n_branches_covered)
+        .def_readonly("ringing", &SimulationResult::Resolution::ringing);
 
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
         py::dynamic_attr())  // allow `result._builder = b` from Python
-        .def_readonly("times", &SimulationResult::times)
+        // update-fixed-step-loop-bookkeeping: `times` is a read-only
+        // zero-copy 1-D view like `states` (it was a list copied on
+        // every access). `list(res.times)` restores the old type.
+        .def_property_readonly("times",
+            [](py::object self) -> py::object {
+                const auto& tv = self.cast<const SimulationResult&>().times;
+                if (tv.empty()) {
+                    return py::array_t<Real>(0);
+                }
+                py::array_t<Real> arr(
+                    static_cast<py::ssize_t>(tv.size()), tv.data(), self);
+                arr.attr("setflags")(py::arg("write") = false);
+                return std::move(arr);
+            },
+            "Sample times as a read-only numpy view over the result "
+            "(zero-copy). `list(res.times)` gives the old list.")
+        .def_property_readonly("resolution",
+            [](py::object self) -> py::object {
+                const auto& r = self.cast<const SimulationResult&>();
+                if (!r.resolution.enabled) return py::none();
+                return py::cast(&r.resolution,
+                                py::return_value_policy::reference_internal,
+                                self);
+            },
+            "Resolution diagnostics of a pwl run (None when off, and "
+            "for trbdf2/dsed). See pulsim.ResolutionWarning.")
+        .def_property_readonly("counters",
+            [](const SimulationResult& r) {
+                py::dict d;
+                d["switch_fn_calls"] = r.switch_fn_calls;
+                d["segment_searches"] = r.segment_searches;
+                d["rollback_snapshots"] = r.rollback_snapshots;
+                return d;
+            },
+            "Fixed-step loop counters (pwl engine; 0 elsewhere): "
+            "`switch_fn_calls` (schedule evaluations in the step loop, "
+            "one per distinct solve time), `segment_searches` (segment "
+            "lookups not absorbed by the last-segment memo), "
+            "`rollback_snapshots` (steps whose pre-step state was "
+            "copied for a possible rollback).")
         .def_readonly("final_snapshot",
                        &SimulationResult::final_snapshot,
                        "Complete state at the end of the run. Pass "
@@ -2597,6 +2665,11 @@ void init_module(py::module_& m) {
                        "Factorisations made for the restart stages: one "
                        "per mask at 2*gamma*dt (more only if the segment "
                        "byte budget evicts). 0 with the rule off.")
+        .def_readonly("n_split_steps", &SimulationResult::n_split_steps,
+                       "Steps split at a gate edge, source jump or diode "
+                       "crossing inside them "
+                       "(enable_substep_state_correction). 0 with the "
+                       "split off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def_readonly("newton_roundoff_accepts",
@@ -2859,6 +2932,15 @@ void init_module(py::module_& m) {
         "at that point, so an on-time of a whole number of "
         "steps is exactly that many steps in every period. "
         "Usable as `switch_fn=` in simulate / run_transient.");
+
+    m.def("make_constant_switch_fn",
+        [](const topology::SwitchStateMask& mask) {
+            return sources::constant_schedule(mask);
+        },
+        py::arg("mask"),
+        "A SwitchSchedule that returns `mask` at every time (no "
+        "edges). Evaluated in C++: simulate() uses it for the pwl "
+        "engine's default when no switch_fn is given.");
 
     m.def("make_dead_time_pwm_pair_fn",
         &sources::make_dead_time_pwm_pair_fn,
@@ -3171,8 +3253,19 @@ void init_module(py::module_& m) {
            py::object resume_from_obj) {
             // Bridge.13: native schedules run their mask in C++ (no
             // Python __call__); the detection is shared by every engine.
-            const SwitchScheduleFn switch_fn =
-                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj).fn;
+            auto adapted =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            const SwitchScheduleFn switch_fn = std::move(adapted.fn);
+            // add-fixed-step-event-splitting: the schedule's edges, read
+            // only when enable_substep_state_correction splits steps.
+            // A Python schedule may declare its edges the same way, with a
+            // `next_edge_after(t)` method (the DSED engine reads it too).
+            std::function<Real(Real)> next_edge_fn =
+                std::move(adapted.next_edge);
+            if (!next_edge_fn && py::hasattr(switch_fn_obj, "next_edge_after")) {
+                next_edge_fn = switch_fn_obj.attr("next_edge_after")
+                                   .cast<std::function<Real(Real)>>();
+            }
             // add-discontinuity-restart-rule: a b_extra_fn may DECLARE
             // its jumps with a `next_jump_after(t)` attribute (first
             // jump strictly after t, inf when none); the restart rule
@@ -3250,7 +3343,8 @@ void init_module(py::module_& m) {
                                           x_init_ptr,
                                           continue_eff,
                                           resume_ptr,
-                                          b_extra_next_jump);
+                                          b_extra_next_jump,
+                                          next_edge_fn);
             }
             return result;
         },

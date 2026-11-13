@@ -46,7 +46,9 @@ namespace pulsim::solver {
 /// `t_estimated` is the linear-interpolated zero crossing of the
 /// watched signal (v_diode − turn_on_voltage for both directions on
 /// the pwl engine, see run_transient's interp_commutation_time)
-/// between two grid points. The state vectors
+/// between two grid points; with the fixed-step event split on it is
+/// the located crossing the step was split at (not a grid index). The
+/// state vectors
 /// themselves remain at the dt grid; only the COMMUTATION
 /// timestamp is sub-step accurate.
 struct CommutationEvent {
@@ -246,6 +248,37 @@ struct SimulationResult {
     /// Factorisations made for the restart stages (one per mask at
     /// 2γ·dt, more only if the segment byte budget evicts). 0 off.
     Size n_restart_factorizations = 0;
+    /// Steps split at an event inside them
+    /// (SimulationOptions::enable_substep_state_correction). 0 off.
+    Size n_split_steps = 0;
+    /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
+    /// `switch_fn` evaluations in the step loop, segment lookups the
+    /// last-segment memo did not absorb, and rollback snapshots taken.
+    /// add-fixed-step-resolution-diagnostics (`pwl` dynamic path).
+    struct RingingRecord {
+        Index var = kInvalidIndex;   ///< state-vector entry
+        Real t_start = 0;            ///< end of the run's first alternating step
+        Size length = 0;             ///< alternating steps in the run
+        Real max_delta = 0;          ///< largest |x_k − x_{k−1}| in the run
+    };
+    struct Resolution {
+        bool enabled = false;
+        /// Per stored sample: max over the steps since the previous one
+        /// of max_i (h/12)|f_{k+1} − 2f_k + f_{k−1}| / running peak |y_i|
+        /// (f = dy/dt of capacitor voltage / inductor current). 0 where
+        /// the stencil is invalid (mask change, restart, split, retry,
+        /// source jump, first two steps).
+        std::vector<Real> lte;
+        Real lte_max = 0;
+        Index lte_branch = kInvalidIndex;
+        Real lte_time = 0;
+        Size n_branches_covered = 0;
+        std::vector<RingingRecord> ringing;
+    };
+    Resolution resolution;
+    Size switch_fn_calls = 0;
+    Size segment_searches = 0;
+    Size rollback_snapshots = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

@@ -154,6 +154,16 @@ you build the cache yourself.
 
 ### Symptom: ringing or instability with reasonable circuits
 
+The fixed engine reports it: `pulsim.ResolutionWarning` (once per run)
+names the variable and the time, and `res.resolution` holds `lte_max`
+(per-step truncation estimate over the variable's peak, threshold 1e-2)
+and `ringing` (runs of >= 4 sign-alternating steps). RC stepped at
+`dt = 10τ`: 0.35 and a run of 8 on `V(out)`; at `τ/10`: 3.3e-4, silent.
+The estimate is not a bound and does not cover the stateful devices'
+internal states: no warning is not a proof (halve `dt`). Silence it with
+`warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)`
+or `simulate(..., resolution_diagnostics=False)`.
+
 If `dt` is too large compared to the system's smallest time constant, the trapezoidal companion can ring (overshoot a true exponential by 10-20 %).
 
 **Heuristic:** use `dt ≤ min(τ) / 10` where `τ` are the RC and L/R time constants. For switching circuits, also enforce `dt ≤ T_PWM / 200` (catch the ON/OFF edge within 1 sample even when the PWM frequency drifts).

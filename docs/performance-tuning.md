@@ -45,9 +45,11 @@ opts.tol_newton_res = 1e-9       # |F(x)|∞ termination (absolute)
 opts.enable_newton_line_search = True   # Armijo backtracking
 opts.enable_newton_lm = True            # Levenberg-Marquardt trust region
 
-# Sub-step state correction — when a commutation event lands inside
-# a fixed-dt step, split the step in two at the linearly-interpolated
-# crossing instant. Big accuracy win on PWM converters; small cost.
+# Event splitting — a gate edge (schedules with next_edge_after), a
+# source jump or a diode crossing inside a fixed-dt step splits it
+# there (needs the restart rule). Buck at T/100: +7..10 % per step,
+# second order for edges off the grid.
+opts.discontinuity_restart = True
 opts.enable_substep_state_correction = True
 
 # Event-detection iteration cap.
@@ -62,10 +64,23 @@ res = p.simulate(
     b, t_end=1e-3, dt=1e-6,
     enable_nonlinear_refresh=True,
     enable_newton_line_search=True,
+    discontinuity_restart=True,
     enable_substep_state_correction=True,
     max_newton_iterations=50,
 )
 ```
+
+## Loop counters
+
+`res.counters` (fixed engine) reports what the step loop did:
+`switch_fn_calls` (one per step, plus one per extra solve time of a
+retry or split sub-step), `segment_searches` (segment lookups; the loop
+reuses the last segment while the mask and the cache generation are
+unchanged, so it counts mask changes between solves, plus one), and
+`rollback_snapshots` (0 when `max_dt_halvings=0` and neither the
+restart rule nor the split is on). Prefer a C++ schedule
+(`make_pwm_switch_fn`, `make_constant_switch_fn`, ...) over a Python
+callable: the callback is one GIL round-trip per step.
 
 ## Cache + scaling
 
