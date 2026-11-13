@@ -19,8 +19,8 @@ Reference values.
   N = 50, 100, 200, 400 (`probes/sdirk_restart_ideal.out` (3)).
 
 ## 1. Characterisation (no behaviour change)
-- [ ] 1.1 Port `probes/current_kernel_goff0.py` as tests of today's behaviour: `g_on = inf` aborts with "numerically singular"; `g_off = 0` opened on 9.93 A gives ±397 V on `pwl` and above 1e10 V on `trbdf2`, with no warning
-- [ ] 1.2 Port `probes/branch_form.py` and `probes/sdirk_restart_ideal.py` as dense references for the stamp, the cut-set, the capacitor loop and the ideal DCM buck
+- [x] 1.1 Port `probes/current_kernel_goff0.py` as tests of today's behaviour: `g_on = inf` aborts with "numerically singular"; `g_off = 0` opened on 9.93 A gives ±397 V on `pwl` and above 1e10 V on `trbdf2`, with no warning. Measured on this kernel: ±396.8 V on `v_b` at `dt = τ/20` (`pwl`), 2.35e9 V (`trbdf2`, pinned `> 1e9`) (`python/tests/test_switch_conductance_today.py`)
+- [x] 1.2 Port `probes/branch_form.py` and `probes/sdirk_restart_ideal.py` as dense references for the stamp, the cut-set, the capacitor loop and the ideal DCM buck (`python/tests/oracles/ideal_switch_reference.py`, pinned to `probes/sdirk_restart_ideal.out` by `python/tests/test_ideal_switch_reference.py`)
 
 ## 2. Validation of the conductance form
 - [ ] 2.1 `add_switch`, `add_diode`, YAML: `g_on` finite and > 0, `g_off` finite and ≥ 0; error names the device and the field (**BREAKING** for invalid values)
