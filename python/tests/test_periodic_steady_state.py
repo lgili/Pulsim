@@ -328,6 +328,38 @@ def test_commensurate_sine_source_is_solved():
     assert abs(fd[0] - r.monodromy[0, 0]) < 1e-6
 
 
+@pytest.mark.parametrize("kind", ["sine", "pulse", "pwl"])
+def test_waveform_current_sources_and_vccs_are_solved(kind):
+    """The add-controlled-source-set kinds reach the map through the
+    dsed adapter: the orbit equals a tight TR-BDF2 transient (measured
+    agreement 5e-8 relative, ideal pulse edges included)."""
+    Tp = 1e-3
+
+    def build():
+        b = p.CircuitBuilder()
+        if kind == "sine":
+            b.add_sine_current_source("I", "gnd", "o", 0.0, 1e-3, 1 / Tp)
+        elif kind == "pulse":
+            b.add_pulse_current_source("I", "gnd", "o", 0.0, 1e-3, 1e-4,
+                                       3e-4, Tp, 0.0, 0.0)
+        else:
+            b.add_pwl_current_source("I", "gnd", "o", [0, 2e-4, 6e-4, Tp],
+                                     [0, 1e-3, -1e-3, 0], periodic=True)
+        b.add_resistor("R", "o", "gnd", 1e3)
+        b.add_capacitor("C", "o", "gnd", 1e-6)
+        b.add_vccs("G", "o", "gnd", "gnd", "q", 1e-3)
+        b.add_resistor("Rq", "q", "gnd", 1e3)
+        b.add_capacitor("Cq", "q", "gnd", 1e-6)
+        return b
+
+    r = p.periodic_steady_state(build(), period=Tp)
+    tr = p.simulate(build(), 30 * Tp, engine="trbdf2", rtol=1e-9,
+                    atol=1e-12)
+    x_tr = np.array([tr.v(lbl[2:-1])[-1] for lbl in r.state_labels])
+    assert sorted(r.state_labels) == ["v(o)", "v(q)"]
+    assert np.abs(r.x0 - x_tr).max() < 1e-6
+
+
 def test_lossless_lc_loop_is_not_isolated():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 1.0)
