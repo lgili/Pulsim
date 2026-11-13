@@ -293,7 +293,7 @@ inline SimulationResult run_transient(
     const topology::Graph& graph,
     const pwl::DevicePool& pool,
     const SimulationOptions& opts,
-    const SwitchScheduleFn& switch_fn,
+    const SwitchScheduleFn& switch_fn_user,
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
     const pwl::NonlinearRefreshFn& nl_refresh = {},
@@ -335,10 +335,19 @@ inline SimulationResult run_transient(
             "that contains an event with the restart rule's SDIRK "
             "window); set both, or neither");
     }
-    if (!switch_fn) {
+    if (!switch_fn_user) {
         throw std::invalid_argument(
             "run_transient: switch_fn callback is required");
     }
+    // Every mask the caller hands in has the circuit's width (a short
+    // one silently dropped bits, e.g. a branch-form diode's).
+    const SwitchScheduleFn switch_fn =
+        [&switch_fn_user, n_sw = static_cast<Size>(graph.num_switches())](
+            Real t_q) {
+            auto m = switch_fn_user(t_q);
+            topology::require_mask_width(m, n_sw);
+            return m;
+        };
     // The cache's dt must match opts.dt. If the user built the
     // cache for a different dt, the trap companion's g_eq is wrong
     // and the solution silently drifts. Catch up-front.

@@ -253,11 +253,28 @@ void init_module(py::module_& m) {
         .def(py::init<Size>(), py::arg("num_switches") = 0)
         .def("set",
               [](topology::SwitchStateMask& self,
-                 Size i, bool v) { self.set(i, v); },
+                 Size i, bool v) {
+                  // An index past the width wrote a bit nothing reads.
+                  if (i >= self.size()) {
+                      throw py::index_error(
+                          "SwitchStateMask.set: bit " + std::to_string(i) +
+                          " is out of range for a mask of width " +
+                          std::to_string(self.size()));
+                  }
+                  self.set(i, v);
+              },
               py::arg("i"), py::arg("v"),
               "Set switch `i` to state `v` (True=ON).")
         .def("get",
-              &topology::SwitchStateMask::get,
+              [](const topology::SwitchStateMask& self, Size i) {
+                  if (i >= self.size()) {
+                      throw py::index_error(
+                          "SwitchStateMask.get: bit " + std::to_string(i) +
+                          " is out of range for a mask of width " +
+                          std::to_string(self.size()));
+                  }
+                  return self.get(i);
+              },
               py::arg("i"),
               "Return True if switch `i` is ON.")
         .def_property_readonly("size",
@@ -4773,8 +4790,8 @@ void init_module(py::module_& m) {
             // function in pure C++ AND hands the stepper its analytic
             // next_edge_after — edge landing then costs zero Python
             // round-trips and no bisection.
-            auto adapted =
-                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            auto adapted = pulsim_bindings_common::adapt_switch_fn(
+                switch_fn_obj, static_cast<Size>(graph.num_switches()));
             const solver::SwitchScheduleFn switch_fn = std::move(adapted.fn);
             const std::function<Real(Real)> next_edge_fn =
                 std::move(adapted.next_edge);

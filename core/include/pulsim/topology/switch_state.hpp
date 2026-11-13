@@ -262,6 +262,21 @@ private:
     std::vector<std::uint64_t> ext_;   // engaged only above kInlineBits
 };
 
+/// Refuse a caller's mask whose width is not the circuit's switch
+/// count. A narrower mask used to drop the missing bits silently (the
+/// overlay takes the user mask's width), a wider one carried bits
+/// nothing reads. `who` names the entry point in the message.
+inline void require_mask_width(const SwitchStateMask& m, Size expected,
+                               const char* who = "switch_fn") {
+    if (m.size() == expected) return;
+    throw std::invalid_argument(
+        std::string(who) + " returned a SwitchStateMask of width " +
+        std::to_string(m.size()) + "; this circuit has " +
+        std::to_string(expected) +
+        " switch bits (graph.num_switches): build masks as "
+        "SwitchStateMask(graph.num_switches) and .set(i, True)");
+}
+
 }  // namespace pulsim::topology
 
 // -----------------------------------------------------------------------------

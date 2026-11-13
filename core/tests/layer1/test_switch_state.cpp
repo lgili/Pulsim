@@ -184,3 +184,19 @@ TEST_CASE("to_string emits a binary representation",
     REQUIRE(s.find("0b") != std::string::npos);
     REQUIRE(s.find("N=4") != std::string::npos);
 }
+
+TEST_CASE("require_mask_width refuses a mask of another width",
+          "[v2][layer1][switch_state]") {
+    SwitchStateMask m(2);
+    REQUIRE_NOTHROW(require_mask_width(m, 2));
+    try {
+        require_mask_width(SwitchStateMask(1), 3);
+        FAIL("a 1-bit mask on a 3-switch circuit was accepted");
+    } catch (const std::invalid_argument& e) {
+        const std::string s = e.what();
+        REQUIRE(s.find("width 1") != std::string::npos);
+        REQUIRE(s.find("has 3 switch bits") != std::string::npos);
+    }
+    REQUIRE_THROWS_AS(require_mask_width(SwitchStateMask(4), 3),
+                      std::invalid_argument);
+}

@@ -60,4 +60,16 @@ inline SwitchFnAdapter adapt_switch_fn(const pybind11::object& obj) {
     return a;
 }
 
+/// Same, refusing every mask whose width is not `num_switches`.
+inline SwitchFnAdapter adapt_switch_fn(const pybind11::object& obj,
+                                       pulsim::Size num_switches) {
+    SwitchFnAdapter a = adapt_switch_fn(obj);
+    a.fn = [fn = std::move(a.fn), num_switches](pulsim::Real t) {
+        auto m = fn(t);
+        pulsim::topology::require_mask_width(m, num_switches);
+        return m;
+    };
+    return a;
+}
+
 }  // namespace pulsim_bindings_common

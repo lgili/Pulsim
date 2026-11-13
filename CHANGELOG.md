@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Switch masks of the wrong width are refused
+
+* **Fixed** (silent wrong answer; **BREAKING** for invalid input only): a
+  `switch_fn` or schedule returning a `SwitchStateMask` whose width is not
+  `graph.num_switches` raises `ValueError` naming both widths, on `pwl`,
+  `trbdf2`, `dsed` and `run_transient_bdf1`. Before, the user mask's width
+  won the overlay, so a narrower mask silently dropped the missing bits (a
+  branch-form diode's, or a diode's on any engine). `SwitchStateMask.set` /
+  `.get` past the width raise `IndexError` (the bit was written where
+  nothing reads it). No shipped example, doc snippet or test relied on a
+  short mask (the `SwitchStateMask(0)` snippets drive switchless circuits).
+
 ### Fixed engine: restart/split checkpoint-review fixes
 
 * A restart stage-2 backward-Euler re-try that throws (now forced in a

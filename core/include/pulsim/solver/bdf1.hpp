@@ -270,17 +270,24 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
 [[nodiscard]] inline SimulationResult run_transient_bdf1(
     const builder::CircuitBuilder& builder,
     const SimulationOptions& opts,
-    const SwitchScheduleFn& switch_fn,
+    const SwitchScheduleFn& switch_fn_user,
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
     const StepObserverFn& step_observer = {},
     const ShouldContinueFn& should_continue = {}) {
+    const SwitchScheduleFn switch_fn =
+        [&switch_fn_user,
+         n_sw = static_cast<Size>(builder.graph().num_switches())](Real t_q) {
+            auto m = switch_fn_user(t_q);
+            topology::require_mask_width(m, n_sw);
+            return m;
+        };
 
     if (!opts.valid()) {
         throw std::invalid_argument(
             "run_transient_bdf1: invalid SimulationOptions");
     }
-    if (!switch_fn) {
+    if (!switch_fn_user) {
         throw std::invalid_argument(
             "run_transient_bdf1: switch_fn is required");
     }

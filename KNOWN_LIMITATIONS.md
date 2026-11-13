@@ -271,6 +271,14 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### Switch-mask width: checked at the Python entry points and on `pwl`
+
+A mask whose width is not `graph.num_switches` is refused on every
+engine reached from Python and on the C++ `run_transient` /
+`run_transient_bdf1`. The C++ `trbdf2` and `dsed` kernels
+(`trbdf2_transient.hpp`, `dsed/scheduler*.hpp`) called directly from C++
+do not check it yet; their Python bindings do.
+
 ### Ideal switch (branch form): opt-in, first slice
 
 `add_ideal_switch` / `add_diode(form='branch')` solve the switch current
