@@ -2014,7 +2014,36 @@ void init_module(py::module_& m) {
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
         py::dynamic_attr())  // allow `result._builder = b` from Python
-        .def_readonly("times", &SimulationResult::times)
+        // update-fixed-step-loop-bookkeeping: `times` is a read-only
+        // zero-copy 1-D view like `states` (it was a list copied on
+        // every access). `list(res.times)` restores the old type.
+        .def_property_readonly("times",
+            [](py::object self) -> py::object {
+                const auto& tv = self.cast<const SimulationResult&>().times;
+                if (tv.empty()) {
+                    return py::array_t<Real>(0);
+                }
+                py::array_t<Real> arr(
+                    static_cast<py::ssize_t>(tv.size()), tv.data(), self);
+                arr.attr("setflags")(py::arg("write") = false);
+                return std::move(arr);
+            },
+            "Sample times as a read-only numpy view over the result "
+            "(zero-copy). `list(res.times)` gives the old list.")
+        .def_property_readonly("counters",
+            [](const SimulationResult& r) {
+                py::dict d;
+                d["switch_fn_calls"] = r.switch_fn_calls;
+                d["segment_searches"] = r.segment_searches;
+                d["rollback_snapshots"] = r.rollback_snapshots;
+                return d;
+            },
+            "Fixed-step loop counters (pwl engine; 0 elsewhere): "
+            "`switch_fn_calls` (schedule evaluations in the step loop, "
+            "one per distinct solve time), `segment_searches` (segment "
+            "lookups not absorbed by the last-segment memo), "
+            "`rollback_snapshots` (steps whose pre-step state was "
+            "copied for a possible rollback).")
         .def_readonly("final_snapshot",
                        &SimulationResult::final_snapshot,
                        "Complete state at the end of the run. Pass "
@@ -2418,6 +2447,15 @@ void init_module(py::module_& m) {
         "at that point, so an on-time of a whole number of "
         "steps is exactly that many steps in every period. "
         "Usable as `switch_fn=` in simulate / run_transient.");
+
+    m.def("make_constant_switch_fn",
+        [](const topology::SwitchStateMask& mask) {
+            return sources::constant_schedule(mask);
+        },
+        py::arg("mask"),
+        "A SwitchSchedule that returns `mask` at every time (no "
+        "edges). Evaluated in C++: simulate() uses it for the pwl "
+        "engine's default when no switch_fn is given.");
 
     m.def("make_dead_time_pwm_pair_fn",
         &sources::make_dead_time_pwm_pair_fn,

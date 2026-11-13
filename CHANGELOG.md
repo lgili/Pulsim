@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed engine: step-loop bookkeeping (results bit-identical)
+
+The `pwl` step loop does less per step; every trajectory, switch state,
+event record and retry is bit-identical to before (69 probe runs,
+restart rule off/on/split, compared by value and by bytes).
+
+- **BREAKING (type):** `res.times` is a read-only zero-copy numpy view
+  (base: the result), not a list copied on every access. Indexing,
+  `len`, slicing, `np.asarray` work as before; `list(res.times)` gives
+  the old list. A 100 k-sample access: 2.85 ms → 0.01 ms.
+- `switch_fn` is evaluated once per distinct solve time in a step (two
+  per step before: the pre-event mask, then once per event iteration).
+  Contract: `switch_fn` is a function of `t` and of state written by
+  `step_observer`; a callable that changes on each call sees fewer
+  calls.
+- No `switch_fn`: the default mask (all closed on `pwl`, all open on
+  `trbdf2`, warnings unchanged) is a C++ schedule
+  (`pulsim.make_constant_switch_fn(mask)`), not a Python lambda.
+- New `res.counters`: `switch_fn_calls`, `segment_searches`,
+  `rollback_snapshots`.
+
+| ns/step, interleaved A/B, best of 5 | before | after |
+|---|---|---|
+| buck (`make_pwm_switch_fn`) | 173 | 131 |
+| buck, restart rule / split | 210 / 196 | 140 / 140 |
+| three-phase VSI | 358 | 261 |
+| RLC n=5, no `switch_fn` | 350 | 125 |
+| RLC n=1502 | 36 015 | 34 082 |
+
 ### Fixed engine: event splitting (opt-in, needs the restart rule)
 
 `simulate(..., discontinuity_restart=True,

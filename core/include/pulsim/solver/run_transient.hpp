@@ -727,7 +727,7 @@ inline SimulationResult run_transient(
     // Phase-1 zero-alloc scope.)
     Vector x_prev;                                  // pre-step state snapshot
     pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
-    std::vector<pwl::HistoryEntry> history_snap;    // V3 rollback snapshot
+    std::vector<Real> history_snap;                 // rollback: (v_prev, i_prev) pairs
     // Phase 4 C.1 — the Coss rolls back with everything else. The
     // saturable inductor cannot, which is the second reason it
     // refuses a variable step; this device was given the
@@ -772,23 +772,57 @@ inline SimulationResult run_transient(
     // PWM/sine/pulse helpers otherwise allocate + zero a state-size vector AND
     // scan every branch on every step; detect ONCE which kinds the circuit
     // contains, then reuse buffers and skip absent kinds in the hot loops.
-    bool has_pwm = false, has_sine = false, has_pulse = false;
+    // update-fixed-step-loop-bookkeeping: the (branch, row) lists are
+    // built once, in the branch order of the dense passes, and each step
+    // writes its rows directly. `b[row] += (0 + (−v))` is the dense pass's
+    // `out[row] += −v` on a zeroed buffer followed by `b += out`, bit for
+    // bit; the rows a source does not own skip `b + (+0.0)`, which only
+    // differs from `b` for a −0.0 entry (checked by byte comparison).
+    using SrcRows = std::vector<std::pair<Index, Index>>;
+    SrcRows pwm_rows, sine_rows, pulse_rows;
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind != topology::BranchKind::Source) {
+        const auto& br = graph.branch(b_id);
+        if (br.kind != topology::BranchKind::Source) {
             continue;
         }
-        switch (pool.kind_of(b_id)) {
+        switch (pool.kind_of(br.id)) {
         case pwl::DevicePool::StoredKind::PWMVoltageSource:
-            has_pwm = true; break;
+            pwm_rows.emplace_back(br.id,
+                pool.branch_var_id_for_source(br.id, graph)); break;
         case pwl::DevicePool::StoredKind::SineVoltageSource:
-            has_sine = true; break;
+            sine_rows.emplace_back(br.id,
+                pool.branch_var_id_for_source(br.id, graph)); break;
         case pwl::DevicePool::StoredKind::PulseVoltageSource:
-            has_pulse = true; break;
+            pulse_rows.emplace_back(br.id,
+                pool.branch_var_id_for_source(br.id, graph)); break;
         default:
             break;
         }
     }
-    Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
+    const bool has_pwm = !pwm_rows.empty();
+    const bool has_pulse = !pulse_rows.empty();
+    // `src_t`: PWM/pulse sample time; `sine_t`: the sine's; `lb`: a
+    // jumping source at `src_t` reads value_at(src_t − lb) (as the dense
+    // passes did).
+    auto add_source_rows = [&](Vector& b, Real src_t, Real sine_t,
+                               Real lb) {
+        const auto read_t = [&](Index id) {
+            return lb > Real{0} && sources::source_jumps_at(pool, id, src_t)
+                ? src_t - lb : src_t;
+        };
+        for (const auto& [id, row] : pwm_rows) {
+            b[row] += Real{0} + -models::PWMVoltageSource::value_at(
+                pool.pwm_voltage_source_params(id), read_t(id));
+        }
+        for (const auto& [id, row] : sine_rows) {
+            b[row] += Real{0} + -models::SineVoltageSource::value_at(
+                pool.sine_voltage_source_params(id), sine_t);
+        }
+        for (const auto& [id, row] : pulse_rows) {
+            b[row] += Real{0} + -models::PulseVoltageSource::value_at(
+                pool.pulse_voltage_source_params(id), read_t(id));
+        }
+    };
 
     // Is a smaller step even capable of helping? Reachability to
     // ground is a property of the GRAPH, not of dt, so a circuit
@@ -822,6 +856,54 @@ inline SimulationResult run_transient(
         pwl::detail::components_without_ground(
             graph, [](const topology::Branch&) { return true; })
             .empty();
+
+    // ---- update-fixed-step-loop-bookkeeping ----
+    // The step's rollback snapshots are read only by the dt-retry ladder,
+    // the restart rule's re-take and the split; without any of them they
+    // are not taken (`rollback_snapshots` counts the ones that are).
+    const bool may_roll_back = dt_retry_can_help ||
+        opts.discontinuity_restart || opts.enable_substep_state_correction;
+    // Event-iteration cycle scratch, hoisted (reset per iteration).
+    std::array<topology::SwitchStateMask, 64> masks_seen{};
+    Size n_masks_seen = 0;
+    // `switch_fn` once per distinct solve time within an outer step:
+    // the observer runs before the first read, so a schedule that is a
+    // function of t and of observer-written state sees the same masks.
+    constexpr Size kGateMemo = 16;
+    std::array<Real, kGateMemo> gate_memo_t{};
+    std::array<topology::SwitchStateMask, kGateMemo> gate_memo_m{};
+    Size gate_memo_n = 0;
+    auto gate_at = [&](Real tq) -> const topology::SwitchStateMask& {
+        for (Size q = 0; q < gate_memo_n; ++q) {
+            if (gate_memo_t[q] == tq) return gate_memo_m[q];
+        }
+        ++result.switch_fn_calls;
+        const Size slot = gate_memo_n < kGateMemo ? gate_memo_n++
+                                                  : kGateMemo - 1;
+        gate_memo_t[slot] = tq;
+        gate_memo_m[slot] = switch_fn(tq);
+        return gate_memo_m[slot];
+    };
+    // Last nominal-dt segment, valid while the cache generation holds
+    // (a lazy insert/eviction or a parametric refactor bumps it). A hit
+    // still writes the LRU tick, so eviction order is unchanged.
+    topology::SwitchStateMask seg_memo_mask;
+    const pwl::PwlSegment* seg_memo = nullptr;
+    std::uint64_t seg_memo_gen = 0;
+    auto nominal_segment =
+        [&](const topology::SwitchStateMask& m) -> const pwl::PwlSegment& {
+        if (seg_memo != nullptr && seg_memo_gen == cache.generation() &&
+            seg_memo_mask == m) {
+            cache.touch_segment(*seg_memo);
+            return *seg_memo;
+        }
+        ++result.segment_searches;
+        const auto& seg = cache.lookup(m);
+        seg_memo = &seg;
+        seg_memo_mask = m;
+        seg_memo_gen = cache.generation();
+        return seg;
+    };
 
     // v2.0 Phase 2: one accumulator for the step's right-hand side,
     // used by the nominal step, by both halves of the sub-step
@@ -879,20 +961,7 @@ inline SimulationResult run_transient(
         if (b_extra_fn) {
             b_extra += b_extra_fn(b_read_t(at_t));
         }
-        if (has_pwm) {
-            sources::compute_pwm_b_extra(pool, graph, src_t, be_pwm,
-                                         left_by);
-            b_extra += be_pwm;
-        }
-        if (has_sine) {
-            sources::compute_sine_b_extra(pool, graph, at_t, be_sine);
-            b_extra += be_sine;
-        }
-        if (has_pulse) {
-            sources::compute_pulse_b_extra(pool, graph, src_t, be_pulse,
-                                           left_by);
-            b_extra += be_pulse;
-        }
+        add_source_rows(b_extra, src_t, at_t, left_by);
     };
 
     // v2.0 Phase 2: a run that dies part-way keeps what it computed.
@@ -1007,6 +1076,7 @@ inline SimulationResult run_transient(
             if (step_observer) {
                 step_observer(t, x_prev);
             }
+            gate_memo_n = 0;
             // ---- add-fixed-step-event-splitting: the step's events ----
             // Gate edges from the schedule's oracle and built-in source
             // jumps inside [t_prev + snap, t - snap), in time order. One
@@ -1035,19 +1105,19 @@ inline SimulationResult run_transient(
                     }
                     Real e = edge_next;
                     if (e < t) {
-                        auto gate_mask = switch_fn(t_prev);
+                        topology::SwitchStateMask gate_mask = gate_at(t_prev);
                         for (Size q = 0; q < 4 * kMaxStepEvents && e < t; ++q) {
                             if (e < t - snap) {
                                 // A no-op edge (same mask both sides) is
                                 // not an event.
-                                auto m = switch_fn(e);
+                                const auto& m = gate_at(e);
                                 if (!(m == gate_mask)) {
                                     if (e < t_prev + snap) {
                                         gate_t = e;
                                     } else {
                                         push_ev(e);
                                     }
-                                    gate_mask = std::move(m);
+                                    gate_mask = m;
                                 }
                             }
                             edge_from = e;
@@ -1084,21 +1154,24 @@ inline SimulationResult run_transient(
             // dynamic-branch). Restored only if a commutation
             // event is detected AND
             // enable_substep_state_correction is true.
-            history.snapshot_into(history_snap);
-            coss_snap = coss_history.snapshot();
-            laur_snap = laur_history.snapshot();
-            pmsm_snap = pmsm_history.snapshot();
-            tail_snap = tail_history.snapshot();
-            sat_snap = sat_history.snapshot();
-            if (has_diodes) {
-                diodes.snapshot_on_bits_into(diodes_snap);
-            } else {
-                diodes_snap.clear();
+            if (may_roll_back) {
+                ++result.rollback_snapshots;
+                history.snapshot_into(history_snap);
+                coss_snap = coss_history.snapshot();
+                laur_snap = laur_history.snapshot();
+                pmsm_snap = pmsm_history.snapshot();
+                tail_snap = tail_history.snapshot();
+                sat_snap = sat_history.snapshot();
+                if (has_diodes) {
+                    diodes.snapshot_on_bits_into(diodes_snap);
+                } else {
+                    diodes_snap.clear();
+                }
             }
             // Pre-event mask: what mask we'd use BEFORE any
             // diode flip during this step. Captured before
             // event iteration runs.
-            topology::SwitchStateMask mask_pre = switch_fn(gate_t);
+            topology::SwitchStateMask mask_pre = gate_at(gate_t);
             if (has_diodes) {
                 mask_pre = combine_masks(
                     mask_pre, diodes.current_diode_mask(),
@@ -1127,8 +1200,7 @@ inline SimulationResult run_transient(
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            std::array<topology::SwitchStateMask, 64> masks_seen{};
-            Size n_masks_seen = 0;
+            n_masks_seen = 0;
 
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
@@ -1173,7 +1245,7 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             do {
-                auto mask = switch_fn(restart_rule ? gate_t : at_t);
+                auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
                     const auto diode_mask =
                         diodes.current_diode_mask();
@@ -1205,7 +1277,7 @@ inline SimulationResult run_transient(
                 }
                 if (nl_refresh_effective) {
                     if (for_dt == opts.dt) {
-                        const auto& seg = cache.lookup(mask);
+                        const auto& seg = nominal_segment(mask);
                         x = pwl::solve_with_newton_b_extra(
                             seg, nl_refresh_effective, graph, pool,
                             /*x_init=*/x, b_extra,
@@ -1240,6 +1312,9 @@ inline SimulationResult run_transient(
                     // nothing extra.
                     if (restart_cache && for_dt == restart_dt) {
                         restart_cache->solve(mask, b_extra, x);
+                    } else if (for_dt == opts.dt && for_dt == cache.dt()) {
+                        // == solve_at's delegation to solve(mask, …)
+                        cache.solve_segment(nominal_segment(mask), b_extra, x);
                     } else {
                         cache.solve_at(mask, for_dt, b_extra, x);
                     }
@@ -1989,6 +2064,7 @@ inline SimulationResult run_transient(
             if (step_observer) {
                 step_observer(t, x_prev);
             }
+            gate_memo_n = 0;
 
             // Accumulate into the reused buffer (audit #6/#16): optional user
             // fn, then present built-in source kinds. No trap history on the
@@ -2005,20 +2081,7 @@ inline SimulationResult run_transient(
             if (b_extra_fn) {
                 b_extra += b_extra_fn(k > 0 ? b_read_t(t) : t);
             }
-            if (has_pwm) {
-                sources::compute_pwm_b_extra(pool, graph, t, be_pwm,
-                                             src_left);
-                b_extra += be_pwm;
-            }
-            if (has_sine) {
-                sources::compute_sine_b_extra(pool, graph, t, be_sine);
-                b_extra += be_sine;
-            }
-            if (has_pulse) {
-                sources::compute_pulse_b_extra(pool, graph, t, be_pulse,
-                                               src_left);
-                b_extra += be_pulse;
-            }
+            add_source_rows(b_extra, t, t, src_left);
             const Vector& b_extra_user = b_extra;
 
             Size iters = 0;
@@ -2027,8 +2090,7 @@ inline SimulationResult run_transient(
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            std::array<topology::SwitchStateMask, 64> masks_seen{};
-            Size n_masks_seen = 0;
+            n_masks_seen = 0;
 
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
@@ -2049,7 +2111,7 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             do {
-                auto mask = switch_fn(gate_t);
+                auto mask = gate_at(gate_t);
                 if (has_diodes) {
                     const auto diode_mask =
                         diodes.current_diode_mask();
@@ -2080,7 +2142,7 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (nl_refresh_effective) {
-                    const auto& seg = cache.lookup(mask);
+                    const auto& seg = nominal_segment(mask);
                     x = pwl::solve_with_newton_b_extra(
                         seg, nl_refresh_effective, graph, pool,
                         /*x_init=*/x, b_extra_user,
@@ -2090,7 +2152,7 @@ inline SimulationResult run_transient(
                         opts.enable_newton_line_search,
                         opts.enable_newton_lm);
                 } else {
-                    cache.solve(mask, b_extra_user, x);
+                    cache.solve_segment(nominal_segment(mask), b_extra_user, x);
                 }
                 stamped_mask = mask;
                 stamped_known = true;

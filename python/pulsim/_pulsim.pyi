@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -1167,6 +1167,11 @@ class SimulationResult:
     def commutation_events(self) -> list[CommutationEvent]:
         ...
     @property
+    def counters(self) -> dict[typing.Any, typing.Any]:
+        """
+        Fixed-step loop counters (pwl engine; 0 elsewhere): `switch_fn_calls` (schedule evaluations in the step loop, one per distinct solve time), `segment_searches` (segment lookups not absorbed by the last-segment memo), `rollback_snapshots` (steps whose pre-step state was copied for a possible rollback).
+        """
+    @property
     def dt_retries(self) -> list[DtRetry]:
         """
         Steps that had to be re-taken at a reduced dt. Empty on a run that never needed one.
@@ -1218,8 +1223,10 @@ class SimulationResult:
         Bytes held by the stamped-mask record.
         """
     @property
-    def times(self) -> list[float]:
-        ...
+    def times(self) -> typing.Any:
+        """
+        Sample times as a read-only numpy view over the result (zero-copy). `list(res.times)` gives the old list.
+        """
     @property
     def total_bytes(self) -> int:
         """
@@ -2500,6 +2507,10 @@ def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: colle
 def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[typing.Any]) -> SwitchSchedule:
     """
     Compose multiple switch_fn callbacks into a single SwitchSchedule whose mask is the bitwise OR of all sub-masks. Useful for combining e.g. a primary-side PWM helper with a sync-rectifier helper where each drives different switch indices. Its `next_edge_after` is the earliest edge of the parts when every part is a SwitchSchedule, else inf.
+    """
+def make_constant_switch_fn(mask: SwitchStateMask) -> SwitchSchedule:
+    """
+    A SwitchSchedule that returns `mask` at every time (no edges). Evaluated in C++: simulate() uses it for the pwl engine's default when no switch_fn is given.
     """
 def make_dead_time_pwm_pair_fn(frequency: float, duty: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, phase: float = 0.0) -> SwitchSchedule:
     """

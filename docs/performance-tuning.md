@@ -70,6 +70,18 @@ res = p.simulate(
 )
 ```
 
+## Loop counters
+
+`res.counters` (fixed engine) reports what the step loop did:
+`switch_fn_calls` (one per step, plus one per extra solve time of a
+retry or split sub-step), `segment_searches` (segment lookups; the loop
+reuses the last segment while the mask and the cache generation are
+unchanged, so it counts mask changes between solves, plus one), and
+`rollback_snapshots` (0 when `max_dt_halvings=0` and neither the
+restart rule nor the split is on). Prefer a C++ schedule
+(`make_pwm_switch_fn`, `make_constant_switch_fn`, ...) over a Python
+callable: the callback is one GIL round-trip per step.
+
 ## Cache + scaling
 
 The PWL cache lives on `PwlStateSpaceCache(graph, pool).build(dt)`.

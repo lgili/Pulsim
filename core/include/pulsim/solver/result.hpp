@@ -235,6 +235,12 @@ struct SimulationResult {
     /// Steps split at an event inside them
     /// (SimulationOptions::enable_substep_state_correction). 0 off.
     Size n_split_steps = 0;
+    /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
+    /// `switch_fn` evaluations in the step loop, segment lookups the
+    /// last-segment memo did not absorb, and rollback snapshots taken.
+    Size switch_fn_calls = 0;
+    Size segment_searches = 0;
+    Size rollback_snapshots = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

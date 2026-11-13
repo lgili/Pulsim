@@ -79,6 +79,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
     ThreePhaseLegIndices,
@@ -500,6 +501,7 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
     "ThreePhaseLegIndices",
@@ -2320,8 +2322,7 @@ def simulate(
             # fixed engine's all-CLOSED legacy default is what the
             # router sends this case to instead — flipping THAT is
             # its own breaking change, not this one).
-            switch_fn = (lambda _n=_n_sw:
-                          (lambda t: SwitchStateMask(_n)))()
+            switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
@@ -2685,7 +2686,8 @@ def simulate(
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)
-        switch_fn = lambda _t: default_mask  # noqa: E731
+        # Evaluated in C++: no Python callable in the step loop.
+        switch_fn = make_constant_switch_fn(default_mask)
 
     # enable_nonlinear_refresh=None goes through as is: the kernel
     # stamps the Newton devices when the circuit has any, and refuses

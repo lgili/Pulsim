@@ -89,6 +89,18 @@ struct PwlSegment {
 Move-only. The cache stores one segment per switch state in an
 `unordered_map<SwitchStateMask, PwlSegment>`.
 
+### Generation and the loop's last-segment memo
+
+`cache.generation()` (relaxed atomic) is bumped by `build`,
+`build_lazy`, every lazy insert (and the evictions before it),
+`build_one_segment` and a parametric refactor of a resident segment.
+`run_transient` keeps `{mask, const PwlSegment*, generation}` and
+reuses the pointer only while the generation is unchanged; a reuse
+still writes the LRU tick (`touch_segment`), so eviction order is the
+same as with a lookup per solve. `solve_segment(seg, b_extra, x)` is
+`solve(mask, …)` without the lookup. The memo lives in the loop, not
+in the cache: a cache is shared by GIL-released runs.
+
 ## V0 scope: static-only circuits
 
 Layer 4 V0 supports Resistor + VoltageSource + Switch. That covers:
