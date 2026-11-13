@@ -381,9 +381,13 @@ class CircuitBuilder:
 
         Optional keyword parasitics (openspec add-realistic-passives): esr [Ω] in series ({name}.esr), c_par [F] across the terminals ({name}.cpar), rac=fit_rac_ladder(...) for a frequency-dependent winding resistance; zero adds nothing. i0 is the current of the ideal inductor {name}.
         """
-    def add_inductor_coupling(self, name_a: str, name_b: str, k: float) -> CircuitBuilder:
+    def add_inductor_coupling(self, name_a: str, name_b: str, k: float) -> 'CircuitBuilder':
         """
+        add_inductor_coupling(self: pulsim._pulsim.CircuitBuilder, name_a: str, name_b: str, k: float) -> pulsim._pulsim.CircuitBuilder
+
         Magnetically couple two existing linear inductors by name with coefficient k in [0, 1], as add_transformer does for the pair it creates.
+
+        Refuses (UnsupportedError) an inductor built with rac=.
         """
     def add_lauritzen_diode(self, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, tau: float = 1e-07, T_M: float = 1e-08, G_min: float = 1e-12) -> CircuitBuilder:
         """

@@ -354,6 +354,9 @@ def _wrap_inductor(native, native_c):
         if rac is None:
             native(self, name, a, n_neg, l_main, i0)
         else:
+            # add_inductor_coupling refuses this winding (see install)
+            self._rac_windings = getattr(self, "_rac_windings", set()) | {
+                name}
             cells = len(rac.R_k)
             nxt = f"{name}.rac_n0" if cells else n_neg
             native(self, name, a, nxt, l_main, i0)
@@ -378,6 +381,28 @@ def _wrap_inductor(native, native_c):
     return add_inductor
 
 
+def _wrap_coupling(native):
+    def add_inductor_coupling(self, name_a: str, name_b: str,
+                              k: float) -> "CircuitBuilder":
+        for n in (name_a, name_b):
+            if n in getattr(self, "_rac_windings", ()):
+                from ._refusal import unsupported
+                raise unsupported(
+                    "", "rac", f"add_inductor_coupling({name_a!r}, "
+                    f"{name_b!r}): {n!r} carries an R_ac ladder; coupling "
+                    "its main inductor alone would leave the ladder "
+                    "cells' flux uncoupled. Couple a winding built "
+                    "without rac= (or with esr=), or use "
+                    "add_transformer.", device=n, kind="Inductor")
+        return native(self, name_a, name_b, k)
+
+    add_inductor_coupling.__qualname__ = "CircuitBuilder.add_inductor_coupling"
+    add_inductor_coupling.__doc__ = (native.__doc__ or "") + (
+        "\nRefuses (UnsupportedError) an inductor built with rac=.")
+    add_inductor_coupling._pulsim_native = native  # type: ignore[attr-defined]
+    return add_inductor_coupling
+
+
 def install(builder_cls) -> None:
     """Patch the parasitic keywords and ``add_transmission_line`` onto
     ``builder_cls`` (idempotent)."""
@@ -386,6 +411,8 @@ def install(builder_cls) -> None:
     if not hasattr(cap, "_pulsim_native"):
         builder_cls.add_capacitor = _wrap_capacitor(cap, ind)
         builder_cls.add_inductor = _wrap_inductor(ind, cap)
+        builder_cls.add_inductor_coupling = _wrap_coupling(
+            builder_cls.add_inductor_coupling)
     if not hasattr(builder_cls, "add_transmission_line"):
         add_transmission_line.__qualname__ = (
             "CircuitBuilder.add_transmission_line")

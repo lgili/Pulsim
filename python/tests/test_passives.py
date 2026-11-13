@@ -380,3 +380,18 @@ def test_odd_charge_table_refuses_a_table_not_starting_at_zero():
 
     with pytest.raises(ValueError, match="v = 0"):
         odd_charge_table([1.0, 2.0], [1e-6, 2e-6], [1e-6, 1e-6])
+
+
+def test_coupling_a_laddered_winding_is_refused():
+    # It used to couple the ladder's main inductor L_hf alone, silently.
+    f = np.logspace(3, 6, 20)
+    lad = fit_rac_ladder(f, 0.01 * np.sqrt(1 + (f / 1e5) ** 2), L=1e-3,
+                         n_cells=4, tol=0.2)
+    b = p.CircuitBuilder()
+    b.add_inductor("L1", "a", "gnd", 1e-3, rac=lad)
+    b.add_inductor("L2", "s", "gnd", 1e-3)
+    with pytest.raises(p.UnsupportedError, match="R_ac ladder") as ei:
+        b.add_inductor_coupling("L2", "L1", 0.99)
+    assert (ei.value.feature, ei.value.device) == ("rac", "L1")
+    b.add_inductor("L3", "t", "gnd", 1e-3, esr=0.01)
+    b.add_inductor_coupling("L2", "L3", 0.99)   # an esr winding couples
