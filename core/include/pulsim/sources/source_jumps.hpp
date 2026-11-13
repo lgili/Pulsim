@@ -5,7 +5,7 @@
 // =============================================================================
 //
 // add-discontinuity-restart-rule, task 3. The fixed engine restarts
-// (two backward-Euler half-steps) after a source jump, and the step
+// (three SDIRK(2,2) steps) after a source jump, and the step
 // that ENDS on a jump reads the source's left limit. Jumps come from
 // PWM voltage sources (period start and duty edge) and pulse sources
 // with a zero rise or fall time; `b_extra_fn` and the sine source

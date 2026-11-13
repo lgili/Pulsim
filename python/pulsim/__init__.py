@@ -1515,6 +1515,20 @@ class SolverOptions:
     dt_init: Optional[float] = None
 
 
+def _carry_jumps(fn, parts):
+    """Give a composed b_extra_fn the declared jumps of its parts.
+
+    A part declares its jump instants with `next_jump_after(t)` (first
+    jump strictly after t); the composition jumps at the earliest.
+    Undeclared parts stay undeclared (the restart rule cannot see them).
+    """
+    nj = [q.next_jump_after for q in parts
+          if q is not None and hasattr(q, "next_jump_after")]
+    if nj:
+        fn.next_jump_after = lambda t, _nj=nj: min(f(t) for f in _nj)
+    return fn
+
+
 def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         label):
     """Compose an internal (observer, b_extra) pair with the user's.
@@ -1549,7 +1563,7 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         f"b_extra_fn returned shape {u.shape}, "
                         f"expected ({_n},) when composed with {_lbl}")
                 return _np.asarray(_i(t)) + u
-            b_extra_fn = _b
+            b_extra_fn = _carry_jumps(_b, (b, _u_b))
     return step_observer, b_extra_fn
 
 
@@ -2478,7 +2492,7 @@ def simulate(
             return total if total is not None else []
 
         step_observer = _cblock_observer
-        b_extra_fn = _cblock_b_extra
+        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch

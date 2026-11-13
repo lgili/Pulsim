@@ -186,6 +186,19 @@ public:
         }
     }
 
+    /// SDIRK restart: pseudo previous q_M from the stage-1 solve, by
+    /// the same affine relation stage 1 solved with (K0/K1 of that
+    /// stage, as `capture_gamma`).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            const Real q_m = e.k0 + e.k1 *
+                models::LauritzenDiode::junction_charge<Real>(v, e.params);
+            e.q_m_prev += c * (q_m - e.q_m_prev);
+        }
+    }
+
     /// Seed from a DC operating point: the device sits on its
     /// steady-state curve, where dq_M/dt = 0 and q_M = i·tau.
     void seed_from_dc_op(const Vector& x) {

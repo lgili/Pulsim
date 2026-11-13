@@ -153,9 +153,10 @@ gate edge, a diode flip, a source jump and the start: an idle DCM
 switch node alternates between about 0.5 V and 26 V instead of sitting
 at `v_out`, and halving `dt` only halves the error.
 
-**Fix:** `simulate(..., discontinuity_restart=True)`. The step after a
-discontinuity becomes two backward-Euler half-steps on the same factor
-(buck `i_L` error 1.18e-2 A → 2.20e-5 A at T/50, order 2.00). The gate of
+**Fix:** `simulate(..., discontinuity_restart=True)`. The step with a
+discontinuity and the next two become SDIRK(2,2) steps (buck `i_L` error
+1.18e-2 A → 1.17e-7 A at T/50, order 2). A `b_extra_fn` that jumps must
+declare it (`fn.next_jump_after = lambda t: ...`) to be restarted. The gate of
 step `(t_{k-1}, t_k]` is then `switch_fn(t_{k-1})`: a closure with edges
 on the grid keeps its duty and moves one step; a left-continuous one
 (`t > te`) becomes one step late. Edges off the `dt` grid stay first

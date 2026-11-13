@@ -81,7 +81,7 @@ inline Real refresh_pmsm_mna(
     // c1/h in the BDF2 stage, 2/h in the trapezoidal one. The two
     // coincide when h is the stage's own step, which is what makes
     // one factor serve both.
-    // Backward Euler over h (restart half-step): 1/h, no dλ_n.
+    // Backward Euler over h (restart stage): 1/h, no dλ_n.
     const bool be = (stage == TrBdf2Stage::BackwardEuler);
     const Real d_coef = bdf2 ? kc.c1 / h : be ? Real{1} / h : Real{2} / h;
     for (const auto& e : history.entries()) {

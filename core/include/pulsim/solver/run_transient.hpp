@@ -64,6 +64,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 
 namespace pulsim::solver {
@@ -299,7 +300,13 @@ inline SimulationResult run_transient(
     /// `final_snapshot`. Unlike `initial_state`, which restores x
     /// and INVENTS the companion history from it, this restores
     /// the history and the solver-owned diode bits too.
-    const SolverSnapshot* resume_from = nullptr) {
+    const SolverSnapshot* resume_from = nullptr,
+    /// add-discontinuity-restart-rule — the instants at which
+    /// `b_extra_fn` jumps, declared by the caller: the first jump
+    /// strictly after t, +inf when none. Only read with
+    /// `discontinuity_restart`; an undeclared callback jump is not
+    /// restarted (and is not detected).
+    const std::function<Real(Real)>& b_extra_next_jump = {}) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -307,6 +314,16 @@ inline SimulationResult run_transient(
             "run_transient: SimulationOptions are not valid "
             "(check t_start < t_end, dt > 0, store_every >= 1, "
             "all finite)");
+    }
+    if (opts.discontinuity_restart && opts.enable_substep_state_correction) {
+        // The V3 correction re-takes a commutation step as two
+        // trapezoidal solves straight after the flip — the stale-
+        // derivative step the restart rule exists to remove.
+        throw std::invalid_argument(
+            "run_transient: discontinuity_restart=True cannot be combined "
+            "with enable_substep_state_correction=True (the sub-step "
+            "correction re-takes the step after a commutation "
+            "trapezoidally, which the restart rule replaces); set one");
     }
     if (!switch_fn) {
         throw std::invalid_argument(
@@ -414,8 +431,8 @@ inline SimulationResult run_transient(
     Real refresh_dt = opts.dt;
     // The rule of the solve in flight, set beside refresh_dt at the one
     // point every solve passes through (run_event_iteration): the
-    // restart half-steps of discontinuity_restart are BackwardEuler,
-    // with refresh_dt = the half-step they advance.
+    // SDIRK stages of discontinuity_restart are BackwardEuler, with
+    // refresh_dt = the γ·h each stage advances.
     pwl::TrBdf2Stage refresh_stage = pwl::TrBdf2Stage::Trapezoidal;
 
     // V17: if any saturable inductors are present, wrap the
@@ -799,8 +816,26 @@ inline SimulationResult run_transient(
     // above the pwm_phase snap and far below a plateau. 0 = off.
     const bool restart_rule = opts.discontinuity_restart;
     const Real left_by = restart_rule ? opts.dt * Real{1e-3} : Real{0};
-    // `backward_euler`: the restart half-step's history (no stored
-    // derivative) at h_e = for_dt/2 on the factor of for_dt.
+    // b_extra_fn's declared jumps (restart rule only), memoised: the
+    // answer for `bj_from` stays valid until t passes `bj_next`.
+    const bool has_b_jumps = restart_rule && static_cast<bool>(b_extra_next_jump);
+    Real bj_from = std::numeric_limits<Real>::infinity();
+    Real bj_next = -std::numeric_limits<Real>::infinity();
+    auto b_jump_after = [&](Real t_q) {
+        if (!(bj_from <= t_q && t_q < bj_next)) {
+            bj_from = t_q;
+            bj_next = b_extra_next_jump(t_q);
+        }
+        return bj_next;
+    };
+    // The time b_extra_fn is read at for a solve at `at_t`: its left
+    // limit when a declared jump falls in (at_t - left_by, at_t].
+    auto b_read_t = [&](Real at_t) {
+        return has_b_jumps && b_jump_after(at_t - left_by) <= at_t
+            ? at_t - left_by : at_t;
+    };
+    // `backward_euler`: a restart stage (no stored derivative), the
+    // BE-like solve of size for_dt/2 on the factor of for_dt.
     auto accumulate_b_extra = [&](Real at_t, Real for_dt,
                                   bool backward_euler = false) {
         if (backward_euler) {
@@ -810,7 +845,7 @@ inline SimulationResult run_transient(
             history.compute_b_extra(for_dt, b_extra);
         }
         if (b_extra_fn) {
-            b_extra += b_extra_fn(at_t);
+            b_extra += b_extra_fn(b_read_t(at_t));
         }
         if (has_pwm) {
             sources::compute_pwm_b_extra(pool, graph, at_t, be_pwm,
@@ -885,11 +920,30 @@ inline SimulationResult run_transient(
         // initial_state=); a resume carries its own flag; a DC
         // operating point is consistent (i_C = 0, v_L = 0 exactly), and
         // its first step restarts only on a mask change or a jump.
-        bool restart_pending =
-            restart_rule && (resume_snap != nullptr
-                                 ? resume_snap->restart_pending
-                                 : !start_from_dc_op);
+        // Steps of the SDIRK restart still owed: a discontinuity's
+        // step and the next two (kRestartSteps). A run that does not
+        // start consistent owes them from its first step; a resume
+        // carries its own count.
+        constexpr Size kRestartSteps = 3;
+        constexpr Real kGamma = Real{1} - Real{0.70710678118654752440};
+        Size restart_left =
+            !restart_rule ? Size{0}
+            : resume_snap != nullptr ? resume_snap->restart_steps_left
+            : start_from_dc_op ? Size{0} : kRestartSteps;
         const bool has_jump_sources = restart_rule && (has_pwm || has_pulse);
+        // Both SDIRK stages solve on the trapezoidal factor of 2γ·dt: a
+        // second FIXED step, so a second lazy cache keeps one factor per
+        // mask under the same byte budget. (On the 8-entry event LRU a
+        // VSI refactored on every restart step: 3172 builds in 3157.)
+        // const_cast: the cache only reads the pool unless a parameter
+        // update is applied, and this one never receives any.
+        std::optional<pwl::PwlStateSpaceCache> restart_cache;
+        const Real restart_dt = Real{2} * (kGamma * opts.dt);
+        if (restart_rule) {
+            restart_cache.emplace(graph, const_cast<pwl::DevicePool&>(pool));
+            restart_cache->set_segment_budget_bytes(cache.segment_budget_bytes());
+            restart_cache->build_lazy(restart_dt);
+        }
 
         for (Size k = 1; k < n_steps; ++k) {
             // User-cancellation check (Phase: live scope). Lets a
@@ -952,8 +1006,9 @@ inline SimulationResult run_transient(
             // bit-identical: history, then the optional user fn, then only the
             // built-in source kinds the circuit contains. A null user fn and
             // absent source kinds contribute (and cost) nothing instead of
-            // allocating + adding a zero vector every step.
-            accumulate_b_extra(t, opts.dt);
+            // allocating + adding a zero vector every step. (Below, once
+            // the step is known not to restart: a restart step evaluates
+            // its sources at its own stage times only.)
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
@@ -989,8 +1044,8 @@ inline SimulationResult run_transient(
             // variable but was written when it never moved; it
             // still refuses a variable step for the OTHER reason,
             // no rollback of its flux.)
-            // A restart half-step advances for_dt/2 on the factor of
-            // for_dt; the devices are told the interval and the rule.
+            // A restart stage advances for_dt/2 (= γh) on the factor of
+            // for_dt (= 2γh); the devices are told the interval and the rule.
             refresh_dt = backward_euler ? for_dt * Real{0.5} : for_dt;
             refresh_stage = backward_euler
                 ? pwl::TrBdf2Stage::BackwardEuler
@@ -1075,7 +1130,11 @@ inline SimulationResult run_transient(
                     // `solve_at` delegates to `solve` bit-identically
                     // when the dt matches, so the nominal path costs
                     // nothing extra.
-                    cache.solve_at(mask, for_dt, b_extra, x);
+                    if (restart_cache && for_dt == restart_dt) {
+                        restart_cache->solve(mask, b_extra, x);
+                    } else {
+                        cache.solve_at(mask, for_dt, b_extra, x);
+                    }
                 }
                 // The mask x was just solved under — what the
                 // stored sample records (a mask cycle breaks out
@@ -1113,18 +1172,23 @@ inline SimulationResult run_transient(
             mask_cycle = false;    // per OUTER step, not per sub-step
 
             // ---- discontinuity restart (add-discontinuity-restart-rule)
-            // Triggers: a pending restart (first step, a flip settled in
-            // the last half-step), an unknown previous stamp, a mask
-            // that differs from the last committed one, a source jump
-            // in [t_prev, t).
-            bool restart = restart_rule &&
-                (restart_pending || !stamped_known ||
-                 !(mask_pre == stamped_mask) ||
+            // Triggers: an unknown previous stamp, a mask that differs
+            // from the last committed one, a source jump in [t_prev, t),
+            // a declared b_extra_fn jump. (The first step and diode
+            // flips arm the window where they happen.)
+            // Each trigger (re-)arms the window; a restart step consumes
+            // one of it.
+            if (restart_rule &&
+                (!stamped_known || !(mask_pre == stamped_mask) ||
                  (has_jump_sources &&
-                  sources::source_jump_in(pool, graph, t_prev, t)));
-            restart_pending = false;
-            // The final solve of this step was a restart half-step, so
-            // the deferred commit below is a backward-Euler one.
+                  sources::source_jump_in(pool, graph, t_prev, t)) ||
+                 (has_b_jumps && b_jump_after(t_prev - left_by) < t - left_by))) {
+                restart_left = kRestartSteps;
+            }
+            bool restart = restart_left > 0;
+            if (restart) --restart_left;
+            // The final solve of this step was a restart stage, so the
+            // deferred commit below is a backward-Euler one (at γh).
             bool committed_be = false;
             auto commit_backward_euler = [&](Real h_e) {
                 history.update_from_state_backward_euler(x, h_e);
@@ -1140,32 +1204,48 @@ inline SimulationResult run_transient(
                         x, pwl::TrBdf2Stage::BackwardEuler);
                 }
             };
-            // Two backward-Euler half-steps of for_dt/2 from t_from on
-            // the factor of for_dt (2C/for_dt = C/h_e), EACH with its
-            // own diode event iteration: decided only after the second,
-            // a gate that opens an inductor's path is damped away in the
-            // first and no diode is asked to conduct. The second half's
-            // commit is the caller's (deferred past the freeze guard).
-            auto run_restart = [&](Real t_from, Real for_dt) {
-                const Real h_e = for_dt * Real{0.5};
-                accumulate_b_extra(t_from + h_e, for_dt, true);
-                run_event_iteration(t_from + h_e, for_dt, true);
+            // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
+            // 1/√2, L-stable, order 2). Both stages are backward-Euler-
+            // like solves of size γh — conductance C/(γh), i.e. the
+            // trapezoidal factor at 2γh — the second from the pseudo
+            // previous state x0* = x0 + ((1 − γ)/γ)(x1 − x0). EACH stage
+            // has its own diode event iteration (not atomic: a gate that
+            // opens an inductor's path is damped in stage 1 before any
+            // diode is asked to conduct). Stage times t_from + γh and
+            // t_from + h, the sources read once at each. The commit after
+            // stage 2 is the caller's (deferred past the freeze guard):
+            // commit_backward_euler(γh) from x0* refreshes the derivative
+            // slots with stage 2's own (x2 − x0*)/(γh).
+            auto run_restart = [&](Real t_from, Real h) {
+                const Real h_s = kGamma * h;
+                const Real dt_eq = Real{2} * h_s;
+                accumulate_b_extra(t_from + h_s, dt_eq, true);
+                run_event_iteration(t_from + h_s, dt_eq, true);
                 const Size iters_1 = iters;
                 const bool breach_1 = flipped;
                 if (breach_1 && has_diodes && !last_solved_bits.empty()) {
                     diodes.restore_on_bits(last_solved_bits);
                 }
-                const topology::SwitchStateMask mask_1 = stamped_mask;
-                commit_backward_euler(h_e);
-                accumulate_b_extra(t_from + for_dt, for_dt, true);
-                run_event_iteration(t_from + for_dt, for_dt, true);
-                // A flip settled in the SECOND half has had only that
-                // one half-step (which carries the jump) under the new
-                // mask: the next step restarts as well.
-                if (!(stamped_mask == mask_1)) restart_pending = true;
+                constexpr Real c = (Real{1} - kGamma) / kGamma;
+                history.extrapolate_previous(x, c);
+                coss_history.extrapolate_previous(x, c);
+                laur_history.extrapolate_previous(x, c);
+                pmsm_history.extrapolate_previous(x, c);
+                tail_history.extrapolate_previous(x, c);
+                if (has_saturable) sat_history.extrapolate_previous(x, c);
+                accumulate_b_extra(t_from + h, dt_eq, true);
+                run_event_iteration(t_from + h, dt_eq, true);
+                // A diode flip inside the step is a discontinuity of its
+                // own: the window covers this step and the next two.
+                if (iters_1 > 1 || iters > 1) {
+                    restart_left = std::max(restart_left, kRestartSteps - 1);
+                }
                 iters += iters_1 - 1;
                 flipped = flipped || breach_1;
             };
+            if (!restart) {
+                accumulate_b_extra(t, opts.dt);
+            }
             try {
                 if (!restart) {
                     run_event_iteration(t, opts.dt);
@@ -1185,6 +1265,8 @@ inline SimulationResult run_transient(
                         }
                         mask_cycle = false;
                         restart = true;
+                        restart_left = std::max(restart_left,
+                                                kRestartSteps - 1);
                     }
                 }
                 if (restart) {
@@ -1236,7 +1318,6 @@ inline SimulationResult run_transient(
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
-                    restart_pending = false;
 
                     const Size n_sub = Size{1} << h;
                     const Real sub_dt =
@@ -1245,16 +1326,15 @@ inline SimulationResult run_transient(
                     for (Size j = 0; j < n_sub; ++j) {
                         const Real t_sub =
                             t_prev + static_cast<Real>(j + 1) * sub_dt;
-                        // The first sub-step of a restart step is itself
-                        // a restart (two half-steps of sub_dt/2 on the
-                        // factor of sub_dt); the rest are trapezoidal.
-                        const bool sub_restart = restart && j == 0;
+                        // Every sub-step of a restart step is an SDIRK
+                        // step of sub_dt (the factor of 2γ·sub_dt).
+                        const bool sub_restart = restart;
                         if (!sub_restart) {
                             accumulate_b_extra(t_sub, sub_dt);
                         }
                         try {
                             if (sub_restart) {
-                                run_restart(t_prev, sub_dt);
+                                run_restart(t_sub - sub_dt, sub_dt);
                             } else {
                                 run_event_iteration(t_sub, sub_dt);
                             }
@@ -1263,11 +1343,11 @@ inline SimulationResult run_transient(
                             all_ok = false;
                             break;
                         }
-                        // shortcut: a flip inside a later trapezoidal
-                        // sub-step is not re-taken, only the next outer
-                        // step restarts (retries are rare).
+                        // shortcut: a flip inside a trapezoidal sub-step is
+                        // not re-taken; the window restarts from the next
+                        // outer step (retries are rare).
                         if (restart_rule && !sub_restart && iters > 1) {
-                            restart_pending = true;
+                            restart_left = kRestartSteps;
                         }
                         // Commit each sub-step before the next one
                         // reads the history — `compute_b_extra(dt)`,
@@ -1292,7 +1372,7 @@ inline SimulationResult run_transient(
                         // halving rolls all of them back together
                         // from `sat_snap`.
                         if (j + 1 < n_sub && sub_restart) {
-                            commit_backward_euler(sub_dt * Real{0.5});
+                            commit_backward_euler(kGamma * sub_dt);
                         } else if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
                             coss_history.update_from_state(x,
@@ -1563,8 +1643,7 @@ inline SimulationResult run_transient(
                         committed_dt = dt2;
                         // The split re-took the step trapezoidally
                         // across a mask change: the next one restarts.
-                        committed_be = false;
-                        restart_pending = restart_rule;
+                        committed_be = false;   // never with the rule (refused)
                     }
                 }
             }
@@ -1673,7 +1752,7 @@ inline SimulationResult run_transient(
             //    path and dt2 when sub-step correction split the step (whose
             //    sub-step 1 already committed the dt1 half above).
             if (committed_be) {
-                commit_backward_euler(committed_dt * Real{0.5});
+                commit_backward_euler(kGamma * committed_dt);
             } else {
             history.update_from_state(x, committed_dt);
             coss_history.update_from_state(x, committed_dt);
@@ -1701,7 +1780,12 @@ inline SimulationResult run_transient(
                 result.record_switch_state(stamped_mask);
             }
         }
-        result.final_snapshot.restart_pending = restart_pending;
+        result.final_snapshot.restart_steps_left = restart_left;
+        if (restart_cache) {
+            result.n_restart_factorizations =
+                restart_cache->num_built_segments() +
+                restart_cache->metrics().segment_evictions;
+        }
     } else {
         // ----------- STATIC PATH ----------------------------------------
         //
@@ -1733,12 +1817,19 @@ inline SimulationResult run_transient(
             // static path. Same summation order → bit-identical; absent kinds
             // and a null user fn cost nothing. `b_extra_user` aliases the
             // buffer so the solves below are unchanged.
+            // discontinuity_restart: the same sampling as the dynamic
+            // path — sample k reads the gate at t_{k-1} and the jumping
+            // sources at their left limit — so adding a capacitor does
+            // not shift the recorded mask by one sample. (k = 0: t.)
+            const Real gate_t = restart_rule && k > 0 ? t_prev : t;
+            const Real src_left = k > 0 ? left_by : Real{0};
             b_extra.setZero();
             if (b_extra_fn) {
-                b_extra += b_extra_fn(t);
+                b_extra += b_extra_fn(k > 0 ? b_read_t(t) : t);
             }
             if (has_pwm) {
-                sources::compute_pwm_b_extra(pool, graph, t, be_pwm);
+                sources::compute_pwm_b_extra(pool, graph, t, be_pwm,
+                                             src_left);
                 b_extra += be_pwm;
             }
             if (has_sine) {
@@ -1746,7 +1837,8 @@ inline SimulationResult run_transient(
                 b_extra += be_sine;
             }
             if (has_pulse) {
-                sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
+                sources::compute_pulse_b_extra(pool, graph, t, be_pulse,
+                                               src_left);
                 b_extra += be_pulse;
             }
             const Vector& b_extra_user = b_extra;
@@ -1779,7 +1871,7 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             do {
-                auto mask = switch_fn(t);
+                auto mask = switch_fn(gate_t);
                 if (has_diodes) {
                     const auto diode_mask =
                         diodes.current_diode_mask();

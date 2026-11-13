@@ -15,7 +15,7 @@
 - [x] 2.6 Gate sampling at the step start when the flag is on; `switch_state_bits` records the stamped mask
 - [x] 2.7 First step: restart unless `resume_from`, or `start_from_dc_op` with first mask = DC mask and no jump at `t_start`
 - [x] 2.8 dt-retry: first sub-step of a restart step is a restart sub-step; ladder depth, sizes and `DtRetry` records unchanged (assert on the existing deliberate-failure tests)
-- [x] 2.9 Cache counters: a run with 1000 restart steps adds no `(mask, dt)` entry and no factorisation (assert `event_builds`, `event_refactors` and the segment count)
+- [x] 2.9 Cache counters: a run with 1000 restart steps adds no `(mask, dt)` entry and no factorisation (assert `event_builds`, `event_refactors` and the segment count) — superseded by 10.5 (one factor per mask at 2γ·dt)
 
 ## 3. Source jumps
 - [x] 3.1 `sources/`: jump table for pulse sources with zero rise or fall time and for PWM voltage sources; left-limit evaluation at a jump that coincides with the step end
@@ -58,6 +58,20 @@
 ## 9. Verification
 - [x] 9.1 `ruff check`, `pytest` (throttled, `-j2`), `ctest`, stub check
 - [x] 9.2 `openspec validate add-discontinuity-restart-rule --strict` and `openspec validate --all --strict`
+
+## 10. Rework: three SDIRK(2,2) steps replace the backward-Euler pair (review of 41711488)
+- [x] 10.1 `run_restart` as one Alexander SDIRK(2,2) step (γ = 1 − 1/√2): two stages of γh on the factor of 2γh, stage 2 from `x0* = x0 + ((1−γ)/γ)(x1 − x0)`, commit once from stage 2
+- [x] 10.2 `extrapolate_previous(x1, c)` on `HistoryState` and the five stateful histories; flux row kept in conductance form
+- [x] 10.3 Window counter `restart_left` (3 per trigger, `max(left, 2)` on a flip in either stage); `SolverSnapshot::restart_steps_left`, pickle field 12 (legacy bool True → 3), read-only `restart_pending`
+- [x] 10.4 Per-stage vs per-step diode decisions measured on the buck; per stage kept (DECISIONS.md)
+- [x] 10.5 One factor per mask at 2γ·dt in a second lazy cache; `SimulationResult::n_restart_factorizations`; VSI counters measured
+- [x] 10.6 `b_extra_fn.next_jump_after(t)`: detection, left-limit read, composition through `_carry_jumps`; undeclared jumps documented as not restarted; test
+- [x] 10.7 Restart + `enable_substep_state_correction` refused by name; test
+- [x] 10.8 Engine tests through a restart: Lauritzen, IGBT tail, transformer, MNA PMSM (Richardson ratios, flag on and off)
+- [x] 10.9 Tests: resume inside a window (pickled, exact), re-arm on a late diode flip, static-path sampling, `b_extra_fn` called once per stage time
+- [x] 10.10 `test_smooth_segments_stay_trapezoidal` from E[0]; resonant tank gate (≤ 1.5× flag-off at T/50, T/100) and isolated-PWM LC gate (within 0.5 % of flag-off)
+- [x] 10.11 Flag-on pins re-measured (DECISIONS.md lists old → new); flag off bit-identical to the 20-run baseline
+- [x] 10.12 proposal, design (D0), spec delta, DECISIONS; CHANGELOG, KNOWN_LIMITATIONS, AI_GUIDE
 
 Notes on how the boxes were closed (details in DECISIONS.md):
 - 1.x / 5.1 / 5.3: written as flag-off pins plus flag-on targets in the

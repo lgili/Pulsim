@@ -92,8 +92,8 @@ inline Real stamp_saturable_inductor(
     const bool bdf2 = (stage == TrBdf2Stage::Bdf2Stage2);
     // c1/h in the BDF2 stage, 2/h in the trapezoidal one; equal when
     // h is that stage's own step, which is the whole point of γ.
-    // Backward Euler over h (restart half-step): 1/h = 2/dt, so the
-    // row stays in conductance form with the nominal diagonal.
+    // Backward Euler over h (restart stage): 1/h = 2/(2h), so the
+    // row stays in conductance form with the stage factor's diagonal.
     const bool be = (stage == TrBdf2Stage::BackwardEuler);
     const Real d_coef = bdf2 ? kc.c1 / h : be ? Real{1} / h : Real{2} / h;
     // Trapezoidal carries the previous step's voltage; BDF2 and

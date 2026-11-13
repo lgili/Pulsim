@@ -202,9 +202,9 @@ def test_a_resumed_run_keeps_its_exact_first_step():
 
 
 # --- the fix: add-discontinuity-restart-rule (simulate(discontinuity_restart=True))
-# The first step of an inconsistent start is taken as two backward-Euler
-# half-steps of h/2 on the nominal factor — NOT the rejected trapezoid
-# at 2h: every device is told the interval the clock advances (h/2), so
+# The first three steps of an inconsistent start are Alexander SDIRK(2,2)
+# steps (two backward-Euler-like stages of gamma*h each) — NOT the rejected
+# trapezoid at 2h: every device is told the interval each stage advances, so
 # the Coss charge test moves the RIGHT way (Q = I·t exactly, see
 # test_fixed_step_discontinuity_order.py) and the retry ladder keeps
 # its step sizes.
@@ -221,22 +221,30 @@ def test_with_the_restart_rule_every_start_is_second_order(name, run, exact):
     assert rels[0] < 1e-5, (name, rels)
 
 
-def test_with_the_restart_rule_the_first_step_is_two_backward_euler_halves():
+def test_with_the_restart_rule_the_first_steps_are_sdirk():
+    """Three Alexander SDIRK(2,2) steps, then the trapezoid. On di/dt =
+    -(R/L) i each stage is i_s = i_prev/(1 + g), g = gamma*h*R/L, and
+    stage 2 starts from i0* = i0 + ((1 - gamma)/gamma)(i1 - i0)."""
     h, R, L, i0 = 1e-6, 1.0, 1e-3, 5.0
     b = p.CircuitBuilder()
     b.add_resistor("R", "a", "gnd", R)
     b.add_inductor("L", "a", "gnd", L, i0=i0)
-    res = p.simulate(b, t_end=4 * h, dt=h, engine="pwl", **RESTART)
+    res = p.simulate(b, t_end=5 * h, dt=h, engine="pwl", **RESTART)
     i = np.asarray(res.i("L"))
-    assert i[1] == pytest.approx(i0 / (1.0 + h * R / (2.0 * L)) ** 2, rel=1e-12)
+    gamma = 1.0 - 1.0 / math.sqrt(2.0)
+    g = gamma * h * R / L
+    c = (1.0 - gamma) / gamma
+    sdirk = (1.0 + c * (1.0 / (1.0 + g) - 1.0)) / (1.0 + g)
+    for k in (1, 2, 3):
+        assert i[k] == pytest.approx(i[k - 1] * sdirk, rel=1e-12)
     a = h * R / (2.0 * L)
-    assert i[2] == pytest.approx(i[1] * (1.0 - a) / (1.0 + a), rel=1e-12)
-    assert res.n_restart_steps == 1
+    assert i[4] == pytest.approx(i[3] * (1.0 - a) / (1.0 + a), rel=1e-12)
+    assert res.n_restart_steps == 3
 
 
 def test_with_the_restart_rule_a_consistent_start_stays_second_order():
     """The control again: the sine start was already consistent, so the
-    restart costs one O(h^2) backward-Euler pair (4.28e-7 -> 4.98e-7)."""
+    restart costs three second-order SDIRK steps."""
     vals = [_rl_sine(dt, **RESTART) for dt in DTS]
     orders, rels = _order(vals, [_rl_sine_exact()] * len(DTS))
     assert all(o > 1.9 for o in orders), (orders, rels)

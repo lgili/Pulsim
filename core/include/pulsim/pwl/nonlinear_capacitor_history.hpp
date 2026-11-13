@@ -74,7 +74,7 @@ public:
     }
 
     /// Commit the just-solved step. `h` must be the step this
-    /// solve actually used; `backward_euler` the restart half-step
+    /// solve actually used; `backward_euler` a restart stage
     /// rule (i = (Q - Q_n)/h, no i_n), as the stamp used it.
     void update_from_state(const Vector& x, Real h,
                            bool backward_euler = false) {
@@ -95,6 +95,17 @@ public:
                 : (Real{2} / h) * (q - e.q_prev) - e.i_prev;
             e.v_prev = v;
             e.q_prev = q;
+        }
+    }
+
+    /// SDIRK restart: pseudo previous charge q0 + c·(q1 − q0) (see
+    /// HistoryState::extrapolate_previous).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            e.q_prev += c * (models::NonlinearCapacitor::charge(e.params, v)
+                             - e.q_prev);
         }
     }
 

@@ -111,7 +111,7 @@ def test_the_saturable_inductor_itself_still_works_alongside():
 
 
 def test_the_chain_composes_on_a_restart_step():
-    """add-discontinuity-restart-rule: the restart half-steps hand every
+    """add-discontinuity-restart-rule: the SDIRK restart stages hand every
     wrapper a BackwardEuler stage through the same refresh_stage. With
     four stateful kinds in the chain (IGBT tail, saturable inductor,
     Coss, Lauritzen diode) the IGBT tail must still give the E_off it

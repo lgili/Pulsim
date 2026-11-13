@@ -161,7 +161,7 @@ public:
         compute_b_extra_(dt, out, /*backward_euler=*/false);
     }
 
-    /// Restart half-step (add-discontinuity-restart-rule): backward
+    /// Restart stage (add-discontinuity-restart-rule): backward
     /// Euler over `h_e` is the trapezoidal companion at 2·h_e with the
     /// stored derivative (capacitor i_prev, inductor v_prev) left
     /// out. Same conductance 2C/(2h_e) = C/h_e, so the factor built
@@ -377,7 +377,7 @@ public:
         update_from_state_(x, dt, /*backward_euler=*/false);
     }
 
-    /// Commit a restart half-step of `h_e`: i_C = (C/h_e)(v − v_n),
+    /// Commit a restart stage of `h_e`: i_C = (C/h_e)(v − v_n),
     /// the trapezoidal commit at 2·h_e without i_prev; the inductor
     /// commit (read i_L and v_L from x) is the same either way.
     void update_from_state_backward_euler(const Vector& x, Real h_e) {
@@ -410,6 +410,25 @@ private:
     }
 
 public:
+    /// SDIRK(2,2) restart (add-discontinuity-restart-rule): between the
+    /// two backward-Euler-like stages of one step, move the previous
+    /// STATE (capacitor v, inductor i) to the pseudo previous state
+    /// x0* = x0 + c·(x1 − x0), c = (1 − γ)/γ, x1 the stage-1 solve.
+    /// Stage 2 then is the BE-like solve of size γh from x0*, and the
+    /// BE commit after it refreshes the derivative slots as
+    /// (x2 − x0*)/(γh) — stage 2's own derivative.
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                const Real v1 = stamping::read_node_voltage(x1, e.from)
+                              - stamping::read_node_voltage(x1, e.to);
+                e.v_prev += c * (v1 - e.v_prev);
+            } else {
+                e.i_prev += c * (x1[e.inductor_branch_var_id] - e.i_prev);
+            }
+        }
+    }
+
     /// Zero all entries — used at start of simulation (all-zero IC).
     void reset() noexcept {
         for (auto& e : entries_) {

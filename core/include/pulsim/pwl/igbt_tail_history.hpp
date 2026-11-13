@@ -176,6 +176,15 @@ public:
         }
     }
 
+    /// SDIRK restart: pseudo previous Q from the stage-1 solve, by
+    /// the affine relation stage 1 solved with.
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real q = e.k0 + e.k1 * steady_state_at(e, x1);
+            e.q_prev += c * (q - e.q_prev);
+        }
+    }
+
     /// Seed from a DC operating point: charge in equilibrium,
     /// Q = k·i_ss·tau, where the split adds back to i_ss exactly.
     void seed_from_dc_op(const Vector& x) {
