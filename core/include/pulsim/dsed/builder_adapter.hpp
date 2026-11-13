@@ -575,10 +575,12 @@ private:
         } else {
             entry.exact.reason = b_extra_fn_
                 ? "b_extra_fn: a user source function has no closed form"
-                : "PWM / pulse source: not piecewise-constant events yet";
+                : "PWM / pulse voltage source or a sine / pulse / table "
+                  "current source: no closed form yet";
         }
-        // PWM/pulse sources or a user b_extra_fn: b(t) is not a
-        // finite sum of oscillators — the numeric path owns those.
+        // PWM/pulse sources, current waveforms or a user b_extra_fn:
+        // b(t) is not a finite sum of the sine-voltage oscillators the
+        // augmented stepper models — the numeric path owns those.
     }
 
     /// True iff every time-varying contribution is a

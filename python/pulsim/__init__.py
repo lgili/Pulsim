@@ -2274,6 +2274,7 @@ def simulate(
             pass
         _auto_check_voltage_sanity(_dsed_res, builder,
                                     voltage_sanity_factor)
+        _dsed.check_diode_modes(_dsed_res, builder)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:

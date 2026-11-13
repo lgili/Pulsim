@@ -150,7 +150,11 @@ the state at an event is the bracket end past the crossing. A diode
 whose signal is zero to rounding (`V_th = 0` at rest, a current zero)
 is decided on its exact OFF-mode trajectory, not by the sign of a
 rounding residue, so `V_th = 0`, `V_th = V_f` and `V_f > V_th` run
-without a hysteresis band. Builder initial conditions (`c0=`, `i0=`,
+without a hysteresis band. That settle can still pick a wrong mode
+(a boost with `V_th = 0` held its diode ON at -1.07 A); `simulate`
+checks every stored sample against the diode law and raises
+`DiodeModeInconsistentError` naming the diode rather than return such a
+run (`V_th = 1e-2` avoided it in every measured case). Builder initial conditions (`c0=`, `i0=`,
 `set_initial`) map per device onto the reduced state;
 `result.initial_condition_adjustment` is the largest change made to a
 declared capacitor voltage (0 when they are consistent).

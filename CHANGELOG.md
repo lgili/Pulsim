@@ -42,6 +42,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   second cache; results bit-identical. `on_cache` parameter refactors
   now reach the restart steps (they solved on stale factors).
 
+### Integration fixes (batch 4: harness, composite diode drop, exact propagator)
+
+* **Changed** `simulate(engine='dsed')` raises `DiodeModeInconsistentError`
+  (a `RuntimeError`) when a stored sample has an ON PWL diode carrying
+  reverse current or an OFF one forward-biased past its threshold (more
+  than 1e-3 of its peak). The exact propagator's zero-band settle returned
+  such runs silently: a boost with `V_th` = 0 held its diode ON at
+  -1.07 A (R = 50 Ω), a half-wave RL rectifier conducted -0.85 A. Give the
+  diode `V_th = 1e-2`, or use `pwl` / `trbdf2`.
+* **Fixed** `periodic_steady_state` solves a boost whose diode has
+  `V_th` = 0 or 1e-3 (CCM 20 Ω: 24.05363 V; DCM 500 Ω: 36.59440 V; trbdf2
+  started from the orbit stays on it to 1e-6 V); it failed "did not
+  settle". The event instants of `pattern` are the stepper's (the extra
+  Newton step moved them by 3e-22 s). `PeriodicSteadyStateResult.exact`
+  is the orbit's `result.exact`.
+* **Changed** `result.exact` names "a sine / pulse / table current source"
+  as the reason a mask is numeric (it said "PWM / pulse source").
+
 ### Fixed engine: discontinuity restart rule (opt-in)
 
 `simulate(..., discontinuity_restart=True)` (also `SolverOptions`,

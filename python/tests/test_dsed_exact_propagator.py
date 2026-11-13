@@ -155,17 +155,27 @@ def test_double_crossing_inside_one_step_is_seen():
     # 9.5 V rail through 1 kOhm: v_D > 0 only for w t in (1.253, 1.889),
     # 0.64 us inside one 10 us step whose ends both read v_D < 0. The
     # scan step pi/(4 w) = 0.79 us finds the window.
-    b = p.CircuitBuilder()
-    b.add_capacitor("C", "t", "gnd", 100e-9)
-    b.add_inductor("L", "t", "gnd", 10e-6, i0=-1.0)
-    b.add_diode("D", "t", "k", GON, GOFF, 0.0)
-    b.add_resistor("R", "k", "r", 1e3)
-    b.add_voltage_source("Vr", "r", "gnd", 9.5)
-    r = _run(b, t_end=10e-6)
+    # Integration batch 4: with V_th = 0 the run was silently wrong after
+    # the turn-on (D ON at -18 mA at 4.25 us; pwl at dt = 0.1 ns has D OFF
+    # there) and the diode-law guard now names it; with V_th = 1e-3 both
+    # windows are right (1.2536-1.8877 us and 7.537-8.170 us, pwl ends 8.170).
+    def build(v_th):
+        b = p.CircuitBuilder()
+        b.add_capacitor("C", "t", "gnd", 100e-9)
+        b.add_inductor("L", "t", "gnd", 10e-6, i0=-1.0)
+        b.add_diode("D", "t", "k", GON, GOFF, v_th)
+        b.add_resistor("R", "k", "r", 1e3)
+        b.add_voltage_source("Vr", "r", "gnd", 9.5)
+        return b
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    with pytest.raises(DiodeModeInconsistentError):
+        _run(build(0.0), t_end=10e-6)
+    r = _run(build(1e-3), t_end=10e-6)
     on = r.event_times[r.event_types == 1]
-    assert len(on) >= 1
-    assert abs(on[0] - np.arcsin(0.95) / 1e6) < 1e-12
-    assert np.count_nonzero(r.event_types == 2) >= 1
+    assert len(on) == 2
+    assert abs(on[0] - np.arcsin(0.9501) / 1e6) < 1e-12
+    assert list(r.event_types) == [1, 2, 1, 2]
+    assert abs(r.event_times[1] - 1.88772e-6) < 1e-11
 
 
 def test_ten_megahertz_duty():
@@ -277,3 +287,47 @@ def test_consistent_initial_conditions_report_no_adjustment():
     t = np.asarray(r.times)
     ref = 5.0 - 3.0 * np.exp(-t / 1e-3)
     assert np.max(np.abs(np.asarray(r.v("a")) - ref)) < 1e-10
+
+
+# Integration batch 4: the zero-band settle can keep a diode in a mode its
+# law forbids; check_diode_modes turns that silent answer into a named error.
+def _boost(v_th, R):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L", "vin", "sw", 100e-6)
+    b.add_switch("S", "sw", "gnd", 1e3, 1e-9)
+    b.add_diode("D1", "sw", "vout", 1e3, 1e-9, v_th)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", R)
+    fn = p.make_pwm_switch_fn(1e5, 0.5, b.switch_index_of("S"), b.graph.num_switches)
+    return b, fn
+
+
+@pytest.mark.parametrize("v_th,R", [(0.0, 50.0), (1e-3, 50.0), (0.0, 500.0)])
+def test_boost_with_a_wrong_settled_mode_is_named(v_th, R):
+    # measured: D1 ON at -1.07 A (R = 50, V_th = 0); V_out 0.76 V low at R = 500
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    b, fn = _boost(v_th, R)
+    with pytest.raises(DiodeModeInconsistentError, match="D1"):
+        p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+
+
+def test_boost_with_a_threshold_band_runs_and_agrees():
+    b, fn = _boost(1e-2, 50.0)
+    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    b, fn = _boost(1e-2, 50.0)
+    ref = p.simulate(b, 3e-3, engine="trbdf2", switch_fn=fn, rtol=1e-10, atol=1e-13)
+    # on dsed's own samples (its sparse output is not interpolated across edges)
+    v = np.interp(np.asarray(r.times), np.asarray(ref.times), np.asarray(ref.v("vout")))
+    assert np.abs(v - np.asarray(r.v("vout"))).max() < 1e-3
+
+
+def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_named():
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_diode("D", "in", "a", 1e3, 1e-9)
+    b.add_resistor("R", "a", "b", 10.0)
+    b.add_inductor("L", "b", "gnd", 1e-3)
+    with pytest.raises(DiodeModeInconsistentError, match="'D' is ON while carrying"):
+        p.simulate(b, 3e-3, engine="dsed")

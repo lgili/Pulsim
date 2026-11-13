@@ -285,11 +285,30 @@ eigen, tier 2 Padé; `result.exact["masks"]`). A mask that passes
 neither bound (tier 3: stiff and non-normal, e.g. a 1e12 Jordan block)
 runs on the old numeric path for that mask, recorded with its reason;
 the implicit hand-off and a strict refusal need the unified stepper
-(`add-exact-propagator-strategy` task 2.4). Masks with PWM / sine /
-pulse sources are numeric too (task 8). Capacitor loops (parallel
+(`add-exact-propagator-strategy` task 2.4). Masks with PWM / pulse
+voltage sources or a sine / pulse / table current source are numeric too
+(task 8; tier 3 in `result.exact`); sine voltage sources are exact
+(an augmented oscillator state). Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).
+
+**A diode with no threshold band can be settled into the wrong mode on
+`dsed`.** The zero-band settle of the exact-propagator slice keeps a
+diode ON through reverse current (or OFF while forward-biased) after
+some events. Before the slice these circuits failed loudly ("did not
+settle"); now a guard checks every stored sample against the diode law
+and raises `DiodeModeInconsistentError` (a `RuntimeError`, in
+`pulsim._dsed_dispatch`) naming the diode. Measured (boost 12 V, 100 µH,
+47 µF, 100 kHz, D = 0.5): V_th = 0 at R = 50 Ω held D1 ON at -1.07 A
+(V_out 0.16 V low at 3 ms); at R = 500 Ω V_out was 0.76 V low; V_th =
+1e-3 was still wrong at 20 and 50 Ω, right at 500 Ω; V_th = 1e-2 was
+right at all three. A half-wave rectifier into 10 Ω + 1 mH with V_th = 0
+conducted -0.85 A for half a period (err_rms 0.40). The guard reads the
+stored samples only, so a wrong mode shorter than one stored step is
+not seen. `periodic_steady_state` (no event projection, rtol 1e-11)
+solves these boosts correctly. Workaround: `V_th = 1e-2`, or `pwl` /
+`trbdf2`. The fix is the complementarity mode selection.
 
 ### Fixed-step controller ticks land on the `dt` grid
 

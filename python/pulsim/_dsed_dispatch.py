@@ -924,3 +924,51 @@ __all__ = [
     "_resolve_dsed_options",
     "run_dsed_from_builder",
 ]
+
+
+class DiodeModeInconsistentError(RuntimeError):
+    """A dsed run whose settled diode modes break their own law."""
+
+
+def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
+    """Raise if a stored sample has an ON PWL diode carrying reverse
+    current, or an OFF one forward-biased past its threshold, by more
+    than ``rel`` of that diode's peak current / voltage over the run.
+
+    Containment for the zero-band settle of add-exact-propagator-strategy
+    slice 1 (integration batch 4): a boost with ``V_th`` = 0 or 1e-3 kept
+    its diode ON through -1.07 A at R = 50 Ohm (V_out 0.16 V low), and a
+    half-wave RL rectifier conducted -0.85 A for half a period, silently.
+    Agreeing circuits (bridges, three-phase rectifier, buck DCM) show no
+    sample beyond 1e-3. The complementarity mode selection replaces this.
+    """
+    try:
+        S = _np.asarray(res.switch_states)
+        comps = [c for c in builder.components() if c.get("kind") == "diode"]
+    except Exception:  # noqa: BLE001 - no record, nothing to check
+        return
+    if S.ndim != 2 or not comps:
+        return
+    for c in comps:
+        prm = c["params"]
+        on = S[:, builder.switch_index_of(c["name"])].astype(bool)
+        i = _np.asarray(res.i(c["name"]), dtype=float)
+        thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
+        v_off = i / float(prm.get("g_off", 1e-9))
+        i_pk = max(float(_np.abs(i).max()), 1e-12)
+        v_pk = max(float(_np.abs(v_off[~on]).max()) if (~on).any() else 0.0,
+                   thr, 1e-12)
+        bad_on = on & (i < -rel * i_pk)
+        bad_off = ~on & (v_off > thr + rel * v_pk)
+        if bad_on.any() or bad_off.any():
+            k = int(_np.argmax(bad_on | bad_off))
+            what = (f"ON while carrying {i[k]:.4g} A" if bad_on[k] else
+                    f"OFF while forward-biased by {v_off[k]:.4g} V")
+            raise DiodeModeInconsistentError(
+                f"simulate(engine='dsed'): diode {c['name']!r} is {what} at "
+                f"t = {float(res.times[k]):.6g} s ({int(bad_on.sum() + bad_off.sum())} "
+                "samples break the diode law): the event settle chose a "
+                "wrong mode, and the run would be silently wrong. Give the "
+                "diode a small threshold band (V_th = 1e-2 V worked on the "
+                "measured boosts; 1e-3 V on some), or use engine='pwl' or "
+                "'trbdf2'. Known limitation of the exact-propagator slice.")
