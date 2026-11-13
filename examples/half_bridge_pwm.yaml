@@ -29,7 +29,9 @@ circuit:
     # Split DC bus: the RL load returns to mid = Vdc/2. A resistive
     # divider alone (100 kΩ, as this file had until 2026-11) is no
     # return for a 10 Ω load: mid followed `out` and i_L peaked at
-    # 1.2 mA instead of 0.62 A. The 100 kΩ pair only balances the caps.
+    # 1.2 mA instead of 0.62 A. The 100 kΩ pair only balances the caps
+    # (τ = 10 s): the start transient leaves 47 µC on mid, so at 500 µs
+    # v(mid) = 50.23 V and i_L carries a −0.02 A offset.
     - type: capacitor
       name: Cbus_hi
       from: vcc

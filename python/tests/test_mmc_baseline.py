@@ -125,7 +125,7 @@ class TestTier2LayerConsistency:
         assert r.passed, r.msg
 
     def test_thd_ordering_l0_l1_l2(self, thesis_params: GeanThesisParams) -> None:
-        """THD(L0) < THD(L1) ≤ THD(L2) — physics ordering."""
+        """|THD(L0) − THD(L1)| ≤ 0.1 pp and THD(L1) ≤ THD(L2)."""
         r: BaselineResult = _test_thd_ordering(thesis_params)
         assert r.passed, r.msg
 

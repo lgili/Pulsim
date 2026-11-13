@@ -73,15 +73,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   26.06 A (V̂/|Z_AC| = 26.76 A). The notebooks' "L0 already has 81.6 %
   THD, so the thesis is inconsistent" conclusion is withdrawn. The
   arm-sum v_C ripple (185 V) is the arm energy balance with the
-  simulated 10 A 2f circulating current (first order: 185.5 V); no 2f
-  current brings it below 178 V, so the thesis' ~50 V is not the arm
+  simulated 10 A 2f circulating current (first order: 178.4 V, with
+  Î and φ from Z_AC); no 2f current brings it below 172 V, so the thesis' ~50 V is not the arm
   sum at these parameters. The closed-loop energy loop's v_C low-pass
   started at 0 V and wound its integrator to a −2.6 A bias on i_d_ref
   (i_d_pre −0.59 A for a 2 A reference); it now starts at the set-point.
 * **Fixed** `examples/half_bridge_pwm.yaml` returned the RL load to a
-  100 kΩ divider (i_L peak 1.2 mA instead of 0.62 A) and had no
-  freewheeling diodes for the dead time; it has a split capacitor bus
-  and anti-parallel diodes now (0.617 A, analytic 0.622 A).
+  100 kΩ divider (i_L half peak-to-peak 1.2 mA instead of 0.62 A) and
+  had no freewheeling diodes for the dead time; it has a split capacitor
+  bus and anti-parallel diodes now (0.617 A, analytic 0.622 A; the
+  −0.02 A DC offset is the start transient's 47 µC on the bus midpoint).
 * **Fixed** `run_psfb_ja_loss_analysis.py` printed 75.09 / 165.4 /
   24.43 W from the primary current (which carries the reflected load
   current) on a core whose J-A B was 0.42 T against the circuit's
@@ -92,7 +93,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   limitation (`probes/ja_negative_loop_area.py`).
 * **Fixed** (notebook) `buck_converter_design` counted the diode
   conduction loss as V_T0·I_avg only; with the 20 mΩ slope it is
-  V_T0·I_avg + R_d·I_rms² = 3.190 W (was 2.812 W), η 92.05 → 91.52 %.
+  V_T0·I_avg + R_d·I_rms² with V_T0 = V_F(1 A) − R_d·1 A = 3.115 W
+  (was 2.812 W), η 92.05 → 91.63 %.
 * **Documented** (not defects) the `b_extra` sign — it is an addend to the
   residual F = J·x + b, so an entry e on a voltage source's row gives
   v(+) − v(−) = V − e, and on a node row draws e out of the node — and

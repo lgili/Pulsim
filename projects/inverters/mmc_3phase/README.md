@@ -57,15 +57,15 @@ _build_notebooks.py         — Gerador do notebook (edite aqui, regenere com
 **Onde divergimos** (notebook 01, L1 sem tempo morto):
 
 * Ondulação de v_C (soma do braço): 185 V pkpk vs ~50 V da Fig 4.2.
-  O balanço de energia do braço dá 291 V sem corrente de circulação e
-  185 V com a 2ω que a simulação desenvolve (10 A pico); nenhuma 2ω o
-  leva abaixo de 178 V. Os ~50 V não são alcançáveis pela soma do braço
-  com esses parâmetros (talvez a figura mostre um submódulo: ÷5 ≈ 37 V;
+  O balanço de energia do braço dá 281 V sem corrente de circulação e
+  178 V com a 2ω que a simulação desenvolve (10 A pico); nenhuma 2ω o
+  leva abaixo de 172 V. Os ~50 V não são alcançáveis pela soma do braço
+  com esses parâmetros (talvez a figura mostre um submódulo: ÷5 ≈ 36 V;
   não conferido, o PDF não está no repositório).
 * THD da corrente de fase: 1,7 % vs 0,71 % (simulação da tese) e
   1,11 % (experimento). É a 5ª harmônica que a ondulação de v_C
   produz em m·v_C; o modelo médio L0, sem PWM, tem a mesma THD.
-* Pico da corrente de fase: 26,6 A vs ~22 A. V̂/|Z_AC| = 26,8 A com os
+* Pico da corrente de fase: 26,6 A (fundamental 26,1 A) vs ~22 A. V̂/|Z_AC| = 26,8 A com os
   parâmetros da legenda.
 
 Até 2026-11 o notebook reportava THD ≈ 80 %: `i_a` lia uma corrente

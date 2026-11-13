@@ -7,9 +7,9 @@ Phase 20.19 — multi-tier verification of pulsim's MMC stack
 
 The Sousa (2022) thesis comparison (notebook 01) has known
 inconsistencies between the documented parameters (Sec 4.1) and the
-plotted waveforms (Fig 4.2) — see ``README.md`` for the analytical
-proof that the documented operating point would give 250 V pkpk of
-``v_C`` ripple, while the figure shows ~50 V. That makes Sousa
+plotted waveforms (Fig 4.2) — see ``README.md`` for the arm energy
+balance: the documented operating point gives at least ~178 V pkpk of
+upper-arm ``v_C`` ripple, while the figure shows ~50 V. That makes Sousa
 *unreliable* as an absolute reference.
 
 This module establishes a *primary* reference instead: closed-form
@@ -238,38 +238,32 @@ def predict_i_a_peak_l0(params: GeanThesisParams) -> float:
     return v_ac_peak / abs(predict_z_ac(params))
 
 
-def predict_v_c_ripple_pkpk_l0(params: GeanThesisParams) -> float:
-    """Closed-form peak-to-peak ``v_C`` ripple at fundamental ω.
+def predict_v_c_ripple_pkpk_l0(params: GeanThesisParams, i2: float = 0.0,
+                               theta2: float = 0.0) -> float:
+    """First-order pkpk ripple of the upper-arm capacitor sum, phase a.
 
-    Derivation: dv_C/dt = m·i_b / C_arm, where i_b is the upper-arm
-    current (DC + AC component). The 1ω component of ``m·i_b`` is
-    integrated by the cap to give the dominant v_C ripple.
+    Arm energy balance: dW/dt = v_arm·i_arm with
+    v_arm = V_dc/2 − V̂·cos ωt and
+    i_arm = I_dc/3 + ½Î·cos(ωt − φ) + i2·cos(2ωt + θ2), where
+    Î = V̂/|Z_AC|, φ = ∠Z_AC and I_dc = 1.5·V̂·Î·cos φ / V_dc.
+    First order: Δv_C = ΔW_pkpk / (C_arm·V_dc).
 
-    For the upper arm:
-        i_b(t) = i_DC + i_a(t) / 2     (HB, with i_a flowing toward ac)
-        m_p(t) = 0.5 − (M/2)·cos(ωt − φ_X)
-
-    Expanding ``m_p · i_b`` and extracting the 1ω term:
-        1ω-component magnitude ≈ (M/2) · I_a_peak · sin(θ)  +  0.5 · ω·I_a_peak·…
-
-    For our typical case (resistive-dominated load, low ω·L vs R),
-    the dominant 1ω term in m·i is ≈ I_a_peak·(M/2)/2 in amplitude.
-
-    Integration over ω: ΔV_C_amplitude = |m·i|_{1ω} / (ω·C_arm).
-    Peak-to-peak: 2 × that.
-
-    This is an *approximate* formula; the exact 1ω amplitude
-    depends on the phase relationship between m and i_a.
+    ``i2``/``theta2`` is the 2ω circulating current (0 = none). The 1ω
+    term does not depend on it, which is why no 2ω current can bring
+    the ripple below a floor (notebook 01, section 1.6b).
     """
-    omega = params.omega_grid
+    w = params.omega_grid
+    v_hat = params.m_depth * params.V_dc / 2.0
+    z = predict_z_ac(params)
+    i_hat, phi = v_hat / abs(z), float(np.angle(z))
+    i_dc = 1.5 * v_hat * i_hat * np.cos(phi) / params.V_dc
     c_arm = params.c_sm / params.n_sm
-    I_a_peak = predict_i_a_peak_l0(params)
-    # Worst-case-style envelope: assume m·i 1ω has amplitude
-    # 0.5·(M/2)·I_a_peak (RMS·sqrt(2) factor cancels for amplitude).
-    # This is a Sousa eq 2.40 reformulation, simplified.
-    mi_amp_1omega = 0.5 * (params.m_depth / 2.0) * I_a_peak
-    delta_amp = mi_amp_1omega / (omega * c_arm)
-    return 2.0 * delta_amp  # peak-to-peak
+    tt = np.linspace(0.0, 1.0 / params.f_grid, 2000, endpoint=False)
+    p_arm = ((params.V_dc / 2.0 - v_hat * np.cos(w * tt))
+             * (i_dc / 3.0 + 0.5 * i_hat * np.cos(w * tt - phi)
+                + i2 * np.cos(2.0 * w * tt + theta2)))
+    energy = np.cumsum(p_arm - p_arm.mean()) * (tt[1] - tt[0])
+    return float(np.ptp(energy) / (c_arm * params.V_dc))
 
 
 # =============================================================================
@@ -398,22 +392,14 @@ def test_l0_ac_amplitude(params: GeanThesisParams,
 
 def test_l0_v_c_ripple(params: GeanThesisParams,
                        factor_tol: float = 2.0) -> BaselineResult:
-    """Tier 1.4 — L0 ``v_C`` pkpk ripple within an *order-of-magnitude*
-    of the analytical first-order prediction ``ΔV ≈ |m·i|_{1ω} /
-    (ω·C_arm)`` × 2.
+    """Tier 1.4 — L0 ``v_C`` pkpk ripple within a factor ``factor_tol``
+    of the first-order arm energy balance without circulating current
+    (``predict_v_c_ripple_pkpk_l0``).
 
-    The first-order formula (assumes ``v_C ≈ V_dc`` constant when
-    computing ``m·i``) *overestimates* the actual ripple because it
-    ignores the feedback of the v_C ripple itself back onto the arm
-    voltage source — a well-known second-order self-consistency
-    effect in MMCs. The simulator solves the coupled ODE
-    self-consistently, so we expect the measured value to be lower
-    than the first-order analytical, typically by a factor 1.5-2×.
-
-    Pass criterion: ``pred / factor_tol < measured < pred · factor_tol``.
-    This is an *order-of-magnitude* check — it would catch a wrong-
-    by-10× error (e.g. wrong C_arm, wrong M, wrong topology) without
-    flagging the harmless first-order/exact discrepancy.
+    The measured ripple is lower than that prediction because the open
+    loop develops a 2ω circulating current, which the prediction leaves
+    out (notebook 01, section 1.6b, quantifies it for L1). This is an
+    order-of-magnitude check: it catches a wrong C_arm, M or topology.
     """
     plant = build_l0_plant(params)
     res = run_l0_open_loop(plant, t_end=200e-3, dt=1e-5)
@@ -430,7 +416,7 @@ def test_l0_v_c_ripple(params: GeanThesisParams,
         tolerance=factor_tol,
         units="V",
         msg=(f"v_C pkpk measured = {pkpk_measured:.1f} V, "
-             f"first-order analytical = {pred:.1f} V, "
+             f"first-order energy balance, no i_circ = {pred:.1f} V, "
              f"ratio = {ratio:.2f}× "
              f"(must be within [{1/factor_tol:.2f}, {factor_tol:.2f}])"),
         tier=1,
@@ -510,12 +496,12 @@ def test_cap_balance(params: GeanThesisParams,
     plant = build_l0_plant(params)
     res = run_l0_open_loop(plant, t_end=200e-3, dt=1e-5)
     mask = res.t >= 150e-3
-    # Check actual v_C drift: compare mean of first half vs second half
-    # of the steady window.
-    n = int(np.sum(mask))
-    half = n // 2
+    # Drift = change of the one-period mean between two consecutive whole
+    # fundamental periods (half-window means over 1.5 periods each read
+    # the 1ω ripple itself as drift: -23 V).
     vc = res.v_C[0, mask]
-    drift_per_period = float(np.mean(vc[half:]) - np.mean(vc[:half]))
+    n_per = int(round((1.0 / params.f_grid) / (res.t[1] - res.t[0])))
+    drift_per_period = float(np.mean(vc[n_per:2 * n_per]) - np.mean(vc[:n_per]))
     rel_drift = abs(drift_per_period) / params.v_c_init
     passed = rel_drift < tol
     return BaselineResult(
@@ -525,7 +511,7 @@ def test_cap_balance(params: GeanThesisParams,
         predicted=0.0,
         tolerance=tol * params.v_c_init,
         units="V",
-        msg=(f"v_C drift across the steady window = {drift_per_period:.2f} V; "
+        msg=(f"v_C one-period-mean drift per period = {drift_per_period:.2f} V; "
              f"relative = {rel_drift*100:.3f} % "
              f"(tol < {tol*100:.0f} %)"),
         tier=1,
@@ -616,9 +602,8 @@ def test_thd_ordering(params: GeanThesisParams) -> BaselineResult:
 
     ``thd`` sums harmonics 2..50 (≤ 3 kHz), so the carrier content near
     9 kHz is outside it. What it sees is the 5th/7th harmonic that the
-    v_C ripple (59/33/15 V at 1f/2f/3f) puts into m·v_C — the same in
-    the average model and the switched one (i_a,5 = 0.447 A in L0,
-    0.439 A in L1). So L0 and L1 agree to 0.1 pp, and dead time
+    v_C ripple puts into m·v_C — the same in the average model and the
+    switched one. So L0 and L1 agree to 0.1 pp, and dead time
     (L2) only adds distortion. (The old "L0 < L1" passed only while
     both read an arm current through a stale state index.)
     """

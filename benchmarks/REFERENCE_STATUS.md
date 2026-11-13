@@ -196,6 +196,13 @@ Measure: `edge` (source-forced nodes dropped from the default observables; the s
 
 ## Notes
 
+**Series-capacitor ICs (25707fe8), 2026-11-13.** A capacitor's `ic` is
+now the voltage across it, so four triaged circuits start from a
+different x0: `half_bridge_transformer_dc`, `half_bridge_inverter_lc`,
+`npc_three_level_halfbridge`, `t_type_3level_halfbridge`. Their rows
+above were re-measured with `reference_status.differential` on those four
+only (no full regeneration); every outcome is unchanged.
+
 **Integration batch 5 (in-house LU Newton + TR-BDF2 error control),
 2026-11-13.** The measure is now `edge` (README, *Measure*). Same harness,
 three runs (agree / disagree / error / refused):

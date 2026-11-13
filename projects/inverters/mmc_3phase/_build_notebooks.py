@@ -109,9 +109,9 @@ de validação.
    Seção 4.1 da tese — vou usar um valor típico (1 mH) e documentar
    o impacto.
 4. Para os parâmetros declarados (V_dc = 640 V, M = 0,85, R = 9,75 Ω,
-   L = 2,8 mH, C_arm = 94 µF) o balanço de energia do braço dá 291 V
+   L = 2,8 mH, C_arm = 94 µF) o balanço de energia do braço dá 281 V
    pkpk sem corrente de circulação, e nenhuma corrente de circulação a
-   2ω o leva abaixo de 178 V (seção 1.6b). Os ~50 V da Fig 4.2 não são
+   2ω o leva abaixo de 172 V (seção 1.6b). Os ~50 V da Fig 4.2 não são
    alcançáveis pela soma do braço nesse ponto de operação.
 
 A seção 1.6 tem a tabela comparativa; a 1.7 discute as diferenças.
@@ -345,7 +345,7 @@ plt.tight_layout(); plt.show()
 * As correntes de fase são senoidais balanceadas a 60 Hz, com pico
   determinado por $\hat V / |Z_{AC}|$, onde
   $Z_{AC} = R_{load} + R_b/2 + j\omega(L_{load} + L_b/2)$ — 26,8 A com
-  nossos parâmetros (medido: 26,6 A).
+  nossos parâmetros (medido: 26,1 A de fundamental, 26,6 A de pico).
 
 A diferença na ondulação de $v_C$ é o principal gap entre nossa
 simulação e a Fig 4.2 da tese — vamos comparar quantitativamente
@@ -422,9 +422,10 @@ A Tabela 4.2 da tese reporta:
 | RMS(i_ca) [A] (circulating) | 4.60 | 4.55 | 8.67 |
 | RMS(CA(i_cc)) [A] | 1.30 | 1.14 | 0.50 |
 
-Calculamos THD($i_a$) e RMS da parte CA da corrente de circulação
-$i_{circ,a} = (i_{a,p} + i_{a,n})/2$ nas simulações L1 e L2 (a corrente
-do barramento não é registrada):
+Calculamos THD($i_a$), a fundamental de $i_a$ e o RMS da corrente de
+circulação $i_{circ,a} = (i_{a,p} + i_{a,n})/2$ — total e só a parte CA,
+porque não sabemos qual dos dois a tabela da tese usa — nas simulações
+L1 e L2 (a corrente do barramento não é registrada):
 """))
 
     cells.append(code(r"""
@@ -443,6 +444,8 @@ def measure(res, label):
                        res.v_C[:, mask].min(axis=1)).mean()
     v_C_mean = res.v_C[:, mask].mean(axis=1).mean()
     i_circ = res.i_circ_a[mask][:n_window]
+    t_w = res.t[mask][:n_window]
+    i_a_fund = 2 * abs(np.mean(i_a * np.exp(-1j * params.omega_grid * t_w)))
     return {
         "label": label,
         "i_a_peak": float(np.max(np.abs(i_a))),
@@ -450,7 +453,9 @@ def measure(res, label):
         "THD_ia_pct": thd_ia,
         "v_C_mean": v_C_mean,
         "v_C_pkpk_avg": v_C_pkpk_avg,
+        "i_a_fund": float(i_a_fund),
         "i_circ_ac_rms": rms_ac(i_circ),
+        "i_circ_rms": rms(i_circ),
     }
 
 
@@ -462,12 +467,16 @@ print(f"{'Métrica':28s} {'L1 (sim 2)':>14s} {'L2 (sim 1)':>14s}  "
 print("-" * 80)
 print(f"{'i_a peak [A]':28s} {m_l1['i_a_peak']:>14.2f} "
       f"{m_l2['i_a_peak']:>14.2f}  {'(~22 A na Fig 4.2)':>20s}")
+print(f"{'i_a fundamental [A]':28s} {m_l1['i_a_fund']:>14.2f} "
+      f"{m_l2['i_a_fund']:>14.2f}  {'':>20s}")
 print(f"{'i_a RMS [A]':28s} {m_l1['i_a_rms']:>14.2f} "
       f"{m_l2['i_a_rms']:>14.2f}  {'(~16 A da Fig 4.2)':>20s}")
 print(f"{'THD(i_a) [%]':28s} {m_l1['THD_ia_pct']:>14.3f} "
       f"{m_l2['THD_ia_pct']:>14.3f}  {'0.709 / 0.706':>20s}")
 print(f"{'RMS(CA(i_circ,a)) [A]':28s} {m_l1['i_circ_ac_rms']:>14.2f} "
-      f"{m_l2['i_circ_ac_rms']:>14.2f}  {'8.67 / 4.55':>20s}")
+      f"{m_l2['i_circ_ac_rms']:>14.2f}  {'8.67 / 4.55 (?)':>20s}")
+print(f"{'RMS(i_circ,a) total [A]':28s} {m_l1['i_circ_rms']:>14.2f} "
+      f"{m_l2['i_circ_rms']:>14.2f}  {'8.67 / 4.55 (?)':>20s}")
 print(f"{'v_C médio [V]':28s} {m_l1['v_C_mean']:>14.1f} "
       f"{m_l2['v_C_mean']:>14.1f}  {'~627 V':>20s}")
 print(f"{'v_C pkpk médio [V]':28s} {m_l1['v_C_pkpk_avg']:>14.1f} "
@@ -480,7 +489,9 @@ print(f"{'v_C pkpk médio [V]':28s} {m_l1['v_C_pkpk_avg']:>14.1f} "
 A soma dos capacitores do braço superior da fase a guarda
 $W = \tfrac12 C_{arm} v_C^2$, com $dW/dt = v_{arm} \, i_{arm}$,
 $v_{arm} = V_{dc}/2 - \hat V \cos\omega t$ e
-$i_{arm} = I_{dc}/3 + \tfrac12 \hat I \cos(\omega t - \varphi) + i_{circ}$.
+$i_{arm} = I_{dc}/3 + \tfrac12 \hat I \cos(\omega t - \varphi) + i_{circ}$,
+com $\hat I = \hat V/|Z_{AC}|$ e $\varphi = \angle Z_{AC}$ (o mesmo $Z_{AC}$
+da seção 1.7 e do notebook 05).
 Em primeira ordem $\Delta v_C = \Delta W / (C_{arm} V_{dc})$. O termo a 1ω
 não depende da corrente de circulação; uma $i_{circ}$ a 2ω só mexe no
 termo a 2ω. Abaixo: o valor sem circulação, o valor com a 2ω que a
@@ -489,28 +500,17 @@ própria simulação L1 produz, e o menor valor que qualquer 2ω
 """))
 
     cells.append(code(r"""
+from mmc_baseline_tests import predict_z_ac, predict_v_c_ripple_pkpk_l0 as ripple_pkpk
+
 w = params.omega_grid
-V_hat = params.m_depth * params.V_dc / 2
-Z_load = params.r_load + 1j * w * params.l_load
-I_hat, phi = V_hat / abs(Z_load), np.angle(Z_load)
-I_dc = 1.5 * V_hat * I_hat * np.cos(phi) / params.V_dc
-C_arm = params.c_sm / params.n_sm
-tt = np.linspace(0, 1 / params.f_grid, 2000, endpoint=False)
-
-def ripple_pkpk(I2, th):
-    v_arm = params.V_dc / 2 - V_hat * np.cos(w * tt)
-    i_arm = (I_dc / 3 + 0.5 * I_hat * np.cos(w * tt - phi)
-             + I2 * np.cos(2 * w * tt + th))
-    p_arm = v_arm * i_arm
-    W = np.cumsum(p_arm - p_arm.mean()) * (tt[1] - tt[0])
-    return np.ptp(W) / (C_arm * params.V_dc)
-
+print(f"Î = V̂/|Z_AC| = {params.m_depth * params.V_dc / 2 / abs(predict_z_ac(params)):.2f} A, "
+      f"φ = {np.degrees(np.angle(predict_z_ac(params))):.1f}°")
 mask = res_l1.t >= 150e-3
 t_w, ic_w = res_l1.t[mask], res_l1.i_circ_a[mask]
 c2 = 2 * np.mean(ic_w * np.exp(-2j * w * t_w))      # 2ω phasor of i_circ,a
-r_none = ripple_pkpk(0.0, 0.0)
-r_sim = ripple_pkpk(abs(c2), np.angle(c2))
-r_min = min(ripple_pkpk(a, th) for a in np.linspace(0, 40, 81)
+r_none = ripple_pkpk(params)
+r_sim = ripple_pkpk(params, abs(c2), np.angle(c2))
+r_min = min(ripple_pkpk(params, a, th) for a in np.linspace(0, 40, 81)
             for th in np.linspace(0, 2 * pi, 72, endpoint=False))
 print(f"i_circ,a da simulação L1: 2ω = {abs(c2):.2f} A pico")
 print(f"v_C pkpk, 1ª ordem, sem i_circ        : {r_none:6.1f} V")
@@ -528,13 +528,13 @@ print(f"por submódulo (÷N = {params.n_sm})               : "
 
 A seção 1.6b responde: a corrente de circulação a 2ω que a planta em
 malha aberta desenvolve sozinha já reduz a ondulação da soma do braço
-de ~291 V (sem circulação) para ~185 V, e o modelo de primeira ordem
-com essa mesma 2ω reproduz a simulação. Nenhuma 2ω leva a soma abaixo
-de ~178 V, porque o termo a 1ω — $V_{dc}/2 \cdot \hat I/2$ contra
+de ~281 V (sem circulação) para ~178 V, a 3,5 % dos 184,8 V que a
+simulação L1 mede. Nenhuma 2ω leva a soma abaixo
+de ~172 V, porque o termo a 1ω — $V_{dc}/2 \cdot \hat I/2$ contra
 $\hat V \cdot I_{dc}/3$ — não tem componente a 2ω para cancelar. Os
 ~50 V da Fig 4.2 portanto **não** vêm da corrente de circulação.
 Uma hipótese consistente com os números é que a figura mostre a
-tensão de *um submódulo* (soma ÷ 5 ≈ 37–58 V); não foi possível
+tensão de *um submódulo* (soma ÷ 5 ≈ 36–56 V); não foi possível
 conferir, porque o PDF da tese não está no repositório.
 
 ### THD da corrente de fase
@@ -548,14 +548,17 @@ nossa THD fica acima da tese.
 
 ### Corrente de circulação
 
-RMS da parte CA de $i_{circ,a}$: 7,5 A em L1 (Sim 2 da tese, sem tempo
-morto: 8,67 A) e 8,8 A em L2 (Sim 1, com tempo morto: 4,55 A;
-experimento: 4,60 A). Em L2 o nosso valor fica perto do dobro do da
-tese; não investigamos essa diferença.
+RMS de $i_{circ,a}$, só a parte CA / total (com o DC $I_{dc}/3$):
+7,5 / 9,4 A em L1 (Sim 2 da tese, sem tempo morto: 8,67 A) e
+8,8 / 10,5 A em L2 (Sim 1, com tempo morto: 4,55 A; experimento:
+4,60 A). A tabela da tese não diz qual das duas usa. Em L2 o nosso
+valor fica 1,9–2,3× o da tese em qualquer leitura; não investigamos
+essa diferença.
 
 ### Corrente de fase
 
-$\hat V / |Z_{AC}| = 26,8$ A, e o L1 mede 26,6 A. A Fig 4.2 mostra
+$\hat V / |Z_{AC}| = 26,8$ A; o L1 mede 26,1 A de fundamental (−2,6 %)
+e 26,6 A de pico. A Fig 4.2 mostra
 ~22 A de pico; com os parâmetros da legenda o circuito não chega a
 22 A sem uma impedância extra de ~2 Ω, que a tese não documenta.
 
@@ -566,8 +569,8 @@ $\hat V / |Z_{AC}| = 26,8$ A, e o L1 mede 26,6 A. A Fig 4.2 mostra
 3. **Tempo morto** — os notches no $v_b$ do L2 aparecem nas transições.
 4. **Balanço de energia** — $v_C$ médio ~635 V, sem deriva, e a
    ondulação concorda com o balanço de energia de primeira ordem.
-5. **Corrente de fase** — amplitude a 1 % de $\hat V/|Z_{AC}|$ e trinca
-   balanceada.
+5. **Corrente de fase** — fundamental 2,6 % abaixo de $\hat V/|Z_{AC}|$
+   (pico a 0,5 %) e trinca balanceada.
 
 ## 1.8 — Próximos passos
 
@@ -838,8 +841,10 @@ print(f"{'v_C drift mean (pre→post) [V]':40s} "
 * O controle de corrente dq do pulsim consegue rastrear o degrau,
   qualitativamente igual à Fig 5.10.
 * A ondulação `v_C` é maior que na figura da tese — o mesmo gap do
-  notebook 01, onde o balanço de energia do braço mostra que esses
-  parâmetros não permitem ~50 V na soma do braço (seção 1.6b).
+  notebook 01. Lá (seção 1.6b) o balanço de energia do braço mostra que
+  esses parâmetros não permitem ~50 V na soma do braço no ponto de malha
+  aberta (26,8 A); para o ponto deste notebook ($i_d$ = 15 A) o limite
+  não foi recalculado.
 
 **O que falta pra fidelidade total ao Cap. 5 da tese**:
 
@@ -1018,7 +1023,7 @@ axes[2].set_title("Corrente de circulação da fase a: visa só a componente DC 
 axes[2].grid(alpha=0.3); axes[2].legend(ncol=5, fontsize=8, loc="upper left")
 
 axes[3].set_ylabel("v_C̄ [V]"); axes[3].set_xlabel("tempo [ms]")
-axes[3].set_title("Média das 6 tensões de cap: energy loop reduz o drift")
+axes[3].set_title("Média das 6 tensões de cap, com e sem energy loop")
 axes[3].grid(alpha=0.3); axes[3].legend(ncol=5, fontsize=8, loc="upper left")
 
 plt.tight_layout(); plt.show()
@@ -1401,7 +1406,7 @@ acrescenta distorção nos zero-crossings. O restante da THD é a 5ª e a
 | Métrica | Pulsim (faixa) | Sousa exp. | Explicação |
 |---|---:|---:|:---|
 | THD($i_a$) [%] | 1,4–2,7 | 1,11 | 5ª/7ª da ondulação de $v_C$ (nb 01, 1.7) |
-| $v_C$ pkpk [V] | 180–206 | ~50 | ≥ 178 V pelo balanço de energia do braço (nb 01, 1.6b) |
+| $v_C$ pkpk [V] | 180–206 | ~50 | ≥ 172 V pelo balanço de energia do braço (nb 01, 1.6b) |
 | $i_a$ pico [A] | 26,0–28,5 | ~22 | $\hat V/|Z_{AC}|$ = 26,8 A; 22 A pede ~2 Ω não documentados |
 
 Modelar IGBTs fisicamente **não fecha** essas diferenças, porque
@@ -1443,7 +1448,7 @@ def build_baseline_notebook() -> list[dict[str, Any]]:
 > **Por quê este notebook existe.** Os notebooks 01-04 comparam
 > contra a tese do Sousa (2022), mas o experimento da Seção 4.1
 > não fecha com os parâmetros declarados — o balanço de energia do
-> braço dá ≥ 178 V pkpk de ondulação $v_C$ (291 V sem corrente de
+> braço dá ≥ 172 V pkpk de ondulação $v_C$ (281 V sem corrente de
 > circulação; notebook 01, seção 1.6b), mas a Fig 4.2 mostra ~50 V.
 > **Para valores absolutos, a tese não serve de referência.**
 
@@ -1494,7 +1499,7 @@ print(f"Operating point: V_dc={params.V_dc}V, M={params.m_depth}, "
       f"N={params.n_sm}, C_SM={params.c_sm*1e6:.0f}µF")
 print(f"|Z_AC| = {abs(predict_z_ac(params)):.3f} Ω")
 print(f"i_a_peak (1st-order analytical) = {predict_i_a_peak_l0(params):.3f} A")
-print(f"v_C pkpk (1st-order analytical) = {predict_v_c_ripple_pkpk_l0(params):.1f} V")
+print(f"v_C pkpk (1st-order arm energy balance, no i_circ) = {predict_v_c_ripple_pkpk_l0(params):.1f} V")
 """))
 
     cells.append(md(r"""
@@ -1624,7 +1629,7 @@ analíticos e de consistência. Os destaques:
 
 | Teste | Resultado |
 |---|---|
-| L0 amplitude i_a vs analítico | **1.0 % erro** |
+| L0 pico de i_a vs $\hat V/|Z_{AC}|$ | **1.0 % erro** (o pico inclui harmônicas) |
 | AVG(v_C) L0 vs L1 | **0.009 % erro** |
 | Fundamental i_a L0 vs L1 | **0.03 % erro** |
 | Sweep M (estabilidade) | **6/6 PASS** |
@@ -1636,8 +1641,8 @@ analíticos e de consistência. Os destaques:
 
 1. A topologia 3-φ do MMC está geometricamente correta
    (Z_AC = R_load + R_b/2 + jω(L_load + L_b/2)).
-2. A geração de fontes m·v_C nos braços está correta — 1.0 % da
-   forma fechada.
+2. A geração de fontes m·v_C nos braços está correta — o pico de $i_a$
+   fica a 1.0 % da forma fechada.
 3. As 4 layers (L0/L1/L2/L3) implementam a **mesma planta** — não
    há viés de DC em nenhuma delas.
 4. O simulador é numericamente robusto: não diverge em nenhum
@@ -1661,7 +1666,7 @@ trabalho futuro com PSIM/LTspice.
 L0 (sem chaveamento) e L1 têm a mesma THD de baixa ordem (1,75 % e
 1,72 %): a 5ª harmônica de $i_a$ vem da ondulação
 de $v_C$ no produto $m \cdot v_C$, não do PWM. Essa ondulação é fixada
-pelos parâmetros (≥ 178 V pkpk na soma do braço; a Fig 4.2 mostra
+pelos parâmetros (≥ 172 V pkpk na soma do braço; a Fig 4.2 mostra
 ~50 V), e por isso nossa THD fica acima dos 0,7–1,1 % da tese.
 
 (Até 2026-11 este notebook dizia que o L0 tinha 81,6 % de THD. Era um

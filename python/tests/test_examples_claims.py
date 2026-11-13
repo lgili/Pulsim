@@ -190,8 +190,10 @@ NOTEBOOKS = {
         (r"V_out médio: " + F + "V", near(11.9205, 0.06)),
         # Diode conduction is V_T0·I_avg + Rd·I_rms² (was V_T0·I_avg alone:
         # 2.812 W, η 92.05 %); the resistive term at I_rms = 4.35 A adds 0.38 W.
-        (r"A, RMS: [\d.]+A\nPerda de condução: " + F + "W", near(3.190, 0.003)),
-        (r"EFICIÊNCIA: " + F + "%", near(91.52, 0.01))],
+        # V_T0 = Vf(1 A) - Rd·1 A = 0.73 V, not Vf itself: 3.190 -> 3.115 W,
+        # η 91.52 -> 91.63 %.
+        (r"A, RMS: [\d.]+A\nPerda de condução: " + F + "W", near(3.115, 0.003)),
+        (r"EFICIÊNCIA: " + F + "%", near(91.63, 0.01))],
     "examples/notebooks/boost_converter_design.ipynb": [
         (r"Vout médio: " + F + "V", near(23.953, 0.12))],
     "examples/notebooks/boost_pfc_closed_loop.ipynb": [
@@ -258,15 +260,19 @@ NOTEBOOKS = {
     ],
     # mmc_3phase: i_a used to read an arm current (stale state index):
     # THD 81.7 -> 1.715 %. The v_C ripple is the arm energy balance with
-    # the simulated 2f circulating current (185.5 V vs simulated 184.8 V).
+    # the simulated 2f circulating current (178.4 V vs simulated 184.8 V).
+    # Energy balance now takes Î, φ from Z_AC (arm R_b/2, L_b/2 included),
+    # as section 1.7 and notebook 05 do: 291.4 -> 281.4, 185.5 -> 178.4,
+    # 178.2 -> 172.0 V (it used the load impedance alone, Î 27.7 A).
     "projects/inverters/mmc_3phase/01_mmc_validation_gean.ipynb": [
         (r"i_a peak \[A\]\s+" + F, near(26.64, 0.27)),
         (r"THD\(i_a\) \[%\]\s+" + F, near(1.715, 0.1)),
         (r"RMS\(CA\(i_circ,a\)\) \[A\]\s+" + F, near(7.54, 0.15)),
+        (r"i_a fundamental \[A\]\s+" + F, near(26.06, 0.26)),
         (r"v_C pkpk médio \[V\]\s+" + F, near(184.8, 3.7)),
-        (r"sem i_circ\s+:\s+" + F, near(291.4, 0.3)),
-        (r"com a 2ω simulada :\s+" + F, near(185.5, 3.7)),
-        (r"mínimo sobre 2ω\s+:\s+" + F, near(178.2, 0.2)),
+        (r"sem i_circ\s+:\s+" + F, near(281.4, 0.3)),
+        (r"com a 2ω simulada :\s+" + F, near(178.4, 3.6)),
+        (r"mínimo sobre 2ω\s+:\s+" + F, near(172.0, 0.2)),
     ],
     "projects/inverters/mmc_3phase/02_mmc_closed_loop_dq.ipynb": [
         (r"i_d post-step \(150-200 ms\) \[A\]\s+" + F, near(15.0, 0.15))],
@@ -452,7 +458,12 @@ def _yaml_value(key):
         return v, 48 * _dcm_buck(0.5, 150e-6, 20.0, 50e-6), 0.01 * 28.2
     if key == "half_bridge_pwm.yaml":       # ±50 V square into 10 Ω + 1 mH
         b, r, t, X = _yaml_run(key, switch_fn=_dead_time_pair)
-        i = np.asarray(r.i("Lload"))[t >= t[-1] - 50e-6]
+        i_all = np.asarray(r.i("Lload"))
+        # The DC offset (-0.02 A) is the start transient's charge left on the
+        # bus midpoint (tau = 10 s through the 100 kOhm pair): check that.
+        dv_mid = X[-1, b.node_id_of("mid")] - 50.0
+        assert abs(dv_mid - np.trapezoid(i_all, t) / 200e-6) <= 1e-3 * abs(dv_mid)
+        i = i_all[t >= t[-1] - 50e-6]
         return 0.5 * np.ptp(i), 5 * math.tanh(25e-6 / 2e-4), 0.02 * 0.622
     # The rest state no number: they must run, finite.
     _yaml_run(key)
