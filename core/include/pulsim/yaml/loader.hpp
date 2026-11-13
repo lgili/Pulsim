@@ -53,6 +53,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <format>
 #include <fstream>
 #include <initializer_list>
@@ -60,6 +61,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace pulsim::yaml {
@@ -151,6 +153,21 @@ namespace detail {
         return node[field].as<std::string>();
     }
     return default_value;
+}
+
+/// A non-negative finite parameter (default 0); refused by name
+/// otherwise. Used by the parasitic keys of `capacitor` / `inductor`
+/// and by `dc_machine` (add-realistic-passives, add-mna-native-machines).
+[[nodiscard]] inline Real nonneg_or_zero(
+    const YAML::Node& node, const std::string& type,
+    const std::string& name, const std::string& field) {
+    const Real v = real_or(node, field, Real{0});
+    if (!std::isfinite(v) || v < Real{0}) {
+        throw std::runtime_error(std::format(
+            "yaml::load: {} '{}': {} must be finite and >= 0 (got {})",
+            type, name, field, v));
+    }
+    return v;
 }
 
 /// Parse a single device entry; dispatches by `type`.
@@ -260,17 +277,86 @@ inline void load_device(
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "R"));
     } else if (type == "capacitor") {
+        // esr / esl: series composite, the same expansion as the
+        // Python keywords (python/pulsim/passives.py); zero adds nothing.
+        const Real esr = nonneg_or_zero(dev, type, name, "esr");
+        const Real esl = nonneg_or_zero(dev, type, name, "esl");
+        std::string from = require_string(dev, idx, type, "from");
+        if (esr > Real{0}) {
+            b.add_resistor(name + ".esr", from, name + ".esr_n", esr);
+            from = name + ".esr_n";
+        }
+        if (esl > Real{0}) {
+            b.add_inductor(name + ".esl", from, name + ".esl_n", esl);
+            from = name + ".esl_n";
+        }
         b.add_capacitor(
             name,
-            require_string(dev, idx, type, "from"),
+            from,
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "C"));
     } else if (type == "inductor") {
-        b.add_inductor(
-            name,
-            require_string(dev, idx, type, "from"),
-            require_string(dev, idx, type, "to"),
-            require_real(dev, idx, type, "L"));
+        if (dev["rac"]) {
+            throw std::runtime_error(std::format(
+                "yaml::load: inductor '{}': 'rac' is not read from YAML "
+                "yet; build the ladder in Python "
+                "(pulsim.passives.fit_rac_ladder, add_inductor(rac=)).",
+                name));
+        }
+        const Real esr = nonneg_or_zero(dev, type, name, "esr");
+        const Real c_par = nonneg_or_zero(dev, type, name, "c_par");
+        const std::string from = require_string(dev, idx, type, "from");
+        const std::string to = require_string(dev, idx, type, "to");
+        std::string a = from;
+        if (esr > Real{0}) {
+            b.add_resistor(name + ".esr", a, name + ".esr_n", esr);
+            a = name + ".esr_n";
+        }
+        b.add_inductor(name, a, to, require_real(dev, idx, type, "L"));
+        if (c_par > Real{0}) {
+            b.add_capacitor(name + ".cpar", from, to, c_par);
+        }
+    } else if (type == "dc_machine") {
+        // add-mna-native-machines: the composite of
+        // CircuitBuilder.add_dc_machine (python/pulsim/machines.py).
+        const Real R_a = nonneg_or_zero(dev, type, name, "R_a");
+        const Real L_a = require_real(dev, idx, type, "L_a");
+        const Real K = require_real(dev, idx, type, "K");
+        const Real J = require_real(dev, idx, type, "J");
+        const Real B = nonneg_or_zero(dev, type, name, "B");
+        const Real T_load = real_or(dev, "T_load", Real{0});
+        for (const auto& [label, v] : {std::pair{"L_a", L_a},
+                                       std::pair{"K", K},
+                                       std::pair{"J", J}}) {
+            if (!std::isfinite(v) || v <= Real{0}) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: dc_machine '{}': {} must be finite and "
+                    "> 0 (got {})", name, label, v));
+            }
+        }
+        if (!std::isfinite(T_load)) {
+            throw std::runtime_error(std::format(
+                "yaml::load: dc_machine '{}': T_load must be finite",
+                name));
+        }
+        const std::string a_pos = require_string(dev, idx, type, "a_pos");
+        const std::string a_neg = require_string(dev, idx, type, "a_neg");
+        const std::string omega = require_string(dev, idx, type, "omega_node");
+        const std::string emf = name + ".emf";
+        std::string l_from = a_pos;
+        if (R_a > Real{0}) {
+            l_from = name + ".ra_la";
+            b.add_resistor(name + ".ra", a_pos, l_from, R_a);
+        }
+        b.add_inductor(name + ".la", l_from, emf, L_a);
+        b.add_ideal_transformer(name + ".em", omega, "gnd", emf, a_neg, K);
+        b.add_capacitor(name + ".j", omega, "gnd", J, Real{0});
+        if (B > Real{0}) {
+            b.add_resistor(name + ".b", omega, "gnd", Real{1} / B);
+        }
+        if (T_load != Real{0}) {
+            b.add_current_source(name + ".tl", "gnd", omega, T_load);
+        }
     } else if (type == "diode") {
         b.add_diode(
             name,
@@ -521,7 +607,8 @@ inline void load_device(
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
             "igbt, igbt_level1, vcvs, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
-            "ideal_transformer, saturable_transformer, induction_motor");
+            "ideal_transformer, saturable_transformer, induction_motor, "
+            "dc_machine");
     }
 }
 

@@ -19,11 +19,16 @@ Each entry: question → option taken → why → how to reverse.
 
 ## D2. YAML keys `esr`, `esl`, `c_par`, `rac`; type `transmission_line`
 
-- Option: not done (task 1.8 and 3.2's YAML half left unticked). The
-  loader is C++ and needs D1's reversal first.
-- Risk recorded: today's loader does not check per-device keys, so a
-  YAML `capacitor` with `esr: 0.05` loads and silently ignores it.
-  That predates this change; it is listed for the YAML follow-up.
+- Option: `esr`, `esl` (capacitor) and `esr`, `c_par` (inductor) are
+  read by the C++ loader, which expands them into the same elements as
+  the Python keywords (pinned equal by
+  `python/tests/test_yaml_composites.py`). `rac:` is refused by name
+  (a ladder is a fitted object; fitting at load needs Python). No
+  `transmission_line` YAML type (section 5.10 belongs to the Bergeron
+  line).
+- Risk recorded: the loader still does not check other per-device
+  keys; an unknown key is ignored without a warning. That predates
+  this change.
 
 ## D3. Where the ESR loss is reported (task 1.7)
 

@@ -22,14 +22,17 @@ Each entry: question → option taken → why → how to reverse.
 ## D2. YAML type `dc_machine`, `components()` entry
 
 - Question: task 1.2 asks for both.
-- Option: not done in this pass (task left unticked). The YAML loader
-  is C++ and expands a device into builder calls; with D1 it would
-  have to duplicate the composite in C++. `components()` lists one
-  entry per branch; a composite-level entry needs a registry of
-  composites in the C++ builder.
-- Why: both need the C++ builder method of D1's reversal; doing it
-  once, when the shared files are quiet, avoids two implementations.
-- Reverse: n/a (pending work).
+- Option: YAML `dc_machine` IS done, in a later commit: the C++ loader
+  expands it into the same six elements as the Python method (keys
+  `a_pos`, `a_neg`, `omega_node`, `R_a`, `L_a`, `K`, `J`, `B`,
+  `T_load`; no `i0`/`omega0`/`theta_node`). The two expansions are
+  pinned equal by `python/tests/test_yaml_composites.py` (same
+  `components()`). The `components()` entry for the machine as a whole
+  is not done: `components()` lists one entry per branch, and a
+  composite-level entry needs a registry of composites in the C++
+  builder.
+- Reverse: when the C++ builder method of D1's reversal exists, make
+  the loader call it.
 
 ## D3. `Kt ≠ Ke` (Open Question 2)
 
@@ -95,10 +98,11 @@ Each entry: question → option taken → why → how to reverse.
   tie (DC operating point with `auto_regularize=False`: `i = 2.0` A,
   `ω = 89.99999999998` rad/s). The tie's effect is a friction of
   1e-9 N·m·s/rad (9e-7 relative on the DC current).
-- Option: not fixed here (a C++ change in a shared engine file); the DC
-  test passes `auto_regularize=False`; the tutorial uses `B > 0`.
-- Fix to make: unite each ideal transformer's primary pair in
-  `components_without_ground` (both passes).
+- Option: fixed in a later commit: `analyze_preflight` unites each
+  ideal transformer's primary pair in both passes
+  (`pwl/preflight.hpp`); C++ test in `layer4/test_preflight.cpp` with a
+  control (the same node without the transformer is still reported).
+  The DC test no longer needs `auto_regularize=False`.
 
 ## D10. `dsed` runs the composite (correction to the design)
 

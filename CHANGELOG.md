@@ -40,8 +40,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (exact answer 1.000 V) at any section count; a 20 ns edge with the
   recommended 55 sections peaks at 1.046 V. `model="bergeron"` (exact
   delay) is refused by name: it needs a kernel device.
-* Not in this pass: YAML keys and type (the loader is C++; it does not
-  check per-device keys, so a YAML `esr:` is silently ignored today), the
+* **Added** YAML keys `esr`, `esl` on `capacitor` and `esr`, `c_par` on
+  `inductor`, expanded by the C++ loader into the same elements as the
+  Python keywords (pinned by comparing `components()`); `rac:` is refused
+  by name (it used to be ignored like every unknown key).
+* Not in this pass: YAML `rac:` and `transmission_line`, the
   MLCC DC-bias table (needs `ChargeTable`), the Bergeron line
   (`openspec/changes/add-realistic-passives/DECISIONS.md`).
 
@@ -61,16 +64,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   equals copper + friction + load + stored energy to 4.2e-9 on `pwl` (5.5e-6 on `trbdf2`). The armature impedance in the
   kernel AC sweep is `R_a + sL_a + K²/(sJ + B)` to 1e-9.
   `Kt ≠ Ke` (legacy spellings) is refused: in SI units they are one
-  constant. `theta_node` is refused until a VCCS exists. With `B = 0` the
-  preflight ties the speed node through 1 GΩ (it misses the ideal
-  transformer's primary as a DC path; 9e-7 relative, see
-  `KNOWN_LIMITATIONS.md`).
+  constant. `theta_node` is refused until a VCCS exists. YAML type
+  `dc_machine` (same keys, expanded by the loader into the same
+  elements).
+* **Fixed** the topology preflight counts an ideal transformer's primary
+  as a DC path. A node reached only through a primary (a DC machine's
+  speed node with `B = 0`) was reported floating and tied to ground
+  through 1 GΩ with a warning (9e-7 relative error on the machine's DC
+  current).
 * **Deprecated** `p.add_dc_motor` and `p.make_dc_motor_observer`
   (`DeprecationWarning` naming `add_dc_machine`): forward Euler from the
   previous step, first order (13.6 % at 100 µs on the same case), `pwl`
   only. They keep working.
-* Not in this step: YAML type `dc_machine`, the `components()` entry, the
-  induction machine, BLDC harmonics and flux maps
+* Not in this step: the `components()` entry, the induction machine, BLDC harmonics and flux maps
   (`openspec/changes/add-mna-native-machines/DECISIONS.md`).
 
 ### Periodic steady state by Newton shooting on the true state (slice 1)

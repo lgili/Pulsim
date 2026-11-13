@@ -6,7 +6,7 @@
 - [x] 1.5 Ripple test: ±1 A square current (pulse current source of `add-controlled-source-set`, or a pulse voltage source behind 1 kΩ) into 50 mΩ + 100 µF → 100 mV step at each edge (1e-6) — ±1000 V pulse behind 1 kΩ (DECISIONS D11)
 - [x] 1.6 Inductor test: 100 µH with `c_par` = 10 pF → impedance peak at 5.033 MHz (1e-6 in frequency) — 1e-3 on the rounded 5.033 MHz, 1e-6 against 1/(2π√(LC)) (D11)
 - [x] 1.7 `components()` reports the parameters; `device_loss_summary` reports `i²·esr` under the component: 1 A rms through 50 mΩ → 50.0 mW (1e-9) — loss as row `{name}.esr` (D3), 1e-6; `components()` lists the sub-elements, not a parameter on the capacitor
-- [ ] 1.8 Bindings, stubs; YAML keys `esr`, `esl`, `c_par` (strict) — PARTIAL: Python kwargs and stubs done; YAML keys NOT DONE (D2)
+- [x] 1.8 Bindings, stubs; YAML keys `esr`, `esl`, `c_par` (strict) — Python kwargs, stubs, YAML keys (negative/non-finite refused by name; D2)
 
 ## 2. π-section line
 - [x] 2.1 `add_transmission_line(..., model="pi", sections=N)` from `(Z0, delay)` or `(L_per_m, C_per_m, length)`; series `R` distributed; validation by name (`Z0 > 0`, `delay > 0`, `sections ≥ 1`) — Python, installed on `CircuitBuilder`; `model="bergeron"` refused by name
@@ -16,7 +16,7 @@
 
 ## 3. AC-resistance ladder
 - [x] 3.1 `python/pulsim/passives.py`: `RacLadder` (cells, `R_dc`, `L_hf`, band, residual, source) and `fit_rac_ladder(f, R_ac, *, L, R_dc=None, n_cells=4, tol=0.05)` (log-spaced corners, non-negative least squares); refusals (`L_hf ≤ 0`, residual above `tol`) naming the component
-- [ ] 3.2 `add_inductor(..., rac=ladder)` composite; YAML `rac:` (cells or a `(f, R_ac)` table to fit at load) — PARTIAL: `rac=` done; YAML `rac:` NOT DONE (D2)
+- [ ] 3.2 `add_inductor(..., rac=ladder)` composite; YAML `rac:` (cells or a `(f, R_ac)` table to fit at load) — PARTIAL: `rac=` done; YAML `rac:` refused by name, not read (D2)
 - [x] 3.3 Identity test: `R_dc` = 10 mΩ, one cell 90 mΩ / 143.24 nH → `R_ac` = 10.009, 55.00, 99.11 mΩ at 1 kHz, 100 kHz, 1 MHz (AC, 1e-9); two-tone loss (1 A peak at 1 kHz and at 100 kHz) = 32.50 mW (1e-3) — AC 1e-9 against the analytic ladder; the rounded design values to 2e-4; loss 1e-3
 - [x] 3.4 Fit tests: round trip on ladder-generated data (1e-6); the round-wire skin-effect curve over two decades — record the cell count needed for 5 % and set the default from it — round trip 1e-6; skin curve: 2 cells 1.75 %, 4 cells 0.60 %; default kept at 4 (D10)
 - [x] 3.5 The fitted points are reported as fitted; no agreement with them is reported as validation — docstrings, CHANGELOG and limitation pages say so

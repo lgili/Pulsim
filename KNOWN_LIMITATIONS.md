@@ -276,11 +276,8 @@ At 50 ns with PWL diodes it is 6.771 V, 2.4 % low.
 
 `b.add_dc_machine` is solved in the matrix; the PMSM (observer path),
 BLDC and induction-motor observers are not yet, and stay first order
-on `pwl`. Not done: YAML `dc_machine`, `theta_node` (needs a VCCS), the
-induction machine, BLDC harmonics, flux maps. With `B = 0` the
-preflight wrongly ties the speed node through 1 GΩ (it does not count
-an ideal transformer primary as a DC path); the effect is 9e-7
-relative, `auto_regularize=False` avoids it. None of the machine tests
+on `pwl`. Not done: `theta_node` (needs a VCCS), the induction
+machine, BLDC harmonics, flux maps. None of the machine tests
 is a validation against a measured machine: they check analytic
 properties of the equations.
 
@@ -289,9 +286,9 @@ properties of the equations.
 ## Passives (`add-realistic-passives`, composites)
 
 ESR/ESL/`c_par`, the `R_ac` ladder and the π-section line are networks
-of R, L, C built from Python. Not done: YAML keys (the C++ loader does
-not check per-device keys, so `esr:` in YAML is silently ignored), the
-MLCC DC-bias table (needs the charge-law `NonlinearCapacitor`), the
+of R, L, C (YAML reads `esr`, `esl`, `c_par`; `rac:` is refused by
+name). Not done: YAML `rac:` and `transmission_line`, the MLCC DC-bias
+table (needs the charge-law `NonlinearCapacitor`), the
 Bergeron line (needs a kernel device; `model="bergeron"` is refused).
 The π line overshoots an ideal step by 27 % at any section count (the
 exact line does not): give the source a rise time and use

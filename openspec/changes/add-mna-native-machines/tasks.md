@@ -1,9 +1,9 @@
 ## 1. DC machine composite (today's structure)
 - [x] 1.1 `CircuitBuilder::add_dc_machine` (sub-elements `{name}.ra`, `{name}.la`, `{name}.em`, `{name}.j`, `{name}.b`, `{name}.tl`); validation by name (`R_a ≥ 0`, `L_a > 0`, `K > 0`, `J > 0`, `B ≥ 0`) — as a Python method installed on `CircuitBuilder` (`python/pulsim/machines.py`), DECISIONS D1; `{name}.ra`/`.b`/`.tl` only when non-zero (D6)
-- [ ] 1.2 Binding, stubs, `components()` entry `dc_machine`; YAML type `dc_machine` — NOT DONE: no C++ binding/YAML/`components()` entry (DECISIONS D2); Python surface is `b.add_dc_machine`
+- [ ] 1.2 Binding, stubs, `components()` entry `dc_machine`; YAML type `dc_machine` — PARTIAL: Python method + stubs, YAML type `dc_machine` (loader expansion pinned equal to the Python one); NO `components()` composite entry (DECISIONS D2)
 - [x] 1.3 Test (accuracy): the `p5b_dcmotor.py` case at dt = 12.5 µs, speed error against the exact solution ≤ 1e-4 (measured 7.45e-5) — measured 7.45e-5
 - [x] 1.4 Test (order): errors at 100, 50, 25, 12.5 µs fall by ≥ 3.5 per halving (measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5) — measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5 (ratios 3.99, 4.00, 4.00)
-- [x] 1.5 Test (DC operating point): 10 V, `K = 0.1`, `R_a = 0.5 Ω`, `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s` within 1e-9 — with `auto_regularize=False` (preflight false positive, DECISIONS D9)
+- [x] 1.5 Test (DC operating point): 10 V, `K = 0.1`, `R_a = 0.5 Ω`, `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s` within 1e-9 — preflight false positive found and fixed (DECISIONS D9)
 - [x] 1.6 Test (`trbdf2`): same case, error ≤ 2e-4 (measured 9.2e-5); energy check `∫v·i dt = ∫R i² dt + ΔE_L + ΔE_J` within 1e-6 — measured 9.19e-5; energy 4.2e-9 on `pwl` (bound 1e-8), 5.5e-6 on `trbdf2` (bound 2e-5, not 1e-6: DECISIONS D8)
 - [x] 1.7 Test: a legacy call with `Kt ≠ Ke` routed to the native path is refused with the SI explanation
 - [ ] 1.8 Optional `theta_node` through the VCCS of `add-controlled-source-set`: `θ(t) = ∫ω dt` within 1e-6 — NOT DONE: refused by name until the VCCS exists (DECISIONS D5)

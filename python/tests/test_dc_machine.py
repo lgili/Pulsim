@@ -81,11 +81,10 @@ def test_trbdf2_matches_exact_and_pwl():
 
 def test_dc_operating_point_is_the_analytic_steady_state():
     b = _build("dc", T_load=0.2)
-    # auto_regularize=False: the preflight does not count the ideal
-    # transformer's primary as a DC path, so with B = 0 it would tie the
-    # speed node to ground through 1 GOhm (a 9e-7 relative torque load).
-    # The matrix is regular without it.
-    x = p.compute_dc_op(b, gmin=0.0, auto_regularize=False)
+    # B = 0: the speed node is reached only through the transformer
+    # primary and the inertia. The preflight counts the primary as a DC
+    # path (it used to add a 1 GOhm bleeder, a 9e-7 relative error).
+    x = p.compute_dc_op(b, gmin=0.0)
     i_idx = b.pool.branch_var_id_for_inductor(b.branch_id_of("M.la"),
                                               b.graph)
     assert x[i_idx] == pytest.approx(2.0, rel=1e-9)            # T_load/K
