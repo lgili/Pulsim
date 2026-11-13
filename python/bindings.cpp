@@ -2513,6 +2513,8 @@ void init_module(py::module_& m) {
                 d["stage2_retries"] = r.stage2_retries;
                 d["stage2_be_kept"] = r.stage2_be_kept;
                 d["stage2_retry_failures"] = r.stage2_retry_failures;
+                d["unlocated_gate_steps"] = r.unlocated_gate_steps;
+                d["split_event_overflows"] = r.split_event_overflows;
                 return d;
             },
             "Fixed-step loop counters (pwl engine; 0 elsewhere): "

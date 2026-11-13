@@ -781,6 +781,22 @@ _berg.install(CircuitBuilder)
 _RESOLUTION_LTE_MAX = 1e-2
 
 
+def _warn_unlocated_edges(res):
+    """Event splitting without an edge oracle (review M3): say so once."""
+    c = getattr(res, "counters", None) or {}
+    n = c.get("unlocated_gate_steps", 0)
+    if n:
+        import warnings
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} gate "
+            "change(s) came from a switch_fn without next_edge_after(t) "
+            "and could not be located inside the step; each was taken "
+            "at the next grid point (first order there). Give the "
+            "schedule an oracle (make_pwm_switch_fn & co. have one) or "
+            "put the edges on the dt grid. See res.counters.",
+            UserWarning, stacklevel=3)
+
+
 def _warn_resolution(builder, res, dt):
     """One ResolutionWarning per run (see ResolutionWarning)."""
     rd = getattr(res, "resolution", None)
@@ -3163,6 +3179,7 @@ def simulate(
 
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
+    _warn_unlocated_edges(res)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

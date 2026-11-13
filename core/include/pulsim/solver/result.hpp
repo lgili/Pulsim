@@ -283,6 +283,11 @@ struct SimulationResult {
     Size stage2_retries = 0;
     Size stage2_be_kept = 0;
     Size stage2_retry_failures = 0;
+    // Event splitting: steps whose gate changed with no edge oracle to
+    // locate it (taken at the next grid point), and steps whose event
+    // list overflowed (kMaxStepEvents or the per-step search cap).
+    Size unlocated_gate_steps = 0;
+    Size split_event_overflows = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

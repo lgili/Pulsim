@@ -761,9 +761,14 @@ inline SimulationResult run_transient(
         static_cast<std::size_t>(graph.num_switches()));
     constexpr Size kMaxStepEvents = 8;
     std::array<Real, kMaxStepEvents> ev_t{};
+    // The gate sample of the interval that starts at ev_t[i]: the LAST
+    // event of a cluster merged within `snap` (review M1).
+    std::array<Real, kMaxStepEvents> ev_s{};
     std::vector<CommutationEvent> split_events;
     split_events.reserve(8);
     std::vector<Real> cross_scratch;
+    topology::SwitchStateMask prev_gate;   // unlocated-edge count (no oracle)
+    bool have_prev_gate = false;
     Real edge_from = std::numeric_limits<Real>::infinity();   // oracle memo:
     Real edge_next = -std::numeric_limits<Real>::infinity();  // first edge after edge_from
     // The mask of the LAST solve that produced x — recorded with
@@ -1143,6 +1148,10 @@ inline SimulationResult run_transient(
             Real gate_t = restart_rule ? t_prev : t;
             if (step_observer) {
                 step_observer(t, x_prev);
+                // An observer (or a control tick) may mutate the
+                // schedule: its oracle answer is stale (review M3).
+                edge_from = std::numeric_limits<Real>::infinity();
+                edge_next = -std::numeric_limits<Real>::infinity();
             }
             gate_memo_n = 0;
             // ---- add-fixed-step-event-splitting: the step's events ----
@@ -1192,6 +1201,7 @@ inline SimulationResult run_transient(
                             e = next_edge_fn(e);
                             edge_next = e;
                         }
+                        ev_overflow = ev_overflow || e < t - snap;
                     }
                 }
                 if (has_jump_sources) {
@@ -1205,13 +1215,32 @@ inline SimulationResult run_transient(
                         }
                         e = sources::next_source_jump_after(pool, graph, e);
                     }
+                    ev_overflow = ev_overflow || e < t - snap;
+                }
+                if (has_b_jumps) {
+                    // Declared b_extra_fn jumps (review M4): the same
+                    // window; one within snap of t is taken at t and
+                    // restarts the next step.
+                    Real e = b_jump_after(t_prev);
+                    for (Size q = 0; q < 4 * kMaxStepEvents && e < t - snap; ++q) {
+                        if (e >= t_prev + snap) {
+                            push_ev(e);
+                        }
+                        e = b_jump_after(e);
+                    }
+                    ev_overflow = ev_overflow || e < t - snap;
                 }
                 std::sort(ev_t.begin(), ev_t.begin() + n_ev);
-                // Events closer than `snap` merge into the earlier one.
+                // Events closer than `snap` merge into the earlier one,
+                // which samples the gate at the cluster's last event (a
+                // dead-time pair < snap apart lands both edges).
                 Size m = 0;
                 for (Size q = 0; q < n_ev; ++q) {
                     if (m == 0 || ev_t[q] - ev_t[m - 1] >= snap) {
-                        ev_t[m++] = ev_t[q];
+                        ev_t[m] = ev_s[m] = ev_t[q];
+                        ++m;
+                    } else {
+                        ev_s[m - 1] = ev_t[q];
                     }
                 }
                 n_ev = m;
@@ -1240,6 +1269,18 @@ inline SimulationResult run_transient(
             // diode flip during this step. Captured before
             // event iteration runs.
             topology::SwitchStateMask mask_pre = gate_at(gate_t);
+            if (split && !next_edge_fn) {
+                // An opaque switch_fn: a gate change between two grid
+                // samples was not located (review M3).
+                if (have_prev_gate && !(mask_pre == prev_gate)) {
+                    ++result.unlocated_gate_steps;
+                }
+                prev_gate = mask_pre;
+                have_prev_gate = true;
+            }
+            if (ev_overflow) {
+                ++result.split_event_overflows;
+            }
             if (has_diodes) {
                 mask_pre = combine_masks(
                     mask_pre, diodes.current_diode_mask(),
@@ -1466,7 +1507,9 @@ inline SimulationResult run_transient(
                   (split ? sources::source_jump_in(pool, graph, t_prev - snap,
                                                    t_prev + snap)
                          : sources::source_jump_in(pool, graph, t_prev, t))) ||
-                 (has_b_jumps && b_jump_after(t_prev - left_by) < t - left_by))) {
+                 (has_b_jumps &&
+                  (split ? b_jump_after(t_prev - snap) < t_prev + snap
+                         : b_jump_after(t_prev - left_by) < t - left_by)))) {
                 restart_left = kRestartSteps;
             }
             bool restart = restart_left > 0;
@@ -1669,7 +1712,7 @@ inline SimulationResult run_transient(
                     Real h = (i == 0 && last) ? opts.dt : b - a;
                     bool be = i == 0 ? restart : true;
                     if (i > 0) {
-                        gate_t = a;   // the edge's post side (grid-exact schedules)
+                        gate_t = ev_s[i - 1];   // post side of the cluster's last edge
                         any_split = true;
                     }
                     if (be) {

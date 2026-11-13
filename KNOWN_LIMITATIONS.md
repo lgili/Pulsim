@@ -288,10 +288,11 @@ Limits with the rule on:
   2: RL edge +0.3 dt 1.01e-6 A at 2 µs; buck D = 0.4567 `v_C` 1.07e-6 V
   at T/50 instead of 8.08e-2 V). The split needs an edge oracle
   (`next_edge_after`): an opaque `switch_fn` is still taken at the next
-  grid point;
-- a `b_extra_fn` jump restarts only when the callable declares it
-  through `next_jump_after(t)`; undeclared ones stay first order and
-  are not split;
+  grid point (counted in `res.counters["unlocated_gate_steps"]`, one
+  `UserWarning`);
+- a `b_extra_fn` jump restarts, and with the split is split at, only
+  when the callable declares it through `next_jump_after(t)` (RC step
+  at 2.037 µs: order 1.97); undeclared ones stay first order;
 - a step that needs the dt-retry ladder is re-taken without its
   interior events (the next step restarts on the new mask);
 - an MNA PMSM retries every fixed step at dt/2 with the rule on or off,

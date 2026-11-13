@@ -89,6 +89,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** `result.exact` names "a sine / pulse / table current source"
   as the reason a mask is numeric (it said "PWM / pulse source").
 
+### Fixed engine: event-splitting review fixes
+
+* **Fixed** two gate edges less than 1 % of `dt` apart (a dead-time
+  pair) merged into the earlier one and the later edge was ignored for
+  the rest of the step; the interval now samples the gate at the
+  cluster's last edge (pair at 10.37 µs: order 2, −1.24e-3 A at 1 µs).
+* **Changed** a declared `b_extra_fn` jump (`next_jump_after`) is split
+  at like a source jump (RC step at 2.037 µs: −6.36e-3 → −1.14e-4 V
+  from dt = 0.4 to 0.05 µs, order 1.97; the rule alone is first order).
+* **Added** `res.counters["unlocated_gate_steps"]` (an opaque
+  `switch_fn` with the split on; one `UserWarning`) and
+  `["split_event_overflows"]` (the per-step event list or search cap
+  ran out). The oracle answer is re-asked after a `step_observer` ran.
+
 ### Fixed: restart rule overshoot on diode rectifiers
 
 With `discontinuity_restart=True`, a diode that turned off inside the

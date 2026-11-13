@@ -251,10 +251,18 @@ def test_dcm_result_does_not_depend_on_where_the_grid_falls():
 
 
 def test_split_off_is_the_restart_rule_bit_for_bit():
-    a = _buck(1.0, 100, 10, **RULE)
-    b = _buck(1.0, 100, 10, enable_substep_state_correction=False, **RULE)
-    assert np.array_equal(np.asarray(a.states), np.asarray(b.states))
-    assert b.n_split_steps == 0
+    """With every edge on the grid (D = 0.5 at T/100) the split finds no
+    event: split ON is the restart rule alone, bit for bit; and an
+    explicit False is the rule too."""
+    on = _buck(1.0, 100, 10, D=0.5, **SPLIT)
+    rule = _buck(1.0, 100, 10, D=0.5, **RULE)
+    off = _buck(1.0, 100, 10, D=0.5, enable_substep_state_correction=False,
+                **RULE)
+    assert on.n_split_steps == 0
+    for r in (on, off):
+        assert np.array_equal(np.asarray(r.states), np.asarray(rule.states))
+        assert np.array_equal(np.asarray(r.switch_states),
+                              np.asarray(rule.switch_states))
 
 
 def test_split_without_the_restart_rule_is_refused():
@@ -530,3 +538,96 @@ def test_source_jump_inside_a_step_is_split():
     assert all(f >= 3.5 for f in _factors(errs)), errs
     rule = [_rc_jump(dt, **RULE)[1] for dt in (2e-7, 1e-7)]
     assert rule[0] > 10 * errs[0], (rule, errs)
+
+
+# --- review findings M1, M3, M4 --------------------------------------------------
+_TE, _DEAD = 10.37e-6, 1e-9
+
+
+class _DeadTimePair:
+    """S1 off at _TE, S2 on 1 ns later: two edges < snap (0.01 dt) apart."""
+
+    def __init__(self, n, k1, k2):
+        self.n, self.k1, self.k2 = n, k1, k2
+
+    def __call__(self, t):
+        m = p.SwitchStateMask(self.n)
+        m.set(self.k1, t < _TE)
+        m.set(self.k2, t >= _TE + _DEAD)
+        return m
+
+    def next_edge_after(self, t):
+        for e in (_TE, _TE + _DEAD):
+            if e > t:
+                return e
+        return math.inf
+
+
+def _pair(dt=None, opaque=False, **kw):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "p1", "gnd", 10.0)
+    b.add_voltage_source("V2", "p2", "gnd", -5.0)
+    b.add_switch("S1", "p1", "a", 1e3, 1e-9)
+    b.add_switch("S2", "p2", "a", 1e3, 1e-9)
+    b.add_resistor("Rp", "a", "gnd", 10.0)
+    b.add_resistor("R", "a", "m", 1.0)
+    b.add_inductor("L", "m", "gnd", 10e-6)
+    fn = _DeadTimePair(b.graph.num_switches, b.switch_index_of("S1"),
+                       b.switch_index_of("S2"))
+    if dt is None:
+        return p.simulate(b, t_end=32e-6, engine="trbdf2", switch_fn=fn,
+                          rtol=1e-10, atol=1e-12)
+    return p.simulate(b, t_end=32e-6, dt=dt, engine="pwl",
+                      switch_fn=fn.__call__ if opaque else fn, **kw)
+
+
+def test_a_dead_time_pair_inside_one_step_lands_both_edges():
+    """Merged within snap, the interval after the pair samples the gate
+    at its LAST edge (it sampled the first one: S2 stayed off until the
+    next grid point)."""
+    ref = float(np.asarray(_pair().i("L"))[-1])
+    e = [float(np.asarray(_pair(dt, **SPLIT).i("L"))[-1]) - ref
+         for dt in (4e-6, 2e-6, 1e-6)]
+    # engine: -2.562e-2, -6.520e-3, -1.236e-3 (factors 3.93, 5.28)
+    assert abs(e[0]) < 3e-2, e
+    assert all(f >= 3.5 for f in _factors(e)), e
+
+
+def test_an_opaque_gate_with_the_split_is_counted_and_warned():
+    with pytest.warns(UserWarning, match="could not be located"):
+        r = _pair(1e-6, opaque=True, **SPLIT)
+    assert r.counters["unlocated_gate_steps"] == 1     # one change, both edges
+    r = _pair(1e-6, **SPLIT)
+    assert r.counters["unlocated_gate_steps"] == 0
+    assert r.counters["split_event_overflows"] == 0
+
+
+def test_a_declared_b_extra_jump_off_the_grid_is_split():
+    te, tau, t_end = 2.037e-6, 1e-6, 6.4e-6
+
+    def run(dt, **kw):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 0.0)
+        b.add_resistor("R", "in", "a", 1e3)
+        b.add_capacitor("C", "a", "gnd", 1e-9)
+
+        def bx(t):
+            v = np.zeros(3)
+            v[2] = 10.0 if t >= te else 0.0      # the source's KVL row
+            return v
+        bx.next_jump_after = lambda t: te if t < te else math.inf
+        r = p.simulate(b, t_end=t_end, dt=dt, engine="pwl", b_extra_fn=bx,
+                       **kw)
+        ex = -10 * (1 - math.exp(-(t_end - te) / tau))
+        return float(np.asarray(r.v("a"))[-1]) - ex, r.n_split_steps
+
+    dts = (4e-7, 2e-7, 1e-7, 5e-8)
+    split = [run(dt, **SPLIT) for dt in dts]
+    rule = [run(dt, **RULE)[0] for dt in dts]
+    assert [n for _, n in split] == [1, 1, 1, 1]
+    e = [v for v, _ in split]
+    # engine: -6.356e-3, -1.719e-3, -4.469e-4, -1.141e-4 (order 1.89,
+    # 1.94, 1.97); the rule alone: -1.08e-2, -6.30e-3, +3.96e-3, -3.10e-4
+    assert abs(e[0]) < 7e-3, e
+    assert all(f >= 3.6 for f in _factors(e)), e
+    assert abs(e[1]) < abs(rule[1]), (e, rule)
