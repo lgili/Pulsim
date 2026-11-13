@@ -146,8 +146,14 @@ void init_module(py::module_& m) {
     // The type is created here rather than in Python because the
     // translator has to name it at throw time, and the result object
     // it carries is a pybind-bound C++ type.
+    //
+    // `ConvergenceError` (add-parameter-sensitivities, task 5a) is the
+    // common base of every non-convergence: a RuntimeError, so the
+    // `except RuntimeError` of callers keeps working.
+    static py::object convergence_exc = py::exception<void>(
+        m, "ConvergenceError", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
-        m, "SimulationAborted", PyExc_RuntimeError);
+        m, "SimulationAborted", convergence_exc);
     py::register_exception_translator(
         [](std::exception_ptr pe) {
             if (!pe) {

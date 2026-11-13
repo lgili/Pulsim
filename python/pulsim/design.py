@@ -48,14 +48,6 @@ __all__ = [
 
 STATUSES = ("ok", "refused", "failed", "infeasible")
 
-# Messages of periodic_steady_state that are a non-convergence of the
-# design, not a configuration error (those are re-raised).
-_PSS_FAILURES = ("no periodic orbit found", "Newton made no progress",
-                 "I - M is singular", "the orbit is not isolated",
-                 "grazing event", "a period run failed",
-                 "the verification period moved")
-
-
 class _Failed(Exception):
     """Internal: a design-specific non-convergence (-> ``failed``)."""
 
@@ -674,7 +666,7 @@ class Evaluator:
 
     def _steady(self, b, sf, T, counters):
         """``(result, t_from, t_to)`` of one steady period."""
-        from ._refusal import UnsupportedError
+        from .periodic_steady_state import _pss_refusal
         method = self.steady.method
         if method == "auto":
             if self.engine not in ("auto", "dsed"):
@@ -682,16 +674,10 @@ class Evaluator:
                 counters["steady_route_reason"] = (
                     f"engine={self.engine!r}: pss runs on dsed only")
             else:
-                try:
-                    _pss_capability(b, T, sf)
+                e = _pss_refusal(b, T, sf)
+                if e is None:
                     method = "pss"
-                except ValueError as e:
-                    if not isinstance(e, UnsupportedError) and \
-                            "cannot extract this circuit's state space" \
-                            not in str(e):
-                        raise       # a configuration error: not a route
-                    if not isinstance(e, UnsupportedError):
-                        e.feature, e.kind, e.device = "state_space", "", ""
+                else:
                     # A documented route, decided BEFORE any run: the
                     # circuit is outside the exact stepper's coverage.
                     method = "transient"
@@ -749,18 +735,22 @@ class Evaluator:
 
     def _pss(self, b, sf, T, counters):
         from . import simulate
+        from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
         from .periodic_steady_state import periodic_steady_state
         counters["route"] = "pss/dsed"
-        try:
-            r = _engine(lambda: periodic_steady_state(
-                b, period=T, switch_fn=sf,
-                max_period_runs=self.steady.max_period_runs,
-                sensitivities=(sorted(set(self.gradients.values()))
-                               if self.gradients else None)))
-        except ValueError as e:
-            if _is_pss_failure(e):
+
+        def solve():
+            try:
+                return periodic_steady_state(
+                    b, period=T, switch_fn=sf,
+                    max_period_runs=self.steady.max_period_runs,
+                    sensitivities=(sorted(set(self.gradients.values()))
+                                   if self.gradients else None))
+            except ConvergenceError as e:
+                # typed at the source: a non-convergence of the design
                 raise _Failed(str(e)) from e
-            raise
+
+        r = _engine(solve)
         if not r.stable:
             # an orbit the circuit never reaches: its KPIs are no answer
             raise _Failed(
@@ -946,14 +936,6 @@ class Evaluator:
         return kpis
 
 
-def _pss_capability(b, T, sf):
-    """Raise the UnsupportedError ``periodic_steady_state`` would raise
-    for this circuit, before running anything (its applicability
-    checks of the circuit and the schedule)."""
-    from .periodic_steady_state import _Solver
-    _Solver(b, T, sf)
-
-
 def _true_state(b, run):
     """``(t, X)``: inductor currents, capacitor voltages and every
     column of the engine's state vector (node voltages, branch
@@ -1018,13 +1000,6 @@ def _settle_error(b, run, T, n):
     xa = np.abs(xs[4] - xs[1]) / scale       # x(n) - x(3n/4)
     return float(max(max(geo(xa[j], d[0, j]), geo(d[3, j], d[2, j]))
                      for j in range(X.shape[1])))
-
-
-def _is_pss_failure(e) -> bool:
-    from ._refusal import UnsupportedError
-    return (not isinstance(e, UnsupportedError)
-            and str(e).startswith("periodic_steady_state: ")
-            and any(m in str(e) for m in _PSS_FAILURES))
 
 
 def _engine(fn):

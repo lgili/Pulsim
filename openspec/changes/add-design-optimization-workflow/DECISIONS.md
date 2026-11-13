@@ -82,9 +82,11 @@ failed period run, an irreproducible map). Its other `ValueError`s are
 configuration errors (a schedule that is not periodic in `period`) and
 propagate. (c) A non-finite KPI (`P_in = 0`). (d) `not_settled`.
 
-The message match of (b) is fragile; the kernel is missing a typed
-non-convergence (see "Missing from the kernel" below).
-→ Reverse: catch the typed exception once it exists.
+(b) is now typed: `periodic_steady_state` raises
+`pulsim.ConvergenceError` (still a `ValueError`) at its seven
+non-convergence sites and the evaluator catches that class; the message
+list is gone (see "Missing from the kernel", items 1 and 2).
+→ Reverse: none.
 
 ## 6. `build` and `period`
 
@@ -292,6 +294,29 @@ here (pymoo is not installed on this machine); its test is an
   cancelling queued futures when a batch raises.
 
 ## Missing from the kernel (recorded, worked around in Python)
+
+Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):
+
+* `pulsim.ConvergenceError(RuntimeError)` is created by the extension
+  (`python/bindings.cpp`) and is the base of `SimulationAborted`, so
+  `except RuntimeError` keeps working. `periodic_steady_state` raises a
+  private subclass that is also a `ValueError` (what it raised before)
+  at its seven non-convergence sites; its configuration errors stay
+  plain `ValueError`s, and "the exact stepper cannot extract this
+  circuit's state space" became `UnsupportedError(feature=
+  "state_space")`. The `dsed` stepper's own non-convergences ("did not
+  settle after 64 rounds", "chattering", "no meaningful progress",
+  "exceeded max-step cap", the RK45 NaN) are still `std::runtime_error`
+  in `core/include/pulsim/dsed/scheduler.hpp`, a file this slice may
+  not edit. Hook: throw `solver::SimulationAborted` (or a new
+  `ConvergenceFailure : std::runtime_error` translated to
+  `ConvergenceError` in `bindings.cpp`) at those five sites; the
+  evaluator needs no change, it already maps every `RuntimeError` of an
+  engine call to `failed`.
+* `pulsim.periodic_steady_state_supported(builder, period, switch_fn)
+  -> (bool, reason)` runs the solver's applicability checks (the
+  `_pss_refusal` that the evaluator's `auto` route also calls) and no
+  period.
 
 1. **A typed non-convergence.** What: a `RuntimeError` subclass, e.g.
    `pulsim.ConvergenceError(where, reason, t, counters)`, raised by

@@ -1094,15 +1094,20 @@ def _near_misses(ctx, traj, K=8):
                     stretches.append(cur)
                 cur = dict(on=on, own_start=own or k == 0, pts=[])
             mode = ctx.modes[key]
-            if mode.tier != 1:
-                continue
             row = ctx.pair_row(key, a, k_)[0]
             thr = V_f if on else (V_th if V_f == 0.0 else max(V_th, V_f))
             h = traj.times[k + 1] - traj.times[k]
-            z = mode.Vi @ (mode.dsc * np.append(traj.states[k], 1.0))
-            r = (row / mode.dsc) @ mode.V
+            xb = np.append(traj.states[k], 1.0)
             ss = np.linspace(0, h, K + 1)
-            g = (np.exp(np.outer(ss, mode.mu)) @ (r * z)).real - thr
+            if mode.tier == 1:
+                z = mode.Vi @ (mode.dsc * xb)
+                r = (row / mode.dsc) @ mode.V
+                g = (np.exp(np.outer(ss, mode.mu)) @ (r * z)).real - thr
+            else:
+                # near-defective mode: the block exponential (no S needed)
+                S0 = np.zeros((len(xb), len(ctx.params)))
+                g = np.array([row @ mode.advance(xb, S0, s)[0]
+                              for s in ss]) - thr
             cur["pts"].extend(zip(traj.times[k] + ss, g))
         if cur is not None:
             # the end of the run counts: an event just before it is

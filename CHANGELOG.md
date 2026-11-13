@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Typed non-convergence and the steady-state capability check
+
+* **Added** `pulsim.ConvergenceError`, a `RuntimeError` created by the
+  extension and the base of `SimulationAborted`. `periodic_steady_state`
+  raises it at its seven non-convergence sites (no orbit within the
+  budget, no Newton progress, singular `I − M`, a non-isolated orbit, a
+  grazing event, a failed period run, an irreproducible map). It is still
+  a `ValueError` there, as before. Configuration errors stay plain
+  `ValueError`s.
+* **Added** `pulsim.periodic_steady_state_supported(builder, period,
+  switch_fn) -> (bool, reason)`. It runs the solver's applicability
+  checks without a period run, so it reaches the same refusal as the
+  solve.
+* **Changed** "the exact stepper cannot extract this circuit's state
+  space" is now an `UnsupportedError` (`feature="state_space"`). The
+  design evaluator's `auto` route and its `failed` status use the typed
+  classes, and the message list is gone.
+
 ### Parameter sensitivities on the exact path (`add-parameter-sensitivities`)
 
 * **Added** characterisation and references (group 1): today's central

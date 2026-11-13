@@ -247,10 +247,9 @@ def test_grazing_event_is_refused():
     assert np.allclose(S1[:, 0], [3.0 + 2.0 * -1.5, 0.0])
 
 
-def test_dcm_ccm_boundary_is_flagged_as_a_near_miss():
-    """At the CCM/DCM boundary the inductor current touches zero at its
-    valley without crossing: the gradient is one-sided there. The
-    load is bisected to the boundary (CCM side)."""
+@pytest.fixture(scope="module")
+def boundary_R():
+    """The load bisected to the CCM/DCM boundary (CCM side)."""
     def valley(R):
         b = _buck(R=R)
         r = p.periodic_steady_state(b, period=T, switch_fn=_pwm(b))
@@ -261,7 +260,13 @@ def test_dcm_ccm_boundary_is_flagged_as_a_near_miss():
     for _ in range(40):
         mid = 0.5 * (lo + hi)
         (lo, hi) = (mid, hi) if valley(mid) > 1e-7 else (lo, mid)
-    b = _buck(R=lo)
+    return lo
+
+
+def test_dcm_ccm_boundary_is_flagged_as_a_near_miss(boundary_R):
+    """At the CCM/DCM boundary the inductor current touches zero at its
+    valley without crossing: the gradient is one-sided there."""
+    b = _buck(R=boundary_R)
     with pytest.warns(UserWarning, match="near miss"):
         r = p.periodic_steady_state(b, period=T, switch_fn=_pwm(b),
                                     sensitivities=["RL.R"])
@@ -274,6 +279,23 @@ def test_dcm_ccm_boundary_is_flagged_as_a_near_miss():
         r = p.periodic_steady_state(b, period=T, switch_fn=_pwm(b),
                                     sensitivities=["RL.R"])
     assert r.sensitivity.flags == []
+
+
+def test_near_misses_are_also_scanned_on_block_exponential_modes(
+        boundary_R):
+    # the same boundary orbit with every mode on the tier-2 propagator:
+    # the scan must not skip a mode without an eigenbasis
+    b = _buck(R=boundary_R)
+    with pytest.warns(UserWarning, match="near miss"):
+        r = p.periodic_steady_state(b, period=T, switch_fn=_pwm(b),
+                                    sensitivities=["RL.R"])
+    sr = r.sensitivity
+    for m in sr._ctx.modes.values():
+        m.tier, m.cs, m._pade = 2, np.ones(len(sr.params)), {}
+    flags = sens._near_misses(sr._ctx, sr._traj)
+    assert [f["device"] for f in flags] == [f["device"] for f in sr.flags]
+    assert [f["t"] for f in flags] == pytest.approx(
+        [f["t"] for f in sr.flags], rel=1e-12)
 
 
 # ---------------------------------------------------------------------

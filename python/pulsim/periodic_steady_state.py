@@ -43,6 +43,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
+
 __all__ = [
     "periodic_steady_state",
     "PeriodicSteadyStateResult",
@@ -59,6 +61,16 @@ _DIODE_ON, _DIODE_OFF = 1, 2
 
 def _err(msg: str) -> ValueError:
     return ValueError("periodic_steady_state: " + msg)
+
+
+class _NoConvergence(ConvergenceError, ValueError):
+    """The solve did not reach an isolated orbit: a ``ConvergenceError``
+    (catch that), and the ``ValueError`` it was before."""
+
+
+def _conv(msg: str) -> ValueError:
+    """A non-convergence of the shooting (not a configuration error)."""
+    return _NoConvergence("periodic_steady_state: " + msg)
 
 
 def _unsup(feature: str, msg: str, *, device: str = "",
@@ -464,7 +476,8 @@ class _Solver:
             self.labels, self.label_devices = _labels(
                 builder, self.cache, m0, self.comps)
         except (RuntimeError, NotImplementedError) as e:
-            raise _err(
+            raise _unsup(
+                "state_space",
                 "the exact stepper cannot extract this circuit's "
                 f"state space ({str(e).splitlines()[0]}).") from e
         if n == 0:
@@ -503,7 +516,7 @@ class _Solver:
                 dt_init=self.T * 1e-6, dt_max=self.T, store_every=1,
                 enable_event_projection=False)
         except RuntimeError as e:
-            raise _err(f"a period run failed: {e}") from e
+            raise _conv(f"a period run failed: {e}") from e
         times = np.asarray(r["times"], dtype=float)
         states = np.asarray(r["states"], dtype=float)
         self.n_steps += int(r["n_accept"])
@@ -576,7 +589,7 @@ class _Solver:
         den = float(grad @ fm) + g_t
         if abs(den) <= 1e-12 * (np.linalg.norm(grad)
                                  * np.linalg.norm(fm) + abs(g_t)):
-            raise _err(
+            raise _conv(
                 f"grazing event: {ev['name']} at t = "
                 f"{ev['t'] / self.T:.12g} T is tangent to its switching "
                 "surface (grad(g).f = 0), where the period map is not "
@@ -802,6 +815,28 @@ def _classify(mu):
     return "flip (period-doubling)" if mu.real < 0 else "fold"
 
 
+def _pss_refusal(builder, period, switch_fn=None):
+    """The ``UnsupportedError`` :func:`periodic_steady_state` would raise
+    for this circuit and schedule before its first run (its
+    applicability checks), or ``None``."""
+    from ._refusal import UnsupportedError
+    try:
+        _Solver(builder, float(period), switch_fn)
+    except UnsupportedError as e:
+        return e
+    return None
+
+
+def periodic_steady_state_supported(builder, period, switch_fn=None):
+    """``(True, "")`` when :func:`periodic_steady_state` can solve this
+    circuit with this schedule, else ``(False, reason)`` with the
+    message of the ``UnsupportedError`` it would raise. Runs the same
+    checks, and no period; a configuration error (a bad period, a
+    schedule that is not T-periodic) still raises."""
+    e = _pss_refusal(builder, period, switch_fn)
+    return (True, "") if e is None else (False, str(e))
+
+
 def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           start_from=None, max_period_runs: int = 60,
                           n_relax: int = 5,
@@ -884,7 +919,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
 
     def budget(extra=""):
         if s.n_runs >= max_period_runs:
-            raise _err(
+            raise _conv(
                 f"no periodic orbit found within max_period_runs="
                 f"{max_period_runs}{extra}. Residual history "
                 f"max|P(x)-x|: {[f'{h:.3e}' for h in history]}; last "
@@ -920,7 +955,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                     np.linalg.solve(IM, G), traj.x0, scale, rtol) <= 1.0:
                 break
         if singular:
-            raise _err(
+            raise _conv(
                 "I - M is singular: a Floquet multiplier equals 1, so "
                 "the orbit is not isolated (a floating capacitor, an "
                 "inductor loop with no resistance, an integrator with "
@@ -944,7 +979,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
             continue
         relax_rounds += 1
         if relax_rounds > 3:
-            raise _err(
+            raise _conv(
                 "Newton made no progress after three rounds of "
                 f"{n_relax} relaxation periods. Residual history "
                 f"max|P(x)-x|: {[f'{h:.3e}' for h in history]}; last "
@@ -960,7 +995,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     lam_, vec = np.linalg.eig(M)
     for i, m_ in enumerate(lam_):
         if abs(abs(m_) - 1.0) < _MARGINAL:
-            raise _err(
+            raise _conv(
                 f"the orbit is not isolated: Floquet multiplier {m_:.12g} "
                 "lies on the unit circle, so neighbouring solutions "
                 "never decay to it (a lossless loop or an undamped "
@@ -977,7 +1012,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     residual = float(np.abs(x_back - x0).max())
     if residual > 1e3 * max(history[-1], rtol * float(
             (scale + np.abs(x0)).max())):
-        raise _err(
+        raise _conv(
             f"the verification period moved the orbit by {residual:.3e} "
             f"(the last Newton residual was {history[-1]:.3e}): the "
             "map is not reproducible between runs.")

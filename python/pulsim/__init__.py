@@ -43,6 +43,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    ConvergenceError,
     # add-engine-conformance-matrix: the typed refusal (a ValueError
     # carrying engine / feature / device / kind) and the kernel's
     # device-kind capability table it is raised from.
@@ -430,6 +431,7 @@ from .steady_state import (
 )
 from .periodic_steady_state import (
     periodic_steady_state,  # noqa: F401
+    periodic_steady_state_supported,  # noqa: F401
     PeriodicSteadyStateResult,  # noqa: F401
     SampledModel,  # noqa: F401
 )
@@ -532,6 +534,8 @@ __all__ = [
     "Cancelled",
     "RetiredDeviceError",
     "SimulationAborted",
+    "ConvergenceError",
+    "periodic_steady_state_supported",
     "UnsupportedError",
     "value_and_grad",
     "KpiValue",
