@@ -457,10 +457,11 @@ def test_a_late_diode_flip_re_arms_the_window():
 
 def test_one_factor_per_mask_and_no_refactor():
     """Both SDIRK stages run on the trapezoidal factor of 2*gamma*dt
-    (C/(gamma*dt)), kept by a second cache at that fixed step: one
-    factorisation per mask visited by a restart, none in the event LRU
-    (which refactored on every restart step of a VSI: 3172 builds in
-    3157 restart steps; 81 factorisations now)."""
+    (C/(gamma*dt)), kept by the cache's event table at that fixed step:
+    one factorisation per mask visited by a restart and no refactor
+    (the 8-entry LRU it replaced refactored on every restart step of a
+    VSI: 3172 builds in 3157 restart steps), on the run's one symbolic
+    analysis."""
     caches = []
     runs = [_buck(1.0, 0.5, 100, nper=1000, on_cache=caches.append, **kw)
             for kw in ({}, ON)]
@@ -469,7 +470,10 @@ def test_one_factor_per_mask_and_no_refactor():
     assert runs[0].n_restart_factorizations == 0
     off, on = caches
     m = on.metrics()
-    assert m.event_builds == m.event_refactors == on.num_event_entries() == 0
+    assert m.event_builds == on.num_event_entries() == 4     # one per restart mask
+    assert m.event_refactors == 0
+    assert m.symbolic_analyses == m.structure_builds == 1
+    assert off.metrics().event_builds == 0
     # The transitional masks of the event iteration are now solved on
     # the restart factor only: nominal segments 2 (4 without the rule),
     # i.e. 6 factorisations in all against 4.

@@ -943,18 +943,13 @@ inline SimulationResult run_transient(
             : start_from_dc_op ? Size{0} : kRestartSteps;
         const bool has_jump_sources = restart_rule && (has_pwm || has_pulse || has_iwave);
         // Both SDIRK stages solve on the trapezoidal factor of 2γ·dt: a
-        // second FIXED step, so a second lazy cache keeps one factor per
-        // mask under the same byte budget. (On the 8-entry event LRU a
-        // VSI refactored on every restart step: 3172 builds in 3157.)
-        // const_cast: the cache only reads the pool unless a parameter
-        // update is applied, and this one never receives any.
-        std::optional<pwl::PwlStateSpaceCache> restart_cache;
+        // second FIXED step, kept by the cache's event table (one entry
+        // per mask, the segment byte budget, the regime's shared
+        // symbolic analysis, in-place refactor; a parameter refactor
+        // drops it). The 8-entry LRU this table replaced refactored on
+        // every restart step of a VSI (3172 builds in 3157).
         const Real restart_dt = Real{2} * (kGamma * opts.dt);
-        if (restart_rule) {
-            restart_cache.emplace(graph, const_cast<pwl::DevicePool&>(pool));
-            restart_cache->set_segment_budget_bytes(cache.segment_budget_bytes());
-            restart_cache->build_lazy(restart_dt);
-        }
+        Size restart_factorizations = 0;
 
         for (Size k = 1; k < n_steps; ++k) {
             // User-cancellation check (Phase: live scope). Lets a
@@ -1143,8 +1138,13 @@ inline SimulationResult run_transient(
                     // `solve_at` delegates to `solve` bit-identically
                     // when the dt matches, so the nominal path costs
                     // nothing extra.
-                    if (restart_cache && for_dt == restart_dt) {
-                        restart_cache->solve(mask, b_extra, x);
+                    if (restart_rule && for_dt == restart_dt) {
+                        const auto m0 = cache.metrics();
+                        cache.solve_at(mask, for_dt, b_extra, x);
+                        const auto m1 = cache.metrics();
+                        restart_factorizations += static_cast<Size>(
+                            (m1.event_builds - m0.event_builds) +
+                            (m1.event_refactors - m0.event_refactors));
                     } else {
                         cache.solve_at(mask, for_dt, b_extra, x);
                     }
@@ -1794,11 +1794,7 @@ inline SimulationResult run_transient(
             }
         }
         result.final_snapshot.restart_steps_left = restart_left;
-        if (restart_cache) {
-            result.n_restart_factorizations =
-                restart_cache->num_built_segments() +
-                restart_cache->metrics().segment_evictions;
-        }
+        result.n_restart_factorizations = restart_factorizations;
     } else {
         // ----------- STATIC PATH ----------------------------------------
         //

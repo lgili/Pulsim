@@ -111,3 +111,46 @@ TEST_CASE("a run workspace reuses one analysis and gives the bytes of the fresh 
     // Both masks share the dynamic pattern: one analysis for the run.
     REQUIRE(w.analyses == 1);
 }
+
+TEST_CASE("restart stages share the run workspace's analysis",
+          "[v2][layer4][newton][workspace][restart]") {
+    // run_transient (discontinuity_restart) solves the SDIRK stages on a
+    // segment assembled at 2*gamma*dt (`retry_seg`) with the run's
+    // workspace; its pattern must be the nominal segment's, or every
+    // restart window would re-analyse twice.
+    auto b = smooth_buck();
+    const Real dt = 1e-7;
+    const Real restart_dt = Real{2} * ((Real{1} - Real{0.70710678118654752440}) * dt);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    cache.build_lazy(dt);
+    const auto n = static_cast<Index>(b.pool().state_size(b.graph()));
+    NonlinearRefreshFn rf = [](const Vector& x, sparse::Matrix& J, Vector& f,
+                               const topology::Graph& g, const DevicePool& p) {
+        return refresh_smooth_diodes(x, J, f, g, p);
+    };
+    NewtonWorkspace w;
+    PwlSegment retry_seg;
+    Vector x = Vector::Zero(n);
+    for (int step = 0; step < 60; ++step) {
+        SwitchStateMask m(1);
+        m.set(0, (step / 10) % 2 == 0);
+        const Vector be = Vector::Constant(n, 1e-3 * step);
+        if (step % 10 < 3) {   // the three restart steps after each edge
+            assemble_segment(b.graph(), b.pool(), m, restart_dt,
+                             retry_seg.J, retry_seg.b_constant);
+            sparse::compress_in_place(retry_seg.J);
+            retry_seg.state_size = static_cast<Size>(n);
+            for (int stage = 0; stage < 2; ++stage) {
+                x = solve_with_newton_b_extra(retry_seg, rf, b.graph(), b.pool(), x, be,
+                                              Size{50}, Real{1e-9}, Real{1e-9},
+                                              false, false, &w);
+            }
+        } else {
+            x = solve_with_newton_b_extra(cache.lookup(m), rf, b.graph(), b.pool(), x, be,
+                                          Size{50}, Real{1e-9}, Real{1e-9},
+                                          false, false, &w);
+        }
+    }
+    REQUIRE(w.solves == 6 * 3 * 2 + 6 * 7);
+    REQUIRE(w.analyses == 1);
+}
