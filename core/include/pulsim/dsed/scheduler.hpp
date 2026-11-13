@@ -62,6 +62,7 @@
 #include <vector>
 
 #include "pulsim/dsed/event_predictor.hpp"
+#include "pulsim/events/mode_selector.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/dsed/event_projection.hpp"
 #include "pulsim/dsed/exact_lti.hpp"
@@ -81,6 +82,47 @@ struct EventRecord {
     PredicateType type;
     MaskT old_mask;
     MaskT new_mask;
+};
+
+/// add-complementarity-mode-selection D12 stage 1 — one event where the
+/// shadow LCP and today's settle chose different diode modes (diode
+/// census order; 1 = conducting).
+struct ModeShadowRecord {
+    Real t;
+    std::vector<char> settle_mode;
+    std::vector<char> lcp_mode;
+    std::vector<char> previous_mode;
+    int settle_rounds;
+    int pivots;
+    int ties;
+    events::LcpStatus status;
+    std::vector<Real> lcp_current;   // port currents of the LCP answer (A)
+    std::vector<Real> lcp_gap;       // port gaps w (V)
+    // Judge (independent of both deciders): the mode's own exact
+    // trajectory from the held state over δ = 100·h_e and 1e4·h_e;
+    // consistent iff every ON diode keeps i >= -tol and every OFF diode
+    // v <= max(V_th, V_f) + tol. -1: no exact step for that mask.
+    int settle_consistent = -1;
+    int lcp_consistent = -1;
+    Real settle_violation = Real{0};   // worst violation, scaled (V)
+    Real lcp_violation = Real{0};
+};
+
+/// Shadow counters (task 8.1 names) and the disagreements.
+struct ModeShadowReport {
+    bool enabled = false;
+    Real h_e = Real{0};
+    std::size_t lcp_events = 0;      // events the shadow posed an LCP at
+    std::size_t lcps = 0;            // LCPs solved (with widenings)
+    std::size_t pivots_total = 0;
+    int max_pivots_per_event = 0;
+    std::size_t ties = 0;
+    std::size_t widenings = 0;
+    std::size_t released = 0;        // hysteresis ports released (D8)
+    std::size_t settle_rounds_total = 0;
+    std::size_t errors = 0;          // port model or LCP failures (recorded)
+    std::string last_error;
+    std::vector<ModeShadowRecord> disagreements;
 };
 
 /// PED simulation output.
@@ -116,6 +158,7 @@ struct PEDResult {
     std::size_t n_exact_steps = 0;   // closed-form LTI propagator
     std::size_t n_predicate_evals = 0;  // exact path (D10)
     Real cpu_time_seconds = Real{0};
+    ModeShadowReport mode_shadow;      // mode_selection='shadow' only
 };
 
 /// Append one sample to a PED result, with both mask conventions.
@@ -271,13 +314,17 @@ public:
         // A diode may be forward-biased already at t = 0 (a
         // rectifier powered on mid-cycle). Settle before the first
         // step rather than integrating an inconsistent mode.
-        {
-            MaskT m0 = system_.current_mask();
-            settle_and_project_(t, x, m0);
-        }
-
         RK45State rk_state;
         PEDResult<MaskT> result;
+        {
+            MaskT m0 = system_.current_mask();
+            const MaskT prev0 = diode_bits_;
+            const MaskT old0 = m0;
+            if (shadow_.enabled) shadow_x_ = x;
+            settle_rounds_ = 0;
+            settle_and_project_(t, x, m0);
+            shadow_compare_(t, shadow_x_, old0, prev0, result);
+        }
         ped_push_sample(result, t, x, system_.current_mask(),
                         system_.current_mask(), nullptr);
         std::size_t step_idx = 0;
@@ -585,6 +632,16 @@ public:
         diode_burst_t0_.assign(diodes_.size(), Real{0});
     }
 
+    /// add-complementarity-mode-selection D12 stage 1: after every
+    /// settle, pose the LCP (step h_e) on the same held state and record
+    /// the disagreements. Today's settle still decides: the run's
+    /// numbers do not change.
+    void enable_mode_shadow(Real h_e)
+        requires HasNodePairVoltage<System> {
+        shadow_.enabled = true;
+        shadow_.h_e = h_e;
+    }
+
     /// v2.0 Phase 3 item 2 — see event_projection.hpp. Safe to leave
     /// on: with no fast stable mode in the new mode's A, the
     /// projection is exactly the identity.
@@ -859,6 +916,7 @@ private:
                        PEDResult<MaskT>& result,
                        int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
+        const MaskT prev_bits = diode_bits_;
 
         // Notify switch_fn of non-gate (diode/ZCD) events so it can
         // latch the post-event mode for the remainder of this cycle.
@@ -914,7 +972,14 @@ private:
         // fixed-point iteration run_transient does per step, done
         // here only at events.
         MaskT final_mask = new_mask;
+        if (shadow_.enabled) shadow_x_ = x;
+        settle_rounds_ = 0;
         settle_and_project_(t_event, x, final_mask);
+        if constexpr (HasNodePairVoltage<System>) {
+            shadow_compare_(t_event, shadow_x_,
+                            new_mask.overlay(prev_bits, diode_owned_),
+                            prev_bits, result, &old_mask);
+        }
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -1005,6 +1070,7 @@ private:
         const Real tol = zero_band_tol_(t, x);
         constexpr int kMaxRounds = 64;
         for (int round = 0; round < kMaxRounds; ++round) {
+            ++settle_rounds_;
             bool flipped = false;
             for (const auto& d : diodes_) {
                 const bool on =
@@ -1118,6 +1184,125 @@ private:
         return on;
     }
 
+    /// The shadow LCP at one settle: `gates_prev` is the mask with the
+    /// event's gates and the diode bits from BEFORE the event, the
+    /// previous mode the LCP is posed in; `x_held` the state the settle
+    /// started from; `rec_mask` the mask the state's recovery map is
+    /// read under (the one x was integrated in; default: gates_prev).
+    /// Touches no state the run reads: the system's mask is restored.
+    void shadow_compare_(Real t, const Vector& x_held,
+                         const MaskT& gates_prev, const MaskT& prev_bits,
+                         PEDResult<MaskT>& result,
+                         const MaskT* rec_mask = nullptr) {
+        if constexpr (requires(const System& s, const Vector& xx,
+                               DenseMatrix& Z, Vector& u) {
+                          s.diode_port_problem(gates_prev, t, xx, Real{1},
+                              std::vector<std::pair<Index, Index>>{}, Z, u);
+                          s.port_scale(t, xx);
+                      }) {
+            if (!shadow_.enabled || !has_diodes_) return;
+            auto& rep = result.mode_shadow;
+            rep.enabled = true;
+            rep.h_e = shadow_.h_e;
+            if (shadow_ports_.empty()) {
+                for (const auto& d : diodes_) {
+                    shadow_ports_.push_back(events::DiodePort{
+                        Real{1} / d.g_on, d.g_off, d.V_f, d.V_th});
+                    shadow_nodes_.emplace_back(d.from, d.to);
+                }
+            }
+            std::vector<char> prev(diodes_.size()), settled(diodes_.size());
+            for (std::size_t j = 0; j < diodes_.size(); ++j) {
+                prev[j] = prev_bits.get(diodes_[j].switch_idx) ? 1 : 0;
+                settled[j] = diode_bits_.get(diodes_[j].switch_idx) ? 1 : 0;
+            }
+            const MaskT cur = system_.current_mask();
+            system_.set_mask(rec_mask ? *rec_mask : gates_prev);
+            ++rep.lcp_events;
+            rep.settle_rounds_total += static_cast<std::size_t>(settle_rounds_);
+            try {
+                const events::CircuitScale sc = system_.port_scale(t, x_held);
+                const auto sel = selector_.select(
+                    shadow_ports_, prev,
+                    [&](Real h, DenseMatrix& Z, Vector& u) {
+                        system_.diode_port_problem(gates_prev, t, x_held, h,
+                                                   shadow_nodes_, Z, u);
+                    },
+                    shadow_.h_e, sc);
+                rep.lcps += static_cast<std::size_t>(sel.lcps);
+                rep.pivots_total += static_cast<std::size_t>(sel.pivots_total);
+                rep.max_pivots_per_event = std::max(rep.max_pivots_per_event, sel.pivots);
+                rep.ties += static_cast<std::size_t>(sel.ties);
+                rep.widenings += static_cast<std::size_t>(sel.widenings);
+                rep.released += static_cast<std::size_t>(sel.released);
+                const bool solved = sel.status == events::LcpStatus::Solution
+                                    || sel.status == events::LcpStatus::Trivial;
+                if (!solved || sel.on != settled) {
+                    const Vector& ci = selector_.last_current();
+                    const Vector& cw = selector_.last_gap();
+                    ModeShadowRecord r{
+                        t, settled, sel.on, prev, settle_rounds_, sel.pivots,
+                        sel.ties, sel.status,
+                        std::vector<Real>(ci.data(), ci.data() + ci.size()),
+                        std::vector<Real>(cw.data(), cw.data() + cw.size())};
+                    r.settle_consistent = judge_(gates_prev, settled, t, x_held, sc,
+                                                 r.settle_violation);
+                    if (solved) {
+                        r.lcp_consistent = judge_(gates_prev, sel.on, t, x_held, sc,
+                                                  r.lcp_violation);
+                    }
+                    rep.disagreements.push_back(std::move(r));
+                }
+            } catch (const std::exception& ex) {
+                // recorded, not swallowed: the count and the text are in
+                // the report; the settle's answer stands (shadow only)
+                ++rep.errors;
+                rep.last_error = ex.what();
+            }
+            system_.set_mask(cur);
+        } else {
+            (void)t; (void)x_held; (void)gates_prev; (void)prev_bits;
+            (void)result; (void)rec_mask;
+        }
+    }
+
+    /// The shadow's judge: is `mode` (diode bits over `gates`) consistent
+    /// on its own exact trajectory from x at t? 1 yes, 0 no, -1 unknown.
+    /// Leaves the system's mask to the caller to restore.
+    int judge_(const MaskT& gates, const std::vector<char>& mode, Real t,
+               const Vector& x, const events::CircuitScale& sc, Real& worst)
+        requires HasNodePairVoltage<System> {
+        worst = Real{0};
+        if constexpr (HasExactStep<System>) {
+            MaskT m = gates;
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                m.set(diodes_[j].switch_idx, mode[j] != 0);
+            system_.set_mask(m);
+            if (!system_.has_exact_step()) return -1;
+            const Real tol_v = Real{1e-9} * sc.vscale;
+            const Real zs = sc.vscale / sc.iscale;
+            for (const Real f : {Real{1e2}, Real{1e4}}) {
+                const Real d = f * shadow_.h_e;
+                advance_(t, x, d, x_tmp_);
+                for (std::size_t j = 0; j < diodes_.size(); ++j) {
+                    const auto& dd = diodes_[j];
+                    const Real v = system_.node_pair_voltage(dd.from, dd.to, t + d, x_tmp_);
+                    // violation in volts: ON  -> −i·zs, OFF -> v − V_on
+                    const Real viol = mode[j]
+                        ? -(dd.g_on * (v - dd.V_f)) * zs
+                        : v - std::max(dd.V_th, dd.V_f);
+                    // a non-finite state (an unstable mode over 1e4·h_e) is a violation
+                    worst = std::isfinite(viol) ? std::max(worst, viol)
+                                                : std::numeric_limits<Real>::infinity();
+                }
+            }
+            return worst > tol_v ? 0 : 1;
+        } else {
+            (void)gates; (void)mode; (void)t; (void)x; (void)sc;
+            return -1;
+        }
+    }
+
     /// Whether every entry of `v` is finite (not NaN, not Inf).
     [[nodiscard]] static bool is_all_finite_(const Vector& v) noexcept {
         for (Eigen::Index i = 0; i < v.size(); ++i) {
@@ -1192,6 +1377,13 @@ private:
     std::size_t store_every_;
     StateProjectionFn state_projection_;
     std::size_t nan_streak_ = 0;
+    // add-complementarity-mode-selection — the shadow LCP (stage 1).
+    struct { bool enabled = false; Real h_e = Real{0}; } shadow_;
+    events::ModeSelector selector_;
+    std::vector<events::DiodePort> shadow_ports_;
+    std::vector<std::pair<Index, Index>> shadow_nodes_;
+    Vector shadow_x_;
+    int settle_rounds_ = 0;
     // Exact-path workspaces: a step reuses them (no allocation).
     mutable Vector x_new_, x_evt_, x_tmp_;
     std::vector<Vector> scan_x_;

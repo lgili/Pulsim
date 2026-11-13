@@ -552,6 +552,9 @@ _REFUSED = {
                                ("trbdf2", "dsed")),
     "enable_substep_state_correction": (
         {"enable_substep_state_correction": True}, ("trbdf2", "dsed")),
+    # add-complementarity-mode-selection: the shadow is on the dsed event
+    # integrator only (this RC has no diode, so dsed routes to "auto")
+    "mode_selection": ({"mode_selection": "shadow"}, ("trbdf2", "dsed")),
 }
 
 

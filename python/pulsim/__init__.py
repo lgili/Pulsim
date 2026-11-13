@@ -1627,6 +1627,7 @@ def simulate(
     resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
+    mode_selection: Optional[str] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -1819,6 +1820,15 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    mode_selection
+        How PWL diodes are decided at an event. ``None`` / ``'legacy'``
+        (default): today's settle. ``'shadow'`` (``engine='dsed'``
+        only): the settle still decides, so the numbers are unchanged,
+        and a complementarity problem (LCP) is solved on the same held
+        state at every event; the events where the two disagree, with
+        the LCP counters, are in ``result.diagnostics['mode_shadow']``.
+        ``'shadow'`` on ``pwl`` / ``trbdf2`` and ``'lcp'`` raise
+        :class:`UnsupportedError` (not implemented yet).
 
     Returns
     -------
@@ -1934,6 +1944,17 @@ def simulate(
         stiffness_threshold=stiffness_threshold,
         h_bdf2=h_bdf2,
     )
+    if mode_selection not in (None, "legacy", "shadow", "lcp"):
+        raise ValueError(
+            f"simulate(): mode_selection={mode_selection!r}; expected "
+            "None, 'legacy', 'shadow' or 'lcp'.")
+    if mode_selection == "lcp":
+        raise _unsupported(
+            engine, "mode_selection",
+            "simulate(mode_selection='lcp'): the complementarity mode "
+            "selection does not decide diode states on any engine yet; "
+            "mode_selection='shadow' (engine='dsed') measures it against "
+            "today's settle without changing the numbers.")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -2121,6 +2142,7 @@ def simulate(
             initial_state=None if _ic_from_builder else initial_state,
             builder_initial_state=initial_state if _ic_from_builder else None,
             progress=progress,
+            mode_selection=mode_selection,
         )
         try:
             _dsed_res._preflight = _preflight_report
@@ -2213,6 +2235,15 @@ def simulate(
                 + "; ".join(_route_reasons)
                 + ". Use engine='auto' to route to the fixed-step "
                 "engine automatically, or engine='pwl' explicitly.")
+
+    # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
+    if mode_selection == "shadow":
+        raise _unsupported(
+            engine, "mode_selection",
+            f"simulate(engine={_engine_asked!r}, mode_selection='shadow'): "
+            f"the shadow LCP is implemented on engine='dsed' only; this run "
+            f"lands on engine={engine!r}, whose settle has no shadow hook "
+            "yet. Use engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
