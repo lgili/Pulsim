@@ -1,13 +1,12 @@
 # Pulsim 2.x usage guide (for AI coding assistants)
 
-This file ships inside the `pulsim` package and describes the version it
-ships with. `python -m pulsim.guide` prints it with the installed version
-on the first line; `pulsim.ai_guide()` returns the same text. When this
-guide and your memory of Pulsim disagree, the guide wins: models are
-trained on Pulsim 1.x and on other simulators, and Pulsim 2 changed
-behaviour without changing many names. Every `python` block below is
-executed by the test suite, and every printed number is the one it
-prints.
+This file ships inside the `pulsim` package and describes its version.
+`python -m pulsim.guide` prints it with the installed version on the
+first line; `pulsim.ai_guide()` returns the same text. When this guide
+and your memory of Pulsim disagree, the guide wins: models are trained
+on Pulsim 1.x and other simulators, and Pulsim 2 changed behaviour but
+kept most names. Every `python` block below is executed by the test
+suite, and every printed number is the one it prints.
 
 Short version:
 
@@ -387,14 +386,14 @@ ones, on top of `INV__LSa`'s own hard edges). Model the dead time.
 ## 4. Exact signatures of the most used calls
 
 `b` is a `CircuitBuilder`, `res` a `SimulationResult`. These lines are
-checked against the installed package by the test suite. `...` marks
+checked against the package by the test suite. `...` marks
 further keyword-only options; see `help()`.
 
 ```text
 p.CircuitBuilder()
 b.add_resistor(name, n_pos, n_neg, R_ohms)
-b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None)
-b.add_inductor(name, n_pos, n_neg, L_henries, i0=None)
+b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None, ...)
+b.add_inductor(name, n_pos, n_neg, L_henries, i0=None, ...)
 b.add_voltage_source(name, n_pos, n_neg, V)
 b.add_current_source(name, n_pos, n_neg, I)
 b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
@@ -440,7 +439,8 @@ sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
 A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
-`add_capacitor(c0=)` / `add_inductor(i0=)` set initial conditions.
+`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=)`
+set initial conditions and series parasitics.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
 `auto_regularize`, `progress`.
 
@@ -653,4 +653,4 @@ Paths are from the repository root (the site mirrors `docs/`).
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md` (how each loss is computed),
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.
-- `CHANGELOG.md`: what changed in each release and why.
+- `CHANGELOG.md`: what changed and why.

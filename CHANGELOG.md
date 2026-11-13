@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Realistic passives (`add-realistic-passives`, composites)
+
+* **Added** keyword parasitics on the builder: `b.add_capacitor(...,
+  esr=0.0, esl=0.0)` and `b.add_inductor(..., esr=0.0, c_par=0.0,
+  rac=None)` [Ω, H, F]. Non-zero values expand into existing elements
+  (`{name}.esr`, `{name}.esl`, `{name}.cpar`, internal nodes); `{name}`
+  stays the ideal element, so `c0`, `i0` and `res.i(name)` keep their
+  meaning. All zero is the native call (same states bit for bit). 100 µF
+  + 10 mΩ + 10 nH: `|Z|` equals the series network to 1e-9 in the kernel
+  AC sweep, minimum 10 mΩ at 159.15 kHz; a sine-driven transient matches
+  the phasor to 7.1e-5 at 20, 159 and 800 kHz. A current reversal of 2 A
+  steps the terminal voltage by `esr·Δi` (1e-6). 100 µH with
+  `c_par = 10 pF` peaks at 5.033 MHz. The ESR loss is the resistor row
+  `{name}.esr` of `device_loss_summary` (1 A rms through 50 mΩ:
+  50.000 mW).
+* **Added** `pulsim.passives.fit_rac_ladder(f, R_ac, *, L, R_dc=None,
+  n_cells=4, tol=0.05)` → `RacLadder` (`R_dc`, `L_hf`, cells `R_k ∥ L_k`,
+  band, residual): non-negative least squares on log-spaced corners,
+  passive by construction; refused by name when the cells need more
+  inductance than `L` or the residual exceeds `tol`. On the round-wire
+  skin-effect curve over two decades around the corner: 1 cell 39 %
+  (refused), 2 cells 1.75 %, 4 cells 0.60 %. A fit reproduces its own
+  data; it is not a validation. `b.add_inductor(..., rac=ladder)` builds
+  it (`R_dc` 10 mΩ + one 90 mΩ ∥ 143.24 nH cell: 10.009, 55.00,
+  99.11 mΩ at 1 kHz, 100 kHz, 1 MHz; two-tone loss 32.50 mW).
+* **Added** `b.add_transmission_line(name, k_pos, k_neg, m_pos, m_neg, *,
+  Z0, delay, R=0.0, model="pi", sections)` (or `L_per_m`, `C_per_m`,
+  `length`) and `pulsim.passives.recommend_line_sections(delay, t_rise)`
+  = `ceil(11·delay/t_rise)`. 50 Ω, 100 ns, 50 sections, open end:
+  `Z_in = −j91.525 Ω` at `ωτ = 0.5` (ideal −j91.524). Its limitation is
+  pinned: an ideal step on a source-matched open line peaks at 1.271 V
+  (exact answer 1.000 V) at any section count; a 20 ns edge with the
+  recommended 55 sections peaks at 1.046 V. `model="bergeron"` (exact
+  delay) is refused by name: it needs a kernel device.
+* Not in this pass: YAML keys and type (the loader is C++; it does not
+  check per-device keys, so a YAML `esr:` is silently ignored today), the
+  MLCC DC-bias table (needs `ChargeTable`), the Bergeron line
+  (`openspec/changes/add-realistic-passives/DECISIONS.md`).
+
 ### MNA-native DC machine (`add-mna-native-machines`, step 1)
 
 * **Added** `b.add_dc_machine(name, a_pos, a_neg, omega_node, *, R_a, L_a,

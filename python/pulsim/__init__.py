@@ -760,6 +760,11 @@ Cancelled = _berg.Cancelled
 from . import machines as _machines  # noqa: E402
 _machines.install(CircuitBuilder)
 
+# add-realistic-passives: esr / esl / c_par / rac keywords on
+# add_capacitor / add_inductor and add_transmission_line (composites).
+from . import passives as _passives  # noqa: E402
+_passives.install(CircuitBuilder)
+
 
 
 class NameNotFoundError(KeyError):

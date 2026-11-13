@@ -65,6 +65,14 @@ their messages are covered in [Gotchas](gotchas.md).
 | **`add_dc_machine` with `B = 0` triggers a needless preflight tie.** The preflight does not count the ideal transformer's primary as a DC path and ties the speed node to ground through 1 GΩ, with a warning. | A friction of 1e-9 N·m·s/rad: 9e-7 relative on the DC current. | Ignore, give `B > 0`, or pass `auto_regularize=False` (the matrix is regular). |
 | No YAML type `dc_machine`, no angle node. | — | Python API; integrate `res.v(omega_node)` for the angle. |
 
+## Passives
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **The π-section line overshoots an ideal step by 27 % at any section count.** `b.add_transmission_line(model="pi")` is a lumped ladder; the exact (Bergeron) line is not implemented and `model="bergeron"` is refused. | 50 Ω, 100 ns, source-matched, open end: far-end peak 1.271 V with 50 sections (exact 1.000 V). With a 20 ns edge and `recommend_line_sections` (55) the peak is 1.046 V. | Give the source a realistic rise time and use `p.passives.recommend_line_sections(delay, t_rise)` sections. |
+| **YAML ignores `esr`, `esl`, `c_par`, `rac`.** The loader does not check per-device keys, so a `capacitor` with `esr:` loads as an ideal capacitor without a warning. | — | Build parasitic passives from Python. |
+| One ESR value (no frequency dependence), no DC-bias capacitance table, single-pair line (no coupled three-phase cable). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`. |
+
 ## Older entries
 
 [`KNOWN_LIMITATIONS.md`](https://github.com/lgili/Pulsim/blob/main/KNOWN_LIMITATIONS.md)

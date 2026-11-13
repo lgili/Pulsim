@@ -31,7 +31,10 @@ source).
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from ._pulsim import CircuitBuilder
 
 __all__ = ["install"]
 
@@ -52,7 +55,8 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
                    K: Optional[float] = None, J: float, B: float = 0.0,
                    T_load: float = 0.0, theta_node: Optional[str] = None,
                    i0: Optional[float] = None, omega0: float = 0.0,
-                   Ke: Optional[float] = None, Kt: Optional[float] = None):
+                   Ke: Optional[float] = None, Kt: Optional[float] = None
+                   ) -> "CircuitBuilder":
     """Add a permanent-magnet DC machine solved inside the matrix.
 
     Parameters [SI]: ``R_a`` [Ω, ≥ 0], ``L_a`` [H, > 0], ``K``

@@ -146,6 +146,18 @@ loss = p.device_loss_summary(b, res)
 print(next(e for e in loss if e["name"] == "R_load")["P_avg"])
 ```
 
+## Capacitor ESR, inductor DCR and AC-resistance ladder
+
+`b.add_capacitor(..., esr=)` and `b.add_inductor(..., esr=)` add a series
+resistor named `{name}.esr`; its row in `device_loss_summary` is the
+`i²·esr` loss (1 A rms through 50 mΩ: 50.000 mW). An inductor built with
+`rac=p.passives.fit_rac_ladder(f, R_ac, L=...)` dissipates in `{name}.esr`
+(`R_dc`) and the cell resistors `{name}.rac_r{k}`, so every harmonic of
+the current is charged at its own `R_ac`: 1 A peak at 1 kHz plus 1 A
+peak at 100 kHz through `R_dc` = 10 mΩ and one 90 mΩ ∥ 143.24 nH cell
+dissipates 32.50 mW. ESR is one number: read it at the switching
+frequency.
+
 ## Switch — PSIM-style E_on / E_off
 
 ```python

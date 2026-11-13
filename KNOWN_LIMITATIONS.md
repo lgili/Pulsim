@@ -286,6 +286,21 @@ properties of the equations.
 
 ---
 
+## Passives (`add-realistic-passives`, composites)
+
+ESR/ESL/`c_par`, the `R_ac` ladder and the π-section line are networks
+of R, L, C built from Python. Not done: YAML keys (the C++ loader does
+not check per-device keys, so `esr:` in YAML is silently ignored), the
+MLCC DC-bias table (needs the charge-law `NonlinearCapacitor`), the
+Bergeron line (needs a kernel device; `model="bergeron"` is refused).
+The π line overshoots an ideal step by 27 % at any section count (the
+exact line does not): give the source a rise time and use
+`recommend_line_sections`. A fitted ladder reproduces its own data; it
+is not a validation, and it extrapolates outside its band as its last
+cell does.
+
+---
+
 ## Open OpenSpec proposals as of v1.3.0
 
 The following proposals are accepted as in-flight work but **not**
