@@ -680,3 +680,44 @@ TEST_CASE("YAML loader: source and has_simulation record provenance",
     REQUIRE(with.has_simulation);
     REQUIRE(with.options.t_end == Approx(1.0e-3));
 }
+
+TEST_CASE("YAML loader: capacitor/inductor parasitics and dc_machine",
+          "[v2][layer8][yaml][passives][machines]") {
+    const auto lc = yaml::load_string(R"YAML(
+circuit:
+  devices:
+    - {type: voltage_source, name: V, from: a, to: gnd, V: 10.0}
+    - {type: capacitor, name: C1, from: a, to: gnd, C: 1.0e-6, esr: 0.05, esl: 1.0e-9}
+    - {type: inductor, name: L1, from: a, to: b, L: 1.0e-4, esr: 0.1, c_par: 1.0e-11}
+    - {type: resistor, name: R, from: b, to: gnd, R: 1.0}
+    - {type: dc_machine, name: M, a_pos: a, a_neg: gnd, omega_node: w,
+       R_a: 0.5, L_a: 1.0e-3, K: 0.1, J: 1.0e-5, T_load: 0.2}
+)YAML");
+    const auto& b = lc.builder;
+    for (const char* n : {"C1.esr", "C1.esl", "C1", "L1.esr", "L1",
+                          "L1.cpar", "M.ra", "M.la", "M.em", "M.j",
+                          "M.tl"}) {
+        INFO(n);
+        REQUIRE_NOTHROW(b.branch_id_of(n));
+    }
+    REQUIRE_THROWS(b.branch_id_of("M.b"));     // B = 0 adds nothing
+
+    // Zero parasitics add nothing.
+    const auto plain = yaml::load_string(
+        "circuit:\n  devices:\n"
+        "    - {type: capacitor, name: C, from: a, to: gnd, C: 1.0e-6, esr: 0.0}\n");
+    REQUIRE(plain.builder.graph().num_branches() == 1);
+
+    REQUIRE(load_error("circuit:\n  devices:\n"
+                       "    - {type: capacitor, name: C9, from: a, to: gnd, "
+                       "C: 1.0e-6, esr: -1.0}\n")
+                .find("capacitor 'C9': esr") != std::string::npos);
+    REQUIRE(load_error("circuit:\n  devices:\n"
+                       "    - {type: inductor, name: L9, from: a, to: gnd, "
+                       "L: 1.0e-6, rac: [1, 2]}\n")
+                .find("'rac' is not read") != std::string::npos);
+    REQUIRE(load_error("circuit:\n  devices:\n"
+                       "    - {type: dc_machine, name: M9, a_pos: a, a_neg: gnd, "
+                       "omega_node: w, L_a: 1.0e-3, K: 0.0, J: 1.0e-5}\n")
+                .find("dc_machine 'M9': K") != std::string::npos);
+}
