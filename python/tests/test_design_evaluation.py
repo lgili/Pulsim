@@ -357,23 +357,22 @@ def test_a_run_simulate_only_warns_about_is_failed_not_ok():
     assert rec.kpis == {}
 
 
-def test_a_trbdf2_missed_commutation_is_failed_not_ok():
-    """The floating bridge of test_trbdf2_robustness (rtol 2e-5): trbdf2
-    holds a diode against its rule and only warns; design maps it to
-    failed."""
-    from pulsim import design
-    b = p.CircuitBuilder()
-    b.add_sine_voltage_source("Vac", "s", "gnd", 0.0, 325.0, 50.0)
-    b.add_resistor("Rs", "s", "a", 1e-3)
-    p.add_bridge_rectifier(b, "BR", ac_a="a", ac_b="gnd", dc_pos="dp",
-                           dc_neg="dn")
-    b.add_inductor("Lf", "dp", "dq", 1e-3)
-    b.add_capacitor("C", "dq", "dn", 470e-6)
-    b.add_resistor("RL", "dq", "dn", 1e3)
-    with pytest.warns(RuntimeWarning, match="commutation rule forbids"):
-        res = p.simulate(b, t_end=0.06, engine="trbdf2", rtol=2e-5, atol=2e-8)
+def test_a_trbdf2_missed_commutation_is_failed_not_ok(monkeypatch):
+    """A trbdf2 run that holds a diode against its rule only warns;
+    design maps it to failed. The floating bridge that held BR__D4
+    (rtol 2e-5) no longer does since the TR-BDF2 roundoff-floor fix
+    (DECISIONS.md 12 of update-trbdf2-post-event-restart; no run in the
+    suite still holds one), so the diode-state record is supplied."""
+    from types import SimpleNamespace as NS
+
+    from pulsim import _diode_state, design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2", _trbdf2_stats={})
+    monkeypatch.setattr(
+        _diode_state, "diode_state_traces",
+        lambda b, r: {4: NS(name="BR__D4", n_rule_violations=3)})
     with pytest.raises(design._Failed, match="missed_commutation: .*BR__D4"):
-        design._raise_if_suspect(res, b)
+        design._raise_if_suspect(run, p.CircuitBuilder())
 
 
 def test_exact_is_the_dsed_engine_for_the_evaluator():

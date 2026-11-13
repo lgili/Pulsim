@@ -104,10 +104,63 @@ def test_ccm_error_not_above_twice_the_previous(ccm):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "not met: the DCM steps below 1e-11 s follow the diode turn-off at "
-    "zero inductor current, and the derivative refresh is not applied at "
-    "diode events (it excites the L*g_off mode; DECISIONS.md)"))
+    "not met: 4,325 accepted steps below 1e-11 s (smallest 4e-15 s) are "
+    "the stiff L*g_off mode after a turn-off with residual current "
+    "(tau ~ 2e-13 s), which the raw estimate reads as error, and the "
+    "committed gate-edge probe steps; the roundoff floor does not fire "
+    "here (0 accepts) and the filter needs the SDIRK step (DECISIONS.md "
+    "9, 12)"))
 def test_dcm_no_step_below_1e_11(dcm):
     """Runs of accepted steps between 4e-14 and 1e-12 s before this
     change."""
     assert np.diff(np.asarray(dcm.times)).min() > 1e-11
+
+
+def _mosfet_half_bridge(engine, **kw):
+    T = 1e-5
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "vdc", "gnd", 48.0)
+    b.add_mosfet_level1("M1", "vdc", "sw", "g1", K=20.0, V_T=3.0)
+    b.add_mosfet_level1("M2", "sw", "gnd", "g2", K=20.0, V_T=3.0)
+    b.add_pulse_voltage_source("Vg1", "g1", "sw", 0.0, 12.0, 0.2e-6, 4.6e-6, T)
+    b.add_pulse_voltage_source("Vg2", "g2", "gnd", 0.0, 12.0, 5.2e-6, 4.6e-6, T)
+    b.add_inductor("L", "sw", "out", 100e-6)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", 5.0)
+    return p.simulate(b, t_end=50 * T, engine=engine, **kw)
+
+
+def _time_mean(res, node):
+    t = np.asarray(res.times)
+    return float(np.trapezoid(np.asarray(res.v(node)), t) / (t[-1] - t[0]))
+
+
+def test_body_diode_events_restart_with_an_l_stable_step():
+    """One SDIRK(2,2) step after each diode event: TR-BDF2's first step
+    read the pre-event derivative of the body-diode commutation. The
+    output mean was 5.7 mV off the fixed engine at T/4000 (2.0e-4 V
+    with the SDIRK step), in 1555 steps and 772 rejects (1280, 173)."""
+    ref = _time_mean(_mosfet_half_bridge("pwl", dt=1e-5 / 4000), "out")
+    res = _mosfet_half_bridge("trbdf2")
+    st = res._trbdf2_stats
+    assert st["n_sdirk_steps"] > 0
+    # 2.36e-4 V and 101 rejects with the restart size remembered per
+    # diode transition (240 rejects before: 215 of them the restart
+    # step taken at the pre-event h and rejected once).
+    assert abs(_time_mean(res, "out") - ref) < 3e-4
+    assert st["n_reject"] < 200
+
+
+def test_diode_event_is_recorded_where_it_happens():
+    """ll08_buck_mosfet: the SDIRK restart step after a diode event may be
+    long (500 ns), and V(sw) jumps at the event. With no sample between
+    the event and that step's end the record ramped across it (strict
+    error 0.00231 -> 0.0252, edge instants 0.48 us late). The cascade's
+    probe under the post-event bits is recorded right after the event."""
+    res = _mosfet_half_bridge("trbdf2")
+    t = np.asarray(res.times)
+    ev = np.array([e.t_estimated for e in res.commutation_events])
+    assert ev.size > 100
+    assert np.all(np.diff(t) > 0)
+    nxt = t[np.searchsorted(t, ev, side="right")]
+    assert (nxt - ev).max() < 1e-9

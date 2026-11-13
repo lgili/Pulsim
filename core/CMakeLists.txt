@@ -574,12 +574,15 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v4/test_continuation_rectifier.cpp  # V8 continuation
         tests/layer5_v4/test_vf0_continuation_rectifier.cpp  # V9 V_F0 cont
         tests/layer5_v4/test_pseudo_transient_rectifier.cpp  # V10 PTC
+        tests/layer5_v4/test_newton_roundoff_acceptance.cpp
     )
     target_link_libraries(pulsim_core_layer5_v4_tests
         PRIVATE
             pulsim::core
             Catch2::Catch2WithMain
     )
+    target_compile_definitions(pulsim_core_layer5_v4_tests PRIVATE
+        PULSIM_PWL_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/include/pulsim/pwl")
     if(COMMAND pulsim_apply_target_defaults)
         pulsim_apply_target_defaults(pulsim_core_layer5_v4_tests)
     endif()
