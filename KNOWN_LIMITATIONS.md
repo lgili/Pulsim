@@ -322,6 +322,21 @@ not seen. `periodic_steady_state` (no event projection, rtol 1e-11)
 solves these boosts correctly. Workaround: `V_th = 1e-2`, or `pwl` /
 `trbdf2`. The fix is the complementarity mode selection.
 
+### Complementarity mode selection: dsed only; double crossings at `V_th = 0`
+
+`mode_selection='lcp'` and the default-mode guard run on `engine='dsed'`
+only; `pwl` and `trbdf2` still decide with their settle and refuse
+`'shadow'`/`'lcp'` by name (hooks: add-complementarity-mode-selection
+task 4.2). The guard and the LCP decide at events; a commutation the
+event locator misses is not decided. With `V_th = 0` a diode that turns
+on at exactly `v = 0` starts its next step with the turn-off predicate
+at 0, which the dsed locator skips, so a return through zero inside that
+step is lost: an LC tank into a series diode stays ON at −18 mA from
+2.25 µs (`test_double_crossing_inside_one_step_is_seen`'s circuit). A
+band of `V_th = 1e-3` gives the exact windows. The guard repairs only
+the modes it judges inconsistent over `1e4·h_e`; a mode consistent that
+long and wrong later is not caught.
+
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or

@@ -2649,6 +2649,10 @@ class _NativeCircuitBuilderAdapter:
         """
     def __init__(self, builder: CircuitBuilder, cache: PwlStateSpaceCache, b_extra_fn: typing.Any = None) -> None:
         ...
+    def _mode_select_at(self, mask: SwitchStateMask, t: float, x_full: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], h_e: float, tol: float = 1e-09) -> dict[typing.Any, typing.Any]:
+        """
+        add-complementarity-mode-selection: the diode-port LCP of the backward-Euler companion at step h_e from the full-MNA state x_full held at t, posed in the previous mode (the diode bits of `mask`), and the selector's answer. Test/probe surface.
+        """
     def b_vector(self, t: float) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Continuous-time b vector at time `t` (DC + sine + PWM + pulse + user-supplied overlay).
@@ -2711,6 +2715,18 @@ def _cpp_mmc_arm_multilevel_step(v_C: float, m_ref: float, i_b: float, dt: float
 def _cpp_ps_pwm_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
     C++ hotpath: PS-PWM switching function — returns the integer count of SMs to insert at time `t` given the modulation reference `m_ref`. Equivalent to `ps_pwm_switching_function` in pulsim/mmc.py.
+    """
+def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
+    """
+    2^k enumeration (k <= 12): (number of solutions, z, w) with the fewest basic z.
+    """
+def _lcp_lemke(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], int, str]:
+    """
+    Lemke with the lexicographic ratio test on w = M z + q (add-complementarity-mode-selection D4). Returns (z, w, pivots, status).
+    """
+def _min_source_period(graph: Graph, pool: DevicePool) -> float:
+    """
+    Shortest period of the sine / PWM sources (inf when none): T_ref of the shadow LCP's event step (add-complementarity-mode-selection D5).
     """
 def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
     """
@@ -2830,7 +2846,7 @@ def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotat
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
     """
-def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True) -> dict[typing.Any, typing.Any]:
+def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """

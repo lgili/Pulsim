@@ -502,6 +502,29 @@ def _has_edge_oracle(sf) -> bool:
     return hasattr(sf, "next_edge_after")
 
 
+# add-complementarity-mode-selection D5: the event step of the shadow LCP.
+# h_e = H_E_REL * T_ref (measured band 1e-9..1e-6, probes/h_e_band.out), T_ref the shortest declared period (sine / PWM
+# source) or the run length (see DECISIONS.md for the measured band).
+H_E_REL = 1e-7
+# Slice 2, task 4: the default-mode guard (judge each settled mode, re-decide a
+# violating one with the LCP). Module switch for A/B measurements only.
+MODE_GUARD = True
+
+
+def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
+    import math
+    from . import _pulsim as _kern
+    periods = [float(t_window),
+               float(_kern._min_source_period(builder.graph, builder.pool))]
+    nxt = getattr(switch_fn, "next_edge_after", None)
+    if nxt is not None:                 # a periodic gate: two edges per period
+        e1 = float(nxt(0.0))
+        e3 = float(nxt(float(nxt(e1))))
+        if math.isfinite(e3) and e3 > e1:
+            periods.append(e3 - e1)
+    return H_E_REL * min(periods)
+
+
 def run_dsed_from_builder(
     *,
     builder: Any,                          # pulsim.CircuitBuilder
@@ -520,6 +543,7 @@ def run_dsed_from_builder(
     initial_state: Optional[Any] = None,
     progress: Any = False,
     builder_initial_state: Optional[Any] = None,
+    mode_selection: Optional[str] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
 
@@ -770,12 +794,31 @@ def run_dsed_from_builder(
                 native_adapter.set_mask(initial_mask)
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
                     builder)
+            shadow_kw = {}
+            if mode_selection in ("shadow", "lcp") and (
+                    opts.integrator != "rk45" or _n_diodes == 0):
+                raise unsupported(
+                    "dsed", "mode_selection", message=
+                    f"simulate(engine='dsed', mode_selection="
+                    f"{mode_selection!r}): the complementarity selection "
+                    f"is wired into the event-driven integrator "
+                    f"only; integrator={opts.integrator!r} has no hook. "
+                    "Drop mode_selection, or run a circuit with diodes.")
+            if opts.integrator == "rk45" and _n_diodes > 0:
+                h_e = _shadow_h_e(builder, sf, t_window)
+                if mode_selection == "lcp":
+                    shadow_kw["mode_lcp_h_e"] = h_e
+                elif MODE_GUARD:    # default and shadow: the settle, guarded
+                    shadow_kw["mode_guard_h_e"] = h_e
+                if mode_selection == "shadow":
+                    shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
                 native_res = run_ped_b11(
                     native_adapter, sf, x0, t_window,
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
-                    store_every=opts.store_every, event_log=False)
+                    store_every=opts.store_every, event_log=False,
+                    **shadow_kw)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -815,6 +858,10 @@ def run_dsed_from_builder(
             res.event_times = (None if et is None
                                else np.asarray(et) + float(opts.t_start))
             res.event_types = native_res.get("event_types")
+            res.diagnostics = {}
+            for key in ("mode_shadow", "mode_selection", "mode_guard"):
+                if key in native_res:
+                    res.diagnostics[key] = native_res[key]
             return res
         except UnsupportedError:
             # A refusal is an answer, not a reason to try the next
@@ -833,6 +880,13 @@ def run_dsed_from_builder(
             if _n_diodes > 0:
                 raise
             pass
+
+    if mode_selection in ("shadow", "lcp"):
+        raise unsupported(
+            "dsed", "mode_selection", message=
+            f"simulate(engine='dsed', mode_selection={mode_selection!r}): "
+            "the native adapter rejected this circuit and the fallback "
+            "path has no complementarity hook. Drop mode_selection.")
 
     if builder_initial_state is not None:
         raise unsupported(
