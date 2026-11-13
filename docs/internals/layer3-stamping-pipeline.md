@@ -134,6 +134,23 @@ x += delta;
 ONE call to each stamper, ONE call to the solver, EXACT solution.
 The 4-place v1 stamping logic is gone.
 
+## Stamp positions are topology-only
+
+No stamper chooses a position from a value or a switch state: a
+switch stamps the same four entries with `g_on` or `g_off`, an inactive
+(ground) terminal is the only thing that skips a stamp. Layer 4's
+`SegmentAssembler` relies on this to stamp later switch states into a
+pattern template (`coeffRef` then finds an existing entry, never
+inserts). A new stamper whose position depended on a value would be
+caught by the template's entry-count check and rebuild the template
+(`CacheMetrics::structure_builds`), not produce a wrong matrix. Once
+inserts were gone, a `sample` profile of repeated segment builds on a
+3008-unknown switched ladder put the stampers (with their in-column
+`coeffRef` search) plus assembly and combine at 22 % of busy samples,
+below the numeric `factorize` (25 %) and the pool lookups
+`DevicePool::kind_of` / `entry_at` (36 %); the steady-state step at
+n = 1502 shows no assembly at all (the triangular solves dominate).
+
 ## What this layer does NOT do
 
 - No 3-terminal+ devices. `stamp_device<T>` static-asserts

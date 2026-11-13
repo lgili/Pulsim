@@ -510,6 +510,54 @@ once, above the engine dispatch, and both engines consume that plan.
   +0.07 %, plateau +0.35 %; Lauritzen body diode at T_M = 0.01·TT
   against SPICE TT recovery: I_rrm −0.09 %, Q_rr +0.11 %.
 
+### Newton: one sparse-LU analysis per run (performance, bit-identical)
+
+* **Changed** `solve_with_newton_b_extra` takes an optional
+  `NewtonWorkspace*`; `run_transient` and the TR-BDF2 engine pass one per
+  run. The combined Jacobian `J_lin + J_nl` is written in place on its
+  union pattern, the residual and step vectors are reused, and the
+  `Eigen::SparseLU` analysis is kept while the pattern holds (it was
+  rebuilt every iteration). Factors, states and iteration counts are
+  bit-identical (`update-newton-persistent-solver`, stage A1; A2 and B
+  not included). Eigen heap allocations per Newton iteration on a
+  Shockley-diode buck: 47.7 → 20.4.
+
+### TR-BDF2 event solvers: byte budget and allocation-free refactor (performance, bit-identical)
+
+* **Changed** `PwlStateSpaceCache::solve_at` (every TR-BDF2 solve) keeps
+  one event solver per visited switch state, bounded by the segment byte
+  budget (`set_segment_budget_bytes`, accounted separately for this
+  table) instead of 8 entries. The three-phase VSI on `trbdf2` (20 ms)
+  now builds 87 entries — one per switch state — instead of 3,198.
+* **Changed** a refactor of a resident entry at a new `dt` writes
+  `J = G + (1/dt)·C` in place and the in-house LU reuses its work
+  vectors and L/U capacity: 0 heap allocations per refactor (was 6
+  `operator new` + 6 Eigen mallocs). Results are bit-identical
+  (`update-trbdf2-factor-reuse`, parts 1-2; the step grid of part 3 is
+  not included).
+* **Removed** `PwlStateSpaceCache::kMaxEventEntries`.
+* **Added** `CacheMetrics.event_evictions`.
+
+### Linear-time segment assembly and one symbolic analysis per circuit (performance, bit-identical)
+
+* **Changed** `PwlStateSpaceCache` builds the sparse structure of `G`,
+  `C` and `J` once per assembly regime (dynamic `dt > 0`, static
+  `dt = 0`); every later switch state stamps into that template and
+  writes `J = G + (1/dt)·C` through slot arrays. The first structure is
+  assembled with a per-column reserve, so assembly is linear in the
+  number of stamps instead of quadratic. One symbolic analysis (column
+  ordering, elimination tree) per regime is shared by every segment,
+  event entry and the rank-1 solver; a new switch state costs a numeric
+  factorisation. The cached solve forms the right-hand side inside the
+  LU's row-permutation pass. Matrices, factors and every result are
+  bit-identical (`update-linear-time-assembly`, tier 1).
+  Measured: segment build at 15,002 unknowns 123 ms → 3.9 ms (build
+  cost now grows 10.6× per 10× unknowns, was 85×); per switch state on
+  a 3008-unknown switched ladder 5.7 ms → 0.24 ms; per-step cost
+  unchanged within noise.
+* **Added** `CacheMetrics.structure_builds`, `symbolic_analyses`,
+  `symbolic_fallbacks`.
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

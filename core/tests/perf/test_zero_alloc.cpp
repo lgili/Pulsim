@@ -221,6 +221,40 @@ TEST_CASE("steady-state solve_at (same mask+dt) is allocation-free",
     REQUIRE(f.cache->metrics().event_hits >= 1000);
 }
 
+
+TEST_CASE("solve_at refactor of a resident entry at a new dt is allocation-free",
+          "[v2][perf][zero_alloc]") {
+    // update-trbdf2-factor-reuse part 2: in-place J = G + (1/dt)·C on the
+    // entry's own pattern, and the LU keeps its work vectors and L/U
+    // capacity between factorisations.
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+
+    SwitchStateMask m_on(2);
+    m_on.set(0, true);
+    const auto n = static_cast<Index>(f.pool.state_size(f.g));
+    Vector b_extra = Vector::Zero(n);
+    Vector x;
+
+    f.cache->solve_at(m_on, 5e-7, b_extra, x);   // build entry
+    f.cache->solve_at(m_on, 4e-7, b_extra, x);   // first refactor
+
+    const auto refactors_before = f.cache->metrics().event_refactors;
+    Eigen::internal::set_is_malloc_allowed(false);
+    const std::size_t before = g_new_count.load();
+    Real dt = 3e-7;
+    for (int k = 0; k < 100; ++k, dt *= 1.01) {
+        f.cache->solve_at(m_on, dt, b_extra, x);
+    }
+    const std::size_t after = g_new_count.load();
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
+    REQUIRE(f.cache->metrics().event_refactors - refactors_before == 100);
+}
+
 TEST_CASE("run_transient hot loop: zero std-container allocations",
           "[v2][perf][zero_alloc]") {
     // The full engine over 2000 steps, PWM-style mask walk over

@@ -2001,6 +2001,22 @@ void init_module(py::module_& m) {
         .def_readonly("event_builds", &pwl::CacheMetrics::event_builds,
                        "solve_at calls that had to build a fresh "
                        "event solver.")
+        .def_readonly("event_evictions",
+                       &pwl::CacheMetrics::event_evictions,
+                       "solve_at entries evicted (LRU) under the byte "
+                       "budget.")
+        .def_readonly("structure_builds",
+                       &pwl::CacheMetrics::structure_builds,
+                       "Sparse-structure (template) builds of G/C/J: one "
+                       "per assembly regime.")
+        .def_readonly("symbolic_analyses",
+                       &pwl::CacheMetrics::symbolic_analyses,
+                       "Symbolic analyses run: one per assembly regime, "
+                       "shared by every switch state.")
+        .def_readonly("symbolic_fallbacks",
+                       &pwl::CacheMetrics::symbolic_fallbacks,
+                       "Matrices whose pattern refused the shared "
+                       "analysis and were analysed privately.")
         .def("__repr__", [](const pwl::CacheMetrics& x) {
             return std::string("CacheMetrics(evictions=") +
                    std::to_string(x.segment_evictions) +

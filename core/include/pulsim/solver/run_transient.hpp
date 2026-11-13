@@ -720,6 +720,7 @@ inline SimulationResult run_transient(
     // Phase-1 zero-alloc scope.)
     Vector x_prev;                                  // pre-step state snapshot
     pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
+    pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
     std::vector<pwl::HistoryEntry> history_snap;    // V3 rollback snapshot
     // Phase 4 C.1 — the Coss rolls back with everything else. The
     // saturable inductor cannot, which is the second reason it
@@ -1115,7 +1116,8 @@ inline SimulationResult run_transient(
                             opts.tol_newton_dx,
                             opts.tol_newton_res,
                             opts.enable_newton_line_search,
-                            opts.enable_newton_lm);
+                            opts.enable_newton_lm,
+                            &newton_ws);
                     } else {
                         // Off-nominal dt: assemble the companion
                         // system for this step size. No factorization
@@ -1134,7 +1136,8 @@ inline SimulationResult run_transient(
                             opts.tol_newton_dx,
                             opts.tol_newton_res,
                             opts.enable_newton_line_search,
-                            opts.enable_newton_lm);
+                            opts.enable_newton_lm,
+                            &newton_ws);
                     }
                 } else {
                     // `solve_at` delegates to `solve` bit-identically
@@ -1925,7 +1928,7 @@ inline SimulationResult run_transient(
                         opts.tol_newton_dx,
                         opts.tol_newton_res,
                         opts.enable_newton_line_search,
-                        opts.enable_newton_lm);
+                        opts.enable_newton_lm, &newton_ws);
                 } else {
                     cache.solve(mask, b_extra_user, x);
                 }

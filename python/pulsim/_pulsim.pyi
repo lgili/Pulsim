@@ -988,6 +988,11 @@ class CacheMetrics:
         solve_at calls that had to build a fresh event solver.
         """
     @property
+    def event_evictions(self) -> int:
+        """
+        solve_at entries evicted (LRU) under the byte budget.
+        """
+    @property
     def event_hits(self) -> int:
         """
         solve_at calls served by a resident factor at the same dt.
@@ -1013,6 +1018,21 @@ class CacheMetrics:
     def segment_evictions(self) -> int:
         """
         Lazy-mode segments dropped by the byte-budget LRU.
+        """
+    @property
+    def structure_builds(self) -> int:
+        """
+        Sparse-structure (template) builds of G/C/J: one per assembly regime.
+        """
+    @property
+    def symbolic_analyses(self) -> int:
+        """
+        Symbolic analyses run: one per assembly regime, shared by every switch state.
+        """
+    @property
+    def symbolic_fallbacks(self) -> int:
+        """
+        Matrices whose pattern refused the shared analysis and were analysed privately.
         """
 class PwlStateSpaceCache:
     """

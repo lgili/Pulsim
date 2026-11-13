@@ -80,9 +80,10 @@ Key properties:
   are never factored. Cold-start cost ≈ (num reached configs) ×
   (single LU cost).
 - **Event-dt solves.** Sub-step event correction solves at
-  interpolated fractions of `dt` through a small pool of reusable
-  event solvers (≤ 8 masks resident); a new event `dt` is a cheap
-  in-place numeric refactor (`J = G + (1/dt)·C` on a shared
+  interpolated fractions of `dt` (and TR-BDF2 solves every stage)
+  through a table of reusable event solvers, one per mask, bounded by
+  the same byte budget as the segments; a new `dt` is an in-place,
+  allocation-free numeric refactor (`J = G + (1/dt)·C` on a shared
   symbolic analysis), never a permanently cached factor.
 
 For circuits with many switches (3-φ VSI with 6 IGBTs has 64
