@@ -22,7 +22,7 @@ circuits:
   circuits/closed_loop/cl_buck_sample_hold.yaml: {status: skipped, reason: "component type 'sample_hold'"}
   circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: error}}
   circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: error}}
-  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: error, match: "solve_with_newton: failed to converge", reason: "pwl: SimulationAborted: run_transient: the step ending at t = 3.7e-05 could not be taken, even split into 64 sub-steps of 3.906e-09 s (dt/64). La"}
+  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: error}}  # completes since add-newton-roundoff-acceptance (1645 accepts) but I(Lm_core) = 2.4e13 A from t = 0 (also before: it aborted at 37 us); no converged reference
   circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
   circuits/diodes/diode_bridge_rectifier.yaml: {status: runs}
   circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}

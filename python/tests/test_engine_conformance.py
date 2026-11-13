@@ -562,8 +562,11 @@ def test_pwm2_on_trbdf2_unchanged_by_the_adapter():
         warnings.simplefilter("ignore")
         r = p.simulate(b, 10 * T, engine="trbdf2", switch_fn=fn)
     st = r._trbdf2_stats
+    # Re-pinned by update-trbdf2-post-event-restart / error-control
+    # (integration batch 5): (1104, 2254, 20) -> (1031, 2058, 20); the
+    # post-edge restart removes the post-edge step collapse; same 20 edges.
     assert (len(r.times), st["n_solves"], st["n_gate_events"]) == (
-        1104, 2254, 20)
+        1031, 2058, 20)
 
 
 # ---------------------------------------------------------------------

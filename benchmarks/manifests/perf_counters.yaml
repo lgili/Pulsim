@@ -20,9 +20,9 @@ counters:
       n_event_iterations: 0
       n_commutations: 0
     trbdf2:
-      n_accept: 1009
+      n_accept: 1010
       n_reject: 9
-      n_solves: 2036
+      n_solves: 2038
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 0
@@ -50,9 +50,9 @@ counters:
       n_event_iterations: 0
       n_commutations: 0
     trbdf2:
-      n_accept: 1114
+      n_accept: 1151
       n_reject: 10
-      n_solves: 2248
+      n_solves: 2322
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 0
@@ -80,9 +80,9 @@ counters:
       n_event_iterations: 80
       n_commutations: 80
     trbdf2:
-      n_accept: 1374
-      n_reject: 24
-      n_solves: 2957
+      n_accept: 1055
+      n_reject: 9
+      n_solves: 2289
       n_newton_retries: 0
       n_gate_events: 80
       n_diode_events: 0
@@ -110,9 +110,9 @@ counters:
       n_event_iterations: 80
       n_commutations: 80
     trbdf2:
-      n_accept: 1782
-      n_reject: 269
-      n_solves: 4361
+      n_accept: 1335
+      n_reject: 244
+      n_solves: 3419
       n_newton_retries: 0
       n_gate_events: 80
       n_diode_events: 19
@@ -140,14 +140,14 @@ counters:
       n_event_iterations: 0
       n_commutations: 0
     trbdf2:
-      n_accept: 2180
-      n_reject: 27
-      n_solves: 4414
+      n_accept: 2407
+      n_reject: 17
+      n_solves: 4858
       n_newton_retries: 0
       n_gate_events: 10
       n_diode_events: 0
       n_chatter_breaks: 0
-      n_forced_accepts: 10
+      n_forced_accepts: 1
     dsed:
       n_accept: 10
       n_reject: 0
@@ -222,9 +222,9 @@ counters:
       n_event_iterations: 0
       n_commutations: 0
     trbdf2:
-      n_accept: 3130
-      n_reject: 43
-      n_solves: 6346
+      n_accept: 2012
+      n_reject: 9
+      n_solves: 4242
       n_newton_retries: 0
       n_gate_events: 200
       n_diode_events: 0
@@ -252,9 +252,9 @@ counters:
       n_event_iterations: 56
       n_commutations: 54
     trbdf2:
-      n_accept: 1213
+      n_accept: 1250
       n_reject: 79
-      n_solves: 3283
+      n_solves: 3330
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 96
@@ -282,12 +282,12 @@ counters:
       n_event_iterations: 80
       n_commutations: 80
     trbdf2:
-      n_accept: 1513
-      n_reject: 1024
-      n_solves: 6893
+      n_accept: 1318
+      n_reject: 546
+      n_solves: 4125
       n_newton_retries: 0
       n_gate_events: 0
-      n_diode_events: 80
+      n_diode_events: 79
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
@@ -308,14 +308,14 @@ counters:
       n_event_iterations: 3809
       n_commutations: 3808
     trbdf2:
-      n_accept: 23352
-      n_reject: 558
-      n_solves: 49025
+      n_accept: 28642
+      n_reject: 642
+      n_solves: 59746
       n_newton_retries: 0
       n_gate_events: 200
-      n_diode_events: 209
-      n_chatter_breaks: 5
-      n_forced_accepts: 167
+      n_diode_events: 199
+      n_chatter_breaks: 0
+      n_forced_accepts: 3
     dsed:
       refused: NotImplementedError
   diode_bridge_rectifier:
@@ -334,9 +334,9 @@ counters:
       n_event_iterations: 20
       n_commutations: 38
     trbdf2:
-      n_accept: 1120
-      n_reject: 29
-      n_solves: 2424
+      n_accept: 1144
+      n_reject: 20
+      n_solves: 2462
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 19

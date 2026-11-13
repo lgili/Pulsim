@@ -13,7 +13,7 @@ cases:
       measured: 0.00159
     trbdf2:
       ceiling: 4.52e-07
-      measured: 2.258e-07
+      measured: 2.26e-07
     dsed:
       ceiling: 1.0e-06
       measured: 1.545e-15
@@ -22,8 +22,8 @@ cases:
       ceiling: 0.00318
       measured: 0.00159
     trbdf2:
-      ceiling: 2.93e-06
-      measured: 1.467e-06
+      ceiling: 1.32e-06
+      measured: 6.601e-07
     dsed:
       ceiling: 1.0e-06
       measured: 1.184e-14
@@ -32,8 +32,8 @@ cases:
       ceiling: 0.00223
       measured: 0.001117
     trbdf2:
-      ceiling: 1.26e-06
-      measured: 6.278e-07
+      ceiling: 1.25e-06
+      measured: 6.251e-07
     dsed:
       ceiling: 1.0e-06
       measured: 4.368e-15
@@ -42,8 +42,8 @@ cases:
       ceiling: 0.00123
       measured: 0.000613
     trbdf2:
-      ceiling: 0.000184
-      measured: 9.185e-05
+      ceiling: 0.000116
+      measured: 5.781e-05
     dsed:
       ceiling: 1.0e-06
       measured: 4.706e-14
@@ -62,8 +62,8 @@ cases:
       ceiling: 0.00356
       measured: 0.00178
     trbdf2:
-      ceiling: 0.00012
-      measured: 5.993e-05
+      ceiling: 0.00011
+      measured: 5.499e-05
     dsed:
       ceiling: 1.0e-06
       measured: 4.996e-14
@@ -72,8 +72,8 @@ cases:
       ceiling: 1.93e-06
       measured: 9.653e-07
     trbdf2:
-      ceiling: 1.62e-05
-      measured: 8.119e-06
+      ceiling: 1.17e-05
+      measured: 5.85e-06
     dsed:
       ceiling: 1.0e-06
       measured: 4.492e-16
@@ -82,8 +82,8 @@ cases:
       ceiling: 1.93e-06
       measured: 9.653e-07
     trbdf2:
-      ceiling: 1.74e-05
-      measured: 8.71e-06
+      ceiling: 1.26e-05
+      measured: 6.303e-06
     dsed:
       ceiling: 1.0e-06
       measured: 4.964e-16
@@ -101,8 +101,8 @@ cases:
       ceiling: 6.5e-06
       measured: 3.248e-06
     trbdf2:
-      ceiling: 2.06e-06
-      measured: 1.029e-06
+      ceiling: 2.01e-06
+      measured: 1.006e-06
     dsed:
       ceiling: 1.0e-06
       measured: 4.632e-07
@@ -111,8 +111,8 @@ cases:
       ceiling: 0.00153
       measured: 0.000765
     trbdf2:
-      ceiling: 2.06e-06
-      measured: 1.03e-06
+      ceiling: 1.63e-06
+      measured: 8.127e-07
     dsed:
       refused: NotImplementedError
   ideal_transformer:
@@ -165,13 +165,13 @@ cases:
       ceiling: 1.93e-05
       measured: 9.646e-06
     trbdf2:
-      ceiling: 8.86e-06
-      measured: 4.43e-06
+      ceiling: 7.52e-06
+      measured: 3.761e-06
     dsed:
       known: error
-      reason: 'exact-propagator slice 1 settles D ON through -0.85 A reverse current after the 2nd
-        cycle (err_rms 0.3995, silently); the integration batch-4 diode-law guard turns that into
-        DiodeModeInconsistentError (before the slice: "did not settle after 64 rounds")'
+      reason: 'exact-propagator slice 1 settles D ON through -0.85 A reverse current after the 2nd cycle
+        (err_rms 0.3995, silently); the integration batch-4 diode-law guard turns that into DiodeModeInconsistentError
+        (before the slice: "did not settle after 64 rounds")'
       measured: DiodeModeInconsistentError
   hard_switched_rc:
     pwl:
@@ -180,8 +180,10 @@ cases:
         % of span); review P5 resolution diagnostics
       measured: 0.01005
     trbdf2:
-      ceiling: 2.2e-06
-      measured: 1.098e-06
+      ceiling: 4.45e-06
+      measured: 2.224e-06
+      reason: 'update-trbdf2-error-control (estimate x2, landed pulse corners): 1.098e-06 -> 2.224e-06
+        at rtol 1e-6 (integration batch 5, reported; pre-merge ceiling 2.2e-06)'
     dsed:
       ceiling: 1.0e-06
       measured: 1.071e-13
@@ -190,8 +192,8 @@ cases:
       ceiling: 0.000512
       measured: 0.0002561
     trbdf2:
-      ceiling: 7.27e-07
-      measured: 3.633e-07
+      ceiling: 6.73e-07
+      measured: 3.367e-07
     dsed:
       ceiling: 1.0e-06
       measured: 2.584e-15
@@ -200,8 +202,10 @@ cases:
       ceiling: 0.00108
       measured: 0.0005377
     trbdf2:
-      ceiling: 8.27e-07
-      measured: 4.136e-07
+      ceiling: 1.13e-06
+      measured: 5.635e-07
+      reason: 'update-trbdf2-post-event-restart / error-control: 4.136e-07 -> 5.635e-07 (integration batch
+        5, reported; pre-merge ceiling 8.27e-07)'
     dsed:
       ceiling: 1.0e-06
       measured: 7.338e-10

@@ -31,10 +31,14 @@ def _run(dt, L, n=200):
     return r, [str(w.message) for w in caught]
 
 
-# (L, dt, aborted before this change). Measured before: 100 uH aborts
-# at 1e-11, 1e-12, 1e-13 s (||dx|| 1.863e-9, 1.490e-8, 1.192e-7);
-# 10 mH aborts at 1e-9 ... 1e-11 s.
-CASES = [(100e-6, 1e-10, False), (100e-6, 1e-11, True),
+# (L, dt, stalls at roundoff). Measured before this change: 100 uH
+# aborts at 1e-11, 1e-12, 1e-13 s (||dx|| 1.863e-9, 1.490e-8, 1.192e-7);
+# 10 mH aborts at 1e-9 ... 1e-11 s. On the in-house LU of the Newton
+# workspace (update-newton-persistent-solver A2, integration batch 5)
+# 100 uH at 1e-11 s converges without a stall (418 iterations, no
+# acceptance); with Eigen::SparseLU it aborted. The stall is roundoff
+# luck; the other cases still need the acceptance.
+CASES = [(100e-6, 1e-10, False), (100e-6, 1e-11, False),
          (100e-6, 1e-12, True), (100e-6, 1e-13, True),
          (10e-3, 1e-8, False), (10e-3, 1e-9, True), (10e-3, 1e-10, True),
          (10e-3, 1e-11, True), (10e-3, 1e-12, False)]
