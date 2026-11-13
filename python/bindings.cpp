@@ -1119,8 +1119,15 @@ void init_module(py::module_& m) {
                           }
                           case K::PWMVoltageSource:
                               kind_str = "pwm_voltage_source"; break;
-                          case K::SineVoltageSource:
-                              kind_str = "sine_voltage_source"; break;
+                          case K::SineVoltageSource: {
+                              kind_str = "sine_voltage_source";
+                              // Read by periodic_steady_state's
+                              // period check.
+                              const auto& p =
+                                  pool.sine_voltage_source_params(bid);
+                              params["frequency"] = p.frequency;
+                              break;
+                          }
                           case K::PulseVoltageSource:
                               kind_str = "pulse_voltage_source"; break;
                           case K::MosfetLevel1:
