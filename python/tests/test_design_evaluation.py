@@ -266,3 +266,40 @@ def test_bad_configuration_is_rejected_up_front():
         _ev(kpis=[Kpi("efficiency", lambda per: 1.0)]).evaluate(CCM)
     with pytest.raises(KeyError, match="names no KPI"):
         _ev(constraints={"nope": (0, 1)}).evaluate(CCM)
+
+
+def test_a_run_simulate_only_warns_about_is_failed_not_ok():
+    """simulate WARNS (once per call site) for an implausible node
+    voltage; an optimiser loop never sees it. Before integration batch
+    6b this design came back `ok` with v_peak.S = 1.19e10 V (trbdf2)."""
+    def opening(d):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "vin", "gnd", 48.0)
+        b.add_inductor("L", "vin", "sw", 1e-3)
+        b.add_switch("S", "sw", "gnd", 1e3, 1e-12)    # no freewheel path
+        return b, p.make_pwm_switch_fn(1e4, 0.5, 0, 1)
+    with pytest.warns(UserWarning):
+        rec = Evaluator(opening, period=1e-4, engine="trbdf2", steady=SteadySpec(
+            method="transient", min_periods=8, max_periods=8)).evaluate({})
+    assert rec.status == "failed", rec
+    assert rec.reason.startswith("implausible_voltage: node sw")
+    assert rec.kpis == {}
+
+
+def test_a_trbdf2_missed_commutation_is_failed_not_ok():
+    """The floating bridge of test_trbdf2_robustness (rtol 2e-5): trbdf2
+    holds a diode against its rule and only warns; design maps it to
+    failed."""
+    from pulsim import design
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "s", "gnd", 0.0, 325.0, 50.0)
+    b.add_resistor("Rs", "s", "a", 1e-3)
+    p.add_bridge_rectifier(b, "BR", ac_a="a", ac_b="gnd", dc_pos="dp",
+                           dc_neg="dn")
+    b.add_inductor("Lf", "dp", "dq", 1e-3)
+    b.add_capacitor("C", "dq", "dn", 470e-6)
+    b.add_resistor("RL", "dq", "dn", 1e3)
+    with pytest.warns(RuntimeWarning, match="commutation rule forbids"):
+        res = p.simulate(b, t_end=0.06, engine="trbdf2", rtol=2e-5, atol=2e-8)
+    with pytest.raises(design._Failed, match="missed_commutation: .*BR__D4"):
+        design._raise_if_suspect(res, b)

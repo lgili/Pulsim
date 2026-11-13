@@ -684,7 +684,7 @@ class Evaluator:
         while True:
             run = _engine(lambda: simulate(
                 b, t_end=n * T, engine=engine, switch_fn=sf, **kw))
-            self._count(run, counters)
+            self._count(run, counters, b)
             counters["route"] = f"transient/{getattr(run, 'engine_used', engine)}"
             counters["periods"] = n
             err = _settle_error(b, run, T, n)
@@ -707,7 +707,7 @@ class Evaluator:
             b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
             switch_fn=sf, initial_state=x0,
             **{k: v for k, v in kw.items() if k != "dt"}))
-        self._count(run2, counters)
+        self._count(run2, counters, b)
         return run2, 0.0, T
 
     def _pss(self, b, sf, T, counters):
@@ -735,12 +735,13 @@ class Evaluator:
         run = _engine(lambda: simulate(
             b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
             switch_fn=sf, initial_state=r.x0, rtol=1e-11, atol=1e-14))
-        self._count(run, counters)
+        self._count(run, counters, b)
         return run, 0.0, T
 
     @staticmethod
-    def _count(run, counters):
+    def _count(run, counters, b):
         counters["simulations"] += 1
+        _raise_if_suspect(run, b)
         n = getattr(run, "n_accept", None)
         if n is None:
             n = run.num_steps()
@@ -945,6 +946,32 @@ def _settle_error(b, run, T, n):
     xa = np.abs(xs[4] - xs[1]) / scale       # x(n) - x(3n/4)
     return float(max(max(geo(xa[j], d[0, j]), geo(d[3, j], d[2, j]))
                      for j in range(X.shape[1])))
+
+
+def _raise_if_suspect(run, b) -> None:
+    """A run whose own checks found its trajectory wrong is ``failed``.
+
+    ``simulate`` only WARNS for these two, and a warning is shown once
+    per call site: in an optimiser loop the record would be ``ok`` with
+    a wrong number (an implausible node voltage, e.g. an open inductor;
+    a trbdf2 diode held in a state its commutation rule forbids)."""
+    volt = getattr(run, "_implausible_voltage", None)
+    if volt is not None:
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
+            b.graph, b.pool, volt))
+    if getattr(run, "engine_used", None) != "trbdf2":
+        return
+    from ._diode_state import diode_state_traces
+    try:
+        bad = [tr.name for tr in diode_state_traces(b, run).values()
+               if tr.n_rule_violations]
+    except (AttributeError, TypeError):  # no PWL diode record
+        return
+    if bad:
+        raise _Failed(f"missed_commutation: trbdf2 held diode(s) "
+                      f"{', '.join(bad)} in a state their commutation "
+                      "rule forbids; cross-check with engine='pwl' and dt")
 
 
 def _is_pss_failure(e) -> bool:

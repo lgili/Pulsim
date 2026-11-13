@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration fixes (batch 6b: design optimisation, exact route)
+
+* **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
+  only warns about: an opening inductor on `trbdf2` came back `ok` with
+  `v_peak.S` = 1.19e10 V. A run with an implausible node voltage, or a
+  trbdf2 run that held a diode against its commutation rule, is now
+  `failed` (`implausible_voltage: ...`, `missed_commutation: ...`); a
+  warning is shown once per call site, so an optimiser never saw it.
+
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 
 * **Changed** on the integrated tree the dsed runs that the batch-4
