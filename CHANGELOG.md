@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Ideal switch in branch form (add-branch-form-ideal-switch)
+
+* **BREAKING** (invalid values only) `add_switch`, `add_diode` and YAML
+  `switch` / `diode` refuse at build time a `g_on` that is not finite and
+  > 0, or a `g_off` that is not finite and >= 0; `add_mosfet`,
+  `add_mosfet_with_body_diode` and `add_igbt` refuse `R_on` / `R_off` the
+  same way, naming the device and the field (`ValueError`). Before, an
+  infinite `g_on` built and aborted mid-run "numerically singular", and a
+  negative value ran on a negative resistance. Every existing example
+  and test circuit still builds; no valid number changes.
+
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 
 * **Changed** on the integrated tree the dsed runs that the batch-4

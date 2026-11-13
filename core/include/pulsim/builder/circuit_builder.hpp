@@ -1233,6 +1233,7 @@ public:
                 "add_diode(\"{}\"): forward drop V_f must be a finite "
                 "number >= 0 V (got {}).", name, V_f));
         }
+        require_conductances_("add_diode", name, g_on, g_off);
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(
@@ -1269,6 +1270,7 @@ public:
     CircuitBuilder& add_switch(
         std::string_view name, std::string_view from,
         std::string_view to, Real g_on, Real g_off) {
+        require_conductances_("add_switch", name, g_on, g_off);
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = add_branch_(
@@ -1330,6 +1332,8 @@ public:
         Real R_off = Real{1e9},
         bool body_diode = true,
         Real V_F        = Real{0.7}) {
+        require_conductances_("add_mosfet", name, Real{1} / R_on,
+                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
         if (!body_diode) {
             return add_switch(name, drain, source,
                                 Real{1} / R_on,
@@ -1356,6 +1360,12 @@ public:
         Real g_on_diode  = Real{1e3},
         Real g_off_diode = Real{1e-9}) {
         require_diode_drop_("add_mosfet_with_body_diode", name, V_F);
+        require_conductances_("add_mosfet_with_body_diode", name,
+                              Real{1} / R_on, Real{1} / R_off, "R_on",
+                              "R_off", R_on, R_off);
+        require_conductances_("add_mosfet_with_body_diode", name,
+                              g_on_diode, g_off_diode, "g_on_diode",
+                              "g_off_diode");
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
@@ -1387,6 +1397,8 @@ public:
         std::string_view emitter,
         Real R_on  = Real{10e-3},
         Real R_off = Real{1e9}) {
+        require_conductances_("add_igbt", name, Real{1} / R_on,
+                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
         return add_switch(std::move(name),
                             std::move(collector),
                             std::move(emitter),
@@ -2005,6 +2017,32 @@ private:
             throw std::invalid_argument(std::format(
                 "{}(\"{}\"): diode conduction drop V_F must be a finite "
                 "number >= 0 V (got {}).", fn, name, V_F));
+        }
+    }
+
+    // add-branch-form-ideal-switch task 2.1: the conductance form needs a
+    // finite g_on > 0 (an infinite one aborted "numerically singular"
+    // mid-run) and a finite g_off >= 0. `field_on`/`field_off` name the
+    // caller's own parameters (R_on for a MOSFET, g_on for add_switch).
+    static void require_conductances_(std::string_view fn,
+                                      std::string_view name, Real g_on,
+                                      Real g_off,
+                                      std::string_view field_on = "g_on",
+                                      std::string_view field_off = "g_off",
+                                      Real shown_on = std::nan(""),
+                                      Real shown_off = std::nan("")) {
+        if (!(g_on > Real{0}) || !std::isfinite(g_on)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): {} = {} is invalid: the conductance form needs a "
+                "finite on-conductance g_on > 0 (an ideal R_on = 0 switch is "
+                "the branch form, add_ideal_switch).", fn, name, field_on,
+                std::isnan(shown_on) ? g_on : shown_on));
+        }
+        if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): {} = {} is invalid: the off-conductance g_off "
+                "must be finite and >= 0.", fn, name, field_off,
+                std::isnan(shown_off) ? g_off : shown_off));
         }
     }
 

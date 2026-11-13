@@ -23,8 +23,8 @@ Reference values.
 - [x] 1.2 Port `probes/branch_form.py` and `probes/sdirk_restart_ideal.py` as dense references for the stamp, the cut-set, the capacitor loop and the ideal DCM buck (`python/tests/oracles/ideal_switch_reference.py`, pinned to `probes/sdirk_restart_ideal.out` by `python/tests/test_ideal_switch_reference.py`)
 
 ## 2. Validation of the conductance form
-- [ ] 2.1 `add_switch`, `add_diode`, YAML: `g_on` finite and > 0, `g_off` finite and ≥ 0; error names the device and the field (**BREAKING** for invalid values)
-- [ ] 2.2 Tests: each invalid value is refused at build time; every existing test circuit still builds
+- [x] 2.1 `add_switch`, `add_diode`, YAML: `g_on` finite and > 0, `g_off` finite and ≥ 0; error names the device and the field (**BREAKING** for invalid values)
+- [x] 2.2 Tests: each invalid value is refused at build time; every existing test circuit still builds (`python/tests/test_switch_conductance_validation.py`; also `add_mosfet` / `add_igbt` naming `R_on` / `R_off`; `g_off = 0` stays legal, `g_on = inf` is refused)
 
 ## 3. Branch stamp and linear algebra
 - [ ] 3.1 `stamp_switch_branch` (D1) shared by the transient and DC assemblers; branch-current unknown allocation in the pool; structural entries kept when zero

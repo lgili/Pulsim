@@ -57,6 +57,7 @@ def test_goff_zero_opened_on_an_inductor_explodes_on_trbdf2():
     assert np.abs(np.asarray(r.v("b"))).max() > 1e9
 
 
-def test_infinite_g_on_aborts_numerically_singular():
-    with pytest.raises(Exception, match="numerically singular"):
+def test_infinite_g_on_is_refused_at_build_time():
+    # Before task 2.1 this built and aborted mid-run "numerically singular".
+    with pytest.raises(ValueError, match=r'add_switch\("S"\): g_on = inf'):
         _rl(float("inf"), 1e-9, lambda t: True, "pwl", dt=5e-5)
