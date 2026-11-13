@@ -167,6 +167,9 @@ public:
 
         Vector x = x0;
         Real t = Real{0};
+        if constexpr (requires { system_.set_max_step(dt_max_); }) {
+            system_.set_max_step(dt_max_);
+        }
         Real h_rk45 = dt_init_;
 
         MaskT mask = switch_fn_(t);
@@ -232,7 +235,15 @@ public:
                 const Real h_ex = std::min(dt_max_, t_gate - t);
                 if (h_ex > Real{0} && system_.has_exact_step()) {
                     step_mask = system_.current_mask();
-                    x = system_.exact_advance_state(t, x, h_ex);
+                    if constexpr (requires {
+                                      system_.exact_advance_state_into(
+                                          t, x, h_ex, x_ex_);
+                                  }) {
+                        system_.exact_advance_state_into(t, x, h_ex, x_ex_);
+                        x.swap(x_ex_);
+                    } else {
+                        x = system_.exact_advance_state(t, x, h_ex);
+                    }
                     t += h_ex;
                     rk_state.invalidate();
                     bdf2_state.invalidate();
@@ -468,6 +479,7 @@ private:
     StiffnessDetector detector_;
     Real dt_init_;
     Real dt_max_;
+    Vector x_ex_;   // exact-step workspace
     Real h_bdf2_;
     std::size_t store_every_;
     // T1.3 — consecutive RK45 NaN/Inf streak counter (BDF2 throws on

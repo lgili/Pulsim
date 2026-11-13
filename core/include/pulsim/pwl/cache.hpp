@@ -415,6 +415,9 @@ public:
         DenseMatrix recover_from_state;         // n_mna × n_state
         Vector recover_const;                   // n_mna
         DenseMatrix recover_from_b;             // n_mna × n_mna
+        // Mass of each state (C of a cap, L of an inductor): the
+        // energy-coordinate scale √m of dsed's exact propagator.
+        std::vector<Real> state_mass;
     };
 
     /// Extract continuous-time `(A, b)` for the given switch mask.
@@ -1038,6 +1041,12 @@ public:
             std::move(rec_state),
             std::move(rec_const),
             std::move(rec_b),
+            [&] {
+                std::vector<Real> m;
+                for (const auto& c : caps) m.push_back(c.C);
+                for (const auto& i : inds) m.push_back(i.L);
+                return m;
+            }(),
         };
     }
 

@@ -57,6 +57,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -113,6 +114,7 @@ struct PEDResult {
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
     std::size_t n_exact_steps = 0;   // closed-form LTI propagator
+    std::size_t n_predicate_evals = 0;  // exact path (D10)
     Real cpu_time_seconds = Real{0};
 };
 
@@ -261,22 +263,17 @@ public:
         Vector x = x0;
         Real t = Real{0};
         Real h = dt_init_;
+        if constexpr (requires { system_.set_max_step(dt_max_); }) {
+            system_.set_max_step(dt_max_);
+        }
         MaskT mask = effective_mask_(switch_fn_(t));
         system_.set_mask(mask);
         // A diode may be forward-biased already at t = 0 (a
         // rectifier powered on mid-cycle). Settle before the first
         // step rather than integrating an inconsistent mode.
-        if constexpr (HasNodePairVoltage<System>) {
-            if (has_diodes_) {
-                settle_diode_cascade_(t, x);
-            }
-        }
-        if constexpr (HasABInterface<System>) {
-            if (enable_event_projection_) {
-                x = project_onto_slow_manifold(
-                    system_.A_matrix(), system_.b_vector(t), x,
-                    Real{100} / dt_max_);
-            }
+        {
+            MaskT m0 = system_.current_mask();
+            settle_and_project_(t, x, m0);
         }
 
         RK45State rk_state;
@@ -340,17 +337,19 @@ public:
                 if (system_.has_exact_step()) {
                     const Real h_ex =
                         std::min(dt_max_, t_target - t);
-                    Vector x_new =
-                        system_.exact_advance_state(t, x, h_ex);
+                    advance_(t, x, h_ex, x_new_);
 
                     std::optional<PredicateEvent> evt;
                     if (predictor_.size() > 0) {
-                        evt = locate_event_exact_(t, x, h_ex);
+                        evt = locate_event_exact_(t, x, h_ex, x_new_,
+                                                  result);
                     }
-                    if (evt.has_value()
-                        && evt->t_event < t + h_ex - Real{1e-15}) {
+                    // An event at the very end of the step fires too:
+                    // the next step starts past the crossing and could
+                    // never see it again.
+                    if (evt.has_value()) {
                         t = evt->t_event;
-                        x = std::move(evt->x_at_event);
+                        x = x_evt_;
                         x_pre_event = x;
                         step_fired = true;
                         fire_event_(t, evt->name, evt->type, x,
@@ -358,7 +357,7 @@ public:
                                      evt->aux_index);
                     } else {
                         t += h_ex;
-                        x = std::move(x_new);
+                        x.swap(x_new_);
                         if (t_gate < t_end && near_time(t, t_gate)) {
                             x_pre_event = x;
                             step_fired = true;
@@ -630,59 +629,151 @@ private:
 
     /// The exact-branch twin of `locate_event_in_step_`: the same
     /// arming and priority rules, with g evaluated on the ANALYTIC
-    /// trajectory instead of the Hermite interpolant.
+    /// trajectory. D3: the step is scanned at the mode's scan step (an
+    /// eighth of the fastest under-damped period) so a double crossing
+    /// is not skipped, and the root is located on the time bracket
+    /// (locate_root_bracket). The event state is left in `x_evt_`.
     [[nodiscard]] std::optional<PredicateEvent> locate_event_exact_(
-        Real t0, const Vector& x0, Real h)
+        Real t0, const Vector& x0, Real h, const Vector& x1,
+        PEDResult<MaskT>& result)
         requires HasExactStep<System> {
         std::optional<PredicateEvent> best;
         int best_priority = std::numeric_limits<int>::max();
         const Real t1 = t0 + h;
-        const Vector x1 = system_.exact_advance_state(t0, x0, h);
+
+        Size n_scan = 1;
+        if constexpr (requires { system_.exact_scan_step(); }) {
+            const Real hs = system_.exact_scan_step();
+            if (std::isfinite(hs) && hs < h) {
+                n_scan = std::min<Size>(
+                    static_cast<Size>(std::ceil(h / hs)), Size{1024});
+            }
+        }
+        if (scan_x_.size() < n_scan + 1) {
+            scan_x_.resize(n_scan + 1);
+        }
+        for (Size k = 1; k < n_scan; ++k) {
+            advance_(t0, x0, h * static_cast<Real>(k)
+                             / static_cast<Real>(n_scan), scan_x_[k]);
+        }
+        const auto t_at = [&](Size k) -> Real {
+            return k == n_scan ? t1
+                : t0 + h * static_cast<Real>(k) / static_cast<Real>(n_scan);
+        };
+        const auto x_at = [&](Size k) -> const Vector& {
+            return k == 0 ? x0 : (k == n_scan ? x1 : scan_x_[k]);
+        };
+        const Real t_tol = std::max(
+            Real{4} * std::numeric_limits<Real>::epsilon() * std::abs(t1),
+            Real{1e-12} * h);
 
         for (const auto& p : predictor_.predicates()) {
             if (p.required_bit >= 0 &&
                 diode_bit_(p.aux_index) != (p.required_bit != 0)) {
                 continue;
             }
-            const Real g0 = p.value(t0, x0);
-            const Real g1 = p.value(t1, x1);
-            if (g0 == Real{0}) continue;
-            if (g0 * g1 >= Real{0}) continue;
-
-            auto g_at = [&](Real tau) -> Real {
-                if (tau <= t0) return g0;
-                if (tau >= t1) return g1;
-                return p.value(tau,
-                    system_.exact_advance_state(t0, x0, tau - t0));
-            };
-            Real t_root;
-            try {
-                t_root = illinois(g_at, t0, t1, g0, g1);
-            } catch (const std::runtime_error&) {
-                predictor_.note_illinois_failure();
-                t_root = bisect_fallback(g_at, t0, t1);
+            Real ga = p.value(t0, x0);
+            ++result.n_predicate_evals;
+            if (ga == Real{0}) continue;      // just fired
+            std::optional<Real> root;
+            for (Size k = 0; k < n_scan && !root; ++k) {
+                const Real ta = t_at(k);
+                const Real tb = t_at(k + 1);
+                const Real gb = p.value(tb, x_at(k + 1));
+                ++result.n_predicate_evals;
+                if (gb == Real{0}) {
+                    root = tb;
+                } else if (ga * gb < Real{0}) {
+                    auto g_at = [&](Real tau) -> Real {
+                        advance_(t0, x0, tau - t0, x_tmp_);
+                        ++result.n_predicate_evals;
+                        return p.value(tau, x_tmp_);
+                    };
+                    root = locate_root_bracket(g_at, ta, tb, ga, gb, t_tol);
+                }
+                ga = gb;
             }
-            const auto make_event = [&]() -> PredicateEvent {
-                return PredicateEvent{
-                    .t_event = t_root,
+            if (!root) continue;
+            if (!best.has_value()
+                || *root < best->t_event - Real{1e-15}
+                || (std::abs(*root - best->t_event) <= Real{1e-15}
+                    && p.priority < best_priority)) {
+                best = PredicateEvent{
+                    .t_event = *root,
                     .name = p.name,
                     .type = p.type,
-                    .x_at_event = system_.exact_advance_state(
-                        t0, x0, t_root - t0),
+                    .x_at_event = {},
                     .aux_index = p.aux_index,
                 };
-            };
-            if (!best.has_value()
-                || t_root < best->t_event - Real{1e-15}) {
-                best = make_event();
-                best_priority = p.priority;
-            } else if (std::abs(t_root - best->t_event) <= Real{1e-15}
-                       && p.priority < best_priority) {
-                best = make_event();
                 best_priority = p.priority;
             }
         }
+        if (best.has_value()) {
+            advance_(t0, x0, best->t_event - t0, x_evt_);
+        }
         return best;
+    }
+
+    /// Exact advance into a caller buffer (no allocation when the
+    /// System offers `exact_advance_state_into`).
+    void advance_(Real t, const Vector& x, Real h, Vector& out) const
+        requires HasExactStep<System> {
+        if constexpr (requires {
+                          system_.exact_advance_state_into(t, x, h, out);
+                      }) {
+            system_.exact_advance_state_into(t, x, h, out);
+        } else {
+            out = system_.exact_advance_state(t, x, h);
+        }
+    }
+
+    /// Consistent reinitialisation (event_projection.hpp), through the
+    /// System's cached eigenbasis when it has one.
+    void project_(Real t, Vector& x) {
+        if constexpr (HasABInterface<System>) {
+            if (!enable_event_projection_) {
+                return;
+            }
+            const Real thr = Real{100} / dt_max_;
+            if constexpr (requires { system_.project_slow(t, x, thr); }) {
+                system_.project_slow(t, x, thr);
+            } else {
+                x = project_onto_slow_manifold(
+                    system_.A_matrix(), system_.b_vector(t), x, thr);
+            }
+        }
+    }
+
+    /// Settle the diodes, project onto the settled mode's slow
+    /// manifold, and settle again on the projected state (repeat while
+    /// the mask changes, at most four passes). The projection relaxes
+    /// the g_off modes, which can leave a diode forward-biased whose
+    /// predicate would then start past its crossing and never fire:
+    /// a series diode feeding an LC from rest stayed OFF for the whole
+    /// run (v_C = 3.3e-6 V of a 10 V step) before this.
+    void settle_and_project_(Real t, Vector& x, MaskT& mask) {
+        if constexpr (HasNodePairVoltage<System>) {
+            if (has_diodes_) {
+                mask = settle_diode_cascade_(t, x);
+                project_(t, x);
+                for (int pass = 0; pass < 4; ++pass) {
+                    const MaskT m2 = settle_diode_cascade_(t, x);
+                    if (m2 == mask) {
+                        break;
+                    }
+                    mask = m2;
+                    project_(t, x);
+                }
+                return;
+            }
+        }
+        project_(t, x);
+    }
+
+    [[nodiscard]] static std::string sci_(Real v) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.9e", v);
+        return buf;
     }
 
     /// Scan all armed predicates over (t0, t1). Return the earliest
@@ -823,11 +914,7 @@ private:
         // fixed-point iteration run_transient does per step, done
         // here only at events.
         MaskT final_mask = new_mask;
-        if constexpr (HasNodePairVoltage<System>) {
-            if (has_diodes_) {
-                final_mask = settle_diode_cascade_(t_event, x);
-            }
-        }
+        settle_and_project_(t_event, x, final_mask);
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -837,14 +924,6 @@ private:
         // integrator will take. Project them to quasi-static; slow
         // components (the conserved charges/fluxes) pass through
         // exactly. Identity whenever no fast stable mode exists.
-        if constexpr (HasABInterface<System>) {
-            if (enable_event_projection_) {
-                x = project_onto_slow_manifold(
-                    system_.A_matrix(), system_.b_vector(t_event), x,
-                    /*fast_threshold=*/Real{100} / dt_max_);
-            }
-        }
-
         rk_state.invalidate();      // f discontinues at event
         controller_.reset();        // avoid PI wind-up across mode change
 
@@ -891,20 +970,12 @@ private:
         if (++diode_burst_count_[di] > Size{32}) {
             throw std::runtime_error(
                 "PEDSimulator: " + diodes_[di].label
-                + " is chattering at t = " + std::to_string(t)
-                + " — it commutated 32 times inside "
-                + std::to_string(window) + " s, which is a zero-"
-                "current oscillation (discontinuous conduction), "
-                "not switching. The dsed engine cannot yet hold a "
-                "DCM idle mode: turning the diode off leaves a "
-                "microamp interpolation residual that g_off "
-                "reconstructs as kilovolts of forward bias, and "
-                "the consistent-reinitialization projection that "
-                "removes it is Phase-3 item 2. Use the default "
-                "engine (engine='pwl'), whose implicit fixed-step "
-                "solver holds DCM correctly. A diode with a forward "
-                "drop V_f and V_th <= V_f has no hysteresis band; "
-                "V_th = V_f + 1e-3 gives it one.");
+                + " is chattering at t = " + sci_(t)
+                + " s — it commutated 32 times inside "
+                + sci_(window) + " s, which is an oscillation at a "
+                "zero crossing, not switching. Use engine='pwl' or "
+                "engine='trbdf2' for this circuit, or give the diode "
+                "a hysteresis band (V_th = V_f + 1e-3).");
         }
     }
 
@@ -918,12 +989,20 @@ private:
     }
 
     /// Iterate the diode configuration to a fixed point at one
-    /// instant. Returns the settled mask (already set on the
-    /// system). Budget-bounded; on exhaustion, throws NAMING the
-    /// devices still flipping — the Phase-1 standard.
+    /// instant, Gauss–Seidel (the mask follows each flip). Returns the
+    /// settled mask (already set on the system). Budget-bounded; on
+    /// exhaustion, throws NAMING the devices still flipping.
+    ///
+    /// D4 (add-exact-propagator-strategy): a diode whose crossing
+    /// signal is zero to rounding cannot be decided by its value —
+    /// `V_th = 0` at rest, where v_D = 0 turns it ON and i_D = 0 turns
+    /// it OFF on alternate rounds. It is decided by where the OFF mode
+    /// takes the signal (zero_band_on_); away from zero the shared
+    /// `SwitchedDiode::decide` law is untouched.
     MaskT settle_diode_cascade_(Real t, const Vector& x)
         requires HasNodePairVoltage<System> {
         MaskT mask = system_.current_mask();
+        const Real tol = zero_band_tol_(t, x);
         constexpr int kMaxRounds = 64;
         for (int round = 0; round < kMaxRounds; ++round) {
             bool flipped = false;
@@ -932,13 +1011,30 @@ private:
                     diode_bits_.get(d.switch_idx);
                 const Real v_d = system_.node_pair_voltage(
                     d.from, d.to, t, x);
-                // The pwl engine's exact decision rule — the two
-                // engines must not drift on what "conducting" means.
-                const bool next =
-                    models::SwitchedDiode::decide(on, v_d, d.params());
+                const auto prm = d.params();
+                const bool by_value =
+                    models::SwitchedDiode::decide(on, v_d, prm);
+                const bool in_band =
+                    std::abs(models::SwitchedDiode::crossing_signal(
+                        on, v_d, prm)) <= tol;
+                // A flip is confirmed on the OFF-mode trajectory: in
+                // the OFF mode g_off turns a rounding-level current
+                // into volts of v_D (1e-18 A → 1e-9 V at 1 nS), so the
+                // value law alone can flip a diode the ON mode then
+                // flips back.
+                const bool next = (in_band || by_value != on)
+                    ? zero_band_on_(t, x, d, mask, tol,
+                                    in_band ? false : by_value)
+                    : on;
                 if (next != on) {
                     diode_bits_.set(d.switch_idx, next);
                     flipped = true;
+                    const MaskT candidate =
+                        mask.overlay(diode_bits_, diode_owned_);
+                    if (candidate != mask) {
+                        mask = candidate;
+                        system_.set_mask(mask);
+                    }
                 }
             }
             if (!flipped) {
@@ -953,19 +1049,73 @@ private:
                 throw std::runtime_error(
                     "PEDSimulator: diode configuration did not "
                     "settle after 64 rounds at t = "
-                    + std::to_string(t) + " (diodes: " + culprits
+                    + sci_(t) + " s (diodes: " + culprits
                     + ") — a pair is fighting over the same node; "
                     "add a small hysteresis band (e.g. V_th = V_f + "
                     "1e-3 on add_diode) or an RC snubber");
             }
-            const MaskT candidate =
-                mask.overlay(diode_bits_, diode_owned_);
-            if (candidate != mask) {
-                mask = candidate;
-                system_.set_mask(mask);
-            }
         }
         return mask;
+    }
+
+    /// The zero band: rounding level of the circuit's voltages.
+    [[nodiscard]] Real zero_band_tol_(Real t, const Vector& x) const {
+        Real vs = Real{0};
+        if constexpr (requires { system_.max_node_voltage(t, x); }) {
+            vs = system_.max_node_voltage(t, x);
+        }
+        for (const auto& d : diodes_) {
+            vs = std::max({vs, std::abs(d.V_th), std::abs(d.V_f)});
+        }
+        return Real{1e-12} * vs;
+    }
+
+    /// D4 for one diode in the zero band, or whose value law wants to
+    /// flip it: ON iff the OFF mode drives
+    /// its signal v_D − V_on above the band. The signal is read on the
+    /// exact OFF-mode trajectory at δ = 1e-12·dt_max, 1e-11·dt_max, …,
+    /// dt_max; the first δ where it leaves the band decides, which is
+    /// the sign of its first non-zero derivative with the stiff
+    /// (g_off) modes already relaxed. A signal that never leaves the
+    /// band carries no current either way: OFF.
+    [[nodiscard]] bool zero_band_on_(Real t, const Vector& x,
+                                     const SchedulerDiode& d,
+                                     const MaskT& mask, Real tol,
+                                     bool fallback)
+        requires HasNodePairVoltage<System> {
+        const bool was = diode_bits_.get(d.switch_idx);
+        diode_bits_.set(d.switch_idx, false);
+        system_.set_mask(mask.overlay(diode_bits_, diode_owned_));
+        diode_bits_.set(d.switch_idx, was);
+        // Without an exact OFF-mode step: the value law outside the
+        // band, OFF inside it.
+        bool on = fallback;
+        if constexpr (HasExactStep<System>) {
+            if (system_.has_exact_step()) {
+                on = false;
+                const auto prm = d.params();
+                for (int k = 0; k <= 12; ++k) {
+                    const Real delta =
+                        dt_max_ * std::pow(Real{10}, Real(k - 12));
+                    advance_(t, x, delta, x_tmp_);
+                    const Real sig =
+                        models::SwitchedDiode::crossing_signal(
+                            false,
+                            system_.node_pair_voltage(
+                                d.from, d.to, t + delta, x_tmp_),
+                            prm);
+                    if (sig > tol) {
+                        on = true;
+                        break;
+                    }
+                    if (sig < -tol) {
+                        break;
+                    }
+                }
+            }
+        }
+        system_.set_mask(mask);
+        return on;
     }
 
     /// Whether every entry of `v` is finite (not NaN, not Inf).
@@ -1042,6 +1192,9 @@ private:
     std::size_t store_every_;
     StateProjectionFn state_projection_;
     std::size_t nan_streak_ = 0;
+    // Exact-path workspaces: a step reuses them (no allocation).
+    mutable Vector x_new_, x_evt_, x_tmp_;
+    std::vector<Vector> scan_x_;
 };
 
 }  // namespace pulsim::dsed
