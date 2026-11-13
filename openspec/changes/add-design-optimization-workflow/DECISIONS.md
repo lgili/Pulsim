@@ -128,6 +128,14 @@ batch. The window now ends at the run's last sample when it is within
 `1e-9·T` of `nT`.
 → Reverse: drop the two `_Failed` branches in `_raise_if_suspect`.
 
+With the TR-BDF2 track merged (batch 6c, job 3): its
+`n_roundoff_floor_accepts` (a step accepted within the error
+estimate's own roundoff floor, a `g_off`-held node) is
+`counters["roundoff_floor_accepts"]`, `ok`; its run budget (more than
+130 consecutive Newton roundoff accepts, `NewtonRoundoffBudgetExceeded`)
+reaches Python as `SimulationAborted`, a `ConvergenceError`, so the
+record is `failed` like any engine non-convergence.
+
 ## 6. `build` and `period`
 
 → `build(design)` returns a builder or `(builder, switch_fn)`: the

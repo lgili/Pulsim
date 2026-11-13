@@ -502,3 +502,37 @@ def test_a_polled_dsed_schedule_is_counted_and_its_kpis_are_unaffected():
     assert b.counters["polled_switch_fn_runs"] >= 2
     for k in ("efficiency", "p_loss", "v_out", "ripple_v"):
         assert b.kpis[k] == pytest.approx(a.kpis[k], rel=1e-6), k
+
+
+def test_a_roundoff_budget_abort_is_a_convergence_error_and_failed(
+        monkeypatch):
+    """TR-BDF2 track: 130 consecutive Newton roundoff accepts throw
+    NewtonRoundoffBudgetExceeded, which both engines' outer catch turns
+    into SimulationAborted (a ConvergenceError since batch 6c); the
+    evaluator maps it to failed. The budget is not reachable from Python
+    (max_consecutive is not exposed), so the abort is injected."""
+    assert issubclass(p.SimulationAborted, p.ConvergenceError)
+    assert issubclass(p.ConvergenceError, RuntimeError)
+    msg = ("solve_with_newton: 131 consecutive Newton solves ended at the "
+           "iteration budget and would each have been accepted at "
+           "round-off level")
+
+    def aborted(*a, **k):
+        raise p.SimulationAborted(msg)
+    monkeypatch.setattr(p, "simulate", aborted)
+    rec = _ev(engine="trbdf2", steady=SteadySpec(
+        method="transient")).evaluate(CCM)
+    assert rec.status == "failed", rec
+    assert rec.reason.startswith("SimulationAborted: solve_with_newton: 131")
+
+
+def test_roundoff_floor_accepts_are_counted():
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    run = NS(_implausible_voltage=None, inductor_guard_actions=[],
+             engine_used="trbdf2", n_accept=10,
+             _trbdf2_stats={"n_roundoff_floor_accepts": 4})
+    counters = {"simulations": 0}
+    design.Evaluator._count(run, counters, None)
+    assert counters["roundoff_floor_accepts"] == 4

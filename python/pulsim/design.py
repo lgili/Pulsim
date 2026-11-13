@@ -987,6 +987,13 @@ class Evaluator:
         nr = int(getattr(run, "newton_roundoff_accepts", 0) or 0)
         if nf:
             counters["forced_accepts"] = counters.get("forced_accepts", 0) + nf
+        # trbdf2 steps accepted within the error estimate's own roundoff
+        # floor (a g_off-held node): honest, counted (DECISIONS 5)
+        nfl = int((getattr(run, "_trbdf2_stats", None) or {}).get(
+            "n_roundoff_floor_accepts", 0))
+        if nfl:
+            counters["roundoff_floor_accepts"] = counters.get(
+                "roundoff_floor_accepts", 0) + nfl
         if nr:
             counters["newton_roundoff_accepts"] = counters.get(
                 "newton_roundoff_accepts", 0) + nr

@@ -243,6 +243,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   baseline's VSI and bridge "errors" are the reference's edge
   quantisation and the bus common mode (DECISIONS 11). The ripple test
   pins the engine's own peak-to-peak at 5e-3 again.
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
