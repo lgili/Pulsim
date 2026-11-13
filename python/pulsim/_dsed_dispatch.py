@@ -93,7 +93,9 @@ class DSEDOptions:
 # =============================================================================
 
 
-_VALID_ENGINES = ("auto", "pwl", "dsed", "trbdf2")
+# 'exact' is the canonical name of the event-driven exact engine, 'dsed' its
+# legacy alias (add-exact-propagator-strategy D11; simulate() maps one to the other).
+_VALID_ENGINES = ("auto", "pwl", "exact", "dsed", "trbdf2")
 _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 
 # (The dsed-only kwargs that get the leak-warning if user passes
@@ -853,6 +855,11 @@ def run_dsed_from_builder(
                 cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
             )
             res.exact = native_res.get("exact")
+            if res.exact is not None:
+                # add-exact-propagator-strategy D11: the route record (report only)
+                from ._exact_route import segments_from_exact
+                res.exact["segments"] = segments_from_exact(
+                    res.exact, native_res.get("switch_states"))
             res.initial_condition_adjustment = ic_adjustment
             et = native_res.get("event_times")
             res.event_times = (None if et is None

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `engine='exact'` and the exact-route record (report only)
+
+`engine='exact'` is the canonical name of the event-driven exact engine;
+`'dsed'` stays accepted as its alias everywhere (one engine,
+bit-identical runs; `result.engine_used` and refusals keep naming
+`'dsed'`, the capability-table column). Every exact run carries
+`result.exact['segments']`: one row per mask visited, `exact` or not,
+with the reason (`'device'`, `'source'`, `'extraction'`, `'cost'`), the
+device and kind, the tier and `n_segments`. `pulsim.exact_route(builder,
+t_end, ...)` returns the same record, and classifies circuits the exact
+engine refuses (a Shockley diode → `'device'`; coupled inductors, an
+inductor cut-set or a capacitor loop → `'extraction'`; a PWM / pulse
+source → `'source'`). The route of `engine='auto'` does not change.
+
 ### Diode mode selection: passivity classes in the diagnostics
 
 `diagnostics['mode_guard']` and `diagnostics['mode_selection']` now

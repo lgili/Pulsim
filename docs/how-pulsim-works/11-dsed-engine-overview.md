@@ -23,6 +23,13 @@ is **14.5×**.
 The next five chapters walk through the math + architecture top-down.
 This chapter just sets up the *why*.
 
+> **Name.** `engine='exact'` is the canonical name of this engine and
+> `'dsed'` its alias: one engine, bit-identical runs. Results
+> (`result.engine_used`) and refusals (`UnsupportedError.engine`) keep
+> naming `'dsed'`, the capability-table column. `pulsim.exact_route()`
+> and `result.exact['segments']` report which masks of a run step on the
+> closed-form propagator, and why the others do not.
+
 ---
 
 ## 11.1 Why fixed-step trap struggles with PE switching

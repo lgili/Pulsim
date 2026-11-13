@@ -78,6 +78,18 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
+| `engine` | `str` | `'auto'` | `'auto'`, `'pwl'`, `'trbdf2'` or `'exact'`. `'exact'` is the canonical name of the event-driven exact engine and `'dsed'` its alias: one engine, bit-identical runs; `result.engine_used` and every refusal's `engine` field read `'dsed'` (the capability-table column) until the default flip. |
+
+`pulsim.exact_route(builder, t_end, switch_fn=None, **kw)` runs the
+circuit on `engine='exact'` and classifies every mask it visits as
+exact-eligible or not (add-exact-propagator-strategy D11, report only —
+`'auto'` does not read it): `{"exact": bool, "reason": ..., "segments":
+[{"mask", "exact", "reason", "device", "kind", "detail", "tier",
+"n_segments"}, ...]}`. Reasons: `'device'` (a device with no linear / PWL
+law, named), `'source'` (a PWM / pulse source or a `b_extra_fn`),
+`'extraction'` (coupled inductors, a capacitor loop, an inductor
+cut-set), `'cost'` (the mask's propagator outside its accuracy tiers).
+The same rows ride on every exact run as `result.exact["segments"]`.
 
 Returns a `SimulationResult` with parallel arrays:
 - `result.times` — `list[float]`. With a fixed `dt`: length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on. Without one the grid is **variable-step** and the spacing is not uniform — average with [the time-weighted helpers](#statistics-over-a-result-time-weighted), not `.mean()`.
