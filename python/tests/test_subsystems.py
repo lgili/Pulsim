@@ -269,12 +269,30 @@ def test_building_many_cells_stays_linear():
     scan per add: 4x the cells cost 7x the time); a name index
     fixes both that and `branch_id_of`, which was itself an
     O(num_branches) scan.
+
+    The builder exposes no operation counter, so this stays a timing
+    check, made robust instead of deterministic (the old single-shot
+    `t_big < 24 * t_small` on 200 vs 1600 cells failed under load at
+    sub-millisecond times):
+
+    * best of 5 repetitions at 500 and 4000 cells (8x), so a burst of
+      load on a shared machine inflates no sample that counts;
+    * the bound is the geometric midpoint between linear (8x) and
+      quadratic (64x) growth, 8**1.5 = 22.6x;
+    * a CONTROL in the same run proves the measurement can see the
+      defect: resolving an alias falls back to the O(num_branches)
+      scan of `branch_id_of`, so the same build with 20 alias lookups
+      per cell is quadratic, and must exceed the bound the real build
+      stays under (measured on an idle M-series Mac: real 10.2x,
+      control 44x; with one lookup per cell the control is only 17x). If the control fails, the machine is too noisy to
+      tell, and the test says so rather than passing vacuously.
     """
     import time
 
-    def build(n):
+    def build(n, alias_lookups=False):
         b = p.CircuitBuilder()
         b.add_voltage_source("V", "p", "gnd", 1.0)
+        b.set_alias("first", branch="V")
         t0 = time.perf_counter()
         prev = "p"
         for i in range(n):
@@ -283,17 +301,45 @@ def test_building_many_cells_stays_linear():
             b.add_switch(f"sm{i}__Si", prev, f"sm{i}__m", 1e3,
                           1e-9)
             b.add_capacitor(f"sm{i}__C", f"sm{i}__m", node, 2e-3)
+            if alias_lookups:
+                for _ in range(20):
+                    b.branch_id_of("first")
             prev = node
         return time.perf_counter() - t0, b
 
-    t_small, _ = build(200)
-    t_big, big = build(1600)
-    # 8x the cells in well under 8^2 the time. Generous bound so a
-    # loaded CI box cannot make this flaky; quadratic would be ~64x
-    # and shows up immediately.
-    assert t_big < t_small * 24, (t_small, t_big)
-    # And name lookup does not degrade with size.
-    t0 = time.perf_counter()
-    for i in range(0, 1600, 32):
-        big.branch_id_of(f"sm{i}__C")
-    assert (time.perf_counter() - t0) < 0.05
+    def growth(fn, small, big, reps=5):
+        t_small = min(fn(small) for _ in range(reps))
+        t_big = min(fn(big) for _ in range(reps))
+        return t_big / t_small
+
+    bound = 8 ** 1.5
+    real = growth(lambda n: build(n)[0], 500, 4000)
+    control = growth(lambda n: build(n, alias_lookups=True)[0], 500, 4000)
+    assert control > bound, (
+        f"control: a quadratic build grew only {control:.1f}x; the "
+        "machine is too noisy for this measurement")
+    assert real < bound, (real, control)
+
+    # Name lookup does not degrade with size: 1000 lookups in a
+    # 4000-cell builder cost what they cost in a 500-cell one (bound
+    # sqrt(8), midway between O(1) and O(n) on a log scale; the alias
+    # scan is the control, O(num_branches) per lookup: measured 1.0x
+    # by name, 7.5x by alias).
+    _, small_b = build(500)
+    _, big_b = build(4000)
+
+    def lookups(b, names, reps=5):
+        best = float("inf")
+        for _ in range(reps):
+            t0 = time.perf_counter()
+            for nm in names:
+                b.branch_id_of(nm)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    names = [f"sm{i}__C" for i in range(0, 500, 10)] * 20
+    by_name = lookups(big_b, names) / lookups(small_b, names)
+    by_alias = (lookups(big_b, ["first"] * 1000)
+                / lookups(small_b, ["first"] * 1000))
+    assert by_alias > 8 ** 0.5, by_alias
+    assert by_name < 8 ** 0.5, (by_name, by_alias)
