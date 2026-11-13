@@ -71,8 +71,9 @@ skips gracefully if the wheel isn't built.
 
 - **Notebook 1**: derive $V_o = V_g/(1-D)$ from state-space averaging,
   identify the source of the RHP zero in the algebra, plot the
-  characteristic "wrong-way" step response, validate the steady-state
-  ratio against a Pulsim transient.
+  characteristic "wrong-way" step response. The Pulsim transient
+  (steady-state ratio and the RHP-zero dip) is in
+  `00_boost_pulsim_validation.ipynb`.
 
 - **Notebook 2**: size a type-III compensator that respects the
   $f_c \le f_z/5$ ceiling, discretize via Tustin, run a switched

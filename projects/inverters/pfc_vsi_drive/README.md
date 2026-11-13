@@ -76,7 +76,7 @@ separately:
 
 The shared *contract* is the bus voltage. PSIM reports
 `V_link_avg = 378.98 V` for OP 2.3; our front-end sim lands at
-`376 V` open-loop, which closes the contract.
+383.5 V with the default cascade loop (+1.2 %).
 
 ## Loss-extraction strategy: hybrid waveform + analytical
 
@@ -84,12 +84,12 @@ The shared *contract* is the bus voltage. PSIM reports
 Pulsim-simulated branch currents wherever the waveform is clean (boost
 loop: i_L002, i_T001/T002, i_D002, i_Cbus, boost shunts, R508).
 
-For the *line-side* devices (bridge D001, L001 DCR, F500) the simulated
-i_L001 is contaminated by an open-loop bridge-DCM oscillation, so those
-losses are back-computed from power balance instead:
-`I_in_rms = P_link / (V_ac_rms · PF)`. This is exactly what PSIM's
-closed-loop sim ends up emitting and the resulting numbers track to
-within a few percent.
+For the *line-side* devices (bridge D001, L001 DCR, F500) `losses.py`
+back-computes the losses from power balance instead of integrating
+i_L001:
+`I_in_rms = P_link / (V_ac_rms · PF)` with an assumed PF = 0.95.
+That is an assumption, not a simulated result: `I_in_rms` lands
++3.3 / +5.0 / −26.6 % from PSIM on OP 2.2 / 2.3 / 2.4.
 
 ## PFC control modes
 
@@ -98,11 +98,11 @@ The front-end supports three control modes, selectable via flags on
 
 | Mode | Flags | Description |
 |------|-------|------------|
-| **Open-loop, constant duty** *(default)* | both flags `False` | Boost MOSFET fires at a fixed duty `D = 1 − V_in_pk/V_link_target` derived from the CCM gain formula. Stable but the boost only conducts near the line peaks → `I_L002_rms` ~ 15 × lower than PSIM. Used for the headline validation numbers because it gives the cleanest steady-state V_link without controller-induced ringing. |
+| **Open-loop, constant duty** | both flags `False` | Boost MOSFET fires at a fixed duty `D = 1 − V_in_pk/V_link_target` derived from the CCM gain formula. Stable but the boost only conducts near the line peaks → `I_L002_rms` ~ 15 × lower than PSIM. Kept for ablation; the headline numbers below use the cascade. |
 | **Feed-forward trajectory** | `sp.pfc_closed_loop = True` | Modulates `D(t) = (1 − V_rect(t)/V_link_target) · K_load` (the textbook CCM steady-state duty trajectory). Shapes the current well but cannot regulate V_link without an outer loop. |
-| **Full cascade — V outer + I inner PI** | `sp.pfc_cascade_loop = True` | Real avg-current-mode PFC controller (Erickson §18.4): outer V_link PI generates `K_amp`, inner I_L002 PI generates duty. Implemented as `PfcCascadeController` (wired via `switch_fn` + `step_observer` pair, see source). Gives a properly shaped sinusoidal `I_L002` envelope at unity PF. Gains in `DriveSimParams` are tuned for OP 2.3; OP 2.2 (low line) and OP 2.4 (max load) need per-OP scaling — left as a follow-up. |
+| **Full cascade — V outer + I inner PI** *(default)* | `sp.pfc_cascade_loop = True` | Real avg-current-mode PFC controller (Erickson §18.4): outer V_link PI generates `K_amp`, inner I_L002 PI generates duty. Implemented as `PfcCascadeController` (wired via `switch_fn` + `step_observer` pair, see source). Gives a properly shaped sinusoidal `I_L002` envelope at unity PF. Gains in `DriveSimParams` are tuned for OP 2.3; OP 2.2 (low line) and OP 2.4 (max load) need per-OP scaling — left as a follow-up. |
 
-## Known limitations of the default open-loop model
+## Known limitations of the open-loop model
 
 1. **L001-C006-bridge tank rings past ≈ 50 ms** because there's
    no current-loop damping. All sims default to ≤ 60 ms and KPIs
@@ -129,12 +129,12 @@ After ~ 0.5 s of compute time per OP.
 
 | KPI | Pulsim cascade | PSIM | %err |
 |------|---------------:|-----:|-----:|
-| **`V_link_avg`** | **381 V** | **(≈ 380)** | **+0.5 %** |
-| **`I_in_rms`** | **9.20 A** | **9.04 A** | **+1.7 %** |
-| **`I_L002_rms`** | **9.12 A** | **9.00 A** | **+1.2 %** |
-| `I_F500_rms` | 3.56 A | 3.38 A | +5.4 % |
-| **`P_total`** | **71.8 W** | **70.9 W** | **+1.3 %** |
-| **`eta_inverter`** | **92.8 %** | **93.0 %** | **−0.2 %** |
+| **`V_link_avg`** | **383.9 V** | **(≈ 380)** | **+1.0 %** |
+| `I_in_rms` | 9.34 A | 9.04 A | +3.3 % |
+| `I_L002_rms` | 6.79 A | 9.00 A | −24.6 % |
+| `I_F500_rms` | 3.39 A | 3.38 A | +0.3 % |
+| `P_total` | 57.8 W | 70.9 W | −18.5 % |
+| `eta_inverter` | 94.2 % | 93.0 % | +1.3 % |
 
 ### OP 2.3 (220 V / 1090 W / 50 °C) — high line, nominal
 
@@ -142,12 +142,12 @@ After ~ 0.5 s of compute time per OP.
 |------|---------------:|-----:|-----:|
 | **`V_link_avg`** | **383.5 V** | **379.0 V** | **+1.2 %** |
 | **`I_in_rms`** | **5.31 A** | **5.06 A** | **+5.0 %** |
-| `I_L002_rms` | 3.88 A | 4.95 A | −21.6 % |
-| **`I_F500_rms`** | **3.56 A** | **3.51 A** | **+1.4 %** |
-| **`P_total`** | **40.0 W** | **41.8 W** | **−4.2 %** |
-| **`eta_inverter`** | **96.3 %** | **95.9 %** | **+0.4 %** |
-| **`T_J_D002`** | **82.8 °C** | **76.1 °C** | **+8.7 %** |
-| **`T_J_IGBT_IC500`** | **64.1 °C** | **67.0 °C** | **−4.3 %** |
+| `I_L002_rms` | 3.67 A | 4.95 A | −25.8 % |
+| **`I_F500_rms`** | **3.40 A** | **3.51 A** | **−3.4 %** |
+| `P_total` | 38.7 W | 41.8 W | −7.3 % |
+| **`eta_inverter`** | **96.5 %** | **95.9 %** | **+0.6 %** |
+| **`T_J_D002`** | **78.8 °C** | **76.1 °C** | **+3.6 %** |
+| **`T_J_IGBT_IC500`** | **66.5 °C** | **67.0 °C** | **−0.8 %** |
 
 ### OP 2.4 (220 V / 1023 W / 50 °C) — high line, current-limited
 
@@ -155,12 +155,12 @@ After ~ 0.5 s of compute time per OP.
 |------|---------------:|-----:|-----:|
 | **`V_link_avg`** | **383.2 V** | **377.9 V** | **+1.4 %** |
 | `I_in_rms` | 4.98 A | 6.78 A | −26.6 % |
-| **`I_F500_rms`** | **3.56 A** | **3.51 A** | **+1.4 %** |
-| **`P_total`** | **37.5 W** | **41.8 W** | **−10.2 %** |
-| **`eta_inverter`** | **96.3 %** | **95.9 %** | **+0.4 %** |
-| **`T_J_T001`** | **66.1 °C** | **70.4 °C** | **−6.1 %** |
-| **`T_J_D002`** | **80.3 °C** | **80.4 °C** | **−0.1 %** |
-| `T_J_IGBT_IC500` | 63.3 °C | 78.8 °C | −19.7 % |
+| **`I_F500_rms`** | **3.40 A** | **3.51 A** | **−3.4 %** |
+| `P_total` | 36.4 W | 41.8 W | −12.8 % |
+| **`eta_inverter`** | **96.4 %** | **95.9 %** | **+0.5 %** |
+| `T_J_T001` | 66.0 °C | 70.4 °C | −6.3 % |
+| **`T_J_D002`** | **76.9 °C** | **80.4 °C** | **−4.3 %** |
+| `T_J_IGBT_IC500` | 65.4 °C | 78.8 °C | −17.0 % |
 
 Note: OP 2.4's nameplate rating is 1400 W "max load" but PSIM only
 actually delivers 1023 W (= KPI_24.P_in) at this OP — the boost
@@ -170,8 +170,26 @@ PSIM directly.
 
 ### Headline summary
 
-**Efficiency within ±0.4 % on all three OPs.** V_link within ±1.5 %,
-I_F500 (motor return) within ±6 %, T_J_D002 within ±9 %.
+Inverter efficiency within +0.5 / +0.6 % at OP 2.3 / 2.4 and +1.3 % at
+OP 2.2. V_link within ±1.5 %, I_F500 (motor return) within ±4 %,
+T_J_D002 within ±5 % at OP 2.3 / 2.4. P_total is 7–19 % below PSIM and
+I_L002_rms 25–30 % below PSIM on every OP: the boost-stage currents do
+not match PSIM.
+(`python3 run_validation.py`, cascade, 10 line cycles.)
+
+Read these with three caveats:
+
+* `I_in_rms`, `P_cond_D001` and `P_ohm_L001` are **not simulated**:
+  `losses.py` derives them from the bus power with an assumed
+  PF = 0.95. Their agreement with PSIM validates that assumption, not
+  the simulator.
+* Earlier snapshots (P_total +1.3 / −4.2 / −10.2 %) came from a front
+  end with a 1 mΩ `ac_b`→gnd tie that shorted a bridge diode; a
+  post-solve current clamp then replaced the L001 current on ~40 % of
+  the steps. The tie is now 1 MΩ and no guard fires.
+* The cascade gains are tuned on OP 2.3 and OP 2.4's power target is
+  PSIM's own `P_in`; OP 2.2/2.3 PSIM junction temperatures for D001,
+  T001 and D002 are missed by 21–94 °C.
 
 ## References
 

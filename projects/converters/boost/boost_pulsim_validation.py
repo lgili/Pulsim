@@ -40,19 +40,17 @@ def _build_boost_builder(bp):
 
 
 def _warm_start(b, bp):
-    """Steady-state seed: ``I_L = V_o / (R · (1 - D))``, ``V_C = V_o``."""
+    """Steady-state seed at the start of an ON interval (the PWM starts ON
+    at t = 0): ``i_L`` at its valley ``V_o/(R(1-D)) - ΔI_L/2`` and ``v_C``
+    at its peak ``V_o + ΔV_C/2``. Seeding the cycle *average* instead
+    starts the LC tank ``ΔI_L/2`` off its orbit and rings for ~10 ms."""
     n_state = b.pool.state_size(b.graph)
     x0 = [0.0] * n_state
     out_idx = b.node_id_of("vout")
-    x0[out_idx] = float(bp.V_o)
-    I_L0 = float(bp.V_o / (bp.R * (1.0 - bp.D)))
-    for bid in range(b.graph.num_branches):
-        try:
-            i_idx = b.pool.branch_var_id_for_inductor(bid, b.graph)
-            x0[i_idx] = I_L0
-            break
-        except Exception:
-            continue
+    x0[out_idx] = float(bp.V_o + bp.V_o / bp.R * bp.D / (2.0 * bp.f_sw * bp.C))
+    I_L0 = float(bp.V_o / (bp.R * (1.0 - bp.D))
+                 - bp.V_g * bp.D / (2.0 * bp.L * bp.f_sw))
+    x0[b.pool.branch_var_id_for_inductor(b.branch_id_of("L1"), b.graph)] = I_L0
     return x0
 
 

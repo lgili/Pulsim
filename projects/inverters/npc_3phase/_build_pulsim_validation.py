@@ -304,9 +304,8 @@ print(f"  2-level VSI  v_ab THD : {thd_2lvl * 100:6.2f} %")
 print(f"  Reduction factor      : {thd_2lvl / thd_npc:5.2f}×")
 print()
 print("  (THD measured up to the 50th harmonic of f_o = 60 Hz → 3 kHz,")
-print("   which is below the carrier at 5 kHz. The LC output filter")
-print("   further attenuates the carrier side-bands above its corner")
-print("   at ~1.6 kHz, so the load-side THD is even lower.)")
+print("   which is below the carrier at 5 kHz. This is the bridge voltage;")
+print("   the simulated circuit has an RL load and no LC output filter.)")
 """))
 
     cells.append(md(r"""
@@ -318,11 +317,12 @@ print("   at ~1.6 kHz, so the load-side THD is even lower.)")
 | Line-to-line voltage levels | $\{-V_{dc}, -V_{dc}/2, 0, +V_{dc}/2, +V_{dc}\}$ — 5 levels | same | ✅ |
 | Fundamental L-L peak | $\sqrt{3} m_a V_{dc}/2$ | same | ✅ ~1% |
 | Phase-to-phase 120° spacing | yes | yes | ✅ |
-| Low-order THD vs 2-level | ~4× lower | predicted ~$L/(L-1)$ better | ✅ |
+| Low-order THD vs 2-level | ~2.7× lower | no closed-form factor | observation, not a pass/fail check |
 
 The defining multilevel features — **3 levels in phase, 5 levels
-line-to-line, and ~4× lower low-order THD** — all reproduce in the
-Pulsim switched simulation. With this validation in place, the
+line-to-line** — reproduce in the Pulsim switched simulation; the
+~2.7× lower low-order THD is an observation (there is no analytical
+factor to check it against). With this validation in place, the
 balancing controller in
 [`02_npc_balancing.ipynb`](02_npc_balancing.ipynb) can be designed
 against the NPC's small-signal model with confidence that Pulsim

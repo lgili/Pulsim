@@ -128,14 +128,23 @@ t_sim, v_out = simulate_half_bridge(
 )
 
 tail = t_sim >= t_sim[-1] - 3e-4
-v_o_dc = float(v_out[tail].mean())
+v_o_dc = pulsim.time_average(t_sim, v_out, t_from=t_sim[-1] - 3e-4)
 ripple_pp = float(v_out[tail].max() - v_out[tail].min())
 
+# Two non-ideal effects the ideal n·D·V_g leaves out:
+#  * dead time trims each pulse by t_dead/2 -> D_eff = D - t_dead·f_sw/2;
+#  * the k = 0.999 leakage, seen from the secondary, delays each of the two
+#    commutations per period by L_lk·I_o/(n·V_g/2): V_o loses 2·f_sw·L_lk·I_o.
+D_eff = params.D - params.t_dead * params.f_sw / 2.0
+L_lk = params.n**2 * max(params.L * 100.0, 1e-3) * (1.0 - 0.999**2)
+v_o_pred = params.n * D_eff * params.V_g / (1.0 + 2.0 * params.f_sw * L_lk / params.R)
+
 print(f"Simulation: {len(t_sim)} samples over {t_sim[-1] * 1e3:.2f} ms")
-print(f"  Pulsim  V_o (mean over last 0.3 ms): {v_o_dc:.4f} V")
-print(f"  Target  V_o = n · D · V_g           : {params.V_o:.4f} V")
-print(f"  Relative error                     : "
-      f"{abs(v_o_dc - params.V_o) / params.V_o * 100:.2f} %")
+print(f"  Pulsim  V_o (time average, last 0.3 ms): {v_o_dc:.4f} V")
+print(f"  Ideal   V_o = n · D · V_g                : {params.V_o:.4f} V")
+print(f"  With dead time and leakage             : {v_o_pred:.4f} V  (L_lk = {L_lk*1e6:.3f} µH)")
+print(f"  Error vs that prediction               : "
+      f"{(v_o_dc - v_o_pred) / v_o_pred * 100:+.2f} %")
 print(f"  Output ripple (pk-pk)              : "
       f"{ripple_pp * 1e3:.2f} mV  ({ripple_pp / v_o_dc * 100:.3f} %)")
 """))
@@ -158,34 +167,34 @@ plt.show()
 """))
 
     cells.append(md(r"""
-## Note on the diode-drop headroom
+## Note on the residual error
 
-This is a particularly demanding test: $V_o = 5$ V is small relative
-to the **four** diode drops in the full-wave bridge (the rectified
-current always passes through two of the four diodes in series per
-half-cycle). With $V_{th} = 0.7$ V each, the effective secondary peak
-becomes $n V_g/2 - 1.4$ V ≈ 4.6 V instead of 6 V, dragging the
-average $V_o$ down by ~25%.
+The ~6 % gap to the ideal $n D V_g$ is dead time and transformer
+leakage, both computed in the cell above; the simulation lands within
+about 0.5 % of that prediction. It is **not** diode drops: the diodes'
+$V_{th} = 0.7$ V is a turn-on threshold, not a forward drop (their
+on-state is 1 mΩ).
 
-On a higher-$V_o$ design (e.g. 24 V or 48 V output) the diode losses
-become negligible. For control-loop validation what matters is the
-**ripple shape** and the **time scale** — both of which are correct
-here regardless of the absolute DC headroom.
+The switch bits come from `b.switch_index_of("S1")` / `("S2")`:
+`add_mosfet_with_body_diode` adds a `<name>_body` bit after each
+MOSFET, so S2 is bit 2. An earlier version drove bit 1 (S1's body
+diode) as "S2": only S1 switched, the split-capacitor midpoint walked
+away from $V_g/2$ and $V_o$ fell to 3.6 V and kept falling.
 
 ## Summary
 
 | Check | Pulsim | Analytical | Notes |
 |---|---|---|---|
-| Steady-state $V_o$ | $n D V_g - $ ~1.4 V (bridge drops) | $n D V_g$ | Real diodes, low $V_o$ test |
+| Steady-state $V_o$ | within ~0.5 % of $n D_{eff} V_g/(1 + 2 f_{sw} L_{lk}/R)$ | $n D V_g$ ideal | ✅ dead time + leakage |
 | Ripple frequency | $2 f_{sw}$ | $2 f_{sw}$ | ✅ |
 | Switching symmetry | $S_1/S_2$ alternate cleanly | per-switch $D \le 0.5$ | ✅ |
-| Small-signal $G_{vd}$ | identical to forward | same form | ✅ |
+| Small-signal $G_{vd}$ | not simulated here | same form as the forward | — |
 
 The half-bridge is the forward's twin in the average model
 (buck-derived, no RHP zero) but the implementation has substantially
 more parts and a more interesting switching pattern. The Pulsim
-simulation reproduces both the DC ratio (modulo real diode losses)
-and the doubled ripple frequency.
+simulation reproduces the DC ratio once dead time and leakage are
+accounted for.
 """))
 
     return cells

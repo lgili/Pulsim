@@ -107,6 +107,11 @@ def _build_npc_builder(p, R_load: float | None = None, L_load: float = 5e-3,
     # balancing-analysis notebook.
     b.add_capacitor("C_dc_top", "vdc_pos", "np", C_split)
     b.add_capacitor("C_dc_bot", "np", "vdc_neg", C_split)
+    # Ground reference at the neutral point. Without it nothing in this
+    # circuit touches gnd and auto_regularize picks the reference, so
+    # v(np) came out as -200 V. One tie carries no current; 1 MΩ per
+    # AI_GUIDE trap 7.
+    b.add_resistor("R_ref_np", "np", "gnd", 1.0e6)
 
     # ---- Three NPC legs ----
     # Add ALL 12 controllable switches FIRST so they get contiguous
@@ -243,9 +248,9 @@ def simulate_npc(p,
     """Run an open-loop NPC 3-level simulation with PD-PWM.
 
     Returns ``(times, v_mid_a, v_mid_b, v_mid_c, v_np)`` — the three
-    phase-leg midpoint voltages (w.r.t. ``vdc_neg``, so they range
-    over ``[0, V_dc]`` not ``[-V_dc/2, V_dc/2]``), plus the neutral
-    point voltage (so you can watch it drift open-loop).
+    phase-leg midpoint voltages w.r.t. ground, which is tied to the
+    neutral point (so they range over ``[-V_dc/2, V_dc/2]``), plus the
+    neutral-point voltage (0 V here: the split bus is two ideal sources).
     """
     import pulsim as pp
 

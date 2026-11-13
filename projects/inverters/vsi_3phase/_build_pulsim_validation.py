@@ -136,8 +136,16 @@ print(f"  v_ab peak (analytical)     : {ab_peak_analytical:.2f} V")
 print(f"  v_ab peak (target = V_LLpk): {vp.V_o_LL_pk:.2f} V")
 print()
 print("  Note: the Pulsim peak includes the carrier — what matters is")
-print("  the fundamental (carrier-filtered) component, which matches the")
-print("  analytical sinusoid below.")
+print("  the fundamental component:")
+
+# Fundamental of v_ab by a one-bin DFT over the last two output cycles.
+w_o = 2 * np.pi * vp.f_o
+win = t_v2 >= t_v2[-1] - 2.0 / vp.f_o
+tw, vab_w = t_v2[win], (v_a - v_b)[win]
+span = tw[-1] - tw[0]
+c1 = 2 * np.trapezoid(vab_w * np.exp(-1j * w_o * tw), tw) / span
+print(f"  v_ab fundamental peak (Pulsim, DFT): {abs(c1):.2f} V  "
+      f"({(abs(c1) / ab_peak_analytical - 1) * 100:+.2f} % vs analytical)")
 """))
 
     cells.append(code(r"""

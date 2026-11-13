@@ -77,14 +77,15 @@ At $D = 0.5$ (the natural symmetric design point):
   zero, lightly-damped LC pole, slow voltage-mode loop) and offers
   the same workarounds.
 
-## Pulsim cross-validation: same limitation
+## Pulsim cross-validation
 
-The flyback's ideal-switch + ideal-transformer topology shares the
-boost / buck-boost's numerical stability issues in Pulsim's
-switching engine. The math self-consistency checks (poles, DC gains,
-ss2tf round-trip) are the rigorous validation; the closed-loop
-pure-Python simulation in notebook 2 is the proof on the actual
-switched waveform.
+`00_flyback_pulsim_validation.ipynb` runs the switched flyback in
+Pulsim. With the coupled-inductor coupling $k = 0.99$ the output sits
+about 8 % below $n D V_g/(1-D)$ — leakage, not a solver limitation —
+and the gap closes as $k \to 1$ (the notebook sweeps it). The math
+self-consistency checks (poles, DC gains, ss2tf round-trip) are in
+notebook 1; notebook 2 closes the loop on a pure-Python switched model,
+not in Pulsim.
 
 ## How to run
 

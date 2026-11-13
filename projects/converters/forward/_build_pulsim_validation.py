@@ -102,21 +102,32 @@ print(f"f_sw = {params.f_sw/1e3:.0f} kHz")
 """))
 
     cells.append(code(r"""
+# 10 ms: the output LC (Q ≈ 5) still rings visibly at 2 ms after a cold start.
 t_sim, v_out = simulate_forward(
-    params, duty=params.D, t_end=2e-3, dt=2e-8,
+    params, duty=params.D, t_end=10e-3, dt=2e-8,
 )
 
+v_o_dc = pulsim.time_average(t_sim, v_out, t_from=t_sim[-1] - 1e-3)
 tail = t_sim >= t_sim[-1] - 2e-4
-v_o_dc = float(v_out[tail].mean())
 ripple_pp = float(v_out[tail].max() - v_out[tail].min())
 
+# Leakage of the k = 0.999 transformer, seen from the secondary, delays
+# every D_fw -> D_rec commutation by L_lk·I_o/(n·V_g): the output loses
+# f_sw·L_lk·I_o volts, so V_o = n·D·V_g / (1 + f_sw·L_lk/R).
+L_s = params.n**2 * max(params.L * 100.0, 1e-3)
+L_lk = L_s * (1.0 - 0.999**2)
+v_o_lk = params.V_o / (1.0 + params.f_sw * L_lk / params.R)
+# Erickson 2.31 with n·V_g in place of V_g.
+ripple_an = params.V_o * (1.0 - params.D) / (8.0 * params.L * params.C * params.f_sw**2)
+
 print(f"Simulation: {len(t_sim)} samples over {t_sim[-1] * 1e3:.2f} ms")
-print(f"  Pulsim  V_o (mean over last 0.2 ms): {v_o_dc:.4f} V")
-print(f"  Target  V_o = n · D · V_g           : {params.V_o:.4f} V")
-print(f"  Relative error                     : "
-      f"{abs(v_o_dc - params.V_o) / params.V_o * 100:.2f} %")
-print(f"  Output ripple (pk-pk)              : "
-      f"{ripple_pp * 1e3:.2f} mV  ({ripple_pp / params.V_o * 100:.3f} %)")
+print(f"  Pulsim  V_o (time average, last 1 ms): {v_o_dc:.4f} V")
+print(f"  Ideal   V_o = n · D · V_g            : {params.V_o:.4f} V")
+print(f"  With leakage n·D·V_g/(1+f·L_lk/R)    : {v_o_lk:.4f} V  (L_lk = {L_lk*1e6:.2f} µH)")
+print(f"  Error vs leakage-corrected value     : "
+      f"{(v_o_dc - v_o_lk) / v_o_lk * 100:+.2f} %")
+print(f"  Output ripple (pk-pk)                : "
+      f"{ripple_pp * 1e3:.2f} mV  (analytical {ripple_an * 1e3:.2f} mV)")
 """))
 
     cells.append(code(r"""
@@ -136,27 +147,41 @@ plt.tight_layout()
 plt.show()
 """))
 
+    cells.append(code(r"""
+for k in (0.999, 0.9999, 0.99999):
+    t_k, v_k = simulate_forward(params, duty=params.D, t_end=10e-3, dt=2e-8,
+                                k_coupling=k)
+    v_k_dc = pulsim.time_average(t_k, v_k, t_from=t_k[-1] - 1e-3)
+    print(f"  k = {k:<8}: V_o = {v_k_dc:.4f} V  ({(v_k_dc / params.V_o - 1) * 100:+.2f} % vs n·D·V_g)")
+"""))
+
     cells.append(md(r"""
 ## Note on the residual error
 
-Because $V_o = 5$ V is only ~7× the diode drop $V_{th} = 0.7$ V, the
-two diodes in series (rectifier + freewheel during their respective
-conduction phases) eat a noticeable fraction of headroom. On a higher
-$V_o$ design (e.g. 24 V output), the diode losses become negligible
-and the Pulsim mean matches the analytical $V_o$ within a few tenths
-of a percent.
+The ~10 % gap to the ideal $n D V_g$ is the transformer **leakage**
+($k = 0.999$), not the diodes: $V_{th} = 0.7$ V is the diodes' turn-on
+threshold, not a forward drop (their on-state is 1 mΩ). Each turn-on
+must first commutate the filter current from $D_{fw}$ to $D_{rec}$
+through $L_{lk}$, which costs $f_{sw} L_{lk} I_o$ of output voltage —
+the leakage-corrected value printed above. Raising $k$ closes the gap,
+as the sweep above shows.
+
+Without a reset winding, clamp or snubber, the leakage and magnetising
+energy has nowhere to go at turn-off, so the switch node rings up to
+~10 kV through the MOSFET's 1 GΩ off-resistance; `simulate` warns
+about it. A real design needs the reset path.
 
 ## Summary
 
 | Check | Pulsim | Analytical | Match |
 |---|---|---|---|
-| Steady-state $V_o$ | $n D V_g$ minus ~$V_{th}$ losses | $n D V_g$ | ✅ within real-world margins |
-| Ripple shape | buck-like triangle on the cap | same | ✅ |
-| No RHP zero | switched response is monotonic | $G_{vd}$ has no RHP zero | ✅ |
+| Steady-state $V_o$ | $n D V_g/(1 + f_{sw} L_{lk}/R)$ within ~1 % | same (leakage-corrected) | ✅ |
+| Steady-state $V_o$ vs $k$ | → $n D V_g$ as $k \to 1$ | $n D V_g$ | ✅ |
+| Output ripple | buck formula with $n V_g$ | Erickson 2.31 | ✅ |
 
-The forward converter is the buck with a transformer in front, and
-the Pulsim simulation confirms the small-signal $G_{vd}(s)$ is
-identical to the buck's with $n V_g$ in place of $V_g$.
+This notebook checks the DC ratio and the ripple only; the duty-step
+response (no RHP zero, buck-like $G_{vd}$ with $n V_g$ in place of
+$V_g$) is derived in the modeling notebook, not simulated here.
 """))
 
     return cells

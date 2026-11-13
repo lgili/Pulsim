@@ -176,8 +176,8 @@ plt.show()
     cells.append(md(r"""
 ## 3. Cap voltages stay flat — sort-and-select at work
 
-The headline plot of any MMC paper: the 6 cap voltages (3 per arm)
-all tracking $V_C \approx V_{dc}/N$ with only a small ~$2 f_o$
+The headline plot of any MMC paper: the 3 cap voltages
+of each arm tracking each other with only a small ~$2 f_o$
 ripple from the load-current modulation. **Without** sort-and-select
 this plot is a disaster (see the next section).
 """))
@@ -299,8 +299,16 @@ print(f"  Relative error: "
 | Arm voltage levels | $\{0, V_C, 2V_C, 3V_C\}$ — 4 levels | same | ✅ |
 | AC output levels | 4 levels in $[-V_{dc}/2, +V_{dc}/2]$ | same | ✅ |
 | Fundamental peak (balanced) | within ~1% of $m_a V_{dc}/2$ | $m_a V_{dc}/2$ | ✅ |
-| Cap voltages with sort-and-select | all within 0.1 V of $V_C = V_{dc}/N$ | balanced | ✅ |
+| Cap voltages with sort-and-select | within 0.1 V of each other inside an arm | balanced inside the arm | ✅ |
+| Upper vs lower arm cap average | ~129 V vs ~142 V ($V_C$ = 133.3 V) | equal | ❌ not balanced (see note) |
 | Cap voltages without balancing | diverge in 2–3 fundamental periods | predicted drift | ✅ (the **motivation** for balancing) |
+
+**Note.** Sort-and-select balances the SMs *within* an arm; it does
+not move energy between the upper and the lower arm. In this run the
+upper-arm caps end the 50 ms run near 129 V and the lower-arm caps near 142 V
+(−3 % / +6 % of $V_C$), and nothing here pulls them back: that takes
+the circulating-current / arm-energy control of
+[`02_mmc_control.ipynb`](02_mmc_control.ipynb).
 
 The MMC topology + PSC-PWM + sort-and-select reproduce in Pulsim
 exactly as the analytical model predicts. The **necessity** of active

@@ -15,8 +15,8 @@ linear systems is assumed; everything else is derived from scratch.
 
 | File | Role |
 |---|---|
-| `01_buck_modeling.ipynb` | Derives the average + small-signal model. Builds state-space `(A, B, C, D)`, transfer functions, Bode/step plots, then validates against a Pulsim transient. |
-| `02_buck_controller.ipynb` | Uses the model from notebook 1 to design a voltage-loop compensator. Verifies the closed loop in two ways: an analytical step response (scipy.signal) and a closed-loop Pulsim transient with the digital PID applied. |
+| `01_buck_modeling.ipynb` | Derives the average + small-signal model. Builds state-space `(A, B, C, D)`, transfer functions, Bode/step plots. The Pulsim cross-check is `00_buck_pulsim_validation.ipynb`. |
+| `02_buck_controller.ipynb` | Uses the model from notebook 1 to design a voltage-loop compensator. Verifies the closed loop in two ways: an analytical step response (scipy.signal) and a pure-Python switched closed-loop simulation with the digital compensator. |
 | `buck_model.py` | Pure-Python module with `BuckParams`, `buck_state_space`, and the three reference transfer functions (`control_to_output_tf`, `line_to_output_tf`, `output_impedance_tf`). Both notebooks import this. |
 
 ## Reference parameters
@@ -25,8 +25,9 @@ The default `BuckParams()` uses a 24 V → 12 V buck with a 100 µH inductor,
 100 µF cap, 2.4 Ω load (~5 A), 100 kHz switching. The LC corner sits at
 ~1.6 kHz and the switching frequency is 60× above the natural — that's
 the standard "averaging assumption is comfortably valid" regime where
-the analytical model and the time-domain simulation should match to
-within ~1%.
+the analytical model and the time-domain simulation should match: the
+Pulsim steady state in `00_buck_pulsim_validation.ipynb` lands within
+0.05 % of $D V_g$.
 
 ## How to run
 
@@ -57,7 +58,7 @@ By the end of `01_buck_modeling.ipynb` you should be able to:
   - `G_vg(s)` — input voltage to output voltage (audio susceptibility).
   - `Z_out(s)` — open-loop output impedance.
 - Verify the model is correct by overlaying its step response with the
-  Pulsim transient response of the same converter.
+  Pulsim transient response of the same converter (notebook 00).
 
 By the end of `02_buck_controller.ipynb` you should be able to:
 
@@ -68,8 +69,8 @@ By the end of `02_buck_controller.ipynb` you should be able to:
 - Discretize the compensator (Tustin) for digital implementation.
 - Confirm the closed-loop behavior with a step in reference voltage
   and a load step.
-- Drop the same compensator into a Pulsim closed-loop simulation and
-  confirm it tracks the analytical prediction.
+- Run the same compensator on a switched closed-loop model (pure
+  Python) and confirm it tracks the analytical prediction.
 
 ## Bibliography
 

@@ -245,17 +245,13 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
         v_dc=0.0, v_amplitude=V_pk,
         frequency=float(op.f_line), phase=0.0,
     )
-    b.add_resistor("R_ac_b_gnd", "ac_b", "gnd", 1.0e-3)
+    # 1 MΩ reference only: ac_b and the bridge's dc_neg are both "gnd"-side,
+    # so a milliohm tie shorts a bridge diode and, every negative half
+    # cycle, puts the line straight across L001 (it ramped to ~100 A and
+    # needed a post-solve current clamp on ~40 % of the steps).
+    b.add_resistor("R_ac_b_gnd", "ac_b", "gnd", 1.0e6)
 
     # F500 fuse + L001 EMI input choke + DCR.
-    #
-    # L001 is restored as a real inductor now that the kernel has the
-    # ``inductor_freeze_di_max`` guard (Layer 5 V5): when the bridge
-    # enters DCM and the inductor's MNA constraint becomes near-
-    # singular, the post-solve guard snaps i_L001 back to its
-    # previous value instead of letting the LU solve emit
-    # kiloamp-scale unphysical jumps. ``simulate_frontend`` passes
-    # ``inductor_freeze_di_max = 50.0`` to enable it.
     b.add_resistor("F500", "ac_a", "n_f500", float(F500.R_cold))
     sw_map.l001_branch = int(b.graph.num_branches)
     b.add_inductor("L001", "n_f500", "n_l001", float(L001.L))
@@ -863,35 +859,14 @@ def simulate_frontend(sp: DriveSimParams,
         b, t_end=t_end, dt=dt, switch_fn=sw_fn,
         initial_state=init_state, step_observer=observer,
         max_event_iterations=12,
-        # Post-solve kernel guards (see solver/options.hpp). NOTE
-        # (v2.0 Phase 2): these do not solve anything — they replace
-        # the solver's i_L with a limit configured here, and the run
-        # below genuinely depends on them: without them i_in peaks at
-        # ~544 A and the boost stage starves. That dependence is a
-        # MODELLING gap (the L001 loop opens when the bridge enters
-        # DCM and only the diode leakage is left), not a solver
-        # setting, and simulate() now warns whenever a guard fires so
-        # the clamped value is not mistaken for a measurement.
-        # Layer 5 V5 kernel guards (post-solve, see solver/options.hpp):
-        #   * freeze_di_max = 50 A catches sudden kiloamp jumps in
-        #     the inductor's branch current.
-        #   * abs_clamp = 100 A catches the slower drift form of the
-        #     same failure. Loose enough that the bridge can carry
-        #     legitimate inrush peaks (≈ 30-60 A at line peak when
-        #     C006 is briefly charging), tight enough to bound the
-        #     ≥ 1 kA solver garbage when the bridge is in deep DCM.
-        #     A previous attempt at 30 A was too tight — it clipped
-        #     real bridge conduction, V_rect collapsed to < 15 V at
-        #     line peak (should be 309 V), and the boost stage
-        #     starved.
-        inductor_freeze_di_max=50.0,
-        inductor_abs_clamp=100.0,
+        # No inductor guards: they only ever fired because of the old
+        # 1 mΩ ac_b tie (see R_ac_b_gnd); without it they never engage.
         progress=False,
     )
 
     states = np.asarray([list(v) for v in res.states], dtype=float)
     times = np.asarray(res.times, dtype=float)
-    nid = lambda n: b.node_id_of(n)
+    nid = b.node_id_of
 
     # Branch current indices into the state vector. L001 and L002
     # are both real inductor branches now (the kernel freeze guard
@@ -965,7 +940,7 @@ def simulate_inverter(sp: DriveSimParams,
 
     states = np.asarray([list(v) for v in res.states], dtype=float)
     times = np.asarray(res.times, dtype=float)
-    nid = lambda n: b.node_id_of(n)
+    nid = b.node_id_of
 
     return InverterResult(
         times=times,

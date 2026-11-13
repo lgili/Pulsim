@@ -42,6 +42,14 @@ boost from the boost project; only the input source changes.
                                   vout ── Cout ── Rload ── gnd
 ```
 
+A 1 µF capacitor after the bridge (`C_in`, the HF input capacitor
+every PFC has) holds `rect_pos` at the rectified line; without it the
+node floats whenever the DCM inductor current is zero. The AC source is
+left floating — `dc_neg` is already ground, and a low-ohm tie from an
+AC terminal to ground would short a bridge diode (half-wave output).
+The MOSFET is driven by `switch_index_of("Q1")`: the four bridge
+diodes occupy switch bits 0–3.
+
 We use Pulsim's helpers directly:
 
 * ``pulsim.add_sine_voltage_source`` for the AC mains.
@@ -103,7 +111,7 @@ print(f"Switching f_sw    = {bp.f_sw/1e3:.0f} kHz")
 
     cells.append(code(r"""
 t_v2, v_rect, v_out = simulate_pfc(
-    bp, duty=0.45, t_end=0.06, dt=2e-6,
+    bp, duty=0.45, t_end=0.06, dt=1e-7,   # 45 steps per on-time: no duty quantisation
 )
 
 # Analytical reference for the rectified envelope.
@@ -148,8 +156,10 @@ plt.show()
 ## Summary
 
 The bridge rectifier reproduces the textbook
-$|V_{pk} \sin(\omega_{line} t)|$ envelope cleanly, and the bulk DC
-bus charges toward a (high) open-loop steady state — without the
+$|V_{pk} \sin(\omega_{line} t)|$ envelope within ~3 % of $V_{pk}$
+(the residue is switching ripple on the 1 µF input capacitor; it halves
+with `dt = 5e-8`), and the bulk DC bus charges toward a (high)
+open-loop steady state (above 800 V after 60 ms at $D = 0.45$) — without the
 voltage loop the DC bus would eventually settle far above the design
 $V_o = 400$ V target. The boost duty cycle needs to be **modulated**
 across the line cycle to shape the input current sinusoidally and

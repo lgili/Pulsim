@@ -155,7 +155,7 @@ plt.show()
 
 This is the headline boost behaviour. Step the duty from D to D+2% at
 $t = 1$ ms. The analytical small-signal prediction says $v_o$ should
-first **drop** by roughly $-I_L \cdot L / C \cdot \Delta d$, then
+first **drop** (initial slope $-I_L \, \Delta d / C$), then
 climb to its new steady state $V_g/(1 - (D+\Delta d))$.
 
 The dip happens because of the $-I_L \hat d$ term in the capacitor's
@@ -200,7 +200,18 @@ plt.show()
 win = (t_v2 >= t_step) & (t_v2 < t_step + 5.0 / params.f_z_rhp)
 dip_v2 = float(v_o_v2[win].min())
 dip_pred = float(v_o_pred[win].min())
-print(f"  Switched dip (Pulsim)               : {dip_v2:.4f} V")
+# The raw minimum includes half the switching ripple; the small-signal
+# model predicts the switching-period average, so compare that too.
+n_T = int(round(1.0 / (params.f_sw * (t_v2[1] - t_v2[0]))))
+k0 = int(np.searchsorted(t_v2, t_step - 1e-12))
+n_per = int(np.sum(win)) // n_T
+v_avg = np.array([np.trapezoid(v_o_v2[k0 + i*n_T:k0 + (i+1)*n_T + 1],
+                               t_v2[k0 + i*n_T:k0 + (i+1)*n_T + 1]) * params.f_sw
+                  for i in range(n_per)])
+v_pre = float(np.trapezoid(v_o_v2[k0 - n_T:k0 + 1], t_v2[k0 - n_T:k0 + 1]) * params.f_sw)
+print(f"  Switched dip (Pulsim, raw minimum)  : {dip_v2:.4f} V")
+print(f"  Switched dip (period average)       : {v_avg.min():.4f} V "
+      f"({(v_avg.min() - v_pre) * 1e3:+.1f} mV from the pre-step average)")
 print(f"  Predicted dip (small-signal)        : {dip_pred:.4f} V")
 print(f"  Analytical RHP-zero frequency f_z   : {params.f_z_rhp:.1f} Hz")
 print(f"  Expected dip duration ~1/f_z        : {1e3/params.f_z_rhp:.2f} ms")
@@ -208,8 +219,9 @@ print(f"  Expected dip duration ~1/f_z        : {1e3/params.f_z_rhp:.2f} ms")
 
     cells.append(md(r"""
 Both curves dip below the original $V_o$ for ~$1/f_{z,RHP}$ before
-climbing. The Pulsim trace adds the switching ripple on top; otherwise
-they overlap inside the LC corner's resonance amplitude.
+climbing. The raw switched minimum sits about half a ripple
+(~50 mV) below the predicted dip; the switching-period average dips by
+roughly the predicted amount.
 
 ## Summary
 

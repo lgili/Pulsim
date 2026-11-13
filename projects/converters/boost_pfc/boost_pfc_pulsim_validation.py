@@ -11,7 +11,7 @@ Topology::
              │  │                    │
              └─┤ac_a            dc_pos├─┬── L ── sw ──┬── D ── vout
                │                      │ │             │
-               │ac_b            dc_neg├─┘             Q1 (LS MOSFET)
+               │ac_b            dc_neg├─┘ C_in        Q1 (LS MOSFET)
                │                      │               │
                                                      gnd
                                        vout ── Cout ── gnd
@@ -43,8 +43,9 @@ def _build_builder(bp):
         frequency=float(bp.f_line), phase=0.0,
     )
 
-    # Pin one AC terminal to ground for a single-ended bridge-fed boost.
-    b.add_resistor("R_ac_b_to_gnd", "ac_b", "gnd", 1.0e-3)
+    # No AC-side ground tie: dc_neg is already gnd. A milliohm tie from ac_b
+    # to gnd shorts the lower bridge diode and turns the bridge into a
+    # half-wave rectifier (AI_GUIDE trap 7).
 
     add_bridge_rectifier(
         b, "BR",
@@ -53,6 +54,9 @@ def _build_builder(bp):
         g_on=1e3, g_off=1e-9, V_th=0.7,
     )
 
+    # The HF input capacitor every PFC has after the bridge. Without it
+    # rect_pos floats whenever the DCM inductor current is zero.
+    b.add_capacitor("C_in", "rect_pos", "gnd", 1e-6)
     b.add_inductor("L_pfc", "rect_pos", "sw", float(bp.L))
     b.add_mosfet_with_body_diode("Q1", "sw", "gnd",
                                    R_on=1e-2, R_off=1e9, V_F=0.7)
@@ -65,7 +69,7 @@ def _build_builder(bp):
 def simulate_pfc(bp,
                   duty: float = 0.45,
                   t_end: float = 0.04,
-                  dt: float = 1e-6,
+                  dt: float = 1e-7,
                   ) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
     """Run an open-loop boost-PFC simulation at constant duty cycle.
 
@@ -82,7 +86,8 @@ def simulate_pfc(bp,
 
     sw_fn = p.make_pwm_switch_fn(
         frequency=float(bp.f_sw), duty=float(duty),
-        switch_idx=0, num_switches=b.graph.num_switches,
+        # The four bridge diodes come first: Q1 is bit 4, not 0.
+        switch_idx=b.switch_index_of("Q1"), num_switches=b.graph.num_switches,
     )
     res = p.simulate(
         b, t_end=float(t_end), dt=float(dt),

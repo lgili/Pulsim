@@ -708,6 +708,14 @@ de 1/100 (Sec 7); a forma temporal das curvas é equivalente.
 
 def build_long_simulation_notebook() -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
+    cells.append(md(r"""
+> **⚠ Audit note (2026-11-13) — claims below are NOT met by this notebook's own run.**
+> Re-executed on Pulsim 2.x: the line-voltage peak is **28.64 kV** against the thesis
+> operating point (Tab 16) of **15.56 kV**, so "the waveforms match Tab 16" (5.6) is false;
+> the capacitor-voltage spread reaches **2.99 kV (12.5 %)** against the stated ±10 %.
+> Not yet diagnosed (controller set-up vs. model); treat the figures as illustrations,
+> not as a validation. See `projects/inverters/m3c_3phase/README.md`.
+"""))
 
     cells.append(md(r"""
 # 5 — M3C 3-φ: Simulação Longa (15 s) + Figuras Estilo Tese
@@ -1066,6 +1074,13 @@ mantém o conversor estável e produzindo potência nominal.
 
 def build_dbpc_notebook() -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
+    cells.append(md(r"""
+> **⚠ Audit note (2026-11-13) — claims below are NOT met by this notebook's own run.**
+> Re-executed on Pulsim 2.x at 45 Hz: DBPC current THD **13.02 %** against **9.59 %** for
+> PI/dq, and a DBPC peak of **95.8 A** for a 100 A reference (PI/dq: 133.7 A). So
+> "DBPC has lower THD" (6.5) and "tracking error < 5 %" (6.1, 6.6) are false as run.
+> Not yet diagnosed; treat the comparison as an illustration, not a result.
+"""))
 
     cells.append(md(r"""
 # 6 — M3C 3-φ: Dead-Beat Predictive Control (DBPC)
@@ -1695,7 +1710,9 @@ plt.show()
 * O controle DBPC + cost function + cap PI loop mantém:
     - corrente de saída rastreando bem (mesmo na vizinhança de f_out=f_in);
     - capacitores em torno do alvo de 24 kV;
-    - spread limitado, com pico identificável no ponto crítico.
+    - spread limitado; o pico (~9.7 kV) **não** fica no cruzamento
+      f_out = f_in: aparece no início da rampa (f_out ≈ 3 Hz,
+      t ≈ 0.7 s).
 * Na entrada, a corrente fica em fase com a tensão (UPF) com amplitude
   ditada pelo cap-outer loop para manter o balanço energético.
 
@@ -2057,7 +2074,8 @@ A FSM de pré-carga funciona como um circuito de partida real:
 * **Não há corrente de inrush** — i_in é limitada à referência de
   30 A durante toda a precharge.
 * **Após o release**, o cap-PI corrige os últimos ~10 % e mantém
-  os caps em 24 kV ± 0.1 %.
+  a **média** dos caps em 24 kV ± 0.1 % (o spread entre módulos fica
+  em ~1 kV, ±2 %).
 * **A partida do motor é segura** porque os caps já estão no
   nominal — o DBPC tem toda a faixa de modulação disponível.
 
