@@ -403,6 +403,13 @@ on `pwl` (3): `buck_igbt` (Newton does not converge),
 `ll13_active_clamp_forward` (no DC operating point).
 `ll16_flyback_closed_loop` completes since the Newton roundoff
 acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
+The cause is the DC operating point it starts from: `compute_dc_op` on
+a voltage source across series inductors (ll16's Vin, Lleak, Lm)
+returns 2.4e13 A (the source over the inductors' DC regularisation)
+instead of refusing; reproducer
+`openspec/changes/add-newton-roundoff-acceptance/probes/ll16_dc_op.py`.
+Every Newton solve from there is at roundoff, and the run stays inside
+the acceptance's run budget (longest run 5, the budget 130).
 The differential matrix (edge measure) records 53 `disagree` / `error`
 cells over 47 circuits as `known:` in `benchmarks/manifests/v2_triage.yaml`,
 plus `sepic` on pwl and trbdf2, whose trbdf2 reference ground to

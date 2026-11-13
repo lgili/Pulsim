@@ -46,7 +46,103 @@ struct Cycle {
         return 0.0;
     }
 };
+// The same row, but ||dx|| DOUBLES each iteration (1, 2, 4, ... u):
+// n = 2^k - 1 steps by 2^k ulps at a residual of 12 u. Every residual
+// is at roundoff against the row scale and ||dx|| never contracts, so
+// only the two-sided test can see that the iterate is running away.
+struct Grow {
+    Real operator()(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                    const Graph&, const DevicePool&) const {
+        const Real u = std::ldexp(1.0, -23);
+        const long n = std::lround((-x[1] - 1e9) / u);
+        J_nl.setZero();
+        f_nl.setZero();
+        const Real p2 = static_cast<Real>(n + 1);
+        if (n >= 0 && (n & (n + 1)) == 0) {   // n = 2^k - 1
+            f_nl[0] = (12.0 + static_cast<Real>(n)) * u;
+            J_nl.coeffRef(0, 1) = 12.0 / p2 - 1.0;
+        }
+        return 0.0;
+    }
+};
+// A transient step starts from the previous state, here the solution
+// itself (v = 1e9 V, i = -1e9 A): the acceptance takes its row scale
+// from that start state, so a cold zero start has none on the KCL row.
+Vector x_start(const PwlSegment& seg) {
+    Vector x = Vector::Zero(seg.state_size);
+    x[0] = 1e9;
+    x[1] = -1e9;
+    return x;
+}
 }  // namespace
+
+TEST_CASE("Roundoff acceptance: a growing ||dx|| is never accepted",
+          "[v2][newton][roundoff]") {
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 1e9});
+    pool.add_resistor(1, {.G = 1.0});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    NewtonRoundoffAcceptance ro;
+    ro.enabled = true;
+    const Grow grow;
+    try {
+        (void)solve_with_newton_b_extra(
+            seg, grow, g, pool, x_start(seg),
+            Vector::Zero(seg.state_size), 12, 1e-9, 1e-9, false, false,
+            nullptr, &ro);
+        FAIL("a growing sequence was accepted");
+    } catch (const std::runtime_error& e) {
+        REQUIRE(std::string(e.what()).find("growing") != std::string::npos);
+    }
+    REQUIRE_FALSE(ro.accepted);
+    REQUIRE(ro.total == 0);
+}
+
+TEST_CASE("Roundoff acceptance: the run budget refuses a run of accepts "
+          "by name",
+          "[v2][newton][roundoff]") {
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 1e9});
+    pool.add_resistor(1, {.G = 1.0});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    NewtonRoundoffAcceptance ro;   // one object per run, as the engines keep it
+    ro.enabled = true;
+    ro.max_consecutive = 2;
+    for (int k = 0; k < 2; ++k) {
+        const Cycle cyc;
+        (void)solve_with_newton_b_extra(
+            seg, cyc, g, pool, x_start(seg),
+            Vector::Zero(seg.state_size), 10, 1e-9, 1e-9, false, false,
+            nullptr, &ro);
+        REQUIRE(ro.accepted);
+    }
+    REQUIRE(ro.consecutive == 2);
+    const Cycle cyc;
+    try {
+        (void)solve_with_newton_b_extra(
+            seg, cyc, g, pool, x_start(seg),
+            Vector::Zero(seg.state_size), 10, 1e-9, 1e-9, false, false,
+            nullptr, &ro);
+        FAIL("the budget did not throw");
+    } catch (const NewtonRoundoffBudgetExceeded& e) {
+        const std::string w = e.what();
+        REQUIRE(w.find("3 consecutive") != std::string::npos);
+        REQUIRE(w.find("2 accepted in this run") != std::string::npos);
+    }
+    REQUIRE(ro.total == 2);
+}
 
 TEST_CASE("Roundoff acceptance: a limit cycle without net contraction "
           "is accepted at every budget",
@@ -69,7 +165,7 @@ TEST_CASE("Roundoff acceptance: a limit cycle without net contraction "
         ro.enabled = true;
         const Cycle cyc;
         const Vector x = solve_with_newton_b_extra(
-            seg, cyc, g, pool, Vector::Zero(seg.state_size),
+            seg, cyc, g, pool, x_start(seg),
             Vector::Zero(seg.state_size), iters, 1e-9, 1e-9, false, false, nullptr,
             &ro);
         REQUIRE(ro.accepted);
@@ -78,7 +174,7 @@ TEST_CASE("Roundoff acceptance: a limit cycle without net contraction "
         // Without the acceptance (the DC callers pass none) it throws.
         const Cycle cyc2;
         REQUIRE_THROWS(solve_with_newton_b_extra(
-            seg, cyc2, g, pool, Vector::Zero(seg.state_size),
+            seg, cyc2, g, pool, x_start(seg),
             Vector::Zero(seg.state_size), iters, 1e-9, 1e-9));
     }
 }

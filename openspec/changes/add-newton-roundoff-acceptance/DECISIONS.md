@@ -76,3 +76,42 @@ conservative option was taken.
    1e-15 s, and no baseline circuit aborts at h_min. A floor would
    change every run's step sequence for no measured gain; the h_min
    abort already names the roundoff check that declined.
+
+10. **Honest acceptance (2026-11-13).**
+   (a) The row scale |J||x_0| + |b| + |f_nl(x_0)| + |J_nl||x_0| and the
+   dx cap 1e-6·max(1, |x_0|) are taken once per call, at the start
+   state (iteration 0) and the step's sources, never at the iterate
+   being checked: read at a diverging iterate they grew with it.
+   (b) Stagnation is two-sided: no net contraction by 4 over two steps
+   AND no growth (the largest ||dx|| of the last three is at most twice
+   the largest of the three before). A doubling ||dx|| at roundoff
+   residual is declined ("growing"; C++ test with a whole-ulp
+   doubling sequence).
+   (c) The state kept is x_k, the iterate whose residual was checked,
+   not x_k + dx_k.
+   (d) Run budget: each engine keeps one acceptance object per run (the
+   fixed engine created one per step, so no count could span a run).
+   More than `max_consecutive` = 130 accepts with no converged solve
+   between them throws `NewtonRoundoffBudgetExceeded`, naming the row,
+   the run length and the run's total. No caller retries it at a
+   smaller step. It reaches Python as `SimulationAborted`. The budget
+   is 10× the worst honest run. Measured over the full suite: longest
+   run 13 and total 129 of 200 solves (10 mH at dt = 1e-10 s,
+   `test_newton_roundoff_floor.py`). The saturable transformer at
+   dt = 1e-8 s has a longest run of 4 and a total of 436 of 226,005
+   solves.
+   ll16_flyback_closed_loop on pwl: longest run 5, total 1,773 of 7,999
+   solves. That is inside every budget an honest case allows: its
+   longest run is below the honest worst, and its total is 4× the
+   transformer's. ll16 therefore stays quiet under this check. Its
+   cause is not the acceptance. The v1 reader starts it from
+   `compute_dc_op`, and a voltage source across series inductors (Vin,
+   Lleak, Lm) returns 2.4e13 A instead of a refusal
+   (`probes/ll16_dc_op.py`). The solves at that state really are at
+   roundoff. The defect is in the DC operating point; KNOWN_LIMITATIONS
+   records it.
+   (e) The Python warning no longer says the acceptance "replaces an
+   abort that no tolerance could have passed". 100 µH at dt = 1e-11 s
+   now converges on the in-house LU. The warning names the start-state
+   scale, says that a wrong start state can be accepted all the way,
+   and gives the budget.

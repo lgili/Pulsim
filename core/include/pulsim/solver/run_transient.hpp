@@ -951,6 +951,8 @@ inline SimulationResult run_transient(
         const Real restart_dt = Real{2} * (kGamma * opts.dt);
         Size restart_factorizations = 0;
 
+        pwl::NewtonRoundoffAcceptance newton_roundoff_run;
+        newton_roundoff_run.enabled = true;
         for (Size k = 1; k < n_steps; ++k) {
             // User-cancellation check (Phase: live scope). Lets a
             // GUI / external watchdog stop the simulation early
@@ -1035,8 +1037,8 @@ inline SimulationResult run_transient(
             // add-newton-roundoff-acceptance: a dynamic-path Newton
             // solve that exhausts its budget at row roundoff is
             // accepted and counted (DC and static paths: never).
-            pwl::NewtonRoundoffAcceptance newton_roundoff;
-            newton_roundoff.enabled = true;
+            // One object for the run: its counters are the run budget.
+            pwl::NewtonRoundoffAcceptance& newton_roundoff = newton_roundoff_run;
             auto note_roundoff = [&]() {
                 if (!newton_roundoff.accepted) return;
                 ++result.newton_roundoff_accepts;
@@ -1303,6 +1305,8 @@ inline SimulationResult run_transient(
                     run_restart(t_prev, opts.dt);
                     committed_be = true;
                 }
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;   // a run budget: never retried at a smaller dt
             } catch (const std::runtime_error& nominal_failed) {
                 // NOTE the narrow catch. Everything the solver throws
                 // is a runtime_error; a foreign exception is not.
@@ -1368,6 +1372,8 @@ inline SimulationResult run_transient(
                             } else {
                                 run_event_iteration(t_sub, sub_dt);
                             }
+                        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                            throw;   // a run budget: never retried at a smaller dt
                         } catch (const std::runtime_error& sub_failed) {
                             why = sub_failed.what();
                             all_ok = false;

@@ -8,6 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### TR-BDF2 event handling follow-up (update-trbdf2-post-event-restart)
 
+* **Changed** Newton roundoff acceptance (both transient engines). The
+  row scale and the step cap now come from the solve's start state, not
+  from the iterate being checked. A growing ||dx|| is never accepted.
+  The state kept is the iterate whose residual was checked. A run of
+  more than 130 accepted solves with no converged solve between them
+  raises `SimulationAborted`; the message names the row and the
+  counts. The worst honest run measured is 13. The warning text no
+  longer claims that no tolerance could have passed.
+  `ll16_flyback_closed_loop` is still accepted at roundoff: its start
+  state, from `compute_dc_op`, is 2.4e13 A (see KNOWN_LIMITATIONS).
 * **Fixed** `engine='trbdf2'` / `'auto'` at tight tolerances no longer
   grinds to `max_steps` on a node held only by OFF conductances. The
   SEPIC benchmark at `rtol=1e-8, atol=1e-12` completes in 28,539
@@ -76,7 +86,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** the Newton roundoff acceptance runs on the in-house-LU
   workspace: its backward error reads the workspace's copy of the
   iterate. A solve the Eigen path aborted can now converge (100 µH at
-  `tol_newton_dx` = 1e-11 completes; its test pin changed).
+  dt = 1e-11 s completes; its test pin changed).
 * **Changed** the reference harness compares on an edge-tolerant
   measure: source-forced nodes are dropped and the step that contains a
   switching edge is not interpolated (`--metric interp` keeps the old

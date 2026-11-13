@@ -114,6 +114,8 @@ struct NewtonWorkspace {
     sparse::Matrix J_nl_trial;
     Vector f_nl, f_nl_trial, jx, f, neg_f, dx, x_trial, f_trial;
     Vector ro_f, ro_x;   // roundoff acceptance: f(x_k), x_k of the last iteration
+    Vector ro_scale;     // roundoff acceptance: row scale at the call's start state
+    Real ro_x0_inf = 0;  // roundoff acceptance: |x_0|_inf of the call
     std::unique_ptr<sparse::DirectSolver> solver;   // analysed for J
     std::vector<Real> ls, ns;            // operands scattered on J
 
@@ -195,9 +197,24 @@ struct NewtonRoundoffAcceptance {
     bool enabled = false;
     Real omega_max = Real{8} * std::numeric_limits<Real>::epsilon();
     Real dx_rel_max = Real{1e-6};
+    /// Run budget: the longest run of accepted solves with no converged
+    /// solve between them. Accepts are for isolated solves; a run of
+    /// them is a state the solver is not tracking (BUDGET in DECISIONS).
+    Size max_consecutive = Size{130};
     bool accepted = false;
     Real omega = 0;
     Index row = kInvalidIndex;
+    /// Run counters (the caller keeps one object per run).
+    Size consecutive = 0;
+    Size longest = 0;
+    Size total = 0;
+};
+
+/// Thrown when the run's roundoff-acceptance budget is exhausted. A
+/// named error, not a Newton failure: no caller may retry it at a smaller
+/// step (a retry is how the fixed engine's ladder would swallow it).
+struct NewtonRoundoffBudgetExceeded : std::runtime_error {
+    using std::runtime_error::runtime_error;
 };
 
 /// Newton-iterated solve on top of a cached PwlSegment, with an
@@ -237,9 +254,11 @@ inline void solve_with_newton_in_place(
     // call (in the workspace: no allocation per call) and the last three
     // ||dx||.
     bool ro_set = false;
-    Real ro_dx[3] = {std::numeric_limits<Real>::infinity(),
-                     std::numeric_limits<Real>::infinity(),
-                     std::numeric_limits<Real>::infinity()};
+    bool ro_scaled = false;
+    // ||dx|| of the last six iterations, newest first.
+    Real ro_dx[6];
+    std::fill(std::begin(ro_dx), std::end(ro_dx),
+              std::numeric_limits<Real>::infinity());
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
     }
@@ -381,6 +400,22 @@ inline void solve_with_newton_in_place(
         }
 
         (void)nl_residual_norm;   // diagnostic only
+        // Roundoff acceptance: the row scale is taken HERE, at the start
+        // state of the call (iteration 0: the step's start or its warm
+        // start) and the step's sources, never at the iterate the check
+        // runs on. Read at a diverging iterate it grew with |x| and let a
+        // 2.4e13 A state through (ll16_flyback_closed_loop on pwl).
+        if (ro_on && !ro_scaled) {
+            const Vector ax0 = x.cwiseAbs();
+            w.ro_scale = L->cwiseAbs() * ax0;
+            w.ro_scale += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs()
+                        + f_nl.cwiseAbs();
+            if (J_nl.nonZeros() > 0) {
+                w.ro_scale += J_nl.cwiseAbs() * ax0;
+            }
+            w.ro_x0_inf = x.size() == 0 ? Real{0} : x.cwiseAbs().maxCoeff();
+            ro_scaled = true;
+        }
         const Real baseline_norm =
             f_combined.lpNorm<Eigen::Infinity>();
 
@@ -432,6 +467,7 @@ inline void solve_with_newton_in_place(
             if (baseline_norm < tol_res) {
                 last_dx_norm  = Real{0};
                 last_res_norm = baseline_norm;
+                if (roundoff != nullptr) roundoff->consecutive = 0;
                 return;
             }
             sparse::Matrix& J_nl_trial = w.J_nl_trial;
@@ -611,10 +647,10 @@ inline void solve_with_newton_in_place(
             ? kInvalidIndex : static_cast<Index>(dx_at);
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
-        ro_dx[2] = ro_dx[1];
-        ro_dx[1] = ro_dx[0];
+        for (int k = 5; k > 0; --k) ro_dx[k] = ro_dx[k - 1];
         ro_dx[0] = last_dx_norm;
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
+            if (roundoff != nullptr) roundoff->consecutive = 0;
             return;
         }
         // SCALE-RELATIVE residual acceptance. `tol_res` is
@@ -647,6 +683,7 @@ inline void solve_with_newton_in_place(
                     ? Real{0}
                     : b_extra.cwiseAbs().maxCoeff()});
             if (last_res_norm < tol_res * scale) {
+                if (roundoff != nullptr) roundoff->consecutive = 0;
                 return;
             }
         }
@@ -671,34 +708,35 @@ inline void solve_with_newton_in_place(
         }
     }
 
-    // Budget exhausted. Transient callers may accept x_k + dx_k when
-    // the last two steps did not contract by 4, the step is tiny against
-    // the state, and every row's residual is within omega_max of the
-    // magnitudes that row sums (Oettli-Prager backward error): the
-    // iterate solves a system perturbed by 8 eps per coefficient. The
-    // absolute tol_dx stays the test everywhere else.
+    // Budget exhausted. Transient callers may accept x_k (the iterate
+    // whose residual is checked, not x_k + dx_k) when ||dx|| neither
+    // contracted by 4 over the last two steps nor grew over the last
+    // three (a two-sided stagnation test), ||dx_k|| <= 1e-6 of the START
+    // state, and every row's residual at x_k is within omega_max of the
+    // magnitudes that row sums at the START state (Oettli-Prager backward
+    // error against the call's own scale). Nothing taken from the iterate
+    // can make the test easier as the iterate diverges. The absolute
+    // tol_dx stays the test everywhere else.
     std::string ro_note;
-    if (ro_on && ro_set) {
-        // The terms of the residual at x_k: J_lin = seg.J, and the
-        // workspace's J_nl / f_nl, last refreshed at x_k.
+    if (ro_on && ro_set && ro_scaled) {
         const Vector& ro_f = w.ro_f;
-        const Vector& ro_x = w.ro_x;
         // No NET contraction over two steps. "Each step at least half
         // the previous" read a roundoff limit cycle (||dx|| 3.2e-7,
         // 5.0e-7, 1.9e-7) as converging. Quadratic convergence, or
         // linear at a rate below 1/2, cuts ||dx|| by more than 4 in two
-        // steps; a slower rate counts as stagnated and the omega and
-        // dx-ceiling tests below decide.
-        const bool stagnated = ro_dx[0] >= Real{0.25} * ro_dx[2];
+        // steps; a slower rate counts as stagnated and the tests below
+        // decide.
+        const bool no_contraction = ro_dx[0] >= Real{0.25} * ro_dx[2];
+        // ...and no growth: the largest of the last three is at most
+        // twice the largest of the three before (a limit cycle repeats
+        // its maxima; a diverging iterate does not).
+        const Real m_new = std::max({ro_dx[0], ro_dx[1], ro_dx[2]});
+        const Real m_old = std::max({ro_dx[3], ro_dx[4], ro_dx[5]});
+        const bool growing = !(m_new <= Real{2} * m_old);
+        const bool stagnated = no_contraction && !growing;
         const Real dx_cap = roundoff->dx_rel_max
-            * std::max(Real{1}, ro_x.cwiseAbs().maxCoeff());
-        const Vector ax = ro_x.cwiseAbs();
-        Vector scale = seg.J.cwiseAbs() * ax;
-        scale += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs()
-               + f_nl.cwiseAbs();
-        if (J_nl.nonZeros() > 0) {
-            scale += J_nl.cwiseAbs() * ax;
-        }
+            * std::max(Real{1}, w.ro_x0_inf);
+        const Vector& scale = w.ro_scale;
         Real omega = Real{0};
         Index row = kInvalidIndex;
         for (Index i = 0; i < static_cast<Index>(n); ++i) {
@@ -714,20 +752,41 @@ inline void solve_with_newton_in_place(
         }
         if (stagnated && ro_dx[0] <= dx_cap
             && omega <= roundoff->omega_max) {
+            if (roundoff->consecutive + 1 > roundoff->max_consecutive) {
+                throw NewtonRoundoffBudgetExceeded(std::format(
+                    "solve_with_newton: {} consecutive Newton solves ended "
+                    "at the iteration budget and would each have been "
+                    "accepted at round-off level (worst row {} at {}, "
+                    "backward error {:.2g} eps; {} accepted in this run). "
+                    "Round-off acceptance is for isolated solves; a run of "
+                    "them means the solver is not tracking this state. "
+                    "Check the initial state and the device named, and "
+                    "cross-check on the other transient engine.",
+                    roundoff->consecutive + 1,
+                    row_equation_label(graph, pool, row), row,
+                    omega / std::numeric_limits<Real>::epsilon(),
+                    roundoff->total));
+            }
+            x = w.ro_x;
             roundoff->accepted = true;
             roundoff->omega = omega;
             roundoff->row = row;
+            ++roundoff->consecutive;
+            ++roundoff->total;
+            roundoff->longest = std::max(roundoff->longest,
+                                         roundoff->consecutive);
             return;
         }
         ro_note = std::format(
             " Roundoff acceptance declined: row backward error {:.2g} eps "
-            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x|, last two "
-            "steps {} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
+            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, last steps "
+            "{} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
             omega / std::numeric_limits<Real>::epsilon(),
             row_equation_label(graph, pool, row),
             roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
             ro_dx[0] <= dx_cap ? "within" : "above",
-            stagnated ? "stagnated" : "still contracting",
+            growing ? "growing" : (no_contraction ? "stagnated"
+                                                  : "still contracting"),
             ro_dx[2], ro_dx[1], ro_dx[0]);
     }
 

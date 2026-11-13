@@ -35,3 +35,11 @@
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check
 - [ ] 7.2 `openspec validate add-newton-roundoff-acceptance --strict` and `openspec validate --all --strict`
+
+## 8. Follow-up: honest acceptance (DECISIONS.md 10)
+- [x] 8.1 Scale and dx cap from the call's start state and sources
+- [x] 8.2 Two-sided stagnation test; C++ test: a doubling ||dx|| is declined
+- [x] 8.3 The accepted state is the checked iterate x_k
+- [x] 8.4 Run budget (130 consecutive, 10× the worst honest run) raises `NewtonRoundoffBudgetExceeded` naming row and count; C++ test; Eigen 3.4.0 run of the Newton tests
+- [x] 8.5 ll16: cause found (compute_dc_op on a source across series inductors, `probes/ll16_dc_op.py`), known-limitations row; it stays within the budget
+- [x] 8.6 Python warning text; test parameter renamed `needs_acceptance`

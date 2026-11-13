@@ -855,6 +855,8 @@ inline SimulationResult run_transient_trbdf2(
                     ro_row = newton_roundoff.row;
                 }
             }
+        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+            throw;   // a run budget: never retried at a smaller h
         } catch (const std::runtime_error& e) {
             newton_last_error = e.what();
             return false;
@@ -1327,6 +1329,8 @@ inline SimulationResult run_transient_trbdf2(
             m_probe = mask_at(t_gates);
             try {
                 probe_solve(m_probe, t, hp, x_trial);
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;
             } catch (const std::runtime_error&) {
                 return;   // no usable probe: keep the old slots
             }
