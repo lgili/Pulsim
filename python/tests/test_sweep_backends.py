@@ -117,6 +117,35 @@ def test_step_observer_is_reported():
     assert "switch_fn" not in res.step_loop_python_callbacks
 
 
+def test_periodic_step_observer_is_reported_on_trbdf2():
+    # After fix-control-tick-semantics the trbdf2 branch takes its
+    # ticks from the control plan; the report must still name them.
+    res = p.simulate(build_buck(), t_end=T_END, engine="trbdf2",
+                     switch_fn=native_pwm(),
+                     step_observer=lambda t, x: None,
+                     controller_period=1e-5)
+    assert res.step_loop_python_callbacks == ("step_observer",)
+
+
+@pytest.mark.parametrize("parallel,backend", [(False, "auto"),
+                                              (True, "thread")])
+def test_a_refusal_is_not_a_failed_point(parallel, backend):
+    # add-engine-conformance-matrix: an UnsupportedError holds for every
+    # point, so it propagates instead of landing in `failed`.
+    def factory(R):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "a", "gnd", 1.0)
+        b.add_resistor("R", "a", "o", R)
+        b.add_shockley_diode("D", "o", "gnd")
+        return b
+
+    with pytest.raises(p.UnsupportedError):
+        p.sweep(factory, params={"R": [1e3, 2e3]},
+                kpi_fn=lambda r, prm: {}, parallel=parallel,
+                backend=backend, n_workers=2, verbose=False,
+                t_end=1e-5, engine="dsed")
+
+
 def test_combination_with_a_python_callable_is_reported():
     n = build_buck().graph.num_switches
     mixed = p.make_combined_switch_fn(n, [native_pwm(), PyPwm(0.1)])

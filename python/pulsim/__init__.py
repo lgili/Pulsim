@@ -2437,7 +2437,8 @@ def simulate(
         res.engine_route_reason = None
         res.step_loop_python_callbacks = _step_loop_python_callbacks(
             switch_fn=switch_fn, b_extra_fn=b_extra_fn,
-            step_observer=_auto_observer,
+            # the loops' ticks are reported under closed_loops
+            step_observer=step_observer,
             should_continue=should_continue,
             closed_loops=closed_loops or None)
         # The implausible-voltage detector is engine-independent
