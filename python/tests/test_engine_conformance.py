@@ -616,7 +616,23 @@ _REFUSED = {
         {"enable_substep_state_correction": True}, ("trbdf2", "dsed")),
     "discontinuity_restart": (
         {"discontinuity_restart": True}, ("trbdf2", "dsed")),
+    "resolution_diagnostics": (
+        {"resolution_diagnostics": True}, ("trbdf2", "dsed")),
 }
+
+
+@pytest.mark.parametrize("kw", [
+    {"discontinuity_restart": True, "enable_substep_state_correction": True},
+    {"resolution_diagnostics": True},
+])
+def test_fixed_step_features_are_honoured_on_pwl(kw):
+    """The pwl side of the two cells above: split and diagnostics run and
+    leave their trace (the split's counters, the resolution record)."""
+    r = _sim("pwl", **kw)
+    if "resolution_diagnostics" in kw:
+        assert r.resolution is not None
+    else:
+        assert r.n_split_steps == 0 and "unlocated_gate_steps" in r.counters
 
 
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))

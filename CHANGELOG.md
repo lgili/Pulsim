@@ -118,21 +118,24 @@ LC results bit-identical to before the fallback (the fallback never
 fires there); `res.counters` gains `stage2_retries`, `stage2_be_kept`,
 `stage2_retry_failures`. Flag off: bit-identical.
 
-### Fixed engine: resolution diagnostics (read-only, on by default)
+### Fixed engine: resolution diagnostics (read-only, opt-in)
 
-A fixed-step run that does not resolve its circuit now says so.
+With `resolution_diagnostics=True`, a fixed-step run that does not
+resolve its circuit says so. Off by default: it costs 5-14 % ns/step
+(the gate was 3 %).
 `res.resolution` (`engine='pwl'`; `None` for `trbdf2`/`dsed` or when
 off) holds `lte` (per stored sample), `lte_max`, `lte_branch`,
-`lte_time`, `n_branches_covered` and `ringing` records (`var`,
-`t_start`, `length`, `max_delta`). One `pulsim.ResolutionWarning`
-(a `UserWarning`) per run when `lte_max > 1e-2` or a ringing record
-exists. States are bit-identical with `resolution_diagnostics=False`.
-Projects that turn warnings into errors:
-`warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)`.
+`lte_time`, `n_branches_covered`, `unestimated_fraction` and `ringing`
+records (`var`, `t_start`, `length`, `max_delta`). The estimate is
+normalised by the running peak floored at 1e-3 of the peak of its kind
+(volts / amps), and a ringing step must exceed 1e-3 of the entry's
+peak. One `pulsim.ResolutionWarning` (a `UserWarning`) per run when
+`lte_max > 1e-2`, a ringing record exists, or over half the steps could
+not be estimated. States are bit-identical either way.
 
 | case | `lte_max` | ringing | warns |
 |---|---|---|---|
-| RC, `dt` = 10τ / τ / τ/10 / τ/100 | 0.347 / 2.67e-2 / 3.3e-4 / 3.3e-6 | run of 8 on `V(out)` at 10τ | yes / yes / no / no |
+| RC, `dt` = 10τ / τ / τ/10 / τ/100 | 0.347 / 2.67e-2 / 3.3e-4 / 3.3e-6 | runs of 8 on `V(out)`, 19 on `Is(V)` at 10τ | yes / yes / no / no |
 | buck CCM T/20 / T/100 / T/400 | 1.4e-4 / 2.7e-5 / 6.8e-6 | none | no |
 | DCM buck T/100, flag off / restart rule | 2.8e-3 / 7.4e-7 | `V(sw)` run of 52 / none | yes / no |
 | 1 nF, 1 mΩ switch, dt = 1 ns, flag off / rule | 0.66 / 5.0e-5 | 500 / none | yes / no |

@@ -273,6 +273,9 @@ struct SimulationResult {
         Index lte_branch = kInvalidIndex;
         Real lte_time = 0;
         Size n_branches_covered = 0;
+        /// Fraction of the steps with no estimate (stencil invalid): an
+        /// unestimable run is not a resolved one.
+        Real unestimated_fraction = 0;
         std::vector<RingingRecord> ringing;
     };
     Resolution resolution;

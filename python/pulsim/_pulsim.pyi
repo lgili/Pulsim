@@ -1442,6 +1442,9 @@ class ResolutionRecord:
     @property
     def ringing(self) -> list[RingingRecord]:
         ...
+    @property
+    def unestimated_fraction(self) -> float:
+        ...
 class SimulationResult:
     """
     Output of run_transient: parallel `times` and `states` arrays, plus event diagnostics.

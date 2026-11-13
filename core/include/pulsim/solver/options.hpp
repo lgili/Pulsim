@@ -173,7 +173,7 @@ struct SimulationOptions {
     /// Nyquist-ringing detector over the state vector, recorded in
     /// `SimulationResult::resolution`. Read-only: the states are the
     /// same bit for bit either way; off skips both passes.
-    bool resolution_diagnostics = true;
+    bool resolution_diagnostics = false;   // opt-in (review M5: cost > 3 %)
 
     /// Floating-inductor freeze (post-solve guard).
     ///

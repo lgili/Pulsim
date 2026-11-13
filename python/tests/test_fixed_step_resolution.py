@@ -33,6 +33,7 @@ def _rc():
 
 
 def _sim(b, **kw):
+    kw.setdefault("resolution_diagnostics", True)    # opt-in (review M5)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         res = p.simulate(b, engine="pwl", **kw)
@@ -76,9 +77,10 @@ def test_rc_at_ten_tau_is_flagged_once_with_the_variable_named():
     assert np.max(abs(v - 10 * (1 - np.exp(-t / TAU)))) == pytest.approx(1.666, rel=1e-3)
     assert len(w) == 1
     msg = str(w[0].message)
-    assert "C:" in msg and "Is(V): 29 sign-alternating" in msg and "Reduce dt" in msg
-    # Ringing: V(out) 8 alternating steps, the source current 29.
-    assert _names(b, res) == {"V(out)": 8, "Is(V)": 29}
+    assert "C:" in msg and "Is(V): 19 sign-alternating" in msg and "Reduce dt" in msg
+    # Ringing: V(out) 8 alternating steps, the source current 19 (29
+    # before the 1e-3-of-peak floor: its tail decays by 2/3 per step).
+    assert _names(b, res) == {"V(out)": 8, "Is(V)": 19}
 
 
 def _buck(R, L, N, nper=200, **kw):
@@ -146,6 +148,7 @@ def _sat(**kw):
     b.add_resistor("R", "in", "m", 1.0)
     b.add_saturable_inductor("Ls", "m", "gnd", 1e-3, 2.0, 1e-4)
     b.add_capacitor("C", "m", "gnd", 1e-6)
+    kw.setdefault("resolution_diagnostics", True)
     return p.simulate(b, t_end=2e-3, dt=2e-6, engine="pwl", **kw)
 
 
@@ -166,12 +169,33 @@ def test_states_are_bit_identical_with_the_diagnostics_off(make):
     assert np.asarray(on.times).tobytes() == np.asarray(off.times).tobytes()
 
 
+def test_off_by_default():
+    """Default OFF (review M5): it costs 5-14 % and the cost gate was 3 %."""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        res = p.simulate(_rc(), t_end=0.3, dt=10 * TAU, engine="pwl")
+    assert res.resolution is None
+    assert not [x for x in w if issubclass(x.category, p.ResolutionWarning)]
+
+
+def test_an_unestimable_run_is_reported_and_warned():
+    """A buck at T/5 with the rule: every step restarts or changes mask,
+    no three-step stencil exists, so nothing was shown to be resolved."""
+    b, res, w = _buck(1.0, 10e-6, 5, discontinuity_restart=True)
+    assert res.resolution.unestimated_fraction > 0.5, \
+        res.resolution.unestimated_fraction
+    assert len(w) == 1 and "could not be estimated" in str(w[0].message)
+
+
 def test_off_means_no_record_and_no_warning():
     res, w = _sim(_rc(), t_end=0.3, dt=10 * TAU, resolution_diagnostics=False)
     assert res.resolution is None and not w
-    sol = p.SolverOptions(resolution_diagnostics=False)
-    res, w = _sim(_rc(), t_end=0.3, dt=10 * TAU, solver=sol)
-    assert res.resolution is None and not w
+    sol = p.SolverOptions(resolution_diagnostics=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = p.simulate(_rc(), t_end=0.3, dt=10 * TAU, engine="pwl",
+                         solver=sol)
+    assert res.resolution is not None          # SolverOptions turns it on
 
 
 def test_variable_step_engine_has_no_record():

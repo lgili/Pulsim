@@ -779,6 +779,7 @@ _berg.install(CircuitBuilder)
 
 # add-fixed-step-resolution-diagnostics thresholds (design D3).
 _RESOLUTION_LTE_MAX = 1e-2
+_RESOLUTION_UNESTIMATED_MAX = 0.5
 
 
 def _warn_unlocated_edges(res):
@@ -803,7 +804,8 @@ def _warn_resolution(builder, res, dt):
     if rd is None:
         return
     ring = list(rd.ringing)
-    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring):
+    unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
+    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring or unest):
         return
     import warnings
     lines = []
@@ -825,6 +827,11 @@ def _warn_resolution(builder, res, dt):
             f"  * {nm}: {worst.length} sign-alternating steps from "
             f"t = {worst.t_start:.6g} s (largest step change "
             f"{worst.max_delta:.4g}); {len(ring)} such run(s) in all.")
+    if unest:
+        lines.append(
+            f"  * {rd.unestimated_fraction:.0%} of the steps could not be "
+            "estimated (a mask change, restart, split or source jump "
+            "within three steps): the run is not shown to be resolved.")
     warnings.warn(
         f"simulate(): dt = {dt:.4g} s does not resolve this circuit "
         "(fixed-step engine).\n" + "\n".join(lines) +
@@ -839,7 +846,7 @@ class ResolutionWarning(UserWarning):
     a large truncation estimate or a Nyquist alternation
     (`res.resolution`). Silence with
     ``warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)``
-    or ``simulate(..., resolution_diagnostics=False)``."""
+    or by leaving ``resolution_diagnostics`` off (the default)."""
 
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
@@ -2031,13 +2038,15 @@ def simulate(
         TR-BDF2 abort).
 
     resolution_diagnostics
-        ``engine='pwl'`` only, default on: record ``res.resolution`` (a
-        per-step truncation estimate of the linear capacitors and
-        inductors relative to each one's running peak, and the runs of
-        >= 4 sign-alternating steps of any state entry) and warn once
-        (:class:`ResolutionWarning`) when ``lte_max > 1e-2`` or a run
-        exists. An estimate, not an error bound. ``False`` skips both
-        passes; the states are the same bit for bit either way.
+        ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
+        records ``res.resolution`` (a per-step truncation estimate of
+        the linear capacitors and inductors relative to each one's
+        running peak, floored at 1e-3 of its kind's peak, the runs of
+        >= 4 sign-alternating steps of any state entry, and the fraction
+        of steps that could not be estimated) and warns once
+        (:class:`ResolutionWarning`) when ``lte_max > 1e-2``, a run
+        exists or over half the steps are unestimated. An estimate, not
+        an error bound; the states are the same bit for bit either way.
 
     Returns
     -------
@@ -2311,6 +2320,8 @@ def simulate(
             "enable_substep_state_correction": bool(
                 enable_substep_state_correction),
             "discontinuity_restart": bool(discontinuity_restart),
+            # Per-step truncation of a fixed grid: none to estimate.
+            "resolution_diagnostics": bool(resolution_diagnostics),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -2399,6 +2410,7 @@ def simulate(
             enable_substep_state_correction=(
                 enable_substep_state_correction),
             discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -3432,7 +3444,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn, discontinuity_restart=None):
+                      switch_fn, discontinuity_restart=None,
+                      resolution_diagnostics=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3503,6 +3516,9 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if discontinuity_restart:
         why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
                     "fixed-step engine's restart rule"))
+    if resolution_diagnostics:
+        why.append(_blk("resolution_diagnostics", "resolution_diagnostics "
+                    "estimates a fixed step's truncation"))
     if store_every is not None and int(store_every) != 1:
         why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:

@@ -311,8 +311,15 @@ three-point stencil straddles a mask change, restart, split, retry or
 built-in source jump (an undeclared `b_extra_fn` jump is not seen); it
 is an estimate, not an error bound. Thresholds (1e-2; 1 % over four
 steps) come from one prototype and five circuits. Cost with it on:
-+5 % to +14 % ns/step (design gate: 3 %); `resolution_diagnostics=False`
-removes it.
++5 % to +14 % ns/step (design gate: 3 %), so it is OFF by default
+(`resolution_diagnostics=True` turns it on). With the shipped examples
+under the example test's all-gates-OFF drive, six warn: buck,
+buck_converter, stress_buck_switching (an inductor behind a 1e-9 S
+switch rings at Nyquist: true), half_bridge_pwm and
+stress_large_rc_ladder (truncation 0.67 / 0.056 at their dt: true), and
+flyback (`T1.s` 1.27e3: the normalisation of a winding current that is
+~0 everywhere — a false positive the 1e-3-of-kind floor does not
+remove).
 
 ### DSED exact propagator: what is still numeric or refused
 

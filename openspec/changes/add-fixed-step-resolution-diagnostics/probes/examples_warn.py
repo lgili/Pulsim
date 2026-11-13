@@ -22,7 +22,8 @@ for path in sorted(EX.glob("*.yaml")):
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         try:
-            res = p.simulate(lc, t_end=t_end, engine="pwl", switch_fn=lambda t: off)
+            res = p.simulate(lc, t_end=t_end, engine="pwl", switch_fn=lambda t: off,
+                             resolution_diagnostics=True)
         except Exception as e:  # noqa: BLE001 — a report, not a check
             print(f"{path.name:40s} ERROR {type(e).__name__}")
             continue

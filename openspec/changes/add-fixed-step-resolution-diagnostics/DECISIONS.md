@@ -103,3 +103,24 @@ over 6 entries alone is several percent. Off: the passes are skipped
 (one branch per step); states bit-identical on and off
 (`probes/diag_off_check.py` over the 69-run bookkeeping baseline, and
 the pinned tests).
+
+## Review finding M5 (2026-11-13)
+
+- **Default.** → OFF (`resolution_diagnostics=False`). → The coordinator's
+  rule: on only if the cost is <= 3 % and no shipped example warns
+  falsely; the cost is +5-14 % and flyback warns falsely. → Reverse: set
+  the default in `options.hpp` back to true.
+- **Floors.** → Truncation normalised by max(running peak, 1e-3 x the
+  peak of the variable's kind: capacitor volts / inductor amps); a
+  ringing step must exceed max(1 % local, 1e-3 x the entry's peak) (was
+  1e-9). → RC at 10τ: `Is(V)` run 29 -> 19 (its tail decays by 2/3 per
+  step below the floor). flyback `T1.s` under all-OFF gates 1.3e5 ->
+  1.27e3: still a false positive, recorded in KNOWN_LIMITATIONS.
+- **Too quiet.** → `unestimated_fraction` (steps with no valid stencil /
+  steps); warns above 0.5. Buck at T/5 with the rule: every step.
+- **Examples.** → The example test no longer filters
+  `ResolutionWarning` (default off). Under its all-gates-OFF drive with
+  the diagnostics on, six warn (probe `examples_warn.py`): five true
+  (inductor behind a 1e-9 S switch, RC ladder at its dt), flyback false.
+  The examples' dt is not changed: the warning comes from the test's
+  artificial drive, not the example's.

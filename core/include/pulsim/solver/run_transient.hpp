@@ -1101,6 +1101,8 @@ inline SimulationResult run_transient(
              *rd_inv = nullptr, *rd_dprev = nullptr, *rd_xpeak = nullptr,
              *rd_t0 = nullptr, *rd_dmax = nullptr;
         Size *rd_cnt = nullptr, *rd_open = nullptr;
+        Size rd_steps = 0, rd_unest = 0;
+        Real rd_kind_peak[2] = {Real{0}, Real{0}};   // capacitors, inductors
         constexpr Size kRdNone = std::numeric_limits<Size>::max();
         if (diag) {
             const auto& ents = history.entries();
@@ -2285,6 +2287,10 @@ inline SimulationResult run_transient(
                     : (rd_run > 0 && stamped_mask == rd_prev_mask ? rd_run + 1
                                                                   : 1);
                 rd_prev_mask = stamped_mask;
+                ++rd_steps;
+                if (rd_run < 3) {
+                    ++rd_unest;
+                }
                 const auto& ents = history.entries();
                 for (Size j = 0; j < ents.size(); ++j) {
                     const auto& e = ents[j];
@@ -2293,14 +2299,18 @@ inline SimulationResult run_transient(
                     const Real f = (cap ? e.i_prev : e.v_prev) * rd_inv[j];
                     const Real y = std::abs(cap ? e.v_prev : e.i_prev);
                     rd_peak[j] = std::max(rd_peak[j], y);
+                    Real& kpk = rd_kind_peak[cap ? 0 : 1];
+                    kpk = std::max(kpk, y);
                     if (rd_run >= 3) {
-                        // e > r_best·peak  ⇔  e/peak > r_best (no division
-                        // unless a maximum moves).
+                        // Normalised by the running peak, floored at 1e-3
+                        // of the peak of its kind (volts / amps; review
+                        // M5: a near-zero winding gave 1.3e5).
+                        const Real den = std::max(rd_peak[j],
+                                                  Real{1e-3} * kpk);
                         const Real e_abs = opts.dt / Real{12} *
                             std::abs(f - Real{2} * rd_f1[j] + rd_f2[j]);
-                        if (e_abs > rd_since_store * rd_peak[j] &&
-                            rd_peak[j] > Real{0}) {
-                            const Real r = e_abs / rd_peak[j];
+                        if (e_abs > rd_since_store * den && den > Real{0}) {
+                            const Real r = e_abs / den;
                             rd_since_store = r;
                             if (r > rd.lte_max) {
                                 rd.lte_max = r;
@@ -2324,9 +2334,11 @@ inline SimulationResult run_transient(
                     const Real d_last = dps[u];
                     dps[u] = d;
                     if (d * d_last < Real{0}) [[unlikely]] {
+                        // Floor: 1e-3 of the entry's own peak (round-off
+                        // alternation of a state near zero is not ringing).
                         const Real thr = std::max(
                             Real{0.01} * std::max(ax, std::abs(xps[u])),
-                            Real{1e-9} * pks[u]);
+                            Real{1e-3} * pks[u]);
                         if (std::abs(d) > thr) {
                             if (rd_cnt[u]++ == 0) {
                                 rd_t0[u] = t;
@@ -2370,6 +2382,10 @@ inline SimulationResult run_transient(
                     rd_since_store = 0;
                 }
             }
+        }
+        if (diag && rd_steps > 0) {
+            rd.unestimated_fraction =
+                static_cast<Real>(rd_unest) / static_cast<Real>(rd_steps);
         }
         if (diag && rd.lte.size() < result.times.size()) {
             // The initial sample(s) carry no estimate.

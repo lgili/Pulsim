@@ -470,7 +470,7 @@ Each row was measured on this version. The fix column is what to write.
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode on "its conduction boundary" or in a state "its commutation rule forbids", a `switch_fn` pulse narrower than its sampling. Silence is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped (2 us in 20 ms: 11 of 20 phases) | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
 | 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Linear joins make each edge a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
 | 15 | Controllers run each step | A source ticks at `t_start + k*T`, `ceil(span/T)` times | `step_observer` needs `controller_period=`; see `res.control_tick_counts` |
-| 16 | No `ResolutionWarning` means resolved | `res.resolution` estimates, not bounds; stateful devices excluded | Halve `dt` (6.3) |
+| 16 | No `ResolutionWarning` means resolved | Opt-in (`resolution_diagnostics=True`); estimates, not bounds | Halve `dt` (6.3) |
 
 Traps 1, 3 and 4, executed:
 
@@ -590,7 +590,7 @@ run, or `np.interp` onto a uniform grid.
 
 ### 6.3 Step-size convergence
 
-Read `res.resolution` first: `lte_max` (step truncation over the peak;
+Opt in, read `res.resolution`: `lte_max` (step truncation over the peak;
 warns above 1e-2), `ringing` (Nyquist runs). Then halve `dt`, rerun. A figure that moves more than you need is not
 converged. The fixed engine is first order unless it restarts (trap 9):
 

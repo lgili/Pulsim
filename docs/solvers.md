@@ -44,7 +44,9 @@ Pulsim's transient kernel supports two **fixed-step** integrators
   peak, on three steps under one mask without restart, split, retry or
   source jump; plus a Nyquist-ringing detector (`Δ_k·Δ_{k−1} < 0`,
   `|Δ_k|` above 1 % of the local magnitude, four steps). Recorded in
-  `res.resolution`; `pulsim.ResolutionWarning` above 1e-2 or on a run.
+  `res.resolution`; `pulsim.ResolutionWarning` above 1e-2, on a run or
+  when over half the steps are unestimated. Opt-in:
+  `resolution_diagnostics=True`.
 
 ### BDF1 (implicit Euler)
 

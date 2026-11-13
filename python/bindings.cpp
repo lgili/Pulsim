@@ -2467,6 +2467,8 @@ void init_module(py::module_& m) {
                     static_cast<py::ssize_t>(r.lte.size()), r.lte.data());
             })
         .def_readonly("lte_max", &SimulationResult::Resolution::lte_max)
+        .def_readonly("unestimated_fraction",
+                       &SimulationResult::Resolution::unestimated_fraction)
         .def_readonly("lte_branch",
                        &SimulationResult::Resolution::lte_branch)
         .def_readonly("lte_time", &SimulationResult::Resolution::lte_time)

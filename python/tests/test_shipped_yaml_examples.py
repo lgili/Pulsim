@@ -80,13 +80,6 @@ def test_example_runs_a_short_fixed_step_window(path):
     t0 = time.perf_counter()
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        # All gates OFF leaves switch nodes floating behind 1e-9 S: seven
-        # files (buck, buck_converter, flyback, half_bridge_pwm,
-        # phase_shift_full_bridge, stress_buck_switching,
-        # stress_large_rc_ladder) get a true but artificial
-        # ResolutionWarning here (add-fixed-step-resolution-diagnostics,
-        # probes/examples_warn.py); every other warning stays an error.
-        warnings.filterwarnings("ignore", category=p.ResolutionWarning)
         res = p.simulate(lc, t_end=t_end, engine="pwl",
                          switch_fn=lambda t: off)
     elapsed = time.perf_counter() - t0
