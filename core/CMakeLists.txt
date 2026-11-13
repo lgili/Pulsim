@@ -52,6 +52,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
+        tests/dsed/test_periodic_orbit.cpp  # the Newton shooting loop in the kernel
     )
     target_link_libraries(pulsim_core_dsed_tests
         PRIVATE

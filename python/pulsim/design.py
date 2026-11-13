@@ -28,6 +28,7 @@ import json
 import math
 import time
 import types
+from collections import abc as _abc
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence
 
@@ -81,10 +82,21 @@ class FrozenDict(dict):
         return hash(tuple(sorted(self.items(), key=lambda kv: kv[0])))
 
 
+_PLAIN = (float, int, str, bool, type(None))
+
+
 def _fz(m) -> FrozenDict:
-    return FrozenDict({k: _fz(v) if isinstance(v, Mapping)
-                       else tuple(v) if isinstance(v, list) else v
-                       for k, v in m.items()})
+    out = {}
+    for k, v in m.items():
+        # scalars first: an abc isinstance per KPI value was the record's
+        # largest cost (DECISIONS 18)
+        if type(v) in _PLAIN:
+            out[k] = v
+        elif isinstance(v, _abc.Mapping):
+            out[k] = _fz(v)
+        else:
+            out[k] = tuple(v) if isinstance(v, list) else v
+    return FrozenDict(out)
 
 
 @dataclass(frozen=True)
@@ -221,7 +233,7 @@ def _canon_value(v):
         return int(v)
     if isinstance(v, (float, np.floating)):
         return float(v).hex()      # exact, and NaN/inf are representable
-    if isinstance(v, Mapping):
+    if isinstance(v, _abc.Mapping):
         return {str(k): _canon_value(x) for k, x in sorted(v.items())}
     if isinstance(v, (tuple, list)):
         return [_canon_value(x) for x in v]
@@ -494,9 +506,14 @@ class Evaluator:
                         "options": self._options_digest})
 
     def _provenance(self):
-        from . import __version__
-        return {"pulsim": str(__version__), "build": _build_hash(),
-                "options": self._options_digest}
+        # one frozen mapping per evaluator: it does not depend on the design
+        prov = self.__dict__.get("_prov")
+        if prov is None:
+            from . import __version__
+            prov = self._prov = _fz({"pulsim": str(__version__),
+                                     "build": _build_hash(),
+                                     "options": self._options_digest})
+        return prov
 
     # -- public ----------------------------------------------------------
     def evaluate(self, design: Mapping[str, Any]) -> EvaluationRecord:
@@ -507,7 +524,7 @@ class Evaluator:
         did = self.design_id(design)
         counters: dict = {"simulations": 0}
         base = dict(design=_fz(design), design_id=did,
-                    provenance=_fz(self._provenance()))
+                    provenance=self._provenance())
 
         grads: dict = {}
 
@@ -799,6 +816,8 @@ class Evaluator:
         ctx = r._ctx
         counters["python_callbacks"] = int(ctx.n_python_callbacks)
         counters["nogil_period_runs"] = int(ctx.n_nogil_runs)
+        counters["pss_loop"] = ctx.loop
+        counters["pss_iterations"] = len(r.residual_history)
         d = r._period
 
         def sampled(n):

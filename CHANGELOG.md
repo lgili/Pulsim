@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### The Newton shooting loop in the kernel
+
+* **Added** `pulsim._pulsim.dsed_periodic_orbit` (header
+  `core/include/pulsim/dsed/periodic_orbit.hpp`): the whole Newton
+  shooting of `periodic_steady_state` (scaled-norm residual, Armijo
+  backtracking, relaxation rounds, stop on the Newton step, period-run
+  budget, singular `I − M`, multipliers on the unit circle, the
+  verification period with the caller's integrals) in one call with the
+  GIL released. Every non-converged outcome is a status the wrapper
+  turns into the same `ConvergenceError` as before; a NaN period is
+  never accepted.
+* **Changed** `periodic_steady_state` runs on it for DC sources (a sine
+  `b(t)` keeps the Python loop). Same orbit (within 2e-14 of the state
+  scale), same period-run, step and iteration counts on the CCM/DCM
+  buck and the CCM/DCM boost; `counters["pss_loop"]` and
+  `counters["pss_iterations"]` name the route in an evaluation record.
+  An exception raised by a Python gate schedule inside a period run now
+  propagates as itself instead of becoming "a period run failed".
+* **Changed** the evaluator's per-evaluation Python: a datasheet loss
+  table's energies are read by its kernel copy (`LossTable.total`, bit
+  for bit `np.sum(table(v, i, tj))`), the provenance mapping is built
+  once per evaluator and records freeze scalars without an `abc`
+  check. Buck Pareto (64 designs, interleaved best of 5): 1354 → 2167
+  evaluations/s on one thread; threads still do not scale (see
+  DECISIONS 18 of add-design-optimization-workflow).
+
 ### Datasheet loss tables in the kernel
 
 * **Added** `pulsim.LossTable3D` (`E(v, i, T_j)`) and

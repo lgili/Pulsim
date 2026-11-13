@@ -183,6 +183,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
         raise RuntimeError("did not settle after 64 rounds")
     monkeypatch.setattr(p, "simulate", aborted)
     monkeypatch.setattr(p._pulsim, "dsed_period_map", aborted)   # pss route
+    monkeypatch.setattr(p._pulsim, "dsed_periodic_orbit", aborted)
     rec = _ev().evaluate(CCM)
     assert rec.status == "failed"
     assert "did not settle" in rec.reason
@@ -191,6 +192,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
         raise TypeError("a bug, not a design outcome")
     monkeypatch.setattr(p, "simulate", bug)
     monkeypatch.setattr(p._pulsim, "dsed_period_map", bug)
+    monkeypatch.setattr(p._pulsim, "dsed_periodic_orbit", bug)
     with pytest.raises(TypeError, match="a bug"):
         _ev().evaluate(CCM)
 
@@ -201,6 +203,7 @@ def test_not_implemented_and_recursion_errors_propagate(monkeypatch):
             raise exc("a stub or a bug")
         monkeypatch.setattr(p, "simulate", stub)
         monkeypatch.setattr(p._pulsim, "dsed_period_map", stub)
+        monkeypatch.setattr(p._pulsim, "dsed_periodic_orbit", stub)
         with pytest.raises(exc):
             _ev().evaluate(CCM)
 

@@ -1408,7 +1408,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
             # one of its axes.
             tab = _as_loss_table(table)
             tj_arr = _resolve_tj(tj_spec, times)
-            return float(np.sum(tab(V_blk, I_load, tj_arr[load_k])))
+            return tab.total(V_blk, I_load, tj_arr[load_k])
         if curve is not None:
             # Nonlinear E(I) from the datasheet curve (at V_ref), scaled
             # linearly by the actual blocking voltage.

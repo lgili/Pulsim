@@ -514,6 +514,8 @@ class _Solver:
         # integrals); DC sources only, a sine b(t) takes the old path
         self._map = (None if self.dynamic
                      else getattr(_pulsim, "dsed_period_map", None))
+        self._orbit = (None if self._map is None
+                       else getattr(_pulsim, "dsed_periodic_orbit", None))
         self.n_python_callbacks = 0
         self.n_nogil_runs = 0
 
@@ -590,6 +592,10 @@ class _Solver:
         self.n_steps += int(d["n_accept"])
         self.n_python_callbacks += int(d["python_callbacks"])
         self.n_nogil_runs += bool(d["nogil"])
+        return self._traj(x, d)
+
+    def _traj(self, x, d):
+        """A :class:`_Traj` from a kernel period dict."""
         log = list(d["events"])
         seg_masks = [log[0]["old_mask"] if log else d["first_mask"]]
         events, bounds = [], [0.0]
@@ -879,6 +885,71 @@ class _SourceInput:
 # Newton
 # ----------------------------------------------------------------------
 
+def _kernel_orbit(s, x, rtol, max_period_runs, n_relax, spec):
+    """:func:`periodic_steady_state`'s Newton loop as one kernel call
+    (``dsed_periodic_orbit``): the same iteration, counters and typed
+    outcomes, the messages formatted here."""
+    d = s._orbit(
+        s.ad, s.sf, x, s.T, spec.obs if spec is not None else [],
+        spec.pairs if spec is not None else [], float(rtol),
+        int(max_period_runs), int(n_relax), 1e-11, 1e-14,
+        float(s._guard.get("mode_guard_h_e", 0.0)))
+    s.n_runs = int(d["n_period_runs"])
+    s.n_steps = int(d["n_engine_steps"])
+    s.n_python_callbacks += int(d["python_callbacks"])
+    s.n_nogil_runs += s.n_runs if d["nogil"] else 0
+    history = [float(h) for h in d["history"]]
+    patterns = [list(p) for p in d["patterns"]]
+    st = d["status"]
+    scale = np.asarray(d["scale"], dtype=float)
+    tail = (f"Residual history max|P(x)-x|: {[f'{h:.3e}' for h in history]}; "
+            f"last pattern: {[tuple(p) for p in d['last_pattern']]}; ")
+    mu_last = np.asarray(d["last_mu"])
+    if st == "budget":
+        extra = (" (no run left for the verification period)"
+                 if d["verify_budget"] else "")
+        raise _conv(
+            f"no periodic orbit found within max_period_runs="
+            f"{max_period_runs}{extra}. {tail}multipliers of the last "
+            f"monodromy: {mu_last}.")
+    if st == "no_progress":
+        raise _conv(
+            "Newton made no progress after three rounds of "
+            f"{n_relax} relaxation periods. {tail}multipliers: {mu_last}.")
+    if st == "singular":
+        raise _conv(
+            "I - M is singular: a Floquet multiplier equals 1, so "
+            "the orbit is not isolated (a floating capacitor, an "
+            "inductor loop with no resistance, an integrator with "
+            "no path to its input). States of the marginal "
+            f"direction: {s.name_states(d['marginal_direction'], scale)}.")
+    if st == "marginal":
+        raise _conv(
+            f"the orbit is not isolated: Floquet multiplier "
+            f"{complex(d['marginal_mu']):.12g} "
+            "lies on the unit circle, so neighbouring solutions "
+            "never decay to it (a lossless loop or an undamped "
+            "integrator). States of the marginal direction: "
+            f"{s.name_states(d['marginal_direction'], scale)}.")
+    if st == "grazing":
+        raise _conv(str(d["message"]))
+    if st == "run_failed":
+        raise _conv(f"a period run failed: {d['message']}")
+    if st == "irreproducible":
+        raise _conv(
+            f"the verification period moved the orbit by {d['residual']:.3e} "
+            f"(the last Newton residual was {history[-1]:.3e}): the "
+            "map is not reproducible between runs.")
+    if st != "converged":
+        raise RuntimeError(f"dsed_periodic_orbit: unknown status {st!r}")
+    x0 = np.asarray(d["x0"], dtype=float)
+    period = d["period"]
+    traj = s._traj(x0, period)
+    return (x0, np.asarray(d["monodromy"], dtype=float),
+            np.asarray(d["multipliers"]), traj, history, patterns, period,
+            float(d["residual"]))
+
+
 def _classify(mu):
     if abs(mu.imag) > 1e-12 * max(1.0, abs(mu)):
         return "complex pair (Neimark-Sacker)"
@@ -912,7 +983,8 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           n_relax: int = 5,
                           rtol: float = _RTOL,
                           sensitivities=None,
-                          _observables=None) -> PeriodicSteadyStateResult:
+                          _observables=None,
+                          _python_loop: bool = False) -> PeriodicSteadyStateResult:
     """Periodic steady state of a switching circuit by Newton shooting
     on the true state, on the ``dsed`` exact stepper.
 
@@ -971,6 +1043,14 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     if x.shape != (n,):
         raise _err(f"start_from has {x.size} entries; the state has {n} "
                    f"({s.labels}).")
+    s.loop = "python"
+    if s._orbit is not None and not _python_loop:
+        # the whole Newton loop in the kernel, GIL released (DECISIONS 18)
+        s.loop = "kernel"
+        x0, M, mu, traj, history, patterns, period, residual = \
+            _kernel_orbit(s, x, rtol, max_period_runs, n_relax, _observables)
+        return _result(builder, s, x0, M, mu, traj, history, patterns,
+                       period, residual, sensitivities)
 
     scale = np.zeros(n)
 
@@ -1091,12 +1171,25 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         s.n_steps += int(getattr(orbit, "n_accept", 0))
         x_back = np.asarray(orbit.states_reduced[-1], dtype=float)
     residual = float(np.abs(x_back - x0).max())
-    if residual > 1e3 * max(history[-1], rtol * float(
+    if not residual <= 1e3 * max(history[-1], rtol * float(
             (scale + np.abs(x0)).max())):
         raise _conv(
             f"the verification period moved the orbit by {residual:.3e} "
             f"(the last Newton residual was {history[-1]:.3e}): the "
             "map is not reproducible between runs.")
+    return _result(builder, s, x0, M, mu, traj, history, patterns, period,
+                   residual, sensitivities, orbit)
+
+
+def _result(builder, s, x0, M, mu, traj, history, patterns, period,
+            residual, sensitivities, orbit=None):
+    if orbit is None:
+        from . import simulate as _simulate
+
+        def orbit():
+            return _simulate(builder, t_end=s.T, dt=s.T, engine="dsed",
+                             switch_fn=s.sf, initial_state=x0, rtol=1e-11,
+                             atol=1e-14)
     unstable = [(i, complex(m_), _classify(m_)) for i, m_ in
                 enumerate(mu) if abs(m_) >= 1.0]
     res = PeriodicSteadyStateResult(

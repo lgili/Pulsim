@@ -36,6 +36,7 @@ the last tabulated point.
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -146,6 +147,25 @@ class LossTable:
                     out += e[av, ai, at] * ww_v * ww_i * ww_t
         return np.maximum(out, 0.0).reshape(shape)
 
+    def total(self, v, i, tj) -> float:
+        """``float(np.sum(self(v, i, tj)))`` for 1-D ``v, i, tj`` of one
+        length: each point read by the kernel table (the same rule, bit
+        for bit), summed as numpy sums. A non-finite query takes this
+        class's own path (the kernel refuses one; numpy returns NaN)."""
+        v, i, tj = (np.asarray(a, dtype=float) for a in (v, i, tj))
+        if not (np.isfinite(v).all() and np.isfinite(i).all()
+                and np.isfinite(tj).all()):
+            return float(np.sum(self(v, i, tj)))
+        k = _KERNEL.get(id(self))
+        if k is None or k[0]() is not self:
+            key = id(self)
+            k = (weakref.ref(self, lambda _r, key=key: _KERNEL.pop(key, None)),
+                 self.to_kernel())
+            _KERNEL[id(self)] = k
+        f = k[1]
+        return float(np.sum([f(a, b, c) for a, b, c in zip(
+            v.tolist(), i.tolist(), tj.tolist())]))
+
     def to_kernel(self):
         """The same table as a kernel `pulsim._pulsim.LossTable3D`
         (`core/include/pulsim/thermal/loss_table.hpp`), which reads it
@@ -232,6 +252,11 @@ class LossTable:
         return (f"LossTable(v={self.v_axis.tolist()}, "
                 f"i={len(self.i_axis)} pts, "
                 f"Tj={self.tj_axis.tolist()})")
+
+
+# id(table) -> (weakref, kernel LossTable3D): the kernel copy of a table,
+# built once (LossTable.total); not a field, so records still pickle
+_KERNEL: dict = {}
 
 
 def as_loss_table(obj) -> LossTable:

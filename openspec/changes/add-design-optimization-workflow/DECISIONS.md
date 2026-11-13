@@ -403,6 +403,97 @@ two sign changes of y' in one search cell can be missed (a log-spaced
 grid near s = 0 would fix it); an event within 1e-12 T of the section
 is neither a section edge nor an inside edge in `Period.edges`.
 
+## 18. The Newton loop in the kernel (slice 4)
+
+Question: where does the 89 % of a buck evaluation that is not the
+kernel go, and what can leave the GIL? → Profile first (64 SYN-A
+designs of the Pareto example, per-phase wall time, best of 5; shared
+Mac, observation): 3ea998c6 spent 0.96 ms per evaluation, of which the
+kernel period map 14 %, the Python Newton loop around it 42 % (numpy
+`eigvals`/`svd`/`solve` on 2x2 matrices, the per-run dict conversion),
+the loss rows 26 % (`LossTable.__call__`'s numpy trilinear read, 86 µs
+per point), the KPIs 7 %, the record 10 % (`isinstance(v, typing.Mapping)`
+per value, provenance re-frozen per record). 1744 Python function
+calls per evaluation (cProfile).
+
+→ (1) `dsed_periodic_orbit` (`core/include/pulsim/dsed/periodic_orbit.hpp`):
+the loop of `periodic_steady_state`, statement for statement (the same
+scaled norm with the scale folded in first, the Armijo test against the
+OLD iterate's norm under the new scale, `polished`, three relaxation
+rounds, the budget before every run but the first, the singular test
+`σ_min ≤ 1e-10·max(1, σ_max)`, the unit-circle test, the verification
+period with the caller's observables), one call with the GIL released.
+Each period builds a fresh `PEDSimulator` (its diode latch and burst
+counters must not carry over); the Python schedule object is held by a
+non-owning `SwitchFnRef`, so no reference count is touched without the
+GIL. Outcomes are statuses; Python formats the same `ConvergenceError`
+messages. Two deliberate differences: a NaN anywhere fails every test
+(numpy's `max` propagated it already; C++'s `std::max` would not), and
+the verification check is `!(residual <= bound)`, so a NaN residual is
+irreproducible instead of accepted (the Python loop now has the same
+test). An exception raised by a Python schedule inside a period now
+propagates as itself; the Python loop turned any `RuntimeError` there
+into "a period run failed" (only the engine's `std::runtime_error`
+becomes `run_failed` now). (2) A loss table's energies are read by its
+kernel copy (`LossTable.total`, cached per table by weak reference,
+bit for bit `np.sum(table(v, i, tj))`, asserted on 500 random queries
+inside and outside the grid). (3) Provenance frozen once per evaluator;
+`_fz` checks scalars by type before any `abc` test.
+
+Evidence. Kernel loop against the Python loop (kept as
+`periodic_steady_state(..., _python_loop=True)`;
+`test_periodic_orbit_kernel.py`):
+
+| case | period runs | iterations | steps | max|Δx0|/scale | max|ΔM| |
+|---|---|---|---|---|---|
+| buck CCM (R 1 Ω, D 0.5) | 3 / 3 | 2 / 2 | 6 / 6 | 0 | 0 |
+| buck DCM (R 50 Ω, D 0.3) | 6 / 6 | 5 / 5 | 17 / 17 | 1.8e-14 | 3.0e-15 |
+| boost CCM 20 Ω, V_th 0 | 17 / 17 | 3 / 3 | 34 / 34 | 1.9e-17 | 0 |
+| boost DCM 500 Ω, V_th 0 | 21 / 21 | 7 / 7 | 51 / 51 | 0 | 0 |
+| boost CCM, V_th 1 mV | 3 / 3 | 2 / 2 | 6 / 6 | 1.5e-16 | 0 |
+| boost DCM, V_th 1 mV | 7 / 7 | 6 / 6 | 20 / 20 | 6.8e-14 | 5.3e-15 |
+| negative-conductance RC (unstable, μ = e^{2000T}) | 3 / 3 | 2 / 2 | 30 / 30 | 0 | 0 |
+
+Boost orbits: 24.05362948 V (CCM) and 36.59440084 V (DCM) on both
+loops (the slice brief quoted 36.5943997644 for the DCM case, 1.07e-6 V
+lower; neither loop nor the pre-existing test, 36.594401 ± 1e-5,
+gives that). Budget, singular `I − M` (lossless LC), non-isolated
+orbit, the unstable orbit (returned, `stable = False`) and the
+refusals before the loop keep their types. C++ tests
+(`test_periodic_orbit.cpp`): every status on affine maps with a known
+fixed point, a NaN period never accepted (52 runs, `no_progress`), and
+the DCM buck orbit (6 runs, 5 iterations, v_C within 5.2e-11 of the
+prototype, μ = 0.988977 + 1.7e-7); Eigen 3.4.0 gives the same counts,
+v_C 5.19e-11 off and the same μ to 1e-16.
+
+Throughput (64 designs, `evaluate_many`, one process per tree,
+interleaved best of 5, load average 10–13, observation, not asserted):
+
+| tree | 1 thread | 4 threads | 8 threads |
+|---|---|---|---|
+| 3ea998c6 | 1516 evals/s | 965 | 1011 |
+| this slice | 2445 evals/s | 1848 | 1740 |
+
+Same statuses; KPIs within 1.8e-12 relative (the DCM orbit's rounding).
+Per evaluation now: 0.44 ms, kernel 21 % (was 14 %), 707 Python
+function calls (was 1744).
+
+Threads still do not scale, and this is why: about 80 % of an
+evaluation still holds the GIL — `build` (the user's builder calls,
+~25 µs), the solver's set-up (applicability checks, the schedule's
+periodicity check over two periods, the state-space cache and adapter,
+the state labels: ~50 µs), `spec_for` (the observables, ~38 µs), the
+loss rows (`_switch_switching_loss`'s numpy plumbing on two-element
+arrays, ~56 µs, plus the rows, ~50 µs), the KPIs and the record
+(~60 µs). With 20 % released the ceiling is 1.25x, and the GIL hand-off
+between threads costs more than that on this machine. What would make
+threads scale: the loss rows and the observables spec in the kernel
+(the period's edges are already there), or the process backend for
+batches (item 2 of this slice).
+→ Reverse: delete `dsed_periodic_orbit` from the module (`_Solver._orbit`
+is then `None` and the Python loop runs); `LossTable.total` falls back by
+deleting its body to `np.sum(self(...))`.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):
