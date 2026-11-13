@@ -285,7 +285,7 @@ def test_evaluator_gradients_are_the_orbit_gradients(orbit):
     ev = Evaluator(_design_buck, period=T, output="vout", gradients=_GRADS)
     r = ev.evaluate(_D0)
     assert r.status == "ok", r.reason
-    assert set(r.grads) == {"v_out", "ripple_v", "ripple_i.L"}
+    assert set(r.grads) == {"v_out", "ripple_v"}   # i_L valley: flat
     for var, name in _GRADS.items():
         for k, kind, sig in (("v_out", "avg", "vout"),
                              ("ripple_v", "ripple", "vout")):

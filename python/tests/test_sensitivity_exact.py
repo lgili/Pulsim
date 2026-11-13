@@ -215,6 +215,8 @@ class _FakeCtx:
     def __init__(self, fm, fp):
         self._f = {"old": fm, "new": fp}
         self.diodes = {7: dict(name="D9", nodes=(0, -1))}
+        m = type("M", (), {"dsc": np.ones(3)})()
+        self.modes = {"old": m, "new": m}
 
     def f(self, key, x):
         return self._f[key]

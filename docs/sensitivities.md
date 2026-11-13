@@ -139,7 +139,12 @@ on the `pss` route. The following are refused with feature
 
 - the transient route;
 - the thermal loop;
-- a design variable that is not the circuit value itself.
+- a design variable that is not the circuit value itself, or that sets
+  more than one field.
+
+A KPI whose extremum is not unique (the flat inductor-current valley of
+a DCM converter) gets no gradient. Its name is listed in
+`record.counters["grads_refused"]`.
 
 ## Cost
 

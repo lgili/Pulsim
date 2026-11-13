@@ -77,6 +77,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   eigenproblem is now solved in graded order (exact to 1e-15 against
   50-digit `expm`). A peak inside the first or last sub-grid cell of a
   step was read at the step end.
+* **Fixed** (review of the sensitivity path) cases where a gradient could
+  have been silently approximate are now refused:
+  - the duty of a dead-time pair or a bridge;
+  - an RK45 step of the stepper (the step check is now 1e-10);
+  - a non-Moebius entry (the check is now per row);
+  - an orbit sensitivity run that does not reproduce the solver's
+    events;
+  - a window edge on a moving jump;
+  - an unlocated extremum;
+  - a design variable that feeds two elements.
+
+  A non-unique extremum's gradient is left out of `record.grads`.
+  Interior near misses are refined, so they are flagged.
 
 ### Design evaluation for optimisers (`pulsim.design`, first slice)
 

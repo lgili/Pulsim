@@ -585,7 +585,7 @@ class Evaluator:
             kpis = self._kpis(b, run, a, z, design, did, rows, losses,
                               counters)
             if self.gradients:
-                self._gradients(b, run, design, kpis, grads)
+                self._gradients(b, run, design, kpis, grads, counters)
             return kpis, losses, {}
         names = {c["name"] for c in b.components()}
         for d in th.r_th:
@@ -769,7 +769,7 @@ class Evaluator:
             run.pss_orbit = r
         return run, 0.0, T
 
-    def _gradients(self, b, run, design, kpis, grads):
+    def _gradients(self, b, run, design, kpis, grads, counters):
         """``grads[kpi][variable]`` from the orbit sensitivities; the
         KPI values are replaced by the closed forms they belong to."""
         from .sensitivity import _prepare
@@ -777,10 +777,12 @@ class Evaluator:
         sr = r.sensitivity
         vals = {p.name: p.value for p in _prepare(
             b, list(sr.params), r._ctx.sf, r.period)}
+        base = {c["name"]: dict(c["params"]) for c in b.components()}
         for var, name in self.gradients.items():
             if var not in design:
                 raise KeyError(f"gradients: design variable {var!r} is not "
                                f"in the design {sorted(design)}")
+            self._check_map(design, var, name, base, r.period)
             dv, pv = float(design[var]), vals[name]
             if not abs(dv - pv) <= 1e-12 * max(abs(dv), abs(pv)):
                 raise ValueError(
@@ -798,8 +800,38 @@ class Evaluator:
         for k, (sig, kind) in want.items():
             kv = sr.kpi(sig, kind)
             kpis[k] = kv.value
+            if kv.non_unique:
+                # attained at two instants: not differentiable, no gradient
+                counters["grads_refused"] = ", ".join(filter(None, (
+                    counters.get("grads_refused", ""),
+                    f"{k}: non_unique extremum")))
+                continue
             grads[k] = {var: float(kv.grad[name])
                         for var, name in self.gradients.items()}
+
+    def _check_map(self, design, var, name, base, T):
+        """``var`` must drive exactly the field ``name``: rebuild with it
+        moved and compare every component (a variable feeding two
+        inductors would give a partial derivative as the total)."""
+        from .sensitivity import _prepare
+        dv = float(design[var])
+        b2, sf2 = self._build({**design, var: dv * (1 + 1e-6) + 1e-300})
+        moved = sorted(
+            f"{c['name']}.{k}" for c in b2.components()
+            for k, v in c["params"].items()
+            if base.get(c["name"], {}).get(k) != v)
+        comp, fld = name.rsplit(".", 1)
+        if fld == "duty":
+            d2 = _prepare(b2, [name], sf2, T)[0].value
+            ok = not moved and abs(d2 - dv * (1 + 1e-6)) <= 1e-9
+        else:
+            ok = len(moved) == 1 and moved[0].startswith(comp + ".")
+        if not ok:
+            raise ValueError(
+                f"gradients: design[{var!r}] moves {moved or 'no element'} "
+                f"in the circuit, not {name} alone; the gradient would be "
+                "a partial derivative presented as the total. Map each "
+                "variable to the one field it sets.")
 
     @staticmethod
     def _count(run, counters):

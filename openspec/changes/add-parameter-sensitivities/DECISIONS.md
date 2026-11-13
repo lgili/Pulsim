@@ -145,6 +145,39 @@ Transient route and thermal loop: `UnsupportedError(feature=
 "gradients")`. → Reverse: chain rule through a user `d value/d variable`
 when `add-immutable-circuit-ir` names parameters.
 
+## 12. Review (fresh-context reviewer, read-only) and what changed
+
+The event-time formula, the jump, the predicate rows, `g_p`, the masks of
+`f-`, `f+` and the Moebius / Daleckii-Krein / Van Loan algebra were
+confirmed. Found and fixed (each with a test in
+`test_sensitivity_review.py` unless noted):
+
+1. `.duty` accepted a dead-time pair (the duty also moves the other
+   switch's edge): now refused unless no other switch has edges.
+2. Extremum search: the sub-grid follows the fastest oscillation (8
+   points per period); a strict sub-grid extremum whose stationary point
+   is not found is refused; a bracketed one is found by bisection on
+   `y'` (Newton left the cell on the stiff idle mode).
+3. Numeric (RK45) steps of the stepper are refused
+   (`n_exact_steps != n_accept`); the step check is 1e-10, not 1e-7.
+4. The Moebius check is per row, against 1024 u of the row's assembly
+   (64 u refused a 20 mOhm series resistor; one scale for the whole
+   vector let a 1 V non-Moebius entry through).
+5. The orbit's sensitivity period must reproduce the solver's events
+   and `x(T) = x*` (1e-7 of the state scale), else refused.
+6. Near misses: interior minima of `|g|` are refined by Newton on `g'`
+   (tier 1) and the scan follows oscillations; tier-2 modes are scanned
+   with the block exponential (`test_sensitivity_exact`).
+7. `Evaluator(gradients=)` drops a `non_unique` KPI's gradient
+   (`counters["grads_refused"]`); the two ends of an orbit are one point,
+   not a tie.
+8. `Evaluator(gradients=)` refuses a variable that moves more than its
+   one field (rebuild with the variable moved, compare `components()`).
+9. A window edge or `final` on an event that moves with the parameters,
+   where the signal jumps, is refused (one-sided). The grazing cosine is
+   taken in energy coordinates. Two events with different `dtau` on one
+   sample refuse an extremum sitting there.
+
 ## Open questions of `design.md`
 
 1. Forward mode with a 64-parameter guard: kept (the optimisation use

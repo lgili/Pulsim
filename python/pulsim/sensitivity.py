@@ -68,6 +68,7 @@ _MAX_PARAMS = 64
 _GRAZE = 1e-9                 # |grad g . f-| <= this * |grad g| |f-|
 _NEAR_MISS = 1e-6             # interior min |g| <= this * max|v_D|
 _MOEBIUS_RTOL = 1e-7
+_STEP_RTOL = 1e-10            # re-derived step against the engine's sample
 _BRANCH_RE = re.compile(r"\(branch #(\d+)\)")
 _GATE, _DIODE_ON, _DIODE_OFF = 0, 1, 2
 
@@ -249,23 +250,31 @@ def _resolve(builder, names, switch_fn) -> list:
     return out
 
 
-def _duty_period(sf, bit, t_end, name):
+def _duty_period(sf, bit, t_end, name, nsw=0):
     """Trailing-edge PWM of one switch bit: rising edges on a fixed grid
     of period T, falling edges at rise + D T. Returns (T, D); refuses any
     other schedule (the duty would not be a timing parameter with
     dtau/dD = T)."""
     rises, falls, t = [], [], 0.0
-    prev = bool(sf(0.0).get(bit))
+    prev_m = sf(0.0)
+    prev = bool(prev_m.get(bit))
+    others = False
     while len(rises) < 3 or t < t_end:
         e = float(sf.next_edge_after(t))
         if not math.isfinite(e) or e <= t or len(rises) + len(falls) > 200000:
             break
-        now = bool(sf(e).get(bit))
+        m = sf(e)
+        # another switch with edges (a dead-time pair, a bridge leg): the
+        # duty may move them too, and which ones is not in the schedule
+        others = others or any(bool(m.get(i)) != bool(prev_m.get(i))
+                               for i in range(nsw) if i != bit)
+        prev_m = m
+        now = bool(m.get(bit))
         if now != prev:
             (rises if now else falls).append(e)
             prev = now
         t = e
-    bad = len(rises) < 2 or not falls
+    bad = others or len(rises) < 2 or not falls
     if not bad:
         T = rises[1] - rises[0]
         r = np.asarray(rises)
@@ -279,8 +288,10 @@ def _duty_period(sf, bit, t_end, name):
         raise _unsup(
             "sensitivity_parameter",
             f"sensitivities: {name!r}: the gate schedule of this switch is "
-            "not a fixed-period trailing-edge PWM (rising edges every T, "
-            "falling edges at rise + D T), so its duty is not a parameter "
+            "not a fixed-period trailing-edge PWM driving this switch "
+            "alone (rising edges every T, falling edges at rise + D T, no "
+            "other switch with edges: a dead-time pair or a bridge would "
+            "move the other edges too), so its duty is not a parameter "
             "whose edge moves by T per unit. Build it with "
             "make_pwm_switch_fn.", device=name.rsplit(".", 1)[0],
             kind="duty")
@@ -335,7 +346,7 @@ def _harmonic(a, b, delta):
     return out
 
 
-def _param_derivative(builder, prm, masks, h_max, ic, base):
+def _param_derivative(builder, prm, masks, h_max, ic, base, n1):
     v0 = prm.value
     snaps = {}
     try:
@@ -350,15 +361,25 @@ def _param_derivative(builder, prm, masks, h_max, ic, base):
                        v0 / 8)
         d2 = _harmonic(snaps[1 / 16][key] - f0, snaps[-1 / 16][key] - f0,
                        v0 / 16)
-        floor = 64 * _U * max(1.0, float(np.abs(f0).max())) / (abs(v0) / 16)
-        scale = max(float(np.abs(d1).max()), floor)
-        if float(np.abs(d1 - d2).max()) > _MOEBIUS_RTOL * scale + floor:
+        # per row of Ab / of the recovery (one scale for the whole
+        # vector let a 1e12 1/s entry hide a non-Moebius 1 V entry)
+        w = n1 if key != "__ic__" else f0.size
+        F0, D1, D2 = (np.abs(v.reshape(-1, w)) for v in (f0, d1, d2))
+        # assembly rounding: 1024 u of the row (Schur complements of
+        # g_on / g_off stamps cancel; 64 u refused a series 20 mOhm)
+        floor = 1024 * _U * F0.max(axis=1) / (abs(v0) / 16)
+        dev = np.abs(d1 - d2).reshape(-1, w).max(axis=1)
+        lim = _MOEBIUS_RTOL * D1.max(axis=1) + floor
+        del D2
+        if np.any(dev > lim):
+            j = int(np.argmax(dev - lim))
+            dev, scale = float(dev[j]), float(D1.max(axis=1)[j])
             raise _unsup(
                 "sensitivity_parameter",
                 f"sensitivities: {prm.name!r} does not enter the state space "
                 "as a linear-fractional function (the derivative from two "
-                f"step sizes differs by {float(np.abs(d1 - d2).max()):.3e} "
-                f"against {scale:.3e}), so it cannot be differentiated "
+                f"step sizes differs by {dev:.3e} against {scale:.3e} in "
+                f"row {j} of {key}), so it cannot be differentiated "
                 "exactly from assemblies.", device=prm.comp,
                 kind=prm.name.rsplit(".", 1)[1])
         out[key] = d1
@@ -562,6 +583,13 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
         ad, sf, x0, t_end, rtol=1e-11, atol=1e-14, dt_init=dt_init,
         dt_max=dt_max, store_every=1, enable_event_projection=False,
         event_log=True)
+    if int(r["n_exact_steps"]) != int(r["n_accept"]):
+        raise _unsup(
+            "sensitivities", "sensitivities: the exact stepper took "
+            f"{int(r['n_accept']) - int(r['n_exact_steps'])} numeric (RK45) "
+            "step(s): a mode has no closed-form propagator there, so the "
+            "trajectory (and its events) is not the exact map this "
+            "derivative belongs to.")
     times = np.asarray(r["times"], dtype=float)
     states = np.asarray(r["states"], dtype=float).reshape(len(times), -1)
     log = list(r["event_log"])
@@ -609,8 +637,9 @@ class _Context:
         self.n_assemblies = 1
         for j, prm in enumerate(params):
             if prm.kind != "duty":
-                derivs[j] = _param_derivative(builder, prm, self.mask_by_key,
-                                              h_max, ic_from_builder, base)
+                derivs[j] = _param_derivative(
+                    builder, prm, self.mask_by_key, h_max, ic_from_builder,
+                    base, len(traj.states[0]) + 1)
                 self.n_assemblies += 4
         m0 = traj.masks[0]
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
@@ -703,8 +732,9 @@ def _jump(ctx, ev, x, S, params):
         row, drow = ctx.pair_row(ko, a, k)
         grad = row[:-1]
         den = float(grad @ fm)
-        if abs(den) <= _GRAZE * float(np.linalg.norm(grad)
-                                      * np.linalg.norm(fm)):
+        d = ctx.modes[ko].dsc[:-1]      # the cosine in energy coordinates
+        if abs(den) <= _GRAZE * float(np.linalg.norm(grad / d)
+                                      * np.linalg.norm(fm * d)):
             raise _unsup(
                 "grazing_event",
                 f"sensitivities: grazing event: {ev['name']} at t = "
@@ -754,7 +784,7 @@ def _propagate(ctx, traj, S0):
         xb1, Sb1 = mode.advance(np.append(x, 1.0), Sb, h)
         n_sens += n_p
         err = np.abs(xb1[:n] - traj.states[k + 1]) / scale
-        if float(err.max()) > 1e-7:
+        if float(err.max()) > _STEP_RTOL:
             raise _unsup(
                 "sensitivities",
                 f"sensitivities: the step {traj.times[k]!r} -> "
@@ -813,6 +843,8 @@ class SensitivityResult:
     _ctx: Any = field(default=None, repr=False)
     _traj: Any = field(default=None, repr=False)
     _S_right: dict = field(default_factory=dict, repr=False)
+    #: an orbit run (its two ends are one point)
+    periodic: bool = False
 
     # -- signals ---------------------------------------------------------
     def _signal(self, name):
@@ -877,7 +909,21 @@ class SensitivityResult:
             raise ValueError(f"kpi: window [{t0!r}, {t1!r}] is not inside "
                              f"the run [{tr.times[0]!r}, {tr.times[-1]!r}].")
         t1 = min(t1, float(tr.times[-1]))
-        val, grad, nu, where = _kpi(self, self._signal(signal), kind, t0, t1)
+        row = self._signal(signal)
+        tol = 1e-12 * max(abs(t1), t1 - t0)
+        for ev in self.event_dtau:
+            if not np.any(ev["dtau"]) or not (
+                    (t0 > tr.times[0] and abs(ev["t"] - t0) <= tol)
+                    or abs(ev["t"] - t1) <= tol):
+                continue
+            xb = np.append(tr.states[ev["k"]], 1.0)
+            if row(str(ev["old"]))[0] @ xb != row(str(ev["new"]))[0] @ xb:
+                raise _unsup(
+                    kind, f"kpi: the window edge t = {ev['t']!r} sits on "
+                    f"the event {ev['name']!r}, which moves with the "
+                    f"parameters, and {signal!r} jumps there: the KPI is "
+                    "one-sided (not differentiable). Move the window edge.")
+        val, grad, nu, where = _kpi(self, row, kind, t0, t1)
         if not with_grad:
             return val
         return KpiValue(val, dict(zip(self.params, grad)), nu, where)
@@ -988,7 +1034,13 @@ def _extrema(sr, row, kind, t0, t1, K=16):
     it sits on an event instant)."""
     cands = []          # (y, t, grad)
     tr = sr._traj
-    ev_at = {ev["k"]: ev for ev in sr.event_dtau}
+    ev_at = {}
+    for ev in sr.event_dtau:
+        if ev["k"] in ev_at and not np.array_equal(ev_at[ev["k"]]["dtau"],
+                                                   ev["dtau"]):
+            ev_at[ev["k"]] = dict(ev, dtau=None)    # two different instants
+        else:
+            ev_at.setdefault(ev["k"], ev)
     for k, s0, s1, mode, xb, Sb in _pieces(sr, t0, t1):
         if mode.tier != 1:
             raise _unsup(kind, f"kpi: {kind} over a near-defective mode "
@@ -998,7 +1050,13 @@ def _extrema(sr, row, kind, t0, t1, K=16):
         r = (c / mode.dsc) @ mode.V
         alpha = r * z
         mu = mode.mu
-        ss = np.linspace(s0, s1, K + 1)
+        # at least eight points per period of the fastest oscillation
+        w = float(np.abs(mu.imag).max())
+        Kp = max(K, int(math.ceil((s1 - s0) * w * 8 / (2 * math.pi))))
+        if Kp > 1 << 16:
+            raise _unsup(kind, f"kpi: {kind} over a mode ringing "
+                         f"{Kp // 8} times in one step is not searched.")
+        ss = np.linspace(s0, s1, Kp + 1)
 
         def y(s):
             return float((alpha * np.exp(mu * s)).sum().real)
@@ -1007,6 +1065,7 @@ def _extrema(sr, row, kind, t0, t1, K=16):
             return float((alpha * mu ** order * np.exp(mu * s)).sum().real)
 
         ys = np.array([y(s) for s in ss])
+        yscale = float(np.abs(ys).max()) or 1.0
         pts = [s0, s1]
         for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
             sg = 1.0 if kind_ == "peak" else -1.0
@@ -1014,35 +1073,60 @@ def _extrema(sr, row, kind, t0, t1, K=16):
             # first or last cell has its sub-grid maximum on the end
             # point); Newton on y' within the neighbouring cells, kept
             # only when it converges inside the piece
-            for i in range(K + 1):
-                lo, hi = max(i - 1, 0), min(i + 1, K)
+            for i in range(Kp + 1):
+                lo, hi = max(i - 1, 0), min(i + 1, Kp)
                 if sg * ys[i] < sg * ys[lo] or sg * ys[i] < sg * ys[hi]:
                     continue
-                s = ss[i]
-                for _ in range(50):
-                    d2 = dy(s, 2)
-                    if d2 == 0:
-                        break
-                    s_new = min(max(s - dy(s) / d2, ss[lo]), ss[hi])
-                    if abs(s_new - s) <= max(4 * _U * abs(s),
-                                             1e-13 * (s1 - s0)):
-                        if s0 < s_new < s1:
-                            pts.append(s_new)
-                        break
-                    s = s_new
+                a, b_ = ss[lo], ss[hi]
+                if sg * dy(a) >= 0 >= sg * dy(b_) and a < b_:
+                    # bracketed: bisection on y' to float resolution (a
+                    # stiff mode's e^{mu s} sends Newton out of the cell)
+                    for _ in range(200):
+                        m_ = 0.5 * (a + b_)
+                        if m_ in (a, b_):
+                            break
+                        if sg * dy(m_) >= 0:
+                            a = m_
+                        else:
+                            b_ = m_
+                    s = 0.5 * (a + b_)
+                else:
+                    s = ss[i]
+                    for _ in range(50):
+                        d2 = dy(s, 2)
+                        if d2 == 0:
+                            break
+                        s_new = min(max(s - dy(s) / d2, ss[lo]), ss[hi])
+                        done = abs(s_new - s) <= max(4 * _U * abs(s),
+                                                     1e-13 * (s1 - s0))
+                        s = s_new
+                        if done:
+                            break
+                # a stationary point is a candidate; a sub-grid maximum
+                # strictly inside with none found is a failed search
+                if abs(dy(s)) * (s1 - s0) <= 1e-9 * yscale or (
+                        a < s < b_ and b_ - a <= 4 * _U * max(abs(s), 1.0)):
+                    if s0 < s < s1:
+                        pts.append(s)
+                elif 0 < i < Kp and sg * ys[i] > sg * ys[lo] \
+                        and sg * ys[i] > sg * ys[hi]:
+                    raise _unsup(
+                        kind, f"kpi: the {kind_} search did not converge "
+                        f"in the step at t = {tr.times[k]!r}; the "
+                        "extremum (and its gradient) is not located.")
         for s in pts:
             x1, S1 = mode.advance(xb, Sb, s)
             g = c @ S1 + dc @ x1
             t = tr.times[k] + s
             if s == 0.0 and k in ev_at and t0 < t:
                 g = g + (c[:-1] @ sr._ctx.f(mode.label, x1[:-1])) \
-                    * ev_at[k]["dtau"]
+                    * _one_dtau(ev_at[k], kind)
             cands.append((float(c @ x1), t, g, k, s))
             if s == s1 and (k + 1) in ev_at and tr.times[k + 1] < t1:
                 key = str(tr.masks[k])
                 cands[-1] = (cands[-1][0], t,
                              g + (c[:-1] @ sr._ctx.f(key, x1[:-1]))
-                             * ev_at[k + 1]["dtau"], k, s)
+                             * _one_dtau(ev_at[k + 1], kind), k, s)
     ys = np.array([cd[0] for cd in cands])
     span = float(ys.max() - ys.min()) or max(abs(float(ys.max())), 1.0)
     out = {}
@@ -1051,13 +1135,25 @@ def _extrema(sr, row, kind, t0, t1, K=16):
         i = int(np.argmax(sg * ys))
         tie = [cd for cd in cands
                if sg * (ys[i] - cd[0]) <= 1e-9 * span
-               and abs(cd[1] - cands[i][1]) > 1e-9 * (t1 - t0)]
+               and abs(cd[1] - cands[i][1]) > 1e-9 * (t1 - t0)
+               # the two ends of an orbit are one point
+               and not (sr.periodic and abs(abs(cd[1] - cands[i][1])
+                                            - (t1 - t0)) <= 1e-9 * (t1 - t0)
+                        and t0 == tr.times[0] and t1 == tr.times[-1])]
         out[kind_] = (cands[i][0], cands[i][2], bool(tie), cands[i][1])
     if kind == "ripple":
         p_, v_ = out["peak"], out["valley"]
         return (p_[0] - v_[0], p_[1] - v_[1], p_[2] or v_[2],
                 (p_[3], v_[3]))
     return out[kind]
+
+
+def _one_dtau(ev, kind):
+    if ev["dtau"] is None:
+        raise _unsup(kind, f"kpi: the {kind} sits on two events of "
+                     f"different time derivatives at t = {ev['t']!r}: it "
+                     "is not differentiable there.")
+    return ev["dtau"]
 
 
 def _near_misses(ctx, traj, K=8):
@@ -1092,19 +1188,45 @@ def _near_misses(ctx, traj, K=8):
                 if cur is not None:
                     cur["own_end"] = own
                     stretches.append(cur)
-                cur = dict(on=on, own_start=own or k == 0, pts=[])
+                cur = dict(on=on, own_start=own or k == 0, pts=[],
+                           mins=[])
             mode = ctx.modes[key]
             row = ctx.pair_row(key, a, k_)[0]
             thr = V_f if on else (V_th if V_f == 0.0 else max(V_th, V_f))
             h = traj.times[k + 1] - traj.times[k]
             xb = np.append(traj.states[k], 1.0)
-            ss = np.linspace(0, h, K + 1)
             if mode.tier == 1:
+                w = float(np.abs(mode.mu.imag).max())
+                Kp = max(K, int(math.ceil(h * w * 8 / (2 * math.pi))))
+                ss = np.linspace(0, h, Kp + 1)
                 z = mode.Vi @ (mode.dsc * xb)
                 r = (row / mode.dsc) @ mode.V
-                g = (np.exp(np.outer(ss, mode.mu)) @ (r * z)).real - thr
+                a_ = r * z
+                g = (np.exp(np.outer(ss, mode.mu)) @ a_).real - thr
+                # the sampled |g| misses a sharp interior minimum: refine
+                # each sub-grid minimum by Newton on g'
+                ag_ = np.abs(g)
+                for i in range(1, Kp):
+                    if not (ag_[i] <= ag_[i - 1] and ag_[i] <= ag_[i + 1]):
+                        continue
+                    s = ss[i]
+                    for _ in range(50):
+                        d1 = float((a_ * mode.mu * np.exp(mode.mu * s)).sum().real)
+                        d2 = float((a_ * mode.mu ** 2
+                                    * np.exp(mode.mu * s)).sum().real)
+                        if d2 == 0:
+                            break
+                        s_new = min(max(s - d1 / d2, ss[i - 1]), ss[i + 1])
+                        if abs(s_new - s) <= 1e-13 * h:
+                            s = s_new
+                            break
+                        s = s_new
+                    gm = float((a_ * np.exp(mode.mu * s)).sum().real) - thr
+                    if np.sign(gm) == np.sign(g[i]):
+                        cur["mins"].append((traj.times[k] + s, gm))
             else:
                 # near-defective mode: the block exponential (no S needed)
+                ss = np.linspace(0, h, 4 * K + 1)
                 S0 = np.zeros((len(xb), len(ctx.params)))
                 g = np.array([row @ mode.advance(xb, S0, s)[0]
                               for s in ss]) - thr
@@ -1133,9 +1255,15 @@ def _near_misses(ctx, traj, K=8):
                     hits.append(0)
                 if not x["own_end"] and ag[-1] <= tol:
                     hits.append(len(g) - 1)
-                for i in hits:
+                found = [(float(t[i]), float(g[i])) for i in hits]
+                for tm, gm in x["mins"]:
+                    if abs(gm) <= tol and all(
+                            abs(tm - tf) > 1e-9 * (t[-1] - t[0] or 1.0)
+                            for tf, _g in found):
+                        found.append((tm, gm))
+                for tm, gm in sorted(found):
                     flags.append(dict(kind="near_miss", device=c["name"],
-                                      t=float(t[i]), margin=float(g[i]),
+                                      t=tm, margin=gm,
                                       state="on" if on else "off"))
     return flags
 
@@ -1172,8 +1300,9 @@ def _prepare(builder, names, sf, t_end):
     params = _resolve(builder, names, sf)
     for prm in params:
         if prm.kind == "duty":
-            prm.period, prm.value = _duty_period(sf, prm.bit, t_end,
-                                                 prm.name)
+            prm.period, prm.value = _duty_period(
+                sf, prm.bit, t_end, prm.name,
+                int(builder.graph.num_switches))
     return params
 
 
@@ -1262,10 +1391,30 @@ def orbit_sensitivities(res, solver, names, n_steps=50):
                            f"solver ({res.state_labels}) and the sensitivity "
                            f"run ({ctx.labels}).")
     n = ctx.n
+    # the dP/dp run (T/n_steps) and the solver's run (dt_max = T) must be
+    # one map: the same events, and x(T) = x*
+    ref = [(e["name"], e["t"]) for e in solver.orbit_traj.events]
+    got = [(e["name"], e["t"]) for k in sorted(traj.events)
+           for e in traj.events[k] if e["type"] != _GATE]
+    ref = [e for e in ref if e[0] != "gate_edge"]
+    if [e[0] for e in ref] != [e[0] for e in got] or any(
+            abs(a[1] - b[1]) > 1e-9 * T for a, b in zip(ref, got)):
+        raise _unsup("sensitivities", "sensitivities: the orbit's "
+                     "sensitivity period does not reproduce the solver's "
+                     f"events ({ref} against {got}); the gradient would mix "
+                     "two maps.")
+    x0 = np.asarray(res.x0, dtype=float)
+    sc = np.abs(traj.states).max(axis=0) + 1e-300
+    per = float((np.abs(traj.states[-1] - x0) / sc).max())
+    if per > 1e-7:
+        raise _unsup("sensitivities", "sensitivities: the sensitivity "
+                     f"period moves the orbit by {per:.3e} of the state "
+                     "scale; it is not the solver's map.")
     S_all, _r, _d, _n = _propagate(ctx, traj, np.zeros((n, len(params))))
     dPdp = S_all[-1]
     dx = np.linalg.solve(np.eye(n) - res.monodromy, dPdp)
     sr = _compute(ctx, traj, dx)
+    sr.periodic = True
     sr.counters["n_sens_propagations"] += _n
     res.dPdp = {p.name: dPdp[:, j].copy() for j, p in enumerate(params)}
     res.dx0 = {p.name: dx[:, j].copy() for j, p in enumerate(params)}
