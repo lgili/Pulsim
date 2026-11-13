@@ -20,12 +20,11 @@ import pytest
 import pulsim as p
 
 from . import _sens_reference as ref
+from ._checkout import assert_pulsim_is_this_checkout
 
 
 def test_pulsim_is_this_worktree():
-    import pathlib
-    here = pathlib.Path(__file__).resolve().parents[2]
-    assert pathlib.Path(p.__file__).resolve().is_relative_to(here)
+    assert_pulsim_is_this_checkout(p)
 
 
 # ---------------------------------------------------------------------
