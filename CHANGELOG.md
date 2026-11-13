@@ -28,6 +28,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `RetiredDeviceError` that is still a `RuntimeError`.
 * **Changed** `add_inductor_coupling` refuses a winding built with
   `rac=` (it coupled only the ladder's main inductor).
+* **Fixed** (with `discontinuity_restart=True`) a pulse current source's
+  zero-rise edge is a source jump: it restarts and is read at its left
+  limit (it was integrated at first order; 1 A into 1 kΩ ∥ 1 nF, error
+  at τ 17.8 V → 0.26 V at `dt` = 100 ns). Table and sine current
+  sources are continuous and do not restart.
+* **Fixed** (with the rule) `steady_state` / `sampled_ac` dropped
+  `restart_steps_left` from the period snapshot: an edge one step before
+  the boundary drifted 2.03e-5 (now 2.7e-10). `sweep_path_aware` passes
+  `discontinuity_restart` (it was dropped).
+* **Changed** the restart stages' factors live in the cache's event
+  table (one per mask, byte budget, shared symbolic analysis), not in a
+  second cache; results bit-identical. `on_cache` parameter refactors
+  now reach the restart steps (they solved on stale factors).
 
 ### Fixed engine: discontinuity restart rule (opt-in)
 
