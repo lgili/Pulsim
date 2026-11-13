@@ -1841,6 +1841,18 @@ class SimulationResult:
             If any signal can't be resolved as a node OR a branch.
         """
         ...
+    @property
+    def plan(self) -> typing.Any:
+        """
+        The run's RunPlan (circuit, ties, preflight); None for a run from a builder stand-in.
+        """
+        ...
+    @property
+    def circuit(self) -> Circuit | None:
+        """
+        The pulsim.Circuit this run simulated (with any regularising ties); the caller's builder is never changed.
+        """
+        ...
 class LoadedCircuit:
     """
     Result of `load_yaml_*`: a populated `CircuitBuilder` (`.builder`) + the `simulation:` block (`.options`).
@@ -2827,6 +2839,14 @@ class Circuit:
     def value_hash(self) -> int:
         """
         64-bit hash of the structure and every value (fields, couplings, initial conditions, aliases).
+        """
+    def with_preflight(self, options: PreflightOptions) -> tuple[Circuit, PreflightReport, list[typing.Any]]:
+        """
+        Run the topology preflight on this circuit without changing it: returns (circuit, report, ties) — the circuit a run uses (this one when no tie was needed), the PreflightReport, and the inserted ties as (name, node index, resistance).
+        """
+    def with_ties(self, ties: list[typing.Any]) -> Circuit:
+        """
+        The circuit with regularising ties added: a list of (name, node index, resistance) to ground, as `result.plan.ties` reports them. The receiver is unchanged.
         """
     @property
     def nodes(self) -> list[typing.Any]:

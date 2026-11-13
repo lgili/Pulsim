@@ -99,3 +99,25 @@ is not a precondition; `simulate()` keeps its entry points and calls
 - **Evidence:** keeps the merge with the branch-form switch work (which
   edits `bindings.cpp`) mechanical; compiles in parallel.
 - **Reverse:** move the block into `bindings.cpp`.
+
+## 8. Where the preflight's ties go (group 2)
+
+- **Question:** the preflight used to append `R_auto_iso_*` resistors
+  to the caller's builder. Where do they go now?
+- **Option:** `Circuit::with_preflight(opts)` runs the pure analysis
+  on the circuit; when it finds nothing (or `auto_regularize` is off)
+  it returns the receiver itself — same data, no copy. Otherwise it
+  runs the builder's own fixed-point `run_preflight` on a clone and
+  returns `(circuit, report, ties)`. `simulate()` and `compute_dc_op()`
+  run that circuit; `result.plan` / `result.circuit` expose it. A
+  tie's resistance is the option's value, not `1/G`, so
+  `with_ties(ties)` re-adds it bit for bit.
+- **Evidence:** regularised results equal the in-place preflight on
+  pwl, trbdf2 and dsed (`test_regularised_results_equal_the_in_place_preflight`);
+  `with_ties(r.ties)` equals `r.circuit` by value hash (C++ test).
+  Callers that relied on the mutation, all fixed here: the hostile-
+  circuit dsed test, `electrothermal` / `mmc_thevenin` (wrote to the
+  caller's builder, now only the run's pool), the MMC driver's
+  identity check (gets the caller's builder), `compute_dc_op`.
+- **Reverse:** call `builder.run_preflight(opts)` in place (still
+  public) before `simulate()`.

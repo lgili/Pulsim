@@ -48,7 +48,11 @@ res = pulsim.simulate(c, 1e-3, dt=1e-7)   # same result as simulate(b, ...)
 ```
 
 `simulate()` never runs on the circuit's shared data: it runs on a
-private clone (`c.to_builder()`).
+private clone (`c.to_builder()`). Nor does it change your builder: the
+topology preflight's ties (1 GΩ per floating subnet) go on the run's
+own circuit, `res.circuit`, and are listed in `res.plan.ties`;
+`c.with_preflight(opts)` returns `(circuit, report, ties)` without a
+run.
 
 ## 1. Graph + DevicePool — the circuit description
 

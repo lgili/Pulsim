@@ -19,10 +19,10 @@ lands).
 - [x] 1.6 Docs: `docs/mental-model.md` (builder → circuit → lowered); stubs
 
 ## 2. Stop mutating the caller's circuit (**BREAKING**)
-- [ ] 2.1 `Circuit::with_ties`; the preflight regularises the run's own circuit; `result.circuit` and `result.plan.ties` expose it
-- [ ] 2.2 Update the warning text (no longer "the ties persist on the builder")
-- [ ] 2.3 Tests: `builder.build().value_hash()` equal before and after `simulate()`; a second run with `auto_regularize=False` raises the original singular error; results of regularised runs unchanged
-- [ ] 2.4 Docs: CHANGELOG migration note; `AI_GUIDE.md` preflight section
+- [x] 2.1 `Circuit::with_ties`; the preflight regularises the run's own circuit; `result.circuit` and `result.plan.ties` expose it
+- [x] 2.2 Update the warning text (no longer "the ties persist on the builder")
+- [x] 2.3 Tests: `builder.build().value_hash()` equal before and after `simulate()`; a second run with `auto_regularize=False` raises the original singular error; results of regularised runs unchanged
+- [x] 2.4 Docs: CHANGELOG migration note; `AI_GUIDE.md` preflight section
 
 ## 3. Python side state into the IR
 - [ ] 3.1 Initial conditions (`c0=`, `i0=`, `set_initial`) and aliases stored in the builder / IR; delete `_pulsim_ic`, `_pulsim_aliases`

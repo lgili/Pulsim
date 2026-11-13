@@ -29,8 +29,10 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -74,6 +76,14 @@ struct InitialCondition {
     Real value;
 };
 
+/// A regularising tie the preflight added to a run's circuit: a
+/// resistor `name` from node `node` to ground.
+struct Tie {
+    std::string name;
+    Index node;
+    Real resistance;
+};
+
 struct Alias {
     std::string name;
     bool node;           // node alias, else a branch alias
@@ -109,6 +119,28 @@ public:
     /// A private, mutable copy of the lowered builder: what a run
     /// consumes (the engines take `CircuitBuilder&`).
     [[nodiscard]] builder::CircuitBuilder to_builder() const { return d_->lowered.clone(); }
+
+    /// The circuit with resistors `ties` added (node to ground), each as
+    /// the preflight adds one. The receiver is unchanged.
+    [[nodiscard]] Circuit with_ties(std::span<const Tie> ties) const {
+        auto b = d_->lowered.clone();
+        for (const auto& t : ties) {
+            if (t.node < 0 || t.node >= b.graph().num_nodes()) {
+                throw std::invalid_argument(std::format(
+                    "with_ties: tie \"{}\" names node {}, which this "
+                    "circuit does not have", t.name, t.node));
+            }
+            b.add_resistor(t.name, b.graph().node(t.node).name, "gnd",
+                           t.resistance);
+        }
+        return Circuit{std::move(b)};
+    }
+
+    /// What the topology preflight does to a run: the circuit it runs
+    /// (this one when nothing needed a tie, else a new circuit with the
+    /// ties the preflight inserted), the report, and the ties.
+    struct Regularized;
+    [[nodiscard]] Regularized with_preflight(const pwl::PreflightOptions& opts) const;
 
     /// Same shared data.
     [[nodiscard]] bool same_data(const Circuit& o) const noexcept { return d_ == o.d_; }
@@ -262,6 +294,34 @@ private:
 
     std::shared_ptr<const Data> d_;
 };
+
+struct Circuit::Regularized {
+    Circuit circuit;
+    pwl::PreflightReport report;
+    std::vector<Tie> ties;
+};
+
+inline Circuit::Regularized Circuit::with_preflight(
+    const pwl::PreflightOptions& opts) const {
+    // Pure analysis first: the common, well-posed circuit costs no copy
+    // and keeps its identity (and its shared symbolic plan).
+    auto found = pwl::analyze_preflight(graph(), pool(), opts);
+    if (found.empty() || !opts.auto_regularize) {
+        return {*this, std::move(found), {}};
+    }
+    // The builder's own fixed-point pass, applied to a clone: the run's
+    // circuit is exactly what the in-place preflight produced before.
+    auto b = d_->lowered.clone();
+    const Index before = b.graph().num_branches();
+    auto report = b.run_preflight(opts);
+    std::vector<Tie> ties;
+    for (Index i = before; i < b.graph().num_branches(); ++i) {
+        const auto& br = b.graph().branch(i);
+        ties.push_back(Tie{std::string{b.graph().branch_name(i)}, br.from,
+                           opts.tie_resistance});
+    }
+    return {Circuit{std::move(b)}, std::move(report), std::move(ties)};
+}
 
 }  // namespace pulsim::ir
 

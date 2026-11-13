@@ -281,19 +281,37 @@ def compute_dc_op(builder,
     # to recognise from a singular-matrix message. Running it here
     # too keeps the two entry points from disagreeing about what
     # "floating" means.
+    #
+    # The ties go on this call's own copy of the circuit
+    # (add-immutable-circuit-ir): the caller's builder is not changed.
+    from . import Circuit as _Circuit, CircuitBuilder as _CB
+    if isinstance(builder, (_Circuit, _CB)):
+        circuit = builder if isinstance(builder, _Circuit) else builder.build()
+        side = None if isinstance(builder, _Circuit) else dict(builder.__dict__)
+    else:  # a builder stand-in
+        circuit = side = None
     if auto_regularize is None:
         auto_regularize = True
     if auto_regularize:
         from . import PreflightOptions as _PfOpts
-        pf = builder.run_preflight(_PfOpts(auto_regularize=True))
+        if circuit is not None:
+            circuit, pf, _ = circuit.with_preflight(
+                _PfOpts(auto_regularize=True))
+        else:
+            pf = builder.run_preflight(_PfOpts(auto_regularize=True))
         if not pf.empty():
             import warnings
             warnings.warn(
                 "compute_dc_op(): " + pf.summary() +
                 "\n  Pass auto_regularize=False to get the original "
-                "singular-matrix error instead. The ties persist on "
-                "the builder.",
+                "singular-matrix error instead. The ties were added to "
+                "this call's own copy of the circuit; your builder is "
+                "unchanged.",
                 stacklevel=2)
+    if circuit is not None:
+        builder = circuit.to_builder()
+        if side:
+            builder.__dict__.update(side)
 
     if strategy == "settle":
         # "settle" is a transient, not a solve: it has no rung, no

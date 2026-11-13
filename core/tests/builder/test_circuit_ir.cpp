@@ -156,3 +156,47 @@ TEST_CASE("set_value: equals rebuilding; refusals name device and field",
     CHECK_THROWS_WITH(b.set_value("RL", 1.0), ContainsSubstring("<device>.<field>"));
     CHECK(b.get_value("RL.R") == 10.0);  // refusals left it unchanged
 }
+
+TEST_CASE("IR: with_preflight regularises a copy, never the receiver", "[ir]") {
+    CircuitBuilder b;
+    b.add_voltage_source("V1", "a", "gnd", 5.0);
+    b.add_resistor("R1", "a", "gnd", 10.0);
+    b.add_resistor("Ri", "iso1", "iso2", 10.0);   // floating island
+    const auto c = b.build();
+    const auto h = c.value_hash();
+    const auto nb = c.graph().num_branches();
+
+    auto r = c.with_preflight(pwl::PreflightOptions{});
+    REQUIRE(r.ties.size() == 1);
+    CHECK(r.ties[0].name == "R_auto_iso_iso1");
+    CHECK(r.ties[0].resistance == 1e9);
+    CHECK(r.report.findings.size() == 1);
+    CHECK(r.circuit.graph().num_branches() == nb + 1);
+    CHECK(c.value_hash() == h);                    // receiver unchanged
+    CHECK(c.graph().num_branches() == nb);
+    CHECK(b.graph().num_branches() == nb);         // builder unchanged
+
+    // Equal to the in-place preflight it replaces, and to with_ties.
+    auto inplace = b.clone();
+    (void)inplace.run_preflight(pwl::PreflightOptions{});
+    CHECK(r.circuit.value_hash() == inplace.build().value_hash());
+    CHECK(c.with_ties(r.ties).value_hash() == r.circuit.value_hash());
+
+    // Well posed: same data, no copy, no ties.
+    auto ok = r.circuit.with_preflight(pwl::PreflightOptions{});
+    CHECK(ok.ties.empty());
+    CHECK(ok.report.findings.empty());
+    CHECK(ok.circuit.same_data(r.circuit));
+
+    // auto_regularize off: report only, receiver returned as is.
+    pwl::PreflightOptions off;
+    off.auto_regularize = false;
+    auto rep = c.with_preflight(off);
+    CHECK(rep.ties.empty());
+    CHECK(rep.report.findings.size() == 1);
+    CHECK(rep.circuit.same_data(c));
+
+    using Catch::Matchers::ContainsSubstring;
+    const std::vector<ir::Tie> bad{{"Rx", 99, 1e9}};
+    CHECK_THROWS_WITH(c.with_ties(bad), ContainsSubstring("tie \"Rx\" names node 99"));
+}
