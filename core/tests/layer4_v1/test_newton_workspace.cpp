@@ -278,3 +278,58 @@ TEST_CASE("restart stages share the run workspace's analysis",
     REQUIRE(w.solves == 6 * 3 * 2 + 6 * 7);
     REQUIRE(w.analyses == 1);
 }
+
+// smooth_buck plus a diode whose anode node was created after its cathode
+// node: its Jacobian stamp fills a column, then a LOWER one, the order a
+// MOSFET / IGBT stamp produces. Eigen 3.4's insert only grows the storage
+// on such an out-of-order fill.
+builder::CircuitBuilder smooth_buck_out_of_order() {
+    auto b = smooth_buck();
+    b.add_resistor("Rk", "k", "gnd", 1e3);
+    b.add_resistor("Ra", "o", "a", 100.0);
+    b.add_nonlinear_diode("D3", "a", "k", models::IdealDiode::Params{});
+    return b;
+}
+
+TEST_CASE("the line-search refresh target does not grow over a run",
+          "[v2][layer4][newton][workspace]") {
+    // The workspace's trial target is emptied (resize + setZero) and
+    // refilled with coeffRef by every line-search (and LM) refresh. On
+    // Eigen 3.4.x an insert into an emptied compressed matrix hands all
+    // its spare capacity to the first column, and an out-of-order insert
+    // then reallocates to that capacity plus a few entries, so a
+    // persistent target that is never squeezed grew on every refill and
+    // was copied whole on every insert: three Newton showcases went from
+    // 0.7 s to a 120 s timeout on Ubuntu 24.04 (2.2 M entries for
+    // nnz = 7). The bound is a dense n x n; the defect broke it on the
+    // first solve. Eigen 5 never grows, which is why the A1 gate (no line
+    // search, Eigen 5.0.1) could not see it. LM shares the fix but stalls
+    // short of tolerance on this circuit.
+    auto b = smooth_buck_out_of_order();
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    cache.build_lazy(1e-7);
+    const auto n = static_cast<Index>(b.pool().state_size(b.graph()));
+    NonlinearRefreshFn rf = [](const Vector& x, sparse::Matrix& J, Vector& f,
+                               const topology::Graph& g, const DevicePool& p) {
+        return refresh_smooth_diodes(x, J, f, g, p);
+    };
+    NewtonWorkspace w;
+    Vector x_ws = Vector::Zero(n), x_ref = Vector::Zero(n);
+    for (int step = 0; step < 200; ++step) {
+        SwitchStateMask m(1);
+        m.set(0, (step / 10) % 2 == 0);
+        const auto& seg = cache.lookup(m);
+        const Vector be = Vector::Constant(n, 1e-3 * step);
+        x_ref = solve_with_newton_b_extra(seg, rf, b.graph(), b.pool(), x_ref, be,
+                                          Size{50}, Real{1e-9}, Real{1e-9}, true);
+        x_ws = solve_with_newton_b_extra(seg, rf, b.graph(), b.pool(), x_ws, be,
+                                         Size{50}, Real{1e-9}, Real{1e-9}, true,
+                                         false, &w);
+        REQUIRE(same_bytes(x_ws, x_ref));
+        REQUIRE(w.J_nl_trial.data().allocatedSize() <= n * n);
+        REQUIRE(w.J_nl.data().allocatedSize() <= n * n);
+    }
+    REQUIRE(w.solves == 200);
+    REQUIRE(w.lm_attempts == 0);
+    REQUIRE(w.factorizations == w.iterations);
+}
