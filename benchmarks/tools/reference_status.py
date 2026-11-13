@@ -6,7 +6,8 @@ the analytic set per engine configuration.
     reference_status.py --from-json out.json      # re-render only
 
 Configurations: ``pwl`` (defaults), ``pwl+restart``
-(``discontinuity_restart=True``), ``trbdf2`` and ``dsed`` (harness
+(``discontinuity_restart=True``), ``pwl+split`` (the rule and
+``enable_substep_state_correction=True``), ``trbdf2`` and ``dsed`` (harness
 defaults). Cells are classified exactly as differential_runner.py does,
 against one reference per circuit (computed once, without the flag).
 Text below the ``## Notes`` heading of the existing file is kept.
@@ -37,6 +38,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "REFERENCE_STATUS.md"
 ANALYTIC = yaml.safe_load((ROOT / "manifests" / "analytic.yaml").read_text())["cases"]
 CONFIGS = {"pwl": ("pwl", {}), "pwl+restart": ("pwl", {"discontinuity_restart": True}),
+           "pwl+split": ("pwl", {"discontinuity_restart": True,
+                                 "enable_substep_state_correction": True}),
            "trbdf2": ("trbdf2", {}), "dsed": ("dsed", {})}
 KINDS = ("agree", "disagree", "error", "refused")
 
@@ -129,16 +132,16 @@ def render(diff, ana, notes, metric="edge"):
                                    " the steps that contain a switching instant left out)."
                                    if metric == "edge" else " (the previous measure)."),
          "", f"## Differential matrix ({len(circuits)} circuits)", "", *_counts(diff), "",
-         "### Fixed engine: restart rule off vs on (circuits that do not agree with it off)", "",
-         "| circuit | tol | pwl | pwl+restart |", "|---|---:|---:|---:|"]
+         "### Fixed engine: restart rule and split (circuits where any of the three does not agree)", "",
+         "| circuit | tol | pwl | pwl+restart | pwl+split |", "|---|---:|---:|---:|---:|"]
     for c in circuits:
-        a, b = by[(c, "pwl")], by[(c, "pwl+restart")]
-        if a["outcome"] != "agree":
-            L.append(f"| {c.removeprefix('circuits/')} | {a['tol']:g} | {_e(a)} | {_e(b)} |")
+        a, b, sp = by[(c, "pwl")], by[(c, "pwl+restart")], by[(c, "pwl+split")]
+        if a["outcome"] != "agree" or b["outcome"] != "agree" or sp["outcome"] != "agree":
+            L.append(f"| {c.removeprefix('circuits/')} | {a['tol']:g} | {_e(a)} | {_e(b)} | {_e(sp)} |")
     L += ["", "### Every cell whose outcome differs from the frozen `known:` entry", "",
           "| circuit | engine | frozen | now | err_rms |", "|---|---|---|---|---:|"]
     for r in diff:
-        if r["config"] == "pwl+restart":
+        if r["config"] in ("pwl+restart", "pwl+split"):
             continue
         frozen = r["known"] or "agree/refused"
         if (r["known"] or None) != (r["outcome"] if r["outcome"] in ("disagree", "error") else None):
