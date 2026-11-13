@@ -361,6 +361,21 @@ conduction trace as a **constant offset** (thermal time constants ≫
 nanosecond switching transitions, so the impulse energy is smeared
 across the cycle — standard PSIM convention).
 
+## Device-level switching energy — `add_power_mosfet`
+
+To simulate the switching transient itself instead of annotating it,
+build the device with `CircuitBuilder.add_power_mosfet` (channel, C_gs,
+C_gd(v), C_ds(v), R_g, body diode) and measure it with
+`p.double_pulse_test(device_kwargs, V_dd=, I_load=, R_g_ext=, V_drive=,
+L_load=)`, which returns E_on, E_off, the Miller plateau, dv/dt, di/dt
+and I_rr as time-weighted integrals, starting from the off-state bias
+(an all-zero start turns the device on through C_gd before the gate
+command). Use `engine="trbdf2"`; on `pwl`
+the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
+The datasheet fitters are in `pulsim.datasheet`. Losses of the
+composite are not in `device_loss_summary` yet (unified device
+interface).
+
 ## What's *not* covered
 
 The kernel runs at fixed `dt`. We don't resolve sub-`dt` switching

@@ -138,6 +138,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_multi_winding_transformer.cpp  # Layer 2 V16
         tests/layer2/test_ideal_transformer.cpp         # Phase 4 C.4
         tests/layer2/test_flux_table.cpp                # Phase 4 C.4
+        tests/layer2/test_charge_table.cpp              # add-power-mosfet-datasheet-device
         tests/layer2/test_gapped_core.cpp               # Phase 4 C.4
         tests/layer2/test_jiles_atherton_core.cpp       # Phase 4 C.4 (JA in loop)
         tests/layer2/test_controlled_sources.cpp        # add-controlled-source-set

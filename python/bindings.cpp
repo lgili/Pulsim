@@ -414,6 +414,75 @@ void init_module(py::module_& m) {
         .def_readwrite("name_prefix",
                         &pwl::PreflightOptions::name_prefix);
 
+    // ---- add-power-mosfet-datasheet-device: charge laws ----------------
+    py::class_<models::ChargeTable>(m, "ChargeTable",
+        "Monotone charge law Q(v) for a nonlinear capacitor: knots "
+        "(v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the "
+        "exact derivative of Q(v). Not odd; linear tails at the end-knot "
+        "slopes; one knot must sit at v = 0 with Q = 0. Fritsch-Carlson "
+        "monotonicity is checked and a violating tangent clamped.")
+        .def(py::init([](std::vector<Real> v, std::vector<Real> q,
+                          std::vector<Real> c) {
+                  return models::ChargeTable(std::move(v), std::move(q),
+                                             std::move(c));
+              }),
+              py::arg("v"), py::arg("Q"), py::arg("C"),
+              "From triples: voltages [V], charges [C], capacitances [F].")
+        .def_static("from_capacitance",
+              [](const std::vector<Real>& v, const std::vector<Real>& c) {
+                  return models::ChargeTable::from_capacitance(v, c);
+              },
+              py::arg("v"), py::arg("C"),
+              "From (v, C) pairs, e.g. a digitised datasheet curve: Q is the "
+              "exact integral of the monotone cubic interpolant of C. Use "
+              "pulsim.datasheet.fit_charge_table to get a table with a "
+              "checked residual.")
+        .def("charge", &models::ChargeTable::charge, py::arg("v"),
+              "Q(v) [C].")
+        .def("capacitance", &models::ChargeTable::capacitance, py::arg("v"),
+              "C(v) = dQ/dv [F], exact derivative of charge().")
+        .def_property_readonly("v_knots", &models::ChargeTable::v_knots)
+        .def_property_readonly("q_knots", &models::ChargeTable::q_knots)
+        .def_property_readonly("c_knots", &models::ChargeTable::c_knots,
+              "Knot tangents after Fritsch-Carlson clamping.")
+        .def_property_readonly("clamped_tangents",
+              &models::ChargeTable::clamped_tangents);
+
+    py::class_<models::NonlinearCapacitor::Params>(m, "ChargeLaw",
+        "A nonlinear capacitor's charge law: junction C0/(1+v/V0)^m, a "
+        "ChargeTable, or the SPICE VDMOS gate-drain law. Build one with "
+        "ChargeLaw.junction / .table / .vdmos_cgd and pass it to "
+        "add_nonlinear_capacitor or as add_power_mosfet's C_gd / C_ds.")
+        .def_static("junction",
+              &models::NonlinearCapacitor::junction,
+              py::arg("C0"), py::arg("V0"), py::arg("m") = 0.5,
+              py::arg("v_floor") = -0.9,
+              "C(v) = C0 / (1 + v/V0)^m (C0 [F], V0 [V]).")
+        .def_static("table",
+              [](const models::ChargeTable& t) {
+                  return models::NonlinearCapacitor::from_table(
+                      std::make_shared<const models::ChargeTable>(t));
+              },
+              py::arg("table"), "Charge law from a ChargeTable.")
+        .def_static("vdmos_cgd",
+              &models::NonlinearCapacitor::vdmos_cgd,
+              py::arg("cgd_max"), py::arg("cgd_min"), py::arg("a"),
+              "ngspice VDMOS C_gd(v_gd): s = (CGDMAX-CGDMIN)/(1+pi/2), "
+              "C = CGDMAX - s + s*tanh(a*u) for u > 0, "
+              "CGDMAX - s + s*atan(a*u) for u <= 0.")
+        .def_property_readonly("kind",
+              [](const models::NonlinearCapacitor::Params& p) {
+                  return std::string{models::NonlinearCapacitor::law_name(p)};
+              }, "'junction', 'table' or 'vdmos_cgd'.")
+        .def("charge",
+              [](const models::NonlinearCapacitor::Params& p, Real v) {
+                  return models::NonlinearCapacitor::charge(p, v);
+              }, py::arg("v"), "Q(v) [C].")
+        .def("capacitance",
+              [](const models::NonlinearCapacitor::Params& p, Real v) {
+                  return models::NonlinearCapacitor::capacitance(p, v);
+              }, py::arg("v"), "C(v) = dQ/dv [F].");
+
     py::class_<builder::CircuitBuilder>(m, "CircuitBuilder",
         "High-level v2 circuit constructor. Hides the "
         "two-object Graph + DevicePool setup; users pass "
@@ -1385,6 +1454,47 @@ void init_module(py::module_& m) {
                           static_cast<int>(br.to));
                       desc["params"] = params;
                       desc["branch_id"] = static_cast<int>(bid);
+                      // add-power-mosfet-datasheet-device: the channel's
+                      // entry stands for the whole composite.
+                      if (const auto* pm = self.power_mosfet_record(bid)) {
+                          const auto& pp = pm->params;
+                          auto cap = [](const models::PowerMosfet::Capacitance& c) {
+                              py::dict d;
+                              if (const Real* x = std::get_if<Real>(&c)) {
+                                  d["law"] = *x > Real{0} ? "linear" : "none";
+                                  d["C"] = *x;
+                                  return d;
+                              }
+                              const auto& q = std::get<models::NonlinearCapacitor::Params>(c);
+                              d["law"] = models::NonlinearCapacitor::law_name(q);
+                              if (q.law == models::ChargeLawKind::Junction) {
+                                  d["C0"] = q.C0; d["V0"] = q.V0; d["m"] = q.m;
+                              } else if (q.law == models::ChargeLawKind::VdmosCgd) {
+                                  d["cgd_max"] = q.cgd_max; d["cgd_min"] = q.cgd_min;
+                                  d["a"] = q.a;
+                              } else {
+                                  d["knots"] = q.table->size();
+                              }
+                              return d;
+                          };
+                          py::dict pd;
+                          pd["K"] = pp.K; pd["V_T"] = pp.V_T;
+                          pd["lambda_"] = pp.lambda; pd["kappa"] = pp.kappa;
+                          pd["R_d"] = pp.R_d; pd["C_gs"] = pp.C_gs;
+                          pd["C_gd"] = cap(pp.C_gd); pd["C_ds"] = cap(pp.C_ds);
+                          pd["R_g"] = pp.R_g; pd["L_s"] = pp.L_s;
+                          using BD = models::PowerMosfet::BodyDiode;
+                          pd["body_diode"] = pp.body == BD::Lauritzen ? "lauritzen"
+                              : pp.body == BD::Shockley ? "shockley" : "none";
+                          pd["T_j"] = pp.T_j; pd["rds_tc1"] = pp.rds_tc1;
+                          pd["rds_tc2"] = pp.rds_tc2; pd["vt_tc"] = pp.vt_tc;
+                          pd["K_eff"] = pm->K_eff; pd["V_T_eff"] = pm->V_T_eff;
+                          pd["R_d_eff"] = pm->R_d_eff;
+                          desc["kind"] = "power_mosfet";
+                          desc["params"] = pd;
+                          desc["pins"] = py::make_tuple(pm->drain, pm->source, pm->gate);
+                          desc["sub_elements"] = pm->sub_elements;
+                      }
                       out.append(desc);
                   }
                   return out;
@@ -1425,7 +1535,126 @@ void init_module(py::module_& m) {
                   return out;
               },
               "Dict mapping every node_id used in the circuit to its "
-              "current role hint.");
+              "current role hint.")
+        // ---- add-power-mosfet-datasheet-device -------------------------
+        .def("add_nonlinear_capacitor",
+              &builder::CircuitBuilder::add_nonlinear_capacitor_law,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("law"),
+              py::return_value_policy::reference,
+              "Charge-based nonlinear capacitor with an explicit "
+              "ChargeLaw (junction, table or vdmos_cgd). Stamped in "
+              "charge form, so charge is conserved over any cycle.")
+        .def("add_power_mosfet",
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view drain, std::string_view source,
+                 std::string_view gate, Real K, Real V_T, Real lambda_,
+                 Real kappa, Real R_d, Real C_gs, const py::object& C_gd,
+                 const py::object& C_ds, Real R_g, Real L_s,
+                 const py::object& body_diode, Real T_j, Real rds_tc1,
+                 Real rds_tc2, Real vt_tc) -> builder::CircuitBuilder& {
+                  using PM = models::PowerMosfet;
+                  auto cap = [&](const py::object& o, const char* what)
+                      -> PM::Capacitance {
+                      if (py::isinstance<models::NonlinearCapacitor::Params>(o)) {
+                          return o.cast<models::NonlinearCapacitor::Params>();
+                      }
+                      if (py::isinstance<models::ChargeTable>(o)) {
+                          return models::NonlinearCapacitor::from_table(
+                              std::make_shared<const models::ChargeTable>(
+                                  o.cast<models::ChargeTable>()));
+                      }
+                      if (py::isinstance<py::float_>(o) || py::isinstance<py::int_>(o)) {
+                          return o.cast<Real>();
+                      }
+                      throw py::type_error(std::format(
+                          "add_power_mosfet(\"{}\"): {} must be a float "
+                          "(linear, farads), a ChargeTable or a ChargeLaw; "
+                          "got {}", name, what,
+                          std::string(py::str(py::type::handle_of(o).attr("__name__")))));
+                  };
+                  PM::Params p;
+                  p.K = K; p.V_T = V_T; p.lambda = lambda_; p.kappa = kappa;
+                  p.R_d = R_d; p.C_gs = C_gs;
+                  p.C_gd = cap(C_gd, "C_gd");
+                  p.C_ds = cap(C_ds, "C_ds");
+                  p.R_g = R_g; p.L_s = L_s; p.T_j = T_j;
+                  p.rds_tc1 = rds_tc1; p.rds_tc2 = rds_tc2; p.vt_tc = vt_tc;
+                  if (!body_diode.is_none()) {
+                      if (!py::isinstance<py::dict>(body_diode)) {
+                          throw py::type_error(std::format(
+                              "add_power_mosfet(\"{}\"): body_diode must be "
+                              "None or a dict with 'model' = 'lauritzen' or "
+                              "'shockley'", name));
+                      }
+                      py::dict d = body_diode.cast<py::dict>();
+                      if (!d.contains("model")) {
+                          throw py::value_error(std::format(
+                              "add_power_mosfet(\"{}\"): body_diode needs "
+                              "'model' ('lauritzen' or 'shockley')", name));
+                      }
+                      const auto model = d["model"].cast<std::string>();
+                      std::vector<std::string> allowed;
+                      if (model == "lauritzen") {
+                          p.body = PM::BodyDiode::Lauritzen;
+                          allowed = {"model", "I_S", "n", "V_T", "tau", "T_M", "G_min"};
+                      } else if (model == "shockley") {
+                          p.body = PM::BodyDiode::Shockley;
+                          allowed = {"model", "I_S", "n", "V_T", "G_min", "BV"};
+                      } else {
+                          throw py::value_error(std::format(
+                              "add_power_mosfet(\"{}\"): body_diode model "
+                              "'{}' — expected 'lauritzen' or 'shockley' "
+                              "(pass body_diode=None for no diode)", name, model));
+                      }
+                      for (auto item : d) {
+                          const auto k = item.first.cast<std::string>();
+                          if (std::find(allowed.begin(), allowed.end(), k) == allowed.end()) {
+                              throw py::value_error(std::format(
+                                  "add_power_mosfet(\"{}\"): body_diode key "
+                                  "'{}' is not a {} parameter", name, k, model));
+                          }
+                      }
+                      auto get = [&](const char* k, Real dflt) {
+                          return d.contains(k) ? d[k].cast<Real>() : dflt;
+                      };
+                      auto& L = p.lauritzen;
+                      auto& S = p.shockley;
+                      if (p.body == PM::BodyDiode::Lauritzen) {
+                          L.I_S = get("I_S", L.I_S); L.n = get("n", L.n);
+                          L.V_T = get("V_T", L.V_T); L.tau = get("tau", L.tau);
+                          L.T_M = get("T_M", L.T_M); L.G_min = get("G_min", L.G_min);
+                      } else {
+                          S.I_S = get("I_S", S.I_S); S.n = get("n", S.n);
+                          S.V_T = get("V_T", S.V_T); S.G_min = get("G_min", S.G_min);
+                          S.BV = get("BV", S.BV);
+                      }
+                  }
+                  return self.add_power_mosfet(name, drain, source, gate, p);
+              },
+              py::arg("name"), py::arg("drain"), py::arg("source"),
+              py::arg("gate"), py::kw_only(),
+              py::arg("K"), py::arg("V_T"),
+              py::arg("lambda_") = 0.0, py::arg("kappa") = 15.0,
+              py::arg("R_d") = 0.0, py::arg("C_gs"),
+              py::arg("C_gd"), py::arg("C_ds"),
+              py::arg("R_g") = 0.0, py::arg("L_s") = 0.0,
+              py::arg("body_diode") = py::none(),
+              py::arg("T_j") = 25.0, py::arg("rds_tc1") = 0.0,
+              py::arg("rds_tc2") = 0.0, py::arg("vt_tc") = 0.0,
+              py::return_value_policy::reference,
+              "Datasheet power MOSFET as one call: Level-1 channel (K "
+              "[A/V^2], V_T [V], third quadrant by terminal swap), drift "
+              "resistance R_d [ohm], C_gs [F], C_gd and C_ds (float = linear "
+              "farads, 0 = absent; or a ChargeTable / ChargeLaw), internal "
+              "gate resistance R_g [ohm], common source inductance L_s [H], "
+              "body_diode None or {'model': 'lauritzen'|'shockley', ...}. "
+              "T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + "
+              "rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). "
+              "Sub-elements: name (channel), name.rd/.rg/.ls/.cgs/.cgd/.cds, "
+              "name_body. Runs on pwl (time step must resolve the gate "
+              "transient: ~0.2 ns for a 60 ns plateau) and trbdf2. "
+              "components() reports one 'power_mosfet' entry.");
 
     // ---- BranchKind enum + Branch struct (for schematic backends
     //      that want graph-level structural info) -------------------

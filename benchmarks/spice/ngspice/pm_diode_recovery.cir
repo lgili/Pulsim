@@ -1,0 +1,21 @@
+* add-power-mosfet-datasheet-device task 3.4 -- SPICE TT reverse recovery
+* Fixes the importer's T_M / TT ratio for the Lauritzen body diode.
+* 20 V through 2 ohm sets I_F = 9.61 A; at 5 us the source steps to
+* -100 V and 1 uH sets di/dt = -120 A/us. The RC snubber (20 ohm, 2 nF)
+* makes the snap after recovery physical (without it the CJO = 0
+* junction leaves ngspice ringing numerically). Measured: I_rrm and Q_rr
+* of the first negative lobe of i(L1).
+.model DT D(IS=1e-12 N=1 TT=50n)
+.temp 26.85
+.options TNOM=26.85 RELTOL=1e-6 ABSTOL=1e-10
+Vs s 0 PULSE(20 -100 5u 1n 1n 100u 200u)
+R1 s x 2
+L1 x a 1u
+D1 a 0 DT
+Rs a b 20
+Cs b 0 2n
+.control
+tran 0.05n 6u 4.9u 0.05n
+wrdata pm_diode_recovery.out i(L1)
+.endc
+.end

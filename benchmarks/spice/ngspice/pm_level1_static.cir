@@ -1,0 +1,26 @@
+* add-power-mosfet-datasheet-device task 7.1 -- Level-1 static curves
+* NMOS LEVEL=1 with KP = 2*K = 2.86, W = L (KP_eff = KP), VTO = 3,
+* LAMBDA = 0.01; no body diode (IS = 0 junctions are not used: bulk tied
+* to source). Pulsim: add_mosfet_level1(K=1.43, V_T=3, lambda_=0.01).
+.model NM NMOS(LEVEL=1 VTO=3 KP=2.86 LAMBDA=0.01 IS=0 CBD=0 CBS=0)
+M1 d g 0 0 NM W=10u L=10u
+Vd d 0 DC 0
+Vg g 0 DC 0
+.control
+set numdgt=12
+* output curves at V_GS = 6, 9, 12 V (V_DS 0.5 .. 20 V)
+alter Vg dc = 6
+dc Vd 0.5 20 0.5
+wrdata pm_level1_out_vg6.out -i(Vd)
+alter Vg dc = 9
+dc Vd 0.5 20 0.5
+wrdata pm_level1_out_vg9.out -i(Vd)
+alter Vg dc = 12
+dc Vd 0.5 20 0.5
+wrdata pm_level1_out_vg12.out -i(Vd)
+* transfer curve at V_DS = 20 V
+alter Vd dc = 20
+dc Vg 4 12 0.25
+wrdata pm_level1_transfer.out -i(Vd)
+.endc
+.end

@@ -695,7 +695,7 @@ def _spice_diode(b, el: SpiceElement, nodes: List[str], notes: List[str],
 
 
 def _spice_mosfet(b, el: SpiceElement, nodes: List[str], notes: List[str],
-                  drops: List[str]) -> None:
+                  drops: List[str], charge: str = "keep") -> None:
     d = el.designator
     if el.model_name is None:
         raise ValueError(
@@ -716,7 +716,7 @@ def _spice_mosfet(b, el: SpiceElement, nodes: List[str], notes: List[str],
     mult = float(inst.get("M", 1.0))
     p = mdl.params
     if mdl.type == "VDMOS":
-        _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops)
+        _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops, charge)
         return
     if mdl.type not in ("NMOS", "PMOS"):
         raise ValueError(f"{d}: model {mdl.name!r} is of type {mdl.type}, not NMOS/PMOS/VDMOS.")
@@ -801,10 +801,49 @@ def _spice_mosfet(b, el: SpiceElement, nodes: List[str], notes: List[str],
         notes.append(f"{d}: body diode from IS/JS ({I_S_body:.3g} A) built explicitly")
 
 
-def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None:
+# T_M / TT for the Lauritzen body diode (task 3.4). SPICE TT is the
+# T_M -> 0 limit; against ngspice's TT diode (pm_diode_recovery.cir,
+# TT = 50 ns, 120 A/us) 0.01 gives I_rrm -0.09 %, Q_rr +0.11 %; 0.1 would
+# give -2.2 % in I_rrm. Smaller ratios gain < 0.1 % and stiffen the diode.
+_VDMOS_TM_OVER_TT = 0.01
+_VDMOS_CHARGE = ("CGS", "CGDMAX", "CGDMIN", "A", "CJO", "TT", "RG")
+
+
+def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops,
+           charge: str = "keep") -> None:
     """LTspice's VDMOS: 'the DC model is the same as a level 1
     monolithic MOSFET except that the length and width default to
-    one so that transconductance can be directly specified'."""
+    one so that transconductance can be directly specified'.
+
+    With ``charge="keep"`` (default) a card carrying any of CGS, CGDMAX,
+    CGDMIN, A, CJO, TT or RG becomes ``add_power_mosfet``:
+
+    ===========================  ============================================
+    card                         Pulsim
+    ===========================  ============================================
+    KP, VTO, LAMBDA              channel K = KP/2·W/L·M, V_T, lambda_
+    RD                           R_d (``{d}.rd``)
+    RS                           series resistor ``{d}.rs`` (as before)
+    CGS                          C_gs (× M)
+    CGDMAX, CGDMIN, A            ``ChargeLaw.vdmos_cgd`` (× M; LTspice
+                                 defaults CGDMIN = 0, A = 1)
+    CJO, VJ, M                   C_ds ``ChargeLaw.junction`` (VJ 0.8, M 0.5
+                                 defaults; no FC linearisation)
+    TT                           Lauritzen body diode tau = TT,
+                                 T_M = 0.01·TT (ngspice TT recovery:
+                                 I_rrm -0.09 %, Q_rr +0.11 %)
+    RG                           R_g (/ M)
+    IS, N, RB, BV, RDS           body diode / resistors as before (BV is
+                                 dropped with a Lauritzen diode)
+    ===========================  ============================================
+
+    Absent capacitances are 0 (LTspice's defaults). NOTE: ngspice's
+    VDMOS defaults are not 0 (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF,
+    CJO 0.5 nF, measured with ``showmod``), so a card written for ngspice
+    that omits them simulates differently there. ``charge="drop"``
+    restores the ideal-gate Level-1 device of 2.0 and lists the charge
+    parameters as dropped.
+    """
     p = mdl.params
     if "pchan" in mdl.flags:
         raise ValueError(
@@ -822,29 +861,61 @@ def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None
             "changes the triode-region law; the level-1 device has no such knob.")
     if "VTO" not in p or "KP" not in p:
         raise ValueError(f"{d}: VDMOS model {mdl.name!r} needs VTO and KP (has {sorted(p)}).")
+    if charge not in ("keep", "drop"):
+        raise ValueError(f"spice_to_builder: charge={charge!r}; expected 'keep' or 'drop'.")
+    keep = charge == "keep" and any(k in p for k in _VDMOS_CHARGE)
     W = float(inst.get("W", 1.0))
     L = float(inst.get("L", 1.0))
     K = float(p["KP"]) / 2.0 * W / L * mult
     RD = float(p.get("RD", 0.0)) / mult
     RS = float(p.get("RS", 0.0)) / mult
     RDS = float(p.get("RDS", 0.0))
-    if "RG" in p:
+    if "RG" in p and not keep:
         drops.append(f"{d}: RG={p['RG']:g} dropped: the gate is a node reference (ideal gate)")
     if any(k in p for k in ("SUBTHRES", "KSUBTHRES")):
         drops.append(f"{d}: subthreshold conduction (subthres/ksubthres) dropped")
     caps = sorted(k for k in p if k in ("CJO", "TT", "CGDMIN", "CGDMAX", "A", "CGS", "M", "VJ"))
-    if caps:
+    if caps and not keep:
         drops.append(f"{d}: {caps} (gate / junction charge, transit time) dropped: no switching "
                      "transient and no reverse recovery in the level-1 device")
-    dn, sn = drain, source
-    if RD > 0:
-        dn = f"{d}.d"
-        b.add_resistor(f"{d}.rd", drain, dn, RD)
-    if RS > 0:
-        sn = f"{d}.s"
-        b.add_resistor(f"{d}.rs", sn, source, RS)
-    b.add_mosfet_level1(d, dn, sn, gate, K=K, V_T=float(p["VTO"]),
-                        lambda_=float(p.get("LAMBDA", 0.0)), with_body_diode=False)
+    dn, sn = drain, (f"{d}.s" if RS > 0 else source)
+    if keep:
+        if RS > 0:
+            b.add_resistor(f"{d}.rs", sn, source, RS)
+        cgd_max = float(p.get("CGDMAX", 0.0)) * mult
+        cgd_min = float(p.get("CGDMIN", 0.0)) * mult
+        if ("CGDMAX" in p or "CGDMIN" in p) and not cgd_max > cgd_min:
+            raise ValueError(
+                f"{d}: VDMOS model {mdl.name!r} has CGDMAX={cgd_max:g} <= CGDMIN="
+                f"{cgd_min:g}; the gate-drain law needs CGDMAX > CGDMIN.")
+        import pulsim as _p
+        C_gd = (_p.ChargeLaw.vdmos_cgd(cgd_max, cgd_min, float(p.get("A", 1.0)))
+                if cgd_max > 0 else 0.0)
+        CJO = float(p.get("CJO", 0.0)) * mult
+        C_ds = (_p.ChargeLaw.junction(CJO, float(p.get("VJ", 0.8)), float(p.get("M", 0.5)))
+                if CJO > 0 else 0.0)
+        C_gs = float(p.get("CGS", 0.0)) * mult
+        R_g = float(p.get("RG", 0.0)) / mult
+        if R_g > 0 and C_gs == 0 and cgd_max == 0:
+            drops.append(f"{d}: RG={p['RG']:g} dropped: the card has no gate capacitance "
+                         "(CGS/CGDMAX), so a gate resistor would carry no current")
+            R_g = 0.0
+        b.add_power_mosfet(d, drain, sn, gate, K=K, V_T=float(p["VTO"]),
+                           lambda_=float(p.get("LAMBDA", 0.0)), R_d=RD,
+                           C_gs=C_gs, C_gd=C_gd, C_ds=C_ds, R_g=R_g)
+        if RD > 0:
+            dn = f"{d}.d"
+        kept = sorted(k for k in p if k in _VDMOS_CHARGE + ("VJ", "M"))
+        notes.append(f"{d}: VDMOS charge kept {kept} → add_power_mosfet (charge='drop' "
+                     "restores the ideal-gate level-1 device)")
+    else:  # the 2.0 device, built in the 2.0 order
+        if RD > 0:
+            dn = f"{d}.d"
+            b.add_resistor(f"{d}.rd", drain, dn, RD)
+        if RS > 0:
+            b.add_resistor(f"{d}.rs", sn, source, RS)
+        b.add_mosfet_level1(d, dn, sn, gate, K=K, V_T=float(p["VTO"]),
+                            lambda_=float(p.get("LAMBDA", 0.0)), with_body_diode=False)
     if RDS > 0:
         b.add_resistor(f"{d}.rds", dn, sn, RDS / mult)
     # The body diode the card describes (LTspice defaults: Is=1e-14, N=1).
@@ -852,6 +923,7 @@ def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None
     n = float(p.get("N", 1.0))
     RB = float(p.get("RB", 0.0)) / mult
     BV = float(p.get("BV", 0.0))
+    TT = float(p.get("TT", 0.0)) if keep else 0.0
     BV_p = 0.0
     if BV > 0:
         IBV = float(p.get("IBV", 1e-3))
@@ -860,11 +932,19 @@ def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None
     if RB > 0:
         an = f"{d}.b"
         b.add_resistor(f"{d}_body.rb", sn, an, RB)
-    b.add_shockley_diode(f"{d}_body", an, dn, I_S=I_S, n=n, BV=BV_p)
+    if TT > 0:
+        if BV > 0:
+            drops.append(f"{d}: BV={BV:g} dropped: the Lauritzen body diode (TT) has no breakdown")
+        b.add_lauritzen_diode(f"{d}_body", an, dn, I_S=I_S, n=n, tau=TT,
+                              T_M=_VDMOS_TM_OVER_TT * TT)
+        notes.append(f"{d}: body diode Lauritzen tau = TT = {TT:.3g} s, "
+                     f"T_M = {_VDMOS_TM_OVER_TT:g}·TT")
+    else:
+        b.add_shockley_diode(f"{d}_body", an, dn, I_S=I_S, n=n, BV=BV_p)
     notes.append(f"{d}: VDMOS → level-1 K = KP/2 = {K:.4g} A/V², body diode Is={I_S:.3g} A n={n:g}")
 
 
-def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
+def spice_to_builder(text_or_path, *, strict: bool = False, charge: str = "keep") -> Any:
     """Parse a SPICE netlist string OR file path and return a
     populated `pulsim.CircuitBuilder`.
 
@@ -876,7 +956,9 @@ def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
     the body diode the card gives) or refused by name; see the module
     docstring. Parameters that are dropped knowingly are listed in
     one summary warning; ``strict=True`` turns any drop into a
-    refusal.
+    refusal. ``charge="drop"`` builds a VDMOS card as the ideal-gate
+    Level-1 device even when it carries gate / junction charge (the
+    pre-2.1 behaviour; see ``_vdmos`` for the mapping).
     """
     if "\n" not in str(text_or_path):
         from pathlib import Path
@@ -936,7 +1018,7 @@ def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
         elif kind == "D":
             _spice_diode(b, elem, nodes, notes, drops)
         elif kind == "M":
-            _spice_mosfet(b, elem, nodes, notes, drops)
+            _spice_mosfet(b, elem, nodes, notes, drops, charge=charge)
         elif kind == "X":
             raise ValueError(
                 f"{designator}: an unexpanded subcircuit instance survived "

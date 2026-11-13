@@ -54,7 +54,7 @@ print(p.CircuitBuilder.add_current_source.__doc__.splitlines()[0])
 add_current_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, I: typing.SupportsFloat | typing.SupportsIndex) -> pulsim._pulsim.CircuitBuilder
 ```
 
-That union is pybind11's `float` (the stub writes `float`).
+That union is pybind11's `float`, as in the stub.
 
 ## 2. Mental model
 
@@ -62,12 +62,14 @@ That union is pybind11's `float` (the stub writes `float`).
   ground. Every `b.add_*` call adds a branch between two nodes; the
   first argument is the branch name used later by `res.i(name)`.
 - **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
-  and `add_diode` are two-state branches: a conductance `g_on` (or
-  `1/R_on`) when on, `g_off` when off; only `add_diode(V_f=)` adds a
-  series drop, while on. Each one owns a bit in the switch-state mask. Controlled
+  and `add_diode` are two-state branches: conductance `g_on` (or
+  `1/R_on`) on, `g_off` off; `add_diode(V_f=)` adds a series drop
+  while on. Each one owns a bit in the switch-state mask. Controlled
   switches follow `switch_fn(t) -> SwitchStateMask`; diodes commutate
   on their own. Smooth devices (`add_shockley_diode`, `add_mosfet_level1`,
-  saturable magnetics) are solved with Newton; `add_nonlinear_diode` is retired.
+  `add_power_mosfet`, saturable magnetics) are solved with Newton;
+  `add_nonlinear_diode` is retired. Gate transients:
+  `p.double_pulse_test`, trbdf2 or `dt` <= 0.2 ns.
 - **Engines** (`p.simulate(..., engine=...)`):
 
 | engine | step | use it for |

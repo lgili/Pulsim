@@ -355,6 +355,64 @@ once, above the engine dispatch, and both engines consume that plan.
   unchanged until the fixed engine shoots on the true state (Phase 2).
 * **Added** `_NativeCircuitBuilderAdapter.node_pair_voltage` and the
   sine source `frequency` in `CircuitBuilder.components()`.
+
+### Datasheet power MOSFET (add-power-mosfet-datasheet-device, steps 1-4)
+
+* **Added** `ChargeTable` (C++ `models/charge_table.hpp`, Python
+  `pulsim.ChargeTable`): a monotone charge law Q(v) from knots (v, Q, C)
+  or from (v, C) pairs, cubic Hermite with C as exact tangents, so
+  C(v) = dQ/dv to rounding; not odd; Fritsch-Carlson checked; refusals
+  name the knot.
+* **Added** charge-law variants of `NonlinearCapacitor`: `junction`
+  (unchanged, bit-identical), `table` and `vdmos_cgd` (the ngspice VDMOS
+  C_gd law, matched to 1e-9 at ten bias points against ngspice 45.2).
+  Python: `pulsim.ChargeLaw.junction / .table / .vdmos_cgd` and
+  `add_nonlinear_capacitor(name, n_pos, n_neg, law)`. Same device kind,
+  same history, no new Newton-refresh wrapper.
+* **Added** `CircuitBuilder.add_power_mosfet(name, drain, source, gate,
+  *, K, V_T, ..., C_gs, C_gd, C_ds, R_g, L_s, body_diode, T_j, rds_tc1,
+  rds_tc2, vt_tc)` and the YAML type `power_mosfet` (strict keys): a
+  composite of the Level-1 channel, R_d, C_gs, C_gd(v_gd), C_ds(v_ds),
+  R_g, L_s and a Shockley or Lauritzen body diode, at a run-constant T_j.
+  `components()` reports one `power_mosfet` entry. Runs on `pwl` (the
+  step must resolve the gate transient) and `trbdf2`. One call reproduces
+  the hand-built double pulse of the 2026-11 review (E_on 136.14 uJ,
+  E_off 158.96 uJ at 400 V / 10 A, R_g = 10 ohm) within 1e-9.
+* **Added** `pulsim.double_pulse_test(...)` (E_on, E_off, Miller plateau,
+  dv/dt, di/dt, I_rr; time-weighted integrals) and
+  `pulsim.double_pulse_metrics(...)` for external waveforms. The run
+  starts from the off-state bias (`initial_state`); from an all-zero
+  state C_gd turns the device on before the gate command. Plateau within
+  3 % of Q_gd/I_g at 10 and 47 ohm; pwl and trbdf2 agree to 0.08 %.
+* **Added** `pulsim.datasheet`: `fit_charge_table`, `fit_mosfet_channel`,
+  `fit_rdson_temperature`, `fit_body_diode_recovery`,
+  `power_mosfet_from_datasheet`; each returns its residual and raises
+  above its limit.
+* **Added** the part-file `power_mosfet` block (per-curve datasheet
+  references, disjoint `fitted_on` / `validated_on`, a `double_pulse`
+  acceptance condition with a tolerance of at most 25 %),
+  `pulsim.lib.power_mosfet(number)`, `Part.add_to(...)` and
+  `Part.acceptance_check()`. No real part ships yet (owner decision).
+* **Added** `import_plecs_xml(path, variables={...})`: a "table and
+  formula" switching-energy table is evaluated at import (arithmetic only,
+  no `eval`) and the provenance note records the formula and values.
+* **Changed (BREAKING)** `spice_to_builder` keeps a VDMOS card's charge:
+  a card carrying CGS, CGDMAX, CGDMIN, A, CJO, TT or RG now builds
+  `add_power_mosfet` (TT gives a Lauritzen body diode), produces switching
+  transients and needs a time step that resolves them.
+  `spice_to_builder(..., charge="drop")` restores the ideal-gate Level-1
+  device. A card without these parameters imports as before. Note:
+  ngspice's VDMOS defaults for absent capacitances are not zero; the
+  importer follows LTspice (zero).
+* **Added** ngspice decks `benchmarks/spice/ngspice/pm_*.cir` (Level-1
+  static curves, Shockley curve, charge-law sweeps, VDMOS double pulse,
+  TT diode recovery) with pinned reference numbers checked by
+  `test_power_mosfet_ngspice.py`. Measured against ngspice 45.2: charge
+  laws 1e-12; Level-1 4e-8 away from the triode/saturation boundary,
+  1.6e-5 within 0.5 V of it; VDMOS double pulse E_on +0.15 %, E_off
+  +0.07 %, plateau +0.35 %; Lauritzen body diode at T_M = 0.01·TT
+  against SPICE TT recovery: I_rrm −0.09 %, Q_rr +0.11 %.
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

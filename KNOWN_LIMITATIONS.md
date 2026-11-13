@@ -138,6 +138,11 @@ The intentional gaps for v1.3:
 For complex netlists, the YAML loader (`pulsim.load_yaml_file`) or
 hand-built `CircuitBuilder` is the recommended path.
 
+VDMOS cards keep their charge since add-power-mosfet-datasheet-device
+(CGS, CGDMAX/CGDMIN/A, CJO/VJ/M, TT, RG → `add_power_mosfet`); still
+dropped: subthreshold conduction (KSUBTHRES), FC linearisation, and BV
+when TT makes the body diode Lauritzen. `charge="drop"` restores 2.0.
+
 ---
 
 ## MMC stack (Phase 20)
