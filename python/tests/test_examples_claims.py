@@ -202,8 +202,32 @@ NOTEBOOKS = {
         (r"NPC 3-level v_ab THD\s+:\s+" + F, near(0.83, 0.05))],
     "projects/inverters/mmc/00_mmc_pulsim_validation.ipynb": [
         (r"v_ac fundamental peak \(Pulsim, carrier-filtered\): " + F, near(156.95, 0.16))],
+    # m3c: the L1 plant carries the Tab 16 load (R + jωL); fundamentals,
+    # not staircase peaks (2026-11-13 follow-up of the audit).
+    "projects/inverters/m3c_3phase/05_m3c_long_simulation.ipynb": [
+        (r"V_ab fundamental: " + F + " kV", near(15.56, 0.08)),
+        (r"I_a fundamental: " + F + " A", near(149.69, 0.75)),
+        (r"P_in - P_out = " + F + " %", near(0.0, 0.5)),
+        (r"Média geral: " + F + " kV", near(24.0, 0.05)),
+        (r"Maior desvio instantâneo na janela: " + F, near(10.6, 1.0)),
+    ],
+    "projects/inverters/m3c_3phase/06_m3c_dbpc.ipynb": [
+        (r"45 Hz\s+: \|i_a1\| =\s+" + F, near(100.0, 1.5)),
+        (r"0\.5 Hz\s+: \|i_a1\| =\s+" + F, near(100.0, 1.5)),
+        (r"DBPC:  \|i_a1\| = .*THD = " + F, near(2.87, 0.3)),
+        (r"PI/dq: \|i_a1\| = .*THD = " + F, near(6.28, 0.6)),
+    ],
+    "projects/inverters/m3c_3phase/07_m3c_motor_ramp.ipynb": [
+        (F + r" kV @ t = ", near(11.02, 0.3)),
+        (r"f_out nesse instante: " + F, below(5.0)),
+        (r"cap mean = " + F + " V", near(24000, 24)),
+    ],
+    # 24002 -> 23954 V: the plant gained L_load and the DBPC its
+    # reference timing (precharge release 1.349 -> 1.372 s).
     "projects/inverters/m3c_3phase/08_m3c_precharge_start.ipynb": [
-        (r"V_mean:\s+" + F, near(24002, 24))],
+        (r"V_mean:\s+" + F, near(23954, 24)),
+        (r"Released to RUNNING:\s+" + F, near(1.372, 0.02)),
+    ],
     "projects/inverters/pfc_vsi_drive/00_pfc_vsi_drive_pulsim_validation.ipynb": [
         (r"OP_2.2\s+P_total\s+" + F, near(57.79, 0.058))],
 }

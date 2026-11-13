@@ -79,14 +79,14 @@ def write_notebook(cells: list[dict[str, Any]], path: Path) -> None:
 
 # Standard preamble (path setup) for every notebook.
 _PREAMBLE = '''
-import sys, os
+import sys
 from pathlib import Path
 _HERE = Path.cwd() / "projects" / "inverters" / "m3c_3phase"
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-import numpy as np
-import matplotlib.pyplot as plt
+import numpy as np  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
 plt.rcParams["figure.figsize"] = (10, 4)
 plt.rcParams["figure.dpi"] = 100
 '''.strip()
@@ -441,7 +441,7 @@ from m3c_3phase_model import (
 )
 
 params = M3cParams()        # Tab. 16 defaults
-print(f"Ponto de operação Tab 16:")
+print("Ponto de operação Tab 16:")
 print(f"  Saída: {params.V_out_LL_peak/np.sqrt(2)/1000:.1f} kV LL @ {params.f_out} Hz")
 print(f"  Carga: R={params.R_load} Ω, L={params.L_load*1000:.1f} mH")
 print(f"  |Z|: {abs(predict_load_impedance(params)):.2f} Ω")
@@ -549,8 +549,8 @@ print(f"THD L1: {thd(ia_l1, fs_l1, params.f_out):.2f}%")
 ## 3.5 — Resumo
 
 * O **fundamental do L1 bate com o L0** dentro de poucos por cento.
-* O THD do L1 é da ordem de **5-10%**, vs L0 que tem THD ≈ 0 (puro
-  sinusóide). O ripple do L1 vem do degrau quantizado de V_cap.
+* O THD do L1 é da ordem de **2 %** (1,7 % nesta execução), vs L0
+  que tem THD ≈ 0 (puro sinusóide). O ripple do L1 vem do degrau quantizado de V_cap.
 * As tensões de capacitor permanecem dentro de uma faixa razoável
   (com o cap-outer loop ativo).
 
@@ -709,12 +709,12 @@ de 1/100 (Sec 7); a forma temporal das curvas é equivalente.
 def build_long_simulation_notebook() -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
     cells.append(md(r"""
-> **⚠ Audit note (2026-11-13) — claims below are NOT met by this notebook's own run.**
-> Re-executed on Pulsim 2.x: the line-voltage peak is **28.64 kV** against the thesis
-> operating point (Tab 16) of **15.56 kV**, so "the waveforms match Tab 16" (5.6) is false;
-> the capacitor-voltage spread reaches **2.99 kV (12.5 %)** against the stated ±10 %.
-> Not yet diagnosed (controller set-up vs. model); treat the figures as illustrations,
-> not as a validation. See `projects/inverters/m3c_3phase/README.md`.
+> **Revisão (2026-11-13).** Até esta data o plant L1 não tinha o L_load da carga
+> (só R_load + L_out), embora o PI, o DBPC e a Tab 16 o supusessem, e as métricas
+> eram picos instantâneos de uma tensão derivada da corrente. Agora o plant tem a
+> carga R + jωL da Tab 16 e as métricas são fundamentais (projeção de Fourier em
+> períodos inteiros); o balanço de energia dos capacitores (Eq 162) usa a corrente
+> média do período. Os números abaixo são os desta execução.
 """))
 
     cells.append(md(r"""
@@ -742,11 +742,11 @@ import time
 from m3c_3phase_model import (
     M3cParams, build_l1_plant,
     run_l1_dq_full_closed_loop_with_cap_loop,
-    predict_i_out_peak, predict_load_impedance,
+    predict_i_out_peak,
 )
 
 params = M3cParams()
-print(f"Ponto de operação Tab 16:")
+print("Ponto de operação Tab 16:")
 print(f"  Entrada: {params.V_in_LL_peak/np.sqrt(2)/1000:.1f} kV LL @ {params.f_in} Hz")
 print(f"  Saída:   {params.V_out_LL_peak/np.sqrt(2)/1000:.1f} kV LL @ {params.f_out} Hz")
 print(f"  Carga: R={params.R_load} Ω, L_load={params.L_load*1000:.1f} mH")
@@ -839,12 +839,23 @@ I_b_out = result.i_b_out
 I_c_out = result.i_c_out
 P_out = V_a*I_a_out + V_b*I_b_out + V_c*I_c_out
 
-print(f"Reconstruções prontas.")
+print("Reconstruções prontas.")
 print(f"  V_A peak: {np.max(np.abs(V_A))/1000:.2f} kV (esperado: "
         f"{params.V_in_phase_peak/1000:.2f} kV)")
 print(f"  V_a peak (steady): {np.max(np.abs(V_a[t>5.0]))/1000:.2f} kV")
 print(f"  I_a_out peak (steady): "
         f"{np.max(np.abs(I_a_out[t>5.0])):.2f} A")
+
+# Fundamentals by Fourier projection over the last 200 ms: 10 input and
+# 9 output periods, whole periods of both. A peak of the staircase is
+# not the fundamental that Tab 16 states.
+mask_w = t > t[-1] - 0.2
+def fundamental(x, omega):
+    tw, xw = t[mask_w], x[mask_w]
+    return float(np.hypot(2*np.mean(xw*np.cos(omega*tw)),
+                          2*np.mean(xw*np.sin(omega*tw))))
+print(f"  V_a fundamental: {fundamental(V_a, params.omega_out)/1000:.2f} kV "
+        f"(Tab 16: {params.V_out_phase_peak/1000:.2f} kV)")
 '''))
 
     cells.append(md(r"""
@@ -972,11 +983,14 @@ plt.show()
 
 print(f"\\nMétricas de saída (regime, "
         f"t={T_STEADY*1000:.0f}-{t[-1]*1000:.0f} ms):")
-print(f"  V_ab peak: {np.max(np.abs(V_ab[mask_ss]))/1000:.2f} kV "
-        f"(thesis: {params.V_out_LL_peak/1000:.2f} kV)")
-print(f"  I_a peak:  {np.max(np.abs(I_a_out[mask_ss])):.2f} A "
+print(f"  V_ab fundamental: {fundamental(V_ab, params.omega_out)/1000:.2f} kV "
+        f"(thesis: {params.V_out_LL_peak/1000:.2f} kV); instantaneous peak "
+        f"{np.max(np.abs(V_ab[mask_ss]))/1000:.2f} kV (the staircase)")
+print(f"  I_a fundamental: {fundamental(I_a_out, params.omega_out):.2f} A "
         f"(predicted Ohm: {predict_i_out_peak(params):.2f} A)")
-print(f"  P_out mean: {np.mean(P_out[mask_ss])/1e6:.3f} MW")
+p_in_w, p_out_w = np.mean(P_in[mask_w]), np.mean(P_out[mask_w])
+print(f"  P_out mean (200 ms): {p_out_w/1e6:.3f} MW, P_in: {p_in_w/1e6:.3f} MW, "
+        f"P_in - P_out = {(p_in_w - p_out_w)/p_out_w*100:+.2f} %")
 '''))
 
     cells.append(md(r"""
@@ -984,7 +998,9 @@ print(f"  P_out mean: {np.mean(P_out[mask_ss])/1e6:.3f} MW")
 
 Cada curva é a tensão somada dos 6 SM-caps de um módulo (V_module
 = Σ V_cap_SM). O alvo é `N · v_cap_nominal = 6 · 4 kV = 24 kV` por
-módulo, com tolerância ±10 % típica em regime permanente.
+módulo. Em regime a MÉDIA de cada módulo fica junto do alvo; o valor
+instantâneo oscila com a troca de energia nas frequências de entrada e
+saída (o desvio máximo é impresso abaixo).
 """))
 
     cells.append(code('''
@@ -1040,7 +1056,7 @@ plt.show()
 print(f"\\nBalanço final dos capacitores (t ≥ {T_END-0.5:.1f} s):")
 final_window = t_caps >= (T_END - 0.5)
 v_final = v_caps_hist[final_window]
-print(f"  Por módulo (média na janela):")
+print("  Por módulo (média na janela):")
 for k in range(9):
     avg = v_final[:, k].mean()
     print(f"    {labels[k]}: {avg/1000:6.2f} kV "
@@ -1049,18 +1065,21 @@ print(f"  Média geral: {v_final.mean()/1000:.2f} kV "
         f"(desvio: {(v_final.mean()-target)/target*100:+.2f}%)")
 print(f"  Spread final: {v_spread[-100:].mean()/1000:.2f} kV "
         f"({v_spread[-100:].mean()/target*100:.2f}% do target)")
+print(f"  Maior desvio instantâneo na janela: "
+        f"{np.max(np.abs(v_final - target))/target*100:.2f}% do target")
 '''))
 
     cells.append(md(r"""
 ## 5.6 — Resumo
 
-* **Estabilidade**: ao longo de 15 s (= 60 mil T_s, 675 ciclos de
-  saída a 45 Hz, 750 ciclos de entrada a 50 Hz), os capacitores
-  permanecem dentro de uma faixa razoável da referência.
-* **Regime permanente**: as formas de onda de V e I batem com o
-  ponto de operação Tab 16 da tese.
-* **Potência**: P_in ≈ P_out (balanço de potência ativa) com
-  perdas mínimas (apenas as resistências de chave + L_in/L_out + R_load).
+* **Estabilidade**: ao longo de 15 s (= 30 mil T_s, 675 ciclos de
+  saída a 45 Hz, 750 ciclos de entrada a 50 Hz) a média de cada
+  módulo fica a menos de 0,6 % do alvo; o valor instantâneo oscila
+  cerca de ±11 % (ver 5.5).
+* **Regime permanente**: a fundamental de V_ab na carga bate com os
+  15,56 kV da Tab 16 a menos de 0,5 %, e a de I_a com a lei de Ohm.
+* **Potência**: P_in e P_out (= 3·R·I²) diferem menos de 0,5 %: as
+  fontes ideais dos módulos não entregam energia líquida.
 * **Multinível**: as tensões de saída (V_ab, V_a) mostram o padrão
   staircase característico do conversor de 13 níveis de linha-linha.
 
@@ -1075,11 +1094,11 @@ mantém o conversor estável e produzindo potência nominal.
 def build_dbpc_notebook() -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
     cells.append(md(r"""
-> **⚠ Audit note (2026-11-13) — claims below are NOT met by this notebook's own run.**
-> Re-executed on Pulsim 2.x at 45 Hz: DBPC current THD **13.02 %** against **9.59 %** for
-> PI/dq, and a DBPC peak of **95.8 A** for a 100 A reference (PI/dq: 133.7 A). So
-> "DBPC has lower THD" (6.5) and "tracking error < 5 %" (6.1, 6.6) are false as run.
-> Not yet diagnosed; treat the comparison as an illustration, not a result.
+> **Revisão (2026-11-13).** Até esta data o plant L1 não tinha o L_load da carga:
+> a tensão pedida a 100 A cabia em ±1,35 dos níveis de 4 kV, o DBPC entregava 86,5 A
+> de fundamental com THD 12,3 % e o PI 99,5 A com 10,5 %. Com a carga R + jωL da
+> Tab 16 no plant, os números abaixo (amplitude por ajuste de senoide, não pico)
+> são os desta execução.
 """))
 
     cells.append(md(r"""
@@ -1128,7 +1147,8 @@ necessário para rastrear sinusóides com fase correta.
 
 * Latência = 1 T_s.
 * Funciona em qualquer f_out (DC, baixa, perto de f_in).
-* Robusto a erro de L_load (não usa decoupling ωL).
+* Não usa decoupling ωL — mas inverte L_out + L_load, e sem integrador
+  um erro nesse L vira erro de amplitude.
 * Reusa toda a infraestrutura de quantização SVM + cost function
   da Phase 22.6 (a função custo continua escolhendo a config que
   preserva balanço de capacitores).
@@ -1140,13 +1160,13 @@ necessário para rastrear sinusóides com fase correta.
 from m3c_3phase_model import (
     M3cParams, build_l1_plant, run_l1_dbpc,
     make_sinusoidal_abc_ref, make_dc_abc_ref,
-    predict_i_out_peak, thd, rms,
+    thd,
 )
 
 params = M3cParams()
-print(f"M3C Tab 16 defaults — DBPC test ground:")
+print("M3C Tab 16 defaults — DBPC test ground:")
 print(f"  Saída: {params.V_out_LL_peak/np.sqrt(2)/1000:.1f} kV LL @ {params.f_out} Hz nominal")
-print(f"  Plant L1: R_load={params.R_load} Ω, L_out={params.L_out*1000} mH (filtro)")
+print(f"  Plant L1: R_load={params.R_load} Ω, L_load={params.L_load*1000} mH, L_out={params.L_out*1000} mH (filtro)")
 print(f"  T_s = {params.T_s*1e3:.2f} ms (f_sw = {params.f_switching/1000:.1f} kHz)")
 '''))
 
@@ -1160,6 +1180,14 @@ diferentes — incluindo casos onde o PI/dq quebra (0.5 Hz, f_out = f_in):
     cells.append(code('''
 target_pk = 100.0
 
+def fit_amplitude(t, x, f):
+    # Least-squares sinusoid at f, valid for any window length (no
+    # offset term: a 3-wire phase current has no DC to fit).
+    w = 2*np.pi*f
+    A = np.column_stack([np.cos(w*t), np.sin(w*t)])
+    a, b = np.linalg.lstsq(A, x, rcond=None)[0]
+    return float(np.hypot(a, b))
+
 results = {}
 for f_out, label in [(45.0, "45 Hz"), (5.0, "5 Hz"), (0.5, "0.5 Hz"), (50.0, "50 Hz (=f_in)")]:
     i_out_ref = make_sinusoidal_abc_ref(target_pk, f_out)
@@ -1168,19 +1196,22 @@ for f_out, label in [(45.0, "45 Hz"), (5.0, "5 Hz"), (0.5, "0.5 Hz"), (50.0, "50
         plant, params, i_out_ref_fn=i_out_ref, t_end=1.0, dt=25e-6,
     )
     mask = res.t >= 0.8
-    i_a_pk = float(np.max(np.abs(res.i_a_out[mask])))
+    i_a_pk = fit_amplitude(res.t[mask], res.i_a_out[mask], f_out)
     cap_mean = float(np.mean(ctrl.v_caps_module))
     cap_spread = float(max(ctrl.v_caps_module) - min(ctrl.v_caps_module))
     results[label] = (res, ctrl, i_a_pk, cap_mean, cap_spread)
     err = (i_a_pk - target_pk)/target_pk * 100
-    print(f"{label:18s}: |i_a|_pk = {i_a_pk:6.2f} A (err {err:+5.2f}%), "
+    print(f"{label:18s}: |i_a1| = {i_a_pk:6.2f} A (err {err:+5.2f}%), "
             f"cap mean = {cap_mean:6.0f} V, spread = {cap_spread:5.0f} V")
 '''))
 
     cells.append(md(r"""
-**Resultado**: o DBPC rastreia 100 A pico **dentro de ±5 %** em
-todas as frequências de 0.5 Hz a 50 Hz (incluindo f_in ≈ f_out!).
-Os capacitores permanecem balanceados em torno de 23.6 kV.
+**Resultado**: a amplitude da fundamental (ajuste de senoide na janela
+0,8-1,0 s) fica a menos de 1,5 % dos 100 A em 45 Hz, 5 Hz, 0,5 Hz e
+50 Hz (= f_in). Os módulos ficam em torno de 23,7 kV ao fim de 1 s; o
+spread é ~1,5 kV a 45/50 Hz mas cresce a ~7 kV a 5 Hz e ~12 kV a
+0,5 Hz: em baixa frequência de saída a troca de energia por ciclo é
+maior, o caso de estresse conhecido do M3C.
 
 Vamos plotar as correntes em todas as 4 condições para comparar:
 """))
@@ -1220,9 +1251,9 @@ plant = build_l1_plant(params)
 res, ctrl, cap = run_l1_dbpc(
     plant, params, i_out_ref_fn=i_out_ref, t_end=0.5, dt=25e-6,
 )
-print(f"DC reference: i_a=+100, i_b=-50, i_c=-50 A (constante)")
+print("DC reference: i_a=+100, i_b=-50, i_c=-50 A (constante)")
 mask = res.t >= 0.4
-print(f"  steady-state (t > 400 ms):")
+print("  steady-state (t > 400 ms):")
 print(f"    i_a mean = {np.mean(res.i_a_out[mask]):+7.2f} A (target +100)")
 print(f"    i_b mean = {np.mean(res.i_b_out[mask]):+7.2f} A (target  -50)")
 print(f"    i_c mean = {np.mean(res.i_c_out[mask]):+7.2f} A (target  -50)")
@@ -1330,14 +1361,13 @@ plt.show()
 ## 6.5 — Comparação direta DBPC vs PI/dq @ 45 Hz
 
 Para o ponto nominal Tab 16 (45 Hz), vamos comparar a corrente
-produzida pelos dois controladores. O DBPC deve ter **menor THD**
-e **fase mais correta** — o PI/dq depende da tuning de K_p / K_i e
-do decoupling ωL.
+produzida pelos dois controladores (THD e amplitude da fundamental
+nos últimos 3 períodos).
 """))
 
     cells.append(code('''
 from m3c_3phase_model import (
-    run_l1_dq_full_closed_loop_with_cap_loop, M3cDqController,
+    run_l1_dq_full_closed_loop_with_cap_loop,
 )
 
 # DBPC.
@@ -1361,8 +1391,9 @@ fs = 1.0/25e-6
 n_per = int(round((1.0/45.0)*fs))
 ia_d = res_d.i_a_out[-3*n_per:]
 ia_p = res_p.i_a_out[-3*n_per:]
-print(f"DBPC:  |i_a| peak = {np.max(np.abs(ia_d)):.2f} A, THD = {thd(ia_d, fs, 45.0):.2f}%")
-print(f"PI/dq: |i_a| peak = {np.max(np.abs(ia_p)):.2f} A, THD = {thd(ia_p, fs, 45.0):.2f}%")
+t_w = res_d.t[-3*n_per:]
+print(f"DBPC:  |i_a1| = {fit_amplitude(t_w, ia_d, 45.0):.2f} A, THD = {thd(ia_d, fs, 45.0):.2f}%")
+print(f"PI/dq: |i_a1| = {fit_amplitude(t_w, ia_p, 45.0):.2f} A, THD = {thd(ia_p, fs, 45.0):.2f}%")
 print(f"DBPC cap spread = {max(ctrl_d.v_caps_module)-min(ctrl_d.v_caps_module):.0f} V")
 print(f"PI/dq cap spread = {max(ctrl_p.v_caps_module)-min(ctrl_p.v_caps_module):.0f} V")
 
@@ -1388,15 +1419,16 @@ plt.show()
 | Ganhos para sintonizar | 6 + decoupling | **0** (só plant model) |
 | f_out ≈ 0 (DC) | Lento, dq degenera | **Funciona normalmente** |
 | f_out = f_in (50 Hz) | Batimento não-filtrado | **Funciona normalmente** |
-| Tracking error | ~10 % | **< 5 %** |
+| Erro da fundamental @ 45 Hz, 100 A | < 1 % (integrador) | < 1 % |
+| THD @ 45 Hz, 100 A | ~6 % | **~3 %** |
 | Latência | ~1/ω_c (ms) | **1 T_s (0.5 ms)** |
 | Linhas de código | ~150 | ~80 |
-| Sensibilidade a L_load | Alta (decoupling) | Baixa (não usa ωL) |
+| Usa L do plant | ωL no decoupling | L_out + L_load na inversão (sem integrador: erro de L vira erro de amplitude) |
 
 O **DBPC controla a corrente diretamente em abc** sem precisar de
 transformação síncrona, sem precisar de tuning. Reusa a função custo
-da Sec 5.5.3 para balancear capacitores. **Mais simples, mais rápido
-e mais robusto** que o cascado PI clássico.
+da Sec 5.5.3 para balancear capacitores. Neste ponto (45 Hz, 100 A)
+entrega a mesma fundamental que o PI com cerca de metade do THD.
 """))
 
     return cells
@@ -1449,13 +1481,13 @@ Nossa stack:
 import time
 from m3c_3phase_model import (
     M3cParams, build_l1_plant, run_l1_dbpc,
-    make_freq_ramp_abc_ref, predict_i_out_peak,
+    make_freq_ramp_abc_ref,
 )
 
 params = M3cParams()
-print(f"Ponto de operação:")
+print("Ponto de operação:")
 print(f"  Entrada: {params.V_in_LL_peak/np.sqrt(2)/1000:.1f} kV LL @ {params.f_in} Hz")
-print(f"  Carga (motor proxy): R={params.R_load} Ω, L_out={params.L_out*1000} mH")
+print(f"  Carga (motor proxy): R={params.R_load} Ω, L_load={params.L_load*1000} mH, L_out={params.L_out*1000} mH")
 print(f"  Capacitores: N={params.n_sm_per_module} SMs/módulo × {params.v_cap_nominal} V = {params.v_cap_total_per_module/1000:.0f} kV/módulo")
 '''))
 
@@ -1673,12 +1705,12 @@ v_spread_all = v_hist.max(axis=1) - v_hist.min(axis=1)
 idx_max = int(np.argmax(v_spread_all))
 t_at_max = t_caps[idx_max]
 f_at_max = i_out_ref.frequency(t_at_max)
-print(f"Spread máximo de V_caps durante a simulação:")
+print("Spread máximo de V_caps durante a simulação:")
 print(f"  {v_spread_all[idx_max]/1000:.2f} kV @ t = {t_at_max:.3f} s")
 print(f"  f_out nesse instante: {f_at_max:.2f} Hz")
 print(f"  |f_in − f_out| = {abs(params.f_in - f_at_max):.2f} Hz")
 print()
-print(f"Steady-state (últimos 500 ms):")
+print("Steady-state (últimos 500 ms):")
 mask_ss = t_caps >= (T_END - 0.5)
 v_mean_ss = float(v_hist[mask_ss].mean())
 v_spread_ss = float(np.mean(v_spread_all[mask_ss]))
@@ -1710,9 +1742,9 @@ plt.show()
 * O controle DBPC + cost function + cap PI loop mantém:
     - corrente de saída rastreando bem (mesmo na vizinhança de f_out=f_in);
     - capacitores em torno do alvo de 24 kV;
-    - spread limitado; o pico (~9.7 kV) **não** fica no cruzamento
-      f_out = f_in: aparece no início da rampa (f_out ≈ 3 Hz,
-      t ≈ 0.7 s).
+    - spread limitado; o pico (~11.0 kV) **não** fica no cruzamento
+      f_out = f_in: aparece no início da rampa (f_out ≈ 2 Hz,
+      t ≈ 0.64 s).
 * Na entrada, a corrente fica em fase com a tensão (UPF) com amplitude
   ditada pelo cap-outer loop para manter o balanço energético.
 
@@ -1824,7 +1856,7 @@ from m3c_3phase_model import (
 )
 
 params = M3cParams()
-print(f"M3C Tab 16 — startup cold (V_cap = 0)")
+print("M3C Tab 16 — startup cold (V_cap = 0)")
 print(f"  Cap nominal target: {params.v_cap_total_per_module/1000:.0f} kV/módulo")
 print(f"  9 módulos × {params.v_cap_total_per_module/1000:.0f} kV = "
         f"{9*params.v_cap_total_per_module/1000:.0f} kV total")
@@ -1853,7 +1885,7 @@ i_out_ref = make_freq_ramp_abc_ref(
     t_ramp_start=T_RAMP_START, t_ramp_end=T_RAMP_END,
 )
 
-print(f"Pré-carga:")
+print("Pré-carga:")
 print(f"  V_cap inicial:  {precharge_cfg.v_cap_initial:.0f} V")
 print(f"  i_in precharge: {precharge_cfg.i_d_in_precharge:.0f} A")
 print(f"  Threshold:      {precharge_cfg.v_cap_release_threshold_frac*100:.0f}% = "
@@ -1878,11 +1910,11 @@ result, ctrl, cap, fsm = run_l1_dbpc_with_precharge(
 )
 elapsed = time.time() - t0
 print(f"Simulação concluída em {elapsed:.1f} s wall.")
-print(f"\\nResultado da FSM:")
+print("\\nResultado da FSM:")
 print(f"  Threshold reached at: {fsm.threshold_first_reached_at:.3f} s")
 print(f"  Released to RUNNING:  {fsm.released_at:.3f} s")
 print(f"  Final state:          {fsm.state}")
-print(f"\\nCapacitores ao final:")
+print("\\nCapacitores ao final:")
 print(f"  V_mean:    {np.mean(ctrl.v_caps_module):.0f} V "
         f"(target {params.v_cap_total_per_module:.0f} V)")
 print(f"  V_spread:  {max(ctrl.v_caps_module)-min(ctrl.v_caps_module):.0f} V")
@@ -2064,18 +2096,18 @@ A FSM de pré-carga funciona como um circuito de partida real:
 
 | Fase | i_in | i_out | cap-PI | V_cap_mean |
 |---|---:|---:|---|---|
-| **PRECHARGE** (t < 1.05 s) | 30 A | 0 | off | rampa 0 → 21.6 kV |
-| **STABILIZING** (1.05 → 1.35 s) | 30 A | 0 | off | mantém ~21.6 kV |
-| **RUNNING** (t ≥ 1.35 s) | ditado por cap-PI | **rampa motor** | on | ajusta para 24 kV |
+| **PRECHARGE** (t < 1.07 s) | 30 A | 0 | off | rampa 0 → 21.6 kV |
+| **STABILIZING** (1.07 → 1.37 s) | 30 A | 0 | off | mantém ~21.6 kV |
+| **RUNNING** (t ≥ 1.37 s) | ditado por cap-PI | **rampa motor** | on | ajusta para 24 kV |
 
-* **Tempo de carga**: ~1 s para chegar a 90 % do nominal a 30 A.
+* **Tempo de carga**: ~1.1 s para chegar a 90 % do nominal a 30 A.
   Pode ser acelerado aumentando `i_d_in_precharge` (custo: stress
   inicial maior).
 * **Não há corrente de inrush** — i_in é limitada à referência de
   30 A durante toda a precharge.
 * **Após o release**, o cap-PI corrige os últimos ~10 % e mantém
-  a **média** dos caps em 24 kV ± 0.1 % (o spread entre módulos fica
-  em ~1 kV, ±2 %).
+  a **média** dos caps em 24 kV ± 0.2 % (o spread entre módulos fica
+  em ~1.3 kV, ±3 %).
 * **A partida do motor é segura** porque os caps já estão no
   nominal — o DBPC tem toda a faixa de modulação disponível.
 

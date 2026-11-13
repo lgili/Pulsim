@@ -1361,12 +1361,12 @@ def build_l1_plant(params: M3cParams) -> M3cPlant:
 
     Topology::
 
-        V_A ── A ── L_in ── inA ─┬── VM_Aa──S_Aa ──┬── outA ── L_out ─┐
-                                  ├── VM_Ab──S_Ab ──┤                  │
-                                  └── VM_Ac──S_Ac ──┤   load Y         │
-        V_B ── B ── L_in ── inB ──···──S_Bx ───────┤  (R + jωL,        │
-        V_C ── C ── L_in ── inC ──···──S_Cx ───────┤   neutral=load_star)
-                                                   └─── load_star
+        V_A ── A ── L_in ── inA ─┬── VM_Aa──S_Aa ──┬── outA ── L_out ── L_load ── R_load ─┐
+                                  ├── VM_Ab──S_Ab ──┤                                      │
+                                  └── VM_Ac──S_Ac ──┤   load Y (R_load + jω·L_load,        │
+        V_B ── B ── L_in ── inB ──···──S_Bx ───────┤   0.9 PF at 45 Hz, as in L0)         │
+        V_C ── C ── L_in ── inC ──···──S_Cx ───────┤                                      │
+                                                   └──────────────────────────── load_star
 
     Each "VM_xy──S_xy" pair is a *controlled* module: a constant
     voltage source initialised at 0 V (updated each step via
@@ -1436,7 +1436,10 @@ def build_l1_plant(params: M3cParams) -> M3cPlant:
     for ph in "abc":
         L_id = b.graph.num_branches
         b.add_inductor(
-            f"L_out_{ph}", f"out_{ph}", f"rload_{ph}", params.L_out,
+            f"L_out_{ph}", f"out_{ph}", f"lload_{ph}", params.L_out,
+        )
+        b.add_inductor(
+            f"L_load_{ph}", f"lload_{ph}", f"rload_{ph}", params.L_load,
         )
         b.add_resistor(
             f"R_load_{ph}", f"rload_{ph}", "load_star", params.R_load,
@@ -1740,6 +1743,27 @@ class M3cL1ControlState:
     v_caps_module_history: list = field(default_factory=list)
     # T_s tick centre time for each row in v_caps_module_history.
     refresh_t_centres: list = field(default_factory=list)
+    # (config, V_xy, I_xy at its start) of the period now running; its
+    # cap update waits for the end-of-period currents.
+    pending_caps: tuple | None = None
+
+
+def _advance_module_caps(state, params, I_in, I_out) -> None:
+    """Eq 162 for the period that just ended, with the MEAN of its start
+    and end module currents. Using the start current alone biased the
+    energy: the voltage chosen for a period is what moves its current,
+    so the module sources delivered a net 156 kW at the Tab 16 point
+    while their bookkeeping capacitors stayed level."""
+    if state.pending_caps is None:
+        return
+    cfg, V_xy, I_start = state.pending_caps
+    I_end = solve_module_currents(cfg, I_in, I_out)
+    for (i, j), V_int in V_xy.items():
+        i_mean = 0.5 * (float(I_start[(i, j)]) + float(I_end[(i, j)]))
+        state.v_caps_module[_module_index(i, j)] += (
+            float(V_int) * i_mean / (params.f_switching * params.c_sm)
+        )
+    state.pending_caps = None
 
 
 def make_m3c_l1_cost_control(
@@ -1821,6 +1845,7 @@ def make_m3c_l1_cost_control(
         # tiny drift). The cost function would otherwise reject.
         diff = (I_in.sum() - I_out.sum()) / 3.0
         I_out_balanced = I_out + diff
+        _advance_module_caps(state, params, I_in, I_out_balanced)
 
         # 2. SVM references at the T_s centre.
         t_centre = (period_idx + 0.5) * T_s
@@ -1871,14 +1896,7 @@ def make_m3c_l1_cost_control(
         state.switch_bits = switch_bits
         state.v_module_target = v_module
 
-        # 7. Integrate Eq 162 — cap-sum voltage update per module:
-        #    ΔV_module = V_xy_signed · I_xy · T_s / C_SM     (S_n = |V_int|;
-        #    sign carried by V_int for charge-direction physics).
-        for (i, j), V_int in V_xy.items():
-            idx = _module_index(i, j)
-            state.v_caps_module[idx] += (
-                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
-            )
+        state.pending_caps = (best_cfg, V_xy, I_xy)
 
         # Diagnostics.
         state.chosen_configs.append(best_cfg)
@@ -2217,15 +2235,18 @@ def make_m3c_l1_dq_control(
         I_out = np.array([float(x[i]) for i in iL_out_indices])
         diff = (I_in.sum() - I_out.sum()) / 3.0
         I_out_balanced = I_out + diff
+        _advance_module_caps(state, params, I_in, I_out_balanced)
 
         # Compute dq angle for output side.
         t_centre = (period_idx + 0.5) * T_s
         theta_o = params.omega_out * t_centre
 
-        # Measured output currents → dq.
+        # Measured output currents → dq, at the instant they were
+        # sampled (t), not the period centre: half a period late is a
+        # 4° rotation at 45 Hz, which the PI turned into i_q ≈ 7 A.
         i_d, i_q = abc_to_dq(
             float(I_out[0]), float(I_out[1]), float(I_out[2]),
-            theta_o,
+            params.omega_out * t,
         )
 
         # DQ PI step.
@@ -2293,12 +2314,7 @@ def make_m3c_l1_dq_control(
         state.switch_bits = switch_bits
         state.v_module_target = v_module
 
-        # Update cap voltages (Eq 162).
-        for (i, j), V_int in V_xy.items():
-            idx = _module_index(i, j)
-            state.v_caps_module[idx] += (
-                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
-            )
+        state.pending_caps = (best_cfg, V_xy, I_xy)
 
         # Diagnostics.
         state.chosen_configs.append(best_cfg)
@@ -2434,6 +2450,7 @@ def make_m3c_l1_dq_full_control(
         I_out = np.array([float(x[i]) for i in iL_out_indices])
         diff = (I_in.sum() - I_out.sum()) / 3.0
         I_out_balanced = I_out + diff
+        _advance_module_caps(state, params, I_in, I_out_balanced)
 
         t_centre = (period_idx + 0.5) * T_s
         theta_i = params.omega_in * t_centre
@@ -2452,8 +2469,10 @@ def make_m3c_l1_dq_full_control(
         # decoupling with a sign assuming output-style plant; for
         # the input we reverse that sign in addition to flipping
         # the PI bias.
+        # Currents → dq at their sampling instant t (see the dq loop).
         i_d_in_meas, i_q_in_meas = abc_to_dq(
-            float(I_in[0]), float(I_in[1]), float(I_in[2]), theta_i,
+            float(I_in[0]), float(I_in[1]), float(I_in[2]),
+            params.omega_in * t,
         )
         V_d_in_pi, V_q_in_pi = dq_in_controller.step(
             i_d_in_meas, i_q_in_meas,
@@ -2472,7 +2491,8 @@ def make_m3c_l1_dq_full_control(
 
         # ---- OUTPUT side ----
         i_d_out_meas, i_q_out_meas = abc_to_dq(
-            float(I_out[0]), float(I_out[1]), float(I_out[2]), theta_o,
+            float(I_out[0]), float(I_out[1]), float(I_out[2]),
+            params.omega_out * t,
         )
         V_d_out_ref, V_q_out_ref = dq_out_controller.step(
             i_d_out_meas, i_q_out_meas,
@@ -2511,11 +2531,7 @@ def make_m3c_l1_dq_full_control(
             v_module[idx] = float(V_int) * v_cap
         state.switch_bits = switch_bits
         state.v_module_target = v_module
-        for (i, j), V_int in V_xy.items():
-            idx = _module_index(i, j)
-            state.v_caps_module[idx] += (
-                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
-            )
+        state.pending_caps = (best_cfg, V_xy, I_xy)
         state.chosen_configs.append(best_cfg)
         state.chosen_costs.append(best_cost)
         state.v_caps_module_history.append(list(state.v_caps_module))
@@ -3133,13 +3149,9 @@ def make_m3c_l1_dbpc_control(
     v_cap = params.v_cap_nominal
     T_s = params.T_s
     L_in = params.L_in
-    # IMPORTANT: the L1 plant (build_l1_plant) only models the
-    # *output filter* inductor L_out in series with R_load — L_load
-    # is purely a *target* parameter used by the L0 baseline. For
-    # the L1 dead-beat to match the actual plant dynamics, use
-    # ``L_out_eff = params.L_out`` only. (If your plant variant also
-    # models L_load as a separate inductor, sum them here.)
-    L_out_eff = params.L_out
+    # The L1 plant puts L_out and the load's L_load in series with
+    # R_load, so the dead-beat inverts R_load + (L_out + L_load).
+    L_out_eff = params.L_out + params.L_load
     R_load = params.R_load
     N_sm = params.n_sm_per_module
     src_indices = plant.module_v_src_state_indices
@@ -3163,6 +3175,7 @@ def make_m3c_l1_dbpc_control(
         I_out = np.array([float(x[i]) for i in iL_out_indices])
         diff = (I_in.sum() - I_out.sum()) / 3.0
         I_out_balanced = I_out + diff
+        _advance_module_caps(state, params, I_in, I_out_balanced)
 
         # 2) T_s centre for reference evaluation.
         t_centre = (period_idx + 0.5) * T_s
@@ -3173,8 +3186,11 @@ def make_m3c_l1_dbpc_control(
             i_d_in_base_val, state.v_caps_module,
         )
         omega_in_t = params.omega_in * t_centre
-        # i_in_ref at t_centre + T_s is computed below alongside the
-        # output ref to keep both predict-ahead in one place.
+        # The voltage chosen now acts until the period ends, at
+        # t_next = (k+1)·T_s: that is where i(k+1) = i_ref(k+1) must
+        # hold (t_centre + T_s, used before, led the current by half a
+        # period). i_in_ref(t_next) is computed below with the output.
+        t_next = (period_idx + 1) * T_s
 
         # 4) Output reference at the END of the next T_s window — the
         #    NEXT-step prediction. This is the critical detail for
@@ -3185,7 +3201,7 @@ def make_m3c_l1_dbpc_control(
         #    i_ref(k+1) is equivalent to including ``+L·di_ref/dt``
         #    inside the formula.
         i_out_ref_next = np.asarray(
-            i_out_ref_fn(t_centre + T_s), dtype=float,
+            i_out_ref_fn(t_next), dtype=float,
         )
         if i_out_ref_next.shape != (3,):
             raise ValueError(
@@ -3202,8 +3218,8 @@ def make_m3c_l1_dbpc_control(
             np.cos(omega_in_t - 2.0 * pi / 3.0),
             np.cos(omega_in_t + 2.0 * pi / 3.0),
         ])
-        # Same predict-ahead trick for input: i_in_ref at t_centre+T_s.
-        omega_in_t_next = params.omega_in * (t_centre + T_s)
+        # Same predict-ahead for the input: i_in_ref at t_next.
+        omega_in_t_next = params.omega_in * t_next
         i_in_ref_next = i_d_in_total * np.array([
             np.cos(omega_in_t_next),
             np.cos(omega_in_t_next - 2.0 * pi / 3.0),
@@ -3266,11 +3282,7 @@ def make_m3c_l1_dbpc_control(
             v_module[idx] = float(V_int) * v_cap
         state.switch_bits = switch_bits
         state.v_module_target = v_module
-        for (i, j), V_int in V_xy.items():
-            idx = _module_index(i, j)
-            state.v_caps_module[idx] += (
-                float(V_int) * float(I_xy[(i, j)]) * T_s / params.c_sm
-            )
+        state.pending_caps = (best_cfg, V_xy, I_xy)
         state.chosen_configs.append(best_cfg)
         state.chosen_costs.append(best_cost)
         state.v_caps_module_history.append(list(state.v_caps_module))

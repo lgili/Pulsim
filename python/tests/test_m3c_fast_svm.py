@@ -1723,3 +1723,88 @@ class TestThesisTab16Validation:
         # Currents should be bounded, even if not accurate.
         assert m.i_a_out_peak < 2.0 * m.i_a_out_peak_predicted
         # Not asserting peak_rel_err here — known to be ~30 %.
+
+
+# ============================================================================
+# The L1 plant carries the load inductance (examples audit, 2026-11-13)
+# ============================================================================
+
+
+def _fundamental(t, i, f, periods=9, dt=25e-6):
+    n = int(round(periods / f / dt))
+    t, i = t[-n:], i[-n:]
+    w = 2.0 * np.pi * f
+    return float(np.hypot(2 * np.mean(i * np.cos(w * t)),
+                          2 * np.mean(i * np.sin(w * t)))), thd(i, 1 / dt, f)
+
+
+@_requires_pulsim
+def test_l1_plant_load_is_r_plus_l_load():
+    """build_l1_plant once built R_load + L_out only, while the PI
+    tuning, the DBPC, predict_i_out_peak and Tab 16 all assume the
+    0.9 PF load R_load + jω·L_load. On that plant the converter needs
+    only ±1.35 of its 4 kV levels at 100 A, and DBPC delivered 86.5 A
+    of fundamental at 12.3 % THD (PI/dq 99.5 A, 10.5 %). With L_load
+    in the plant (and the sampling-angle fix below): DBPC 99.71 A at
+    2.34 %, PI/dq 99.54 A at 6.06 %."""
+    from m3c_3phase_model import make_sinusoidal_abc_ref, run_l1_dbpc
+
+    params = M3cParams()
+    r_d, _, _ = run_l1_dbpc(build_l1_plant(params), params,
+                            i_out_ref_fn=make_sinusoidal_abc_ref(100.0, 45.0),
+                            t_end=0.6, dt=25e-6)
+    r_p, *_ = run_l1_dq_full_closed_loop_with_cap_loop(
+        build_l1_plant(params), params, i_d_out_ref=100.0, t_end=0.6, dt=25e-6)
+    a_d, thd_d = _fundamental(r_d.t, r_d.i_a_out, 45.0)
+    a_p, thd_p = _fundamental(r_p.t, r_p.i_a_out, 45.0)
+    assert a_d == pytest.approx(100.0, abs=1.5)
+    assert a_p == pytest.approx(100.0, abs=1.5)
+    assert thd_d < 4.0
+    assert thd_d < thd_p
+
+
+@_requires_pulsim
+def test_module_sources_deliver_no_net_power_at_tab16():
+    """The module capacitors are bookkeeping in the controller; their
+    Eq 162 update used the period's START current, which the voltage
+    chosen for that period then moves. At the Tab 16 point the ideal
+    module sources delivered a net 156 kW (P_in 1.656 MW, P_out
+    1.812 MW) while the bookkeeping held 24 kV. With the mean of the
+    start and end currents: +4.3 kW (0.24 %) at 3 s."""
+    params = M3cParams()
+    r, *_ = run_l1_dq_full_closed_loop_with_cap_loop(
+        build_l1_plant(params), params, i_d_out_ref=predict_i_out_peak(params),
+        t_end=2.0, dt=25e-6)
+    n = int(round(0.2 / 25e-6))  # 10 input and 9 output periods
+    t = r.t[-n:]
+    p_in = np.mean(sum(
+        params.V_in_phase_peak * np.cos(params.omega_in * t - k * 2 * np.pi / 3) * i[-n:]
+        for k, i in enumerate((r.i_a_in, r.i_b_in, r.i_c_in))))
+    p_out = params.R_load * np.mean(sum(i[-n:] ** 2 for i in (r.i_a_out, r.i_b_out, r.i_c_out)))
+    assert p_out == pytest.approx(1.812e6, rel=0.01)
+    assert abs(p_in - p_out) < 0.01 * p_out
+
+
+@_requires_pulsim
+def test_output_current_is_in_phase_with_its_reference():
+    """The controllers sample the currents at the start of a T_s period.
+    The PI/dq rotated them with the angle of the period CENTRE and the
+    DBPC aimed at i_ref(t_centre + T_s): both half a period (4.05° at
+    45 Hz) late. Measured at 45 Hz / 100 A: PI/dq led by 4.18°
+    (i_q = 7.31 A for i_q_ref = 0), DBPC by 2.88°. Now −0.03° and −0.90°."""
+    from m3c_3phase_model import make_sinusoidal_abc_ref, run_l1_dbpc
+
+    params, dt, f = M3cParams(), 25e-6, 45.0
+
+    def phase_deg(r):
+        n = int(round(9 / f / dt))
+        z = 2 * np.mean(r.i_a_out[-n:] * np.exp(-2j * np.pi * f * r.t[-n:]))
+        return float(np.degrees(np.angle(z)))  # reference: A·cos(ωt)
+
+    r_p, *_ = run_l1_dq_full_closed_loop_with_cap_loop(
+        build_l1_plant(params), params, i_d_out_ref=100.0, t_end=0.6, dt=dt)
+    r_d, _, _ = run_l1_dbpc(build_l1_plant(params), params,
+                            i_out_ref_fn=make_sinusoidal_abc_ref(100.0, f),
+                            t_end=0.6, dt=dt)
+    assert phase_deg(r_p) == pytest.approx(0.0, abs=0.5)
+    assert phase_deg(r_d) == pytest.approx(0.0, abs=1.5)
