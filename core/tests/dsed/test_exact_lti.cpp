@@ -165,11 +165,11 @@ TEST_CASE("Exact: sine-driven RC steps to the analytic response",
     REQUIRE(x2[0] == Approx(v_ref(12e-3)).margin(1e-9));
 }
 
-TEST_CASE("Exact: PWM or pulse sources decline the exact path",
+TEST_CASE("Exact: a PWM source steps exactly inside a piece and names its corners",
           "[v2][dsed][exact_lti][augmented]") {
-    // b(t) with steps is not a finite oscillator sum — the numeric
-    // path owns it, and claiming otherwise would be a wrong answer,
-    // not a slow one.
+    // add-exact-propagator-strategy D14: between corners the source is
+    // a level, stepped in closed form; each corner is a time event the
+    // scheduler lands on (it never steps across one).
     builder::CircuitBuilder b;
     b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1e5, 0.5);
     b.add_resistor("R1", "in", "n1", 1e3);
@@ -180,7 +180,13 @@ TEST_CASE("Exact: PWM or pulse sources decline the exact path",
                                              cache};
     topology::SwitchStateMask m(0);
     ad.set_mask(m);
-    REQUIRE_FALSE(ad.has_exact_step());
+    REQUIRE(ad.has_exact_step());
+    REQUIRE(ad.next_source_corner_after(0.0) == Approx(5e-6).epsilon(1e-14));
+    REQUIRE(ad.next_source_corner_after(5e-6) == Approx(1e-5).epsilon(1e-14));
+    Vector x0(1);
+    x0 << 0.0;
+    const Vector x1 = ad.exact_advance_state(0.0, x0, 5e-6);   // the 5 V piece
+    REQUIRE(x1[0] == Approx(-5.0 * std::expm1(-5e-6 / 1e-3)).epsilon(1e-13));
 }
 
 // -----------------------------------------------------------------
@@ -215,6 +221,71 @@ TEST_CASE("Exact: phi1 is accurate to 1e-14 at every |s|",
         }
     }
     REQUIRE(phi1({0, 0}) == std::complex<Real>{1, 0});
+}
+
+TEST_CASE("Exact: phi2 is accurate to 1e-14 at every |s|",
+          "[v2][dsed][exact_lti][phi]") {
+    // Reference: the Taylor series below |s| = 2 (60 terms), the
+    // direct form above (e^s - 1 - s does not cancel there).
+    const auto ref = [](std::complex<Real> s) {
+        if (std::abs(s) < 2.0) {
+            std::complex<Real> term = 0.5, sum = 0.5;
+            for (int k = 3; k < 60; ++k) {
+                term *= s / Real(k);
+                sum += term;
+            }
+            return sum;
+        }
+        return (std::exp(s) - 1.0 - s) / (s * s);
+    };
+    const std::complex<Real> dirs[] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0.70710678118654752, 0.70710678118654752},
+        {-0.6, 0.8}};
+    for (const Real mag : {1e-12, 1e-6, 1e-3, 0.3, 0.4999, 0.5, 0.5001, 1.0,
+                           1.99, 3.0, 10.0, 50.0}) {
+        for (const auto dir : dirs) {
+            const std::complex<Real> s = mag * dir;
+            const Real err = std::abs(phi2(s) - ref(s)) / std::abs(ref(s));
+            INFO("s = " << s);
+            REQUIRE(err <= 1e-14);
+        }
+    }
+    REQUIRE(phi2({0, 0}) == std::complex<Real>{0.5, 0});
+}
+
+TEST_CASE("Exact: a level + ramp source is exact on tiers 1 and 2",
+          "[v2][dsed][exact_lti][phi]") {
+    // x' = A x + c0 + c1 t from 0 over h = 3. Defective A = [[-1, 1],
+    // [0, -1]] (no eigenbasis: tier 2) with c0 = c1 = (0, 1):
+    // x2 = t, x1 = t - 1 + e^{-t}. Diagonal A = diag(-1, -2) (tier 1)
+    // with c0 = (1, 0), c1 = (0, 2): x1 = 1 - e^{-t},
+    // x2 = t - (1 - e^{-2t})/2.
+    const Real h = 3.0;
+    Vector x0 = Vector::Zero(2), out(2);
+
+    DenseMatrix Ad(2, 2);
+    Ad << -1.0, 1.0, 0.0, -1.0;
+    const auto ed = make_exact_lti(Ad);
+    REQUIRE(ed.valid);
+    REQUIRE(ed.tier == 2);
+    Vector c0(2), c1(2);
+    c0 << 0.0, 1.0;
+    c1 << 0.0, 1.0;
+    exact_advance_affine_into(ed, x0, h, c0, c1, out);
+    REQUIRE(out[0] == Approx(h - 1.0 + std::exp(-h)).epsilon(1e-13));
+    REQUIRE(out[1] == Approx(h).epsilon(1e-13));
+
+    DenseMatrix Ag = DenseMatrix::Zero(2, 2);
+    Ag(0, 0) = -1.0;
+    Ag(1, 1) = -2.0;
+    const auto eg = make_exact_lti(Ag);
+    REQUIRE(eg.valid);
+    REQUIRE(eg.tier == 1);
+    c0 << 1.0, 0.0;
+    c1 << 0.0, 2.0;
+    exact_advance_affine_into(eg, x0, h, c0, c1, out);
+    REQUIRE(out[0] == Approx(1.0 - std::exp(-h)).epsilon(1e-14));
+    REQUIRE(out[1] == Approx(h - 0.5 * (1.0 - std::exp(-2.0 * h))).epsilon(1e-14));
 }
 
 namespace {

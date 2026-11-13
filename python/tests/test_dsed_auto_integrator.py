@@ -72,9 +72,10 @@ def test_bdf2_starts_each_segment_with_backward_euler():
 
 
 def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
-    # A trapezoidal pulse source: no closed-form propagator (sine sources
-    # have one), so 'auto' integrates numerically (DOPRI5/BDF2) and must
-    # still match the fixed engine.
+    # A user b_extra_fn has no closed-form propagator (sine, pulse and PWM
+    # sources do), so 'auto' integrates numerically (DOPRI5/BDF2) and must
+    # still match the fixed engine. The callable adds zero: the physics is
+    # the pulse-driven RC the pwl run sees.
     def build():
         b = p.CircuitBuilder()
         b.add_pulse_voltage_source("V", "in", "gnd", 0.0, 10.0, 0.2e-3,
@@ -84,7 +85,9 @@ def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
         return b
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        rd = p.simulate(build(), t_end=2e-3, engine="dsed")
+        bd = build()
+        zero = [0.0] * bd.pool.state_size(bd.graph)
+        rd = p.simulate(bd, t_end=2e-3, engine="dsed", b_extra_fn=lambda _t: zero)
         rp = p.simulate(build(), t_end=2e-3, engine="pwl", dt=1e-7)
     assert rd.n_exact_steps == 0
     assert rd.n_rk45_steps + rd.n_bdf2_steps > 0

@@ -16,7 +16,7 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 1.5 Conditioning census: κ₂(V) in energy coordinates and `‖A·h‖₁` for every mask visited by the analytic reference set of `restore-reference-benchmark-harness`; record how many masks each tier of D2 would take — deferred: needs the analytic reference set of restore-reference-benchmark-harness
 
 ## 2. Propagator kernel
-- [x] 2.1 `phi1`, `phi2` through `expm1`; test relative error ≤ 1e-14 on `|s| ∈ [1e-12, 50]` including `s = 1.01e-6` (today 6.5e-11) and purely imaginary `s` — φ₁ only; φ₂ deferred to 8.2 (its only user)
+- [x] 2.1 `phi1`, `phi2` through `expm1`; test relative error ≤ 1e-14 on `|s| ∈ [1e-12, 50]` including `s = 1.01e-6` (today 6.5e-11) and purely imaginary `s` — φ₂ added with 8.2 (series below |s| = 1/2), same test (`Exact: phi2 is accurate to 1e-14 at every |s|`)
 - [x] 2.2 Energy-coordinate scaling before the eigenproblem; κ₂ by SVD; `ExactLTI` carries `kappa`, `tier`, `reason`
 - [x] 2.3 Tier 2: Padé [13/13] of the augmented matrix, cached per `(mask, h)`; acceptance `u·‖A·h‖₁ ≤ 1e-10` — cached per h, 16 entries per mask; bound evaluated at dt_max
 - [ ] 2.4 Tier 3 hand-off to the implicit stepper for that mask; strict option that refuses instead — deferred (Phase 3): tier 3 runs the scheduler's numeric path for the mask and is recorded (DECISIONS.md OQ2)
@@ -48,9 +48,9 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 7.2 Tests: two coupled inductors (L₁ = L₂ = 1 mH, k = 0.9), each winding in series with 1 Ω, 10 V step on the primary, secondary loop closed: `i₁,₂ = 5·[(1 − e^{−t/τ₊}) ± (1 − e^{−t/τ₋})]` with `τ± = (1 ± k)·L/R = 1.9 ms, 0.1 ms`, within 1e-10; flyback agreement with `trbdf2` to 1e-5
 
 ## 8. Sources through the event queue (needs `add-unified-event-queue`)
-- [ ] 8.1 Piecewise-constant sources: breakpoints as time events, `b` constant between
-- [ ] 8.2 φ₂ term for piecewise-linear sources
-- [ ] 8.3 Tests: the pulse-driven RC of audit item 11 (trbdf2 floors at 1.8e-4 V on 10 V today, whatever the rtol) within 1e-10 of the closed form at every sample; a ramp source into an RL within 1e-10 of the closed form
+- [x] 8.1 Piecewise-constant sources: breakpoints as time events, `b` constant between — done in the dsed scheduler without the unified queue: `next_source_corner_after(t)` joins the gate-edge min (DECISIONS: group 16 slice)
+- [x] 8.2 φ₂ term for piecewise-linear sources — `exact_advance_affine_into` (tier 1 φ₁/φ₂, tier 2 augmented exponential); C++ test on a defective (tier 2) and a diagonal (tier 1) block against closed forms
+- [x] 8.3 Tests: the pulse-driven RC of audit item 11 (trbdf2 floors at 1.8e-4 V on 10 V today, whatever the rtol) within 1e-10 of the closed form at every sample; a ramp source into an RL within 1e-10 of the closed form — `test_exact_sources.py`: the instant-edge pulse RC (3.3 µs start) within 1e-10 at every sample, the ramp RL within 1e-10
 
 ## 9. Strategy in the unified stepper (needs `refactor-unified-transient-stepper`)
 - [ ] 9.1 `ExactPropagator` integrator behind the stepper's integrator interface, event-driven controller
@@ -93,8 +93,8 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 15.4 Calibrate the flop constants, `m_max` and the dense budget against C++ timings with the counter harness; record them here
 
 ## 16. Exact sources (D14)
-- [ ] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events. Done before this change: shared oscillator pairs (sine). Open, recorded in DECISIONS (group 16 slice): polynomial / ramp states and pulse / PWM corners as time events — every mask with such a source is tier 3 today
-- [ ] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events. Sine part done (`python/tests/test_exact_sources.py`: 3.2e-13 A; a sine-driven series RLC to 2.7e-13 relative). Open: the ramp (numeric today, 8.97e-8 V) and the corner events
+- [x] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events. Sine: shared oscillator pairs (before this change). Pulse / PWM: level + ramp through φ₁ / φ₂ between corners, each corner a time event (DECISIONS: group 16 slice). Exponential and higher-polynomial sources: no such source exists in the builder; table sources: none exist (only `add_saturable_inductor_table` takes a table)
+- [x] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events. `python/tests/test_exact_sources.py`: sine 3.2e-13 A; ramp RC 2.7e-13 V with a sample exactly at 1 ms; pulse train, PWM source and coincident gate edge: every corner a sample
 
 ## 17. Output samples and controller ticks as events (D15; needs `add-unified-event-queue`)
 - [ ] 17.1 Samples evaluated from the last event (modal O(n), or a cached `Φ(dt_out)`); ticks as queue events with zero-order hold

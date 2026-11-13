@@ -75,7 +75,7 @@ struct ExactLTI {
     mutable std::size_t n_pade_hits = 0;  // cache hits
 
     // Workspaces: a step allocates nothing.
-    mutable Vector z_re, z_im, zn_re, zn_im, y;
+    mutable Vector z_re, z_im, zn_re, zn_im, y, c1_re, c1_im;
 };
 
 /// eˢ − 1 for complex s without cancellation at any |s|.
@@ -93,6 +93,23 @@ struct ExactLTI {
         return Real{1};
     }
     return expm1c(s) / s;
+}
+
+/// φ₂(s) = (eˢ − 1 − s)/s², relative error near u for every s: the
+/// Taylor series below |s| = 1/2 (where eˢ − 1 − s cancels), the
+/// closed form above.
+[[nodiscard]] inline std::complex<Real> phi2(std::complex<Real> s) {
+    if (std::abs(s) < Real{0.5}) {
+        std::complex<Real> term{Real{0.5}};   // s^k/(k+2)!, k = 0
+        std::complex<Real> sum = term;
+        for (int k = 1; k < 30; ++k) {
+            term *= s / static_cast<Real>(k + 2);
+            sum += term;
+            if (std::abs(term) <= std::numeric_limits<Real>::epsilon() * std::abs(sum)) break;
+        }
+        return sum;
+    }
+    return (expm1c(s) - s) / (s * s);
 }
 
 namespace detail {
@@ -216,6 +233,48 @@ inline void exact_advance_into(const ExactLTI& e, const Vector& x, Real h,
         const std::complex<Real> zi =
             std::exp(s) * std::complex<Real>{e.z_re[i], e.z_im[i]}
             + h * phi1(s) * e.w[i];
+        e.zn_re[i] = zi.real();
+        e.zn_im[i] = zi.imag();
+    }
+    out.noalias() = e.V_re * e.zn_re;
+    out.noalias() -= e.V_im * e.zn_im;
+}
+
+/// Advance `x` by `h` under ẋ = A·x + b + c0 + c1·τ (τ ∈ [0, h], b the
+/// vector the propagator was built with): a source that is level + ramp
+/// over the step (add-exact-propagator-strategy D14),
+///   x(h) = e^{Ah}x + h·φ₁(Ah)(b + c0) + h²·φ₂(Ah)·c1.
+/// Tier 2: the exponential of [[Ãh, (b̃ + c̃0)h, c̃1h²],[0,0,0],[0,1,0]]
+/// (states 1 and τ/h), not cached (c0, c1 change at every corner).
+inline void exact_advance_affine_into(const ExactLTI& e, const Vector& x, Real h,
+                                      const Vector& c0, const Vector& c1,
+                                      Vector& out) {
+    const auto n = x.size();
+    if (e.tier == 2) {
+        DenseMatrix M = DenseMatrix::Zero(n + 2, n + 2);
+        M.topLeftCorner(n, n) = e.As * h;
+        M.block(0, n, n, 1) = (e.bs + e.d.cwiseProduct(c0)) * h;
+        M.block(0, n + 1, n, 1) = e.d.cwiseProduct(c1) * (h * h);
+        M(n + 1, n) = Real{1};
+        ++e.n_pade;
+        const DenseMatrix E = M.exp();
+        e.y.noalias() = E.topLeftCorner(n, n) * e.d.cwiseProduct(x);
+        out = (e.y + E.block(0, n, n, 1)).cwiseQuotient(e.d);
+        return;
+    }
+    e.z_re.noalias() = e.Vinv_re * x;
+    e.z_im.noalias() = e.Vinv_im * x;
+    e.zn_re.noalias() = e.Vinv_re * c0;   // V⁻¹c0 (re, im), then V⁻¹c1
+    e.zn_im.noalias() = e.Vinv_im * c0;
+    e.c1_re.noalias() = e.Vinv_re * c1;
+    e.c1_im.noalias() = e.Vinv_im * c1;
+    for (Eigen::Index i = 0; i < n; ++i) {
+        const std::complex<Real> s = e.lambda[i] * h;
+        const std::complex<Real> w0 = e.w[i] + std::complex<Real>{e.zn_re[i], e.zn_im[i]};
+        const std::complex<Real> w1{e.c1_re[i], e.c1_im[i]};
+        const std::complex<Real> zi =
+            std::exp(s) * std::complex<Real>{e.z_re[i], e.z_im[i]}
+            + h * phi1(s) * w0 + (h * h) * phi2(s) * w1;
         e.zn_re[i] = zi.real();
         e.zn_im[i] = zi.imag();
     }

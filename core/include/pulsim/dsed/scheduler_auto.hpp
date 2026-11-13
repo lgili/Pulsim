@@ -218,9 +218,17 @@ public:
             //    (which catches any discovered mask change).
             const Real t_gate_raw = switch_fn_.next_edge_after(t);
             constexpr Real kPollFractionOfDtMax = Real{0.1};
-            const Real t_gate = std::isfinite(t_gate_raw)
+            Real t_gate = std::isfinite(t_gate_raw)
                 ? std::min(t_gate_raw, t_end)
                 : std::min(t + dt_max_ * kPollFractionOfDtMax, t_end);
+            // A PWM / pulse source's corner is a time event too: no step
+            // straddles a change of the source's piece (D14).
+            bool at_corner = false;   // landed on exactly (see scheduler.hpp)
+            if constexpr (requires { system_.next_source_corner_after(t); }) {
+                const Real t_c = system_.next_source_corner_after(t);
+                at_corner = t_c < t_gate;
+                t_gate = std::min(t_gate, t_c);
+            }
 
             // 2a. Exact stepper first. A mode with a closed-form
             //     propagator (LTI, supported sources, non-defective
@@ -250,6 +258,7 @@ public:
                     ++result.n_accept;
                     ++result.n_exact_steps;
                     if (t_gate < t_end && near_time(t, t_gate)) {
+                        if (at_corner) t = t_gate;
                         const IntegratorChoice prev_choice = choice;
                         fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                             prev_choice, result);
@@ -398,6 +407,7 @@ public:
 
             // 4. Did we land on a gate edge?
             if (t_gate < t_end && near_time(t, t_gate)) {
+                if (at_corner) t = t_gate;
                 const IntegratorChoice prev_choice = choice;
                 fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                     prev_choice, result);

@@ -370,6 +370,9 @@ public:
             // 1. Next gate-edge time (analytical fast path)
             const Real t_gate = next_gate_edge_(t, t_end);
             const Real t_target = std::min(t_gate, t_end);
+            // a source corner is landed on exactly: a single-shot pulse
+            // read one ulp early would keep its old piece for a step
+            const bool at_corner = t_gate < next_switch_edge_(t, t_end);
 
             // 2. Propose step capped at next gate
             Real h_use = std::min({h, dt_max_, t_target - t});
@@ -428,6 +431,7 @@ public:
                         t += h_ex;
                         x.swap(x_new_);
                         if (t_gate < t_end && near_time(t, t_gate)) {
+                            if (at_corner) t = t_gate;
                             x_pre_event = x;
                             step_fired = true;
                             fire_event_(t_gate, "gate_edge",
@@ -611,6 +615,7 @@ public:
                 // 7. Did we land on a gate edge?
                 if (t_gate < t_end &&
                     near_time(t, t_gate)) {
+                    if (at_corner) t = t_gate;
                     x_pre_event = x;
                     step_fired = true;
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
@@ -767,7 +772,19 @@ private:
         return true;
     }
 
+    /// The next time event: a gate edge, or a corner of a PWM / pulse
+    /// source (add-exact-propagator-strategy D14: no step straddles a
+    /// change of a source's piece; the corner is fired like a gate edge,
+    /// so the diode modes are decided again after a source jump).
     [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end) const {
+        const Real t_g = next_switch_edge_(t_now, t_end);
+        if constexpr (requires { system_.next_source_corner_after(t_now); }) {
+            return std::min(t_g, system_.next_source_corner_after(t_now));
+        }
+        return t_g;
+    }
+
+    [[nodiscard]] Real next_switch_edge_(Real t_now, Real t_end) const {
         if constexpr (HasNextEdge<SwitchFn>) {
             // Fast path: switch_fn knows when its next edge is
             // (e.g. NativePwm2Switch with an analytical formula).

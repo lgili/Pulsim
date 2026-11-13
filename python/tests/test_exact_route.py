@@ -110,16 +110,21 @@ def test_floating_capacitor_loop_is_not_exact_extraction():
     assert (rep["exact"], rep["reason"]) == (False, "extraction")
 
 
-def test_pwm_voltage_source_is_not_exact_source():
+def test_pwm_voltage_source_routes_exact():
+    """Task 16.1: a PWM source is level + ramp between corners, each corner a time event, so its
+    masks are exact (it was refused as 'source' before) and the run takes only exact steps."""
     b = p.CircuitBuilder()
     b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1e4, 0.5)
     b.add_resistor("R", "in", "a", 10.0)
     b.add_diode("D", "a", "o", GON, GOFF)
     b.add_capacitor("C", "o", "gnd", 1e-6)
     rep = p.exact_route(b, 3e-4)
-    assert (rep["exact"], rep["reason"]) == (False, "source")
-    (row,) = rep["segments"]
-    assert (row["device"], row["kind"]) == ("Vg", "PWMVoltageSource")
+    assert (rep["exact"], rep["reason"]) == (True, None)
+    assert all(row["exact"] for row in rep["segments"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=3e-4, engine="exact")
+    assert r.n_exact_steps == len(r.times) - 1
 
 
 def test_segments_ride_on_the_result():

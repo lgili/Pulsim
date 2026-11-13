@@ -104,6 +104,10 @@ public:
         std::vector<Real> aug_omegas;   // one per oscillator pair
         bool exact_built = false;       // lazy — see item 4 note
         std::vector<Real> state_mass;   // C or L per state (energy scale)
+        // add-exact-propagator-strategy D14: one reduced column per
+        // piecewise-linear source (b_projection of its −1 stamp); the
+        // source enters each step as level + ramp (exact_advance_affine).
+        DenseMatrix pwl_cols;
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -122,7 +126,8 @@ public:
           cache_{cache},
           b_extra_fn_{std::move(b_extra_fn)},
           has_dynamic_sources_{detect_dynamic_sources_()},
-          sine_only_sources_{detect_sine_only_()} {
+          has_sine_sources_{detect_sine_()} {
+        collect_pwl_sources_();
         // The LTI extraction drops Newton devices; refuse them here so
         // every caller (not only simulate()) gets the typed refusal.
         require_supported(graph, pool, pwl::Engine::Dsed);
@@ -274,8 +279,29 @@ public:
         const auto n = x.size();
         const auto k =
             static_cast<Index>(e.aug_omegas.size());
+        const bool pwl = !pwl_sources_.empty();
+        if (pwl) {
+            // level and ramp of every PWL source just after t; the
+            // scheduler never steps across a corner (next_source_corner_after)
+            const auto m = static_cast<Index>(pwl_sources_.size());
+            pwl_v_.resize(m);
+            pwl_s_.resize(m);
+            for (Index j = 0; j < m; ++j) {
+                const auto [v, sl] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
+                pwl_v_[j] = v;
+                pwl_s_[j] = sl;
+            }
+            pwl_c0_.setZero(n + 2 * k);
+            pwl_c1_.setZero(n + 2 * k);
+            pwl_c0_.head(n).noalias() = e.pwl_cols * pwl_v_;
+            pwl_c1_.head(n).noalias() = e.pwl_cols * pwl_s_;
+        }
         if (k == 0) {
-            exact_advance_into(e.exact, x, h, out);
+            if (pwl) {
+                exact_advance_affine_into(e.exact, x, h, pwl_c0_, pwl_c1_, out);
+            } else {
+                exact_advance_into(e.exact, x, h, out);
+            }
             return;
         }
         aug_in_.resize(n + 2 * k);
@@ -286,8 +312,27 @@ public:
             aug_in_[n + 2 * j]     = std::sin(w * t);
             aug_in_[n + 2 * j + 1] = std::cos(w * t);
         }
-        exact_advance_into(e.exact, aug_in_, h, aug_out_);
+        if (pwl) {
+            exact_advance_affine_into(e.exact, aug_in_, h, pwl_c0_, pwl_c1_, aug_out_);
+        } else {
+            exact_advance_into(e.exact, aug_in_, h, aug_out_);
+        }
         out = aug_out_.head(n);
+    }
+
+    /// The first corner of a piecewise-linear source strictly after t
+    /// (+∞ when there is none): a time event of the scheduler, so no
+    /// exact step straddles a change of a source's piece (D14).
+    [[nodiscard]] Real next_source_corner_after(Real t) const {
+        Real c = std::numeric_limits<Real>::infinity();
+        for (const auto& ps : pwl_sources_) {
+            c = std::min(c, ps.pulse
+                ? models::PulseVoltageSource::next_corner_after(
+                      pool_.pulse_voltage_source_params(ps.branch), t)
+                : models::PWMVoltageSource::next_corner_after(
+                      pool_.pwm_voltage_source_params(ps.branch), t));
+        }
+        return c;
     }
 
     /// Event-scan step of the current mode (exact_scan_step).
@@ -317,7 +362,7 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         const LTIEntry& e = *current_entry_;
-        if (e.aug_omegas.empty()
+        if (e.aug_omegas.empty() && pwl_sources_.empty()
             && exact_project_slow(e.exact, x, fast_threshold)) {
             return;
         }
@@ -569,43 +614,78 @@ private:
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
                                          energy_scale_(entry, 0), h_max_);
             ++n_eig_;
-        } else if (sine_only_sources_) {
-            build_augmented_exact_(entry);
+        } else if (!b_extra_fn_) {
+            // sine pairs augmented; PWM / pulse sources enter each step
+            // as level + ramp through pwl_cols (D14)
+            if (has_sine_sources_) {
+                build_augmented_exact_(entry);
+            } else {
+                entry.exact_b = entry.b_constant;
+                entry.exact = make_exact_lti(entry.A, entry.exact_b,
+                                             energy_scale_(entry, 0), h_max_);
+            }
             ++n_eig_;
+            const auto m = static_cast<Index>(pwl_sources_.size());
+            entry.pwl_cols = DenseMatrix::Zero(entry.A.rows(), m);
+            for (Index j = 0; j < m; ++j) {
+                entry.pwl_cols.col(j) =
+                    -entry.b_projection.col(pwl_sources_[static_cast<Size>(j)].src_var);
+            }
         } else {
-            entry.exact.reason = b_extra_fn_
-                ? "b_extra_fn: a user source function has no closed form"
-                : "PWM / pulse source: not piecewise-constant events yet";
+            entry.exact.reason =
+                "b_extra_fn: a user source function has no closed form";
         }
-        // PWM/pulse sources or a user b_extra_fn: b(t) is not a
-        // finite sum of oscillators — the numeric path owns those.
+        // a user b_extra_fn: b(t) has no closed form — the numeric
+        // path owns it.
     }
 
-    /// True iff every time-varying contribution is a
-    /// SineVoltageSource (no PWM, no pulse, no user callback) —
-    /// the class the augmented-oscillator exact stepper covers.
-    [[nodiscard]] bool detect_sine_only_() const {
-        if (!has_dynamic_sources_ || b_extra_fn_) {
-            return false;
-        }
+    /// Whether a SineVoltageSource exists (its oscillator pair is
+    /// augmented into every mode's exact stepper).
+    [[nodiscard]] bool detect_sine_() const {
         using K = pwl::DevicePool::StoredKind;
-        bool any_sine = false;
         for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
-            K kind;
             try {
-                kind = pool_.kind_of(b_id);
+                if (pool_.kind_of(b_id) == K::SineVoltageSource) return true;
             } catch (const std::out_of_range&) {
+            }
+        }
+        return false;
+    }
+
+    /// A piecewise-linear source: PWM (levels) or pulse (levels and
+    /// ramps), by its MNA source row.
+    struct PwlSource {
+        Index branch;
+        Index src_var;
+        bool pulse;
+    };
+
+    void collect_pwl_sources_() {
+        using K = pwl::DevicePool::StoredKind;
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            const auto& branch = graph_.branch(b_id);
+            if (branch.kind != topology::BranchKind::Source
+                || !pool_.is_registered(b_id)) {
                 continue;
             }
-            if (kind == K::PWMVoltageSource ||
-                kind == K::PulseVoltageSource) {
-                return false;
-            }
-            if (kind == K::SineVoltageSource) {
-                any_sine = true;
+            const K kind = pool_.kind_of(b_id);
+            if (kind == K::PWMVoltageSource || kind == K::PulseVoltageSource) {
+                pwl_sources_.push_back({b_id, pool_.branch_var_id_for_source(b_id, graph_),
+                                        kind == K::PulseVoltageSource});
             }
         }
-        return any_sine;
+    }
+
+    /// (value, right slope) of one PWL source at t, as the overlay
+    /// (compute_pwm_b_extra / compute_pulse_b_extra) evaluates it.
+    [[nodiscard]] std::pair<Real, Real> pwl_value_slope_(const PwlSource& ps, Real t) const {
+        if (ps.pulse) {
+            const auto& p = pool_.pulse_voltage_source_params(ps.branch);
+            return {models::PulseVoltageSource::value_at(p, t),
+                    models::PulseVoltageSource::slope_at(p, t)};
+        }
+        return {models::PWMVoltageSource::value_at(
+                    pool_.pwm_voltage_source_params(ps.branch), t), Real{0}};
     }
 
     /// Build the augmented exact stepper for a sine-driven mode.
@@ -1030,7 +1110,9 @@ private:
     pwl::PwlStateSpaceCache&  cache_;
     std::function<Vector(Real)> b_extra_fn_;
     bool                       has_dynamic_sources_;
-    bool                       sine_only_sources_;
+    bool                       has_sine_sources_;
+    std::vector<PwlSource>     pwl_sources_;
+    mutable Vector pwl_v_, pwl_s_, pwl_c0_, pwl_c1_;
 
     MaskT  current_mask_{};
     bool   current_mask_set_ = false;

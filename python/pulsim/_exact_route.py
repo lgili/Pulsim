@@ -7,9 +7,9 @@ one row per mask visited, with the number of segments the run spent in it:
      | 'cost', "device": str, "kind": str, "detail": str, "n_segments": int}
 
 Reasons (D11 rules 1-4): 'device' -- a device with no linear / PWL law (named, with its kind);
-'source' -- a source the exact kernel has no closed form for (PWM / pulse sources, a user
-b_extra_fn); 'extraction' -- the per-mask state extraction fails (coupled inductors, a
-capacitor loop); 'cost' -- the mask's propagator is outside its accuracy tiers (a
+'source' -- a source the exact kernel has no closed form for (a user b_extra_fn; PWM / pulse
+sources are exact: level + ramp between corners, each corner a time event, D14);
+'extraction' -- the per-mask state extraction fails (coupled inductors, a capacitor loop); 'cost' -- the mask's propagator is outside its accuracy tiers (a
 near-defective eigenbasis with a stiff ||A*h||, tier 3; D11 names this rule 'cost': size and
 stiffness are one cost question, D13). The default route of engine='auto' does not read this.
 """
@@ -80,20 +80,10 @@ def exact_route(builder, t_end: float, switch_fn=None, **simulate_kwargs) -> dic
         _kern._require_supported(builder.graph, builder.pool, "exact")
     except UnsupportedError as e:
         return from_err("device", e)
-    # Rule 2 is structural: a PWM / pulse source has no closed form between its corners yet
-    # (every mask is tier 3), and a user function never has one. Decided without a run (such a
+    # Rule 2 is structural: a user function has no closed form. Decided without a run (such a
     # run is numeric and can fail on its own account).
     if simulate_kwargs.get("b_extra_fn") is not None:
         return one_row("source", "", "", "b_extra_fn: a user source function has no closed form")
-    g, pool = builder.graph, builder.pool
-    for i in range(g.num_branches):
-        try:
-            kind = pool.kind_of(i).name
-        except Exception:  # noqa: BLE001 -- an unregistered branch
-            continue
-        if kind in ("PWMVoltageSource", "PulseVoltageSource"):
-            return one_row("source", g.branch_name(i), kind,
-                           "PWM / pulse source: not piecewise-constant events yet")
     kw = dict(simulate_kwargs)
     kw.setdefault("integrator", "rk45")
     if switch_fn is not None:

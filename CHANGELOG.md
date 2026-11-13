@@ -17,8 +17,23 @@ with the reason (`'device'`, `'source'`, `'extraction'`, `'cost'`), the
 device and kind, the tier and `n_segments`. `pulsim.exact_route(builder,
 t_end, ...)` returns the same record, and classifies circuits the exact
 engine refuses (a Shockley diode → `'device'`; coupled inductors, an
-inductor cut-set or a capacitor loop → `'extraction'`; a PWM / pulse
-source → `'source'`). The route of `engine='auto'` does not change.
+inductor cut-set or a capacitor loop → `'extraction'`; a user
+`b_extra_fn` → `'source'`). The route of `engine='auto'` does not change.
+
+### `engine='exact'`: pulse and PWM sources are exact
+
+A pulse or PWM voltage source is level + ramp between corners; the exact
+engine now steps it in closed form (`e^{Ah}x + hφ₁(Ah)(b + c0) +
+h²φ₂(Ah)c1`) and lands every corner as a time event, so the diode modes
+are re-decided there. Before, every mask with such a source was tier 3
+and numeric. A 0 → 10 V ramp over 1 ms into 1 kΩ / 1 µF: 8.97e-8 V off
+the closed form with 0 exact steps → 2.7e-13 V with 5000 / 5000 exact
+and a sample at the 1 ms corner. A PWM source → R → diode → C that
+raised a chatter error at 50 µs now runs (4.999998216 V, pwl at dt =
+1e-8 the same). Pulse trains, a PWM-source buck and a corner on a gate
+edge match an exact affine propagation within 1e-10. `exact_route` no
+longer answers `'source'` for these sources. pwl and trbdf2 are
+bit-identical.
 
 ### Diode mode selection: passivity classes in the diagnostics
 

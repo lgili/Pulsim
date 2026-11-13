@@ -86,7 +86,7 @@ exact-eligible or not (add-exact-propagator-strategy D11, report only —
 `'auto'` does not read it): `{"exact": bool, "reason": ..., "segments":
 [{"mask", "exact", "reason", "device", "kind", "detail", "tier",
 "n_segments"}, ...]}`. Reasons: `'device'` (a device with no linear / PWL
-law, named), `'source'` (a PWM / pulse source or a `b_extra_fn`),
+law, named), `'source'` (a user `b_extra_fn`; sine, PWM and pulse sources are exact),
 `'extraction'` (coupled inductors, a capacitor loop, an inductor
 cut-set), `'cost'` (the mask's propagator outside its accuracy tiers).
 The same rows ride on every exact run as `result.exact["segments"]`.

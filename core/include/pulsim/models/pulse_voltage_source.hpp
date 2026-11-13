@@ -44,6 +44,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace pulsim::models {
 
@@ -119,6 +120,49 @@ struct PulseVoltageSource {
             }
         }
         return p.v_initial;
+    }
+
+    /// dv/dt just after t (right derivative): the ramp of the piece
+    /// `value_at` takes at t, 0 on a level. Same branches and snap
+    /// tolerance as `value_at`, so value + slope·τ is that piece.
+    [[nodiscard]] static Real slope_at(const Params& p, Real t) noexcept {
+        if (t < p.t_start) return Real{0};
+        Real elapsed = t - p.t_start;
+        Real tol = Real{0};
+        if (p.period > Real{0}) {
+            const auto pos = pwm_phase::cycle_position(t, p.t_start, p.period);
+            elapsed = pos.u * p.period;
+            tol = pos.tol * p.period;
+        }
+        const auto before = [&](Real x) { return elapsed < x - tol; };
+        if (p.rise_time > Real{0} && before(p.rise_time)) {
+            return (p.v_pulsed - p.v_initial) / p.rise_time;
+        }
+        if (before(p.rise_time + p.pulse_width)) return Real{0};
+        if (p.fall_time > Real{0}
+            && before(p.rise_time + p.pulse_width + p.fall_time)) {
+            return (p.v_initial - p.v_pulsed) / p.fall_time;
+        }
+        return Real{0};
+    }
+
+    /// The first corner strictly after t (a time at which `value_at`
+    /// changes piece), +∞ when none: t_start, then rise / width / fall
+    /// ends, every period when periodic.
+    [[nodiscard]] static Real next_corner_after(const Params& p, Real t) noexcept {
+        if (t < p.t_start) return p.t_start;
+        const Real ends[3] = {p.rise_time, p.rise_time + p.pulse_width,
+                              p.rise_time + p.pulse_width + p.fall_time};
+        if (p.period > Real{0}) {
+            Real thr[3];
+            for (int i = 0; i < 3; ++i) thr[i] = ends[i] / p.period;
+            return pwm_phase::next_constant_crossing(t, p.t_start, p.period, thr);
+        }
+        for (const Real e : ends) {
+            const Real c = p.t_start + e;
+            if (c > t) return c;
+        }
+        return std::numeric_limits<Real>::infinity();
     }
 };
 
