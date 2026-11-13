@@ -55,6 +55,10 @@ their messages are covered in [Gotchas](gotchas.md).
 
 | Limitation | Measured | Workaround |
 |---|---|---|
+| **`add_power_mosfet` is a composite of Newton devices: no `res.i` of the device and no loss row.** Generic outputs arrive with the unified device interface (Phase 3). | `res.i("Q1")` raises like `mosfet_level1`; `device_loss_summary` omits it. | `p.double_pulse_test` (sense resistor), or a 1 mΩ resistor in series. |
+| **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects, a table channel (constant-K Level-1 only), AC analysis. | - | - |
+| **A gate transient on `pwl` needs a step that resolves it.** | The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at `dt` = 0.2 ns; `trbdf2` takes about 1200. | `engine="trbdf2"`. |
+| **VDMOS import: absent capacitances are 0 (LTspice), not ngspice's defaults** (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF, CJO 0.5 nF). CJO uses the junction law without SPICE's FC linearisation. | - | Write every charge parameter in the card; `charge="drop"` restores the ideal-gate device. |
 | **`spice_to_builder` reads a subset of SPICE.** | `Q` (BJT) and `K` (coupled inductors) raise `NotImplementedError`. A `.param` expression such as `{R*2}` raises `KeyError`. `B` sources raise `ValueError`. `.subckt` is flattened correctly. | Build those parts with `CircuitBuilder` (`add_transformer` for coupled inductors) or a YAML netlist. |
 
 ## Older entries
