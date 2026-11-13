@@ -1,12 +1,12 @@
 ## 1. Records and the evaluator (first slice)
-- [ ] 1.1 `python/pulsim/design.py`: `EvaluationRecord`, `Evaluator(build, period, kpis, constraints, steady, engine, options)`, `evaluate`; design hash; provenance
-- [ ] 1.2 Default KPIs on one steady period, time-weighted (`np.trapezoid`): efficiency, losses by device and category, ripple, stresses
-- [ ] 1.3 Oracle: a CCM buck with resistor-pair switches (`g_on = 1e3`, `g_off = 1e-9`) and a 10 mΩ inductor resistance on `engine='dsed'` with `method='pss'`, KPIs against a numpy reference (matrix exponential per mode on the periodic orbit, in the test, same element values): efficiency, loss and ripple within 1e-8 relative; the ripple also within 2 % of the small-ripple formula `ΔV = (1 − D)·V_out/(8·L·C·f²)` as a sanity check
+- [x] 1.1 `python/pulsim/design.py`: `EvaluationRecord`, `Evaluator(build, period, kpis, constraints, steady, engine, options)`, `evaluate`; design hash; provenance
+- [x] 1.2 Default KPIs on one steady period, time-weighted (`np.trapezoid`): efficiency, losses by device and category, ripple, stresses
+- [x] 1.3 Oracle: a CCM buck with resistor-pair switches (`g_on = 1e3`, `g_off = 1e-9`) and a 10 mΩ inductor resistance on `engine='dsed'` with `method='pss'`, KPIs against a numpy reference (matrix exponential per mode on the periodic orbit, in the test, same element values): efficiency, loss and ripple within 1e-8 relative; the ripple also within 2 % of the small-ripple formula `ΔV = (1 − D)·V_out/(8·L·C·f²)` as a sanity check
 
 ## 2. Failures as records
-- [ ] 2.1 Status mapping of design D3; never a default value; other exceptions re-raised
-- [ ] 2.2 Penalty and constraint adaptors
-- [ ] 2.3 Tests: a design that builds a Shockley rectifier with `engine='dsed'` (refused today) gives `refused` with the four fields; a design with a non-settling steady state gives `failed` with `'not_settled'`; a ripple bound exceeded gives `infeasible` with the excess in volts; `as_objectives` and `as_constraints` return `penalty` for `refused`/`failed` and finite values otherwise
+- [x] 2.1 Status mapping of design D3; never a default value; other exceptions re-raised
+- [x] 2.2 Penalty and constraint adaptors
+- [x] 2.3 Tests: a design that builds a Shockley rectifier with `engine='dsed'` (refused today) gives `refused` with the four fields; a design with a non-settling steady state gives `failed` with `'not_settled'`; a ripple bound exceeded gives `infeasible` with the excess in volts; `as_objectives` and `as_constraints` return `penalty` for `refused`/`failed` and finite values otherwise
 
 ## 3. Thermal fixed point
 - [ ] 3.1 Loop of design D4 with damping, 0.1 K tolerance, 20-iteration cap; re-simulation only when the circuit depends on `T_j`

@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Design evaluation for optimisers (`pulsim.design`, first slice)
+
+* **Added** `pulsim.design.Evaluator(build, period=..., loads=...,
+  output=..., constraints=...)` and `evaluate(design) ->
+  EvaluationRecord`: status `ok` / `refused` / `failed` /
+  `infeasible`, KPIs on one steady period (efficiency, input / output
+  power, losses per device and category, output ripple and mean,
+  inductor ripple, peak / RMS current and peak voltage per
+  semiconductor, user `Kpi`s), violations, route and solver counters,
+  provenance (version, extension hash, options digest) and a SHA-256
+  design id. Every KPI is time-weighted on the run's own grid with the
+  right limit of each event; on a CCM buck the efficiency, the loss
+  and the ripple match a matrix-exponential reference of the same
+  orbit to 1.9e-12, 8e-15 and 6e-11 relative (2000 samples per period;
+  a plain trapezoid over the gate edge read the input power 1 % high
+  at 100 samples).
+* **Added** failures as records: an `UnsupportedError` becomes
+  `refused` with its `(engine, feature, device, kind)`; an engine's
+  `RuntimeError` or a `periodic_steady_state` non-convergence becomes
+  `failed` with the reason; a violated bound becomes `infeasible` with
+  the excess in the KPI's unit. No default value replaces a failure;
+  any other exception propagates. `as_objectives` / `as_constraints`
+  map records to an optimiser's vectors (`penalty` for `refused` /
+  `failed`).
+* **Changed** `pulsim.sweep`'s job runner takes the job function (and
+  an option to let every exception propagate); `sweep` / `monte_carlo`
+  are unchanged.
+
 ### Integration fixes (review of the integration branch, 2026-11-13)
 
 * **Fixed** `periodic_steady_state` accepted a sine, pulse or table

@@ -1,0 +1,231 @@
+"""`pulsim.design`: the evaluation contract (add-design-optimization-workflow,
+tasks 1-2). The KPI oracle is a numpy matrix-exponential reference of
+the same periodic orbit (`_design_reference.py`); the failure tests pin
+the status mapping of design D3: a refusal, a non-convergence and a
+violated bound are typed records, never a default number, and any
+other exception propagates.
+"""
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import pulsim as p
+from pulsim.design import (EvaluationRecord, Evaluator, Kpi, SteadySpec,
+                           as_constraints, as_objectives, evaluate)
+
+from . import _design_reference as ref
+
+T = 1e-5
+CCM = dict(L=100e-6, C=47e-6, R=1.0, R_L=0.01, T=T, D=0.5)
+
+
+def buck(d):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", ref.VIN)
+    b.add_switch("S", "vin", "sw", ref.GON, ref.GOFF)
+    b.add_diode("D1", "gnd", "sw", ref.GON, ref.GOFF)
+    b.add_inductor("L", "sw", "x", d["L"])
+    b.add_resistor("RLs", "x", "vout", d["R_L"])
+    b.add_capacitor("C", "vout", "gnd", d["C"])
+    b.add_resistor("RL", "vout", "gnd", d["R"])
+    sf = p.make_pwm_switch_fn(1 / d["T"], d["D"], b.switch_index_of("S"),
+                              b.graph.num_switches)
+    return b, sf
+
+
+def shockley_buck(d):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_shockley_diode("D1", "gnd", "sw")
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 5.0)
+    return b, p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
+                                   b.graph.num_switches)
+
+
+def _ev(**kw):
+    kw.setdefault("steady", SteadySpec(method="pss"))
+    return Evaluator(buck, period=T, loads=("RL",), output="vout", **kw)
+
+
+def test_the_tested_pulsim_is_this_tree():
+    assert Path(p.__file__).resolve().is_relative_to(
+        Path(__file__).resolve().parents[1])
+
+
+# ---------------------------------------------------------------------
+# 1.3 the oracle
+# ---------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def ccm():
+    return _ev().evaluate(CCM), ref.kpis(CCM)
+
+
+def test_ccm_buck_kpis_match_the_matrix_exponential_reference(ccm):
+    rec, R = ccm
+    assert rec.status == "ok", rec.reason
+    k = rec.kpis
+    # measured 2e-12 (efficiency), 8e-15 (loss), 6e-11 (ripple)
+    for name in ("efficiency", "p_loss", "ripple_v", "p_in", "p_out"):
+        assert k[name] == pytest.approx(R[name], rel=1e-8), name
+    assert rec.losses["S"]["conduction"] == pytest.approx(R["p_s"], rel=1e-8)
+    assert rec.losses["D1"]["conduction"] == pytest.approx(R["p_d"], rel=1e-8)
+    assert rec.losses["RLs"]["resistive"] == pytest.approx(R["p_rl"],
+                                                           rel=1e-8)
+    assert "RL" not in rec.losses           # the load is the output
+    # sanity: the reference itself against the textbook numbers
+    assert R["efficiency"] == pytest.approx(0.98911738798, rel=1e-9)
+    assert R["p_in"] == pytest.approx(R["p_out"] + R["p_loss"], rel=1e-12)
+
+
+def test_ripple_agrees_with_the_small_ripple_formula(ccm):
+    rec, _ = ccm
+    D, f = CCM["D"], 1 / T
+    dv = (1 - D) * rec.kpis["v_out"] / (8 * CCM["L"] * CCM["C"] * f * f)
+    assert rec.kpis["ripple_v"] == pytest.approx(dv, rel=0.02)   # 1.1 %
+
+
+def test_record_shape_counters_and_provenance(ccm):
+    rec, _ = ccm
+    assert isinstance(rec, EvaluationRecord)
+    assert rec.counters["steady_method"] == "pss"
+    assert rec.counters["route"] == "pss/dsed"
+    assert 1 <= rec.counters["pss_period_runs"] <= 8
+    assert rec.counters["python_callbacks"] == 0
+    assert rec.provenance["pulsim"] == p.__version__
+    assert len(rec.provenance["build"]) == 16
+    assert len(rec.design_id) == 64 and rec.seed == int(rec.design_id, 16) % 2**32
+    assert rec.violations == {} and rec.refusal is None and rec.reason is None
+    with pytest.raises(TypeError):
+        rec.kpis["efficiency"] = 1.0       # records are immutable
+    # the semiconductor stresses are there
+    for n in ("S", "D1"):
+        assert {f"i_peak.{n}", f"i_rms.{n}", f"v_peak.{n}"} <= set(rec.kpis)
+    assert rec.kpis["v_peak.S"] == pytest.approx(24.0, rel=1e-3)
+
+
+def test_design_id_depends_on_design_and_options_only():
+    a, b = _ev(), _ev()
+    assert a.design_id(CCM) == b.design_id(dict(reversed(CCM.items())))
+    assert a.design_id(CCM) != a.design_id({**CCM, "C": 48e-6})
+    assert a.design_id(CCM) != _ev(samples_per_period=500).design_id(CCM)
+
+
+def test_user_kpi_is_time_weighted():
+    def mean_vout(per):
+        return per.average(per.result.v("vout"))
+    rec = _ev(kpis=[Kpi("mean_vout", mean_vout)]).evaluate(CCM)
+    assert rec.kpis["mean_vout"] == pytest.approx(rec.kpis["v_out"],
+                                                  rel=1e-12)
+
+
+# ---------------------------------------------------------------------
+# 2. failures are records
+# ---------------------------------------------------------------------
+
+def test_refusal_is_a_record_with_the_four_fields():
+    rec = Evaluator(shockley_buck, period=T, loads=("RL",),
+                    engine="dsed").evaluate({})
+    assert rec.status == "refused"
+    assert rec.refusal == ("dsed", "", "D1", "ShockleyDiode")
+    assert "D1" in rec.reason
+    assert rec.kpis == {} and rec.losses == {}
+    # 'auto' routed to the transient BEFORE running: pss refused it
+    assert rec.counters["steady_method"] == "transient"
+    assert "ShockleyDiode" in rec.counters["steady_route_reason"]
+
+
+def test_pss_refusal_is_not_followed_by_a_transient():
+    rec = Evaluator(shockley_buck, period=T, loads=("RL",),
+                    steady=SteadySpec(method="pss")).evaluate({})
+    assert rec.status == "refused"
+    assert rec.refusal[0] == "periodic_steady_state"
+    assert rec.counters["simulations"] == 0
+
+
+def test_not_settled_is_failed_with_the_reason():
+    # DCM buck: Floquet multiplier 0.989, ~1250 periods to 1e-6.
+    ev = Evaluator(buck, period=T, loads=("RL",), output="vout",
+                   engine="dsed", steady=SteadySpec(
+                       method="transient", min_periods=8, max_periods=32))
+    rec = ev.evaluate({**CCM, "R": 50.0, "D": 0.3})
+    assert rec.status == "failed"
+    assert rec.reason.startswith("not_settled")
+    assert rec.counters["periods"] == 32
+    assert rec.counters["settle_error"] > 1e-6
+    assert rec.kpis == {}
+
+
+def test_pss_non_convergence_is_failed():
+    rec = _ev(steady=SteadySpec(method="pss", max_period_runs=1)).evaluate(
+        {**CCM, "R": 50.0, "D": 0.3})
+    assert rec.status == "failed"
+    assert "no periodic orbit found" in rec.reason
+    assert rec.kpis == {}
+
+
+def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
+        monkeypatch):
+    def aborted(*a, **k):
+        raise RuntimeError("did not settle after 64 rounds")
+    monkeypatch.setattr(p, "simulate", aborted)
+    rec = _ev().evaluate(CCM)
+    assert rec.status == "failed"
+    assert "did not settle" in rec.reason
+
+    def bug(*a, **k):
+        raise TypeError("a bug, not a design outcome")
+    monkeypatch.setattr(p, "simulate", bug)
+    with pytest.raises(TypeError, match="a bug"):
+        _ev().evaluate(CCM)
+
+
+def test_build_errors_propagate():
+    def broken(d):
+        raise ZeroDivisionError("in the user's build")
+    with pytest.raises(ZeroDivisionError):
+        evaluate(broken, {}, period=T)
+
+
+def test_ripple_bound_exceeded_is_infeasible_with_the_excess_in_volts():
+    rec = _ev(constraints={"ripple_v": (None, 0.12)}).evaluate(
+        {**CCM, "C": 4.8e-6})
+    assert rec.status == "infeasible"
+    r = rec.kpis["ripple_v"]
+    assert r == pytest.approx(0.15, abs=0.005)
+    assert rec.violations["ripple_v"] == pytest.approx(r - 0.12, rel=1e-12)
+    assert rec.violations["ripple_v"] == pytest.approx(0.03, abs=0.005)
+    ok = _ev(constraints={"ripple_v": (None, 0.12)}).evaluate(CCM)
+    assert ok.status == "ok" and ok.violations["ripple_v"] == 0.0
+
+
+def test_adapters_penalise_refused_and_failed_only(ccm):
+    rec, _ = ccm
+    names = ["efficiency", "p_loss"]
+    obj = as_objectives(rec, names, maximise=["efficiency"])
+    assert np.all(np.isfinite(obj)) and obj[0] == -rec.kpis["efficiency"]
+    refused = Evaluator(shockley_buck, period=T, engine="dsed").evaluate({})
+    failed = _ev(steady=SteadySpec(method="pss", max_period_runs=1)
+                 ).evaluate({**CCM, "R": 50.0, "D": 0.3})
+    for r in (refused, failed):
+        assert list(as_objectives(r, names, penalty=7.0)) == [7.0, 7.0]
+        assert list(as_constraints(r, ["ripple_v"], penalty=7.0)) == [7.0]
+    inf = _ev(constraints={"ripple_v": (None, 0.12)}).evaluate(
+        {**CCM, "C": 4.8e-6})
+    g = as_constraints(inf, ["ripple_v"])
+    assert g[0] == inf.violations["ripple_v"] > 0
+    assert np.all(np.isfinite(as_objectives(inf, names)))
+    with pytest.raises(KeyError):       # a misspelt name is not "feasible"
+        as_constraints(inf, ["ripple"])
+
+
+def test_bad_configuration_is_rejected_up_front():
+    with pytest.raises(ValueError, match="dsed exact stepper"):
+        Evaluator(buck, period=T, engine="pwl", steady=SteadySpec("pss"))
+    with pytest.raises(KeyError, match="names no KPI"):
+        _ev(constraints={"nope": (0, 1)}).evaluate(CCM)
