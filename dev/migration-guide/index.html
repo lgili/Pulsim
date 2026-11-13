@@ -811,6 +811,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1812,6 +1833,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#after-200-pwl-diode-forward-drop-psim-v_f" class="md-nav__link">
+    <span class="md-ellipsis">
+      After 2.0.0 — PWL diode forward drop (PSIM V_f)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       See also
@@ -2027,6 +2057,15 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#after-200-pwl-diode-forward-drop-psim-v_f" class="md-nav__link">
+    <span class="md-ellipsis">
+      After 2.0.0 — PWL diode forward drop (PSIM V_f)
+    </span>
+  </a>
   
 </li>
       
@@ -2532,6 +2571,18 @@ construct kwargs from a settings dict, just splat it:</p>
 </code></pre></div>
 <p>This is intentional — no parallel <code>*Params</code> data structure to keep
 in sync with the kwarg list.</p>
+<h2 id="after-200-pwl-diode-forward-drop-psim-v_f">After 2.0.0 — PWL diode forward drop (PSIM <code>V_f</code>)<a class="headerlink" href="#after-200-pwl-diode-forward-drop-psim-v_f" title="Permanent link">&para;</a></h2>
+<p><code>add_diode</code> gained <code>V_f</code> (default 0): the PSIM "Diode Voltage Drop",
+<code>v = V_f + i/g_on</code> while ON, so the diode dissipates <code>V_f·i + i²/g_on</code>.
+Omitting it changes nothing. <code>V_th</code> stays the turn-on threshold.</p>
+<p><strong>Breaking:</strong> <code>add_three_phase_vsi(V_f=0.7)</code> now passes <code>V_f</code> as that
+drop (it was the turn-on threshold <code>V_th</code> and added no loss). The
+freewheel diodes' conduction loss rises by <code>V_f·I_avg</code>, they no longer
+share current with a gated-on switch below <code>R_on·|i| = V_f</code>, and the
+leg-output voltage during dead time shifts by <code>V_f</code>. For the old
+behaviour pass <code>V_f=0.0, V_th=0.7</code>. <code>add_bridge_rectifier</code> gained a
+<code>V_f=0.0</code> drop; its <code>V_th=0.7</code> threshold is unchanged. <code>add_mosfet</code>'s
+<code>V_F</code> stays a body-diode threshold.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>examples/scripts/</code> — 20 runnable reference scripts.</li>

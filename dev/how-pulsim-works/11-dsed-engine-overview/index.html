@@ -811,6 +811,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1953,7 +1974,7 @@ h  = h_init
 
 while t &lt; t_end:
     # 1. PREDICT next event time analytically.
-    t_gate  = switch_fn.next_edge_after(t)
+    t_gate  = switch_fn.next_edge_after(t)   # or: sample + bisect
     t_pred  = min(t_gate, t_end)
 
     # 2. INTEGRATE between events with adaptive step.
@@ -2004,6 +2025,21 @@ while t &lt; t_end:
 </tr>
 </tbody>
 </table>
+<p>Where <code>t_gate</code> comes from matters. The built-in PWM helpers
+(<code>make_pwm_switch_fn</code>, <code>make_dead_time_pwm_pair_fn</code>,
+<code>make_spwm_pair_fn</code>, <code>make_phase_shift_full_bridge_fn</code>,
+<code>make_three_phase_spwm_fn</code>, <code>make_combined_switch_fn</code>) return a
+<code>SwitchSchedule</code> whose <code>next_edge_after</code> is analytic (bisected to the
+last representable time for the sine-modulated ones), as do
+<code>NativePwm2Switch</code> / <code>NativeMultiMaskPwm</code>. A plain callable has no
+oracle: the scheduler samples it every <code>dt_max / 10</code> and bisects each
+change it finds down to the edge (<code>EdgeSearch</code> in
+<code>python/dsed_bindings.cpp</code>). A pulse that starts and ends between two
+samples is missed, and <code>simulate</code> warns about it. Before the bisection
+existed, every edge of a plain callable moved onto the sample grid: a
+synchronous buck at 100 kHz, D = 0.25 and 100 ns dead time ran with no
+dead time and D = 0.30 (14.28 V against 11.49 V, body diodes never
+conducting) at the default <code>dt_max</code>.</p>
 <p>The native C++ implementation of the loop + the
 <code>NativePwm2Switch</code> fast path that gives DSED its 24× story are
 covered in <a href="../15-dsed-native-bindings/">chapter 15</a>. The end-to-end

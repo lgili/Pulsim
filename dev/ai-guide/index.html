@@ -1046,6 +1046,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2166,9 +2187,8 @@ prints.</p>
   a fixed grid: <code>np.sqrt(p.time_average(t, i**2))</code> (trap 14).</li>
 <li>Switch bits come from <code>b.switch_index_of(name)</code>; mask size from
   <code>b.graph.num_switches</code>. <code>p.SwitchStateMask(n)</code> is a SIZE.</li>
-<li>PWL diode <code>V_th</code> is a commutation threshold, not a forward drop.
-  Without <code>dt</code>, give PWL diodes <code>V_th &gt; 0</code> and heed <code>res.i</code> warnings
-  (trap 13).</li>
+<li>PWL diode <code>V_th</code> is a turn-on threshold; <code>V_f</code> is the forward drop.
+  Without <code>dt</code>, rerun with <code>dt</code> on any <code>simulate</code> warning (trap 13).</li>
 <li>Loss and thermal summaries average the WHOLE run, start-up included
   (3.4).</li>
 <li>Check every result physically (section 6) before reporting it.</li>
@@ -2207,8 +2227,8 @@ prints.</p>
   Pulsim assembles a modified nodal analysis (MNA) system from them.</li>
 <li><strong>Piecewise-linear switching.</strong> <code>add_switch</code>, <code>add_mosfet</code>, <code>add_igbt</code>
   and <code>add_diode</code> are two-state branches: a conductance <code>g_on</code> (or
-  <code>1/R_on</code>) when on, <code>g_off</code> when off, no voltage offset in either
-  state. Each one owns a bit in the switch-state mask. Controlled
+  <code>1/R_on</code>) when on, <code>g_off</code> when off; only <code>add_diode(V_f=)</code> adds a
+  series drop, while on. Each one owns a bit in the switch-state mask. Controlled
   switches follow <code>switch_fn(t) -&gt; SwitchStateMask</code>; diodes commutate
   on their own. Smooth devices (<code>add_shockley_diode</code>, <code>add_mosfet_level1</code>,
   saturable magnetics) are nonlinear and are solved with Newton.</li>
@@ -2251,9 +2271,8 @@ prints.</p>
 <li><strong>Pass <code>dt</code></strong> when a <code>switch_fn</code> drives the circuit, when you need a
   uniform grid, or when you compare runs bit for bit. Every on-time
   must be a whole number of steps, and every edge on the grid (3.2).</li>
-<li><strong>Omit <code>dt</code></strong> for passive and source-driven circuits, for circuits
-  whose PWL diodes have <code>V_th &gt; 0</code> (trap 13), and as the second engine
-  in a cross-check.</li>
+<li><strong>Omit <code>dt</code></strong> for passive, source-driven and diode-commutated
+  circuits (trap 13), and as the second engine in a cross-check.</li>
 </ul>
 <h2 id="3-canonical-examples">3. Canonical examples<a class="headerlink" href="#3-canonical-examples" title="Permanent link">&para;</a></h2>
 <h3 id="31-rc-step-the-minimal-script">3.1 RC step: the minimal script<a class="headerlink" href="#31-rc-step-the-minimal-script" title="Permanent link">&para;</a></h3>
@@ -2274,20 +2293,9 @@ prints.</p>
 </code></pre></div>
 <h3 id="32-buck-converter-with-a-pwm-switch_fn">3.2 Buck converter with a PWM <code>switch_fn</code><a class="headerlink" href="#32-buck-converter-with-a-pwm-switch_fn" title="Permanent link">&para;</a></h3>
 <p>A <code>switch_fn</code> maps <code>t</code> to a <code>SwitchStateMask</code>. On the fixed-step engine
-gate edges can only fall on the <code>dt</code> grid, so compute the PWM in steps:</p>
+gate edges can only fall on the <code>dt</code> grid, so make the on-time a whole
+number of steps (trap 10):</p>
 <div class="highlight"><pre><span></span><code><span class="n">DT</span> <span class="o">=</span> <span class="mf">1e-7</span>
-
-<span class="k">def</span><span class="w"> </span><span class="nf">grid_pwm</span><span class="p">(</span><span class="n">f_sw</span><span class="p">,</span> <span class="n">duty</span><span class="p">,</span> <span class="n">bit</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">"""PWM whose edges sit exactly on the dt grid (trap 10)."""</span>
-    <span class="n">n_per</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="n">f_sw</span> <span class="o">*</span> <span class="n">dt</span><span class="p">))</span>           <span class="c1"># steps per period</span>
-    <span class="n">n_on</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">duty</span> <span class="o">*</span> <span class="n">n_per</span><span class="p">)</span>               <span class="c1"># steps per on-time</span>
-    <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">n_per</span> <span class="o">*</span> <span class="n">f_sw</span> <span class="o">*</span> <span class="n">dt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="nb">abs</span><span class="p">(</span><span class="n">n_on</span> <span class="o">-</span> <span class="n">duty</span> <span class="o">*</span> <span class="n">n_per</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">1e-6</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"period and on-time must be whole numbers of dt"</span><span class="p">)</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">switch_fn</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
-        <span class="n">m</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span><span class="p">(</span><span class="n">n_sw</span><span class="p">)</span>          <span class="c1"># all OFF</span>
-        <span class="n">m</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">bit</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">t</span> <span class="o">/</span> <span class="n">dt</span><span class="p">)</span> <span class="o">%</span> <span class="n">n_per</span> <span class="o">&lt;</span> <span class="n">n_on</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">m</span>
-    <span class="k">return</span> <span class="n">switch_fn</span>
 
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
@@ -2299,7 +2307,7 @@ gate edges can only fall on the <code>dt</code> grid, so compute the PWM in step
 
 <span class="n">q1</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>                 <span class="c1"># never count bits by hand</span>
 <span class="n">n_sw</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span>                  <span class="c1"># Q1, Q1_body, D1 -&gt; 3</span>
-<span class="n">pwm</span> <span class="o">=</span> <span class="n">grid_pwm</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">q1</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">)</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">q1</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">)</span>   <span class="c1"># f, D, bit, size</span>
 
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
 <span class="n">s</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">steady_state_stats</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">8e-3</span><span class="p">)</span>
@@ -2313,20 +2321,22 @@ gate edges can only fall on the <code>dt</code> grid, so compute the PWM in step
 analytic: dI = 0.600 A, dV = dI/(8 f C) = 16.0 mV
 </code></pre></div>
 <p><code>steady_state_stats</code> returns <code>.mean .rms .min .max .ripple_pp .t_from
-.t_to</code>. <code>p.make_pwm_switch_fn(frequency, duty, bit, n_sw)</code> means the same, but
-it compares a floating-point phase, so on a <code>dt</code> grid some edges land a
-step early or late. The duty jitter keeps the LC filter ringing: 67 mV
-pp here instead of 17 mV, with the mean unchanged. Use it without <code>dt</code>,
-or count its on-steps first:</p>
-<div class="highlight"><pre><span></span><code><span class="n">mk</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">q1</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">)</span>
-<span class="n">on</span> <span class="o">=</span> <span class="p">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">mk</span><span class="p">(</span><span class="n">k</span> <span class="o">*</span> <span class="n">DT</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">q1</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">j</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span> <span class="n">j</span> <span class="o">*</span> <span class="mi">100</span> <span class="o">+</span> <span class="mi">100</span><span class="p">))</span>
+.t_to</code>. An edge of the built-in helpers that falls on a <code>dt</code> grid point
+takes effect at that point, so the on-time is the same in every period:</p>
+<div class="highlight"><pre><span></span><code><span class="n">on</span> <span class="o">=</span> <span class="p">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">pwm</span><span class="p">(</span><span class="n">k</span> <span class="o">*</span> <span class="n">DT</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">q1</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">j</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span> <span class="n">j</span> <span class="o">*</span> <span class="mi">100</span> <span class="o">+</span> <span class="mi">100</span><span class="p">))</span>
       <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">600</span><span class="p">)}</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"on-steps per period:"</span><span class="p">,</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">on</span><span class="p">))</span>    <span class="c1"># 50 asked</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>on-steps per period: [49, 50, 51]
+<div class="highlight"><pre><span></span><code>on-steps per period: [50]
 </code></pre></div>
 <p>For a half bridge, <code>p.make_dead_time_pwm_pair_fn</code> drives the high- and
-low-side bits with a dead time; for a three-phase bridge see 3.7.</p>
+low-side bits with a dead time; for a three-phase bridge see 3.7. The
+helpers also name their edges (<code>pwm.next_edge_after(t)</code>), so the
+variable-step engines land on them. A plain callable has no edges:
+<code>trbdf2</code> can step over a short pulse or dead time silently (D = 0.03:
+0.17 V vs 1.20 V) and <code>dsed</code> bisects only changes it sees at its
+<code>dt_max / 10</code> polls (and warns). Use a helper or pass <code>dt</code>. Both call
+it out of time order: keep it a pure function of <code>t</code>.</p>
 <h3 id="33-bridge-rectifier-from-pulsimtopology">3.3 Bridge rectifier from <code>pulsim.topology</code><a class="headerlink" href="#33-bridge-rectifier-from-pulsimtopology" title="Permanent link">&para;</a></h3>
 <p>Topology helpers are module-level functions that take the builder first
 and keyword-only node names. The diodes are named <code>&lt;name&gt;__D1</code> ...
@@ -2355,12 +2365,13 @@ the open switch (before a turn-on, after a turn-off) and <code>I</code> through 
 closed one, so a soft edge costs what its measured voltage says (3.7).
 An offset-plus-slope conduction model <code>V_f0*|i| + r_on*i^2</code> comes from
 <code>conduction_specs</code>. <code>p.device_thermal_summary</code> adds a Foster network per
-device (<code>p.FosterStage(R_th_K_per_W, tau_s)</code>). Both average over the
-WHOLE record, start-up included, with no window argument: on the bridge
-of trap 13 (<code>t_end = 0.1 s</code>, <code>V_f0 = 0.7</code>, <code>r_on = 0.02</code>) the diode
-conduction loss reads 17x its 80-100 ms value. For steady state, apply
-the same model to <code>res.i(name)</code> over a window yourself. <code>T_j</code> starts at
-<code>T_ambient_C</code> and settles only after several of the largest <code>tau</code>.</p>
+device (<code>p.FosterStage(R_th_K_per_W, tau_s)</code>). Both cover the WHOLE
+record unless you pass <code>t_from=</code> / <code>t_to=</code> (seconds; bounds interpolated
+on any grid, edges counted when they start inside): on the bridge of
+trap 13 (<code>t_end = 0.1 s</code>, <code>V_f0 = 0.7</code>, <code>r_on = 0.02</code>) the run's diode
+conduction loss is 17x its 80-100 ms value. <code>T_j_trace</code> starts at
+<code>T_ambient_C</code> at t = 0 and settles only after several of the largest
+<code>tau</code>; <code>T_j_avg</code> / <code>T_j_peak</code> cover the window.</p>
 <div class="highlight"><pre><span></span><code><span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="n">R_on</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
@@ -2368,33 +2379,31 @@ the same model to <code>res.i(name)</code> over a window yourself. <code>T_j</co
 <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">100e-6</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
-<span class="n">pwm</span> <span class="o">=</span> <span class="n">grid_pwm</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
 <span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
 
 <span class="n">sw</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"Q1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"E_on_ref"</span><span class="p">:</span> <span class="mf">20e-6</span><span class="p">,</span> <span class="s2">"E_off_ref"</span><span class="p">:</span> <span class="mf">30e-6</span><span class="p">,</span> <span class="s2">"V_ref"</span><span class="p">:</span> <span class="mf">24.0</span><span class="p">,</span>
              <span class="s2">"I_ref"</span><span class="p">:</span> <span class="mf">6.0</span><span class="p">}}</span>
 <span class="n">cond</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"V_f0"</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span> <span class="s2">"r_on"</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">}}</span>
-<span class="n">rows</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]:</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span>
-    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_specs</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">conduction_specs</span><span class="o">=</span><span class="n">cond</span><span class="p">)}</span>
-<span class="n">i_q</span><span class="p">,</span> <span class="n">i_d</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">res</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Q1 cond </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="s1">'Q1'</span><span class="p">][</span><span class="s1">'P_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (run), "</span>
-      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mf">0.05</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">i_q</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (3-5 ms); "</span>
-      <span class="sa">f</span><span class="s2">"sw </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="s1">'Q1'</span><span class="p">][</span><span class="s1">'P_sw_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (run)"</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"D1 cond </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="s1">'D1'</span><span class="p">][</span><span class="s1">'P_cond_model_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (run), "</span>
-      <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mf">0.7</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nb">abs</span><span class="p">(</span><span class="n">i_d</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">0.02</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">i_d</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W (3-5 ms)"</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mf">3e-3</span><span class="p">):</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]:</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span>
+        <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_specs</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">conduction_specs</span><span class="o">=</span><span class="n">cond</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="n">w</span><span class="p">)}</span>
+    <span class="n">q</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="s2">"Q1"</span><span class="p">],</span> <span class="n">rows</span><span class="p">[</span><span class="s2">"D1"</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="s1">'3-5 ms'</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">'run'</span><span class="si">}</span><span class="s2">: Q1 cond </span><span class="si">{</span><span class="n">q</span><span class="p">[</span><span class="s1">'P_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W, "</span>
+          <span class="sa">f</span><span class="s2">"sw </span><span class="si">{</span><span class="n">q</span><span class="p">[</span><span class="s1">'P_sw_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W; D1 cond </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">'P_cond_model_avg'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> W"</span><span class="p">)</span>
 
 <span class="n">th</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_thermal_summary</span><span class="p">(</span>
-    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_specs</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">T_ambient_C</span><span class="o">=</span><span class="mf">40.0</span><span class="p">,</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_specs</span><span class="o">=</span><span class="n">sw</span><span class="p">,</span> <span class="n">T_ambient_C</span><span class="o">=</span><span class="mf">40.0</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">3e-3</span><span class="p">,</span>
     <span class="n">thermal_specs</span><span class="o">=</span><span class="p">{</span><span class="s2">"Q1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">),</span>
                                      <span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2e-2</span><span class="p">)]}})</span>
 <span class="n">P</span> <span class="o">=</span> <span class="n">th</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">"P_total_avg"</span><span class="p">]</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Q1: P = </span><span class="si">{</span><span class="n">P</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> W, T_j peak = </span><span class="si">{</span><span class="n">th</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'T_j_peak'</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> C at 5 ms; "</span>
       <span class="sa">f</span><span class="s2">"settles near 40 + 1.5 K/W * P = </span><span class="si">{</span><span class="mi">40</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.5</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">P</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> C"</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>Q1 cond 0.905 W (run), 0.878 W (3-5 ms); sw 5.034 W (run)
-D1 cond 2.453 W (run), 2.425 W (3-5 ms)
-Q1: P = 5.94 W, T_j peak = 44.2 C at 5 ms; settles near 40 + 1.5 K/W * P = 48.9 C
+<div class="highlight"><pre><span></span><code>run: Q1 cond 0.905 W, sw 5.034 W; D1 cond 2.453 W
+3-5 ms: Q1 cond 0.878 W, sw 4.987 W; D1 cond 2.422 W
+Q1: P = 5.86 W, T_j peak = 44.2 C at 5 ms; settles near 40 + 1.5 K/W * P = 48.8 C
 </code></pre></div>
 <p><code>P_avg</code> of a diode is <code>v^2 * g_on</code> only: the PWL diode has no forward
 drop (trap 1). Diode losses are only as good as the diode current;
@@ -2409,9 +2418,10 @@ turn-off, with <code>V_R</code> read one <code>t_rr</code> (default 100 ns) afte
 <div class="highlight"><pre><span></span><code>P_rr = 0.988 W, 500 turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)
 </code></pre></div>
 <h3 id="35-yaml-netlist">3.5 YAML netlist<a class="headerlink" href="#35-yaml-netlist" title="Permanent link">&para;</a></h3>
-<p><code>p.load_yaml_string</code> / <code>p.load_yaml_file</code> return a <code>LoadedCircuit</code> with
-<code>.builder</code> and <code>.options</code>. The gate drive is not in the YAML: build
-the <code>switch_fn</code> from the loaded builder.</p>
+<p><code>p.load_yaml_*</code> return a <code>LoadedCircuit</code> (<code>.builder</code>, <code>.options</code>,
+<code>.switch_names</code>). <code>simulation:</code> must be top-level (nested: refused);
+<code>p.simulate(lc)</code> takes t_end/dt from it. The gate drive is not in the
+YAML: pass a <code>switch_fn</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="n">lc</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">"""</span>
 <span class="s2">circuit:</span>
 <span class="s2">  devices:</span>
@@ -2422,7 +2432,7 @@ the <code>switch_fn</code> from the loaded builder.</p>
 <span class="s2">  t_end: 5.0e-3</span>
 <span class="s2">  dt: 1.0e-6</span>
 <span class="s2">"""</span><span class="p">)</span>
-<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">lc</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">lc</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">lc</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">lc</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"v_out(end) = </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s1">'out'</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>v_out(end) = 9.933 V
@@ -2442,7 +2452,7 @@ the <code>switch_fn</code> from the loaded builder.</p>
     <span class="k">return</span> <span class="n">b</span>
 
 <span class="n">ref</span> <span class="o">=</span> <span class="n">make_buck</span><span class="p">(</span><span class="mf">10.0</span><span class="p">)</span>                        <span class="c1"># same topology -&gt; same bits</span>
-<span class="n">pwm</span> <span class="o">=</span> <span class="n">grid_pwm</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">ref</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">ref</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span> <span class="n">ref</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
 <span class="n">out</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">sweep</span><span class="p">(</span><span class="n">make_buck</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">"R_load"</span><span class="p">:</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">]},</span>
               <span class="n">kpi_fn</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">,</span> <span class="n">prm</span><span class="p">:</span> <span class="p">{</span><span class="s2">"vout"</span><span class="p">:</span> <span class="n">p</span><span class="o">.</span><span class="n">steady_state_stats</span><span class="p">(</span>
                   <span class="n">r</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">8e-3</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">},</span>
@@ -2482,24 +2492,27 @@ reuses the factorisation across points.</p>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"dead </span><span class="si">{</span><span class="n">dead</span><span class="si">:</span><span class="s2">.0e</span><span class="si">}</span><span class="s2"> s: V_LL1 = </span><span class="si">{</span><span class="nb">abs</span><span class="p">(</span><span class="n">c1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V rms, "</span>
           <span class="sa">f</span><span class="s2">"I_a = </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_rms</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">inv</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s1">'La'</span><span class="p">),</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> A rms, "</span>
           <span class="sa">f</span><span class="s2">"P_dc = </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">time_average</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mi">600</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">inv</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s1">'Vdc'</span><span class="p">),</span><span class="w"> </span><span class="n">t_from</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">)</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> W"</span><span class="p">)</span>
+    <span class="n">on</span> <span class="o">=</span> <span class="p">(</span><span class="n">inv</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"INV__Dha"</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">1e-3</span><span class="p">)[</span><span class="n">w</span><span class="p">]</span>       <span class="c1"># HSa is switch_indices[0]</span>
+    <span class="n">hs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">inv</span><span class="o">.</span><span class="n">switch_states</span><span class="p">)[</span><span class="n">w</span><span class="p">,</span> <span class="n">vsi</span><span class="o">.</span><span class="n">switch_indices</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  INV__Dha on </span><span class="si">{</span><span class="mi">100</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">on</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> %, </span><span class="si">{</span><span class="mi">100</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">on</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">hs</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> % with HSa on"</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"ideal V_LL1 = sqrt(3/8) * m * V_dc = </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">3</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.8</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">600</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>dead 0e+00 s: V_LL1 = 293.9 V rms, I_a = 16.77 A rms, P_dc = -8435 W
+  INV__Dha on 0.0 %, 0.0 % with HSa on
 dead 1e-06 s: V_LL1 = 284.6 V rms, I_a = 16.24 A rms, P_dc = -7912 W
+  INV__Dha on 1.0 %, 0.0 % with HSa on
 ideal V_LL1 = sqrt(3/8) * m * V_dc = 293.9 V
 </code></pre></div>
 <p>The dead time costs <code>4/pi * V_dc * t_d * f_sw * sqrt(3/2)</code> = 9.4 V of
 <code>V_LL1</code>; <code>P_dc &lt; 0</code> is the source sign convention (section 4). In the
-dead time the antiparallel PWL diode takes the freewheel current, and it
-turns off only when its current reverses: once the switch is gated on
-(the switches conduct both ways) the diode stays on in parallel with
-<code>R_on / (R_on + R_d)</code> = 2 % of it. With 1 us dead time <code>INV__Dha</code>
-conducts on 12.9 % of samples, 11.9 % with <code>HSa</code> on; with none, never.
-Read both branches before attributing conduction loss. <code>switch_specs</code>
+dead time the antiparallel PWL diode takes the freewheel current and
+drops <code>V_f + i / g_on</code> (0.7 V + 0.05 ohm); once <code>HSa</code> is gated on, the
+switch takes it all and the diode turns off at zero current: it never
+shares (printed above). <code>switch_specs</code>
 on <code>HSa</code> (<code>E_on_ref</code> 4 mJ, <code>E_off_ref</code> 3.5 mJ at 600 V, 50 A) gives
-11.3 W with the dead time (soft edges see the diode's 0.8 V: about 0 J)
+11.3 W with the dead time (soft edges see only the diode's drop: about 0 J)
 and 22.6 W without (soft edges block 600 V and are charged like hard
-ones). Model the dead time.</p>
+ones, on top of <code>INV__LSa</code>'s own hard edges). Model the dead time.</p>
 <h2 id="4-exact-signatures-of-the-most-used-calls">4. Exact signatures of the most used calls<a class="headerlink" href="#4-exact-signatures-of-the-most-used-calls" title="Permanent link">&para;</a></h2>
 <p><code>b</code> is a <code>CircuitBuilder</code>, <code>res</code> a <code>SimulationResult</code>. These lines are
 checked against the installed package by the test suite. <code>...</code> marks
@@ -2513,7 +2526,7 @@ b.add_current_source(name, n_pos, n_neg, I)
 b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
 b.add_pulse_voltage_source(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0.0, rise_time=0.0, fall_time=0.0)
 b.add_pwm_voltage_source(name, n_pos, n_neg, v_high, v_low, frequency, duty, phase=0.0)
-b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0)
+b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0, V_f=0.0)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on, g_off)
 b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
@@ -2526,19 +2539,19 @@ p.make_pwm_switch_fn(frequency, duty, switch_idx, num_switches, phase=0.0)
 p.make_dead_time_pwm_pair_fn(frequency, duty, hs_switch_idx, ls_switch_idx, num_switches, dead_time, phase=0.0)
 p.make_three_phase_spwm_fn(carrier_frequency, modulation_frequency, modulation_index, legs, num_switches, dead_time, modulation_phase=0.0, carrier_phase=0.0)
 p.ThreePhaseLegIndices(hs_a, ls_a, hs_b, ls_b, hs_c, ls_c)
-p.simulate(builder, t_end, dt=None, *, engine='auto', rtol=None, atol=None, ...)
+p.simulate(builder, t_end=None, dt=None, *, engine='auto', rtol=None, atol=None, ...)
 res.v(name, t=None)
 res.i(name, t=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
-p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7)
-p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05)
+p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0)
+p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0)
 p.load_yaml_string(yaml_text)
 p.load_yaml_file(path)
 p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, verbose=True, **simulate_kwargs)
-p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None)
-p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None)
+p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None, t_from=None, t_to=None)
+p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None, t_from=None, t_to=None)
 p.scope(builder, result, *, signals=None, title=None, save=None, stack=True, show=False, tight_lw=False)
 </code></pre></div>
 <p>Notes: <code>res.i(name)</code> is positive from a device's first node to its
@@ -2568,9 +2581,9 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 <tbody>
 <tr>
 <td>1</td>
-<td><code>V_th</code> of <code>add_diode</code> (and <code>add_bridge_rectifier(V_th=)</code>, <code>add_three_phase_vsi(V_f=)</code>, <code>add_mosfet(V_F=)</code> body diode) is a forward drop</td>
-<td>It is the voltage at which the diode commutates. On-state is <code>I/g_on</code>: 10 A into <code>g_on = 20 S</code> gives 0.500 V for <code>V_th = 0</code> and <code>0.7</code> alike</td>
-<td>Model a real drop with <code>b.add_shockley_diode</code> (<code>res.i</code> does not reconstruct its current and <code>device_loss_summary</code> omits it: put a 1 mOhm resistor in series and read <code>res.i("Rsense")</code>), or post-process losses with <code>conduction_specs={"D": {"V_f0": ..., "r_on": ...}}</code></td>
+<td><code>V_th</code> of <code>add_diode</code> / <code>add_bridge_rectifier</code>, or <code>add_mosfet(V_F=)</code> (body diode), is a forward drop</td>
+<td>It is the turn-on threshold. On-state is <code>V_f + I/g_on</code>: 10 A into <code>g_on = 20 S</code> gives 0.500 V for <code>V_th = 0</code> and <code>0.7</code> alike, 1.200 V with <code>V_f = 0.7</code>. <code>add_three_phase_vsi(V_f=)</code> IS a drop</td>
+<td>Pass <code>V_f</code> (PSIM's diode drop; losses include <code>V_f*I</code>), or <code>b.add_shockley_diode</code> for an exponential law. Never also a <code>conduction_specs</code> <code>V_f0</code></td>
 </tr>
 <tr>
 <td>2</td>
@@ -2610,9 +2623,9 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 </tr>
 <tr>
 <td>8</td>
-<td>A rectifier's DC side can float</td>
-<td>With every diode off at t = 0, <code>engine='auto'</code> aborts: <code>factorize failed (numerically singular) ... dt=6e-14 ... node dcn</code>. A 1 MOhm or 1 GOhm rail-to-ground resistor did NOT cure it</td>
-<td>Connect one DC rail to <code>"gnd"</code> (as in 3.3), or pass <code>dt</code></td>
+<td><code>res.v</code> of a floating DC rail is the DC voltage</td>
+<td>It is to ground. A bridge with <code>ac_b="gnd"</code>, load across <code>dp</code>/<code>dn</code>: <code>v("dp")</code> spans -0.7..325.0 V, <code>v("dn")</code> -325.0..0.7 V; <code>dp - dn</code> averages 321.85 V on both engines. Without <code>dt</code> it warns the rails "reach the rest of the circuit only through switches/diodes"; with 10 mF: 323.94 V, 324.51 V with <code>dt</code></td>
+<td><code>res.v("dp") - res.v("dn")</code>, or ground one DC rail (3.3)</td>
 </tr>
 <tr>
 <td>9</td>
@@ -2623,8 +2636,8 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 <tr>
 <td>10</td>
 <td>Any <code>dt</code> works with PWM</td>
-<td>Gate edges land on the <code>dt</code> grid. Buck D = 0.25 at 100 kHz with <code>make_pwm_switch_fn</code>: 5.84 V with <code>dt=2e-7</code> (on-time = 12.5 steps), 5.99 V with <code>dt=1e-7</code>. <code>make_pwm_switch_fn</code> still puts edges one step off (3.2)</td>
-<td>Make <code>D/f_sw</code> a whole number of steps; compute the PWM in steps (<code>grid_pwm</code>, 3.2)</td>
+<td>Gate edges land on the <code>dt</code> grid. Buck D = 0.25 at 100 kHz with <code>make_pwm_switch_fn</code>: 6.24 V with <code>dt=2e-7</code> (on-time 12.5 steps, run as 13), 6.00 V with <code>dt=1e-7</code></td>
+<td>Make <code>D/f_sw</code> a whole number of steps; the helpers then hold it exactly (3.2)</td>
 </tr>
 <tr>
 <td>11</td>
@@ -2640,9 +2653,9 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 </tr>
 <tr>
 <td>13</td>
-<td><code>V_th = 0</code> diodes are fine on any engine</td>
-<td>Without <code>dt</code>, a <code>V_th = 0</code> bridge behind 0.1 ohm (230 V rms, 470 uF, 1 kOhm) ran half-wave: 318.8 V, 12.9 V pp, <code>BR__D1</code> and <code>BR__D3</code> never conducting; with <code>dt=1e-6</code>, 322.1 V, 6.4 V pp. <code>simulate</code> warns a diode "rode its conduction boundary"; <code>res.i</code> warns it was held "OFF while forward-biased" (a missed commutation). <code>V_th &gt; 0</code> is no guarantee: with 1 mH of line and <code>V_th = 0.7</code>, TR-BDF2 missed one commutation (V_dc still within 0.04 V of <code>dt</code>)</td>
-<td>With <code>V_th = 0</code> pass <code>dt</code> (0.7: 322.1 V on both engines). On either warning, rerun with <code>dt</code> (6.2)</td>
+<td>A warning from a run without <code>dt</code> is noise</td>
+<td>It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or was held in a state "its commutation rule forbids" (a missed commutation; named, and <code>res.i</code> repeats it), a <code>switch_fn</code> pulse narrower than its sampling. No warning is no proof: a one-shot <code>switch_fn</code> pulse under a quarter of the step ceiling (<code>dt</code>, else at most <code>t_end/1000</code>) can be skipped silently (2 us in 20 ms: 11 of 20 phases). <code>dsed</code> can refuse a zero-current turn-on of a <code>V_th &lt;= V_f</code> diode</td>
+<td>Rerun with <code>dt</code> and compare (6.2); <code>dt</code> at most 4x the narrowest pulse; <code>dsed</code>: <code>V_th = V_f + 1e-3</code></td>
 </tr>
 <tr>
 <td>14</td>
@@ -2653,12 +2666,12 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 </tbody>
 </table>
 <p>Traps 1, 3 and 4, executed:</p>
-<div class="highlight"><pre><span></span><code><span class="k">for</span> <span class="n">vth</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">):</span>
+<div class="highlight"><pre><span></span><code><span class="k">for</span> <span class="n">vth</span><span class="p">,</span> <span class="n">vf</span> <span class="ow">in</span> <span class="p">((</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span> <span class="p">(</span><span class="mf">0.7</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">)):</span>
     <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
     <span class="n">b</span><span class="o">.</span><span class="n">add_current_source</span><span class="p">(</span><span class="s2">"I1"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>   <span class="c1"># 10 A out of "a"</span>
-    <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="n">vth</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">V_th</span><span class="o">=</span><span class="n">vth</span><span class="p">,</span> <span class="n">V_f</span><span class="o">=</span><span class="n">vf</span><span class="p">)</span>
     <span class="n">r</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_th = </span><span class="si">{</span><span class="n">vth</span><span class="si">}</span><span class="s2">: V(a) = </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s1">'a'</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"V_th = </span><span class="si">{</span><span class="n">vth</span><span class="si">}</span><span class="s2">, V_f = </span><span class="si">{</span><span class="n">vf</span><span class="si">}</span><span class="s2">: V(a) = </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s1">'a'</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
 
 <span class="n">m</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="s2">"SwitchStateMask(1):"</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="s2">"bit, bit 0 on:"</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
@@ -2671,8 +2684,9 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">({</span><span class="n">n</span><span class="p">:</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"Q1_body"</span><span class="p">,</span> <span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"Q2"</span><span class="p">,</span> <span class="s2">"Q2_body"</span><span class="p">)})</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>V_th = 0.0: V(a) = 0.500 V
-V_th = 0.7: V(a) = 0.500 V
+<div class="highlight"><pre><span></span><code>V_th = 0.0, V_f = 0.0: V(a) = 0.500 V
+V_th = 0.7, V_f = 0.0: V(a) = 0.500 V
+V_th = 0.0, V_f = 0.7: V(a) = 1.200 V
 SwitchStateMask(1): 1 bit, bit 0 on: False
 {'Q1': 0, 'Q1_body': 1, 'D1': 2, 'Q2': 3, 'Q2_body': 4}
 </code></pre></div>
@@ -2735,12 +2749,12 @@ trbdf2 time-weighted 6.330 V, sample mean 5.007 V
 </code></pre></div>
 <p>The engines agree; the sample mean on the variable grid does not.
 When two engines disagree, check the metric before blaming an engine.
-Compare ripple and RMS too: the buck of 3.2 on <code>make_pwm_switch_fn</code>
-reads 11.998 V on both engines, but 67 mV pp with <code>dt</code>, 15 mV without.
-Neither is right: <code>min</code>, <code>max</code> and <code>ripple_pp</code> are sample extremes,
-and the variable grid (about 20 samples per period here) misses the
-peaks (analytic 16.0 mV; <code>grid_pwm</code> with <code>dt</code>, 16.8 mV). Read ripple
-from a fixed-<code>dt</code> run, or <code>np.interp</code> onto a uniform grid first.</p>
+Compare ripple and RMS too: the buck of 3.2 reads 11.999 V on both
+engines, but 16.8 mV pp with <code>dt</code> and 15.4 mV without (analytic
+16.0 mV): <code>min</code>, <code>max</code> and <code>ripple_pp</code> are sample extremes, and the
+variable grid (about 20 samples per period here) misses the peaks.
+Read ripple from a fixed-<code>dt</code> run, or <code>np.interp</code> onto a uniform grid
+first.</p>
 <h3 id="63-step-size-convergence">6.3 Step-size convergence<a class="headerlink" href="#63-step-size-convergence" title="Permanent link">&para;</a></h3>
 <p>Halve <code>dt</code> and rerun. A figure that moves by more than you need is not
 converged. The fixed engine is first order from the start (trap 9):</p>
@@ -2761,7 +2775,7 @@ dt = 5e-06: i_L(tau) error 9.21e-04 A
 <h3 id="64-when-simulate-raises">6.4 When <code>simulate</code> raises<a class="headerlink" href="#64-when-simulate-raises" title="Permanent link">&para;</a></h3>
 <p>The message names the device, node or option involved (trap 12). If
 you change engine to get past a refusal, confirm the answer with 6.2.
-Typical refusals: a singular matrix (a floating node, trap 8), a Newton
+Typical refusals: a singular matrix (a floating node), a Newton
 abort (trap 5), a part file without provenance, a mismatched snapshot.</p>
 <h2 id="7-coming-from-pulsim-1x-or-pre-10">7. Coming from Pulsim 1.x or pre-1.0<a class="headerlink" href="#7-coming-from-pulsim-1x-or-pre-10" title="Permanent link">&para;</a></h2>
 <p>Retired names still raise <code>AttributeError</code> with a hint (for example

@@ -908,6 +908,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1937,10 +1958,9 @@
 <div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/buck.yaml"</span><span class="p">)</span>   <span class="c1"># path relative to the repo root</span>
 <span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">),</span>
                            <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
-<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span>
-                 <span class="n">dt</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>     <span class="c1"># t_end / dt from the file</span>
 </code></pre></div>
-<p>The YAML loader builds a <code>LoadedCircuit</code> with two attributes: <code>.builder</code> (the populated <code>CircuitBuilder</code>) and <code>.options</code> (the <code>simulation:</code> block — <code>t_end</code>, <code>dt</code>, ...). The YAML does not carry the gate drive: build the <code>switch_fn</code> from the loaded builder, asking it for the switch's bit by name.</p>
+<p>The YAML loader builds a <code>LoadedCircuit</code> with two attributes: <code>.builder</code> (the populated <code>CircuitBuilder</code>) and <code>.options</code> (the top-level <code>simulation:</code> block — <code>t_end</code>, <code>dt</code>, ...), plus read-only shortcuts (<code>t_end</code>, <code>dt</code>, <code>switch_names</code>, <code>node_names</code>, <code>source</code>). <code>simulate(loaded)</code> reads <code>t_end</code> / <code>dt</code> from it. The YAML does not carry the gate drive: build the <code>switch_fn</code> from the loaded builder, asking it for the switch's bit by name.</p>
 <h2 id="how-a-tutorial-walks-through-this">How a tutorial walks through this<a class="headerlink" href="#how-a-tutorial-walks-through-this" title="Permanent link">&para;</a></h2>
 <p>Every tutorial in this guide hits the same three checkpoints:</p>
 <ol>

@@ -805,6 +805,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1685,6 +1706,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What you get per device">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#steady-state-t_from-t_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      Steady state: t_from / t_to
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1843,16 +1879,48 @@ recognises. Common fields:</p>
 <td>float ∈ [0, 1]</td>
 <td>switch</td>
 </tr>
+<tr>
+<td><code>t_window_start</code>, <code>t_window_end</code></td>
+<td>float [s]</td>
+<td>every device</td>
+</tr>
 </tbody>
 </table>
+<p>A Shockley diode (<code>add_shockley_diode</code>, kind <code>shockley_diode</code>) gets
+<code>i_avg</code>, <code>i_rms</code>, <code>i_peak</code>, <code>P_avg</code> and <code>E_total</code> from the kernel's
+exponential law at the recorded <code>v_D</code> (the parameters are kept on the
+builder when the diode is added); <code>result.i()</code> returns the same current.
+Against a 1 mOhm sense resistor in series it agrees to 3e-12 A.</p>
+<h3 id="steady-state-t_from-t_to">Steady state: <code>t_from</code> / <code>t_to</code><a class="headerlink" href="#steady-state-t_from-t_to" title="Permanent link">&para;</a></h3>
+<p>Every figure covers the whole run, start-up included, unless you pass a
+window in seconds (both <code>device_loss_summary</code> and
+<code>device_thermal_summary</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="n">rows</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">conduction_specs</span><span class="o">=</span><span class="n">cond</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">0.08</span><span class="p">)</span>
+</code></pre></div>
+<p>On a 230 V bridge rectifier (0.1 Ω, 470 µF ‖ 1 kΩ, <code>t_end = 0.1</code> s) a
+diode's <code>V_f0 = 0.7, r_on = 0.02</code> conduction loss is 2.338 W over the
+run and 0.1358 W over 80–100 ms. A bound inside a step cuts that step's
+own model: the line of its current and, on a step that flips a switch or
+diode, the trapezoid of its end powers. Adjacent windows therefore add
+up to rounding wherever the cuts fall, a bound inside a flip step reads
+like either end of it, and a variable-step grid gives the same answer
+as a fine fixed one. Gate edges
+and diode turn-offs are found on the whole run and count when their step
+starts inside the window. The thermal summary still runs the Foster
+network from t = 0 (<code>T_j_trace</code> covers the run); its averages and peaks
+cover the window, and the constant switching offset is the window's
+<code>P_sw_avg</code>.</p>
 <p>Switch and diode states are not inferred. Every engine records, with
 each stored sample, the switch / diode mask it <strong>stamped</strong> for the solve
 that produced it (<code>result.switch_states</code>, one bool column per
 <code>builder.switch_index_of(name)</code>), so a switched branch's current is
-exactly <code>(g_on if closed else g_off) · v</code>. A PWL diode needs this: its ON
-state is a pure conductance, so a diode carrying 48 A at <code>g_on = 1e3</code>
-sits at 48 mV — inside <code>0 &lt; v_D &lt; V_th</code>, where the voltage alone cannot
-say whether it conducts. <code>switch_fn=</code> is only needed for a result built
+exactly <code>(g_on if closed else g_off) · v</code> (for an ON PWL diode with a
+forward drop, <code>g_on · (v − V_f)</code>). A PWL diode needs this: its ON
+state is <code>V_f + i/g_on</code>, so a diode carrying 48 A at <code>g_on = 1e3</code>
+sits at <code>V_f</code> + 48 mV — inside <code>V_f &lt; v_D &lt; V_th</code>, where the voltage
+alone cannot say whether it conducts. Its loss is <code>V_f·i + i²/g_on</code>, so
+<code>P_avg</code> already contains the drop: a <code>conduction_specs</code> <code>V_f0</code> for the
+same diode is a separate estimate, not an addition. <code>switch_fn=</code> is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.</p>
 <p>Row <code>k</code> of the record is the mask in force over the step
@@ -1998,7 +2066,8 @@ transformer rectifier (<code>τ = 0.5 µs</code>) records 360 instead of 5 at
 reflected ON step lasts one step, so a gap counts when at least two of
 the three runs around it (the conducting stretch before, the gap, the
 stretch after) last at most 2 steps, and no step average of <code>v_D</code> in it
-falls below <code>−2·V_th</code>. The gap length is not used: chatter gaps measured
+falls below <code>−2·V_th</code> (with a forward drop, <code>v_D − V_f</code> against
+<code>−2·(V_on − V_f)</code>). The gap length is not used: chatter gaps measured
 1 to 237 steps, and real short blocking intervals are as short (a
 100 kHz pulsed charger blocking 0.5 V: 5 steps at 1 µs, between
 conducting stretches of 5 steps, not reported). On the fixed-step engine

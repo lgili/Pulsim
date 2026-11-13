@@ -805,6 +805,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1819,7 +1840,7 @@ integration is intentionally deferred to the follow-up
 chatter at the DCM/CCM boundary; sub-step bisection is the right
 fix).</p>
 <h2 id="the-diode-state-machine">The diode state machine<a class="headerlink" href="#the-diode-state-machine" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>        ┌────── v_anode − v_cathode ≥ V_th ──────┐
+<div class="highlight"><pre><span></span><code>        ┌────── v_anode − v_cathode ≥ V_on ──────┐
         │                                         │
         ▼                                         │
     ┌──────┐                                   ┌──────┐
@@ -1832,6 +1853,46 @@ fix).</p>
 </code></pre></div>
 <p>For an ideal diode <code>V_th = 0</code>. For a Si-behavioral diode
 <code>V_th = 0.7</code>. Both are supported.</p>
+<p><strong>Forward drop <code>V_f</code> (PSIM's "Diode Voltage Drop").</strong> While ON the
+diode is <code>g_on</code> in series with <code>V_f</code>: <code>i = g_on·(v − V_f)</code>, so
+<code>v = V_f + i/g_on</code>; OFF stays a plain <code>g_off</code> (no offset). The stamp
+adds <code>−g_on·V_f</code> to <code>b</code> at the anode (<code>+</code> at the cathode) on the ON mask
+only; <code>J</code> is unchanged. The decisions use one law
+(<code>SwitchedDiode::decide</code> / <code>crossing_signal</code>):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V_on</code></td>
+<td><code>V_th</code> if <code>V_f == 0</code>, else <code>max(V_th, V_f)</code></td>
+</tr>
+<tr>
+<td>OFF → ON</td>
+<td><code>v ≥ V_on</code></td>
+</tr>
+<tr>
+<td>ON stays</td>
+<td><code>g_on·(v − V_f) &gt; 0</code></td>
+</tr>
+<tr>
+<td>crossing signal</td>
+<td>ON: <code>v − V_f</code>; OFF: <code>v − V_on</code></td>
+</tr>
+<tr>
+<td>power while ON</td>
+<td><code>V_f·i + i²/g_on</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>V_th &gt; V_f</code> is a hysteresis band of width <code>V_th − V_f</code>; the DSED
+engine's settle needs one to resolve a zero-current turn-on. <code>V_f</code>
+must be finite and ≥ 0. At <code>V_f = 0</code> everything is bit-identical to
+the law without it.</p>
 <p>At the topology level, the diode IS a Switch — same combinatorial
 axis in the Layer 4 cache (an N-switch graph with M diodes has
 2^N segments). The new piece is the <strong>per-step state decision
@@ -1844,7 +1905,8 @@ just-computed <code>(v_diode, i_diode)</code>.</p>
 <span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">Params</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="n">Real</span><span class="w"> </span><span class="n">g_on</span><span class="p">;</span><span class="w">   </span><span class="c1">// forward conductance (typ. 1e3)</span>
 <span class="w">        </span><span class="n">Real</span><span class="w"> </span><span class="n">g_off</span><span class="p">;</span><span class="w">  </span><span class="c1">// reverse conductance (typ. 1e-9)</span>
-<span class="w">        </span><span class="n">Real</span><span class="w"> </span><span class="n">V_th</span><span class="p">;</span><span class="w">   </span><span class="c1">// forward threshold (0 for ideal, 0.7 for Si)</span>
+<span class="w">        </span><span class="n">Real</span><span class="w"> </span><span class="n">V_th</span><span class="p">;</span><span class="w">   </span><span class="c1">// turn-on threshold (effective max(V_th, V_f))</span>
+<span class="w">        </span><span class="n">Real</span><span class="w"> </span><span class="n">V_f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">  </span><span class="c1">// forward drop while ON</span>
 <span class="w">    </span><span class="p">};</span>
 
 <span class="w">    </span><span class="c1">// Topology: looks like a switch.</span>
@@ -1866,7 +1928,7 @@ just-computed <code>(v_diode, i_diode)</code>.</p>
 <span class="k">class</span><span class="w"> </span><span class="nc">DevicePool</span><span class="w"> </span><span class="p">{</span>
 <span class="k">public</span><span class="o">:</span>
 <span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">add_diode</span><span class="p">(</span><span class="n">Index</span><span class="w"> </span><span class="n">branch_id</span><span class="p">,</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">g_on</span><span class="p">,</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">g_off</span><span class="p">,</span>
-<span class="w">                    </span><span class="n">Real</span><span class="w"> </span><span class="n">V_th</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">);</span>
+<span class="w">                    </span><span class="n">Real</span><span class="w"> </span><span class="n">V_th</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">V_f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">);</span>
 <span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">models</span><span class="o">::</span><span class="n">SwitchedDiode</span><span class="o">::</span><span class="n">Params</span><span class="o">&amp;</span><span class="w"> </span><span class="nf">diode_params</span><span class="p">(</span><span class="n">Index</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
 <span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">Index</span><span class="o">&gt;</span><span class="w"> </span><span class="n">diode_branches</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
 <span class="w">    </span><span class="n">Size</span><span class="w"> </span><span class="nf">num_diodes</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>

@@ -805,6 +805,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1845,6 +1866,14 @@ ready to feed into <code>PwlStateSpaceCache</code> and <code>run_transient</code
 <span class="w">  </span><span class="nt">t_end</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5e-3</span>
 <span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-7</span>
 </code></pre></div>
+<p><code>simulation:</code> is a top-level key, a sibling of <code>circuit:</code>. The loader
+refuses a <code>simulation:</code> block indented under <code>circuit:</code> (until 2.0.x
+that was ignored and the file loaded with <code>t_end = dt = 0</code>). Any other
+unknown key (top-level, under <code>circuit:</code> other than <code>nodes</code>/<code>devices</code>,
+or inside <code>simulation:</code>) is ignored but collected in
+<code>LoadedCircuit::warnings</code> and re-emitted by the Python binding as a
+<code>UserWarning</code>. <code>LoadedCircuit::source</code> records the path (or
+<code>"&lt;string&gt;"</code>) and <code>has_simulation</code> whether the block was present.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
 <span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"my_buck.yaml"</span><span class="p">)</span>
@@ -1894,7 +1923,7 @@ device entry's <code>type:</code> field selects the schema:</p>
 <tr>
 <td><code>diode</code></td>
 <td><code>anode</code>, <code>cathode</code>, <code>g_on</code>, <code>g_off</code></td>
-<td><code>V_th</code> (default 0)</td>
+<td><code>V_th</code> (default 0), <code>V_f</code> forward drop (default 0)</td>
 </tr>
 <tr>
 <td><code>nonlinear_diode</code></td>

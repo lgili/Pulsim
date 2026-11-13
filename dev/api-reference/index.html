@@ -1073,6 +1073,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2269,15 +2290,15 @@
 <tbody>
 <tr>
 <td><code>builder</code></td>
-<td><code>CircuitBuilder</code></td>
+<td><code>CircuitBuilder</code> or <code>LoadedCircuit</code></td>
 <td>required</td>
-<td>The populated builder.</td>
+<td>The populated builder, or a <code>LoadedCircuit</code> from the YAML loader (then <code>t_end</code>, <code>dt</code>, <code>t_start</code> and <code>store_every</code> default to its <code>simulation:</code> block; see <em>YAML loader</em>).</td>
 </tr>
 <tr>
 <td><code>t_end</code></td>
 <td><code>float</code></td>
-<td>required</td>
-<td>End time, seconds.</td>
+<td>required with a builder</td>
+<td>End time, seconds; must be greater than <code>t_start</code> (a <code>ValueError</code> otherwise).</td>
 </tr>
 <tr>
 <td><code>dt</code></td>
@@ -2498,7 +2519,7 @@ result remains valid), and memory drops by the same factor.
 </tr>
 <tr>
 <td><code>add_diode</code></td>
-<td><code>(name, anode, cathode, g_on, g_off, V_th=0)</code> — binary switched diode; <code>V_th</code> is the commutation threshold, not a forward drop (the ON state is the bare conductance <code>g_on</code>)</td>
+<td><code>(name, anode, cathode, g_on, g_off, V_th=0, V_f=0)</code> — binary switched diode; <code>V_f</code> is the forward drop while ON (PSIM's diode voltage drop: <code>v = V_f + i/g_on</code>), <code>V_th</code> the turn-on threshold (effectively <code>max(V_th, V_f)</code>), not a drop</td>
 </tr>
 <tr>
 <td><code>add_nonlinear_diode</code></td>
@@ -2717,10 +2738,33 @@ still the form that keeps working when the <code>dt</code> is dropped.</p>
 <span class="s2">"""</span><span class="p">)</span>
 <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span>              <span class="c1"># CircuitBuilder</span>
 <span class="n">loaded</span><span class="o">.</span><span class="n">options</span>              <span class="c1"># SimulationOptions (t_start, t_end, dt, ...)</span>
+<span class="n">loaded</span><span class="o">.</span><span class="n">source</span>               <span class="c1"># the path, or '&lt;string&gt;'</span>
+<span class="n">loaded</span><span class="o">.</span><span class="n">has_simulation</span>       <span class="c1"># True: the YAML has a top-level simulation:</span>
+<span class="n">loaded</span><span class="o">.</span><span class="n">t_start</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span> <span class="n">loaded</span><span class="o">.</span><span class="n">dt</span>     <span class="c1"># read-only, from options</span>
+<span class="n">loaded</span><span class="o">.</span><span class="n">node_names</span>           <span class="c1"># ['in', 'out'] (ground not listed)</span>
+<span class="n">loaded</span><span class="o">.</span><span class="n">switch_names</span>         <span class="c1"># switching branches in SwitchStateMask bit order</span>
+<span class="n">loaded</span><span class="o">.</span><span class="n">warnings</span>             <span class="c1"># non-fatal loader findings (also UserWarnings)</span>
+
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="p">)</span>    <span class="c1"># t_end / dt from the file; keywords override</span>
 </code></pre></div>
-<p>Pass it to <code>simulate(loaded.builder, loaded.options.t_end, loaded.options.dt)</code>.
-The YAML describes the circuit and run settings only — build any gate
+<p><code>simulate(loaded)</code> takes <code>t_end</code>, <code>dt</code> (when the file sets one),
+<code>t_start</code> and <code>store_every</code> from the <code>simulation:</code> block; any keyword
+you pass wins. The other <code>simulation:</code> fields (Newton tolerances,
+<code>integrator</code>, ...) stay on <code>loaded.options</code> for you to forward. A
+<code>LoadedCircuit</code> with no top-level <code>simulation:</code> block (or no <code>t_end</code> in
+it) is refused with a <code>ValueError</code> naming the file, unless you pass
+<code>t_end=</code>.</p>
+<p>The YAML describes the circuit and run settings only — build any gate
 drive yourself (e.g. <code>make_pwm_switch_fn</code>) and pass it as <code>switch_fn=</code>.</p>
+<p>Key checks. The loader accepts only <code>circuit:</code> and <code>simulation:</code> at the
+top level and only <code>nodes:</code> / <code>devices:</code> under <code>circuit:</code>; anything else
+is ignored with a <code>UserWarning</code> naming the key (also listed in
+<code>loaded.warnings</code>). A <code>simulation:</code> block indented
+under <code>circuit:</code> is refused with the fix spelled out (until 2.0.x it was
+ignored and the file loaded with <code>t_end = dt = 0</code>). A
+<code>schema: pulsim-v1</code> netlist is refused as such. Unknown keys inside
+<code>simulation:</code> (e.g. the v1 spelling <code>tstop</code>) are not fatal: each is a
+<code>UserWarning</code> and an entry of <code>loaded.warnings</code>.</p>
 <h2 id="parts-library-pulsimlib">Parts library — <code>pulsim.lib</code><a class="headerlink" href="#parts-library-pulsimlib" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">q</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">igbt</span><span class="p">(</span><span class="s2">"AK40N120"</span><span class="p">,</span> <span class="n">paths</span><span class="o">=</span><span class="p">[</span><span class="s2">"./parts"</span><span class="p">])</span>   <span class="c1"># or PULSIM_PARTS_PATH</span>
 <span class="n">spec</span>  <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">switch_spec</span><span class="p">(</span><span class="n">Tj</span><span class="o">=</span><span class="mf">125.0</span><span class="p">)</span>                   <span class="c1"># E_on_table / E_off_table + Tj</span>

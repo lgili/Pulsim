@@ -926,6 +926,27 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2011,13 +2032,13 @@ want to see it in <code>V_out</code>.</p>
 <div class="highlight"><pre><span></span><code>V_out (steady-state mean) = 12.00 V (target D·V_in = 12.0 V)
 </code></pre></div></p>
 <p>The output filter (100 µH / 47 µF / 10 Ω) is lightly damped (ζ ≈ 0.07), so
-at 2–5 ms it is still ringing from the start-up. The window mean is already
-on target, but do not read the ripple from this run: <code>make_pwm_switch_fn</code>
-compares a floating-point phase, so on the <code>dt</code> grid some gate edges land
-one step early or late, and that duty jitter keeps the filter ringing. At
-9–10 ms of a 10 ms run it still shows ≈ 0.12 V peak-to-peak, where a PWM
-computed in whole steps (<code>round(t / dt) % 50 &lt; 25</code>) shows the ≈ 16 mV
-switching ripple that <code>ΔI / (8 f C)</code> predicts. See trap 10 and section 3.2
+at 2–5 ms it is still ringing from the start-up; the window mean is already
+on target. The on-time is a whole number of steps (25 steps of 0.2 µs), and
+an edge of <code>make_pwm_switch_fn</code> that falls on a <code>dt</code> grid point takes effect
+at that point, so every period has the same duty: at 9–10 ms of a 10 ms run
+the output shows ≈ 16 mV peak-to-peak, the switching ripple that
+<code>ΔI / (8 f C)</code> predicts. With an on-time that is not a whole number of
+steps the edge moves to the next grid point. See trap 10 and section 3.2
 of <code>python -m pulsim.guide</code>.</p>
 <h2 id="whats-going-on-internally">What's going on internally<a class="headerlink" href="#whats-going-on-internally" title="Permanent link">&para;</a></h2>
 <ol>
