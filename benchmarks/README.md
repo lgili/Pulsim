@@ -78,18 +78,23 @@ Rules the harness keeps:
 - **Every average, RMS and error is time-weighted** (trapezoid on the
   samples); a plain `.mean()` over a variable-step trace once invented an
   engine defect. `err_rms = sqrt(∫(y − ref)² dt / window) / span`.
-- **The differential runner compares what an engine computes.** Its
-  default observables leave out the nodes an independent voltage source
-  ties to ground (an ideal PWM node scored 0.06–0.11 between two tight
-  references although nothing reads it), and its default measure
-  (`--metric edge`) leaves out the steps of either trace across which the
-  recorded switch state changes: interpolating a jump between two sparse
-  samples compares a ramp neither engine computed. The window shrinks by
-  those steps only; every other interval counts. A trace that switches
-  across more than half its span (dsed sampled at the switching rate)
-  keeps its steps: they are its only data. `--metric interp` is the
-  previous measure (every interval interpolated, every node), kept for
-  comparison; `reference_status.py --metric` takes the same switch.
+- **The gate is strict.** A differential cell agrees or disagrees, and a
+  `known:` entry is frozen, on the `interp` measure only: every
+  observable (source-forced nodes included), every interval, linearly
+  interpolated on the union of both grids. Nothing is left out of it.
+- **The edge measure is a diagnostic, never the gate.** Each cell also
+  records the error with the steps that hold a recorded switch-state
+  change (either trace) and the nodes a voltage source ties to ground
+  left out, the excluded fraction of the compared span, the worst
+  observable, and the edge-timing mismatch (max |t_edge − t_edge,ref|
+  over switching instants matched per switch and new state, in s and in
+  the engine's `dt` on pwl). It tells "late by one step" from "states
+  wrong", but it cannot see a late edge on a resistive load (the late
+  interval is the excluded step) and dropping a chattering trace's
+  switching steps drops exactly its wrong intervals. So above 10 %
+  excluded it reports `undersampled`, and when one trace records more
+  than twice the other's switch-state changes it reports `chatter`;
+  neither is a number and no other measure is substituted.
 - **The first stored sample is excluded** where it is the initial state
   rather than the `t = 0⁺` solution (on `pwl` / `trbdf2` an RL step reads
   0 V across the inductor at `t = 0`; the answer is 10 V).

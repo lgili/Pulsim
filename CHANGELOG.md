@@ -15,13 +15,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workspace: its backward error reads the workspace's copy of the
   iterate. A solve the Eigen path aborted can now converge (100 µH at
   `tol_newton_dx` = 1e-11 completes; its test pin changed).
-* **Changed** the reference harness compares on an edge-tolerant
-  measure: source-forced nodes are dropped and the step that contains a
-  switching edge is not interpolated (`--metric interp` keeps the old
-  measure). `benchmarks/REFERENCE_STATUS.md` states which one it uses.
-  A trace that switches across more than half its span (dsed sampled at
-  the switching rate) keeps its steps. Re-frozen triage: 21 `known:`
-  cells cleared (they agree), `ll08_buck_mosfet` error → disagree.
+* **Changed** the reference harness drops nothing from its gate. Batch 5
+  first gated on an `edge` measure (switching steps and source-forced
+  nodes left out) and cleared 21 `known:` cells, saying they agree; a
+  review showed that measure cannot see a late edge on a resistive load
+  (`vcswitch_resistor` pwl 0.0332 strict, 1.1e-21 edge) and drops exactly
+  the wrong intervals of a chattering trace. The gate and every freeze
+  are now the strict `interp` measure; each cell also records an edge
+  DIAGNOSTIC (edge error, excluded fraction of the span, worst
+  observable, edge-timing mismatch in s and in pwl steps; `undersampled`
+  above 10 % excluded, `chatter` when one trace has more than twice the
+  other's switch-state changes), which never decides. Of the 21 cells,
+  9 agree on the strict gate and stay cleared — trbdf2 on `ll02`,
+  `ll06`, `ll07`, `ll10`, `ll12`, `full_bridge_dc`,
+  `flying_capacitor_3level`, `t_type_3level_halfbridge` (the TR-BDF2
+  merge) and pwl `cascaded_h_bridge_5level` (its reference moved) —
+  and 12 came from the measure alone and are frozen again (pwl on nine
+  circuits, trbdf2 `ll09`, dsed `ll03` and `full_bridge_dc`); dsed
+  `ll02` (1.14e-3, moved with its reference) is frozen too.
+  `ll08_buck_mosfet` error → disagree on pwl and trbdf2. Strict counts:
+  pwl 77/23/8/0, trbdf2 96/4/2/6, dsed 38/17/14/39.
 * **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
   grinds to `max_steps` on the SEPIC benchmark (it ran before the
   error-control change); the harness has no reference for it, so its

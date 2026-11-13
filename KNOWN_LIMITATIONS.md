@@ -356,6 +356,11 @@ characterised, and one tempting fix refuted*).
 after an event landing, or a row-equilibrated Jacobian — not a
 tolerance change.
 
+A saturable inductor used as a buck's own inductor loses its whole
+current at a turn-off edge on TR-BDF2 (`v_sw` = 2.6e7 V; comment above
+`_gated_buck` in `test_trbdf2_stateful_with_diodes.py`; a fix is in
+progress). Use `engine='pwl'` with a `dt`.
+
 ### TR-BDF2 still refactors on every new step size
 
 `engine='trbdf2'` solves through one event solver per switch state.
@@ -428,9 +433,12 @@ on `pwl` (3): `buck_igbt` (Newton does not converge),
 `ll05_diode_rectifier_filter` (no consistent DC diode configuration),
 `ll13_active_clamp_forward` (no DC operating point).
 `ll16_flyback_closed_loop` completes since the Newton roundoff
-acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
-The differential matrix (edge measure) records 53 `disagree` / `error`
-cells over 47 circuits as `known:` in `benchmarks/manifests/v2_triage.yaml`,
+acceptance, through 1,645 roundoff accepts with a diverged state
+(I(Lm_core) ≈ 2.4e13 A from t = 0); a fix that makes it loud again is in
+progress.
+The differential matrix (strict gate: every observable, every interval)
+records 66 `disagree` / `error` cells over 56 circuits as `known:` in
+`benchmarks/manifests/v2_triage.yaml`,
 plus `sepic` on pwl and trbdf2, whose trbdf2 reference grinds to
 `max_steps` (a TR-BDF2 regression, not frozen; integrated tree,
 2026-11-13, `benchmarks/REFERENCE_STATUS.md`). Each is an
