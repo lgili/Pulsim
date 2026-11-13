@@ -214,37 +214,93 @@ class SteadyPeriod:
 # hashing and provenance
 # ----------------------------------------------------------------------
 
-def _canon_value(v):
+def _code_digest(code) -> str:
+    """Bytecode, names and constants, nested code objects recursively
+    (their repr carries a memory address) and sets sorted (their order
+    follows the per-process string hash)."""
+    def const(c):
+        if isinstance(c, types.CodeType):
+            return _code_digest(c)
+        if isinstance(c, frozenset):
+            return sorted(repr(x) for x in c)
+        if isinstance(c, tuple):
+            return [const(x) for x in c]
+        return repr(c)
+    h = hashlib.sha256(code.co_code)
+    h.update(json.dumps([list(code.co_names), list(code.co_varnames),
+                         list(code.co_freevars),
+                         [const(c) for c in code.co_consts]]).encode())
+    return h.hexdigest()
+
+
+def _global_names(code, out):
+    out.update(code.co_names)
+    for c in code.co_consts:
+        if isinstance(c, types.CodeType):
+            _global_names(c, out)
+    return out
+
+
+def _opaque(v):
+    # no canonical form: type + repr, so two such values are equal only
+    # when their reprs are (an address in the repr makes it unique)
+    return {"opaque": f"{type(v).__module__}.{type(v).__qualname__}",
+            "repr": repr(v)}
+
+
+def _canon_value(v, _seen=None):
     if isinstance(v, (bool, str)) or v is None:
         return v
     if isinstance(v, (int, np.integer)):
         return int(v)
     if isinstance(v, (float, np.floating)):
         return float(v).hex()      # exact, and NaN/inf are representable
+    seen = set() if _seen is None else _seen
+    if id(v) in seen:
+        return {"recursive": f"{type(v).__qualname__}"}
+    seen = seen | {id(v)}
+
+    def canon(x):
+        return _canon_value(x, seen)
+
+    def canon_or_opaque(x):
+        try:
+            return canon(x)
+        except (TypeError, ValueError):
+            return _opaque(x)
     if isinstance(v, Mapping):
-        return {str(k): _canon_value(x) for k, x in sorted(v.items())}
+        return {str(k): canon(x) for k, x in sorted(v.items())}
     if isinstance(v, (tuple, list)):
-        return [_canon_value(x) for x in v]
+        return [canon(x) for x in v]
     if isinstance(v, np.ndarray):
-        return _canon_value(v.tolist())
+        return canon(v.tolist())
+    if isinstance(v, types.ModuleType):
+        return {"module": v.__name__}
+    if isinstance(v, functools.partial):
+        return {"partial": canon(v.func), "args": canon(list(v.args)),
+                "keywords": canon(dict(v.keywords))}
+    if isinstance(v, types.MethodType):
+        return {"method": canon(v.__func__), "self": canon_or_opaque(v.__self__)}
     if isinstance(v, types.FunctionType):
-        # name + code + defaults + captured values: two closures of one
-        # factory with different captures are different options
+        # name + code + defaults + captured values + the globals it reads:
+        # two closures of one factory, or two lambdas reading different
+        # globals, are different options
         code = v.__code__
-        cells = []
-        for c in v.__closure__ or ():
-            try:
-                cells.append(_canon_value(c.cell_contents))
-            except (TypeError, ValueError):
-                cells.append(type(c.cell_contents).__qualname__)
+        g = v.__globals__
+        glob = {n: canon_or_opaque(g[n])
+                for n in sorted(_global_names(code, set())) if n in g}
         return {"fn": f"{v.__module__}.{v.__qualname__}",
-                "code": hashlib.sha256(code.co_code + repr(
-                    code.co_consts).encode()).hexdigest(),
-                "defaults": _canon_value(list(v.__defaults__ or ())),
-                "cells": cells}
+                "code": _code_digest(code),
+                "defaults": canon(list(v.__defaults__ or ())),
+                "kwdefaults": canon(dict(v.__kwdefaults__ or {})),
+                "cells": [canon_or_opaque(c.cell_contents)
+                          for c in v.__closure__ or ()],
+                "globals": glob}
+    if isinstance(v, type):
+        return {"class": f"{v.__module__}.{v.__qualname__}"}
     if hasattr(v, "__dict__"):
         return {"type": f"{type(v).__module__}.{type(v).__qualname__}",
-                "fields": _canon_value(vars(v))}
+                "fields": canon(vars(v))}
     if callable(v):
         return f"{getattr(v, '__module__', '?')}.{getattr(v, '__qualname__', type(v).__qualname__)}"
     raise TypeError(

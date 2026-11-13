@@ -124,6 +124,74 @@ def test_design_id_depends_on_design_and_options_only():
         a.design_id({"v": [1.0, 2.0]})
 
 
+_SCALE = 1.0
+
+
+def _scaled(x):
+    return _SCALE * x
+
+
+class _Laws:
+    def __init__(self, k):
+        self.k = k
+
+    def lin(self, x):
+        return self.k * x
+
+    def sq(self, x):
+        return self.k * x * x
+
+
+def test_design_ids_of_different_functions_differ():
+    """Batch 6c review (d3): each pair below hashed equal before."""
+    import functools
+    import math
+    import subprocess
+    import sys
+    a = _ev()
+
+    def ids(*fs):
+        return [a.design_id({"f": f}) for f in fs]
+
+    def kw(x, *, k=1.0):
+        return k * x
+
+    def kw2(x, *, k=2.0):
+        return k * x
+    pairs = [
+        ids(lambda x: math.sin(x), lambda x: math.cos(x)),   # co_names
+        ids(kw, kw2) if kw.__qualname__ != kw2.__qualname__ else None,
+        ids(functools.partial(kw, k=1.0), functools.partial(kw, k=2.0)),
+        ids(_Laws(1.0).lin, _Laws(1.0).sq),
+        ids(_Laws(1.0).lin, _Laws(2.0).lin),
+    ]
+    for pr in filter(None, pairs):
+        assert pr[0] != pr[1]
+    # a global read by the function is part of its identity
+    global _SCALE
+    before = a.design_id({"f": _scaled})
+    _SCALE = 2.0
+    try:
+        assert a.design_id({"f": _scaled}) != before
+    finally:
+        _SCALE = 1.0
+    # keyword-only defaults alone
+    kw2.__qualname__ = kw.__qualname__
+    assert a.design_id({"f": kw}) != a.design_id({"f": kw2})
+    # a nested function hashes the same in another process (its code
+    # object's repr carries an address)
+    src = ("import sys; sys.path[:0] = {path!r}\n"
+           "from tests.test_design_evaluation import _ev\n"
+           "def outer(x):\n"
+           "    def inner(y):\n"
+           "        return y + 1\n"
+           "    return inner(x)\n"
+           "print(_ev().design_id({{'f': outer}}))\n").format(path=sys.path)
+    out = {subprocess.run([sys.executable, "-c", src], capture_output=True,
+                          text=True, check=True).stdout for _ in range(2)}
+    assert len(out) == 1, out
+
+
 def test_user_kpi_is_time_weighted():
     def mean_vout(per):
         return per.average(per.result.v("vout"))
