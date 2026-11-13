@@ -18,6 +18,16 @@ minutes into "no meaningful progress", are now refused at their first
 segment. `integrator='bdf2'` is unaffected. The keyword is refused by name
 on `pwl`, `trbdf2` and `auto`. Reference runs are unchanged.
 
+### Fixed: a delayed single-shot pulse on `engine='exact'`
+
+A pulse source with `period=0` and a start time whose corners round
+below `t_start + e` held its old level for the step after the corner
+(a 300 ns, 10 V pulse from 1 ms into 1 kΩ / 1 nF peaked at 7.27 V
+instead of 2.59 V). The source now reads the new piece at its corner.
+The law is shared, so a `pwl` / `trbdf2` sample landing exactly on such
+a corner now reads the new piece too; the reference sets are
+bit-identical.
+
 ### Exact-engine record: `auto_would_route`; floating-island bound recorded
 
 Every exact run now carries `result.exact['auto_would_route']`: `True`

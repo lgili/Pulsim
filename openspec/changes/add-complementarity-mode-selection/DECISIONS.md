@@ -470,3 +470,36 @@ choices it did not pin.
     `test_port_factor_beyond_the_bound_refuses_instead_of_rounding`
     (1e12 Ω, 2 mF → the singular-factor error). → Reverse: n/a (no code
     change); if the factor is made compensated, re-run the sweep.
+
+28. **Fresh-context review (2026-11-13): one defect fixed, four risks
+    recorded, not fixed.** A read-only reviewer was asked whether the
+    one-sided diode predicate can miss a real event, whether the
+    false-repair fix (#24) is sound on every family, and whether source
+    corners are landed exactly. Defect: a delayed single-shot pulse
+    read its old piece at a corner landed on exactly (fixed;
+    add-exact-propagator-strategy DECISIONS, group 16 row). Risks kept
+    open, each with why it is not fixed here:
+    - The selector's probes (`first_departure_`, the judge) propagate up
+      to 12 800·h_e = 1.28e-3·T_ref with the gates and the source piece
+      frozen at t; they do not stop at the next gate edge or source
+      corner. A departure inside that window after a time event is
+      judged on a trajectory that does not happen (a spurious repair, or
+      a refusal with the guard off). For a single-shot pulse T_ref is the
+      run length. Fix: cap the probe at the next time event; it changes
+      every guarded run's selection trace, so it needs its own
+      bit-identity pass. Not seen on any survey circuit.
+    - With no exact step (tier 3, allowed numeric), `first_departure_`
+      returns +∞, so the widening is uncapped and #24's early release is
+      possible again. Under the default (13.2) such a mode is refused
+      before it runs; it applies only with `allow_implicit_segments=True`.
+    - At k = 0 the cap is 50·h_e even for a departure at τ < 50·h_e:
+      an early release of at most 5e-6·T_ref.
+    - `exact_scan_step` scans a real-eigenvalue or ramp-driven mode in
+      one interval, so a crossing and recrossing inside one step (both
+      ends admissible) is missed; the reviewer could not trigger it
+      (the dt_max/10 poll bounds the step). A predicate that starts at
+      exactly g = 0 off an event relies on the next event's mode
+      decision. Sign conventions match `SwitchedDiode::crossing_signal`
+      for V_f > 0, V_th > V_f and series / antiparallel pairs; source
+      corners on PWM and periodic pulses, and corners coinciding with a
+      gate edge, were found sound.

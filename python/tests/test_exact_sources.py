@@ -257,6 +257,25 @@ def test_pulse_with_instant_edges_into_rc_is_exact_at_every_sample():
     assert r.n_exact_steps == len(t) - 1
 
 
+@pytest.mark.parametrize("rise,width,fall", [(0.0, 3e-7, 0.0), (2e-7, 3e-7, 1e-7)])
+def test_delayed_single_shot_pulse_reads_the_new_piece_at_its_corner(rise, width, fall):
+    """Reviewer finding: a single-shot pulse from t0 = 1 ms whose corners t0 + e round below
+    t0 + e - t0 (300 ns, 200 ns, 600 ns all do) held the old piece for the step after the corner:
+    a 300 ns, 10 V pulse into 1 kohm / 1 nF peaked at 7.27 V instead of 2.59 V. Within 1e-10."""
+    R_, C_ = 1e3, 1e-9
+    pls = (0.0, 10.0, 1e-3, rise, width, fall, 0.0)
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("V", "a", "gnd", pls[0], pls[1], pls[2], pls[4], pls[6], pls[3], pls[5])
+    b.add_resistor("R", "a", "o", R_)
+    b.add_capacitor("C", "o", "gnd", C_)
+    r = _run(b, 1.003e-3)
+    t = np.asarray(r.times)
+    a = -1.0 / (R_ * C_)
+    ref = _propagate(np.array([[a]]), np.array([-a]), _pulse(*pls), t, np.zeros(1))[:, 0]
+    assert np.abs(np.asarray(r.v("o")) - ref).max() <= 1e-10 * 10.0
+    _assert_corners_sampled(t, [pls[2] + e for e in (0.0, rise, rise + width, rise + width + fall)])
+
+
 def test_ramp_into_rl_matches_the_closed_form():
     """Task 8.3: 0 -> 10 V over 1 ms into 10 ohm + 10 mH (tau = 1 ms), then held:
     i = (a/R)(t - tau(1 - e^{-t/tau})) on the ramp, an exponential to 1 A after; 1e-10."""

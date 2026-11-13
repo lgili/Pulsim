@@ -96,7 +96,13 @@ struct PulseVoltageSource {
             tol = pos.tol * p.period;
         }
         // `elapsed` has not yet reached `x` (within the snap tolerance).
-        const auto before = [&](Real x) { return elapsed < x - tol; };
+        // Single-shot: compare t against the rounded sum t_start + x that
+        // next_corner_after returns, else a corner landed on exactly reads
+        // the old piece when (t_start + x) - t_start rounds below x.
+        const bool periodic = p.period > Real{0};
+        const auto before = [&](Real x) {
+            return periodic ? elapsed < x - tol : t < p.t_start + x;
+        };
         // Rising ramp.
         if (p.rise_time > Real{0} &&
                 before(p.rise_time)) {
@@ -134,7 +140,10 @@ struct PulseVoltageSource {
             elapsed = pos.u * p.period;
             tol = pos.tol * p.period;
         }
-        const auto before = [&](Real x) { return elapsed < x - tol; };
+        const bool periodic = p.period > Real{0};
+        const auto before = [&](Real x) {   // same rule as value_at
+            return periodic ? elapsed < x - tol : t < p.t_start + x;
+        };
         if (p.rise_time > Real{0} && before(p.rise_time)) {
             return (p.v_pulsed - p.v_initial) / p.rise_time;
         }
