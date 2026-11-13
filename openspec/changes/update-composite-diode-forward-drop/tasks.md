@@ -19,7 +19,7 @@
 
 ## 3. Callers
 - [x] 3.1 Run the suite; for each failing expectation in the 24 Python and 5 C++ files of design.md, re-derive the value (`V_F·I` term stated in the test) or pin `V_F=0.0` where the test is about something else — one expectation moved (`test_mosfet_third_quadrant`, gate-off body diode: -10 mV → -(0.7 + i/g_on)); the C++ twin `test_circuit_builder.cpp` reads the diode params
-- [ ] 3.2 Examples and `projects/`: re-run each script and notebook of design.md; update printed expectations and any asserted number
+- [x] 3.2 Examples and `projects/`: re-run each script and notebook of design.md; update printed expectations and any asserted number — the 16 scripts and the 8 project validation notebooks re-run against an old-device emulation (switch + `add_diode(V_th=0.7)`): no script asserts a number; moves are small (closed-loop sweep rows up to 0.022 V, AC sweep 4th digit; notebooks V_o ≤ 0.8 mV, ripple 1–5 mV, pfc_vsi_drive `P_sw_T1` 9.472 → 9.542 W). Only the half-bridge notebook's stored output matched the old run and was refreshed (V_o 3.6355 → 3.6351 V, ripple 110.37 → 114.89 mV); the forward, flyback and pfc_vsi_drive stored outputs were already stale before this change and are left. `run_live_scope_buck` is interactive (not run to completion)
 - [x] 3.3 `python/pulsim/spice_import.py` and `discovery.py`: check what they pass for the body diode and whether an imported `.model` forward voltage should feed `V_F` — no change: a MOS card has no forward-voltage parameter; with IS/JS the importer already builds a Shockley body diode, otherwise the level-1 default (now a 0.7 V drop) applies; `discovery.py` only lists names
 
 ## 4. Docs
@@ -32,7 +32,7 @@
 ## 5. Verification
 - [x] 5.1 `ruff check`
 - [x] 5.2 `pytest python/tests`
-- [ ] 5.3 `ctest -j2`
+- [x] 5.3 `ctest -j2` — 749/749 passed
 - [x] 5.4 `openspec validate --all --strict`
 - [x] 5.5 Stub check
 - [x] 5.6 Re-run `p6b.py`, `probes/d9b_forced.py`, `probes/d9_buck_emulated.py`; the "today" rows must read as the "future" rows; then delete `probes/` (tests 1.1–1.8 replace it) — `d9b_forced.py` and `d9_buck_emulated.py` now print today = future (0.7100 V; 11.6403 V); `p6b.py` is not in this repository; probes deleted
