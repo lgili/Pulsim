@@ -1114,6 +1114,10 @@ class PwlStateSpaceCache:
         """
         Set the lazy-mode segment cache byte budget. Once the estimated resident bytes would exceed it, the least-recently-solved mask's factor is evicted (transparently rebuilt on re-visit). 0 disables eviction. Default: 1 GiB. Eager build() never evicts.
         """
+    def share_symbolic(self, circuit: Circuit) -> None:
+        """
+        Share symbolic analyses with every cache of a circuit of this structure (with_params / with_value derivations): one analysis per sweep. Call before the first build; results are bit-identical.
+        """
 class SimulationOptions:
     """
     Inputs to run_transient: time window + dt + Newton / event-iteration knobs.

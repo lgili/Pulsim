@@ -7,6 +7,9 @@
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/ir/circuit.hpp"
+#include "pulsim/pwl/cache.hpp"
+
+#include <cstring>
 
 #include <bit>
 #include <cstdint>
@@ -249,4 +252,48 @@ TEST_CASE("IR: with_params / with_value derive, never mutate", "[ir]") {
                       ContainsSubstring("no parameter named \"X\"; parameters: Lbase, Rload"));
     CHECK_THROWS_WITH(c.with_value("RL.Q", 1.0),
                       ContainsSubstring("with_value(\"RL.Q\"): device \"RL\" (Resistor) has no value field \"Q\""));
+}
+
+TEST_CASE("IR: circuits of one structure share one symbolic analysis", "[ir]") {
+    using pwl::PwlStateSpaceCache;
+    const auto c = mixed_circuit().build();
+    const auto d = c.with_value("RL.R", 4.0).with_value("L.L", 220e-6);
+    REQUIRE(d.symbolic_plan() == c.symbolic_plan());
+    constexpr Real dt = 1e-7;
+    auto solve = [&](const ir::Circuit& k, bool share, Index& analyses) {
+        auto b = k.to_builder();   // a run owns its pool, as simulate() does
+        PwlStateSpaceCache cache(b.graph(), b.pool());
+        if (share) cache.share_symbolic(k.symbolic_plan());
+        cache.build_lazy(dt);
+        const Index n = static_cast<Index>(b.pool().state_size(b.graph()));
+        const Vector be = Vector::LinSpaced(n, -1.0, 1.0);
+        std::vector<Vector> xs;
+        for (unsigned v = 0; v < 8; ++v) {
+            topology::SwitchStateMask m(b.graph().num_switches());
+            for (Size i = 0; i < m.size(); ++i) m.set(i, ((v >> (i % 3)) & 1U) != 0);
+            Vector x;
+            cache.solve(m, be, x);
+            xs.push_back(x);
+        }
+        analyses = static_cast<Index>(cache.metrics().symbolic_analyses);
+        return xs;
+    };
+    Index a0 = 0, a1 = 0, a2 = 0;
+    (void)solve(c, true, a0);                  // analyses and offers
+    const auto shared = solve(d, true, a1);    // adopts the plan's analysis
+    const auto own = solve(d, false, a2);      // private analysis
+    CHECK(a0 == 1);
+    CHECK(a1 == 0);
+    CHECK(a2 == 1);
+    REQUIRE(shared.size() == own.size());
+    for (std::size_t i = 0; i < own.size(); ++i) {
+        REQUIRE(shared[i].size() == own[i].size());
+        CHECK(std::memcmp(shared[i].data(), own[i].data(),
+                          sizeof(Real) * static_cast<std::size_t>(own[i].size())) == 0);
+    }
+    // Another structure starts its own plan; build() always does.
+    auto other = mixed_circuit();
+    other.add_resistor("Rx", "vout", "gnd", 1e3);
+    CHECK(other.build().symbolic_plan() != c.symbolic_plan());
+    CHECK(mixed_circuit().build().symbolic_plan() != c.symbolic_plan());
 }

@@ -233,6 +233,39 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
     return kpi_list, failed, backend
 
 
+class _CircuitPoints:
+    """``sweep(circuit, ...)`` / ``monte_carlo(circuit, ...)``: point
+    ``p`` is ``circuit.with_params`` of its parameter names, then
+    ``with_value`` of its ``"device.field"`` names. Every point shares
+    the circuit's structure, so its symbolic analysis is done once."""
+
+    def __init__(self, circuit):
+        self.circuit = circuit
+
+    def __call__(self, **p):
+        c = self.circuit.with_params(
+            {k: v for k, v in p.items() if "." not in k})
+        for k, v in p.items():
+            if "." in k:
+                c = c.with_value(k, v)
+        return c
+
+
+def _circuit_form(builder_factory, parallel, backend):
+    """``(factory, backend)`` for a ``pulsim.Circuit`` first argument:
+    its points run on threads, which share the circuit (it is immutable);
+    a process pool cannot carry it."""
+    from . import Circuit
+    if not isinstance(builder_factory, Circuit):
+        return builder_factory, backend
+    if parallel and backend == "process":
+        raise ValueError(
+            "backend='process' cannot carry a pulsim.Circuit (it does "
+            "not pickle); use backend='thread' or 'auto' — the circuit "
+            "is immutable and shared by the threads")
+    return _CircuitPoints(builder_factory), "thread"
+
+
 def sweep(builder_factory: Callable[..., Any],
             *,
             params: Dict[str, Sequence[float]],
@@ -249,7 +282,11 @@ def sweep(builder_factory: Callable[..., Any],
     ----------
     builder_factory
         Function `(**params) -> CircuitBuilder` that constructs a
-        populated builder.
+        populated builder, or a :class:`pulsim.Circuit`: each point is
+        then ``circuit.with_params`` of its parameter names (and
+        ``with_value`` of its ``"device.field"`` names). Its points
+        share one symbolic analysis and run on threads when
+        ``parallel`` (``backend="process"`` is refused).
     params
         Dict mapping parameter names to value sequences. The sweep
         runs over the Cartesian product (every combination).
@@ -290,6 +327,7 @@ def sweep(builder_factory: Callable[..., Any],
     SweepResult
         Parallel arrays of parameters and KPIs.
     """
+    builder_factory, backend = _circuit_form(builder_factory, parallel, backend)
     keys = list(params.keys())
     vals = [list(params[k]) for k in keys]
     shape = tuple(len(v) for v in vals)
@@ -355,7 +393,8 @@ def monte_carlo(builder_factory: Callable[..., Any],
     Parameters
     ----------
     builder_factory
-        `(**params) -> CircuitBuilder`.
+        `(**params) -> CircuitBuilder`, or a :class:`pulsim.Circuit`
+        (as in :func:`sweep`).
     distributions
         Dict mapping parameter names to draw functions. Each draw
         function is called as ``rng_draw(np_default_rng)`` and must
@@ -372,6 +411,7 @@ def monte_carlo(builder_factory: Callable[..., Any],
     ----------------
     Same as :func:`sweep`.
     """
+    builder_factory, backend = _circuit_form(builder_factory, parallel, backend)
     rng = np.random.default_rng(seed)
     samples = []
     for _ in range(n_samples):

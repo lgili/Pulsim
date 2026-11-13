@@ -183,3 +183,31 @@ is not a precondition; `simulate()` keeps its entry points and calls
 - `Circuit.components()` called the class attribute by name, so a
   Python patch of `CircuitBuilder.components` would run on the shared
   lowered builder: the native function is captured at module init.
+
+## 12. Where the symbolic plan lives (group 10)
+
+- **Question:** "held by structure hash": a process-wide map from
+  `structure_hash` to an analysis, or a plan carried by the circuits?
+- **Option:** carried. `Circuit::Data` holds a
+  `shared_ptr<pwl::SymbolicPlan>`; `with_params` / `with_value` hand
+  the receiver's plan to the derived circuit; `build()`, `with_ties`
+  and a regularising `with_preflight` start a new one. A run's cache
+  gets it through `PwlStateSpaceCache::share_symbolic`, adopts the
+  stored analysis after the pattern check (`adopt_symbolic`), or
+  analyses and offers its own. A plan whose pattern does not match is
+  dropped for that cache (it analyses privately) — never a wrong
+  factor.
+- **Evidence:** the 100-point sweeps (BASELINE.md "after") count ONE
+  symbolic analysis in the circuit form against 100 in the factory
+  form, with bit-identical final states; `test_circuit_sweep.py`
+  gates the count (30-point grid: 30 → 1) and that another structure
+  does not share.
+- **Why not a global map:** it is static mutable state shared by
+  unrelated circuits (the thread-safety audit of this slice forbids
+  it), and it would need eviction. The carried plan dies with its
+  circuits.
+- **Thread safety:** the plan is the one mutable object an immutable
+  circuit reaches: a mutex guards its two slots, written once each.
+  `SymbolicAnalysis` is read-only after `export_symbolic` (adoption
+  copies it).
+- **Reverse:** drop `share_symbolic` calls; caches analyse privately.

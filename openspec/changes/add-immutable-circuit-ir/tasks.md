@@ -39,7 +39,7 @@ lands).
 - [ ] 4.6 Docs: YAML reference (new kinds), `AI_GUIDE.md`
 
 ## 5. Sweeps over a circuit
-- [ ] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads
+- [x] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads
 - [ ] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine)
 
 ## 6. Named parameters and generic updates
@@ -71,9 +71,9 @@ lands).
 - [ ] 9.6 Docs: domains page; `docs/known-limitations.md`
 
 ## 10. Structure sharing
-- [ ] 10.1 `SymbolicPlan` held by structure hash and reused by `with_params` (requires `update-linear-time-assembly`; skipped with a note otherwise)
-- [ ] 10.2 Measure the 100-point sweep of 0.2 again; counter gate: one symbolic analysis for the whole sweep
-- [ ] 10.3 Oracle: sweep results equal
+- [x] 10.1 `SymbolicPlan` held by structure hash and reused by `with_params` (requires `update-linear-time-assembly`; skipped with a note otherwise)
+- [x] 10.2 Measure the 100-point sweep of 0.2 again; counter gate: one symbolic analysis for the whole sweep
+- [x] 10.3 Oracle: sweep results equal
 
 ## 11. Remove the deprecated surface (one release later)
 - [ ] 11.1 Delete the four `update_*` bindings and the string-prefix code of the subsystem proxy

@@ -40,3 +40,24 @@ Baseline (factory form, rebuilt per point; best of 3):
 |---|---|---|---|---|---|
 | buck | 53.4 ms | 0.53 ms | 100 | 100 | 418 |
 | ladder1502 | 415.7 ms | 4.16 ms | 100 | 100 | 100 |
+
+After (task 10.2, this slice; interleaved with the factory form in the
+same process, best of 3). `circuit` = one `build()`, then
+`simulate(circuit.with_value(field, x))` per point; every derived circuit
+shares the receiver's `SymbolicPlan`:
+
+| sweep | form | wall | per point | builds | symbolic analyses | numeric factorisations | final states |
+|---|---|---|---|---|---|---|---|
+| buck | factory | 47.1 ms | 0.47 ms | 100 | 100 | 418 | |
+| buck | circuit | 42.6 ms | 0.43 ms | 1 | **1** | 418 | bit-identical |
+| ladder1502 | factory | 497.1 ms | 4.97 ms | 100 | 100 | 100 | |
+| ladder1502 | circuit | 168.3 ms | 1.68 ms | 1 | **1** | 100 | bit-identical |
+
+Numeric factorisations are unchanged: each point has new values, so each
+refactors; only the symbolic analysis (pattern, ordering) is shared.
+
+Threads (`pulsim.sweep(circuit, params=..., parallel=True, n_workers=8)`,
+backend `thread`, best of 3, results bit-equal to serial): buck 100 points 41.5 ms serial → 17.6 ms
+(2.4×); ladder1502 231 ms → 211 ms (1.1×: 20 steps per point, so the
+per-point Python work — derive, clone, preflight — holds the GIL).
+Short of audit row 23 (3.0–3.1× on four): task 5.2 stays open.

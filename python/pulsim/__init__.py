@@ -2610,6 +2610,8 @@ def simulate(
             # its own breaking change, not this one).
             switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        if _run_circuit is not None:  # one analysis per structure
+            cache.share_symbolic(_run_circuit)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
         # solve_at, never at this value.
@@ -2802,6 +2804,8 @@ def simulate(
     # the default") true — they previously described intent, not
     # behaviour.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    if _run_circuit is not None:  # one analysis per structure
+        cache.share_symbolic(_run_circuit)
     cache.build_lazy(dt)
 
     # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver

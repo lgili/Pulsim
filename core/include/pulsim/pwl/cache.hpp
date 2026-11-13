@@ -26,6 +26,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/pwl/symbolic_plan.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/enumerator.hpp"
@@ -1459,6 +1460,13 @@ public:
         }
     }
 
+    /// Share symbolic analyses with every cache given the same plan
+    /// (`ir::Circuit::symbolic_plan()`: all circuits of one structure).
+    /// Set before the first factorisation.
+    void share_symbolic(std::shared_ptr<SymbolicPlan> plan) noexcept {
+        plan_ = std::move(plan);
+    }
+
     /// Snapshot the rank-1 telemetry counters. Read-only from outside;
     /// monotonic across the cache's lifetime.
     [[nodiscard]] CacheMetrics metrics() const noexcept {
@@ -2143,6 +2151,7 @@ private:
     mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_static_;
     mutable std::atomic<std::uint64_t> symbolic_analyses_{0};
     mutable std::atomic<std::uint64_t> symbolic_fallbacks_{0};
+    std::shared_ptr<SymbolicPlan> plan_;  // add-immutable-circuit-ir
 
     /// Analyse `J` on `solver`, adopting the regime's shared analysis
     /// when `J` has its pattern. Returns `analyze`'s verdict.
@@ -2150,9 +2159,15 @@ private:
                                        const sparse::Matrix& J,
                                        bool dynamic) const {
         auto& sym = dynamic ? sym_dynamic_ : sym_static_;
+        bool seeded = false;
+        if (!sym && plan_) {
+            sym = plan_->get(dynamic);
+            seeded = sym != nullptr;
+        }
         if (sym && solver.adopt_symbolic(*sym, J)) {
             return true;
         }
+        if (seeded) sym.reset();  // the plan's pattern is not this one
         if (!solver.analyze(J)) {
             return false;
         }
@@ -2160,6 +2175,7 @@ private:
         auto mine = solver.export_symbolic(J);
         if (!sym) {
             sym = std::move(mine);
+            if (plan_ && sym) plan_->offer(dynamic, sym);
         } else if (mine) {
             // A sharing-capable backend refused the shared analysis:
             // the pattern differs from the regime's.

@@ -14,6 +14,7 @@
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/ir/circuit.hpp"
+#include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 
 #include <format>
@@ -207,6 +208,17 @@ void init_module(py::module_& m) {
                     "{:016x}>", c.nodes().size(), c.devices().size(),
                     c.value_hash());
             });
+
+    py::reinterpret_borrow<py::class_<pulsim::pwl::PwlStateSpaceCache>>(
+        m.attr("PwlStateSpaceCache"))
+        .def("share_symbolic", [](pulsim::pwl::PwlStateSpaceCache& cache,
+                                  const Circuit& c) {
+                cache.share_symbolic(c.symbolic_plan());
+            }, py::arg("circuit"),
+            "Share symbolic analyses with every cache of a circuit of "
+            "this structure (with_params / with_value derivations): one "
+            "analysis per sweep. Call before the first build; results "
+            "are bit-identical.");
 
     auto builder = py::reinterpret_borrow<py::class_<CircuitBuilder>>(
         m.attr("CircuitBuilder"));

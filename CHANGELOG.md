@@ -51,6 +51,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   builder); `simulate(circuit, mmc_arms=...)` asks for the builder.
   Shockley loss/thermal parameters are read from the device's fields,
   so `set_value("D1.I_S", ...)` reaches them.
+* **Added** `pulsim.sweep(circuit, params=...)` and
+  `pulsim.monte_carlo(circuit, distributions=...)`: a `pulsim.Circuit`
+  in place of the builder factory. Parameter names go through
+  `with_params`, `"device.field"` names through `with_value`; the
+  points share the circuit's symbolic analysis (one per sweep, where
+  the factory form does one per point: the 100-point ladder sweep runs
+  in 168 ms against 497 ms) and the results are bit-identical. With
+  `parallel=True` the points run on threads sharing the circuit;
+  `backend="process"` is refused (a Circuit does not pickle).
 
 ### Integration fixes (batch 6b: design optimisation, exact route)
 

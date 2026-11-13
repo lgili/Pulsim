@@ -25,6 +25,7 @@
 #include "pulsim/ir/fields.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/symbolic_plan.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -138,7 +139,7 @@ public:
         std::span<const std::pair<std::string_view, Real>> values) const {
         auto b = d_->lowered.clone();
         for (const auto& [name, v] : values) b.set_param(name, v);
-        return Circuit{std::move(b)};
+        return Circuit{std::move(b), d_->plan};
     }
 
     /// The circuit with one field set to a literal
@@ -147,7 +148,7 @@ public:
                                      Real value) const {
         auto b = d_->lowered.clone();
         b.set_value_("with_value", device_dot_field, value);
-        return Circuit{std::move(b)};
+        return Circuit{std::move(b), d_->plan};
     }
 
     /// The circuit with resistors `ties` added (node to ground), each as
@@ -172,6 +173,14 @@ public:
     struct Regularized;
     [[nodiscard]] Regularized with_preflight(const pwl::PreflightOptions& opts) const;
 
+    /// The symbolic plan every circuit of this structure shares
+    /// (`with_params` / `with_value` derivations). A run's cache adopts
+    /// it (`PwlStateSpaceCache::share_symbolic`); it is a cache of
+    /// derived data, never part of the circuit's value.
+    [[nodiscard]] std::shared_ptr<pwl::SymbolicPlan> symbolic_plan() const noexcept {
+        return d_->plan;
+    }
+
     /// Same shared data.
     [[nodiscard]] bool same_data(const Circuit& o) const noexcept { return d_ == o.d_; }
 
@@ -184,10 +193,12 @@ private:
         std::vector<Alias> aliases;
         std::uint64_t structure_hash = 0;
         std::uint64_t value_hash = 0;
+        std::shared_ptr<pwl::SymbolicPlan> plan;
     };
 
-    explicit Circuit(builder::CircuitBuilder&& b)
-        : d_{make_data_(std::move(b))} {}
+    explicit Circuit(builder::CircuitBuilder&& b,
+                     std::shared_ptr<pwl::SymbolicPlan> plan = nullptr)
+        : d_{make_data_(std::move(b), std::move(plan))} {}
 
     // FNV-1a 64 over 8-byte words.
     struct Hash {
@@ -234,8 +245,10 @@ private:
         }
     }
 
-    static std::shared_ptr<const Data> make_data_(builder::CircuitBuilder&& b) {
-        auto d = std::make_shared<Data>(Data{std::move(b), {}, {}, {}, {}, 0, 0});
+    static std::shared_ptr<const Data> make_data_(
+        builder::CircuitBuilder&& b, std::shared_ptr<pwl::SymbolicPlan> plan) {
+        auto d = std::make_shared<Data>(Data{std::move(b), {}, {}, {}, {}, 0, 0,
+            plan ? std::move(plan) : std::make_shared<pwl::SymbolicPlan>()});
         const auto& g = d->lowered.graph();
         const auto& pool = d->lowered.pool();
         // Fill the graph's lazy id cache now: after construction nothing
