@@ -22,6 +22,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** conformance cells: `mode_selection='shadow'|'lcp'` with a
   diode on `pwl`, `trbdf2` and `auto` raises
   `UnsupportedError(feature='mode_selection')` (pwl had no cell).
+* **Changed** the reference status after the event-splitting merge
+  (7a60a084), strict gate, agree / disagree / error: pwl 77 / 23 / 8,
+  pwl+restart 81 / 19 / 8 → 82 / 18 / 8 (`three_phase_diode_rectifier`
+  2.17 → 6.3e-3), pwl+split 85 / 15 / 8; trbdf2 and dsed unchanged.
+  `vcswitch_resistor`, `ll07`, `ll09`, `ll10`, `ll12` still disagree
+  under the split: edge diagnostic 1.1e-21–6.5e-3, timing 1 step (the
+  source-forced gate node is sampled on the step grid). The gate is
+  unchanged.
 
 ### Integration fixes (batch 5: in-house LU Newton, TR-BDF2 error control)
 
