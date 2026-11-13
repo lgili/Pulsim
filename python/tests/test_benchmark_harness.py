@@ -183,10 +183,12 @@ def test_vcswitch_pwm_gate_becomes_a_native_schedule():
     assert sw.next_edge_after(100e-6) == pytest.approx(200e-6, rel=1e-12)
 
 
-def test_v1_pwm_phase_is_a_radian_advance_and_dead_time_shortens_on_time():
-    # v1 kernel: high while (t + phase/2pi*T) mod T < duty*T - dead_time
+def test_v1_pwm_phase_is_a_period_fraction_and_dead_time_shortens_on_time():
+    # high while (t + phase*T) mod T < duty*T - dead_time. Re-pin (batch 6b): the v1 kernel
+    # read radians, but every file that sets a pwm phase means a fraction (0.5 on a leg's
+    # low side, 1/3 and 2/3 on three phases); as radians ll09/ll10 modelled shoot-through.
     f, duty, start = v1_reader._on_windows(
-        {"type": "pwm", "frequency": 1e3, "duty": 0.5, "phase": math.pi / 2, "dead_time": 1e-4}, 0.5)
+        {"type": "pwm", "frequency": 1e3, "duty": 0.5, "phase": 0.25, "dead_time": 1e-4}, 0.5)
     assert (f, duty) == (1e3, pytest.approx(0.4))
     assert start == pytest.approx(0.75e-3)
 
@@ -437,3 +439,27 @@ def test_benchmark_runner_imports_without_the_retired_backend():
     src = (BENCH / "tools" / "benchmark_runner.py").read_text()
     assert "import pulsim_python_backend" not in src and "from pulsim_python_backend" not in src
     import benchmark_runner  # noqa: F401
+
+
+def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
+    # checkpoint review M1 / M7 (integration batch 6b)
+    sus = {"status": "runs", "reference": "suspect", "reference_reason": "broken"}
+    for out in ("agree", "disagree", "error"):
+        r = dr.mark_suspect({"outcome": out}, sus)
+        assert r["outcome"] == "unverified" and r["was"] == out
+        assert dr.frozen_check(r, sus, "trbdf2") == ""
+    assert dr.mark_suspect({"outcome": "refused"}, sus)["outcome"] == "refused"
+    for rel in ("circuits/switching/buck_boost/cuk_converter.yaml",
+                "circuits/switching/buck_boost/sepic.yaml"):
+        assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    e = {"known": {"pwl+split": "disagree"}, "known_err": {"pwl+split": 0.01}}
+    assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.019}, e, "pwl+split") == ""
+    assert "grew" in dr.frozen_check({"outcome": "disagree", "err_rms": 0.021}, e, "pwl+split")
+    assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.01}, e, "pwl") == "new outcome"
+    r = {"outcome": "disagree", "err_rms": 0.004}
+    assert dr.frozen_check(r, e, "pwl+split") == "" and "re-freeze" in r["note"]
+    # every frozen disagreement carries its error
+    for rel, ent in TRIAGE.items():
+        for cfg, out in (ent.get("known") or {}).items():
+            if out == "disagree":
+                assert (ent.get("known_err") or {}).get(cfg), (rel, cfg)

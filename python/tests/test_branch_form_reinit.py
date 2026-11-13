@@ -166,3 +166,9 @@ def test_trbdf2_refuses_the_cutset_by_name():
                    switch_fn=lambda t: p.SwitchStateMask(1))
     assert (ei.value.engine, ei.value.feature, ei.value.device) == (
         "trbdf2", "dependent_states", "S")
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed", "exact", "auto"])
+def test_on_impulse_value_checked_on_every_engine(engine):
+    with pytest.raises(ValueError, match="on_impulse"):
+        p.simulate(_cutset_builder(), t_end=1e-4, engine=engine, on_impulse="bogus")

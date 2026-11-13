@@ -40,7 +40,8 @@ class Case:
 
     def run(self, engine: str, k: float = 1.0):
         b, sw = self.build(k)
-        kw = dict(self.engines.get(engine, ALL[engine]))
+        key = "dsed" if engine == "exact" else engine   # 'exact' = 'dsed'
+        kw = dict(self.engines.get(key, ALL[key]))
         if engine == "pwl":
             kw["dt"] = self.dt
         if sw is not None:

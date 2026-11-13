@@ -74,7 +74,7 @@ def test_thd_with_3rd_harmonic() -> None:
     times = [k / fs for k in range(n)]
     samples = [_sine(t, 1.0, f0) + _sine(t, 0.1, 3 * f0) for t in times]
     thd = compute_thd(samples, sample_rate_hz=fs, fundamental_hz=f0)
-    _almost(thd, 10.0, 0.5, f"THD with 10% 3rd harmonic")
+    _almost(thd, 10.0, 0.5, "THD with 10% 3rd harmonic")
 
 
 # ----- power factor -----

@@ -342,6 +342,7 @@ from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
 from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
 from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
+from ._exact_route import exact_route
 from .electrothermal import (
     TempCoResistance,
     make_bidirectional_observer,
@@ -523,6 +524,8 @@ __all__ = [
     "SwitchSchedule",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
+    # add-exact-propagator-strategy D11 (report only).
+    "exact_route",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
@@ -2007,8 +2010,12 @@ def simulate(
         ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
         defaults to 10 µs); the grid is variable either way.
     engine
-        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
-        see above.
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
+        see above. ``'exact'`` is the canonical name of the event-driven
+        exact engine; ``'dsed'`` is its alias (one engine: the result's
+        ``engine_used`` and refusals name ``'dsed'``).
+        :func:`pulsim.exact_route` reports which segments of a run are
+        exact-eligible.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
@@ -2207,6 +2214,16 @@ def simulate(
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
     # engine='pwl' it just warns on DSED-only kwarg leakage.
+    # add-exact-propagator-strategy D11: 'exact' is the canonical name of the
+    # event-driven exact engine and 'dsed' its alias. One run: the result's
+    # engine_used and every refusal keep naming 'dsed' (the capability-table
+    # column) until the default flip (DECISIONS #3).
+    if engine == "exact":
+        engine = "dsed"
+    # Every engine: those that refuse dependent modes never record.
+    if on_impulse not in ("record", "warn", "error"):
+        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
+                         "'record', 'warn' or 'error'")
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2916,9 +2933,6 @@ def simulate(
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
-    if on_impulse not in ("record", "warn", "error"):
-        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
-                         "'record', 'warn' or 'error'")
     opts.on_impulse_error = on_impulse == "error"
     if resolution_diagnostics is not None:
         opts.resolution_diagnostics = bool(resolution_diagnostics)

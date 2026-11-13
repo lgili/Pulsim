@@ -18,25 +18,25 @@ pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
    trbdf2 rtol 1e-10: v(out) end=23.806555568 mean=28.080889833 law: rev 0 A  fwd 0 V 
    settle : events=975 law: rev 1.04 A D1 fwd 0 V  | v(out) end=23.764172135 mean=28.044674405 d_end=-4.24e-02 d_mean=-3.62e-02 [0.00 s]
    default: events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | guard repairs=3/979 [0.00 s]
-   lcp    : events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | lcp piv_max=2 pins=0 ties=0 [0.01 s]
+   lcp    : events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == boost 500 ohm, V_th = 1e-3
    trbdf2 rtol 1e-10: v(out) end=44.722105420 mean=43.759028794 law: rev 0 A  fwd 0 V 
    settle : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 [0.00 s]
    default: events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | guard repairs=0/1158 [0.00 s]
-   lcp    : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | lcp piv_max=2 pins=0 ties=0 [0.02 s]
+   lcp    : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == half-wave RL rectifier = benchmark diode_half_wave_rl_load (builder), V_th = 0
    trbdf2 rtol 1e-10: v(out) end=0.000003142 mean=3.180662149 law: rev 0 A  fwd 0 V 
-   settle : events=5 law: rev 0 A  fwd 10 V D1 | v(out) end=0.000003142 mean=2.120456524 d_end=-2.31e-11 d_mean=-1.06e+00 [0.21 s]
-   default: events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | guard repairs=2/6 [0.13 s]
-   lcp    : events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | lcp piv_max=2 pins=0 ties=0 [0.23 s]
+   settle : events=5 law: rev 0 A  fwd 10 V D1 | v(out) end=0.000003142 mean=2.120456524 d_end=-2.31e-11 d_mean=-1.06e+00 [0.06 s]
+   default: events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | guard repairs=2/6 [0.06 s]
+   lcp    : events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | lcp piv_max=2 pins=0 ties=0 [0.06 s]
 == double-crossing LC tank, V_th = 0
    trbdf2 rtol 1e-10: v(t) end=-5.437891218 mean=1.838735571 law: rev 0.000192 A D fwd 0 V 
-   settle : events=2 law: rev 0.0183 A D fwd 0 V  | v(t) end=-5.273282927 mean=1.693153280 d_end=+1.65e-01 d_mean=-1.46e-01 [0.00 s]
-            switching: ['ON @1.2532e-06', 'OFF@7.6554e-06']
-   default: events=2 law: rev 0.0183 A D fwd 0 V  | v(t) end=-5.177992616 mean=1.699796608 d_end=+2.60e-01 d_mean=-1.39e-01 | guard repairs=1/3 [0.00 s]
-            switching: ['ON @1.2532e-06']
-   lcp    : events=2 law: rev 0.0183 A D fwd 0 V  | v(t) end=-5.177992616 mean=1.699796608 d_end=+2.60e-01 d_mean=-1.39e-01 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
-            switching: ['ON @1.2532e-06']
+   settle : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 [0.00 s]
+            switching: ['ON @1.2532e-06', 'OFF@1.8877e-06', 'ON @7.5371e-06', 'OFF@8.1703e-06']
+   default: events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 | guard repairs=0/5 [0.00 s]
+            switching: ['ON @1.2532e-06', 'OFF@1.8877e-06', 'ON @7.5371e-06', 'OFF@8.1703e-06']
+   lcp    : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
+            switching: ['ON @1.2532e-06', 'OFF@1.8877e-06', 'ON @7.5371e-06', 'OFF@8.1703e-06']
    trbdf2  switching: ['ON @1.2532e-06', 'OFF@1.9433e-06', 'ON @7.5371e-06', 'OFF@8.2271e-06']
 == double-crossing LC tank, V_th = 1e-3
    trbdf2 rtol 1e-10: v(t) end=-5.437891496 mean=1.838735698 law: rev 0.000193 A D fwd 0 V 

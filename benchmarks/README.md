@@ -95,6 +95,23 @@ Rules the harness keeps:
   excluded it reports `undersampled`, and when one trace records more
   than twice the other's switch-state changes it reports `chatter`;
   neither is a number and no other measure is substituted.
+- **A trbdf2 cell graded against the trbdf2 reference is a
+  self-consistency check, not an agreement.** The differential reference
+  is `trbdf2` at `rtol = 1e-8`, so the `trbdf2` column compares the
+  engine with itself at a tighter tolerance; it cannot see a defect both
+  share. Where a circuit has an analytic or independent reference
+  (the analytic set, ngspice, a closed form), prefer it.
+- **A broken reference grades nothing.** A circuit whose reference is
+  itself wrong carries `reference: suspect` and a `reference_reason` in
+  the triage manifest: every cell on it is `unverified` (none agrees,
+  none disagrees) and it leaves the agree count. `cuk_converter`
+  (ill-posed as written) and `sepic` (the reference grinds to
+  `max_steps`) are marked so.
+- **Every configuration has its own freeze, with its error.** `known:`
+  is keyed by configuration (`pwl`, `pwl+restart`, `pwl+split`,
+  `trbdf2`, `dsed`), and a frozen `disagree` stores its `err_rms` under
+  `known_err:`. The cell fails when that error grows past 2x the frozen
+  value; when it shrinks past 2x the status page prompts a re-freeze.
 - **The first stored sample is excluded** where it is the initial state
   rather than the `t = 0⁺` solution (on `pwl` / `trbdf2` an RL step reads
   0 V across the inductor at `t = 0`; the answer is 10 V).

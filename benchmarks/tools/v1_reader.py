@@ -9,8 +9,13 @@ raises :class:`Unmapped` naming it -- the triage manifest records it as
 ``skipped`` with that text.
 
 Semantics copied from the v1 kernel (git 990995e4, core/src/v1/):
-- pwm source: ``phase`` in RADIANS advancing the carrier
-  (``t + phase/2π·T``), on-time ``duty·T − dead_time``;
+- pwm source: ``phase`` as a FRACTION OF THE PERIOD advancing the carrier
+  (``t + phase·T``), on-time ``duty·T − dead_time``. The v1 kernel read
+  radians (``t + phase/2π·T``), but every circuit here that sets a pwm
+  phase means a fraction: 0.5 on the low side of a leg (ll09, ll10, ll11),
+  0.25 / 0.5 / 0.75 on four interleaved cells, 1/3 and 2/3 on three phases.
+  Read as radians, the ``ll`` legs conduct both switches about 20 us of
+  every 50 us (shoot-through). A sine ``phase`` stays in radians;
 - vcswitch: ON while v(ctrl) > v_threshold (the tanh ``hysteresis`` is a
   Newton smoothing, ignored here); defaults g_on 1e3, g_off 1e-9;
 - diode: binary, g_on 1e3 / g_off 1e-9; with ``is`` / ``n`` it is Shockley;
@@ -20,7 +25,6 @@ Semantics copied from the v1 kernel (git 990995e4, core/src/v1/):
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -178,8 +182,8 @@ def _on_windows(w: dict, thr: float):
         f = value(w.get("frequency", 10e3))
         T = 1.0 / f
         t_on = min(max(value(w.get("duty", 0.5)) * T - value(w.get("dead_time", 0.0)), 0.0), T)
-        # v1 carrier: t_mod = (t + phase/2π·T) mod T, high while t_mod < t_on
-        start = (-value(w.get("phase", 0.0)) / (2 * math.pi) * T) % T
+        # carrier: t_mod = (t + phase·T) mod T, high while t_mod < t_on
+        start = (-value(w.get("phase", 0.0)) * T) % T
         if (hi > thr) == (lo > thr):
             return hi > thr
         if hi > thr:

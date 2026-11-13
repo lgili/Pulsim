@@ -416,6 +416,8 @@ public:
                     // never see it again.
                     if (evt.has_value()) {
                         t = evt->t_event;
+                        last_fired_index_ = evt->pred_index;
+                        last_fired_t_ = t;
                         x = x_evt_;
                         x_pre_event = x;
                         step_fired = true;
@@ -563,6 +565,7 @@ public:
             PredicateType p_type = PredicateType::Custom;
             Vector x_pred;
             int p_aux = -1;
+            int p_index = -1;
             if (need_pred_scan) {
                 const Vector& k7 = *rk_state.k1;
                 auto evt = locate_event_in_step_(t, x, t + h_use, x_new,
@@ -573,6 +576,7 @@ public:
                     p_type = evt->type;
                     x_pred = std::move(evt->x_at_event);
                     p_aux = evt->aux_index;
+                    p_index = evt->pred_index;
                 }
             }
 
@@ -586,6 +590,8 @@ public:
                 // part of the Phase-3 event-queue overhaul.
                 // Predicate fired strictly inside the step — backtrack.
                 t = *t_pred;
+                last_fired_index_ = p_index;
+                last_fired_t_ = t;
                 x = std::move(x_pred);
                 x_pre_event = x;
                 step_fired = true;
@@ -697,7 +703,42 @@ private:
         PredicateType type;
         Vector x_at_event;
         int aux_index = -1;   // fired diode's switch index, or -1
+        int pred_index = -1;  // index in predictor_.predicates()
     };
+
+    /// The probe step for a predicate that starts a step exactly on
+    /// zero: the judge's shortest propagation (100·h_e), or 1e-6 of the
+    /// step when no h_e is set (guard and LCP off).
+    [[nodiscard]] Real zero_probe_dt_(Real h) const noexcept {
+        return shadow_.h_e > Real{0} ? Real{100} * shadow_.h_e
+                                     : Real{1e-6} * h;
+    }
+
+    /// A predicate that starts a step at exactly g = 0 is located only
+    /// when it is a diode predicate (whose admissible side is known: a
+    /// DiodeOn signal v − V_on is negative while OFF, a DiodeOff signal
+    /// v − V_f positive while ON), is not the one that fired at this
+    /// very instant, and moves INTO its admissible side just after t0
+    /// (`g_plus = g(t0 + d)`, returned in `g_out`). A predicate that
+    /// stays at zero (a diode at rest) or leaves on its event side (an
+    /// inconsistent mode — the mode decision's case, never a
+    /// zero-length event) is skipped, so nothing re-fires at t0: no
+    /// Zeno loop by construction.
+    template <class G>
+    [[nodiscard]] bool zero_start_admissible_(const EventPredicate& p, int ip,
+                                              Real t0, Real d, G&& g_at,
+                                              Real& g_out) const {
+        const int s = p.type == PredicateType::DiodeOn    ? -1
+                    : p.type == PredicateType::DiodeOff   ? 1
+                                                          : 0;
+        if (s == 0 || (ip == last_fired_index_ && t0 == last_fired_t_)) {
+            return false;
+        }
+        const Real gp = g_at(t0 + d);
+        if (!(gp * static_cast<Real>(s) > Real{0})) return false;
+        g_out = gp;
+        return true;
+    }
 
     [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end) const {
         if constexpr (HasNextEdge<SwitchFn>) {
@@ -765,17 +806,34 @@ private:
             Real{4} * std::numeric_limits<Real>::epsilon() * std::abs(t1),
             Real{1e-12} * h);
 
-        for (const auto& p : predictor_.predicates()) {
+        const auto& preds = predictor_.predicates();
+        for (std::size_t ip = 0; ip < preds.size(); ++ip) {
+            const auto& p = preds[ip];
             if (p.required_bit >= 0 &&
                 diode_bit_(p.aux_index) != (p.required_bit != 0)) {
                 continue;
             }
             Real ga = p.value(t0, x0);
             ++result.n_predicate_evals;
-            if (ga == Real{0}) continue;      // just fired
+            Real ta0 = t0;
+            if (ga == Real{0}) {
+                // Starts exactly on zero: read the side it leaves to just
+                // after t0, on the exact trajectory (the judge's 100·h_e).
+                const Real d = std::min(zero_probe_dt_(h),
+                                        Real{0.5} * h / static_cast<Real>(n_scan));
+                if (!zero_start_admissible_(p, static_cast<int>(ip), t0, d,
+                        [&](Real tau) {
+                            advance_(t0, x0, tau - t0, x_tmp_);
+                            ++result.n_predicate_evals;
+                            return p.value(tau, x_tmp_);
+                        }, ga)) {
+                    continue;
+                }
+                ta0 = t0 + d;
+            }
             std::optional<Real> root;
             for (Size k = 0; k < n_scan && !root; ++k) {
-                const Real ta = t_at(k);
+                const Real ta = k == 0 ? ta0 : t_at(k);
                 const Real tb = t_at(k + 1);
                 const Real gb = p.value(tb, x_at(k + 1));
                 ++result.n_predicate_evals;
@@ -802,6 +860,7 @@ private:
                     .type = p.type,
                     .x_at_event = {},
                     .aux_index = p.aux_index,
+                    .pred_index = static_cast<int>(ip),
                 };
                 best_priority = p.priority;
             }
@@ -1047,7 +1106,9 @@ private:
         std::optional<PredicateEvent> best;
         int best_priority = std::numeric_limits<int>::max();
 
-        for (const auto& p : predictor_.predicates()) {
+        const auto& preds = predictor_.predicates();
+        for (std::size_t ip = 0; ip < preds.size(); ++ip) {
+            const auto& p = preds[ip];
             // v2.0 Phase 3 — state-dependent arming. A diode's
             // DiodeOn predicate is only meaningful while its bit is
             // OFF (and vice versa); evaluating the other one would
@@ -1060,28 +1121,39 @@ private:
                     (p.required_bit != 0)) {
                 continue;
             }
-            const Real g0 = p.value(t0, x0);
+            Real g0 = p.value(t0, x0);
             const Real g1 = p.value(t1, x1);
+            const auto hermite_g = [&p, &x0, &x1, &k1, &k7, h, t0](Real tau) -> Real {
+                const Real theta = (tau - t0) / h;
+                return p.value(tau, hermite_interp(x0, x1, k1, k7, h, theta));
+            };
 
-            // Skip predicates already at zero (just fired) or no sign change.
-            if (g0 == Real{0}) continue;
+            // A predicate at exactly zero is located only when it leaves
+            // into its admissible side (zero_start_admissible_).
+            Real ta = t0;
+            if (g0 == Real{0}) {
+                const Real d = std::min(zero_probe_dt_(h), Real{0.5} * h);
+                if (!zero_start_admissible_(p, static_cast<int>(ip), t0, d,
+                                            hermite_g, g0)) {
+                    continue;
+                }
+                ta = t0 + d;
+            }
             if (g0 * g1 >= Real{0}) continue;
 
             // Locate root via Illinois on the Hermite interpolant.
-            auto g_at = [&p, &x0, &x1, &k1, &k7, h, t0, t1, g0, g1](Real tau) -> Real {
-                if (tau <= t0) return g0;
+            auto g_at = [&hermite_g, ta, t1, g0, g1](Real tau) -> Real {
+                if (tau <= ta) return g0;
                 if (tau >= t1) return g1;
-                const Real theta = (tau - t0) / h;
-                const Vector x_tau = hermite_interp(x0, x1, k1, k7, h, theta);
-                return p.value(tau, x_tau);
+                return hermite_g(tau);
             };
 
             Real t_root;
             try {
-                t_root = illinois(g_at, t0, t1, g0, g1);
+                t_root = illinois(g_at, ta, t1, g0, g1);
             } catch (const std::runtime_error&) {
                 predictor_.note_illinois_failure();
-                t_root = bisect_fallback(g_at, t0, t1);
+                t_root = bisect_fallback(g_at, ta, t1);
             }
 
             const auto make_event = [&]() -> PredicateEvent {
@@ -1093,6 +1165,7 @@ private:
                     .type = p.type,
                     .x_at_event = std::move(x_root),
                     .aux_index = p.aux_index,
+                    .pred_index = static_cast<int>(ip),
                 };
             };
 
@@ -1572,6 +1645,10 @@ private:
     std::vector<std::pair<Index, Index>> shadow_nodes_;
     Vector shadow_x_;
     int settle_rounds_ = 0;
+    // The predicate that fired the last predicate event, and when: only
+    // it is skipped as "just fired" at a step starting at that instant.
+    int last_fired_index_ = -1;
+    Real last_fired_t_ = std::numeric_limits<Real>::quiet_NaN();
     // Exact-path workspaces: a step reuses them (no allocation).
     mutable Vector x_new_, x_evt_, x_tmp_;
     std::vector<Vector> scan_x_;
