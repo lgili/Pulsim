@@ -927,8 +927,20 @@ class Evaluator:
                     counters.get("grads_refused", ""),
                     f"{k}: non_unique extremum")))
                 continue
-            grads[k] = {var: float(kv.grad[name])
-                        for var, name in self.gradients.items()}
+            g = {var: float(kv.grad[name])
+                 for var, name in self.gradients.items()}
+            if not all(math.isfinite(v) for v in g.values()):
+                counters["grads_refused"] = ", ".join(filter(None, (
+                    counters.get("grads_refused", ""),
+                    f"{k}: non-finite gradient")))
+                continue
+            grads[k] = g
+        # an event that nearly grazed: the gradient is exact for this
+        # event pattern but a nearby design may switch pattern; simulate
+        # warns once per call site, so the record carries it
+        nm = len(getattr(sr, "flags", None) or ())
+        if nm:
+            counters["grad_near_misses"] = nm
 
     def _check_map(self, design, var, name, base, T):
         """``var`` must drive exactly the field ``name``: rebuild with it

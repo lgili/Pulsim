@@ -348,6 +348,14 @@ def _harmonic(a, b, delta):
 
 def _param_derivative(builder, prm, masks, h_max, ic, base, n1):
     v0 = prm.value
+    if not (math.isfinite(v0) and v0 != 0.0):
+        # the steps are relative (v0/8, v0/16): at 0 they are 0 and the
+        # derivative 0/0 (a NaN that passed the check below)
+        raise _unsup(
+            "sensitivity_parameter",
+            f"sensitivities: {prm.name!r} = {v0!r}; its derivative is taken "
+            "from relative steps, which need a finite non-zero value",
+            device=prm.comp, kind=prm.name.rsplit(".", 1)[1])
     snaps = {}
     try:
         for f in (1 / 8, -1 / 8, 1 / 16, -1 / 16):
@@ -371,7 +379,7 @@ def _param_derivative(builder, prm, masks, h_max, ic, base, n1):
         dev = np.abs(d1 - d2).reshape(-1, w).max(axis=1)
         lim = _MOEBIUS_RTOL * D1.max(axis=1) + floor
         del D2
-        if np.any(dev > lim):
+        if not np.all(dev <= lim):      # a NaN is refused too
             j = int(np.argmax(dev - lim))
             dev, scale = float(dev[j]), float(D1.max(axis=1)[j])
             raise _unsup(
