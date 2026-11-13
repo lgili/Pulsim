@@ -1,13 +1,12 @@
 # Pulsim 2.x usage guide (for AI coding assistants)
 
-This file ships inside the `pulsim` package and describes the version it
-ships with. `python -m pulsim.guide` prints it with the installed version
-on the first line; `pulsim.ai_guide()` returns the same text. When this
-guide and your memory of Pulsim disagree, the guide wins: models are
-trained on Pulsim 1.x and on other simulators, and Pulsim 2 changed
-behaviour without changing many names. Every `python` block below is
-executed by the test suite, and every printed number is the one it
-prints.
+This file ships inside the `pulsim` package and describes its version.
+`python -m pulsim.guide` prints it with the installed version on the
+first line; `pulsim.ai_guide()` returns the same text. When this guide
+and your memory of Pulsim disagree, the guide wins: models are trained
+on Pulsim 1.x and other simulators, and Pulsim 2 changed behaviour but
+kept most names. Every `python` block below is executed by the test
+suite, and every printed number is the one it prints.
 
 Short version:
 
@@ -386,14 +385,14 @@ ones, on top of `INV__LSa`'s own hard edges). Model the dead time.
 ## 4. Exact signatures of the most used calls
 
 `b` is a `CircuitBuilder`, `res` a `SimulationResult`. These lines are
-checked against the installed package by the test suite. `...` marks
+checked against the package by the test suite. `...` marks
 further keyword-only options; see `help()`.
 
 ```text
 p.CircuitBuilder()
 b.add_resistor(name, n_pos, n_neg, R_ohms)
-b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None)
-b.add_inductor(name, n_pos, n_neg, L_henries, i0=None)
+b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None, ...)
+b.add_inductor(name, n_pos, n_neg, L_henries, i0=None, ...)
 b.add_voltage_source(name, n_pos, n_neg, V)
 b.add_current_source(name, n_pos, n_neg, I)
 b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
@@ -421,6 +420,7 @@ p.simulate(builder, t_end=None, dt=None, *, engine='auto', rtol=None, atol=None,
 res.v(name, t=None)
 res.i(name, t=None, *, port=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
+p.periodic_steady_state(builder, *, period, switch_fn=None, start_from=None, ...)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
 p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0)
@@ -447,8 +447,10 @@ sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
 A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
-Other `simulate` keywords you may need: `switch_fn`, `t_start`,
-`store_every`, `auto_regularize`, `progress`.
+`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=)`
+set initial conditions and series parasitics.
+Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
+`auto_regularize`, `progress`.
 
 ## 5. Traps
 
@@ -620,9 +622,9 @@ abort (trap 5), a part file without provenance, a mismatched snapshot.
 
 ## 7. Coming from Pulsim 1.x or pre-1.0
 
-Retired names still raise `AttributeError` with a hint (for example
+Retired names still raise `AttributeError` with a hint (e.g.
 `Circuit`, `Simulator`, `YamlParser`, `Preset`, `PulseParams` from
-pre-1.0; the `v2` sub-namespace of 0.10). The 2.0 changes that keep
+pre-1.0; the `v2` sub-namespace of 0.10). Changes that keep
 names but change results:
 
 | 1.x habit | 2.x |
@@ -636,6 +638,7 @@ names but change results:
 | `add_three_phase_vsi` built six bare switches | it adds six freewheel diodes (`with_freewheel_diodes=True`) |
 | `p.add_hysteretic_inductor` + `p.make_hysteretic_inductor_observer` | the inductor is solved inside Newton; drop the observer, whose factory now raises |
 | `p.add_pmsm` (observer, one average L) | still there; `b.add_pmsm_mna` stamps the machine with full saliency |
+| `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` solves it in the matrix |
 | parts in `pulsim.lib` resolved by part number | they are synthetic; pass `allow_synthetic=True` to use them |
 
 ## 8. Paste this into your project's assistant config
@@ -651,9 +654,11 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
+Paths are from the repository root (the site mirrors `docs/`).
+
 - `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `06-igbt-boost.md`.
+  `07-dc-machine.md` (executed, end to end).
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`,
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.
-- `CHANGELOG.md`: what changed in each release and why.
+- `CHANGELOG.md`: what changed and why.

@@ -226,12 +226,16 @@ class CircuitBuilder:
     """
     def __init__(self) -> None:
         ...
-    def add_capacitor(self, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None) -> CircuitBuilder:
+    def add_capacitor(self, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None, *, esr: float = 0.0, esl: float = 0.0) -> 'CircuitBuilder':
         """
+        add_capacitor(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None) -> pulsim._pulsim.CircuitBuilder
+
         Add a linear capacitor. C in farads.
         Optional `c0` records an initial voltage (V) on the
         capacitor — consumed by `simulate(initial_state=None)`
         to seed the cap's positive-terminal node.
+
+        Optional keyword parasitics (openspec add-realistic-passives): esr [Ω] and esl [H] in series, expanded into {name}.esr and {name}.esl with internal nodes; zero adds nothing. c0 is the voltage of the ideal capacitor {name}.
         """
     def add_cccs(self, name: str, control: str, n_pos: str, n_neg: str, gain: float) -> CircuitBuilder:
         """
@@ -244,6 +248,27 @@ class CircuitBuilder:
     def add_current_source(self, name: str, n_pos: str, n_neg: str, I: float) -> CircuitBuilder:
         """
         Add a DC current source. I in amperes. EE convention: I flows OUT of `n_pos` (the + terminal) into the external circuit, back to `n_neg`. Does NOT add a branch-current unknown — the current is fixed at I.
+        """
+    def add_dc_machine(self, name: str, a_pos: str, a_neg: str, omega_node: str, *, R_a: float, L_a: float, K: float | None = None, J: float, B: float = 0.0, T_load: float = 0.0, theta_node: str | None = None, i0: float | None = None, omega0: float = 0.0, Ke: float | None = None, Kt: float | None = None) -> 'CircuitBuilder':
+        """
+        Add a permanent-magnet DC machine solved inside the matrix.
+
+        Parameters [SI]: ``R_a`` [Ω, ≥ 0], ``L_a`` [H, > 0], ``K``
+        [V·s/rad = N·m/A, > 0], ``J`` [kg·m², > 0], ``B`` [N·m·s/rad,
+        ≥ 0], ``T_load`` [N·m, constant, opposing positive speed]. ``i0``
+        is the initial armature current [A] and ``omega0`` the initial
+        speed [rad/s]. ``omega_node`` is created if new; read the speed
+        with ``result.v(omega_node)`` and the armature current with
+        ``result.i(f"{name}.la")``. A speed-dependent load is any element
+        you connect to ``omega_node`` (torque = current out of it).
+
+        ``Ke`` / ``Kt`` are the legacy ``add_dc_motor`` spellings: in SI
+        units they are the same constant, so a call with ``Kt != Ke`` is
+        refused (the coupling would not conserve power).
+
+        ``theta_node`` needs a voltage-controlled current source, which the
+        kernel does not have yet (``add-controlled-source-set``); it is
+        refused by name.
         """
     def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0, V_f: float = 0.0) -> CircuitBuilder:
         """
@@ -273,12 +298,16 @@ class CircuitBuilder:
         """
         Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. Use `run_transient(..., enable_nonlinear_refresh=True)` to stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
         """
-    def add_inductor(self, name: str, n_pos: str, n_neg: str, L_henries: float, i0: float | None = None) -> CircuitBuilder:
+    def add_inductor(self, name: str, n_pos: str, n_neg: str, L_henries: float, i0: float | None = None, *, esr: float = 0.0, c_par: float = 0.0, rac = None) -> 'CircuitBuilder':
         """
+        add_inductor(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, L_henries: float, i0: float | None = None) -> pulsim._pulsim.CircuitBuilder
+
         Add a linear inductor. L in henries.
         Optional `i0` records an initial current (A) flowing
         from the `n_pos` terminal toward `n_neg` — consumed by
         `simulate(initial_state=None)`.
+
+        Optional keyword parasitics (openspec add-realistic-passives): esr [Ω] in series ({name}.esr), c_par [F] across the terminals ({name}.cpar), rac=fit_rac_ladder(...) for a frequency-dependent winding resistance; zero adds nothing. i0 is the current of the ideal inductor {name}.
         """
     def add_inductor_coupling(self, name_a: str, name_b: str, k: float) -> CircuitBuilder:
         """
@@ -379,6 +408,31 @@ class CircuitBuilder:
     def add_transformer(self, name: str, p_from: str, p_to: str, s_from: str, s_to: str, L_p: float, L_s: float, k: float = 1.0) -> CircuitBuilder:
         """
         Add a two-winding linear transformer. Creates two coupled inductors with mutual inductance M = k·√(L_p·L_s). k=1 (default) for ideal coupling; k∈[0.9, 0.99] for realistic leakage.
+        """
+    def add_transmission_line(self, name: str, k_pos: str, k_neg: str, m_pos: str, m_neg: str, *, Z0: float | None = None, delay: float | None = None, R: float = 0.0, model: str = 'pi', sections: int | None = None, L_per_m: float | None = None, C_per_m: float | None = None, length: float | None = None) -> 'CircuitBuilder':
+        """
+        Two-conductor lossless (or series-lossy) line, differential mode.
+
+        Give ``Z0`` [Ω] and one-way ``delay`` [s], or ``L_per_m`` [H/m],
+        ``C_per_m`` [F/m] and ``length`` [m]. ``R`` [Ω] is the total series
+        resistance, distributed over the sections.
+
+        ``model="pi"``: ``sections`` cells of a series ``Z0·delay/N``
+        inductance with ``delay/(Z0·N)`` shunt capacitance split at its
+        ends. Usable in every analysis; cut-off ``N/(π·delay)``. LIMITATION
+        (measured, openspec add-realistic-passives): an ideal step
+        overshoots the exact answer by 27 % at the far end of an open,
+        source-matched line whatever ``N`` is (1.271 V instead of 1.000 V
+        with 50 sections); a finite edge needs
+        :func:`recommend_line_sections` sections to stay near 5 %.
+
+        ``model="bergeron"`` (exact delay) needs a kernel device that does
+        not exist yet and is refused by name.
+
+        Sub-elements: ``{name}.l{k}``, ``{name}.c{k}``, ``{name}.r{k}``;
+        internal nodes ``{name}.n{k}``; ``{name}.ret`` (0 V source) joins
+        ``m_neg`` to ``k_neg`` when they differ (the return conductor's
+        impedance is lumped into the forward one).
         """
     def add_vccs(self, name: str, in_pos: str, in_neg: str, n_pos: str, n_neg: str, gm: float) -> CircuitBuilder:
         """
@@ -2404,6 +2458,10 @@ class _NativeCircuitBuilderAdapter:
     def current_mask(self) -> SwitchStateMask:
         """
         Return the currently-active mask.
+        """
+    def node_pair_voltage(self, from_node: int, to_node: int, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> float:
+        """
+        v(from_node) − v(to_node) recovered from the reduced state `x` under the active mask (−1 is ground). The quantity a PWL diode predicate evaluates; affine in `x`, so its gradient is the predicate's recovery row (used by pulsim.periodic_steady_state for saltation).
         """
     def rhs(self, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """

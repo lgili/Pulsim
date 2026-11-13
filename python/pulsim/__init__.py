@@ -419,6 +419,11 @@ from .steady_state import (
     steady_state,  # noqa: F401
     SteadyStateResult,  # noqa: F401
 )
+from .periodic_steady_state import (
+    periodic_steady_state,  # noqa: F401
+    PeriodicSteadyStateResult,  # noqa: F401
+    SampledModel,  # noqa: F401
+)
 
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
 # scoped names (audit A.7). Pure builder-level; the kernel never
@@ -751,6 +756,16 @@ if _HAS_SCOPE:
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
+
+# add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
+# composite of existing kernel elements, solved inside the matrix).
+from . import machines as _machines  # noqa: E402
+_machines.install(CircuitBuilder)
+
+# add-realistic-passives: esr / esl / c_par / rac keywords on
+# add_capacitor / add_inductor and add_transmission_line (composites).
+from . import passives as _passives  # noqa: E402
+_passives.install(CircuitBuilder)
 
 
 

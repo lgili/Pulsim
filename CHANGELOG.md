@@ -100,6 +100,106 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     after (0.30 ×).
   * `pulsim.scope` (6.25 s cumulative in the first `-X importtime` run,
     6.13 s of it pyqtgraph) no longer appears in the import.
+### Realistic passives (`add-realistic-passives`, composites)
+
+* **Added** keyword parasitics on the builder: `b.add_capacitor(...,
+  esr=0.0, esl=0.0)` and `b.add_inductor(..., esr=0.0, c_par=0.0,
+  rac=None)` [Ω, H, F]. Non-zero values expand into existing elements
+  (`{name}.esr`, `{name}.esl`, `{name}.cpar`, internal nodes); `{name}`
+  stays the ideal element, so `c0`, `i0` and `res.i(name)` keep their
+  meaning. All zero is the native call (same states bit for bit). 100 µF
+  + 10 mΩ + 10 nH: `|Z|` equals the series network to 1e-9 in the kernel
+  AC sweep, minimum 10 mΩ at 159.15 kHz; a sine-driven transient matches
+  the phasor to 7.1e-5 at 20, 159 and 800 kHz. A current reversal of 2 A
+  steps the terminal voltage by `esr·Δi` (1e-6). 100 µH with
+  `c_par = 10 pF` peaks at 5.033 MHz. The ESR loss is the resistor row
+  `{name}.esr` of `device_loss_summary` (1 A rms through 50 mΩ:
+  50.000 mW).
+* **Added** `pulsim.passives.fit_rac_ladder(f, R_ac, *, L, R_dc=None,
+  n_cells=4, tol=0.05)` → `RacLadder` (`R_dc`, `L_hf`, cells `R_k ∥ L_k`,
+  band, residual): non-negative least squares on log-spaced corners,
+  passive by construction; refused by name when the cells need more
+  inductance than `L` or the residual exceeds `tol`. On the round-wire
+  skin-effect curve over two decades around the corner: 1 cell 39 %
+  (refused), 2 cells 1.75 %, 4 cells 0.60 %. A fit reproduces its own
+  data; it is not a validation. `b.add_inductor(..., rac=ladder)` builds
+  it (`R_dc` 10 mΩ + one 90 mΩ ∥ 143.24 nH cell: 10.009, 55.00,
+  99.11 mΩ at 1 kHz, 100 kHz, 1 MHz; two-tone loss 32.50 mW).
+* **Added** `b.add_transmission_line(name, k_pos, k_neg, m_pos, m_neg, *,
+  Z0, delay, R=0.0, model="pi", sections)` (or `L_per_m`, `C_per_m`,
+  `length`) and `pulsim.passives.recommend_line_sections(delay, t_rise)`
+  = `ceil(11·delay/t_rise)`. 50 Ω, 100 ns, 50 sections, open end:
+  `Z_in = −j91.525 Ω` at `ωτ = 0.5` (ideal −j91.524). Its limitation is
+  pinned: an ideal step on a source-matched open line peaks at 1.271 V
+  (exact answer 1.000 V) at any section count; a 20 ns edge with the
+  recommended 55 sections peaks at 1.046 V. `model="bergeron"` (exact
+  delay) is refused by name: it needs a kernel device.
+* **Added** YAML keys `esr`, `esl` on `capacitor` and `esr`, `c_par` on
+  `inductor`, expanded by the C++ loader into the same elements as the
+  Python keywords (pinned by comparing `components()`); `rac:` is refused
+  by name (it used to be ignored like every unknown key).
+* Not in this pass: YAML `rac:` and `transmission_line`, the
+  MLCC DC-bias table (needs `ChargeTable`), the Bergeron line
+  (`openspec/changes/add-realistic-passives/DECISIONS.md`).
+
+### MNA-native DC machine (`add-mna-native-machines`, step 1)
+
+* **Added** `b.add_dc_machine(name, a_pos, a_neg, omega_node, *, R_a, L_a,
+  K, J, B=0, T_load=0, i0=None, omega0=0)`: a permanent-magnet DC machine
+  solved inside the matrix, a composite of existing elements — armature
+  `R_a`, `L_a`, an ideal transformer of ratio `K` between the speed node
+  and the armature, the inertia `J` as a capacitor on the speed node
+  (`ω` is its voltage, torque is current), friction `1/B`, the load
+  torque a current source. Second order on `pwl` (sine-driven test
+  machine from rest, speed error against the exact solution
+  4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5 — ratios 3.99, 4.00, 4.00 — at dt = 100, 50, 25, 12.5 µs), runs on `trbdf2`
+  (9.19e-5 in 1061 points; the same as `pwl` to 1e-3) and on `dsed` (1.8e-7), and has a DC operating point (10 V, `K = 0.1`, `R_a = 0.5 Ω`,
+  `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s`). Electrical energy in
+  equals copper + friction + load + stored energy to 4.2e-9 on `pwl` (5.5e-6 on `trbdf2`). The armature impedance in the
+  kernel AC sweep is `R_a + sL_a + K²/(sJ + B)` to 1e-9.
+  `Kt ≠ Ke` (legacy spellings) is refused: in SI units they are one
+  constant. `theta_node` is refused until a VCCS exists. YAML type
+  `dc_machine` (same keys, expanded by the loader into the same
+  elements).
+* **Fixed** the topology preflight counts an ideal transformer's primary
+  as a DC path. A node reached only through a primary (a DC machine's
+  speed node with `B = 0`) was reported floating and tied to ground
+  through 1 GΩ with a warning (9e-7 relative error on the machine's DC
+  current).
+* **Deprecated** `p.add_dc_motor` and `p.make_dc_motor_observer`
+  (`DeprecationWarning` naming `add_dc_machine`): forward Euler from the
+  previous step, first order (13.6 % at 100 µs on the same case), `pwl`
+  only. They keep working.
+* Not in this step: the `components()` entry, the induction machine, BLDC harmonics and flux maps
+  (`openspec/changes/add-mna-native-machines/DECISIONS.md`).
+
+### Periodic steady state by Newton shooting on the true state (slice 1)
+
+* **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,
+  start_from=None)`: Newton on `P(x0) - x0` over the true state
+  (capacitor voltages, inductor currents) at `t = 0`, each map
+  evaluation one period of the dsed exact stepper with located events,
+  the Jacobian the monodromy `M = Φ_K·S_K·…·S_1·Φ_0` with saltation
+  matrices. Works in DCM, where the pattern changes between iterations.
+  The audit's DCM buck (24 V, 100 µH, 47 µF, 50 Ω, D = 0.3) converges
+  from zero to `v_C = 8.99624708729 V` (50-digit reference
+  8.99624708728943) in 5 map evaluations plus one verification period;
+  before, `steady_state` raised "no periodic orbit found" and
+  `run_periodic_shooting` returned 8.8998 V (−1.07 %). Returns the
+  orbit, `monodromy`, Floquet `multipliers` (DCM: 0 and 0.98898),
+  `stable`, the commutation `pattern`, the residual history and the
+  period-run count, and `sampled_model(inputs, outputs)` — `A = M`,
+  `B = ∂P/∂u` for a switch duty or a DC source value (DCM:
+  `∂v_C*/∂D = 23.0896 V`). Refused by name: opaque Python gates,
+  schedules or sine sources not periodic in `period`, PWM/pulse
+  sources, nonlinear and stateful devices, grazing events, marginal
+  multipliers (a lossless LC loop), an exhausted budget.
+* **Added** `steady_state(...)` and `frequency_response(...)` without
+  `dt` run on the new solver; with `dt` they are unchanged (fixed
+  engine). `run_periodic_shooting` / `run_harmonic_balance` are
+  unchanged until the fixed engine shoots on the true state (Phase 2).
+* **Added** `_NativeCircuitBuilderAdapter.node_pair_voltage` and the
+  sine source `frequency` in `CircuitBuilder.components()`.
 
 ### PWL diode forward drop (PSIM `V_f`)
 

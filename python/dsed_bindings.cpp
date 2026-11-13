@@ -885,6 +885,15 @@ void init_module(py::module_& m) {
             &NativeAdapter::rhs,
             py::arg("t"), py::arg("x"),
             "Continuous-time RHS: dx/dt = A·x + b(t).")
+        .def("node_pair_voltage",
+            &NativeAdapter::node_pair_voltage,
+            py::arg("from_node"), py::arg("to_node"),
+            py::arg("t"), py::arg("x"),
+            "v(from_node) − v(to_node) recovered from the reduced "
+            "state `x` under the active mask (−1 is ground). The "
+            "quantity a PWL diode predicate evaluates; affine in "
+            "`x`, so its gradient is the predicate's recovery row "
+            "(used by pulsim.periodic_steady_state for saltation).")
         .def_property_readonly("n_state",
             &NativeAdapter::n_state,
             "Number of continuous-time state variables for the "
