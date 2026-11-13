@@ -117,7 +117,7 @@ circuits:
   # dsed refused the builder ICs until the exact-propagator slice; now "no meaningful progress".
   circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, reference: suspect, reference_reason: "ill-posed as written: Drect is reversed (anode at ground), so with S1 and Drect OFF the two inductor currents meet at mid through g_off = 1e-6 S; the trbdf2 reference takes 3163 steps at h_min above tolerance, puts mid at 2.6e4-3.5e6 V and V(out) at +11.92 V (KNOWN_LIMITATIONS)"}
   # dsed refused the builder ICs until the exact-propagator slice; now "did not settle" at 2.35e-4 s.
-  circuits/switching/buck_boost/sepic.yaml: {status: runs, reference: suspect, reference_reason: "the trbdf2 rtol 1e-8 reference grinds to max_steps (an open TR-BDF2 regression) and pwl dt/2 vs dt/4 do not agree: no reference"}
+  circuits/switching/buck_boost/sepic.yaml: {status: runs, known: {dsed: error}}
   circuits/switching/inverter/half_bridge_inverter.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00121}}

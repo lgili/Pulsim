@@ -503,9 +503,11 @@ The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. Two circuits have no valid reference and are `unverified`
-on every engine (`reference: suspect`): `sepic`, whose trbdf2 reference
-grinds to `max_steps` (an open TR-BDF2 regression), and `cuk_converter`:
+tolerance. One circuit has no valid reference and is `unverified`
+on every engine (`reference: suspect`), `cuk_converter`. (`sepic`
+carried the mark while its trbdf2 reference ground to `max_steps`. That
+grind is fixed, and the reference now gives pwl 1.9e-3 and trbdf2
+3.0e-5, both agree; dsed is a frozen `error`.)
 
 **`cuk_converter` is ill-posed as written; its reference is marked
 suspect.** `Drect` is reversed: the file (and its ngspice deck) put the
