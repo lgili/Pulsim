@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Diode mode selection as a complementarity problem: shadow mode
+
+`simulate(engine='dsed', mode_selection='shadow')` keeps today's settle
+deciding (states bit-identical) and solves, at every event, the diode
+LCP of the backward-Euler companion network at `h_e = 1e-7·T_ref`
+(lexicographic Lemke, hybrid previous-mode coordinates, tie widening,
+`V_th > V_f` hysteresis). `result.diagnostics['mode_shadow']` lists each
+disagreement with both modes judged by their exact trajectories, plus
+`lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
+`widenings`, `settle_rounds_total` (add-complementarity-mode-selection
+tasks 1–4). `'shadow'` on `pwl`/`trbdf2` and `'lcp'` everywhere raise
+`UnsupportedError(engine, 'mode_selection')`. Over 19 circuits: the
+`V_th = 0` boost's 15 (R = 50 Ω) and 24 (R = 500 Ω) disagreements are
+all the settle's error (it ends 1.01 V low at R = 500 Ω); banded runs
+agree at every event; the three-phase C-filter bridge shows 30 where the
+LCP's tie rule is wrong (KNOWN_LIMITATIONS). Max 3 pivots per event.
+
 ### DSED: exact propagator with a stated accuracy per mask
 
 `engine='dsed'` steps each constant-source mask with

@@ -248,6 +248,16 @@ capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).
 
+### Complementarity mode selection: shadow only, and the tie rule
+
+`mode_selection='shadow'` runs on `engine='dsed'` only (the fixed-step
+and TR-BDF2 hooks are task 4.2); `'lcp'` does not decide yet. On the
+three-phase bridge into C ‖ R the shadow LCP is wrong at each turn-off:
+its own solution keeps one diode ON with a leak-scale 49 nA, which is a
+tie, and "a remaining tie is OFF" (design D5) floats the DC bus to where
+an OFF diode is forward biased by 8.1 V. The fix belongs with the gauge
+handling (task 7) before the LCP may decide.
+
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or
