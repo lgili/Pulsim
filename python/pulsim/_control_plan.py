@@ -107,6 +107,12 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
         else:
             plan.every_step.append(obs)
         plan.inner_observers.append(obs)
+    if step_observer is not None and controller_period is not None and \
+            getattr(step_observer, "_rate_ticks", None):
+        raise ValueError(
+            "simulate(controller_period=...) with a chain that has "
+            "Rate groups: the groups already set when the graph ticks. "
+            "Drop controller_period.")
     if step_observer is not None:
         period = controller_period
         if period is None:

@@ -219,6 +219,9 @@ public:
         compiled_ = false;
     }
 
+    /// Forget the reads and writes of a block whose build failed.
+    void discard_pending() { pending_ = Block{}; }
+
     /// Name / kind of the most recently added block (error messages,
     /// the reorder report).
     void name_last(const std::string& name, const std::string& kind = {}) {
@@ -422,13 +425,18 @@ public:
     /// once, then (t_n, x_{n-1}) before step n. The graph reads the
     /// state at its own instant t_n - dt, so a tick at tau sees x(tau).
     void observe_fixed_step(Real t, const Vector& x, Real dt_group0) {
+        rearm_if_restarted(t);
         Real tx = t;
         if (n_calls_ == 0) {
             t0_ = t;
         } else {
-            if (n_calls_ == 1 && !(solver_dt_ > Real{0})) solver_dt_ = t - t0_;
+            if (n_calls_ == 1) {
+                if (!(solver_dt_ > Real{0})) solver_dt_ = t - t0_;
+                check_periods();
+            }
             tx = t - solver_dt_;
         }
+        last_t_ = t;
         ++n_calls_;
         run_pass(tx, &x, dt_group0, /*every_call=*/group0_used_,
                  /*record_t=*/has_rates() ? tx : t);
@@ -437,12 +445,36 @@ public:
     /// Exact protocol (the variable-step engine lands a step on every
     /// tick and calls here with the state at the tick).
     void observe_tick(Real t, const Vector& x) {
+        rearm_if_restarted(t);
         if (n_calls_ == 0) t0_ = t;
+        last_t_ = t;
         ++n_calls_;
         run_pass(t, &x, Real{0}, /*every_call=*/false, t);
     }
 
-    void set_solver_dt(Real dt) noexcept { solver_dt_ = dt; }
+    void set_solver_dt(Real dt) {
+        solver_dt_ = dt;
+        dt_given_ = dt > Real{0};
+        check_periods();
+    }
+
+    /// A rate group ticks at most once per solver step: a period below
+    /// the fixed step would feed its blocks dt = period while they run
+    /// once per step (integrators at the wrong rate, unbounded lateness).
+    void check_periods() const {
+        if (!(solver_dt_ > Real{0})) return;
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            if (groups_[gi].period < solver_dt_ * (Real{1} - Real{1e-9})) {
+                throw ControlGraphBuildError(
+                    "control graph: a Rate period (" +
+                    std::to_string(groups_[gi].period) +
+                    " s) is shorter than the fixed solver step (" +
+                    std::to_string(solver_dt_) +
+                    " s); a group ticks at most once per step. Use a "
+                    "period >= dt, or a smaller dt.");
+            }
+        }
+    }
 
     /// The first instant strictly after `t` at which a published value
     /// (what the sinks read) may change: every group's publication
@@ -471,6 +503,16 @@ public:
         return best;
     }
 
+    /// A reused observer (a second simulate()): time went back, so the
+    /// tick grid restarts at the new t_start. Block state carries over,
+    /// as it always did; reset() clears it.
+    void rearm_if_restarted(Real t) {
+        if (n_calls_ == 0 || !(t < last_t_)) return;
+        n_calls_ = 0;
+        if (!dt_given_) solver_dt_ = Real{0};
+        for (auto& g : groups_) { g.k = 0; g.pending = false; }
+    }
+
     // ---- running --------------------------------------------------------
 
     /// Reset all block states, zero the signals, clear b_extra and the
@@ -487,6 +529,7 @@ public:
         }
         std::fill(pub_.begin(), pub_.end(), Real{0});
         n_calls_ = 0;
+        if (!dt_given_) solver_dt_ = Real{0};
     }
 
     /// Evaluate the graph once at (t, x) with block step `dt`.
@@ -574,6 +617,12 @@ public:
     }
 
     /// Latest value of a channel (0 for a name never mentioned).
+    /// Slot of `name`, or -1 if nothing reads or writes it.
+    [[nodiscard]] Index find_slot(const std::string& name) const {
+        auto it = slot_of_.find(name);
+        return it == slot_of_.end() ? Index{-1} : it->second;
+    }
+
     [[nodiscard]] Real get_channel(const std::string& name) const {
         auto it = slot_of_.find(name);
         return it == slot_of_.end() ? Real{0}
@@ -777,6 +826,8 @@ private:
     std::vector<Real> pub_;
     std::vector<Sink> sinks_;
     std::uint64_t n_calls_ = 0;
+    Real last_t_ = Real{0};
+    bool dt_given_ = false;
     bool group0_used_ = true;
     Real t0_ = Real{0};
     Real solver_dt_ = Real{0};

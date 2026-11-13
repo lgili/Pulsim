@@ -134,7 +134,7 @@ def main() -> None:
         def reset(self): pass
         def update(self, t): return self.omega * t
 
-    chain.add("theta", RotorAngle(W_ELEC),
+    chain.add("theta", p.PythonBlock(RotorAngle(W_ELEC)),
                 inputs=dict(t="time"),
                 output="theta_elec")
 
@@ -207,18 +207,11 @@ def main() -> None:
 
     # Complementary LS gates (no dead-time for simplicity — body diodes
     # handle any shoot-through gracefully).
-    class Complement:
-        def reset(self): pass
-        def update(self, x): return 1.0 - x
-    chain.add("ls_a", Complement(),
-                inputs=dict(x="channel:gate_hs_a"),
-                output="gate_ls_a")
-    chain.add("ls_b", Complement(),
-                inputs=dict(x="channel:gate_hs_b"),
-                output="gate_ls_b")
-    chain.add("ls_c", Complement(),
-                inputs=dict(x="channel:gate_hs_c"),
-                output="gate_ls_c")
+    # 1.0 + (-1)*x is 1.0 - x exactly.
+    for ph in "abc":
+        chain.add(f"ls_{ph}", p.Sum(weights=(1.0, -1.0)),
+                  inputs=dict(inputs=(1.0, f"channel:gate_hs_{ph}")),
+                  output=f"gate_ls_{ph}")
 
     # -------------------------------------------------------------------------
     # Wire to simulate()

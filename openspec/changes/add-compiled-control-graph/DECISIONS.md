@@ -140,6 +140,56 @@ Each entry: question → option taken → evidence → how to reverse.
   discontinuity of the run too.
 - **Reverse.** Return the plain `make_b_extra_fn` (no declaration).
 
+## G10. Which law a ported block runs
+
+- **Question.** Where the kernel already had a block of the same name
+  with a different law (`PIDController`, `Integrator`, `Differentiator`,
+  `MovingAverageFilter`, `Sum`, `PwmGenerator`, `FirstOrderLowPass`),
+  which one does a chain run?
+- **Taken.** The Python class's: it is the documented API and the
+  Python evaluator ran it whenever the kernel mapping failed, so the
+  same chain gave two answers. Ports keep Python's operand order
+  (`-ffp-contract=off` is already on) and `min`/`max` argument order;
+  `test_control_graph_blocks.py` checks every mapped block byte for
+  byte on 10^4 random inputs (incl. dt = 0 and a zero divisor), except
+  `SpaceVectorModulator`, the Clarke / Park transforms and the PLL
+  (kernel blocks, not yet compared).
+- **Evidence.** Before: `Integrator` differed on 9559 of 10^4 inputs
+  (up to 2.3e-2), `FirstOrderLowPass` at dt = 0 and its `state=`,
+  `PIDController` structurally, `PwmGenerator` read `phase` as a period
+  fraction with the opposite sign (interleaved legs collapsed); `PIController`, `Gain`, `Subtract`, `Limiter` were
+  already identical. The kernel `PIDController` / `Differentiator` /
+  moving-window filter stay for C++ users (`add_pid_controller`, ...).
+- **Reverse.** Map the class back to the old `add_*` in
+  `_compile_to_cxx`.
+
+## G11. Library blocks implemented in Python
+
+- **Taken.** `SlidingModeObserver` and `FluxMRASObserver` (Python
+  classes in `pulsim.observers`) run through the `PythonBlock` adapter
+  automatically; user classes must be wrapped explicitly (an unknown
+  kind is a build error, so a typo or a forgotten port cannot fall back
+  silently). Their kernel twins (`add_sliding_mode_observer`, ...) are
+  not proven bit-identical, so they are not substituted.
+- **Reverse.** Drop them from `_PY_LIBRARY` in `blockchain.py`.
+
+## G12. Rate-group edge cases (final review)
+
+- **Question.** What a rated chain does when it is reused, resumed,
+  under-sampled or holds a PWM.
+- **Taken.** Time going back between observer calls (a second
+  `simulate()`) restarts the tick grid, keeping block state (as a
+  chain without rates always did; before, the groups never ticked
+  again). A period below the fixed step and a `PwmGenerator` without
+  its own rate in a rated chain are `ControlGraphBuildError`s;
+  `controller_period=` with a rated chain is a `ValueError`. With
+  `resume_from=` the grid restarts at the resume instant (hook 6.1).
+- **Evidence.** `test_control_graph_blocks.py` (reuse, period, PWM,
+  controller_period cases).
+- **Reverse.** `BlockChain::rearm_if_restarted` / `check_periods`
+  (`chain.hpp`), the PWM check in `_assign_groups`, the
+  `controller_period` check in `compose_control`.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 graph state in the solver snapshot.** `SolverSnapshot`

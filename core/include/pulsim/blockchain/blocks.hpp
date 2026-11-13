@@ -201,7 +201,9 @@ struct FirstOrderLowPass {
     void reset() noexcept { y = Real{0}; }
 
     [[nodiscard]] Real update(Real input_value, Real dt) {
-        if (dt <= Real{0} || tau <= Real{0}) {
+        // As pulsim.control.FirstOrderLowPass: dt = 0 holds (alpha 0);
+        // it used to pass the input through.
+        if (tau <= Real{0}) {
             y = input_value;
             return y;
         }

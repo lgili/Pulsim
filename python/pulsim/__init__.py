@@ -170,6 +170,7 @@ from .plot import (
 from .blockchain import (
     MixedDomainBlockChain,
     BlockSpec,
+    PythonBlock,
     Rate,
     parse_block_chain,
 )
@@ -592,6 +593,7 @@ __all__ = [
     "MixedDomainBlockChain",
     "BlockSpec",
     "parse_block_chain",
+    "PythonBlock",
     "Rate",
     # DC operating-point strategies (v1 parity Phase A.2).
     "compute_dc_op",

@@ -52,6 +52,7 @@ from typing import Any, Callable
 __all__ = [
     "BlockSpec",
     "Rate",
+    "PythonBlock",
     "MixedDomainBlockChain",
     "parse_block_chain",
 ]
@@ -94,6 +95,9 @@ class _InputSource:
             return cls(kind="node", value=spec)
         if isinstance(spec, _InputSource):
             return spec
+        if isinstance(spec, (tuple, list)):
+            # An N-input block (Sum, SignalMux): one source per element.
+            return cls(kind="tuple", value=[cls.from_spec(e) for e in spec])
         raise ValueError(f"Unrecognised input spec: {spec!r}")
 
 
@@ -123,18 +127,42 @@ class Rate:
         return (1, float(d)) if float(d) > 0.0 else (0, 0.0)
 
 
+class PythonBlock:
+    """A control-graph block that runs Python: ``fn(**inputs)`` (or
+    ``obj.update(**inputs)`` for an object) returns a float, or a tuple
+    with one value per output name.
+
+    Each evaluation is one Python call under the GIL, so a graph holding
+    one is no longer Python-free per step. Every input is direct
+    feedthrough; the block counts as stateful (give it a rate when the
+    graph has rates).
+    """
+
+    def __init__(self, fn) -> None:
+        upd = getattr(fn, "update", None)
+        fn = upd if callable(upd) else fn
+        if not callable(fn):
+            raise TypeError(f"PythonBlock needs a callable; got {fn!r}")
+        self.fn = fn
+
+    def _call_with(self, names):
+        fn = self.fn
+
+        def call(*values):
+            return fn(**dict(zip(names, values)))
+        return call
+
+
+# pulsim blocks whose implementation is Python (PythonBlock adapter).
+_PY_LIBRARY = frozenset({"SlidingModeObserver", "FluxMRASObserver"})
+
 # Blocks with no state: they inherit the rate of their inputs.
 _STATELESS = frozenset({
     "Gain", "Subtract", "Sum", "MathBlock", "Limiter", "OpAmp",
     "SignalMux", "SignalDemux", "LookupTable1D", "ClarkeTransform",
     "InverseClarkeTransform", "ParkTransform", "InverseParkTransform",
-    "SpaceVectorModulator", "PwmGenerator",
+    "SpaceVectorModulator",
 })
-
-
-def _k_build_error():
-    from ._pulsim import ControlGraphBuildError  # type: ignore[import-not-found]
-    return ControlGraphBuildError
 
 
 def _warn_reorders(cxx_chain) -> None:
@@ -191,7 +219,6 @@ class MixedDomainBlockChain:
         self.rate = rate
         self._sinks: list = []
         self.blocks: list[BlockSpec] = []
-        self.channels: dict[str, Any] = {}
         # node-name → state-vector index (populated by bind()).
         self._node_idx: dict[str, int] = {}
         # The Python integer time-step used by step_observer for "dt"
@@ -216,7 +243,7 @@ class MixedDomainBlockChain:
         return self
 
     def reset(self) -> None:
-        """Reset every block + clear all channels."""
+        """Reset every block (and the compiled graph's ticks and state)."""
         for spec in self.blocks:
             r = getattr(spec.block, "reset", None)
             if callable(r):
@@ -224,7 +251,8 @@ class MixedDomainBlockChain:
                     r()
                 except TypeError:
                     pass  # block.reset() requires args we don't know about
-        self.channels = {}
+        if self._cxx_chain is not None:
+            self._cxx_chain.reset()
 
     # -------- binding ------------------------------------------------------
 
@@ -246,56 +274,6 @@ class MixedDomainBlockChain:
                                 f"refers to unknown node '{name}'") from exc
         return self
 
-    # -------- evaluation ---------------------------------------------------
-
-    def update(self, t: float, x) -> None:
-        """Evaluate every block in order. Outputs are stored in
-        `self.channels` keyed by the block's `output` field."""
-        for spec in self.blocks:
-            kwargs = {}
-            for kw, src in spec.inputs.items():
-                if src.kind == "const":
-                    kwargs[kw] = src.value
-                elif src.kind == "time":
-                    kwargs[kw] = float(t)
-                elif src.kind == "dt":
-                    kwargs[kw] = float(self._dt)
-                elif src.kind == "node":
-                    idx = self._node_idx[src.value]
-                    kwargs[kw] = float(x[idx])
-                elif src.kind == "channel":
-                    kwargs[kw] = self.channels.get(src.value, 0.0)
-            # Some blocks expect special kwarg "inputs" as a tuple of
-            # already-resolved values — accept either pattern.
-            try:
-                result = spec.block.update(**kwargs)
-            except TypeError:
-                # Maybe the block's update() takes positional only or
-                # a different convention. Re-raise with context.
-                raise
-            # Store result.
-            if isinstance(spec.output, (list, tuple)):
-                if not isinstance(result, tuple):
-                    raise ValueError(
-                        f"chain block '{spec.name}' output is a tuple of "
-                        f"names but the block returned a scalar")
-                if len(result) != len(spec.output):
-                    raise ValueError(
-                        f"chain block '{spec.name}' returned "
-                        f"{len(result)} values but {len(spec.output)} "
-                        f"output names were specified")
-                for ch, v in zip(spec.output, result):
-                    self.channels[ch] = v
-            else:
-                self.channels[spec.output] = result
-        # Channel recording (Python fallback path).
-        recorded = getattr(self, "_recorded_names", None)
-        if recorded:
-            self._py_recording_times.append(float(t))
-            for name in recorded:
-                self._py_history[name].append(
-                    float(self.channels.get(name, 0.0)))
-
     # -------- callback factories ------------------------------------------
 
     def make_step_observer(self, builder, *, dt: "float | None" = None,
@@ -305,17 +283,21 @@ class MixedDomainBlockChain:
         `simulate(...)`. Binds the chain to `builder` and stashes
         `dt` for blocks that need it.
 
-        When ``use_kernel=True`` (default), the entire chain is
-        compiled to the C++ `CxxBlockChain` executor and the step
-        observer is a pure-C++ lambda — no Python roundtrip per
-        simulation step. The closures, channels, and state all live
-        in C++. Falls back to the Python evaluator if any block
-        type isn't (yet) supported by the C++ backend.
+        The chain is compiled to the kernel graph (`CxxBlockChain`):
+        no Python call per step unless it holds a `PythonBlock`. A block
+        with no kernel implementation, an algebraic loop or a signal
+        with two writers raise `ControlGraphBuildError`.
 
-        Pass ``use_kernel=False`` to force the Python evaluator
-        (mostly useful for debugging mismatches between the two
-        backends).
+        ``use_kernel=False`` (the Python evaluator) was removed in 2.1
+        and raises `DeprecationWarning`.
         """
+        if not use_kernel:
+            raise DeprecationWarning(
+                "make_step_observer(use_kernel=False): the Python evaluator "
+                "was removed in Pulsim 2.1; every block runs in the kernel "
+                "graph (bit-identical to its Python class). Drop the "
+                "argument; record signals with chain.record_channel(name), "
+                "and wrap custom Python logic in pulsim.PythonBlock(fn).")
         self.bind(builder)
         has_rate = self.rate is not None or any(
             spec.rate is not None for spec in self.blocks)
@@ -326,47 +308,32 @@ class MixedDomainBlockChain:
         dt = 0.0 if dt is None else float(dt)
         self._dt = dt
 
-        if use_kernel:
-            try:
-                self._cxx_chain = self._compile_to_cxx(builder)
-                # Use the C++ chain's step_observer.
-                cxx_observer = self._cxx_chain.make_step_observer(dt)
-                # Tag the returned observer so simulate() knows it
-                # can use run_transient_with_chain() (the kernel
-                # fast path that bypasses the std::function wrap).
-                def observer(t, x):
-                    cxx_observer(t, x)
-                observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
-                observer._chain_dt = float(dt)  # type: ignore[attr-defined]
-                cxx = self._cxx_chain
-                if cxx.has_rates:
-                    # The variable-step engine ticks each group at its
-                    # period; any tick runs every group due then (C++).
-                    tick = cxx.make_tick_observer()
-                    observer._rate_ticks = [  # type: ignore[attr-defined]
-                        (tick, cxx.group_period(g))
-                        for g in sorted(self._groups.values())]
-                    observer._rate_offsets = [  # type: ignore[attr-defined]
-                        r.offset for r in self._groups]
-                    observer._rate_delays = [  # type: ignore[attr-defined]
-                        r._delay()[0] for r in self._groups]
-                if self._sinks:
-                    state_size = int(builder.pool.state_size(builder.graph))
-                    observer._b_extra_fn = cxx.make_sink_b_extra_fn(state_size)  # type: ignore[attr-defined]
-                return observer
-            except _k_build_error():
-                raise
-            except Exception as exc:  # pragma: no cover — graceful fallback
-                import warnings
-                warnings.warn(
-                    f"BlockChain: C++ backend failed "
-                    f"({type(exc).__name__}: {exc}); falling back to "
-                    f"Python evaluator", stacklevel=2)
-                self._cxx_chain = None
-
-        # Python fallback path.
+        self._cxx_chain = None
+        self._cxx_chain = self._compile_to_cxx(builder)
+        # Use the C++ chain's step_observer.
+        cxx_observer = self._cxx_chain.make_step_observer(dt)
+        # Tag the returned observer so simulate() knows it
+        # can use run_transient_with_chain() (the kernel
+        # fast path that bypasses the std::function wrap).
         def observer(t, x):
-            self.update(t, x)
+            cxx_observer(t, x)
+        observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
+        observer._chain_dt = float(dt)  # type: ignore[attr-defined]
+        cxx = self._cxx_chain
+        if cxx.has_rates:
+            # The variable-step engine ticks each group at its
+            # period; any tick runs every group due then (C++).
+            tick = cxx.make_tick_observer()
+            observer._rate_ticks = [  # type: ignore[attr-defined]
+                (tick, cxx.group_period(g))
+                for g in sorted(self._groups.values())]
+            observer._rate_offsets = [  # type: ignore[attr-defined]
+                r.offset for r in self._groups]
+            observer._rate_delays = [  # type: ignore[attr-defined]
+                r._delay()[0] for r in self._groups]
+        if self._sinks:
+            state_size = int(builder.pool.state_size(builder.graph))
+            observer._b_extra_fn = cxx.make_sink_b_extra_fn(state_size)  # type: ignore[attr-defined]
         return observer
 
     # -------- C++ backend compilation -------------------------------------
@@ -380,7 +347,12 @@ class MixedDomainBlockChain:
         block type isn't (yet) supported.
         """
         from . import _pulsim as _k  # type: ignore[import-not-found]
+        ControlGraphBuildError = _k.ControlGraphBuildError
         cxx_chain = _k.CxxBlockChain()
+
+        def _outs(output):
+            return [str(o) for o in output] \
+                if isinstance(output, (tuple, list)) else [str(output)]
 
         for spec in self.blocks:
             block = spec.block
@@ -391,8 +363,17 @@ class MixedDomainBlockChain:
             # Translate inputs. Node references are PRE-RESOLVED here
             # (the closure inside the C++ chain captures InputRef by
             # value, so we can't patch the index later via bind_nodes).
-            def ref(name_kw: str):
-                src = inputs[name_kw]
+            def ref(name_kw, default=None):
+                if isinstance(name_kw, _InputSource):
+                    src = name_kw
+                elif name_kw not in inputs and default is not None:
+                    return _k.CxxInputRef.const_value(float(default))
+                else:
+                    src = inputs[name_kw]
+                if src.kind == "tuple":
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': input '{name_kw}' is a tuple; "
+                        f"{cls_name} takes a single source there")
                 if src.kind == "const":
                     return _k.CxxInputRef.const_value(float(src.value))
                 if src.kind == "channel":
@@ -406,6 +387,12 @@ class MixedDomainBlockChain:
                     return _k.CxxInputRef.dt()
                 raise ValueError(f"unknown source kind {src.kind}")
 
+            def add_ported(kind, params, refs, _out=output):
+                cxx_chain.add_ported(
+                    kind, {k: [float(e) for e in v]
+                           if isinstance(v, (list, tuple)) else [float(v)]
+                           for k, v in params.items()}, refs, _outs(_out))
+
             if cls_name == "Gain":
                 cxx_chain.add_gain(k=float(block.k),
                                       x=ref("x"), output=output)
@@ -413,17 +400,17 @@ class MixedDomainBlockChain:
                 cxx_chain.add_subtract(a=ref("a"), b=ref("b"),
                                           output=output)
             elif cls_name == "Sum":
-                cxx_chain.add_sum(
-                    w0=float(getattr(block, "w0", 1.0)),
-                    w1=float(getattr(block, "w1", 1.0)),
-                    w2=float(getattr(block, "w2", 0.0)),
-                    a=ref("a") if "a" in inputs else
-                       _k.CxxInputRef.const_value(0.0),
-                    b=ref("b") if "b" in inputs else
-                       _k.CxxInputRef.const_value(0.0),
-                    c=ref("c") if "c" in inputs else
-                       _k.CxxInputRef.const_value(0.0),
-                    output=output)
+                # Sum.weights, one per input: `inputs=(...)` as the
+                # class takes them, or the a / b / c keys in that order.
+                srcs = (inputs["inputs"].value if "inputs" in inputs
+                        else [inputs[k] for k in ("a", "b", "c")
+                              if k in inputs])
+                w = [float(v) for v in block.weights]
+                if len(w) != len(srcs):
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': Sum has {len(w)} weights "
+                        f"but {len(srcs)} inputs")
+                add_ported("sum", {"weights": w}, [ref(s_) for s_ in srcs])
             elif cls_name == "PIController":
                 cxx_chain.add_pi_controller(
                     Kp=float(block.Kp), Ki=float(block.Ki),
@@ -432,51 +419,116 @@ class MixedDomainBlockChain:
                     setpoint=ref("setpoint"),
                     measured=ref("measured"),
                     dt=ref("dt"),
-                    output=output)
+                    output=output,
+                    integrator_state=float(block.integrator_state),
+                    prev_error=float(block._prev_error))
             elif cls_name == "PIDController":
-                cxx_chain.add_pid_controller(
-                    Kp=float(block.Kp), Ki=float(block.Ki),
-                    Kd=float(block.Kd),
-                    tau_d=float(getattr(block, "tau_d", 0.0)),
-                    output_min=float(block.output_min),
-                    output_max=float(block.output_max),
-                    setpoint=ref("setpoint"),
-                    measured=ref("measured"),
-                    dt=ref("dt"),
-                    output=output)
+                # Python-exact (trapezoidal I, filtered D on the error);
+                # the kernel PIDController (D on measurement, tau_d) is
+                # a different law and is no longer mapped here.
+                add_ported("pid", dict(
+                    Kp=block.Kp, Ki=block.Ki, Kd=block.Kd,
+                    alpha=block.derivative_alpha,
+                    output_min=block.output_min, output_max=block.output_max,
+                    integrator_state=block.integrator_state,
+                    derivative_state=block.derivative_state,
+                    prev_error=block._prev_error),
+                    [ref("setpoint"), ref("measured"), ref("dt")])
             elif cls_name == "FirstOrderLowPass":
-                cxx_chain.add_first_order_lpf(
-                    tau=float(block.tau),
-                    input_value=ref("input_value"),
-                    dt=ref("dt"),
-                    output=output)
+                add_ported("first_order_low_pass",
+                           dict(tau=block.tau, state=block.state),
+                           [ref("input_value"), ref("dt")])
             elif cls_name == "Integrator":
-                cxx_chain.add_integrator(
-                    gain=float(block.gain),
-                    output_min=float(block.output_min),
-                    output_max=float(block.output_max),
-                    x=ref("x"), dt=ref("dt"),
-                    output=output)
+                # Python-exact: the kernel Integrator (no anti-windup
+                # hold, gain*x*dt) differed on 9559 of 10^4 inputs.
+                add_ported("integrator", dict(
+                    gain=block.gain, output_min=block.output_min,
+                    output_max=block.output_max, state=block.state),
+                    [ref("x"), ref("dt")])
             elif cls_name == "Differentiator":
-                cxx_chain.add_differentiator(
-                    filter_alpha=float(block.filter_alpha),
-                    x=ref("x"), dt=ref("dt"),
-                    output=output)
+                add_ported("differentiator", dict(
+                    alpha=block.alpha, state=block.state,
+                    prev_x=block._prev_x), [ref("x"), ref("dt")])
             elif cls_name == "Limiter":
                 cxx_chain.add_limiter(
                     min_v=float(block.output_min),
                     max_v=float(block.output_max),
                     x=ref("x"), output=output)
             elif cls_name == "MovingAverageFilter":
-                cxx_chain.add_moving_average(
-                    window=int(block.window),
-                    x=ref("input_value"), output=output)
+                add_ported("ema", dict(alpha=block.alpha, state=block.state),
+                           [ref("input_value")])
+            elif cls_name == "Comparator":
+                add_ported("comparator", dict(
+                    threshold=block.threshold, hysteresis=block.hysteresis,
+                    output_high=block.output_high,
+                    output_low=block.output_low, state=float(block.state)),
+                    [ref("input_value")])
+            elif cls_name == "RateLimiter":
+                add_ported("rate_limiter", dict(
+                    slew_up=block.slew_up, slew_down=block.slew_down,
+                    state=block.state), [ref("target"), ref("dt")])
+            elif cls_name == "SampleHold":
+                add_ported("sample_hold", dict(
+                    sample_period=block.sample_period, state=block.state,
+                    last_t=block._last_sample_t),
+                    [ref("input_value"), ref("t")])
+            elif cls_name == "TransferFunction":
+                add_ported("transfer_function", {
+                    "num": list(block.num), "den": list(block.den),
+                    "x_hist": list(block._x_hist),
+                    "y_hist": list(block._y_hist)}, [ref("x")])
+            elif cls_name == "StateMachine":
+                modes = {"toggle": 0, "level": 1, "sr_latch": 2}
+                mode = modes.get(str(block.mode).lower())
+                if mode is None:
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': StateMachine mode "
+                        f"{block.mode!r} is not one of {sorted(modes)}")
+                add_ported("state_machine", dict(
+                    mode=mode, threshold=block.threshold,
+                    high_value=block.high_value, low_value=block.low_value,
+                    state=block.state, trigger_prev=block._trigger_prev),
+                    [ref("trigger", 0.0), ref("set_", 0.0),
+                     ref("reset_", 0.0)])
+            elif cls_name == "OpAmp":
+                add_ported("op_amp", dict(
+                    gain=block.gain, rail_min=block.rail_min,
+                    rail_max=block.rail_max),
+                    [ref("in_pos"), ref("in_neg")])
+            elif cls_name == "LookupTable1D":
+                add_ported("lookup_table_1d", {
+                    "xs": list(block.xs), "ys": list(block.ys)}, [ref("x")])
+            elif cls_name == "MathBlock":
+                ops = ("add", "sub", "mul", "div", "abs", "neg", "sqrt",
+                       "pow2")
+                op = str(block.op).lower()
+                if op not in ops:
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': MathBlock op {block.op!r} "
+                        f"is not one of {list(ops)}")
+                add_ported("math", dict(op=ops.index(op)),
+                           [ref("a"), ref("b", 0.0)])
+            elif cls_name == "SignalMux":
+                add_ported("signal_mux", {}, [ref("selector")] + [
+                    ref(s_) for s_ in inputs["inputs"].value])
+            elif cls_name == "SignalDemux":
+                add_ported("signal_demux",
+                           dict(n_outputs=int(block.n_outputs)), [ref("x")])
+            elif cls_name == "PythonBlock" or cls_name in _PY_LIBRARY:
+                # Library blocks implemented in Python run through the
+                # same adapter (DECISIONS G11); user classes must be
+                # wrapped explicitly.
+                pyb = block if cls_name == "PythonBlock" else PythonBlock(block)
+                names = list(inputs)
+                cxx_chain.add_python_block(
+                    pyb._call_with(names), [ref(n) for n in names],
+                    _outs(output))
             elif cls_name == "PwmGenerator":
-                cxx_chain.add_pwm_generator(
-                    frequency=float(block.frequency),
-                    phase=float(getattr(block, "phase", 0.0)),
-                    duty=ref("duty"), t=ref("t"),
-                    output=output)
+                # Python-exact: the kernel PwmGenerator reads phase as a
+                # fraction of the period, the class as seconds.
+                add_ported("pwm", dict(frequency=block.frequency,
+                                       phase=block.phase),
+                           [ref("duty"), ref("t")])
             elif cls_name == "SpaceVectorModulator":
                 if not isinstance(output, (tuple, list)) or len(output) != 3:
                     raise ValueError("SVM output must be 3-tuple")
@@ -531,9 +583,11 @@ class MixedDomainBlockChain:
                     initial_value=float(block.initial_value),
                     x=ref("x"), output=output)
             else:
-                raise ValueError(
-                    f"block type {cls_name!r} not yet supported by "
-                    f"C++ backend")
+                raise ControlGraphBuildError(
+                    f"control graph: block '{spec.name}' is a {cls_name}, "
+                    "which has no kernel implementation. Wrap custom "
+                    "Python logic in pulsim.PythonBlock(fn) (one Python "
+                    "call per evaluation).")
             cxx_chain.name_last(spec.name, cls_name)
 
         # Schedule: direct-feedthrough topological order; an algebraic
@@ -554,6 +608,8 @@ class MixedDomainBlockChain:
                 cxx_chain.add_source_sink(
                     channel, int(builder.node_id_of(wire[2])), -_I_SRC_SIGN)
         cxx_chain.compile()
+        for name, reserve_n in getattr(self, "_recorded_names", []):
+            cxx_chain.record_channel(name, reserve_n)
         return cxx_chain
 
     def _assign_groups(self, cxx_chain) -> None:
@@ -570,13 +626,24 @@ class MixedDomainBlockChain:
             for o in outs:
                 writer[o] = i
         rate = [spec.rate for spec in self.blocks]
+        for spec in self.blocks:
+            if spec.rate is None and type(spec.block).__name__ == "PwmGenerator":
+                # A carrier compared at the controller rate is a
+                # sample-and-hold of the gate, not a PWM.
+                raise ControlGraphBuildError(
+                    f"control graph: PwmGenerator '{spec.name}' in a rated "
+                    "chain would compare its carrier only at the controller "
+                    "ticks; give it rate=Rate(dt) (the solver step, pwl), "
+                    "or gate the switch from the duty outside the graph")
         for _ in range(len(self.blocks)):
             changed = False
             for i, spec in enumerate(self.blocks):
                 if rate[i] is not None or \
                         type(spec.block).__name__ not in _STATELESS:
                     continue
-                ups = [rate[writer[src.value]] for src in spec.inputs.values()
+                srcs = [e for src in spec.inputs.values()
+                        for e in (src.value if src.kind == "tuple" else [src])]
+                ups = [rate[writer[src.value]] for src in srcs
                        if src.kind == "channel" and src.value in writer
                        and rate[writer[src.value]] is not None]
                 if ups:
@@ -678,7 +745,7 @@ class MixedDomainBlockChain:
         def switch_fn(t):  # noqa: ARG001
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
-            if chain_self.get(channel, 0.0) > threshold:
+            if chain_self._sink(channel) > threshold:
                 m.set(switch_idx, True)
             return m
         return switch_fn
@@ -731,20 +798,23 @@ class MixedDomainBlockChain:
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
             for ch, idx in zip(chan_list, idx_list):
-                if chain_self.get(ch, 0.0) > threshold:
+                if chain_self._sink(ch) > threshold:
                     m.set(idx, True)
             return m
         return switch_fn
 
-    def get(self, channel: str, default: float = 0.0):
-        """Read the latest value on a channel. Useful for debugging.
+    def _sink(self, channel: str) -> float:
+        # A gate sees a rate group's output after its compute_delay.
+        if self._cxx_chain is None:
+            return 0.0
+        return self._cxx_chain.sink_value(channel)
 
-        If the C++ backend is active, reads from there; otherwise
-        from the Python-side `channels` dict.
-        """
+    def get(self, channel: str, default: float = 0.0):
+        """Read the latest value on a channel (``default`` before the
+        graph is compiled). Useful for debugging."""
         if self._cxx_chain is not None:
             return self._cxx_chain.get_channel(channel)
-        return self.channels.get(channel, default)
+        return default
 
     # -------- channel logging --------------------------------------------
 
@@ -764,16 +834,13 @@ class MixedDomainBlockChain:
             simulation steps). Pre-allocates internal buffers for
             efficient appending — defaults to 0 (grow as needed).
         """
-        # Both paths: queue the name + reservation. The actual recording
-        # happens inside the C++ chain (when active) or via a Python
-        # fallback observer (when not).
+        # Queued for the kernel graph built by make_step_observer (a
+        # name registered before it was dropped: the 2.0 kernel path
+        # never recorded it).
         if not hasattr(self, "_recorded_names"):
-            self._recorded_names = []
-            self._py_history: dict[str, list] = {}
-            self._py_recording_times: list = []
-        if name not in self._recorded_names:
-            self._recorded_names.append(name)
-            self._py_history[name] = []
+            self._recorded_names: list = []
+        if name not in [n for n, _ in self._recorded_names]:
+            self._recorded_names.append((name, int(reserve_n)))
         if self._cxx_chain is not None:
             self._cxx_chain.record_channel(name, int(reserve_n))
 
@@ -783,8 +850,7 @@ class MixedDomainBlockChain:
         import numpy as np
         if self._cxx_chain is not None:
             return self._cxx_chain.get_channel_history(name)
-        return np.asarray(getattr(self, "_py_history", {}).get(name, []),
-                            dtype=float)
+        return np.zeros(0)
 
     def get_recording_times(self):
         """Return the parallel time vector for the recorded channel
@@ -792,17 +858,12 @@ class MixedDomainBlockChain:
         import numpy as np
         if self._cxx_chain is not None:
             return self._cxx_chain.get_recording_times()
-        return np.asarray(getattr(self, "_py_recording_times", []),
-                            dtype=float)
+        return np.zeros(0)
 
     def clear_recordings(self) -> None:
         """Clear all recorded histories (keeps registered names)."""
         if self._cxx_chain is not None:
             self._cxx_chain.clear_recordings()
-        if hasattr(self, "_py_history"):
-            for k in self._py_history:
-                self._py_history[k] = []
-            self._py_recording_times = []
 
 
 # =============================================================================

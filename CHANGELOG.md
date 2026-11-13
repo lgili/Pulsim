@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Compiled control graph, part 3: blocks (add-compiled-control-graph, 2026-11-13)
+
+* **Removed (BREAKING)** the Python evaluator of `MixedDomainBlockChain`
+  and its silent fallback: a block with no kernel implementation is a
+  `ControlGraphBuildError` naming `pulsim.PythonBlock(fn)` (new: runs a
+  callable in the graph, one Python call per evaluation);
+  `make_step_observer(use_kernel=False)` raises `DeprecationWarning`;
+  `MixedDomainBlockChain.update()` is gone.
+* **Added** kernel ports, bit-identical to their Python classes on 10^4
+  random inputs each: `Comparator`, `RateLimiter`, `SampleHold`,
+  `TransferFunction`, `StateMachine`, `OpAmp`, `SignalMux`,
+  `SignalDemux`, `LookupTable1D`, `MathBlock`, `MovingAverageFilter`,
+  `Differentiator`, `PIDController`, `Integrator`, `Sum`,
+  `FirstOrderLowPass`, `PwmGenerator`, `DelayBlock`. N-input blocks take
+  a tuple of sources (`inputs=dict(inputs=("channel:a", "vout"))`).
+* **Fixed (numbers change)** silent mapping defects of the kernel chain:
+  `PIDController` ran a different law (derivative on the measurement,
+  `tau_d = 0`); `Integrator` had no anti-windup hold (9559 of 10^4
+  inputs differed, up to 2.3e-2); `Sum` ignored its `weights` and a `c`
+  input; `FirstOrderLowPass` passed the input through at `dt = 0`; a
+  block's initial state (`integrator_state=`, `state=`) was ignored;
+  `PwmGenerator(phase=)` was read as a fraction of the period with the
+  opposite sign (the class: seconds), and `frequency <= 0` gave
+  `duty > 0` instead of 0; `record_channel` before `make_step_observer`
+  recorded nothing.
+* **Changed** `pulsim.control.Sum` and `TransferFunction` sum left to
+  right: the builtin `sum()` is compensated since Python 3.12, so the
+  classes gave a different last bit on 3.10/3.11 than on 3.12/3.13.
+* **Fixed** rate groups: `make_pwm_switch_fn` gates honour
+  `compute_delay`; a reused observer restarts its tick grid (it never
+  ticked again); a period below the fixed step and a `PwmGenerator`
+  inheriting a controller rate are `ControlGraphBuildError`s;
+  `controller_period=` with a rated chain is a `ValueError`; a driven
+  source's `b_extra` runs in C++ on `pwl` and `trbdf2` (it went through
+  a Python wrapper per call).
+* **Changed** the converter design notebooks drop `use_kernel=False`;
+  the FOC / motor examples and `wire_pmsm_foc` run their custom blocks
+  as kernel `Sum`s or `PythonBlock`s. Migration table in
+  [docs/control-graph.md](docs/control-graph.md).
+
 ### Compiled control graph, part 2: rates (add-compiled-control-graph, 2026-11-13)
 
 * **Added** `pulsim.Rate(period, offset=0, compute_delay=0)` on a

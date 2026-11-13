@@ -38,9 +38,9 @@ Closed forms used below.
 - [x] 4.4 Tests: tick counts of task 1.2 exact on every engine; discrete P loop `v[10] = 0.643545722992` and `v[k] → 2/3` within 1e-9 on the exact strategy and within the engine tolerance elsewhere; with `one_sample`, `v[10] = 0.659695654069`
 
 ## 5. Block library
-- [ ] 5.1 Port `Comparator`, `RateLimiter`, `SampleHold`, `TransferFunction`, `StateMachine`, `OpAmp`, `DelayBlock`, `SignalMux`, `SignalDemux`, `LookupTable1D`
-- [ ] 5.2 Remove the Python evaluator and the fallback at `blockchain.py:268-281`; unknown block kind is a build error
-- [ ] 5.3 Tests: each ported block against its Python class on 10⁴ random inputs, bit-identical; `use_kernel=False` raises a deprecation error naming the replacement
+- [x] 5.1 Port `Comparator`, `RateLimiter`, `SampleHold`, `TransferFunction`, `StateMachine`, `OpAmp`, `DelayBlock`, `SignalMux`, `SignalDemux`, `LookupTable1D`
+- [x] 5.2 Remove the Python evaluator and the fallback at `blockchain.py:268-281`; unknown block kind is a build error
+- [x] 5.3 Tests: each ported block against its Python class on 10⁴ random inputs, bit-identical; `use_kernel=False` raises a deprecation error naming the replacement
 
 ## 6. Tick events and outputs (needs `add-unified-event-queue`)
 - [ ] 6.1 Discrete groups on queue tick events; graph state in the solver snapshot
@@ -60,8 +60,8 @@ Closed forms used below.
 - [ ] 8.4 Tests: for every block kind and for a PI + limiter + PWM graph, the export compiled with `-ffp-contract=off` and loaded through `add_c_block` reproduces the in-kernel graph bit for bit over 10⁴ ticks; the export compiles with `-std=c99 -Wall -Werror -pedantic` and contains no `malloc`
 
 ## 9. Consolidation
-- [ ] 9.1 `MixedDomainBlockChain`, `bind_pi_to_switch`, `bind_pi_to_duty_callable`, `add_c_block`, YAML chains build a `ControlGraph`; closures through the `PythonBlock` adapter with a deprecation warning; remove the two composition blocks in `simulate()`
-- [ ] 9.2 Measurement gate (counters): `n_block_evals = n_ticks × blocks in the group`; zero Python calls during a run of a graph with no `PythonBlock` (baseline from 1.3); for a 10 kHz controller on a dt = 1e-7 fixed run, block evaluations fall from one per step to one per tick (1000× fewer, by count)
+- [ ] 9.1 (partial: `MixedDomainBlockChain` and YAML chains build the graph, `PythonBlock` adapter exists; `bind_pi_*` / `add_c_block` / the composition blocks remain) `MixedDomainBlockChain`, `bind_pi_to_switch`, `bind_pi_to_duty_callable`, `add_c_block`, YAML chains build a `ControlGraph`; closures through the `PythonBlock` adapter with a deprecation warning; remove the two composition blocks in `simulate()`
+- [x] 9.2 Measurement gate (counters): `n_block_evals = n_ticks × blocks in the group`; zero Python calls during a run of a graph with no `PythonBlock` (baseline from 1.3); for a 10 kHz controller on a dt = 1e-7 fixed run, block evaluations fall from one per step to one per tick (1000× fewer, by count)
 - [ ] 9.3 C blocks on `trbdf2` and on the exact strategy: same output as on the fixed engine within the engine tolerance (refused / open-loop today)
 
 ## 10. Docs and verification

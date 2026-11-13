@@ -452,7 +452,13 @@ class Sum:
             raise ValueError(
                 f"Sum: expected {len(self.weights)} inputs, "
                 f"got {len(inputs)}")
-        return sum(w * x for w, x in zip(self.weights, inputs))
+        # A plain left-to-right sum, as the kernel graph runs it: the
+        # builtin sum() is compensated since Python 3.12 (one answer per
+        # interpreter).
+        acc = 0.0
+        for w, x in zip(self.weights, inputs):
+            acc += w * x
+        return acc
 
 
 @dataclass
@@ -569,12 +575,15 @@ class TransferFunction:
         # Keep only what we need.
         if len(self._x_hist) > len(self.num):
             self._x_hist = self._x_hist[:len(self.num)]
-        # Compute the numerator contribution.
-        num_part = sum(b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
-                        for i, b in enumerate(self.num))
-        # Compute the denominator (feedback) contribution.
-        den_part = sum(a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
-                        for i, a in enumerate(self.den))
+        # Numerator and denominator (feedback) contributions, summed
+        # left to right as the kernel graph does (the builtin sum() is
+        # compensated since Python 3.12).
+        num_part = 0.0
+        for i, b in enumerate(self.num):
+            num_part += b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
+        den_part = 0.0
+        for i, a in enumerate(self.den):
+            den_part += a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
         y = num_part - den_part
         self._y_hist.insert(0, y)
         if len(self._y_hist) > len(self.den):

@@ -2620,7 +2620,7 @@ class CxxBlockChain:
         ...
     def add_park(self, alpha: CxxInputRef, beta: CxxInputRef, theta: CxxInputRef, output_d: str, output_q: str) -> None:
         ...
-    def add_pi_controller(self, Kp: float, Ki: float, output_min: float, output_max: float, setpoint: CxxInputRef, measured: CxxInputRef, dt: CxxInputRef, output: str) -> None:
+    def add_pi_controller(self, Kp: float, Ki: float, output_min: float, output_max: float, setpoint: CxxInputRef, measured: CxxInputRef, dt: CxxInputRef, output: str, integrator_state: float = 0.0, prev_error: float = 0.0) -> None:
         ...
     def add_pid_controller(self, Kp: float, Ki: float, Kd: float, tau_d: float, output_min: float, output_max: float, setpoint: CxxInputRef, measured: CxxInputRef, dt: CxxInputRef, output: str) -> None:
         ...
@@ -2628,8 +2628,16 @@ class CxxBlockChain:
         ...
     def add_pmsm(self, J: float, B: float, T_load: float, R_s: float, L_s: float, psi_pm: float, pole_pairs: int, phase_inductor_idx: typing.Annotated[collections.abc.Sequence[int], "FixedSize(3)"], bemf_source_idx: typing.Annotated[collections.abc.Sequence[int], "FixedSize(3)"], omega_channel: str, theta_channel: str) -> None:
         ...
+    def add_ported(self, kind: str, params: collections.abc.Mapping[str, collections.abc.Sequence[float]], inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str]) -> None:
+        """
+        A block ported from pulsim.control, Python-exact (kinds: comparator, rate_limiter, sample_hold, transfer_function, state_machine, op_amp, lookup_table_1d, math, ema, differentiator, pid, sum, signal_mux, signal_demux).
+        """
     def add_pwm_generator(self, frequency: float, phase: float = 0.0, *, duty: CxxInputRef, t: CxxInputRef, output: str) -> None:
         ...
+    def add_python_block(self, fn: collections.abc.Callable, inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str]) -> None:
+        """
+        A block that calls fn(*input_values) (Python, under the GIL) once per evaluation; returns a float or one value per output.
+        """
     def add_resistive_power_injection(self, R_ohm: float, i_ref: CxxInputRef, junction_node_idx: int, power_channel: str = '') -> None:
         """
         Convenience: P = R·I² with single current input. Typical use is a MOSFET conduction loss (R = R_DS_ON, i = inductor branch current).
@@ -2724,6 +2732,10 @@ class CxxBlockChain:
         ...
     def set_solver_dt(self, dt: float) -> None:
         ...
+    def sink_value(self, name: str) -> float:
+        """
+        What a circuit sink (switch mask, driven source) sees: a rate group's output after its compute_delay.
+        """
     def size(self) -> int:
         ...
     def tick_counts(self) -> list[int]:
@@ -2930,7 +2942,7 @@ def load_yaml_string(yaml_text: str) -> LoadedCircuit:
     """
 def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> collections.abc.Callable[[float], SwitchStateMask]:
     """
-    Build a switch_fn(t) that sets bit `idx` ON when `chain.channels[channel_name] > 0.5`. `mapping` is a list of (channel_name, switch_idx) pairs.
+    Build a switch_fn(t) that sets bit `idx` ON when `chain.sink_value(channel_name) > 0.5`. `mapping` is a list of (channel_name, switch_idx) pairs.
     """
 def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[typing.Any]) -> SwitchSchedule:
     """
@@ -3002,7 +3014,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = []) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = []) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + k*observer_periods[j] (ceil(span/T_j) times, index order when coincident); stats['control_tick_counts'] counts each.
     """

@@ -103,12 +103,14 @@ def main() -> None:
         output="gate",
     )
 
-    def combined_observer(t, x):
-        # Expose the solved ω (node voltage) to the chain via a channel.
-        chain.channels["omega"] = float(x[omega_idx])
-        chain.update(t, x)
+    # The kernel graph (the Python evaluator was removed in 2.1); the
+    # solved ω (a node voltage) reaches it as a channel each step.
+    chain_obs = chain.make_step_observer(b, dt=DT)
+    set_channel = chain._cxx_chain.set_channel
 
-    chain.bind(b); chain._dt = DT
+    def combined_observer(t, x):
+        set_channel("omega", float(x[omega_idx]))
+        chain_obs(t, x)
 
     # Combined switch_fn: chain's gate drives HS only.
     switch_fn = chain.make_pwm_switch_fn(
