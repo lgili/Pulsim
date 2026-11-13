@@ -128,3 +128,29 @@ class TestTier2LayerConsistency:
         """THD(L0) < THD(L1) ≤ THD(L2) — physics ordering."""
         r: BaselineResult = _test_thd_ordering(thesis_params)
         assert r.passed, r.msg
+
+
+def test_i_a_is_the_phase_current(thesis_params: GeanThesisParams) -> None:
+    """``plant.iL_indices`` must name the load inductors.
+
+    The builders took ``branch_var_id_for_inductor`` (= num_nodes + k)
+    inside the load loop, before the phase-b/c and star nodes existed,
+    so ``i_a`` read another branch: an arm current with THD 81.6 % and a
+    fundamental of 13.0 A instead of the 26.8 A that V̂/|Z_AC| gives.
+    """
+    from mmc_3phase_model import build_l1_plant, run_mmc_open_loop, thd
+    from mmc_baseline_tests import (build_l0_plant, predict_i_a_peak_l0,
+                                    run_l0_open_loop)
+    import numpy as np
+
+    i_pk = predict_i_a_peak_l0(thesis_params)
+    for res, fs in ((run_l0_open_loop(build_l0_plant(thesis_params),
+                                      t_end=100e-3, dt=1e-5), 1e5),
+                    (run_mmc_open_loop(build_l1_plant(thesis_params),
+                                       t_end=100e-3, dt=5e-6, layer="l1"), 2e5)):
+        w = res.t >= 50e-3
+        n = int(round(3 / thesis_params.f_grid * fs))
+        t, i_a = res.t[w][:n], res.i_a[w][:n]
+        fund = abs(2 * np.mean(i_a * np.exp(-2j * np.pi * thesis_params.f_grid * t)))
+        assert abs(fund / i_pk - 1) < 0.04, (fund, i_pk)
+        assert thd(i_a, fs, thesis_params.f_grid) < 3.0

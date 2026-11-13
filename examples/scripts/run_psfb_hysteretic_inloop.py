@@ -2,7 +2,7 @@
 """PSFB with HystereticInductor (Jiles-Atherton) **in the MNA loop**.
 
 Companion to ``run_psfb_ja_loss_analysis.py`` — which post-processes
-the inductor current OFFLINE through the JA model to estimate core
+the transformer's magnetising current OFFLINE through the JA model to estimate core
 loss. THIS demo wires the JA hysteresis **inside the kernel loop**:
 the core is solved inside the Newton iteration of every step, so the
 hysteresis actively shapes the simulated current waveform.

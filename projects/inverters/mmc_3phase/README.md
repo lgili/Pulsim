@@ -54,39 +54,32 @@ _build_notebooks.py         — Gerador do notebook (edite aqui, regenere com
   previsto na Fig 3.12 da tese ✓
 * Presença de 2ª harmônica nas correntes de circulação ✓
 
-**Onde divergimos**:
+**Onde divergimos** (notebook 01, L1 sem tempo morto):
 
-* Ondulação de v_C é maior (~185 V pkpk vs ~50 V da tese).
-* THD da corrente de fase é maior (~80% vs ~0.7% da tese).
-* Pico da corrente de fase é ~30% maior (~28 A vs ~22 A da tese).
+* Ondulação de v_C (soma do braço): 185 V pkpk vs ~50 V da Fig 4.2.
+  O balanço de energia do braço dá 291 V sem corrente de circulação e
+  185 V com a 2ω que a simulação desenvolve (10 A pico); nenhuma 2ω o
+  leva abaixo de 178 V. Os ~50 V não são alcançáveis pela soma do braço
+  com esses parâmetros (talvez a figura mostre um submódulo: ÷5 ≈ 37 V;
+  não conferido, o PDF não está no repositório).
+* THD da corrente de fase: 1,7 % vs 0,71 % (simulação da tese) e
+  1,11 % (experimento). É a 5ª harmônica que a ondulação de v_C
+  produz em m·v_C; o modelo médio L0, sem PWM, tem a mesma THD.
+* Pico da corrente de fase: 26,6 A vs ~22 A. V̂/|Z_AC| = 26,8 A com os
+  parâmetros da legenda.
 
-Update: depois do commit `feat(mmc): IPD modulation`, o pulsim
-suporta IPD nativamente via `MmcArmMultilevelParams.modulation_scheme
-= "ipd"` (e idem para L2/L3). Este notebook já usa IPD por padrão.
-Mesmo assim, a ondulação `v_C` continua em ~200 V — porque a
-ondulação fundamental vem da dinâmica L0 média (`m·i_b` integrado),
-que é a *mesma* para IPD e PS-PWM. A análise analítica do L0 prevê
-~250 V pkpk para o ponto de operação documentado, indicando que os
-parâmetros da Fig 4.2 da tese não correspondem 100% à legenda.
-
-A diferença na corrente de fase ainda fica em parte sem explicar —
-o protótipo da tese tem perdas adicionais (semicondutores não-ideais)
-que a Seção 4.1 modela aproximadamente ajustando o R_b parasita; nosso
-half-bridge é mais idealizado.
+Até 2026-11 o notebook reportava THD ≈ 80 %: `i_a` lia uma corrente
+de braço, por um índice de estado tirado antes de os nós das fases b/c
+existirem (`branch_var_id_for_inductor` = num_nodes + k).
 
 ## Próximos passos sugeridos
 
-1. ✅ ~~Implementar IPD no pulsim~~ — feito (Phase 20.14). Resultado:
-   o ripple não muda significativamente porque o componente
-   fundamental vem da dinâmica L0 média, não da estratégia de
-   chaveamento.
-2. **Substituir o half-bridge ideal por IGBT level-1** (já existe no
-   pulsim) para capturar V_F0 e r_on — pode reduzir o pico de corrente
-   o suficiente para diminuir o ripple `m·i` por sua vez.
-3. **Replicar o Capítulo 5** (controle de energia + frequência variável)
-   para estender a validação ao regime closed-loop, onde o controle
-   ativo das energias circulantes mantém v_C balanceado mesmo sob
-   modulação imperfeita.
+1. ✅ ~~Implementar IPD no pulsim~~ — feito (Phase 20.14).
+2. ✅ IGBT level-1 — notebook 04 (não fecha o gap: ele não vem de
+   perdas de condução).
+3. Controle de energia e de circulação do Cap. 5 — notebooks 02/03
+   têm a estrutura; com os ganhos usados, os blocos não mudam o regime
+   permanente.
 
 ## Como rodar
 

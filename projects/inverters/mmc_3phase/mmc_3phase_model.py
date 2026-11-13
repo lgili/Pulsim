@@ -37,7 +37,7 @@ walks through this comparison.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import cos, pi, sin, sqrt
+from math import cos, pi, sqrt
 from typing import Callable
 
 import numpy as np
@@ -192,16 +192,17 @@ def build_l1_plant(params: GeanThesisParams) -> MmcPlant:
         arms.append(arm_n)
 
     # Y-connected RL load.
-    iL_indices: list[int] = []
+    l_ids: list[int] = []
     for ph in "abc":
-        l_id = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_indices.append(
-            b.pool.branch_var_id_for_inductor(l_id, b.graph),
-        )
     # Weak star tie for MNA conditioning.
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    # State indices only once every node exists: branch_var_id_for_inductor
+    # is num_nodes + k, and rload_b / rload_c / star added after a capture
+    # moved it (phase a and b read arm currents until 2026-11).
+    iL_indices = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -247,15 +248,16 @@ def build_l2_plant(params: GeanThesisParams) -> MmcPlant:
         )
         arms.append(arm_n)
 
-    iL_indices: list[int] = []
+    l_ids: list[int] = []
     for ph in "abc":
-        l_id = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_indices.append(
-            b.pool.branch_var_id_for_inductor(l_id, b.graph),
-        )
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    # State indices only once every node exists: branch_var_id_for_inductor
+    # is num_nodes + k, and rload_b / rload_c / star added after a capture
+    # moved it (phase a and b read arm currents until 2026-11).
+    iL_indices = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -455,15 +457,16 @@ def build_l1_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
         )
         arms.append(arm_n)
 
-    iL_indices: list[int] = []
+    l_ids: list[int] = []
     for ph in "abc":
-        l_id = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_indices.append(
-            b.pool.branch_var_id_for_inductor(l_id, b.graph),
-        )
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    # State indices only once every node exists: branch_var_id_for_inductor
+    # is num_nodes + k, and rload_b / rload_c / star added after a capture
+    # moved it (phase a and b read arm currents until 2026-11).
+    iL_indices = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -540,15 +543,16 @@ def build_l2_plant_igbt(params: GeanThesisIgbtParams) -> MmcPlant:
         )
         arms.append(arm_n)
 
-    iL_indices: list[int] = []
+    l_ids: list[int] = []
     for ph in "abc":
-        l_id = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_indices.append(
-            b.pool.branch_var_id_for_inductor(l_id, b.graph),
-        )
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    # State indices only once every node exists: branch_var_id_for_inductor
+    # is num_nodes + k, and rload_b / rload_c / star added after a capture
+    # moved it (phase a and b read arm currents until 2026-11).
+    iL_indices = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     return MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -603,6 +607,8 @@ class MmcRunResult:
     arm_names: tuple[str, ...] = (
         "a_p", "b_p", "c_p", "a_n", "b_n", "c_n",
     )
+    # Phase-a circulating current (i_arm,p + i_arm,n)/2 (Sousa eq 2.22).
+    i_circ_a: np.ndarray | None = None
 
 
 def run_mmc_open_loop(
@@ -636,8 +642,12 @@ def run_mmc_open_loop(
         raise ValueError(f"layer must be 'l1' or 'l2' (got {layer!r})")
 
     iLa, iLb, iLc = plant.iL_indices
+    b = plant.builder
+    iLbp, iLbn = (b.pool.branch_var_id_for_inductor(b.branch_id_of(n), b.graph)  # type: ignore[attr-defined]
+                  for n in ("Lb_a_p", "Lb_a_n"))
     n_samples = int(round(t_end / dt)) + 1
     log_t   = np.zeros(n_samples)
+    log_icirc = np.zeros(n_samples)
     log_ia  = np.zeros(n_samples)
     log_ib  = np.zeros(n_samples)
     log_ic  = np.zeros(n_samples)
@@ -653,6 +663,7 @@ def run_mmc_open_loop(
             log_ia[i]  = x[iLa]
             log_ib[i]  = x[iLb]
             log_ic[i]  = x[iLc]
+            log_icirc[i] = 0.5 * (x[iLbp] + x[iLbn])
             arms_list = plant.arms  # type: ignore[assignment]
             log_vba[i] = arms_list[0].v_b  # type: ignore[attr-defined]
             for k in range(6):
@@ -668,7 +679,7 @@ def run_mmc_open_loop(
     n = counter[0]
     return MmcRunResult(
         t=log_t[:n], i_a=log_ia[:n], i_b=log_ib[:n], i_c=log_ic[:n],
-        v_b_a_p=log_vba[:n], v_C=log_vC[:, :n],
+        v_b_a_p=log_vba[:n], v_C=log_vC[:, :n], i_circ_a=log_icirc[:n],
     )
 
 
@@ -683,7 +694,6 @@ def thd(signal: np.ndarray, fs: float, f0: float, n_harm: int = 50) -> float:
     n = len(sig)
     win = np.hanning(n)
     spec = np.fft.rfft(sig * win)
-    freqs = np.fft.rfftfreq(n, 1.0 / fs)
     # Find the bin closest to the fundamental.
     k1 = int(round(f0 / (fs / n)))
     if k1 < 1:
@@ -844,11 +854,11 @@ def run_mmc_closed_loop(
         t_end, dt: Simulation horizon and step.
         with_decoupling: If True, add ω·L_eff feedforward terms to
             decouple the d/q axes. ``L_eff = l_load + l_b/2``.
-        with_circulating: If True, enable per-phase PI on the AC
-            residual of the circulating currents.
-        kp_circ, ki_circ: Gains for the circulating-current PI
-            (units: 1/(A) and 1/(A·s) — output is a modulation-index
-            offset δ).
+        with_circulating: If True, enable a per-phase PROPORTIONAL
+            damping on the AC residual of the circulating currents.
+        kp_circ: Its gain (1/A — output is a modulation-index offset δ,
+            clamped to ±0.05).
+        ki_circ: Unused: there is no integral term.
         with_energy_loop: If True, enable the outer slow PI on
             mean(v_C) that offsets i_d_ref.
         kp_energy, ki_energy: Outer-loop PI gains (units A/V and
@@ -913,13 +923,14 @@ def run_mmc_closed_loop(
         )
         arms.append(arm_n)
 
-    iL_idx: list[int] = []
+    l_ids: list[int] = []
     for ph in "abc":
-        lid = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_idx.append(b.pool.branch_var_id_for_inductor(lid, b.graph))
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    # After the last node: see build_l1_plant.
+    iL_idx = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     obs_arms, bex = make_obs(b, arms, dt=dt)  # type: ignore[arg-type]
 
@@ -948,17 +959,6 @@ def run_mmc_closed_loop(
         output_max=+params.V_dc / 2.0,
     )
 
-    # Per-phase circulating-current PIs. Output ``δ`` is a modulation
-    # index offset — keep it small (±0.1) so we don't lose load
-    # control margin.
-    pi_circ = [
-        p.PIController(
-            Kp=kp_circ, Ki=ki_circ,
-            output_min=-0.10, output_max=+0.10,
-        )
-        for _ in range(3)
-    ]
-
     # Outer energy-loop PI on mean(v_C). Output is a small offset
     # added to ``i_d_ref`` (clamped to ±5 A to stay well within the
     # main current loop's authority).
@@ -974,9 +974,11 @@ def run_mmc_closed_loop(
 
     # Low-pass for the v_C mean — smooths out the 2ω ripple so the
     # outer loop sees the slow energy trend.
-    lpf_vC = p.FirstOrderLowPass(tau=20e-3)
-
     v_C_set = params.V_dc if v_C_target is None else float(v_C_target)
+    # Start the filter at the set-point: from 0 V it read a 640 V deficit
+    # for the first ~100 ms and wound the integrator to a −2.6 A bias on
+    # i_d_ref that never unwound in a 300 ms run.
+    lpf_vC = p.FirstOrderLowPass(tau=20e-3, state=v_C_set)
 
     # Effective phase inductance for the decoupling feedforward.
     # AC current sees ``L_load`` plus ``L_b/2`` from the parallel arm

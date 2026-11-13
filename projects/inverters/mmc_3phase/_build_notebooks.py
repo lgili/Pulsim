@@ -97,14 +97,10 @@ de validação.
 
 **O que NÃO vai bater 1:1 com a tese, e por quê**:
 
-1. **Modulação IPD agora disponível no pulsim** — esta atualização
-   adicionou ``modulation_scheme = "ipd"`` aos params do MMC, e este
-   notebook já usa IPD (a mesma estratégia da tese). Mesmo assim, a
-   ondulação ``v_C`` do nosso modelo continua maior que a da Fig 4.2
-   da tese. Isso porque a ondulação ``v_C`` é dominada pela dinâmica
-   ``L0`` média (``m·i_b`` integrada), que é a *mesma* para IPD e
-   PS-PWM. A diferença entre os esquemas está só no padrão de
-   chaveamento de alta-frequência, que contribui pouco ao ``v_C``.
+1. **Ondulação de $v_C$.** O notebook usa IPD, a mesma modulação da
+   tese, mas a ondulação da soma dos capacitores do braço não depende
+   do esquema de chaveamento: ela é a integral de $v_{arm} \cdot i_{arm}$
+   a 1ω e 2ω, dividida por $C_{arm} V_{dc}$ (seção 1.6b).
 2. O protótipo experimental tem perdas adicionais (semicondutores,
    conexões, capacitores não-ideais) que a tese modela aproximadamente
    ajustando ``R_b = 0.675 Ω``. O nosso modelo não captura todas essas
@@ -112,15 +108,13 @@ de validação.
 3. Indutância do braço ``L_b`` não está explicitamente fixada na
    Seção 4.1 da tese — vou usar um valor típico (1 mH) e documentar
    o impacto.
-4. Da nossa análise analítica do L0 (``ΔV_C(1ω) = amplitude(m·i)/(ω·C_arm)``),
-   o ponto de operação documentado (V_dc=640, M=0.85, R=9.75Ω, L=2.8mH)
-   deveria dar ~250 V pkpk de ondulação — *muito* mais que os 50 V da
-   Fig 4.2. Isso sugere que a Fig 4.2 da tese pode ter sido obtida com
-   parâmetros ligeiramente diferentes do que a legenda especifica
-   (ex.: indutância de carga maior, ou M efetivo menor por queda nos
-   semicondutores).
+4. Para os parâmetros declarados (V_dc = 640 V, M = 0,85, R = 9,75 Ω,
+   L = 2,8 mH, C_arm = 94 µF) o balanço de energia do braço dá 291 V
+   pkpk sem corrente de circulação, e nenhuma corrente de circulação a
+   2ω o leva abaixo de 178 V (seção 1.6b). Os ~50 V da Fig 4.2 não são
+   alcançáveis pela soma do braço nesse ponto de operação.
 
-A discussão final do notebook contém uma tabela comparativa lado-a-lado.
+A seção 1.6 tem a tabela comparativa; a 1.7 discute as diferenças.
 
 **Pré-requisitos**
 
@@ -342,15 +336,16 @@ plt.tight_layout(); plt.show()
     cells.append(md(r"""
 **Observações sobre o plot L1**:
 
-* A tensão $v_C$ oscila em torno de $V_{dc} = 640$ V com uma ondulação
-  bem maior que a vista na Fig 4.2 da tese (~50 V pkpk). Isso é a
-  diferença esperada: PS-PWM com N=5 (ímpar) tem mais conteúdo
-  sub-harmônico que IPD.
+* A tensão $v_C$ (soma dos 5 capacitores do braço) oscila em torno de
+  $V_{dc} = 640$ V com ~185 V pkpk, bem mais que os ~50 V da Fig 4.2
+  da tese. A seção 1.6b mostra que esse é o balanço de energia do
+  braço, não o esquema de modulação.
 * A tensão do braço $v_{b,pa}$ mostra os 6 níveis da modulação
   multinível (s_b/N · v_C ∈ {0, 1/5, 2/5, ..., 5/5} × v_C).
 * As correntes de fase são senoidais balanceadas a 60 Hz, com pico
-  determinado por $V_{peak} / |Z_{load}|$ — que dá ~28 A com nossos
-  parâmetros.
+  determinado por $\hat V / |Z_{AC}|$, onde
+  $Z_{AC} = R_{load} + R_b/2 + j\omega(L_{load} + L_b/2)$ — 26,8 A com
+  nossos parâmetros (medido: 26,6 A).
 
 A diferença na ondulação de $v_C$ é o principal gap entre nossa
 simulação e a Fig 4.2 da tese — vamos comparar quantitativamente
@@ -427,8 +422,9 @@ A Tabela 4.2 da tese reporta:
 | RMS(i_ca) [A] (circulating) | 4.60 | 4.55 | 8.67 |
 | RMS(CA(i_cc)) [A] | 1.30 | 1.14 | 0.50 |
 
-Vamos calcular as mesmas métricas para nossas simulações L1 e L2 e
-comparar:
+Calculamos THD($i_a$) e RMS da parte CA da corrente de circulação
+$i_{circ,a} = (i_{a,p} + i_{a,n})/2$ nas simulações L1 e L2 (a corrente
+do barramento não é registrada):
 """))
 
     cells.append(code(r"""
@@ -446,6 +442,7 @@ def measure(res, label):
     v_C_pkpk_avg = (res.v_C[:, mask].max(axis=1) -
                        res.v_C[:, mask].min(axis=1)).mean()
     v_C_mean = res.v_C[:, mask].mean(axis=1).mean()
+    i_circ = res.i_circ_a[mask][:n_window]
     return {
         "label": label,
         "i_a_peak": float(np.max(np.abs(i_a))),
@@ -453,6 +450,7 @@ def measure(res, label):
         "THD_ia_pct": thd_ia,
         "v_C_mean": v_C_mean,
         "v_C_pkpk_avg": v_C_pkpk_avg,
+        "i_circ_ac_rms": rms_ac(i_circ),
     }
 
 
@@ -468,6 +466,8 @@ print(f"{'i_a RMS [A]':28s} {m_l1['i_a_rms']:>14.2f} "
       f"{m_l2['i_a_rms']:>14.2f}  {'(~16 A da Fig 4.2)':>20s}")
 print(f"{'THD(i_a) [%]':28s} {m_l1['THD_ia_pct']:>14.3f} "
       f"{m_l2['THD_ia_pct']:>14.3f}  {'0.709 / 0.706':>20s}")
+print(f"{'RMS(CA(i_circ,a)) [A]':28s} {m_l1['i_circ_ac_rms']:>14.2f} "
+      f"{m_l2['i_circ_ac_rms']:>14.2f}  {'8.67 / 4.55':>20s}")
 print(f"{'v_C médio [V]':28s} {m_l1['v_C_mean']:>14.1f} "
       f"{m_l2['v_C_mean']:>14.1f}  {'~627 V':>20s}")
 print(f"{'v_C pkpk médio [V]':28s} {m_l1['v_C_pkpk_avg']:>14.1f} "
@@ -475,88 +475,105 @@ print(f"{'v_C pkpk médio [V]':28s} {m_l1['v_C_pkpk_avg']:>14.1f} "
 """))
 
     cells.append(md(r"""
+## 1.6b — Ondulação de $v_C$: balanço de energia do braço
+
+A soma dos capacitores do braço superior da fase a guarda
+$W = \tfrac12 C_{arm} v_C^2$, com $dW/dt = v_{arm} \, i_{arm}$,
+$v_{arm} = V_{dc}/2 - \hat V \cos\omega t$ e
+$i_{arm} = I_{dc}/3 + \tfrac12 \hat I \cos(\omega t - \varphi) + i_{circ}$.
+Em primeira ordem $\Delta v_C = \Delta W / (C_{arm} V_{dc})$. O termo a 1ω
+não depende da corrente de circulação; uma $i_{circ}$ a 2ω só mexe no
+termo a 2ω. Abaixo: o valor sem circulação, o valor com a 2ω que a
+própria simulação L1 produz, e o menor valor que qualquer 2ω
+(amplitude 0–40 A, qualquer fase) consegue:
+"""))
+
+    cells.append(code(r"""
+w = params.omega_grid
+V_hat = params.m_depth * params.V_dc / 2
+Z_load = params.r_load + 1j * w * params.l_load
+I_hat, phi = V_hat / abs(Z_load), np.angle(Z_load)
+I_dc = 1.5 * V_hat * I_hat * np.cos(phi) / params.V_dc
+C_arm = params.c_sm / params.n_sm
+tt = np.linspace(0, 1 / params.f_grid, 2000, endpoint=False)
+
+def ripple_pkpk(I2, th):
+    v_arm = params.V_dc / 2 - V_hat * np.cos(w * tt)
+    i_arm = (I_dc / 3 + 0.5 * I_hat * np.cos(w * tt - phi)
+             + I2 * np.cos(2 * w * tt + th))
+    p_arm = v_arm * i_arm
+    W = np.cumsum(p_arm - p_arm.mean()) * (tt[1] - tt[0])
+    return np.ptp(W) / (C_arm * params.V_dc)
+
+mask = res_l1.t >= 150e-3
+t_w, ic_w = res_l1.t[mask], res_l1.i_circ_a[mask]
+c2 = 2 * np.mean(ic_w * np.exp(-2j * w * t_w))      # 2ω phasor of i_circ,a
+r_none = ripple_pkpk(0.0, 0.0)
+r_sim = ripple_pkpk(abs(c2), np.angle(c2))
+r_min = min(ripple_pkpk(a, th) for a in np.linspace(0, 40, 81)
+            for th in np.linspace(0, 2 * pi, 72, endpoint=False))
+print(f"i_circ,a da simulação L1: 2ω = {abs(c2):.2f} A pico")
+print(f"v_C pkpk, 1ª ordem, sem i_circ        : {r_none:6.1f} V")
+print(f"v_C pkpk, 1ª ordem, com a 2ω simulada : {r_sim:6.1f} V"
+      f"   (simulação L1: {m_l1['v_C_pkpk_avg']:.1f} V)")
+print(f"v_C pkpk, 1ª ordem, mínimo sobre 2ω   : {r_min:6.1f} V")
+print(f"por submódulo (÷N = {params.n_sm})               : "
+      f"{r_none / params.n_sm:.1f} V sem i_circ, {r_sim / params.n_sm:.1f} V com a 2ω simulada")
+"""))
+
+    cells.append(md(r"""
 ## 1.7 — Discussão das diferenças
 
-A comparação acima mostra que algumas métricas batem (tensão média
-$v_C$ ≈ V_dc ✓, padrão balanceado das três fases ✓), mas outras
-divergem significativamente — em especial a **ondulação de $v_C$** e
-a **THD da corrente de fase**.
+### Ondulação de $v_C$
 
-### Por que a ondulação $v_C$ é maior na nossa simulação
+A seção 1.6b responde: a corrente de circulação a 2ω que a planta em
+malha aberta desenvolve sozinha já reduz a ondulação da soma do braço
+de ~291 V (sem circulação) para ~185 V, e o modelo de primeira ordem
+com essa mesma 2ω reproduz a simulação. Nenhuma 2ω leva a soma abaixo
+de ~178 V, porque o termo a 1ω — $V_{dc}/2 \cdot \hat I/2$ contra
+$\hat V \cdot I_{dc}/3$ — não tem componente a 2ω para cancelar. Os
+~50 V da Fig 4.2 portanto **não** vêm da corrente de circulação.
+Uma hipótese consistente com os números é que a figura mostre a
+tensão de *um submódulo* (soma ÷ 5 ≈ 37–58 V); não foi possível
+conferir, porque o PDF da tese não está no repositório.
 
-**Atualizado**: pulsim agora suporta IPD via ``modulation_scheme = "ipd"``,
-e este notebook já está rodando com IPD. Mesmo com a *mesma* modulação
-da tese, nossa ondulação ainda fica em ~200 V pkpk vs ~50 V da Fig 4.2.
+### THD da corrente de fase
 
-A análise analítica do modelo L0 médio explica: a ondulação
-$v_C(1\omega)$ é proporcional à amplitude do produto $m \cdot i_b$
-naquela frequência, integrada e dividida por $C_{arm} \cdot \omega$.
-Para nossos parâmetros (V_dc=640, M=0.85, |Z_load|=9.81Ω,
-C_arm=94µF):
+$i_a$ é senoidal: THD 1,7 % (L1) e 1,9 % (L2), contra 0,71 % das
+simulações da tese e 1,11 % do experimento. O que sobra é sobretudo a 5ª
+harmônica (e um pouco de 7ª) que a ondulação de $v_C$ produz no
+produto $m \cdot v_C$; o modelo médio L0, sem chaveamento, tem a
+mesma 5ª (notebook 05). A maior ondulação de $v_C$ explica por que
+nossa THD fica acima da tese.
 
-$$|m \cdot i_b|_{1\omega} \approx 4.5 \text{ A}, \quad
-  \Delta V_C(1\omega) = \frac{4.5}{2\pi \cdot 60 \cdot 94 \cdot 10^{-6}}
-                       \approx 127 \text{ V (single-sided)}$$
+### Corrente de circulação
 
-ou seja, ~254 V pkpk — essencialmente o que estamos medindo. A escolha
-PS-PWM vs IPD afeta o ripple de chaveamento (alta frequência), mas
-*não* o ripple fundamental — esse vem direto do L0.
+RMS da parte CA de $i_{circ,a}$: 7,5 A em L1 (Sim 2 da tese, sem tempo
+morto: 8,67 A) e 8,8 A em L2 (Sim 1, com tempo morto: 4,55 A;
+experimento: 4,60 A). Em L2 o nosso valor fica perto do dobro do da
+tese; não investigamos essa diferença.
 
-A divergência com a Fig 4.2 da tese (50 V pkpk) sugere que os
-parâmetros documentados não correspondem 100% à figura. Possíveis
-explicações: maior indutância de carga real (filtragem extra dos
-harmônicos), M efetivo menor por queda nos semicondutores, ou
-operação a corrente mais baixa que a documentada.
+### Corrente de fase
 
-### Por que a corrente é maior
-
-Com $V_{dc} = 640$ V e $M = 0.85$, $V_{peak,AC} = 272$ V. Com carga
-$|Z_{load}| = \sqrt{R^2 + (\omega L)^2} = 9.81$ Ω, $I_{peak} = 27.7$ A.
-Mas a Fig 4.2 da tese mostra $i_a \approx 20$ A peak. A diferença
-provavelmente é causada por impedância parasita não modelada (perdas
-nos semicondutores, conexões, capacitores de DC link), que a tese
-modela aproximadamente via $R_b = 0.675$ Ω. Nosso modelo de
-semicondutor é ideal (sem $V_{F0}$, sem $r_{on}$), então as correntes
-são naturalmente maiores.
+$\hat V / |Z_{AC}| = 26,8$ A, e o L1 mede 26,6 A. A Fig 4.2 mostra
+~22 A de pico; com os parâmetros da legenda o circuito não chega a
+22 A sem uma impedância extra de ~2 Ω, que a tese não documenta.
 
 ### O que está validado
 
-Mesmo com as diferenças acima, ficou demonstrado que pulsim:
-
-1. **Resolve a topologia MMC correta** — 6 braços + 6 indutores +
-   carga Y, com o star flutuando em $V_{dc}/2$.
-2. **Implementa a modulação multinível** — o $v_b$ mostra os $N+1 = 6$
-   níveis discretos quando $v_C$ é (aproximadamente) constante.
-3. **Captura o efeito do tempo morto** — os notches no $v_b$ do
-   modelo L2 são visíveis exatamente onde a tese (Fig 3.12) prevê.
-4. **Mantém o balanço energético** — $v_C$ médio fica em ~$V_{dc}$
-   sem deriva, indicando que $\langle m \cdot i_b \rangle = 0$ em
-   regime permanente.
-5. **Produz uma trinca de correntes balanceada** — fase a, b, c com
-   $120°$ de defasagem.
-
-Esses cinco pontos demonstram que **o L1/L2 do pulsim implementa as
-equações da tese de Sousa corretamente**. As diferenças quantitativas
-nas métricas finas vêm de escolhas de modulação (PS-PWM vs IPD) e de
-não-idealidades não modeladas (perdas nos semicondutores) — *não* de
-um erro no modelo MMC propriamente dito.
+1. **Topologia** — 6 braços + 6 indutores + carga Y, star em $V_{dc}/2$.
+2. **Modulação multinível** — o $v_b$ mostra os $N+1 = 6$ níveis.
+3. **Tempo morto** — os notches no $v_b$ do L2 aparecem nas transições.
+4. **Balanço de energia** — $v_C$ médio ~635 V, sem deriva, e a
+   ondulação concorda com o balanço de energia de primeira ordem.
+5. **Corrente de fase** — amplitude a 1 % de $\hat V/|Z_{AC}|$ e trinca
+   balanceada.
 
 ## 1.8 — Próximos passos
 
-Para um match mais próximo da tese, opções:
-
-1. **Implementar IPD no pulsim** — adicionar uma nova variante de
-   modulador à `MmcArmMultilevelParams.modulation_scheme` ao lado
-   do `"ps_pwm"`.
-2. **Modelar os semicondutores** — substituir o modelo half-bridge
-   ideal por IGBT level-1 (já disponível em pulsim) para capturar
-   $V_{F0}$ e $r_{on}$.
-3. **Cap. 5 (operação em frequência variável + controle de
-   energia)** — implementar o controlador RST da Seção 5.3 e
-   comparar com a Figura 5.10 da tese.
-
-Por ora, **a infra de simulação está validada e pronta** para
-projetos de controle de MMC em pulsim.
+* Semicondutores IGBT level-1: notebook 04.
+* Referências analíticas independentes da tese: notebook 05.
+* Controle de corrente, circulação e energia (Cap. 5): notebooks 02 e 03.
 """))
 
     return cells
@@ -820,11 +837,9 @@ print(f"{'v_C drift mean (pre→post) [V]':40s} "
 
 * O controle de corrente dq do pulsim consegue rastrear o degrau,
   qualitativamente igual à Fig 5.10.
-* A ondulação `v_C` é maior que na figura da tese — mesmo motivo do
-  notebook 01 (a tese tem componentes extras de hardware não
-  modeladas). Mas a tese **ativa um controlador de energia** em
-  cima do controlador de corrente (Sec. 5.3) que regula essa
-  ondulação — algo que ainda não fizemos aqui.
+* A ondulação `v_C` é maior que na figura da tese — o mesmo gap do
+  notebook 01, onde o balanço de energia do braço mostra que esses
+  parâmetros não permitem ~50 V na soma do braço (seção 1.6b).
 
 **O que falta pra fidelidade total ao Cap. 5 da tese**:
 
@@ -1027,25 +1042,23 @@ for name, _, _, _ in configs:
     cells.append(md(r"""
 ## 3.4 — Discussão dos resultados
 
-| Melhoria | Efeito esperado | Efeito medido |
+| Melhoria | Efeito esperado | Efeito medido (250–300 ms) |
 |---|---|---|
-| ω·L decoupling | Reduz transient cross-coupling em i_q | Sutil: i_circ_AC cai ~1.5% |
-| circ damping | Reduz amplitude da 2ω natural | Pequeno: i_circ_AC cai ~3% |
-| energy loop | Zera o drift de v_C̄ | **Forte: drift cai ~46%** (de −7.2 V pra −3.9 V) |
+| ω·L decoupling | Reduz o acoplamento cruzado em i_q | i_q ≈ 0 com e sem; i_circ_AC 4,00 → 4,01 A |
+| circ damping | Reduz a 2ω natural | **Não reduz**: i_circ_AC 4,01 → 4,08 A com ``kp_circ = 0,001`` |
+| energy loop | Zera o drift de v_C̄ | Nada a corrigir: v_C̄ já fica 0,6 V acima de V_dc sem o laço |
 
-**O laço externo de energia tem o impacto mais claro** nessa demonstração
-— enquanto o decoupling e o circulating damping têm efeitos sutis
-(esperado pra esse ponto de operação com ω·L = 1 Ω relativamente baixa),
-o laço de energia nullifica metade do drift de v_C̄ ao introduzir um
-pequeno bias em ``i_d_ref`` (~-2.5 A) que compensa as perdas no plant.
+Nesse ponto de operação, com esses ganhos, nenhum dos três blocos muda
+o regime permanente de forma mensurável. O P-damping de circulação
+precisaria de outro ganho (ou do PI síncrono a 2ω da tese) para
+atenuar a 2ω.
 
-**Observação sobre i_d com energy loop ON**: a corrente DC drenada
-``i_d_pre`` ficou em -0.56 A (target 2 A) e ``i_d_post`` em 12.3 A
-(target 15 A). Isso porque o laço externo viu ``v_C̄`` abaixo do
-target ``V_dc = 640 V`` desde o início, e biasou ``i_d_ref`` pra
-baixo pra recuperar a energia perdida. Se o target fosse o ponto
-naturalmente estável de ``v_C̄`` (~633 V), o offset seria ~0 e
-``i_d`` rastearia o setpoint diretamente.
+**Correção (2026-11)**: o filtro passa-baixa de $\bar v_C$ começava em
+0 V. Nos primeiros ~100 ms o laço de energia via um déficit de 640 V,
+o integrador saturava e deixava um bias de −2,6 A em ``i_d_ref``
+(``i_d_pre`` = −0,59 A em vez de 2 A) que não se desfazia em 300 ms. A
+versão anterior deste notebook atribuía esse bias a perdas na planta.
+O filtro agora começa no set-point.
 
 **Limitações conhecidas dessa implementação simplificada**:
 
@@ -1053,8 +1066,8 @@ naturalmente estável de ``v_C̄`` (~633 V), o offset seria ~0 e
    Pra resposta dinâmica perfeita em quadro síncrono, seria preciso
    ``dω/dt`` (irrelevante aqui, mas relevante em acionamentos de
    máquina onde a frequência varia).
-2. **Damping vs controle de circulação**: nosso P-damping reduz
-   timidamente a 2ω. A versão completa do Cap. 4.3.5.2 da tese usa
+2. **Damping vs controle de circulação**: nosso P-damping não reduz
+   a 2ω com o ganho usado. A versão completa do Cap. 4.3.5.2 da tese usa
    um PI síncrono no frame 2ω (negativo) que zera completamente o
    2ω. Isso requer um segundo par de transformadas Park rotando a
    ``−2ω``, fora do escopo desse notebook.
@@ -1066,9 +1079,9 @@ naturalmente estável de ``v_C̄`` (~633 V), o offset seria ~0 e
 **O que está validado**: a arquitetura completa do controlador
 hierárquico da Cap. 5 da tese funciona em pulsim — todos os blocos
 estão implementados e podem ser ligados independentemente. A
-fidelidade ao trabalho da tese é qualitativa (mostramos o gain de
-cada bloco), não quantitativa (não fizemos otimização fina dos
-ganhos nem dos filtros).
+fidelidade ao trabalho da tese é só estrutural: com estes ganhos os
+blocos não mudam o regime permanente (tabela acima), e não fizemos
+ajuste dos ganhos nem dos filtros.
 
 ## 3.5 — Próximos passos sugeridos
 
@@ -1365,8 +1378,9 @@ plt.show()
 
 ### Observação central: o modelo físico *piora* o THD ligeiramente
 
-Comparando o `R_b` lumped (THD ≈ 81,7 %) com o SwitchedDiode pair
-físico (THD ≈ 85,5 %), o modelo físico tem **THD um pouco maior**.
+Comparando o `R_b` lumped (THD 1,4–1,8 % com os R_b dos IGBTs) com o
+SwitchedDiode pair físico (THD 2,1–2,4 %; 2,7 % com tempo morto), o
+modelo físico tem **THD um pouco maior**.
 Isso é contra-intuitivo à primeira vista — *adicionar* a física do
 $V_{F0}$ deveria deixar o modelo mais fiel ao protótipo, certo?
 Mas o efeito é o oposto:
@@ -1377,20 +1391,18 @@ Mas o efeito é o oposto:
   de tensão que aparece como **harmônicos ímpares de baixa ordem**
   na corrente. Isso *aumenta* o THD computado sobre 50 harmônicos.
 
-Isso confirma que IGBTs reais **não atenuam** harmônicos PWM —
-eles introduzem uma assinatura de distorção própria. O protótipo
-da tese consegue 1,11 % de THD experimental **apesar** dos IGBTs,
-não graças a eles. A filtragem deve vir do filtro LC/LCL de saída,
-da indutância de carga maior, ou dos parâmetros efetivos diferentes
-dos documentados na Fig 4.2.
+Ou seja, a queda $V_{F0}$ dos IGBTs não atenua harmônicos — ela
+acrescenta distorção nos zero-crossings. O restante da THD é a 5ª e a
+7ª harmônicas que a ondulação de $v_C$ produz em $m \cdot v_C$
+(notebook 01, seção 1.7).
 
-### O gap quantitativo persiste — mas as razões estão claras agora
+### O gap que resta
 
-| Métrica | Pulsim (best) | Sousa exp. | Gap | Causa identificada |
-|---|---:|---:|:---|:---|
-| THD($i_a$) [%] | 81,7 | 1,11 | ~70× | Filtro LCL não documentado |
-| $v_C$ pkpk [V] | 185 | ~50 | ~4× | Inconsistência nos params Fig 4.2 |
-| $i_a$ pico [A] | 28,7 | ~22 | ~30 % | Filtro LCL ou $L_{load}$ maior |
+| Métrica | Pulsim (faixa) | Sousa exp. | Explicação |
+|---|---:|---:|:---|
+| THD($i_a$) [%] | 1,4–2,7 | 1,11 | 5ª/7ª da ondulação de $v_C$ (nb 01, 1.7) |
+| $v_C$ pkpk [V] | 180–206 | ~50 | ≥ 178 V pelo balanço de energia do braço (nb 01, 1.6b) |
+| $i_a$ pico [A] | 26,0–28,5 | ~22 | $\hat V/|Z_{AC}|$ = 26,8 A; 22 A pede ~2 Ω não documentados |
 
 Modelar IGBTs fisicamente **não fecha** essas diferenças, porque
 elas não vêm de perdas de condução. A modelagem física agora está
@@ -1430,10 +1442,10 @@ def build_baseline_notebook() -> list[dict[str, Any]]:
 
 > **Por quê este notebook existe.** Os notebooks 01-04 comparam
 > contra a tese do Sousa (2022), mas o experimento da Seção 4.1
-> tem inconsistências internas conhecidas — a análise analítica do
-> modelo L0 prevê ~250 V pkpk de ondulação $v_C$ para os params
-> declarados, mas a Fig 4.2 mostra ~50 V. **A tese é uma
-> referência *não confiável* em termos absolutos.**
+> não fecha com os parâmetros declarados — o balanço de energia do
+> braço dá ≥ 178 V pkpk de ondulação $v_C$ (291 V sem corrente de
+> circulação; notebook 01, seção 1.6b), mas a Fig 4.2 mostra ~50 V.
+> **Para valores absolutos, a tese não serve de referência.**
 
 Este notebook estabelece uma **referência primária** independente:
 predições analíticas de forma fechada para pontos de operação
@@ -1446,7 +1458,7 @@ Estrutura em 4 tiers:
   amplitude AC L0, ondulação v_C, conservação de energia, balanço
   do capacitor).
 * **Tier 2** — Consistência entre layers (L0/L1/L2 devem concordar
-  nas *médias*; o ordenamento de THD deve respeitar a física).
+  nas *médias* e na THD de baixa ordem; tempo morto só acrescenta).
 * **Tier 4** — Sweeps de parâmetros (M, f_carrier, N, dt) — sem
   divergência através de todo o range operacional.
 * **Tier 5** — Pytest regression em
@@ -1595,7 +1607,7 @@ for m, im, ip in zip(ms, ia_measured, ia_predicted):
     cells.append(md(r"""
 ## 5.5 — Tier 5: Pytest regression suite
 
-A suite reside em ``python/tests/test_mmc_baseline.py`` (9 testes,
+A suite reside em ``python/tests/test_mmc_baseline.py`` (10 testes,
 ~5 s, roda em todo commit). Use::
 
     pytest python/tests/test_mmc_baseline.py -v
@@ -1612,9 +1624,9 @@ analíticos e de consistência. Os destaques:
 
 | Teste | Resultado |
 |---|---|
-| L0 amplitude i_a vs analítico | **0.6 % erro** |
+| L0 amplitude i_a vs analítico | **1.0 % erro** |
 | AVG(v_C) L0 vs L1 | **0.009 % erro** |
-| Fundamental i_a L0 vs L1 | **0.00 % erro** |
+| Fundamental i_a L0 vs L1 | **0.03 % erro** |
 | Sweep M (estabilidade) | **6/6 PASS** |
 | Sweep f_carrier | **5/5 PASS** |
 | Sweep N (1, 2, 3, 5, 7, 10) | **6/6 PASS** |
@@ -1624,8 +1636,8 @@ analíticos e de consistência. Os destaques:
 
 1. A topologia 3-φ do MMC está geometricamente correta
    (Z_AC = R_load + R_b/2 + jω(L_load + L_b/2)).
-2. A geração de fontes m·v_C nos braços está correta — match de
-   0.6 % com a forma fechada é excelente.
+2. A geração de fontes m·v_C nos braços está correta — 1.0 % da
+   forma fechada.
 3. As 4 layers (L0/L1/L2/L3) implementam a **mesma planta** — não
    há viés de DC em nenhuma delas.
 4. O simulador é numericamente robusto: não diverge em nenhum
@@ -1644,19 +1656,16 @@ Ambas as lacunas requerem cross-validação com um simulador
 independente, que é Tier 3 do plano de validação — fica para
 trabalho futuro com PSIM/LTspice.
 
-**Insight crítico sobre o gap com a tese do Sousa:**
+**Sobre o gap com a tese do Sousa:**
 
-O notebook 01 reporta THD ≈ 82 % vs 1.11 % da tese. Mas o teste
-Tier 2.3 deste notebook mostra que **L0 puro já tem 81.6 % de THD**
-— ou seja, o problema **não é** ripple de chaveamento (L0 não tem
-nenhum). É a 2ª harmônica gerada pelo *feedback do ripple de v_C*
-em m·v_C. Esse efeito é controlado pela amplitude de v_C,
-que por sua vez é determinada pelos params (Sec 4.1 implica
-~180 V pkpk para nossa params; a Fig 4.2 mostra ~50 V). A
-**inconsistência está na tese**, não no nosso modelo.
+L0 (sem chaveamento) e L1 têm a mesma THD de baixa ordem (1,75 % e
+1,72 %): a 5ª harmônica de $i_a$ vem da ondulação
+de $v_C$ no produto $m \cdot v_C$, não do PWM. Essa ondulação é fixada
+pelos parâmetros (≥ 178 V pkpk na soma do braço; a Fig 4.2 mostra
+~50 V), e por isso nossa THD fica acima dos 0,7–1,1 % da tese.
 
-Essa é uma conclusão de validação muito mais forte do que apenas
-"nossos números são diferentes da tese". Agora sabemos *por quê*.
+(Até 2026-11 este notebook dizia que o L0 tinha 81,6 % de THD. Era um
+índice de estado obsoleto: ``i_a`` lia uma corrente de braço.)
 """))
 
     return cells

@@ -65,6 +65,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (outer), where the old gains gave 21–23° on the inner loop at 220 V.
   P_total now reads +4.8 / +13.7 / +6.3 % against PSIM, but PSIM's
   OP 2.3 terms sum to 60.2 W against its stated 41.79 W (README).
+* **Fixed** (project model) every 3-φ MMC builder in
+  `projects/inverters/mmc_3phase` (L0, L1, L2, both IGBT variants, the
+  closed loop) took the load-inductor state index inside the load loop,
+  before the phase-b/c and star nodes existed, so `i_a` read an arm
+  current: THD 81.7 % and a 13.0 A fundamental. Now THD 1.7 % and
+  26.06 A (V̂/|Z_AC| = 26.76 A). The notebooks' "L0 already has 81.6 %
+  THD, so the thesis is inconsistent" conclusion is withdrawn. The
+  arm-sum v_C ripple (185 V) is the arm energy balance with the
+  simulated 10 A 2f circulating current (first order: 185.5 V); no 2f
+  current brings it below 178 V, so the thesis' ~50 V is not the arm
+  sum at these parameters. The closed-loop energy loop's v_C low-pass
+  started at 0 V and wound its integrator to a −2.6 A bias on i_d_ref
+  (i_d_pre −0.59 A for a 2 A reference); it now starts at the set-point.
+* **Fixed** `examples/half_bridge_pwm.yaml` returned the RL load to a
+  100 kΩ divider (i_L peak 1.2 mA instead of 0.62 A) and had no
+  freewheeling diodes for the dead time; it has a split capacitor bus
+  and anti-parallel diodes now (0.617 A, analytic 0.622 A).
+* **Fixed** `run_psfb_ja_loss_analysis.py` printed 75.09 / 165.4 /
+  24.43 W from the primary current (which carries the reflected load
+  current) on a core whose J-A B was 0.42 T against the circuit's
+  23 mT. It now uses the magnetising current on an ETD49 with N = 3 and
+  prints a loss only where the J-A B matches the circuit's: ferrite
+  18.05 W (B ratio 0.83); the other two sets are not the circuit's core.
+  `compute_bh_loop`'s negative loop area for `permalloy` is a known
+  limitation (`probes/ja_negative_loop_area.py`).
+* **Fixed** (notebook) `buck_converter_design` counted the diode
+  conduction loss as V_T0·I_avg only; with the 20 mΩ slope it is
+  V_T0·I_avg + R_d·I_rms² = 3.190 W (was 2.812 W), η 92.05 → 91.52 %.
 * **Documented** (not defects) the `b_extra` sign — it is an addend to the
   residual F = J·x + b, so an entry e on a voltage source's row gives
   v(+) − v(−) = V − e, and on a node row draws e out of the node — and

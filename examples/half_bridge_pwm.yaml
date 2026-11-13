@@ -26,7 +26,22 @@ circuit:
       to: gnd
       V: 100.0
 
-    # Mid-rail divider (sets the RL-load return reference at Vdc/2).
+    # Split DC bus: the RL load returns to mid = Vdc/2. A resistive
+    # divider alone (100 kΩ, as this file had until 2026-11) is no
+    # return for a 10 Ω load: mid followed `out` and i_L peaked at
+    # 1.2 mA instead of 0.62 A. The 100 kΩ pair only balances the caps.
+    - type: capacitor
+      name: Cbus_hi
+      from: vcc
+      to: mid
+      C: 100.0e-6
+
+    - type: capacitor
+      name: Cbus_lo
+      from: mid
+      to: gnd
+      C: 100.0e-6
+
     - type: resistor
       name: Rmid1
       from: vcc
@@ -51,6 +66,22 @@ circuit:
       from: out
       to: gnd
       g_on: 20.0
+      g_off: 1.0e-9
+
+    # Anti-parallel diodes carry the inductor current in the dead time
+    # (without them it has only the 1 nS off-state of the switches).
+    - type: diode
+      name: D_hi
+      anode: out
+      cathode: vcc
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    - type: diode
+      name: D_lo
+      anode: gnd
+      cathode: out
+      g_on: 1.0e3
       g_off: 1.0e-9
 
     - type: resistor

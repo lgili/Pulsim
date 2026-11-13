@@ -90,6 +90,16 @@ SCRIPTS = {
         (r"i_d\s+pre-step.*?= " + F, near(5.0, 0.1)),
         (r"i_q\s+post-step.*?= " + F, near(-3.0, 0.1)),
     ],
+    # Was 75.09 / 165.4 / 24.43 W from the primary current (which carries
+    # the reflected load) on a core whose B was 0.42 T against the
+    # circuit's 23 mT. Now i_m on ETD49, N = 3: only ferrite matches.
+    "run_psfb_ja_loss_analysis.py": [
+        (r"P_out \(last period\)\s+= " + F, near(23.6, 0.3)),
+        (r"circuit B peak, N = 3\s+= " + F, near(0.123, 0.002)),
+        (r"ferrite_n87\s+[\d.]+ T\s+" + F, near(0.83, 0.02)),
+        (r"ferrite_n87\s+[\d.]+ T\s+[\d.]+\s+" + F + " W", near(18.05, 0.2)),
+        (r"permalloy\s+[\d.]+ T\s+" + F, above(3.0)),
+    ],
     "run_pfc_boost_closed_loop.py": [
         (r"V_bus mean \(late\):\s+" + F, near(200.0, 1.0)),
         (r"PF = P/\(V_rms·I_rms\): " + F, above(0.98)),
@@ -177,7 +187,11 @@ NOTEBOOKS = {
     "examples/notebooks/15_new_components_catalog.ipynb": [
         (r"Total OK: (\d+) / 20", near(20, 0))],
     "examples/notebooks/buck_converter_design.ipynb": [
-        (r"V_out médio: " + F + "V", near(11.9205, 0.06))],
+        (r"V_out médio: " + F + "V", near(11.9205, 0.06)),
+        # Diode conduction is V_T0·I_avg + Rd·I_rms² (was V_T0·I_avg alone:
+        # 2.812 W, η 92.05 %); the resistive term at I_rms = 4.35 A adds 0.38 W.
+        (r"A, RMS: [\d.]+A\nPerda de condução: " + F + "W", near(3.190, 0.003)),
+        (r"EFICIÊNCIA: " + F + "%", near(91.52, 0.01))],
     "examples/notebooks/boost_converter_design.ipynb": [
         (r"Vout médio: " + F + "V", near(23.953, 0.12))],
     "examples/notebooks/boost_pfc_closed_loop.ipynb": [
@@ -237,6 +251,30 @@ NOTEBOOKS = {
     "projects/inverters/m3c_3phase/08_m3c_precharge_start.ipynb": [
         (r"V_mean:\s+" + F, near(23954, 24)),
         (r"Released to RUNNING:\s+" + F, near(1.372, 0.02)),
+    ],
+    # mmc_3phase: i_a used to read an arm current (stale state index):
+    # THD 81.7 -> 1.715 %. The v_C ripple is the arm energy balance with
+    # the simulated 2f circulating current (185.5 V vs simulated 184.8 V).
+    "projects/inverters/mmc_3phase/01_mmc_validation_gean.ipynb": [
+        (r"i_a peak \[A\]\s+" + F, near(26.64, 0.27)),
+        (r"THD\(i_a\) \[%\]\s+" + F, near(1.715, 0.1)),
+        (r"RMS\(CA\(i_circ,a\)\) \[A\]\s+" + F, near(7.54, 0.15)),
+        (r"v_C pkpk médio \[V\]\s+" + F, near(184.8, 3.7)),
+        (r"sem i_circ\s+:\s+" + F, near(291.4, 0.3)),
+        (r"com a 2ω simulada :\s+" + F, near(185.5, 3.7)),
+        (r"mínimo sobre 2ω\s+:\s+" + F, near(178.2, 0.2)),
+    ],
+    "projects/inverters/mmc_3phase/02_mmc_closed_loop_dq.ipynb": [
+        (r"i_d post-step \(150-200 ms\) \[A\]\s+" + F, near(15.0, 0.15))],
+    # +energy loop i_d_pre -0.587 -> 2.001 A: the v_C low-pass started at
+    # 0 V and wound the outer integrator to a -2.6 A bias.
+    "projects/inverters/mmc_3phase/03_mmc_advanced_control.ipynb": [
+        (r"\+ energy loop\s+" + F, near(2.001, 0.02))],
+    "projects/inverters/mmc_3phase/04_mmc_igbt_level1.ipynb": [
+        (r"Tese-calibrado\s+(\d+\.\d\d)\s", near(26.64, 0.27))],
+    "projects/inverters/mmc_3phase/05_mmc_baseline_validation.ipynb": [
+        (r"Tier 2[\s\S]*?PASSED: (\d+)/3", near(3, 0)),
+        (r"THD L0=" + F, near(1.747, 0.1)),
     ],
     # 57.79 -> 74.27 W: no 470 uF on rect_p any more (line PF 0.62 ->
     # 0.997) and the bridge loss counts all four diodes on the simulated
@@ -330,3 +368,109 @@ def test_notebook_claims(nb_path):
     nbclient.NotebookClient(nb, timeout=1800, kernel_name="python3",
                             resources={"metadata": {"path": str(path.parent)}}).execute()
     _check(_outputs_text(nb), NOTEBOOKS[nb_path], nb_path)
+
+
+# ---------------------------------------------------------------------------
+# YAML examples with no driver script: each row loads the file, runs it the
+# way its header says, and measures one number against its closed form.
+# ---------------------------------------------------------------------------
+
+def _yaml_run(name, switch_fn=None, t_end=None):
+    import numpy as np
+    import pulsim as p
+    lc = p.load_yaml_file(str(ROOT / "examples" / name))
+    b = lc.builder
+    sw = switch_fn(p, b) if switch_fn else None
+    r = (p.simulate(lc, switch_fn=sw) if t_end is None else
+         p.simulate(b, t_end=t_end, dt=lc.options.dt, switch_fn=sw))
+    t, X = np.asarray(r.times), np.asarray(r.states)
+    assert np.all(np.isfinite(X)), name
+    return b, r, t, X
+
+
+def _pwm(name, f=20e3, d=0.5):
+    return lambda p, b: p.make_pwm_switch_fn(
+        frequency=f, duty=d, switch_idx=b.switch_index_of(name),
+        num_switches=b.graph.num_switches)
+
+
+def _interleaved(p, b, T=50e-6):
+    i0, i1, n = b.switch_index_of("S0"), b.switch_index_of("S1"), b.graph.num_switches
+
+    def sw(t):
+        m = p.SwitchStateMask(n)
+        m.set(i0, (t % T) < 0.5 * T)
+        m.set(i1, ((t + 0.5 * T) % T) < 0.5 * T)
+        return m
+    return sw
+
+
+def _dead_time_pair(p, b):
+    return p.make_dead_time_pwm_pair_fn(
+        frequency=20e3, duty=0.5, hs_switch_idx=b.switch_index_of("S_hi"),
+        ls_switch_idx=b.switch_index_of("S_lo"),
+        num_switches=b.graph.num_switches, dead_time=1e-6)
+
+
+def _dcm_buck(D, L, R, T):
+    import math
+    K = 2 * L / (R * T)
+    return 2 / (1 + math.sqrt(1 + 4 * K / D**2))
+
+
+def _yaml_value(key):
+    import math
+    import numpy as np
+    import pulsim as p
+    if key == "rc_circuit.yaml":            # 5 V, 1 kΩ, 1 µF at t_end
+        b, r, t, X = _yaml_run(key)
+        return X[-1, b.node_id_of("out")], 5 * (1 - math.exp(-t[-1] / 1e-3)), 1e-4
+    if key == "rl_circuit.yaml":            # 10 V, 100 Ω, 10 mH at t_end
+        b, r, t, X = _yaml_run(key)
+        return np.asarray(r.i("L1"))[-1], 0.1 * (1 - math.exp(-t[-1] / 1e-4)), 1e-5
+    if key == "rlc_circuit.yaml":           # settles to the 10 V source
+        b, r, t, X = _yaml_run(key, t_end=20e-3)
+        return X[-1, b.node_id_of("out")], 10.0, 0.05
+    if key == "rlc_step_response.yaml":     # header: peak 18.5 V (ζ = 0.05)
+        b, r, t, X = _yaml_run(key)
+        z = 0.05
+        return (X[:, b.node_id_of("vc")].max(),
+                10 * (1 + math.exp(-math.pi * z / math.sqrt(1 - z * z))), 0.01)
+    if key == "buck_converter.yaml":        # header: DCM, 25.8 V
+        b, r, t, X = _yaml_run(key, switch_fn=_pwm("S1"), t_end=20e-3)
+        v = p.time_average(t, X[:, b.node_id_of("out")], t_from=18e-3)
+        return v, 48 * _dcm_buck(0.5, 100e-6, 10.0, 50e-6), 0.01 * 25.8
+    if key == "stress_buck_switching.yaml":  # header: 2-phase DCM, 28.2 V
+        b, r, t, X = _yaml_run(key, switch_fn=_interleaved)
+        v = p.time_average(t, X[:, b.node_id_of("out")], t_from=8e-3)
+        return v, 48 * _dcm_buck(0.5, 150e-6, 20.0, 50e-6), 0.01 * 28.2
+    if key == "half_bridge_pwm.yaml":       # ±50 V square into 10 Ω + 1 mH
+        b, r, t, X = _yaml_run(key, switch_fn=_dead_time_pair)
+        i = np.asarray(r.i("Lload"))[t >= t[-1] - 50e-6]
+        return 0.5 * np.ptp(i), 5 * math.tanh(25e-6 / 2e-4), 0.02 * 0.622
+    # The rest state no number: they must run, finite.
+    _yaml_run(key)
+    return 0.0, 0.0, 0.0
+
+
+YAMLS = ["rc_circuit.yaml", "rl_circuit.yaml", "rlc_circuit.yaml",
+         "rlc_step_response.yaml", "buck_converter.yaml",
+         "stress_buck_switching.yaml", "half_bridge_pwm.yaml", "rc_pulse.yaml",
+         "stress_large_rc_ladder.yaml", "stress_large_resistive_ladder.yaml",
+         "hysteretic_inductor_demo.yaml", "induction_motor_dol.yaml"]
+
+
+@needs_tree
+@pytest.mark.parametrize("name", YAMLS)
+@pytest.mark.examples
+@pytest.mark.skipif(not RUN_SLOW, reason="set PULSIM_RUN_EXAMPLES=1")
+def test_yaml_claims(name):
+    measured, expected, tol = _yaml_value(name)
+    assert abs(measured - expected) <= tol, f"{name}: {measured} vs {expected} ± {tol}"
+
+
+@needs_tree
+def test_v1_yaml_is_refused():
+    import pulsim as p
+    with pytest.raises(Exception, match="(?i)v1|schema|legacy"):
+        p.load_yaml_file(str(ROOT / "examples" / "refrigerator_compressor_cc.yaml"))

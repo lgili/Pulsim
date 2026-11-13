@@ -4,7 +4,10 @@
 # `vcswitch`es (driven by `pwm` sources on `ctrl0`/`ctrl1`) become
 # gate-mask `switch` devices toggled by a runtime `switch_fn(t)`.
 # Drive S0 (idx 0) and S1 (idx 1) at 20 kHz / 50% — interleave by
-# 180° for ripple cancellation. Run with:
+# 180° for ripple cancellation. Each 150 µH phase carries 1.4 A with
+# ~3.3 A pk-pk ripple, so both run in DCM: K = 2L/(2R·T) = 0.3,
+# M = 2/(1+√(1+4K/D²)) = 0.587 → 28.2 V (measured 28.16 V over
+# 8–10 ms), not D·V_in = 24 V. Run with:
 #
 #   import pulsim as p
 #   lc = p.load_yaml_file("examples/stress_buck_switching.yaml")

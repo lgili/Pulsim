@@ -48,8 +48,7 @@ From pytest::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from math import pi
+from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
 import numpy as np
@@ -64,7 +63,6 @@ from mmc_3phase_model import (
     make_phase_mref_fns,
     run_mmc_open_loop,
     rms,
-    rms_ac,
     thd,
 )
 
@@ -151,15 +149,16 @@ def build_l0_plant(params: GeanThesisParams) -> MmcPlant:
         )
         arms.append(arm_n)
 
-    iL_indices: list[int] = []
+    l_ids: list[int] = []
     for ph in "abc":
-        l_id = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_indices.append(
-            b.pool.branch_var_id_for_inductor(l_id, b.graph),
-        )
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    # State indices only once every node exists: branch_var_id_for_inductor
+    # is num_nodes + k, so an index taken before the phase-b/c nodes were
+    # added points at another branch (an arm current, THD 81.6 %).
+    iL_indices = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     return MmcPlant(builder=b, arms=arms,
                     iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -337,13 +336,13 @@ def test_dc_zero_input(params: GeanThesisParams) -> BaselineResult:
             params=arm_params, m_b=m_const,
         )
         arms.append(arm_n)
-    iL_indices = []
+    l_ids = []
     for ph in "abc":
-        l_id = b.graph.num_branches
+        l_ids.append(b.graph.num_branches)
         b.add_inductor(f"Lload_{ph}", f"ac_{ph}", f"rload_{ph}", params.l_load)
         b.add_resistor(f"R_{ph}", f"rload_{ph}", "star", params.r_load)
-        iL_indices.append(b.pool.branch_var_id_for_inductor(l_id, b.graph))
     b.add_resistor("R_star", "star", "gnd", 1e6)
+    iL_indices = [b.pool.branch_var_id_for_inductor(lid, b.graph) for lid in l_ids]
 
     plant = MmcPlant(builder=b, arms=arms,
                      iL_indices=(iL_indices[0], iL_indices[1], iL_indices[2]))
@@ -458,8 +457,6 @@ def test_energy_conservation(params: GeanThesisParams,
     plant = build_l0_plant(params)
     res = run_l0_open_loop(plant, t_end=200e-3, dt=1e-5)
     mask = res.t >= 150e-3 - 1e-9  # ensure 3 periods captured
-    T = 1.0 / params.f_grid
-
     # Load power (3-φ Y, sum of three phases):
     p_load = 3.0 * rms(res.i_a[mask])**2 * params.r_load
     # Approximation: assume i_a, i_b, i_c have same RMS (balanced).
@@ -615,12 +612,15 @@ def test_layer_fundamental_i_a(params: GeanThesisParams,
 
 
 def test_thd_ordering(params: GeanThesisParams) -> BaselineResult:
-    """Tier 2.3 — THD ordering: L0 ≈ 0 % < L1 < L2 (physical
-    expectation).
+    """Tier 2.3 — THD: L0 ≈ L1 ≤ L2.
 
-    L0: continuous-time average, no carrier → THD ~ 0.
-    L1: PS-PWM discrete, carrier ripple → THD > L0.
-    L2: PS-PWM + dead-time → THD ≥ L1 (dead-time adds distortion).
+    ``thd`` sums harmonics 2..50 (≤ 3 kHz), so the carrier content near
+    9 kHz is outside it. What it sees is the 5th/7th harmonic that the
+    v_C ripple (59/33/15 V at 1f/2f/3f) puts into m·v_C — the same in
+    the average model and the switched one (i_a,5 = 0.447 A in L0,
+    0.439 A in L1). So L0 and L1 agree to 0.1 pp, and dead time
+    (L2) only adds distortion. (The old "L0 < L1" passed only while
+    both read an arm current through a stale state index.)
     """
     plant_l0 = build_l0_plant(params)
     plant_l1 = build_l1_plant(params)
@@ -637,7 +637,7 @@ def test_thd_ordering(params: GeanThesisParams) -> BaselineResult:
     thd_l0 = thd_meas(res_l0, 1e5)
     thd_l1 = thd_meas(res_l1, 2e5)
     thd_l2 = thd_meas(res_l2, 2e5)
-    passed = thd_l0 < thd_l1 <= thd_l2
+    passed = abs(thd_l0 - thd_l1) <= 0.1 and thd_l1 <= thd_l2
     return BaselineResult(
         name="thd_ordering",
         passed=passed,
@@ -646,7 +646,7 @@ def test_thd_ordering(params: GeanThesisParams) -> BaselineResult:
         tolerance=0.0,
         units="%",
         msg=(f"THD L0={thd_l0:.3f} %, L1={thd_l1:.3f} %, "
-             f"L2={thd_l2:.3f} %  (must be L0 < L1 ≤ L2)"),
+             f"L2={thd_l2:.3f} %  (must be |L0 − L1| ≤ 0.1 pp, L1 ≤ L2)"),
         tier=2,
     )
 
