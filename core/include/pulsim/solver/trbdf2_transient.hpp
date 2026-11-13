@@ -158,6 +158,16 @@ struct TrBdf2Options {
     Real tol_newton_res = Real{1e-9};
     bool enable_newton_line_search = false;
     bool enable_newton_lm = false;
+    /// Post-event restart (update-trbdf2-post-event-restart). After
+    /// every gate-edge landing the edge cascade's probe (a trapezoidal
+    /// solve of a few femtoseconds under the post-edge mask) is
+    /// committed as a step, so the next step starts from post-edge
+    /// derivatives; a gate edge settled at a step boundary replaces the
+    /// derivative slots from its probe. Not at diode events or the
+    /// initial settle (see the engine). The post-gate-edge step memory
+    /// stores the controller's proposal instead of the accepted step.
+    /// `false` reproduces the previous step sequence exactly.
+    bool refresh_after_event = true;
 };
 
 struct TrBdf2Stats {
@@ -213,6 +223,14 @@ struct TrBdf2Stats {
     /// The probe step a singular factorization forced (0 = the default
     /// h_probe_floor was enough). See `probe_solve`.
     Real probe_floor_used = 0;
+    /// Post-gate-event restarts (see TrBdf2Options::refresh_after_event;
+    /// each commits the edge probe, which adds one recorded sample and
+    /// is not counted in n_accept), the probe solves taken only for a
+    /// restart (no cascade ran, or it did not settle), and the smallest
+    /// accepted step after a restart (0 = none).
+    Size n_derivative_refreshes = 0;
+    Size n_refresh_probes = 0;
+    Real h_post_event_min = 0;
 };
 
 namespace detail_trbdf2 {
@@ -785,6 +803,10 @@ inline SimulationResult run_transient_trbdf2(
     // past 1 % of h_max), and keep the step that worked as this run's
     // probe floor so the failure is paid once, not at every cascade.
     Real h_probe_learned = Real{0};
+    // Step and outcome of the last probe (the post-event refresh
+    // reads the capacitor current back through this step).
+    Real last_probe_dt = Real{0};
+    bool last_probe_ok = false;
     auto is_singular_error = [](const std::runtime_error& e) {
         return std::string(e.what()).find("numerically singular")
                != std::string::npos;
@@ -800,6 +822,8 @@ inline SimulationResult run_transient_trbdf2(
                 if (dt_try > h_probe_learned && dt_try > dt) {
                     h_probe_learned = dt_try;
                 }
+                last_probe_dt = dt_try;
+                last_probe_ok = ok;
                 return ok;
             } catch (const std::runtime_error& e) {
                 if (!is_singular_error(e) || dt_try >= dt_cap) {
@@ -1053,6 +1077,105 @@ inline SimulationResult run_transient_trbdf2(
     // (see the crossing detector).
     Real held_redecide_t = opts.t_start - span;
 
+    // ---- post-gate-edge restart ----
+    // A gate edge leaves the companion history holding the PRE-edge
+    // derivatives (inductor v, capacitor i, each stateful device's
+    // slot). The next step's trapezoidal stage and error estimate read
+    // them, so its error is O(h), not O(h^3): the controller rightly
+    // refused it, collapsing the buck's post-edge step to 9e-10 s (and
+    // the accepted-step memory then pinned 8e-13 s for a whole run).
+    // The edge cascade's last probe is a real trapezoidal solve over
+    // h_p under the post-edge mask from the committed state: COMMIT it
+    // (as a diode landing commits its sub-step). Its history then
+    // carries the post-edge derivatives the method itself produced,
+    // and the record gets a post-edge sample h_p after the edge, so
+    // anything integrated over the trace (losses, charge) sees the
+    // edge as a jump instead of a ramp across the first post-edge step
+    // (measured: interpolating across a long first step moved a buck's
+    // conduction loss by 5 % and a switched-branch charge 10x).
+    //
+    // GATE-driven events only. Not at a diode event: a turn-off at the
+    // zero crossing of an inductor's current leaves that inductor on a
+    // g_off-only path, the probe then holds the stiff L·g_off mode
+    // (ps time constant) and the trapezoidal stage does not damp it. A
+    // 325 V bridge with a 1 mH line went from 22 to 5814 diode events
+    // and a Level-1 MOSFET half bridge's error from 4e-4 to 4e-2. Nor at
+    // the initial settle: it moved the same bridge's later events
+    // enough to grind it to max_steps. See
+    // update-trbdf2-post-event-restart/DECISIONS.md.
+    //
+    // `settled`: x_trial is already the probe (the last probe of a
+    // cascade that settled, solved under gates_decided); otherwise one
+    // probe is taken here. With `commit` false, or no room before
+    // t_end, only the derivative slots are replaced (states kept).
+    bool post_event_pending = false;
+    auto restart_after_gate_event = [&](bool settled, Real t_gates,
+                                        Real hp, bool commit) {
+        if (!opts.refresh_after_event) {
+            return;
+        }
+        SwitchStateMask m_probe = gates_decided;
+        if (!settled) {
+            m_probe = mask_at(t_gates);
+            try {
+                probe_solve(m_probe, t, hp, x_trial);
+            } catch (const std::runtime_error&) {
+                return;   // no usable probe: keep the old slots
+            }
+            ++st.n_refresh_probes;
+        }
+        if (!last_probe_ok || !x_trial.allFinite()) {
+            return;
+        }
+        const Real dtp = last_probe_dt;
+        ++st.n_derivative_refreshes;
+        post_event_pending = true;
+        // No commit across t_end or a controller tick (it would fire
+        // dtp late): replace the slots only.
+        if (!commit || t + dtp >= opts.t_end - h_min
+            || (has_ticks && t + dtp >= t_next_tick - h_min)) {
+            history.refresh_derivatives(x_trial, dtp);
+            if (has_coss) coss.refresh_derivatives(x_trial, dtp);
+            if (has_laur) laur.refresh_derivatives(x_trial);
+            if (has_tail) tail.refresh_derivatives(x_trial);
+            if (has_pmsm) pmsm.refresh_derivatives(x_trial);
+            if (has_sat) sat.refresh_derivatives(x_trial);
+            return;
+        }
+        history.update_from_state(x_trial, dtp);
+        if (has_coss) coss.update_from_state(x_trial, dtp);
+        if (has_laur) {
+            laur.update_from_state(x_trial, dtp,
+                                   pwl::TrBdf2Stage::Trapezoidal);
+        }
+        if (has_tail) {
+            tail.update_from_state(x_trial, dtp,
+                                   pwl::TrBdf2Stage::Trapezoidal);
+        }
+        if (has_pmsm) {
+            pmsm.update_from_state(x_trial, dtp,
+                                   pwl::TrBdf2Stage::Trapezoidal);
+        }
+        if (has_sat) {
+            sat.update_from_state(x_trial, pwl::TrBdf2Stage::Trapezoidal);
+        }
+        // The toggle is at the edge, not at the next step's start
+        // (t + dtp): dtp differs per edge and biased gate_pulse_min.
+        if (learn_gates) {
+            learn_gate_toggles(m_probe, t);
+        }
+        x = x_trial;
+        x_sig = x;
+        t += dtp;
+        result.times.push_back(t);
+        result.states.push_back(x);
+        result.event_iteration_count.push_back(0);
+        result.record_switch_state(m_probe);
+        x_mask = m_probe;
+        x_mask_known = true;
+        gates_decided = m_probe;
+    };
+
     try {
         while (t < opts.t_end - h_min && steps < opts.max_steps) {
             if (should_continue && !should_continue()) {
@@ -1099,6 +1222,7 @@ inline SimulationResult run_transient_trbdf2(
                 // An edge at this step boundary that no step landed
                 // (see gates_decided): settle the diodes under the
                 // gates the step will use, as a landed edge does.
+                bool settled = false;
                 for (Size it = 0; it < opts.max_event_iterations;
                      ++it) {
                     gates_decided = mask_at(t + Real{0.5} * h_min);
@@ -1106,9 +1230,14 @@ inline SimulationResult run_transient_trbdf2(
                                 x_trial);
                     x_sig = x_trial;
                     if (!diodes.update_from_state(x_trial)) {
+                        settled = true;
                         break;
                     }
                 }
+                restart_after_gate_event(settled,
+                                         t + Real{0.5} * h_min,
+                                         h_probe_floor,
+                                         /*commit=*/false);
                 ++st.n_gate_boundary_settles;
             }
             // Land the next tick exactly, like a gate edge.
@@ -1745,13 +1874,21 @@ inline SimulationResult run_transient_trbdf2(
                 x_mask_known = true;
                 gates_decided = mask_step;
                 ++st.n_accept;
-                if (pending_gate_slot >= 0) {
+                if (post_event_pending) {
+                    st.h_post_event_min = st.h_post_event_min > Real{0}
+                        ? std::min(st.h_post_event_min, h) : h;
+                    post_event_pending = false;
+                }
+                if (pending_gate_slot >= 0
+                    && (landed_on_edge || !opts.refresh_after_event)) {
                     // The h that survived right after this gate
                     // corner — next cycle's same-parity edge
                     // restarts here instead of shrinking through
                     // rejects. Only a CONTROLLER-chosen h is worth
                     // remembering: an edge-clamped step's h is the
-                    // accidental distance to the next edge.
+                    // accidental distance to the next edge. (With the
+                    // refresh, the controller's PROPOSAL is stored
+                    // instead, below.)
                     if (!landed_on_edge) {
                         h_mem_gate[pending_gate_slot] = h;
                     }
@@ -1770,9 +1907,10 @@ inline SimulationResult run_transient_trbdf2(
                     // The probes pin (v, i) via a tiny-dt trap and
                     // ask which diodes conduct under the post-edge
                     // mask; nothing is committed.
+                    const Real h_probe =
+                        std::max(h_probe_floor, h * Real{1e-6});
+                    bool settled = false;
                     if (has_diodes) {
-                        const Real h_probe =
-                            std::max(h_probe_floor, h * Real{1e-6});
                         for (Size it = 0;
                              it < opts.max_event_iterations;
                              ++it) {
@@ -1782,10 +1920,13 @@ inline SimulationResult run_transient_trbdf2(
                             x_sig = x_trial;
                             if (!diodes.update_from_state(
                                     x_trial)) {
+                                settled = true;
                                 break;
                             }
                         }
                     }
+                    restart_after_gate_event(settled, t + h_probe,
+                                             h_probe, /*commit=*/true);
                     // Post-edge restart: use the h remembered for
                     // this edge PARITY (rising/falling alternate);
                     // first cycle keeps the controller's h.
@@ -1804,6 +1945,16 @@ inline SimulationResult run_transient_trbdf2(
                                         Real{-1.0 / 3.0}),
                         Real{0.2}, Real{5.0});
                     h = h * fac;
+                    if (pending_gate_slot >= 0) {
+                        // Post-edge memory = the controller's proposal
+                        // after the first accepted post-edge step: with
+                        // a refreshed derivative it is the right
+                        // restart for the same corner next period, and
+                        // it can grow as well as shrink (storing the
+                        // accepted h could only ratchet down).
+                        h_mem_gate[pending_gate_slot] = std::min(h, h_max);
+                        pending_gate_slot = -1;
+                    }
                 }
             }
         }

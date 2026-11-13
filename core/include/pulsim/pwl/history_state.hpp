@@ -380,6 +380,31 @@ public:
         }
     }
 
+    /// TR-BDF2 post-event derivative refresh: replace the DERIVATIVE
+    /// slot of each entry (capacitor current, inductor voltage) with
+    /// its value in `x_probe`, a trapezoidal probe of step `h_probe`
+    /// solved under the post-event mask from this history. The states
+    /// (capacitor v_prev, inductor i_prev) are left untouched: the
+    /// probe exists to pin them.
+    void refresh_derivatives(const Vector& x_probe, Real h_probe) {
+        if (entries_.empty() || h_probe <= Real{0}) {
+            return;
+        }
+        for (auto& e : entries_) {
+            const Real v_p = stamping::read_node_voltage(x_probe, e.from)
+                             - stamping::read_node_voltage(x_probe, e.to);
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                // The probe's own companion current at t + h_probe.
+                models::Capacitor::Params p{e.C_or_L};
+                e.i_prev = models::Capacitor::g_eq(h_probe, p)
+                               * (v_p - e.v_prev)
+                           - e.i_prev;
+            } else {
+                e.v_prev = v_p;
+            }
+        }
+    }
+
     /// Zero all entries — used at start of simulation (all-zero IC).
     void reset() noexcept {
         for (auto& e : entries_) {

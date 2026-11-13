@@ -90,6 +90,36 @@ step count because L-stability lets dt grow several orders of
 magnitude through the stiff transitions, at the cost of a
 Newton solve per step.
 
+## Variable-step transient engine (`engine='trbdf2'`)
+
+TR-BDF2 (γ = 2 − √2) with an embedded error estimate over capacitor
+voltages and inductor currents, gate edges landed exactly and diode
+crossings localised by Illinois on trial solves. Two restart rules
+after a gate edge:
+
+- **Derivative refresh.** The zero-time diode cascade at an edge
+  solves a short trapezoidal probe (`h_probe`) under the post-edge
+  mask; that probe is committed as a recorded step, so the history's
+  inductor voltages, capacitor currents and stateful-device slots are
+  post-edge values and the probe sample carries the post-edge switch
+  state for loss post-processing. At an edge settled at a step
+  boundary only the slots are replaced (the states are kept). The
+  first post-edge step is then sized by a true error estimate. Each
+  edge adds one recorded sample `h_probe` after it, so
+  `np.diff(res.times).min()` is the probe length, not a controller
+  step. Not
+  done at diode events or at the initial settle (a diode turn-off
+  leaves an inductor on a g_off-only path whose probe derivative is a
+  picosecond mode).
+- **Post-edge memory.** Per edge parity (rising/falling), the step the
+  controller proposes after the first accepted post-edge step,
+  capped at `h_max`, is where the next edge of that parity restarts.
+  It can grow as well as shrink. Diode events have no memory.
+
+`res._trbdf2_stats` reports `n_derivative_refreshes`,
+`n_refresh_probes` and `h_post_event_min` (smallest accepted first
+step after a refreshed edge).
+
 ## Tuning guide
 
 | Knob | DormandPrince5 | RadauIIA3 | Effect |

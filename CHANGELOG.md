@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2 restart after a gate edge (update-trbdf2-post-event-restart)
+
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'` / `'auto'`:
+  after a landed gate edge the edge cascade's probe (a trapezoidal
+  solve of `h_probe` under the post-edge mask) is committed as a
+  recorded step, so the companion history's derivative slots (inductor
+  voltage, capacitor current, each stateful device's slot) hold
+  post-edge values; at a boundary-settled edge only the slots are
+  re-read. The post-edge step memory stores the controller's proposal
+  instead of the accepted step. Each gate edge therefore adds one
+  recorded sample `h_probe` after the edge (not counted in `n_accept`). The first post-edge step was sized by a stale,
+  pre-edge derivative and collapsed; the memory then pinned it (the
+  buck's rising-edge step was 8.26e-13 s for a whole run). Measured,
+  24 V buck, 400 periods, default tolerances:
+
+  | | before | after |
+  |---|---|---|
+  | accepted steps (per period) | 7241 (18.1) | 1636 (4.1) |
+  | solves | 16262 | 5018 |
+  | rejects | 82 | 65 |
+  | first step after an edge | 8.26e-13 s | ≥ 1.7e-7 s |
+  | end error vs expm | 9.84e-4 | 7.18e-5 |
+  | DCM (R = 50 Ω): accepted steps, error | 15242, 2.39e-4 | 8932, 1.62e-5 |
+
+  Variable-step step counts and results move within their tolerance;
+  circuits without gate edges (a diode bridge, pulse sources) are
+  unchanged, and `engine='pwl'` is bit-identical. Not done at diode
+  events: there the probe holds a stiff L·g_off mode and the refresh
+  was measured to multiply a bridge's diode events by 260; the DCM
+  buck's post-turn-off steps (4e-14 s) therefore remain.
+  `res._trbdf2_stats` gains `n_derivative_refreshes`,
+  `n_refresh_probes` and `h_post_event_min`.
+  The trbdf2/auto conduction losses pinned by
+  `test_diode_forward_drop.py` moved by up to 2.4e-4 relative and were
+  re-pinned (boost DCM switch: 8.7e-6 → 2.3e-6 W off the fixed-step
+  value). A 3-phase VSI on RL loads takes 3998 → 1219 steps with its
+  end error 6.28e-4 → 6.73e-4 (the one circuit whose error grew).
+
 ### PWL diode forward drop (PSIM `V_f`)
 
 * **Added** `add_diode(..., V_f=0.0)` and the YAML `diode` key `V_f`: the

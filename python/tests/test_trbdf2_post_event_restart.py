@@ -63,6 +63,8 @@ def _ccm_exact():
 def _post_edge_step(t, te):
     k = int(np.argmin(np.abs(t - te)))
     assert abs(t[k] - te) < 1e-12, "edge not landed"
+    if t[k + 1] - te < 1e-9:  # the committed edge probe (h_probe)
+        k += 1
     return t[k + 1] - t[k]
 
 
@@ -76,32 +78,36 @@ def dcm():
     return _buck(50.0, 0.3)
 
 
-def test_ccm_characterisation_before_the_change(ccm):
-    """p6_ratchet.py on the untouched engine: 7241 accepted steps, 16262
-    solves, rising-edge step 8.26e-13 s at every listed period."""
-    st = ccm._trbdf2_stats
-    t = np.asarray(ccm.times)
-    assert 7000 <= st["n_accept"] <= 7500
-    assert 15800 <= st["n_solves"] <= 16700
-    for n in PERIODS:
-        assert _post_edge_step(t, T0 + n * T) < 1e-11
-
-
-@pytest.mark.xfail(strict=True, reason="post-event restart not landed")
 def test_ccm_post_edge_step_and_steps_per_period(ccm):
+    """The first step after every edge is sized by a true estimate: above
+    1e-8 s at every listed period (8.26e-13 s on the rising edge before
+    this change) and at most 8 accepted steps per period (18 before)."""
     t = np.asarray(ccm.times)
     for n in PERIODS:
         for te in (T0 + n * T, T0 + (n + 0.5) * T):
             assert _post_edge_step(t, te) > 1e-8
-    assert ccm._trbdf2_stats["n_accept"] <= 8 * NPER
+    st = ccm._trbdf2_stats
+    assert st["n_accept"] <= 8 * NPER
+    assert st["n_derivative_refreshes"] >= st["n_gate_events"]
+    assert st["h_post_event_min"] > 1e-8
+    assert st["n_refresh_probes"] == 0   # the edge cascade's probe serves
 
 
-def test_dcm_characterisation_before_the_change(dcm):
-    """p5_trbdf2_edges.py, DCM: accepted steps between 4e-14 and 1e-12 s."""
-    h = np.diff(np.asarray(dcm.times))
-    assert h.min() < 1e-12
+def test_ccm_error_not_above_twice_the_previous(ccm):
+    """End-of-run error against the expm reference: at most twice the
+    value before this change (9.84e-4, max of the i_L and v_C errors at
+    the default tolerances, probes/trbdf2_baseline.json)."""
+    xe = _ccm_exact()
+    err = max(abs(np.asarray(ccm.i("L"))[-1] - xe[0]),
+              abs(np.asarray(ccm.v("vout"))[-1] - xe[1]))
+    assert err < 2 * 9.84e-4
 
 
-@pytest.mark.xfail(strict=True, reason="post-event restart not landed")
+@pytest.mark.xfail(strict=True, reason=(
+    "not met: the DCM steps below 1e-11 s follow the diode turn-off at "
+    "zero inductor current, and the derivative refresh is not applied at "
+    "diode events (it excites the L*g_off mode; DECISIONS.md)"))
 def test_dcm_no_step_below_1e_11(dcm):
+    """Runs of accepted steps between 4e-14 and 1e-12 s before this
+    change."""
     assert np.diff(np.asarray(dcm.times)).min() > 1e-11

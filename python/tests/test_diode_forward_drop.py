@@ -457,10 +457,13 @@ _CIRCUITS = {
 # 1e-3 on dsed — its event times go through libm, and Windows CI moved
 # these ~0.1 mW leakage losses by up to 9e-5. A lost V_f = 0 identity
 # would move them by orders of magnitude, not parts per thousand.
+# trbdf2/auto re-pinned by update-trbdf2-post-event-restart (gate-edge
+# probe committed as a step): S closer to pwl on both, D buck closer,
+# D boost_dcm 7.7e-7 -> 2.9e-6 off pwl (rel 4e-5, within the DCM error).
 _V_F0_REF = {
-    ("boost_dcm", "auto"): {"S": 0.0452680383528, "D": 0.0649591561202},
+    ("boost_dcm", "auto"): {"S": 0.045279006716, "D": 0.0649628415738},
     ("boost_dcm", "pwl"): {"S": 0.0452766957162, "D": 0.0649599299511},
-    ("boost_dcm", "trbdf2"): {"S": 0.0452680383528, "D": 0.0649591561202},
+    ("boost_dcm", "trbdf2"): {"S": 0.045279006716, "D": 0.0649628415738},
     ("bridge", "auto"): {"BR__D1": 0.000138585164756, "BR__D2": 5.6813204064e-05,
                          "BR__D3": 0.000138585164754, "BR__D4": 5.68132040543e-05},
     ("bridge", "dsed"): {"BR__D1": 0.000138571769601, "BR__D2": 5.67576669568e-05,
@@ -469,10 +472,10 @@ _V_F0_REF = {
                         "BR__D3": 0.000138205386014, "BR__D4": 5.66352667572e-05},
     ("bridge", "trbdf2"): {"BR__D1": 0.000138585164756, "BR__D2": 5.6813204064e-05,
                            "BR__D3": 0.000138585164754, "BR__D4": 5.68132040543e-05},
-    ("buck", "auto"): {"S": 0.0035509287608, "D": 0.00533941662173},
+    ("buck", "auto"): {"S": 0.00355077782274, "D": 0.00533935149256},
     ("buck", "dsed"): {"S": 0.00354982022022, "D": 0.00533604800703},
     ("buck", "pwl"): {"S": 0.00354999944119, "D": 0.00533789852559},
-    ("buck", "trbdf2"): {"S": 0.0035509287608, "D": 0.00533941662173},
+    ("buck", "trbdf2"): {"S": 0.00355077782274, "D": 0.00533935149256},
 }
 
 

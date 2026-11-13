@@ -170,6 +170,15 @@ public:
         }
     }
 
+    /// TR-BDF2 post-event refresh: dQ/dt from the law at the probe's
+    /// terminal voltages and the stored charge; Q is not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            e.f_prev = e.params.k_tail * steady_state_at(e, x_probe)
+                       - e.q_prev / e.params.tau_tail;
+        }
+    }
+
     /// Seed from a DC operating point: charge in equilibrium,
     /// Q = k·i_ss·tau, where the split adds back to i_ss exactly.
     void seed_from_dc_op(const Vector& x) {

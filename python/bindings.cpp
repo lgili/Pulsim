@@ -4093,6 +4093,9 @@ void init_module(py::module_& m) {
             d["n_held_diode_redecided"] = st.n_held_diode_redecided;
             d["probe_floor_used"] = st.probe_floor_used;
             d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
+            d["n_derivative_refreshes"] = st.n_derivative_refreshes;
+            d["n_refresh_probes"] = st.n_refresh_probes;
+            d["h_post_event_min"] = st.h_post_event_min;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
