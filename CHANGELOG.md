@@ -73,6 +73,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   looser: `hard_switched_rc` 1.098e-6 → 2.224e-6, `buck_dcm` 4.136e-7 →
   5.635e-7; ten are tighter.
 
+### Design evaluation for optimisers (`pulsim.design`, first slice)
+
+* **Added** `pulsim.design.Evaluator(build, period=..., loads=...,
+  output=..., constraints=...)` and `evaluate(design) ->
+  EvaluationRecord`: status `ok` / `refused` / `failed` /
+  `infeasible`, KPIs on one steady period (efficiency, input / output
+  power, losses per device and category, output ripple and mean,
+  inductor ripple, peak / RMS current and peak voltage per
+  semiconductor, user `Kpi`s), violations, route and solver counters,
+  provenance (version, extension hash, options digest) and a SHA-256
+  design id. Every KPI is time-weighted on the run's own grid with the
+  right limit of each event; on a CCM buck the efficiency, the loss
+  and the ripple match a matrix-exponential reference of the same
+  orbit to 1.9e-12, 8e-15 and 6e-11 relative (2000 samples per period;
+  a plain trapezoid over the gate edge read the input power 1 % high
+  at 100 samples).
+* **Added** failures as records: an `UnsupportedError` becomes
+  `refused` with its `(engine, feature, device, kind)`; an engine's
+  `RuntimeError` or a `periodic_steady_state` non-convergence becomes
+  `failed` with the reason; a violated bound becomes `infeasible` with
+  the excess in the KPI's unit. No default value replaces a failure;
+  any other exception propagates. `as_objectives` / `as_constraints`
+  map records to an optimiser's vectors (`penalty` for `refused` /
+  `failed`).
+* **Added** steady-state routes (`SteadySpec`): `pss`
+  (`periodic_steady_state`, DCM buck orbit within 1e-9 V in 6 period
+  runs), `transient` (doubling runs until the estimated distance to the
+  orbit is below `tol`, else `failed` / `not_settled`) and `auto` (`pss`
+  when its capability check accepts the circuit, else the transient;
+  the route and the reason are in the counters; never a fallback after
+  a failure). A device whose power no loss model covers (a Lauritzen
+  diode) refuses the efficiency instead of reading 0.99989 without it.
+* **Added** `Evaluator.evaluate_many(designs, workers=..., backend=...)`
+  on the sweep job runner: input order kept, 64 designs give equal
+  records on 1 and 8 threads and on processes; a design-specific
+  refusal does not stop the batch, three identical refusals at its
+  start do. Threads do not speed up the `pss` route (87 % of an
+  evaluation is Python), see DECISIONS 12.
+* **Added** `ThermalSpec`: junction temperatures by a damped fixed
+  point between the losses at `T_j` (3-D switching tables read at each
+  device's `T_j`, an optional `loss_at(device, P, T_j)`) and
+  `T_amb + R_th·P`, stopped when the estimated distance to the fixed
+  point is below 0.1 K; re-simulated only when `temperature_dependent`.
+  Linear loss model: 63.0317 °C against the closed form 63.0435 °C;
+  `R_th·P₀·α = 1.2` is `infeasible` with `thermal_runaway`. An
+  unstable `pss` orbit is `failed`, `unstable_orbit`.
+* **Added** `examples/optimization/buck_pareto.py` (+ notebook): a
+  synchronous 48 V → 12 V buck's efficiency-against-volume front over
+  `f_sw`, `L`, `C` and two MOSFETs, with NSGA-II when `pymoo` is
+  installed (new extra `pulsim[opt]`) and a Latin-hypercube sample with
+  a numpy non-dominated filter otherwise. Its MOSFETs are SYNTHETIC
+  and its volume law illustrative; it says so in its output and plot.
+  512 designs: 376 ok, 136 infeasible, a 7-design front, 3.3 s.
+* **Added** Tutorial 08, "Using Pulsim inside an optimiser" (executed):
+  the contract, the four statuses, the adaptors, why derivative-free.
+* **Changed** `pulsim.sweep`'s job runner takes the job function (and
+  an option to let every exception propagate); `sweep` / `monte_carlo`
+  are unchanged.
+
 ### Integration fixes (review of the integration branch, 2026-11-13)
 
 * **Fixed** `periodic_steady_state` accepted a sine, pulse or table
