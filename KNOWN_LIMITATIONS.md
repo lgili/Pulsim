@@ -357,28 +357,55 @@ trbdf2 rtol 1e-10 (7 / 16 / 23 / 1 / 3 repairs), and the half-wave RL
 rectifiers run right (2 and 1 repairs). The batch-4 stored-sample guard
 stays: it checks every stored sample against the diode law and raises
 `DiodeModeInconsistentError` (a `RuntimeError`, in
-`pulsim._dsed_dispatch`), and it catches what the kernel guard does
-not: the `V_th = 0` LC tank of
-`test_double_crossing_inside_one_step_is_seen` (the kernel guard repairs
-one event and returns v(k) = -5.18 V at 10 µs; trbdf2 9.50 V), and every
-case above when `MODE_GUARD = False`. It reads stored samples only, so a
-wrong mode shorter than one stored step is not seen. Workaround for the
-double crossing: `V_th = 1e-3`.
+`pulsim._dsed_dispatch`); it is cheap and independent of the kernel.
+Until the event-locator fix (integration batch 6b) it caught what the
+kernel guard did not: the `V_th = 0` LC tank of
+`test_double_crossing_inside_one_step_is_seen` returned v(k) = -5.18 V at
+10 µs (trbdf2 and a DOP853 reference: 9.49998506 V); now dsed finds all
+four edges and the end state of the reference. With the kernel guard on
+it no longer fires on any circuit of the test suite or the reference set;
+it still names every case above when `MODE_GUARD = False`. It reads
+stored samples only, so a wrong mode shorter than one stored step is not
+seen.
 
-### Complementarity mode selection: dsed only; double crossings at `V_th = 0`
+### Complementarity mode selection: dsed only
 
 `mode_selection='lcp'` and the default-mode guard run on `engine='dsed'`
 only; `pwl` and `trbdf2` still decide with their settle and refuse
 `'shadow'`/`'lcp'` by name (hooks: add-complementarity-mode-selection
 task 4.2). The guard and the LCP decide at events; a commutation the
-event locator misses is not decided. With `V_th = 0` a diode that turns
-on at exactly `v = 0` starts its next step with the turn-off predicate
-at 0, which the dsed locator skips, so a return through zero inside that
-step is lost: an LC tank into a series diode stays ON at −18 mA from
-2.25 µs (`test_double_crossing_inside_one_step_is_seen`'s circuit). A
-band of `V_th = 1e-3` gives the exact windows. The guard repairs only
-the modes it judges inconsistent over `1e4·h_e`; a mode consistent that
-long and wrong later is not caught.
+event locator misses is not decided. A diode predicate that starts a
+step at exactly zero is located from the side it leaves to over the
+first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is
+not seen, nor is a predicate at zero that leaves toward its event side
+(a mode the decision at that instant should have set). With the guard
+off (`h_e = 0`) the read-ahead is `1e-6·h`, so a diode sliding on its
+threshold advances by that much per event until the chatter detector
+stops it. Current zero-crossing and custom predicates starting at zero
+are still skipped for the step. The guard repairs only the modes it
+judges inconsistent over `1e4·h_e`; a mode consistent that long and
+wrong later is not caught.
+
+### `mode_selection='lcp'` on a bridge whose DC bus floats on leak resistors
+
+A four-diode bridge fed from a floating secondary (an ideal transformer,
+or a sine source between two non-ground nodes) whose DC bus is held only
+by 1 MΩ ties and the diodes' `g_off` runs wrong under `'lcp'`: two diodes
+never conduct and one blocks +49.86 V (11.73 V against 31.88 V). The
+result flips with the `h_e` ratio, and the default (settle + guard) is
+right (add-complementarity-mode-selection DECISIONS #21). `'lcp'` is
+opt-in; use the default there.
+
+### Many-diode rectifiers with line inductance on dsed
+
+Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter
+at a natural commutation ("is chattering at t = 4.33 ms") from five
+bridges on, at `V_th = 0` and `1e-2`, in every mode; paralleled onto one
+DC bus they fail to settle at `t = 0` from five bridges on, and
+`trbdf2` aborts on them ("non-finite step … h_min"). The same bank
+without line inductance runs (add-complementarity-mode-selection
+DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
+`dt = 1 µs`); no reference was available to check them.
 
 ### Fixed-step controller ticks land on the `dt` grid
 

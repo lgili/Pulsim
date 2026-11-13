@@ -678,6 +678,15 @@ py::dict exact_report_dict(const AdapterT& adapter,
     return d;
 }
 
+/// Task 5.1: the circuit's passivity class at its diode ports (D3).
+inline py::dict passivity_dict(const pulsim::events::PassivityClass& c) {
+    py::dict d;
+    d["class"] = std::string(c.name());
+    d["device"] = c.passive() ? c.nonreciprocal_device : c.device;
+    d["kind"] = c.passive() ? c.nonreciprocal_kind : c.kind;
+    return d;
+}
+
 /// add-complementarity-mode-selection — result.diagnostics['mode_shadow'].
 inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
                                  const std::vector<std::string>& names,
@@ -1243,8 +1252,10 @@ void init_module(py::module_& m) {
                                                     adapter.n_port_problems());
             }
             if (res.mode_shadow.decides) {
-                d["mode_selection"] = mode_shadow_dict(res.mode_shadow, diode_names,
-                                                       adapter.n_port_problems());
+                auto ms = mode_shadow_dict(res.mode_shadow, diode_names,
+                                           adapter.n_port_problems());
+                ms["passivity"] = passivity_dict(adapter.passivity());
+                d["mode_selection"] = ms;
             }
             if (res.mode_guard.enabled) {
                 const auto& g = res.mode_guard;
@@ -1257,6 +1268,7 @@ void init_module(py::module_& m) {
                 gd["repair_diodes"] = g.repair_diodes;
                 gd["repair_violations"] = g.repair_violations;
                 gd["lcp"] = mode_shadow_dict(g.lcp, diode_names, adapter.n_port_problems());
+                gd["passivity"] = passivity_dict(adapter.passivity());
                 d["mode_guard"] = gd;
             }
             // v2.0 Phase 3 item 5 — the unified result: full MNA
