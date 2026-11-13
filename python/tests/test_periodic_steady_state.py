@@ -395,6 +395,18 @@ def test_nonlinear_device_is_refused():
     assert (ei.value.device, ei.value.kind) == ("Dn", "ShockleyDiode")
 
 
+def test_power_mosfet_composite_is_refused_by_name():
+    # components() reports the channel as kind "power_mosfet"; with linear
+    # gate capacitances and no body diode it is the only Newton entry.
+    b = _buck(50.0)
+    b.add_voltage_source("Vg", "g", "gnd", 0.0)
+    b.add_power_mosfet("Mq", "vout", "gnd", "g", K=1e-2, V_T=2.0,
+                       C_gs=1e-9, C_gd=100e-12, C_ds=0.0)
+    with pytest.raises(p.UnsupportedError, match="nonlinear or stateful.*Mq") as ei:
+        p.periodic_steady_state(b, period=T, switch_fn=_pwm(b, 0.3))
+    assert (ei.value.device, ei.value.kind) == ("Mq", "MosfetLevel1")
+
+
 def test_budget_exhaustion_reports_the_history():
     b = _buck(50.0)
     with pytest.raises(ValueError, match="max_period_runs=2.*Residual"):

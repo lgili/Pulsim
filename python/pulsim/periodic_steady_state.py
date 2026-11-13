@@ -282,7 +282,8 @@ def _check_circuit(builder, T, comps):
         bad = [c for c in comps if c["kind"] in (
             "nonlinear_diode", "mosfet_level1", "igbt_level1",
             "saturable_inductor", "nonlinear_capacitor",
-            "shockley_diode", "lauritzen_diode", "pmsm_mna", "unknown")]
+            "shockley_diode", "lauritzen_diode", "pmsm_mna", "power_mosfet",
+            "unknown")]
         names = [c["name"] for c in bad]
         raise _unsup(
             "", device=names[0] if names else "",
