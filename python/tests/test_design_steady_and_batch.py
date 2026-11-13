@@ -185,6 +185,20 @@ def test_three_identical_refusals_stop_the_batch():
     assert (ei.value.engine, ei.value.device) == ("dsed", "D2")
 
 
+def test_a_mid_run_mode_refusal_does_not_stop_the_batch(monkeypatch):
+    """Batch-6b review: the kernel's 'consistent_mode' refusal is met at
+    a state that depends on the design, so three of them in a row are
+    three records, not a configuration verdict."""
+    from pulsim._refusal import unsupported
+
+    def refuse(self, design, did, counters, grads=None):
+        raise unsupported("dsed", "consistent_mode", "mode selection at t = 1 s",
+                          device="D1", kind="Diode")
+    monkeypatch.setattr(Evaluator, "_evaluate", refuse)
+    recs = Evaluator(dcm_buck, period=T).evaluate_many(_designs(4), workers=1)
+    assert [r.status for r in recs] == ["refused"] * 4
+
+
 def test_a_bug_in_a_batch_propagates():
     def buggy(d):
         if d["D"] > 0.5:

@@ -88,6 +88,26 @@ non-convergence sites and the evaluator catches that class; the message
 list is gone (see "Missing from the kernel", items 1 and 2).
 → Reverse: none.
 
+Merged with integration 1aef1a52 (slice 3): one mapping. A singular
+`I − M` surfacing as `numpy.linalg.LinAlgError` is caught with
+`ConvergenceError` (failed). An unextractable state space is
+`UnsupportedError(feature="state_space")` raised by `_Solver` itself,
+so the explicit and the auto route refuse it without matching a
+message; the capability probe runs inside `_engine`. Accepted-with-
+error runs stay `ok` with a counter in the record: trbdf2
+`forced_accepts` (error estimate above tolerance at the step floor) and
+`newton_roundoff_accepts` (Newton stopped at roundoff) and
+`resolution_warnings` (the fixed-step `ResolutionWarning`), next to
+integration's `event_iteration_breaches` and `chatter_breaks`. Neither
+is failed: a forced accept is the sliver between two events and its
+error is bounded by the step floor times the slope, and a roundoff
+accept has every row's residual within 8 eps of its terms. What would
+make them failed: a forced accept whose step is more than 1e-3 of the
+period (its error is then no longer a sliver) or a roundoff accept whose
+`newton_roundoff_omega_max` exceeds 8 eps; neither is reported per step
+today, so the threshold cannot be applied yet.
+→ Reverse: move the two counters into `_raise_if_suspect`.
+
 ## 6. `build` and `period`
 
 → `build(design)` returns a builder or `(builder, switch_fn)`: the

@@ -814,15 +814,21 @@ def _warn_unlocated_edges(res):
             UserWarning, stacklevel=3)
 
 
+def _resolution_flagged(res) -> bool:
+    """True when :func:`_warn_resolution` warns for this run."""
+    rd = getattr(res, "resolution", None)
+    return rd is not None and bool(
+        rd.lte_max > _RESOLUTION_LTE_MAX or list(rd.ringing)
+        or rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX)
+
+
 def _warn_resolution(builder, res, dt):
     """One ResolutionWarning per run (see ResolutionWarning)."""
-    rd = getattr(res, "resolution", None)
-    if rd is None:
+    if not _resolution_flagged(res):
         return
+    rd = res.resolution
     ring = list(rd.ringing)
     unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
-    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring or unest):
-        return
     import warnings
     lines = []
     if rd.lte_max > _RESOLUTION_LTE_MAX:
