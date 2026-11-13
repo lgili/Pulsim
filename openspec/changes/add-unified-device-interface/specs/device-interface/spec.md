@@ -232,3 +232,20 @@ and the per-step path MUST NOT allocate.
   are timed before and after a kind is ported
 - **THEN** Newton iterations and factorisations per step are equal and
   ns/step is not above the pre-port value (best of five, same machine)
+
+### Requirement: PWL Category Carries The Complementarity Form
+
+Every self-commutated PWL device SHALL expose, for each of its ports,
+the ideal element's orientation, `V_f`, `R_on`, `g_off` and `V_th` to
+the mode-selection service through the device registry, with
+`R_on = 1/g_on` in the conductance form, and SHALL NOT change the
+sparsity pattern by doing so. When the complementarity selection is in
+effect, decision sites SHALL take modes from it instead of calling
+`decide`.
+
+#### Scenario: Conductance-form diode ports
+- **GIVEN** a diode with `g_on = 1e3`, `g_off = 1e-9`, `V_f = 0.7`,
+  `V_th = 0`
+- **WHEN** its ports are read from the registry
+- **THEN** one port is returned with `R_on = 1e-3`, `g_off = 1e-9`,
+  `V_f = 0.7` and no hysteresis

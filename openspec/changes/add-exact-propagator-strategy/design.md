@@ -286,3 +286,194 @@ selectable through a private option until step 9).
    to `engine='pwl'`?
 6. First-order hold for control outputs: default zero-order hold
    (matches a digital controller), first-order hold opt-in?
+
+## Re-centred scope, 2026-11-13
+
+> Appended; D1–D10 stand, except where a decision below names what it
+> supersedes. Prototypes: `probes/expm_action_ladder.py` (scaling,
+> sources), `../add-complementarity-mode-selection/probes/lcp_core.py`
+> (ideal switches, reduced state per mode, mode selection, exact flow
+> between events), `../add-branch-form-ideal-switch/probes/sdirk_restart_ideal.py`
+> (the implicit comparison).
+
+### D11. Exact propagation is the default route
+
+`engine='auto'` decides per segment (the interval between two
+consecutive events). A segment is **exact-eligible** when, at its
+start event:
+
+1. every device is linear, a switch (branch or conductance form), a
+   PWL diode, or returns a region id from `affine_region(x)` (D9);
+2. every source is in the exact classes of D14;
+3. the mode's extraction succeeds (dependent states reduced by the
+   projection of `add-branch-form-ideal-switch` D4; coupled-inductor
+   matrix positive definite, D6);
+4. the scaling rule (D13) finds an exact kernel within its budget.
+
+An eligible segment is propagated exactly; otherwise it is taken by
+the implicit strategy (D12) and the reason is recorded. With an
+explicit `engine='exact'` (alias `'dsed'`) a segment that is not
+eligible is refused with `UnsupportedError(engine, feature, device,
+kind)` naming the failed rule, unless `allow_implicit_segments=True`.
+This supersedes Applicability rule 3 (`n_state ≤ 64`) and task 12.2's
+placeholder: size is a cost question, answered by D13. The spec
+requirement "Applicability Limit" keeps its form (a limit, a route
+reason, a refusal with both numbers); after task group 15 the limit it
+names is the D13 cost rule, not a state count.
+
+### D12. Hybrid rule for Newton segments
+
+- **Classification happens at events only.** A device leaves an
+  affine region at a region-boundary event; a device that has no
+  affine region at the current state (a Shockley diode, a MOSFET
+  Level 1 in its square-law region) makes the segment implicit.
+- **An implicit segment lasts until the next event** of the queue
+  (gate edge, source breakpoint, controller tick, located crossing of a
+  PWL device, region boundary of an affine device, or a declared
+  region re-entry of a smooth device: `affine_region` is re-tested at
+  each accepted implicit step and its first success schedules an
+  event at that step's end). There is no mid-step switch.
+- **Entry to an implicit segment** is a discontinuity of the vector
+  field, so the implicit strategy starts with the restart rule (three
+  consecutive Alexander SDIRK(2,2) steps) from the exact state. **Entry
+  to an exact segment** gathers the reduced state per device (D5) and
+  applies the re-initialisation service if the new mode has dependent
+  states.
+- **Which implicit strategy**: TR-BDF2 with error control by default;
+  the fixed-grid trapezoid with the SDIRK restart when the run has a
+  fixed `dt`. Newton tolerances are the implicit strategy's own (the
+  absolute `dx` test stays; owner note
+  *newton-absolute-dx-is-load-bearing*).
+- **No flapping**: a device that re-enters and leaves an affine region
+  more than 8 times inside one switching period is held implicit for
+  the rest of that period; counted.
+- **Counters**: `n_exact_segments`, `n_implicit_segments`,
+  `t_exact_fraction`, and per hand-over `{t, device, reason}`.
+
+### D13. Scaling rule: dense, action of the exponential, or hand-over
+
+For a mode with `n` states, `nnz` non-zeros in `A`, step or segment
+length `h`, and `N_m` steps expected in the mode (from previous visits;
+first visit: segment length / `h`):
+
+| Kernel | Setup | Per step | Exact? |
+|---|---|---|---|
+| dense modal (tier 1) / dense Padé (tier 2) | ≈ `2n³·(6 + log₂‖A·h‖₁)` flops, `48n²` bytes cached | `2n²` | yes |
+| action of the exponential (truncated Taylor with scaling, Al-Mohy & Higham 2011) | none | ≈ `2·nnz·m`, `m ≈ ‖A·h‖₁ + 10` matvecs | yes (to the tolerance `u`) |
+| implicit hand-over (TR-BDF2, or trapezoid on a fixed grid) | one sparse LU | one solve | no (second order) |
+
+Rule, per mode at its first visit (re-evaluated when `N_m` changes by a
+factor 4):
+
+1. If the dense setup fits the cache budget and
+   `setup_dense + N_m·step_dense ≤ N_m·step_action`, use dense
+   (tier 1, or tier 2 when D2 refuses tier 1).
+2. Else, if `m ≤ m_max` (`m_max = 200` matvecs, an estimate to be
+   measured), use the action.
+3. Else hand over to the implicit strategy for this mode, with reason
+   `'cost'`.
+
+Measured basis (`probes/expm_action_ladder.out`, flop model; wall time
+in the probe is dominated by scipy's per-call overhead of about 300 µs
+and is not used):
+
+| Ladder | n | `‖A·h‖₁` | matvecs/step | action/dense flops per step | dense setup repaid after |
+|---|---|---|---|---|---|
+| RLC | 200 / 500 / 1000 / 2000 | 2 | 20 | 0.25 / 0.10 / 0.05 / 0.02 | never (action is cheaper per step) |
+| RLC + 1 ns snubbers | 300 / 750 / 1500 | 1e3 | 2492 | 24.7 / 9.9 / 5.0 | 203 / 1342 / 6027 steps |
+
+`|dense − action| ≤ 3.2e-15` (non-stiff) and `≤ 1.6e-13` (stiff). The
+implicit trapezoid on the same ladder costs 0.2–0.5 ms of LU and
+7–28 µs per step and is 2.3e-2 off at this `h`.
+
+Reading: the non-stiff large circuit stays exact through the action;
+the stiff large circuit stays exact through dense when its modes last
+long enough, and otherwise hands over. Ideal switches remove the
+switch-induced stiffness (a resistor-pair switch gives `‖A‖ ≈ 5e12`,
+proposal of `add-branch-form-ideal-switch`), which is what makes
+rule 2 the common case for large converters. A rational Krylov
+(shift-and-invert) action would cover stiff large modes at a few
+sparse solves per step; it is not prototyped and is not in this
+change; the hand-over is the fallback.
+
+Counters per mode in `result.exact['routes']`: kernel, reason, `n`,
+`nnz`, `‖A·h‖₁`, matvecs per step, estimated setup flops, steps taken.
+
+### D14. Sources exact through augmented states
+
+The source vector is `b(t) = B_s·s(t)` with `s` the state of an
+autonomous source system `ṡ = S·s`, so that `[x; s]` evolves under
+`[[A, B_s], [0, S]]`:
+
+| Source | `s` | `S` |
+|---|---|---|
+| DC | `s₀ = 1` | 0 |
+| ramp, polynomial of degree p | `(1, t, …, t^p/p!)` | nilpotent shift |
+| PWL table | ramp on each segment; each corner a time event | nilpotent |
+| `e^{−t/τ}` | one state | `−1/τ` |
+| sine, cosine at ω | `(cos ωt, sin ωt)` | `[[0, −ω], [ω, 0]]` (one pair per frequency, shared) |
+| controller output, zero-order hold | constant between ticks | 0 |
+
+Equivalently, for the dense kernel, `x(t+h) = e^{Ah}x + Σ_k h^{k+1}φ_{k+1}(Ah)·b^{(k)}` with
+φ-functions; the augmented form is used because it shares the dense
+and action kernels. Measured: sine into RL at `h = T/20`, 1.6e-12 A
+augmented against 17 A held (`probes/expm_action_ladder.out`); every
+LCP prototype family with a sine source uses this form (event times
+within 1.1e-14 s). An arbitrary Python `b_extra_fn(t)` is not exact:
+the segment is implicit with reason `'source'`.
+
+### D15. Output grid and controller ticks are events
+
+- A recorded sample at `t_k` is an evaluation of the flow from the last
+  event: `x(t_k) = e^{A(t_k − t_e)}·x(t_e)` (modal: O(n); dense with a
+  fixed sample spacing: one cached `Φ(dt_out)`). It is not a step and
+  does not touch the event tolerance or the mode.
+- A controller tick is a time event of the queue: the controller reads
+  the state at the tick, its outputs update with a zero-order hold, and
+  any gate change is a gate edge at the tick or at the computed PWM
+  edge (`fix-control-tick-semantics`, done on `feat/core-integration`,
+  fixes the sampling instant).
+- The output grid never shortens the propagation: the number of
+  exact segments is set by events, not by `dt_out`.
+
+### D16. Ideal switches as the native switch model
+
+The exact route takes branch-form ideal switches and diodes as its
+first-class case: per mode the reduced state of dimension
+`n_x − rank(K)` (`add-branch-form-ideal-switch` D4), gauge directions
+excluded (`add-complementarity-mode-selection` D10), the mode at every
+event from one LCP. The resistor-pair form stays accepted and goes
+through D2's tiers as today. The slice-1 zero-band rule (D4) remains
+the decision rule until the complementarity service is the default;
+then D4 is retired.
+
+### Decisions taken on the Open Questions (2026-11-13)
+
+Taken by the maintainer under the owner's delegation:
+
+1. `integrator='rk45'|'bdf2'` on `engine='dsed'`: deprecated for one
+   release, then removed (as task 12.1).
+2. A non-eligible segment inside an `auto` run: recorded and continued
+   (implicit); with explicit `engine='exact'` it is refused unless
+   `allow_implicit_segments=True`.
+3. The `n_state ≤ 64` limit is replaced by D13.
+4. Block Schur–Parlett: not in this change; the counters of D13 show
+   whether stiff-and-defective modes remain after the ideal-switch
+   default.
+5. Name: `engine='exact'` with `'dsed'` as a legacy alias; the
+   fixed-step Φ/Γ form is `engine='exact', dt=…`, never `'pwl'`.
+6. Controller outputs: zero-order hold by default; first-order hold
+   opt-in through the PWL source class.
+
+### Risks (appended)
+
+- The cost model of D13 mis-ranks kernels → it decides on counted
+  quantities (`n`, `nnz`, `‖A·h‖₁`, `N_m`), and task 15 calibrates the
+  constants against measured C++ times; a wrong ranking costs time, not
+  accuracy.
+- `m_max` and the dense budget are estimates → measured in task 15.
+- Hybrid flapping on a device that hovers at a region boundary → the
+  per-period hold of D12, counted.
+- Default flip changes numbers on every circuit `auto` now routes to
+  the exact strategy → flips with the other number-changing defaults,
+  re-baselined.

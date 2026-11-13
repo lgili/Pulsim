@@ -143,3 +143,18 @@ Probes: `core_review_2026-11/arch/{matrix,probe2,probe3,probe4,probe5}.py`,
   kind may move by floating-point reassociation; each port states its
   measured maximum deviation (budget 1e-10 relative) and re-baselines
   only the goldens that contain that kind.
+
+## Re-centred scope, 2026-11-13
+
+> Appended; the sections above stand except where named.
+
+The PWL category (`ModeDevice`, `SelfCommutated`, D4) must carry the
+complementarity form that `add-complementarity-mode-selection` solves:
+for each self-commutated port the ideal element's orientation, `V_f`,
+`R_on`, `g_off` and the hysteresis threshold `V_th`, and the crossing
+signals in branch form (current ON, gap OFF) from
+`add-branch-form-ideal-switch` D5. `decide` stays as the legacy law
+until the selection service is the default, then becomes a fallback
+used only by `mode_selection='legacy'`. The sentence of D4 "its
+`decide` / `crossing_signal` are the functions that exist today,
+unchanged" holds until that flip.

@@ -98,3 +98,22 @@ at equal times or time-weighted measures, never sample means.
 - [ ] 13.1 Delete `pwl-legacy`, `trbdf2-legacy`, the hidden names, the bodies of `run_transient` and `run_transient_trbdf2`
 - [ ] 13.2 Oracle: matrix; harness; suite; counter gate
 - [ ] 13.3 Final measurement table: lines of transient driver code before and after, ns/step rows 1–3 and 5–9, build time; update `openspec/CORE_ROADMAP.md`
+
+<!-- Re-centred scope, 2026-11-13: groups 14–17 are appended; groups 1–13 are unchanged. -->
+
+## 14. Event-driven outer loop (re-centred scope, D8)
+- [ ] 14.1 Outer loop over queue events with `seg.advance(x, t, t_next, watch)`; the D4 step loop becomes the implicit segment's inner loop; `process_instant` moves to the outer loop
+- [ ] 14.2 Oracle: with the legacy policies selected, the fixed engine stays bit-identical and the variable-step engine step-identical on the harness (the D7 proofs re-run)
+
+## 15. Shared services (D10; needs `add-complementarity-mode-selection` group 6 and `add-branch-form-ideal-switch` group 5)
+- [ ] 15.1 `ModeSelector` and `ReinitService` called once per event instant by every strategy; `modes.settle` kept as the legacy policy
+- [ ] 15.2 `RestartPolicy::Sdirk22x3` (three consecutive Alexander SDIRK(2,2) steps, `factor_dt = 2γh`); `Cda` kept only as a legacy policy
+- [ ] 15.3 Tests: the DCM buck, boost and bridges give the same mode sequence on the three strategies; the interrupted-inductor and capacitor-loop records are identical on the three strategies within 1e-9 relative
+
+## 16. Strategy selectors (D11)
+- [ ] 16.1 `engine='auto'|'exact'|'pwl'|'trbdf2'`, `'dsed'` alias; route reason in the result
+- [ ] 16.2 Tests: each name runs the strategy of the D11 table (asserted from the route record); `'dsed'` and `'exact'` bit-identical
+
+## 17. Default flip (in the single number-changing release)
+- [ ] 17.1 Defaults: `auto` route, selection service, SDIRK×3 restart; legacy names and policies warn
+- [ ] 17.2 Re-baseline through the reference harness with the other number-changing defaults; CHANGELOG

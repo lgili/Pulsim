@@ -223,3 +223,49 @@ exceed that of the driver it replaces.
   stepper and on the legacy drivers
 - **THEN** ns/step on the stepper is not above the legacy value (best
   of five, same machine)
+
+### Requirement: Event-Driven Kernel Advances To The Next Event
+
+The transient kernel SHALL advance the state from one event to the next
+with the segment's strategy and SHALL handle every event at its
+instant (samples, controller ticks, gate edges, source breakpoints,
+located state events) in the outer loop, with the mode selected and
+the state re-initialised once per event instant. The step loop of an
+implicit strategy SHALL be the inner loop of a segment and SHALL NOT
+decide modes.
+
+#### Scenario: One mode decision per instant
+- **GIVEN** the single-phase diode bridge, 100 V 50 Hz,
+  1000 µF ‖ 100 Ω, with `mode_selection='lcp'`
+- **WHEN** it is simulated on `'exact'`, `'pwl'` and `'trbdf2'`
+- **THEN** the number of mode selections equals the number of distinct
+  event instants on each strategy, and the mode sequences are equal
+
+### Requirement: Implicit Integrators As Segment Strategies
+
+The kernel SHALL offer the trapezoidal rule on a fixed grid, restarted
+after every discontinuity by three consecutive Alexander SDIRK(2,2)
+steps, and TR-BDF2 with error control, as strategies for segments that
+contain nonlinear devices or that the exact propagator declines, and
+SHALL record for every segment the strategy used and the reason.
+
+#### Scenario: Fixed grid with the restart rule
+- **GIVEN** the ideal DCM buck started on its orbit, `engine='pwl'`,
+  `dt = T/400`, 300 periods
+- **WHEN** `v_C` is compared with 8.9963970815477 V
+- **THEN** the error is at most 6.6e-8 V (prototype 4.345e-8 V with
+  three SDIRK(2,2) steps; 1.7e-5 V with the backward-Euler pair)
+
+### Requirement: Engine Names As Strategy Selectors
+
+The `engine` argument SHALL select a strategy: `'auto'` (exact where
+eligible, TR-BDF2 elsewhere), `'exact'`, `'pwl'` (fixed-grid
+trapezoid with the SDIRK restart) and `'trbdf2'`; `'dsed'` SHALL be
+accepted as an alias of `'exact'` with a deprecation warning after the
+default flip, for one release.
+
+#### Scenario: Legacy alias
+- **WHEN** a circuit runs with `engine='dsed'` and with
+  `engine='exact'`
+- **THEN** the states are bit-identical and the route records name the
+  exact strategy

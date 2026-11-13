@@ -239,3 +239,115 @@ with `UnsupportedError` naming the limit and the circuit's value.
   states the state count against the limit
 - **AND** an explicit request raises `UnsupportedError` with both
   numbers
+
+### Requirement: Exact Propagation As The Default Route
+
+With `engine='auto'` the kernel SHALL propagate a segment exactly
+whenever, at the event that starts it, every device is linear, a
+switch, a PWL diode or on a declared affine region, every source is in
+an exact source class, the mode's extraction succeeds and the scaling
+rule finds an exact kernel; otherwise it SHALL take the segment with
+the implicit strategy and record the reason. With an explicit
+`engine='exact'` (alias `'dsed'`) a non-eligible segment SHALL raise
+`pulsim.UnsupportedError` naming the failed rule unless
+`allow_implicit_segments=True`.
+
+#### Scenario: Converters routed exact
+- **GIVEN** the DCM buck, the boost and a three-phase diode bridge with
+  PWL devices and DC or sine sources
+- **WHEN** each is simulated with `engine='auto'`
+- **THEN** every segment is recorded as exact and the states are
+  bit-identical to `engine='exact'`
+
+#### Scenario: Smooth device routed implicit
+- **GIVEN** a rectifier with Shockley diodes
+- **WHEN** it is simulated with `engine='auto'`
+- **THEN** every segment is implicit with reason `'device'` naming a
+  diode, and with `engine='exact'` the run raises
+  `pulsim.UnsupportedError`
+
+### Requirement: Hybrid Segment Rule
+
+The kernel SHALL classify segments as exact or implicit at events
+only, SHALL keep an implicit segment until the next event, SHALL start
+every implicit segment with the restart rule of three consecutive
+Alexander SDIRK(2,2) steps, SHALL apply the re-initialisation service
+on entry to an exact segment whose mode has dependent states, and
+SHALL report `n_exact_segments`, `n_implicit_segments`,
+`t_exact_fraction` and every hand-over with its time, device and
+reason.
+
+#### Scenario: MOSFET in cutoff
+- **GIVEN** a buck whose switch is a MOSFET Level 1 and whose diode is
+  a PWL diode
+- **WHEN** it is simulated with `engine='auto'`
+- **THEN** the MOSFET's cutoff intervals are exact segments, its
+  conducting intervals implicit, and `v_C` agrees with `trbdf2`
+  (rtol 1e-9) within 1e-6
+
+### Requirement: Propagator Scaling Decision
+
+For each mode the kernel SHALL choose between the dense propagator,
+the action of the exponential on the sparse system and the hand-over
+to the implicit strategy by a cost rule on the mode's state count,
+non-zero count, `‖A·h‖₁` and expected steps, and SHALL report the
+chosen kernel, the reason and those inputs per mode in
+`result.exact['routes']`.
+
+#### Scenario: Large non-stiff ladder
+- **GIVEN** the RLC ladder of `probes/expm_action_ladder.py` with
+  n = 2000 states at `h = 1 µs` (`‖A·h‖₁ = 2`)
+- **WHEN** it is simulated with `engine='auto'`
+- **THEN** the mode is propagated by the action of the exponential with
+  20 ± 2 matrix-vector products per step and no dense setup
+
+#### Scenario: Stiff ladder with short mode visits
+- **GIVEN** the ladder with 1 ns snubbers (`‖A·h‖₁ = 1e3`), n = 300, in
+  a mode visited for 50 steps at a time
+- **WHEN** it is simulated with `engine='auto'`
+- **THEN** the mode is handed to the implicit strategy with reason
+  `'cost'`
+
+### Requirement: Exact Source Augmentation
+
+The exact route SHALL propagate constant, polynomial-in-time,
+exponential and sinusoidal sources exactly through augmented source
+states, SHALL treat the corners of PWL sources as time events, and
+SHALL take any segment driven by an arbitrary source function with the
+implicit strategy, recording reason `'source'`.
+
+#### Scenario: Sine source
+- **GIVEN** 100 V, 50 Hz into 1 Ω and 1 mH, from rest
+- **WHEN** it is propagated at `h = T/20` for 5 periods
+- **THEN** the current is within 1e-10 A of the closed form (a source
+  held per step is 17 A off)
+
+### Requirement: Output Samples And Controller Ticks As Events
+
+The exact route SHALL produce recorded samples by evaluating the
+exact flow from the last event without starting a new segment, and
+SHALL treat controller ticks as time events at which the controller
+outputs update with a zero-order hold.
+
+#### Scenario: Samples do not add segments
+- **GIVEN** the DCM buck over 100 periods
+- **WHEN** it is simulated with `dt_out = T/7` and with no samples
+- **THEN** the number of events is the same and every sample is within
+  1e-12 of the exact flow at its time
+
+### Requirement: Ideal Switches On The Exact Route
+
+The exact route SHALL accept branch-form ideal switches and diodes,
+SHALL propagate the reduced state of each mode, SHALL apply the
+explicit flux- and charge-conserving projection at mode entry, and
+SHALL take the mode at every event from the complementarity mode
+selection when it is in effect.
+
+#### Scenario: Ideal DCM buck from rest
+- **GIVEN** the DCM buck (24 V, 100 µH, 47 µF, 50 Ω, D = 0.3,
+  100 kHz) with an ideal switch and an ideal diode
+- **WHEN** it is simulated for 4000 periods from rest on the exact
+  route
+- **THEN** `v_C` at the rising edge of the last period is within 1e-9 V
+  of 8.9963970815477 V and the diode turn-off within 1e-11·T of
+  `0.79983739563545·T`

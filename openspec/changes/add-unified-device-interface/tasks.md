@@ -100,3 +100,10 @@ machine (`-j2`, `nice`).
 ## 13. Close
 - [ ] 13.1 Update `openspec/CORE_ROADMAP.md` status and `docs/mental-model.md`
 - [ ] 13.2 Final measurement table in the PR: dispatch sites, files touched to add a kind, build time, ns/step rows 10–13
+
+<!-- Re-centred scope, 2026-11-13: group 14 is appended; groups 1–13 are unchanged. -->
+
+## 14. Complementarity form on the PWL category (re-centred scope, D10)
+- [ ] 14.1 `ComplementarityPort` and the `ComplementarityDevice` concept; `SwitchedDiode` implements it in both forms
+- [ ] 14.2 The mode selector reads the ports from the registry; no device restates the law
+- [ ] 14.3 Tests: the ports of a conductance-form diode (`g_on = 1e3`, `g_off = 1e-9`, `V_f = 0.7`) are `R_on = 1e-3`, `g_off = 1e-9`, `V_f = 0.7`; the sparsity pattern of every mask is unchanged by the concept

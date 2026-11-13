@@ -518,3 +518,27 @@ Order with the other Phase 3 changes: steps 1–3 are enough for
 5. Should the default pin-current table for `q` devices (D7) be on by
    default before `add-probes-and-recorders` lands, given its memory
    cost of `n_pins` reals per such device per stored sample?
+
+## Re-centred scope, 2026-11-13
+
+### D10. The PWL category carries the complementarity form
+
+```cpp
+struct ComplementarityPort {      // one per self-commutated port
+    Index a, k;                   // ideal element oriented a → k (conducts i_d ≥ 0)
+    Real V_f, R_on, g_off;        // series drop and resistance, parallel leak
+    Real V_th;                    // hysteresis threshold; ≤ V_f means none
+};
+
+template <class D>
+concept ComplementarityDevice = SelfCommutated<D> &&
+    requires(const typename D::Params& p) {
+        { D::ports(p) } -> std::ranges::range;            // of ComplementarityPort
+    };
+```
+
+`SwitchedDiode` and the PWL kinds that `add-pwl-igbt-and-thyristor`
+adds (a thyristor is a diode port whose OFF→ON is additionally gated)
+implement it. The mode selector reads the ports from the registry; the
+stamp (conductance or branch form) is unchanged, so the sparsity
+pattern stays mask-invariant. In the conductance form `R_on = 1/g_on`.
