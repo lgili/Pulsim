@@ -788,8 +788,9 @@ public:
     }
 
     /// Add a constant DC current source (Layer 2 V3).
-    /// `I` (amperes) flows FROM `from` TO `to`. Positive `I`
-    /// means conventional current direction.
+    /// Positive `I` (amperes) leaves the source at `from` and
+    /// returns at `to`: `add_current_source("I", "a", "gnd", 1)`
+    /// into 1 Ohm gives v(a) = +1 V. (SPICE `I a 0` is the reverse.)
     ///
     /// Unlike voltage sources, current sources do NOT add a
     /// branch-current unknown to the state vector — the

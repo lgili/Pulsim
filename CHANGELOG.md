@@ -29,6 +29,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `make reference-nightly`. The general Python job deselects marker
   `reference`.
 
+### SPICE import: current-source sign
+
+* **Fixed** `spice_to_builder`: a SPICE current source `Iname n+ n- DC I`
+  drives `I` from `n+` through the source to `n-`, so it leaves the
+  source at `n-`. The importer passed the nodes unswapped to
+  `add_current_source` (which pushes `I` out of its first node), so
+  every imported current source had the wrong sign: `I1 0 a DC 1` into
+  `R1 a 0 1` gave v(a) = -1.000 V, now +1.000 V (ngspice: +1 V). Any
+  result of an imported netlist with a current source changes sign in
+  that source's contribution. The misleading comments on
+  `add_current_source` are corrected; the kernel is unchanged.
+
 ### Periodic steady state by Newton shooting on the true state (slice 1)
 
 * **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,
