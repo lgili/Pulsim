@@ -203,3 +203,15 @@ def test_eight_threads_on_one_evaluator_give_the_serial_records():
                                                      b.reason)
         assert a.kpis == b.kpis and a.losses == b.losses
         assert a.counters == b.counters
+
+
+def test_an_inconsistent_kernel_edge_log_fails_the_design(monkeypatch, ex):
+    """Batch 6c review (d2): Period.edges' RuntimeError was raised outside
+    the engine wrapper and stopped the whole batch."""
+    def bad(self, name, bit):
+        raise RuntimeError(f"period map: the edges of {name!r} do not "
+                           "alternate")
+    monkeypatch.setattr(pk.Period, "edges", bad)
+    rec = ex.evaluate_all(ex.latin_hypercube(1, seed=3), workers=1)[0]
+    assert rec.status == "failed", rec
+    assert "do not alternate" in rec.reason

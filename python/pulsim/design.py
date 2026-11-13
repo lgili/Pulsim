@@ -1029,7 +1029,9 @@ class Evaluator:
                 opts["switch_specs"] = ss
         from ._period_kpis import Period, loss_rows
         if isinstance(run, Period):
-            rows = loss_rows(b, run, opts)
+            # the period's edge log is kernel output: an inconsistent one
+            # ("edges do not alternate") fails this design, not the batch
+            rows = _engine(lambda: loss_rows(b, run, opts))
         else:
             rows = {r["name"]: r for r in device_loss_summary(
                 b, run, t_from=a, t_to=z, **opts) if "name" in r}
