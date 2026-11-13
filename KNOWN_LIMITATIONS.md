@@ -295,6 +295,17 @@ Limits with the rule on:
   at 2.037 µs: order 1.97); undeclared ones stay first order;
 - a step that needs the dt-retry ladder is re-taken without its
   interior events (the next step restarts on the new mask);
+- the split is second order on the integrated devices (MLCC charge
+  table, DC machine, controlled sources, pulse / sine / table current
+  sources, diode with `V_f`: orders 1.9-2.0 to T/800, probe
+  `split_devices.py`) but not on a power MOSFET switched through its
+  gate: its channel crosses `V_T` between grid points, which is no
+  event, and the run is not second order with the flag off, the rule
+  or the split (identical with the edges on the grid);
+- the event table keeps one factor per mask: the split's dt1 / dt2
+  solves and the restart stages at 2γ·dt refactor the same entry in
+  turn (VSI 10 ms at 1e-7 with the split: 2395 event refactors, 307
+  ns/step against 252 with the rule alone);
 - an MNA PMSM retries every fixed step at dt/2 with the rule on or off,
   so its steps are never split.
 - a diode that turns off inside stage 2 of a restart step because of

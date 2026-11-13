@@ -640,3 +640,30 @@ def test_a_declared_b_extra_jump_off_the_grid_is_split():
     assert abs(e[0]) < 7e-3, e
     assert all(f >= 3.6 for f in _factors(e)), e
     assert abs(e[1]) < abs(rule[1]), (e, rule)
+
+
+# --- the split x the devices of the integration branch ---------------------------
+def _split_devices():
+    import importlib.util
+    from pathlib import Path
+    path = (Path(__file__).resolve().parents[2] / "openspec" / "changes"
+            / "add-fixed-step-event-splitting" / "probes" / "split_devices.py")
+    if not path.exists():
+        pytest.skip("probe not shipped")
+    spec = importlib.util.spec_from_file_location("split_devices", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# engine, last two orders by successive differences (T/100..T/800):
+# mlcc 1.98 1.99, dc_machine 1.94 1.98, controlled 1.97 1.99,
+# pulse I 1.94 1.95, sine I 1.88 1.95, table I 1.93 1.97, V_f diode 1.98 1.99
+@pytest.mark.parametrize("case", ["mlcc", "dc_machine", "controlled_sources",
+                                  "pulse_current", "sine_current",
+                                  "table_current", "diode_with_drop"])
+def test_split_is_second_order_on_each_integrated_device(case):
+    mod = _split_devices()
+    _, orders, splits = mod.run(getattr(mod, case))
+    assert splits >= 8
+    assert orders[-1] >= 1.9 and orders[-2] >= 1.85, orders
