@@ -659,6 +659,18 @@ def _half_wave():
     return b
 
 
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
+def test_mode_selection_refused_by_name_on_a_diode_circuit_off_dsed(engine, mode):
+    # Integration batch 6a: pwl had no cell. With a diode present the
+    # refusal is the missing hook, not "nothing to select".
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, _half_wave(), mode_selection=mode)
+    assert ei.value.feature == "mode_selection"
+    if engine != "auto":                       # auto names the engine it lands on
+        assert ei.value.engine == engine
+
+
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
 def test_mode_guard_diagnostics_only_on_dsed(engine):
     # The default-mode guard (add-complementarity-mode-selection task 4)
