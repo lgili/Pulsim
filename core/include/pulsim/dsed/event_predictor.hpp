@@ -185,6 +185,46 @@ template <class G>
 /// The 5-tier resolver (GateEdge > DiodeOn > DiodeOff > CurrentZC >
 /// VoltageThreshold > Custom) breaks ties on simultaneous events
 /// via the ``priority`` field.
+/// Root of `g` on [ta, tb], g(ta)·g(tb) < 0, located on the TIME
+/// BRACKET alone (add-exact-propagator-strategy D3): the search stops
+/// when `tb − ta ≤ t_tol` or g is exactly 0, never on |g| (a value
+/// test is unit-dependent: 1e-10 V on a diode's ON signal is 1e-7 A,
+/// which g_off turns into kilovolts in the OFF mode). Returns the
+/// endpoint on tb's side, where the sign HAS changed, so the state at
+/// the event is past the crossing. Illinois steps; every fourth step
+/// bisects, which bounds the work by the bracket's halvings.
+template <class G>
+[[nodiscard]] Real locate_root_bracket(G&& g, Real ta, Real tb,
+                                       Real ga, Real gb, Real t_tol) {
+    int side = 0;
+    for (int it = 0; it < 256 && tb - ta > t_tol; ++it) {
+        Real tc = (it % 4 == 3) ? Real{0.5} * (ta + tb)
+                                : (ta * gb - tb * ga) / (gb - ga);
+        if (!(tc > ta && tc < tb)) {
+            tc = Real{0.5} * (ta + tb);
+            if (!(tc > ta && tc < tb)) {
+                break;      // the bracket is two adjacent doubles
+            }
+        }
+        const Real gc = g(tc);
+        if (gc == Real{0}) {
+            return tc;
+        }
+        if ((gc > Real{0}) == (gb > Real{0})) {
+            tb = tc;
+            gb = gc;
+            if (side == +1) ga *= Real{0.5};
+            side = +1;
+        } else {
+            ta = tc;
+            ga = gc;
+            if (side == -1) gb *= Real{0.5};
+            side = -1;
+        }
+    }
+    return tb;
+}
+
 class EventPredictor {
 public:
     EventPredictor() = default;

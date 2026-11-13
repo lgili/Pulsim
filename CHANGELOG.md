@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### DSED: exact propagator with a stated accuracy per mask
+
+`engine='dsed'` steps each constant-source mask with
+`V e^{Λh} V⁻¹x + hφ₁(Λh)V⁻¹b` only when energy-scaled
+`u·κ₂(V) ≤ 1e-10` (tier 1), else with a cached Padé [13/13] when
+`u·‖A·h‖₁ ≤ 1e-10` (tier 2), else numerically (tier 3, recorded).
+`result.exact` reports each mask's tier, κ₂, `‖A·h‖₁` and reason plus
+the counters `n_eig`, `n_pade`, `n_phi_cache_hits`,
+`n_predicate_evals` (add-exact-propagator-strategy, first slice).
+
+* **Fixed** a critically damped series RLC (100 µH, 100 nF, one
+  period) was 1.8e-8 off in the energy norm (1.1e-6 in one component)
+  through an ill-conditioned eigenbasis; it is 2.1e-16 (tier 2).
+* **Fixed** the DCM buck (`V_th` = 1e-9 or 0) aborted with "chatter"
+  at 0.996 ms; it runs and equals the `V_th = 1e-6` run. Four of the
+  six `L·(1 ± δ)` runs (δ = 1e-5…1e-2) aborted; all complete and
+  dv_C/dL = 1758.1255 (reference 1758.1254). A `V_th = 0` buck at rest
+  ("did not settle after 64 rounds") runs. Events are bracketed in
+  time to `max(4u|t|, 1e-12·h)` and the state at an event is past the
+  crossing; a diode whose signal is zero to rounding is decided on its
+  exact OFF-mode trajectory. DCM turn-off instant: 2.3e-13 s → 9.2e-18 s.
+* **Fixed** an LC tank driving a series diode from rest never turned
+  the diode on (v_C = 3.3e-6 V instead of 13.73 V), silently: the
+  slow-manifold projection moved the start past the turn-on crossing.
+* **Fixed** a PWL diode with `V_th = V_f` ran silently wrong on `dsed`
+  (sine clamp, `V_th = V_f = 0.7`: minimum 0.0 V, reference -9.98 V).
+  It is now correct, and `V_f > V_th` is no longer refused (it was a
+  `UnsupportedError(feature="V_f")`): a current source charging a
+  capacitor into a `V_th = 0, V_f = 0.7` diode clamps at 1.2 V
+  (0.7 + 10 A / 20 S), and the DCM boost of `test_diode_forward_drop.py`
+  ("did not settle") runs, its states within 1e-5 A of trbdf2.
+* **Added** builder initial conditions (`c0=`, `i0=`, `set_initial`)
+  on `dsed` (were refused by name); `result.initial_condition_adjustment`
+  is the largest change made to a declared capacitor voltage.
+* **Changed** `simulate(engine='dsed')` on the synchronous buck of
+  `perf/p9_dsed.py` (2000 periods): 17.4 ms → 2.8 ms (min of 5; C++
+  loop about 1 ms). The builder runners take `event_log=True` and
+  return `event_times` / `event_types`; `simulate()` exposes them as
+  `result.event_times` / `result.event_types`.
+
 ### Controller ticks: one rule on every engine
 
 Source j with period `T_j` (a `ClosedLoop`'s `period`, or `step_observer`

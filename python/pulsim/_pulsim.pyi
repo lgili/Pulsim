@@ -2354,6 +2354,10 @@ class _NativeCircuitBuilderAdapter:
         """
         Return the currently-active mask.
         """
+    def reduced_initial_state(self, builder: CircuitBuilder) -> tuple[typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], float]:
+        """
+        add-exact-propagator-strategy D5: the reduced state of the current mask from a full-MNA initial vector (the builder's c0= / i0= / set_initial), and the largest capacitor-voltage adjustment the charge-conserving projection made (0 when the declared values are consistent).
+        """
     def rhs(self, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Continuous-time RHS: dx/dt = A·x + b(t).
@@ -2493,7 +2497,7 @@ def run_auto_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annota
     """
     Native PEDSimulatorAuto (per-mode RK45↔BDF2 dispatch via stiffness detector) running the C++ scheduler inner loop. Returns a dict that additionally includes n_rk45_steps + n_bdf2_steps for each mode-segment.
     """
-def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1) -> dict[typing.Any, typing.Any]:
+def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1, event_log: bool = True) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulatorAuto over a NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).
     """
@@ -2501,7 +2505,7 @@ def run_bdf2_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annota
     """
     Native PEDSimulatorBDF2 (implicit BDF2 + Crank-Nicolson bootstrap) running the C++ scheduler inner loop.
     """
-def run_bdf2_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, h_fixed: float = 1e-06, store_every: int = 1) -> dict[typing.Any, typing.Any]:
+def run_bdf2_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, h_fixed: float = 1e-06, store_every: int = 1, event_log: bool = True) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulatorBDF2 over a NativeCircuitBuilderAdapter (implicit BDF2 + CN bootstrap).
     """
@@ -2515,7 +2519,7 @@ def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotat
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
     """
-def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True) -> dict[typing.Any, typing.Any]:
+def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """

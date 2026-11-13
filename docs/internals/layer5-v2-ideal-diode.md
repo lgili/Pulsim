@@ -48,7 +48,8 @@ only; `J` is unchanged. The decisions use one law
 | power while ON | `V_f·i + i²/g_on` |
 
 `V_th > V_f` is a hysteresis band of width `V_th − V_f`; the DSED
-engine's settle needs one to resolve a zero-current turn-on. `V_f`
+engine no longer needs one (it decides a diode in the zero band on
+its exact OFF-mode trajectory). `V_f`
 must be finite and ≥ 0. At `V_f = 0` everything is bit-identical to
 the law without it.
 

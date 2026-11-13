@@ -235,6 +235,19 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### DSED exact propagator: what is still numeric or refused
+
+`engine='dsed'` steps a mask with constant sources exactly (tier 1
+eigen, tier 2 Padé; `result.exact["masks"]`). A mask that passes
+neither bound (tier 3: stiff and non-normal, e.g. a 1e12 Jordan block)
+runs on the old numeric path for that mask, recorded with its reason;
+the implicit hand-off and a strict refusal need the unified stepper
+(`add-exact-propagator-strategy` task 2.4). Masks with PWM / sine /
+pulse sources are numeric too (task 8). Capacitor loops (parallel
+capacitors) are refused by the extractor, so the charge-conserving
+start for inconsistent `c0=` values is not reachable yet. Coupled
+inductors stay refused (task 7).
+
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or

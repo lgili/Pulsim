@@ -2098,38 +2098,6 @@ def simulate(
                 "Observer/closed-loop support inside DSED is tracked "
                 "for v2.0 (event-synchronised controller cadence)."
             )
-        if _ic_from_builder:
-            # The builder recorded `c0=` / `i0=` initial conditions
-            # and DSED cannot apply them. It used to START AT ZERO
-            # in silence: an inductor declared `i0=100` began its
-            # run at 0 A, the solve converged, and the trace looked
-            # like a perfectly ordinary energisation transient —
-            # the same circuit answering differently depending on
-            # which engine the router happened to pick.
-            #
-            # It is not a matter of forwarding the vector. DSED
-            # solves a REDUCED state (one entry per reactive
-            # element) while `builder.initial_state()` is a
-            # full-MNA vector, and for a FLOATING capacitor the
-            # reduced state is the congruence-transformed
-            # difference v_pos − v_neg, not the row the gather
-            # would pick up. A naive gather would therefore be
-            # right for inductors and grounded caps and quietly
-            # wrong for floating ones — which is the failure this
-            # message exists to stop. Refuse by name until the
-            # projection is built and tested.
-            raise _unsupported(
-                "dsed", "initial_conditions",
-                "simulate(engine='dsed'): this circuit declares "
-                "initial conditions (c0= / i0= / set_initial), and "
-                "the DSED engine cannot apply them yet — it would "
-                "start every state at ZERO and return a plausible "
-                "but wrong transient. Use engine='pwl' (or "
-                "'trbdf2'), which honour them, or pass "
-                "initial_state=<reduced state vector> explicitly if "
-                "you know DSED's state ordering "
-                "([v_C..., i_L...])."
-            )
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
         # preflight report on the way out, so `result._preflight` —
@@ -2148,7 +2116,10 @@ def simulate(
             t_start=t_start,
             switch_fn=switch_fn,
             b_extra_fn=b_extra_fn,
-            initial_state=initial_state,
+            # Builder ICs (c0= / i0=) are a full-MNA vector: the
+            # dispatcher maps them per device onto the reduced state.
+            initial_state=None if _ic_from_builder else initial_state,
+            builder_initial_state=initial_state if _ic_from_builder else None,
             progress=progress,
         )
         try:

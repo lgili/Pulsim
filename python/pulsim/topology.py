@@ -167,8 +167,6 @@ def add_bridge_rectifier(builder,
         the instant it turns on, a ``V_th`` above ``V_f`` in a
         low-impedance loop (a capacitor-input bridge) injects a
         turn-on current spike of roughly ``(V_th − V_f) / R_loop``.
-        ``V_th > V_f`` is also the hysteresis band the ``'dsed'``
-        engine needs to settle a zero-current turn-on.
     V_f
         Forward voltage drop while ON (V), PSIM's "Diode Voltage Drop":
         each diode is ``g_on`` in series with ``V_f``, so it conducts
@@ -311,9 +309,7 @@ def add_three_phase_vsi(builder,
     V_th
         Turn-on threshold of each diode (V), effectively
         ``max(V_th, V_f)``. Default 0 (pure PSIM: turn on at ``V_f``).
-        ``V_th > V_f`` (e.g. ``V_f + 1e-3``) gives a hysteresis band,
-        which the ``'dsed'`` engine needs to settle a zero-current
-        turn-on.
+        ``V_th > V_f`` (e.g. ``V_f + 1e-3``) gives a hysteresis band.
 
     Returns
     -------

@@ -426,6 +426,15 @@ class _PEDSimulationResult:
         self.n_bdf2_steps = n_bdf2_steps
         self.n_exact_steps = n_exact_steps
         self.cpu_time_seconds = cpu_time_seconds
+        # add-exact-propagator-strategy D10: per visited mask the
+        # propagator tier (1 eig, 2 Pade, 3 none), kappa2 and the reason
+        # for any tier but 1, plus n_eig / n_pade / n_phi_cache_hits /
+        # n_predicate_evals. Event instants and predicate types as
+        # arrays. Set by the native builder path; None elsewhere.
+        self.exact = None
+        self.initial_condition_adjustment = None
+        self.event_times = None
+        self.event_types = None
         # PWL-engine diagnostic fields — empty for PED, but exposed
         # for API-compat with code that destructures both result types.
         self.event_iteration_count: list = []
@@ -510,8 +519,15 @@ def run_dsed_from_builder(
     b_extra_fn: Optional[Callable[[float], Any]] = None,
     initial_state: Optional[Any] = None,
     progress: Any = False,
+    builder_initial_state: Optional[Any] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
+
+    ``builder_initial_state`` (not None) says the builder declared
+    ``c0=`` / ``i0=`` / ``set_initial`` values; they are mapped per
+    device onto the reduced state (add-exact-propagator-strategy D5)
+    and the largest capacitor-voltage adjustment is
+    ``result.initial_condition_adjustment``.
 
     Production path. Tries the native C++ adapter (Bridge.11) and
     falls back to the Python adapter + native scheduler (Bridge.10)
@@ -749,17 +765,22 @@ def run_dsed_from_builder(
             native_adapter = NativeAdapterCls(
                 builder, cache,
                 b_extra_fn if b_extra_fn is not None else None)
+            ic_adjustment = None
+            if builder_initial_state is not None:
+                native_adapter.set_mask(initial_mask)
+                x0, ic_adjustment = native_adapter.reduced_initial_state(
+                    builder)
             if opts.integrator == "rk45":
                 native_res = run_ped_b11(
                     native_adapter, sf, x0, t_window,
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
-                    store_every=opts.store_every)
+                    store_every=opts.store_every, event_log=False)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
                     h_fixed=opts.h_bdf2,
-                    store_every=opts.store_every)
+                    store_every=opts.store_every, event_log=False)
             else:  # 'auto'
                 native_res = run_auto_b11(
                     native_adapter, sf, x0, t_window,
@@ -767,15 +788,13 @@ def run_dsed_from_builder(
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
-                    store_every=opts.store_every)
-            times_arr = native_res["times"]
-            states_arr = native_res["states"]
-            times = [float(t) + float(opts.t_start) for t in times_arr]
-            states = [np.asarray(states_arr[i], dtype=float)
-                      for i in range(len(times))]
-            return _PEDSimulationResult(
+                    store_every=opts.store_every, event_log=False)
+            # One array conversion, not one per sample.
+            times = (np.asarray(native_res["times"], dtype=float)
+                     + float(opts.t_start)).tolist()
+            res = _PEDSimulationResult(
                 times=times,
-                states=states,
+                states=native_res["states"],
                 states_full=native_res.get("states_full"),
                 switch_states=native_res.get("switch_states"),
                 right_limit_index=native_res.get("right_limit_index"),
@@ -790,6 +809,13 @@ def run_dsed_from_builder(
                 n_exact_steps=native_res.get("n_exact_steps", 0),
                 cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
             )
+            res.exact = native_res.get("exact")
+            res.initial_condition_adjustment = ic_adjustment
+            et = native_res.get("event_times")
+            res.event_times = (None if et is None
+                               else np.asarray(et) + float(opts.t_start))
+            res.event_types = native_res.get("event_types")
+            return res
         except UnsupportedError:
             # A refusal is an answer, not a reason to try the next
             # bridge (which would run the circuit without the device).
@@ -807,6 +833,14 @@ def run_dsed_from_builder(
             if _n_diodes > 0:
                 raise
             pass
+
+    if builder_initial_state is not None:
+        raise unsupported(
+            "dsed", "initial_conditions", message=
+            "simulate(engine='dsed'): builder initial conditions "
+            "(c0= / i0= / set_initial) are mapped onto the reduced "
+            "state by the native adapter only, which rejected this "
+            "circuit. Use engine='pwl' or 'trbdf2'.")
 
     # Bridge.10 path — Python adapter + native scheduler.
     run_ped_native = (getattr(_native, "run_ped_native", None)

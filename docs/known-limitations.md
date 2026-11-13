@@ -55,9 +55,8 @@ unless called with `allow_non_passive=True`.
 
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
-`dsed` and `bdf1`; builder initial conditions on `dsed`; PWL diodes with
-`integrator='bdf2'`, or with `V_f > V_th` (use `V_th = V_f + 1e-3`), on
-`dsed`; C blocks, controllers
+`dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;
+capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
 (`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards and `enable_substep_state_correction` on `dsed`; the fixed-step
