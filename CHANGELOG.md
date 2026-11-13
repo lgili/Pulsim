@@ -76,6 +76,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   closed switch is turned OFF and the mode re-formed
   (`counters['ideal_loop_releases']`); a second release of the same diode
   in one step is refused as `ideal_voltage_loop`.
+* **Fixed** (review of the above, all opt-in paths): an ideal diode
+  forward-biased by a loop of sources and closed ideal elements is
+  refused (`ideal_voltage_loop`) instead of breaching on every step with
+  the diode stuck OFF; a saturable inductor, nonlinear capacitor or PMSM
+  next to an ideal element is refused (`dependent_states`, naming it)
+  instead of escaping the structural pass; `engine='auto'` routes an
+  ideal-switch circuit to `pwl` (or asks for `dt`) instead of raising the
+  trbdf2 refusal; a capacitor loop closed through several ideal switches
+  records whichever one changed; a gate edge that forces a diode into a
+  dependent mode records it; the transformer primary no longer reads as
+  a floating node; the refusal and the record are decided on the
+  committed step (an ideal CCM buck runs without the restart rule);
+  `start_from_dc_op` checks the converged DC mode;
+  `device_loss_summary` warns when it leaves out an ideal element.
 
 ### Integration fixes (batch 6b: design optimisation, exact route)
 

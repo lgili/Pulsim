@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
 #include <numeric>
 #include <string>
 #include <unordered_map>
@@ -80,6 +81,28 @@ public:
             if (g_off == Real{0} || pool.branch_R_on(b) == Real{0}) {
                 active_ = true;
             }
+        }
+        if (!active_) return;
+        // The pass and the D4 record model linear L and C only: a Newton
+        // device's state would be missed in a cut-set or loop (review H3).
+        using K = DevicePool::StoredKind;
+        for (Index b = 0; b < graph.num_branches(); ++b) {
+            if (!pool.is_registered(b)) continue;
+            const auto k = pool.kind_of(b);
+            if (k != K::SaturableInductor && k != K::NonlinearCapacitor &&
+                k != K::PmsmMna) {
+                continue;
+            }
+            throw UnsupportedError(
+                engine_, "dependent_states", std::string(graph.branch_name(b)),
+                std::string(stored_kind_name(k)),
+                std::format(
+                    "engine '{}': '{}' ({}) carries a nonlinear state, and the "
+                    "circuit has an ideal branch-form element (R_on = 0 or "
+                    "g_off = 0); the structural pass cannot tell whether a "
+                    "mode makes that state dependent. Give every branch-form "
+                    "element R_on > 0 and g_off > 0.",
+                    engine_, graph.branch_name(b), stored_kind_name(k)));
         }
     }
 
@@ -181,6 +204,11 @@ private:
             if (!pool_.is_registered(b)) continue;
             edges.push_back({b, node_(br.from), node_(br.to),
                              role_(b, closed, dynamic)});
+            // The primary is tied through v_p = v_s / n (connectivity, as in preflight; review M4).
+            if (pool_.kind_of(b) == DevicePool::StoredKind::IdealTransformer) {
+                const auto [pf, pt] = pool_.ideal_transformer_primary_nodes(b);
+                edges.push_back({b, node_(pf), node_(pt), Role::Conduct});
+            }
         }
         const std::string mode = mask.to_string();
         ModeStructure out;
@@ -311,6 +339,8 @@ private:
                     const int s = t.a == prev[v] ? 1 : -1;
                     if (t.r == Role::Cap) {
                         d.states.push_back(t.b); d.signs.push_back(s);
+                    } else if (t.r == Role::Ideal) {
+                        d.elements.push_back(t.b);   // review M2
                     } else {
                         d.sources.push_back({t.b, s});
                     }
@@ -326,7 +356,7 @@ private:
                     uf.unite(e.a, e.c);
                 }
             }
-            std::unordered_map<Index, DependentStructure> cuts;
+            std::map<Index, DependentStructure> cuts;   // ordered: stable records
             for (const auto& e : edges) {
                 if (e.r != Role::Open && e.r != Role::Ind && e.r != Role::Isrc) {
                     continue;

@@ -103,7 +103,7 @@ inline void require_branch_form_supported(const topology::Graph& graph,
     for (Index b = 0; b < graph.num_branches(); ++b) {
         if (!pool.is_registered(b) || pool.is_branch_form(b)) continue;
         const auto k = pool.kind_of(b);
-        if (k == K::Capacitor || k == K::VoltageSource ||
+        if (k == K::Capacitor || k == K::NonlinearCapacitor || k == K::VoltageSource ||
             k == K::PWMVoltageSource || k == K::SineVoltageSource ||
             k == K::PulseVoltageSource || k == K::VCVS || k == K::CCVS ||
             k == K::IdealTransformer) {

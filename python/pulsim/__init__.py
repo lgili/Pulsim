@@ -2499,6 +2499,13 @@ def simulate(
             #   no dt         -> the engine picks, and uses the
             #                    variable-step path when it can
             # which makes the new engine opt-in by OMISSION.
+            # A branch-form circuit trbdf2 refuses routes, not raises (review H4).
+            from . import _pulsim as _k  # type: ignore[import-not-found]
+            try:
+                _k._require_supported(builder.graph, builder.pool, "trbdf2")
+            except UnsupportedError as e:
+                if e.feature in ("branch_form", "dependent_states"):
+                    _route_reasons = [*_route_reasons, str(e)]
             if dt is not None and dt > 0:
                 _route_reasons = _route_reasons or [
                     "an explicit dt was given, which requests a "

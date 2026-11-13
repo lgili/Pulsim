@@ -674,10 +674,16 @@ inline SimulationResult run_transient(
             // a CCM buck: switch ON while the freewheeling diode still
             // conducts). If the diode law turns it back ON within the
             // same step the loop forward-biases it: refuse.
-            const Index b = ms.loop_diodes.front();
-            const bool again = std::find(loop_released.begin(),
-                                         loop_released.end(), b) !=
-                               loop_released.end();
+            Index b = ms.loop_diodes.front();
+            bool again = false;
+            for (const Index d : ms.loop_diodes) {
+                if (std::find(loop_released.begin(), loop_released.end(), d) !=
+                    loop_released.end()) {
+                    b = d;
+                    again = true;
+                    break;
+                }
+            }
             if (!dynamic || again) {
                 throw UnsupportedError(
                     "pwl", "ideal_voltage_loop",
@@ -703,10 +709,37 @@ inline SimulationResult run_transient(
             ++result.ideal_loop_releases;
             return true;
         }
-        // D4: the SDIRK x3 restart realises the projection onto the
-        // dependent mode; without the rule the trapezoid rings (+-397 V).
-        if (ms.dependent.empty() || opts.discontinuity_restart) return false;
-        const auto& d = ms.dependent.front();
+        return false;
+    };
+    // D4: the SDIRK x3 restart realises the projection onto a dependent
+    // mode; without the rule the trapezoid rings (+-397 V). Decided on the
+    // COMMITTED mode: an event-iteration iterate may pass through one
+    // (CCM buck: switch off, diode not yet on; review M6).
+    // False when the committed state is NOT in the cut-set `d` (sum s_j i_j
+    // = 0 without current sources): the step kept a solve whose mask names
+    // the cut-set but whose diode flip already undid it ("flip at the
+    // step's end" rule), so no impulse happened. Loops: always true.
+    auto in_dependent_mode = [&](const pwl::DependentStructure& d,
+                                 const Vector& xs) {
+        if (d.kind != pwl::DependentStructure::Kind::CutSet || !d.sources.empty()) {
+            return true;
+        }
+        Real k = 0, scale = 0;
+        for (Size j = 0; j < d.states.size(); ++j) {
+            const Real i = xs[pool.branch_var_id_for_inductor(d.states[j], graph)];
+            k += static_cast<Real>(d.signs[j]) * i;
+            scale += std::abs(i);
+        }
+        return std::abs(k) <= Real{1e-9} * scale;
+    };
+    auto refuse_dependent = [&](const pwl::ModeStructure& ms,
+                                const topology::SwitchStateMask& m, Real at_t) {
+        if (opts.discontinuity_restart) return;
+        const auto it = std::find_if(
+            ms.dependent.begin(), ms.dependent.end(),
+            [&](const pwl::DependentStructure& d) { return in_dependent_mode(d, x); });
+        if (it == ms.dependent.end()) return;
+        const auto& d = *it;
         const Index el = d.elements.front();
         std::string states;
         for (Index b : d.states) {
@@ -782,18 +815,27 @@ inline SimulationResult run_transient(
         dc_opts.enable_line_search = opts.enable_newton_line_search;
         dc_opts.enable_lm          = opts.enable_newton_lm;
 
-        if (structure.active()) {
-            (void)check_mode(has_diodes
-                           ? combine_masks(switch_fn(opts.t_start),
-                                           diodes.current_diode_mask(),
-                                           diode_owned)
-                           : switch_fn(opts.t_start),
-                       false, opts.t_start);
-        }
-        auto dc = pwl::compute_dc_operating_point(
-            graph, pool, switch_fn(opts.t_start), nl_static,
-            dc_opts, has_diodes ? &diodes : nullptr,
-            "run_transient(start_from_dc_op)");
+        // The DC mode is the one the DC diode iteration converges to; the
+        // start mask (diodes OFF) can be a false floating island (review
+        // L2). On a failed solve the start mask's check names the cause.
+        const auto dc_start_mask = has_diodes
+            ? combine_masks(switch_fn(opts.t_start),
+                            diodes.current_diode_mask(), diode_owned)
+            : switch_fn(opts.t_start);
+        auto dc = [&] {
+            try {
+                return pwl::compute_dc_operating_point(
+                    graph, pool, switch_fn(opts.t_start), nl_static,
+                    dc_opts, has_diodes ? &diodes : nullptr,
+                    "run_transient(start_from_dc_op)");
+            } catch (const std::runtime_error&) {
+                if (structure.active()) {
+                    (void)check_mode(dc_start_mask, false, opts.t_start);
+                }
+                throw;
+            }
+        }();
+        if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
         initial_mask = dc.mask;
@@ -1490,10 +1532,33 @@ inline SimulationResult run_transient(
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
                 }
+                bool released = false;
                 while (structure.active() && check_mode(mask, true, at_t)) {
+                    released = true;
                     mask = combine_masks(gate_at(restart_rule ? gate_t : at_t),
                                          diodes.current_diode_mask(),
                                          diode_owned);
+                }
+                // A release back onto a mask already solved this step is the
+                // loop forward-biasing the diode: refuse rather than let the
+                // cycle detector turn it into a breach (review H1).
+                if (released && !nl_refresh_effective &&
+                    std::find(masks_seen.begin(),
+                              masks_seen.begin() +
+                                  static_cast<std::ptrdiff_t>(n_masks_seen),
+                              mask) != masks_seen.begin() +
+                                  static_cast<std::ptrdiff_t>(n_masks_seen)) {
+                    const Index d = loop_released.back();
+                    throw UnsupportedError(
+                        "pwl", "ideal_voltage_loop",
+                        std::string(graph.branch_name(d)), "Diode",
+                        std::format(
+                            "engine 'pwl': at t = {} the ideal diode '{}' (R_on "
+                            "= 0) closes a loop of voltage sources and closed "
+                            "ideal elements that forward-biases it (turned OFF, "
+                            "it turned back ON): its current is undefined. Give "
+                            "it R_on > 0.",
+                            at_t, graph.branch_name(d)));
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -2497,6 +2562,20 @@ inline SimulationResult run_transient(
             // split, not the split instant); the record's t is t_prev.
             if (structure.active()) {
                 const auto& now = structure.check(stamped_mask, true);
+                refuse_dependent(now, stamped_mask, t_prev);
+                bool gated_step = false;
+                if (reinit_prev_known) {
+                    for (Index el = 0; el < graph.num_branches(); ++el) {
+                        const long s = reinit_slot[static_cast<std::size_t>(el)];
+                        if (s < 0 || !pool.is_registered(el) ||
+                            pool.kind_of(el) == pwl::DevicePool::StoredKind::Diode) {
+                            continue;
+                        }
+                        gated_step = gated_step ||
+                            stamped_mask.get(static_cast<Size>(s)) !=
+                                reinit_prev_mask.get(static_cast<Size>(s));
+                    }
+                }
                 const pwl::ModeStructure* before = reinit_prev_known
                     ? &structure.check(reinit_prev_mask, true) : nullptr;
                 for (const auto& d : now.dependent) {
@@ -2508,25 +2587,21 @@ inline SimulationResult run_transient(
                                           o.elements == d.elements);
                         }
                     }
-                    // A diode turning off is consistent (its current
-                    // crossed zero): only a gated change, or the start,
-                    // records.
-                    bool gated = !reinit_prev_known;
-                    for (const Index el : d.elements) {
-                        const long s = reinit_slot[static_cast<std::size_t>(el)];
-                        if (s < 0 || pool.kind_of(el) ==
-                                         pwl::DevicePool::StoredKind::Diode) {
-                            continue;
-                        }
-                        gated = gated ||
-                            stamped_mask.get(static_cast<Size>(s)) !=
-                                reinit_prev_mask.get(static_cast<Size>(s));
+                    // A diode commutating on its own is consistent (it
+                    // crossed its threshold): only a step with a gated
+                    // change ANYWHERE (a gate can force a diode into the
+                    // mode: charge pump, review M3), or the start, records.
+                    // shortcut: a natural diode commutation in the same
+                    // step as an unrelated gate edge records its small
+                    // residual too; upgrade by locating the crossing.
+                    if (old || !(gated_step || !reinit_prev_known) ||
+                        !in_dependent_mode(d, x)) {
+                        continue;
                     }
-                    if (old || !gated) continue;
                     const bool cut =
                         d.kind == pwl::DependentStructure::Kind::CutSet;
                     std::vector<Real> xa, xb, mm;
-                    Real kx0 = 0, kx1 = 0, inv_m = 0;
+                    Real kx0 = 0, kx1 = 0, inv_m = 0, scale = 0;
                     for (Size j = 0; j < d.states.size(); ++j) {
                         const Index b = d.states[j];
                         Real a = 0, c = 0, m = 0;
@@ -2546,13 +2621,16 @@ inline SimulationResult run_transient(
                         xa.push_back(a);
                         xb.push_back(c);
                         mm.push_back(m);
+                        scale += std::abs(a) + std::abs(c);
                         kx0 += static_cast<Real>(d.signs[j]) * a;
                         kx1 += static_cast<Real>(d.signs[j]) * c;
                         inv_m += Real{1} / m;
                     }
                     // d = K x(t+h): the restart leaves the constraint exact.
                     const Real r = kx0 - kx1;
-                    if (r == Real{0}) continue;
+                    // Already consistent (start, resume, equal capacitors):
+                    // round-off is not an impulse (review M1).
+                    if (std::abs(r) <= Real{1e-12} * scale) continue;
                     ReinitRecord rec;
                     rec.t = t_prev;
                     rec.kind = cut ? "cut_set" : "capacitor_loop";

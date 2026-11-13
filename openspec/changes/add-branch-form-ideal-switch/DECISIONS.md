@@ -134,3 +134,32 @@ Each entry: question → option taken → evidence → how to reverse.
     Evidence: the DCM buck then matches the prototype within 1.09× at
     N = 50 and 1.002× at N = 400 (task 6.2). → Reverse: drop the
     `loop_diodes` branch in `check_mode`; the refusal returns.
+
+13. **Group-5 review fixes (fresh-context review, 2026-11-13).**
+    - H1: a release that lands back on a mask already solved this step is
+      the loop forward-biasing the diode → `ideal_voltage_loop` (was a
+      silent breach with the diode stuck OFF).
+    - H3: SaturableInductor, NonlinearCapacitor and PmsmMna with an ideal
+      element → `dependent_states` naming the nonlinear device (the pass
+      and the record model linear L and C only). Reverse: give them roles.
+    - H4: `engine='auto'` routes a branch-form circuit trbdf2 refuses to
+      `pwl` (or asks for `dt`) instead of raising.
+    - M1: the record skips |r| <= 1e-12·Σ|x| (round-off at start/resume).
+    - M2: ideal elements on a capacitor loop's path count as its elements.
+    - M3: a step with a gated change ANYWHERE records (a gate can force a
+      diode into the mode); shortcut noted in the code.
+    - M4: the transformer primary is a connectivity tie in the pass.
+    - M5: `device_loss_summary` warns for an ideal element it leaves out.
+    - M6: the `dependent_states` refusal (and the record) are decided on
+      the committed step and only when the committed state satisfies the
+      cut-set (Σ s_j i_j = 0); the "flip at the step's end" rule keeps a
+      solve whose mask is the cut-set while the diode already conducts.
+    - L2: the DC structural check runs on the converged DC mode; the
+      start mask is checked only when the DC solve fails.
+    - Not changed: H2 (refuted: a resistive-only circuit is checked, the
+      branch currents make the path dynamic); L1 (a duplicate cut-set needs
+      two islands joined only by one inductor, which the floating pass
+      refuses first); L3 (the extra `switch_fn` call exists only on
+      opt-in split runs with an opaque `switch_fn`); L4 (commutation
+      events of ideal diodes, C++ `run_trbdf2` callers, `res.i` hold —
+      listed as remaining work).
