@@ -384,6 +384,13 @@ def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
         return b
     r = p.simulate(build(), 3e-3, engine="dsed")
     assert r.diagnostics["mode_guard"]["repairs"] == 1
+    # The repaired run against trbdf2 rtol 1e-10 (batch 6b, checkpoint review M2): mean i(L)
+    # 0.2937666 vs 0.2937670 A (measured 3.7e-7), v(a) on dsed's samples within 5.8e-5 V.
+    ref = p.simulate(build(), 3e-3, engine="trbdf2", rtol=1e-10, atol=1e-13)
+    t, tr = np.asarray(r.times), np.asarray(ref.times)
+    assert np.trapezoid(r.i("L"), t) / 3e-3 == pytest.approx(
+        np.trapezoid(ref.i("L"), tr) / 3e-3, abs=1e-4)
+    assert np.abs(np.interp(t, tr, ref.v("a")) - np.asarray(r.v("a"))).max() < 1e-4
     DD.MODE_GUARD = False
     try:
         with pytest.raises(DD.DiodeModeInconsistentError, match="'D' is ON while carrying"):
