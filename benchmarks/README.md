@@ -78,6 +78,16 @@ Rules the harness keeps:
 - **Every average, RMS and error is time-weighted** (trapezoid on the
   samples); a plain `.mean()` over a variable-step trace once invented an
   engine defect. `err_rms = sqrt(∫(y − ref)² dt / window) / span`.
+- **The differential runner compares what an engine computes.** Its
+  default observables leave out the nodes an independent voltage source
+  ties to ground (an ideal PWM node scored 0.06–0.11 between two tight
+  references although nothing reads it), and its default measure
+  (`--metric edge`) leaves out the steps of either trace across which the
+  recorded switch state changes: interpolating a jump between two sparse
+  samples compares a ramp neither engine computed. The window shrinks by
+  those steps only; every other interval counts. `--metric interp` is the
+  previous measure (every interval interpolated, every node), kept for
+  comparison; `reference_status.py --metric` takes the same switch.
 - **The first stored sample is excluded** where it is the initial state
   rather than the `t = 0⁺` solution (on `pwl` / `trbdf2` an RL step reads
   0 V across the inductor at `t = 0`; the answer is 10 V).

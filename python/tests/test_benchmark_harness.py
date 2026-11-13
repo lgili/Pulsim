@@ -66,6 +66,42 @@ def test_err_rms_identity_and_known_offset():
     assert metrics.err_rms(t, y + 0.1 * span, lambda s: np.sin(3 * s)) == pytest.approx(0.1, rel=1e-6)
 
 
+def test_edge_measure_drops_only_the_steps_that_hold_a_jump():
+    # The same unit step at t = 0.5, sampled densely and sparsely: both are
+    # exact at their samples; interpolating the sparse one across its edge
+    # step invents an error, the edge measure does not.
+    tr = np.linspace(0.0, 1.0, 1001)
+    yr = (tr >= 0.5).astype(float)
+    tr, yr = np.insert(tr, 500, 0.5), np.insert(yr, 500, 0.0)    # left limit
+    ts = np.array([0.0, 0.25, 0.45, 0.55, 0.75, 1.0])
+    ys = (ts >= 0.5).astype(float)
+    assert metrics.err_rms(ts, ys, (tr, yr)) > 0.05
+    assert metrics.err_rms(ts, ys, (tr, yr), exclude=[(0.45, 0.55)]) == 0.0
+    assert metrics.err_max(ts, ys, (tr, yr), exclude=[(0.45, 0.55)]) == 0.0
+    # an error outside the excluded step is still seen, weighted by the kept window
+    assert metrics.err_rms(ts, ys + 0.1, (tr, yr), exclude=[(0.45, 0.55)]) == pytest.approx(0.1)
+
+
+def test_default_observables_drop_source_forced_nodes():
+    case = v1_reader.load(BENCH / "circuits/switching/buck/ll06_buck_vcswitch.yaml")
+    assert dr.source_forced(case) == {"V(vin)", "V(ctrl)"}
+    new, old = dr.observables_of(case), dr.observables_of(case, "interp")
+    assert set(old) - set(new) == {"V(vin)", "V(ctrl)"}
+    assert "V(sw)" in new and "I(L1)" in new
+
+
+def test_switching_steps_bracket_every_recorded_change():
+    case = v1_reader.load(BENCH / "circuits/switching/buck/ll06_buck_vcswitch.yaml")
+    r = case.run("pwl")
+    t = np.asarray(r.times)
+    steps = dr.switching_steps(r, t)
+    s = np.asarray(r.switch_states)
+    assert len(steps) == int(np.any(s[1:] != s[:-1], axis=1).sum()) > 100
+    assert all(b - a == pytest.approx(case.dt, rel=1e-6) for a, b in steps)
+    with pytest.raises(ValueError, match="metric"):
+        dr.compare(dr.traces(r, ["V(sw)"]), dr.traces(r, ["V(sw)"]), ["V(sw)"], 1e-3, "bogus")
+
+
 def test_exclude_t0_drops_only_the_initial_sample():
     t = np.linspace(0, 1, 11)
     y = np.ones_like(t)

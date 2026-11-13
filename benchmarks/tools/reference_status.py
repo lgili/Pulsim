@@ -53,7 +53,7 @@ def extra_kwargs(kw):
         pulsim.simulate = orig
 
 
-def differential(patterns):
+def differential(patterns, metric="edge"):
     triage = dr.load_triage()
     out = []
     for rel, entry in sorted(triage.items()):
@@ -63,9 +63,9 @@ def differential(patterns):
         _, sw, _ = case.build()
         switched = sw is not None or any(k in json.dumps(case._components)
                                          for k in ('"diode"', '"pwm"', '"pulse"'))
-        cols = dr.observables_of(case)
+        cols = dr.observables_of(case, metric)
         tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
-        ref_name, ref = dr.reference(case, cols, min(tols.values()))
+        ref_name, ref = dr.reference(case, cols, min(tols.values()), metric)
         for cfg, (eng, kw) in CONFIGS.items():
             with extra_kwargs(kw):
                 kind, res, _, msg = dr.run_cell(case, eng)
@@ -76,7 +76,7 @@ def differential(patterns):
             elif ref is None:
                 rec.update(outcome="error", message="no converged reference")
             else:
-                er, em = dr.compare(dr.traces(res, cols), ref, cols, 1e-3)
+                er, em = dr.compare(dr.traces(res, cols), ref, cols, 1e-3, metric)
                 rec.update(err_rms=er, err_max=em, outcome="agree" if er <= tols[eng] else "disagree")
             out.append(rec)
             print(f"{rec['outcome']:9s} {cfg:12s} {rel} {rec.get('err_rms', '')}", flush=True)
@@ -117,7 +117,7 @@ def _e(r):
     return f"{r['err_rms']:.3g}" if "err_rms" in r else r["outcome"]
 
 
-def render(diff, ana, notes):
+def render(diff, ana, notes, metric="edge"):
     by = {(r["circuit"], r["config"]): r for r in diff}
     circuits = sorted({r["circuit"] for r in diff})
     L = ["# Reference status", "",
@@ -125,6 +125,9 @@ def render(diff, ana, notes):
          "`## Notes`). Outcomes as in `differential_runner.py`: `err_rms` is the",
          "time-weighted RMS error over the observables' span against the reference",
          "(trbdf2 rtol 1e-8, else pwl dt/4), tolerance 2e-2 (pwl, switched) / 1e-3.",
+         f"Measure: `{metric}`" + (" (source-forced nodes dropped from the default observables;"
+                                   " the steps that contain a switching instant left out)."
+                                   if metric == "edge" else " (the previous measure)."),
          "", f"## Differential matrix ({len(circuits)} circuits)", "", *_counts(diff), "",
          "### Fixed engine: restart rule off vs on (circuits that do not agree with it off)", "",
          "| circuit | tol | pwl | pwl+restart |", "|---|---:|---:|---:|"]
@@ -162,19 +165,23 @@ def main(argv=None) -> int:
     ap.add_argument("--circuits", default="*")
     ap.add_argument("--json", help="also write the cells to this file")
     ap.add_argument("--from-json", help="re-render from a --json file, no runs")
+    ap.add_argument("--metric", choices=dr.METRICS, default="edge",
+                    help="differential measure (see differential_runner.py)")
     args = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if args.from_json:
         d = json.loads(Path(args.from_json).read_text())
         diff, ana = d["differential"], d["analytic"]
+        args.metric = d.get("metric", "interp")
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in args.circuits.split(",")]
-        diff, ana = differential(pats), analytic()
+        diff, ana = differential(pats, args.metric), analytic()
     if args.json:
-        Path(args.json).write_text(json.dumps(dict(differential=diff, analytic=ana), indent=1))
+        Path(args.json).write_text(json.dumps(dict(differential=diff, analytic=ana,
+                                                   metric=args.metric), indent=1))
     old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
     notes = old.split("\n## Notes\n", 1)[1] if "\n## Notes\n" in old else "\n(none)\n"
-    OUT.write_text(render(diff, ana, notes), encoding="utf-8")
+    OUT.write_text(render(diff, ana, notes, args.metric), encoding="utf-8")
     print(f"wrote {OUT}")
     return 0
 
