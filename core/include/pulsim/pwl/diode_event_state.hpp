@@ -54,16 +54,23 @@ public:
             if (pool.kind_of(branch.id) ==
                 DevicePool::StoredKind::Diode) {
                 const auto& p = pool.diode_params(branch.id);
+                // Branch form (add-branch-form-ideal-switch D5): the ON
+                // decision reads the solved current i_s, mapped onto the
+                // voltage law as v = V_f + i_s with g_on = 1 (decide:
+                // i_s > 0; crossing signal: i_s in amperes).
+                const Index var =
+                    pool.branch_var_id_for_switch(branch.id, graph);
                 diodes_.push_back(DiodeEntry{
                     .branch_id  = branch.id,
                     .switch_idx = static_cast<Size>(switch_idx),
                     .from       = branch.from,
                     .to         = branch.to,
-                    .g_on       = p.g_on,
+                    .g_on       = var >= 0 ? Real{1} : p.g_on,
                     .g_off      = p.g_off,
                     .V_th       = p.V_th,
                     .V_f        = p.V_f,
                     .is_on      = false,
+                    .var        = var,
                 });
             }
             ++switch_idx;
@@ -103,10 +110,8 @@ public:
     bool update_from_state(const Vector& x) {
         bool changed = false;
         for (auto& d : diodes_) {
-            const Real v_a = stamping::read_node_voltage(x, d.from);
-            const Real v_k = stamping::read_node_voltage(x, d.to);
             const bool next = models::SwitchedDiode::decide(
-                d.is_on, v_a - v_k, d.params());
+                d.is_on, d.law_voltage(x, d.is_on), d.params());
             if (next != d.is_on) {
                 d.is_on = next;
                 changed = true;
@@ -128,6 +133,15 @@ public:
         Real  V_th;
         Real  V_f;
         bool  is_on;
+        Index var = -1;   // branch-form current unknown, or -1
+
+        /// The voltage the diode law reads for state `on`: v_a - v_k; for
+        /// an ON branch-form diode V_f + i_s (see the constructor).
+        [[nodiscard]] Real law_voltage(const Vector& x, bool on) const noexcept {
+            if (on && var >= 0) return V_f + x[var];
+            return stamping::read_node_voltage(x, from) -
+                   stamping::read_node_voltage(x, to);
+        }
 
         [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
             return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};

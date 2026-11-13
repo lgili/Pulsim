@@ -1173,6 +1173,14 @@ def _result_i(self, name: str, t=None, *, port=None):
             break
         except Exception:  # noqa: BLE001 — wrong device kind
             continue
+    if state_idx is None:
+        # A branch-form switch or diode solves its own current i_s.
+        fn = getattr(builder.pool, "branch_var_id_for_switch", None)
+        try:
+            k = int(fn(b_id, builder.graph)) if fn else -1
+        except Exception:  # noqa: BLE001 — not a switched branch
+            k = -1
+        state_idx = k if k >= 0 else None
     states = _sa(self)
     if state_idx is not None:
         # Owned, writable copy of the single column — see the note
@@ -2520,6 +2528,10 @@ def simulate(
             "engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
+        # add-branch-form-ideal-switch: a branch-form diode is refused
+        # here by name (the table's form row; the switch runs).
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _k._require_supported(builder.graph, builder.pool, "trbdf2")
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,

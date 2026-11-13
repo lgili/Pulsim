@@ -79,7 +79,24 @@ inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
                                 bool closed, sparse::Matrix& J, Vector& b,
                                 const Vector& x,
                                 const stamping::BranchCoord& coord,
-                                DevicePool::StoredKind kind) {
+                                DevicePool::StoredKind kind,
+                                const topology::Graph* graph = nullptr) {
+    // add-branch-form-ideal-switch D1: a branch-form switch / diode has
+    // its own current unknown (one fixed pattern for every mask).
+    if (graph != nullptr && pool.is_branch_form(branch_id)) {
+        const Index var = pool.branch_var_id_for_switch(branch_id, *graph);
+        if (kind == DevicePool::StoredKind::Diode) {
+            const auto& p = pool.diode_params(branch_id);
+            stamping::stamp_switch_branch_form(
+                J, b, x, coord, var, closed, pool.branch_R_on(branch_id),
+                p.g_off, p.V_f);
+        } else {
+            stamping::stamp_switch_branch_form(
+                J, b, x, coord, var, closed, pool.branch_R_on(branch_id),
+                pool.switch_g_off(branch_id));
+        }
+        return;
+    }
     if (kind == DevicePool::StoredKind::Diode) {
         const auto& p = pool.diode_params(branch_id);
         stamping::stamp_switch_fixed(J, b, x, coord, closed, p.g_on,
@@ -94,9 +111,10 @@ inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
 inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
                                 bool closed, sparse::Matrix& J, Vector& b,
                                 const Vector& x,
-                                const stamping::BranchCoord& coord) {
+                                const stamping::BranchCoord& coord,
+                                const topology::Graph* graph = nullptr) {
     stamp_switch_branch(pool, branch_id, closed, J, b, x, coord,
-                        pool.kind_of(branch_id));
+                        pool.kind_of(branch_id), graph);
 }
 
 // One branch's pool lookups, resolved once per assembler instead of once
@@ -360,7 +378,7 @@ inline void assemble_impl(const topology::Graph& graph,
         }
         case topology::BranchKind::Switch: {
             stamp_switch_branch(pool, branch.id, mask.get(switch_idx),
-                                S, b, x, coord, kind_of());
+                                S, b, x, coord, kind_of(), &graph);
             ++switch_idx;
             break;
         }

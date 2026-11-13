@@ -1189,6 +1189,9 @@ public:
             } else if (pool_.is_inductor(b)) {
                 col = pool_.branch_var_id_for_inductor(b, graph_);
                 prefix = "I(";
+            } else if (pool_.is_branch_form(b)) {
+                col = pool_.branch_var_id_for_switch(b, graph_);
+                prefix = "I(";
             } else {
                 continue;
             }
@@ -1277,6 +1280,41 @@ public:
             name, from_idx, to_idx,
             topology::BranchKind::Switch);
         pool_.add_switch(b_id, g_on, g_off);
+        return *this;
+    }
+
+    /// add-branch-form-ideal-switch (design D1, D6): a controlled switch
+    /// in BRANCH form — its own current unknown, R_on >= 0 in series
+    /// (R_on = 0: a 0 V source when ON), g_off >= 0 in parallel when OFF
+    /// (g_off = 0: i = 0). Opt-in until the default flip.
+    CircuitBuilder& add_ideal_switch(
+        std::string_view name, std::string_view from,
+        std::string_view to, Real R_on = Real{0}, Real g_off = Real{0}) {
+        require_branch_values_("add_ideal_switch", name, R_on, g_off);
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx, topology::BranchKind::Switch);
+        pool_.add_switch(b_id, branch_g_on_(R_on), g_off);
+        pool_.set_branch_form(b_id, R_on);
+        return *this;
+    }
+
+    /// add-branch-form-ideal-switch D5: a PWL diode in BRANCH form (ON:
+    /// v = V_f + R_on·i; OFF: i = g_off·v), decided on its solved current
+    /// while ON. `add_diode(form='branch')` in Python.
+    CircuitBuilder& add_diode_branch(
+        std::string_view name, std::string_view anode,
+        std::string_view cathode, Real R_on = Real{0},
+        Real g_off = Real{0}, Real V_th = Real{0}, Real V_f = Real{0}) {
+        require_branch_values_("add_diode", name, R_on, g_off);
+        require_diode_drop_("add_diode", name, V_f);
+        const Index a_idx = resolve_node_(anode);
+        const Index k_idx = resolve_node_(cathode);
+        const Index b_id = add_branch_(
+            name, a_idx, k_idx, topology::BranchKind::Switch);
+        pool_.add_diode(b_id, branch_g_on_(R_on), g_off, V_th, V_f);
+        pool_.set_branch_form(b_id, R_on);
         return *this;
     }
 
@@ -2044,6 +2082,28 @@ private:
                 "must be finite and >= 0.", fn, name, field_off,
                 std::isnan(shown_off) ? g_off : shown_off));
         }
+    }
+
+    static void require_branch_values_(std::string_view fn,
+                                       std::string_view name, Real R_on,
+                                       Real g_off) {
+        if (!(R_on >= Real{0}) || !std::isfinite(R_on)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): R_on = {} is invalid: the branch form needs a "
+                "finite R_on >= 0 (0 is the ideal switch).", fn, name, R_on));
+        }
+        if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): g_off = {} is invalid: the off-conductance must "
+                "be finite and >= 0 (0 is the ideal open switch).", fn, name,
+                g_off));
+        }
+    }
+
+    // The conductance a branch-form switch reports as g_on (never stamped).
+    [[nodiscard]] static Real branch_g_on_(Real R_on) noexcept {
+        return R_on > Real{0} ? Real{1} / R_on
+                              : std::numeric_limits<Real>::infinity();
     }
 
     [[nodiscard]] static constexpr bool is_ground_alias_(

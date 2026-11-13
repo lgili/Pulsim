@@ -66,6 +66,23 @@ MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
 Shockley / Lauritzen diode rows: it runs on `pwl` and `trbdf2` and is
 refused on `dsed`, `bdf1` and the kernel AC sweep, naming the channel.
 
+The branch form of a switch or diode (`add_ideal_switch`,
+`add_diode(form='branch')`, YAML `form: branch`; opt-in) has its own
+column; "no" raises `UnsupportedError(feature='branch_form')`. On `pwl`
+and `trbdf2` a mode whose ideal elements (`R_on = 0` or `g_off = 0`)
+make a state dependent (an inductor cut-set, a capacitor loop) is
+refused with `feature='dependent_states'` until the re-initialisation
+service lands; a node bounded only by open ideal elements with
+`g_off = 0` is refused with `feature='floating_node'`, a loop of closed
+ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
+
+<!-- branch-form-capabilities:begin -->
+| Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
+|---|---|---|---|---|---|
+| Switch | yes | yes | no | no | no |
+| Diode | yes | no | no | no | no |
+<!-- branch-form-capabilities:end -->
+
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;

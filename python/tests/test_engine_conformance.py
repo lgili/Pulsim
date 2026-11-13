@@ -955,3 +955,56 @@ def test_voltage_sanity_factor_honoured_on_every_engine(engine):
         r = p.simulate(_rc(), 1e-3, engine=engine,
                        voltage_sanity_factor=0.5, **kw)
     assert r._implausible_voltage.peak == pytest.approx(10.0)
+
+
+# ---------------------------------------------------------------------
+# The branch form (add-branch-form-ideal-switch 4.3): a FORM of the
+# Switch and Diode kinds with its own engine column, checked like the
+# kind cells (no silent cell) and against the docs block.
+# ---------------------------------------------------------------------
+def _switch_branch(on):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("Rb", "in", "gnd", 1e3)
+    if on:
+        b.add_ideal_switch("Sd", "in", "a", 1e-3, 1e-9)
+    b.add_resistor("R1", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 100e-9)
+    return b
+
+
+FORM_CELLS = {
+    "Switch": (_switch_branch, "o", "Sd", 5e-4, 1e-7, True),
+    "Diode": (_clamp(lambda b: b.add_diode("Dd", "o", "gnd", form="branch",
+                                           R_on=1e-3, g_off=1e-9,
+                                           V_th=0.701, V_f=0.7)),
+              "o", "Dd", 2e-3, 2e-7, False),
+}
+
+
+def test_branch_form_rows_cover_switch_and_diode():
+    caps = k._branch_form_capabilities()
+    assert set(caps) == set(FORM_CELLS)
+    for row in caps.values():
+        assert row["pwl"], "the reference engine runs the branch form"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("kind", list(FORM_CELLS))
+def test_branch_form_cell(kind, engine):
+    _check_cell(kind + "[branch]", FORM_CELLS[kind], engine,
+                k._branch_form_capabilities()[kind][engine])
+
+
+def test_branch_form_matrix_equals_the_docs():
+    import pathlib
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
+           / "known-limitations.md").read_text(encoding="utf-8")
+    block = doc.split("<!-- branch-form-capabilities:begin -->")[1].split(
+        "<!-- branch-form-capabilities:end -->")[0]
+    cols = ("pwl", "trbdf2", "dsed", "bdf1", "ac_sweep")
+    doc_table = {}
+    for ln in block.strip().splitlines()[2:]:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
+    assert doc_table == k._branch_form_capabilities()

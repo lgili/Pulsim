@@ -255,7 +255,7 @@ inline void dc_assemble(const topology::Graph& graph,
         case topology::BranchKind::Switch: {
             detail::stamp_switch_branch(pool, branch.id,
                                         mask.get(switch_idx), J, b, x,
-                                        coord);
+                                        coord, &graph);
             ++switch_idx;
             break;
         }

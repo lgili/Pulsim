@@ -61,6 +61,7 @@
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
 
 #include <algorithm>
 #include <array>
@@ -653,6 +654,39 @@ inline SimulationResult run_transient(
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
 
+    // add-branch-form-ideal-switch D3: the per-mode structural pass, run
+    // once per mode before its first solve (inactive, and free, without
+    // an ideal branch-form element).
+    pwl::BranchStructureChecker structure{graph, pool, "pwl"};
+    auto check_mode = [&](const topology::SwitchStateMask& m, bool dynamic,
+                          Real at_t) {
+        const auto& ms = structure.check(m, dynamic);
+        result.mode_structure_checks = structure.checks_run();
+        if (ms.dependent.empty()) return;
+        const auto& d = ms.dependent.front();
+        const Index el = d.elements.front();
+        std::string states;
+        for (Index b : d.states) {
+            if (!states.empty()) states += ", ";
+            states += graph.branch_name(b);
+        }
+        throw UnsupportedError(
+            "pwl", "dependent_states", std::string(graph.branch_name(el)),
+            std::string(pwl::stored_kind_name(pool.kind_of(el))),
+            std::format(
+                "engine 'pwl': at t = {} the mode {} makes {} dependent "
+                "(a {} through the ideal element '{}'); the re-initialisation "
+                "of add-branch-form-ideal-switch group 5 is not available. "
+                "Give '{}' {} > 0.",
+                at_t, m.to_string(),
+                states,
+                d.kind == pwl::DependentStructure::Kind::CutSet
+                    ? "cut-set of inductors" : "loop of capacitors",
+                graph.branch_name(el), graph.branch_name(el),
+                d.kind == pwl::DependentStructure::Kind::CutSet ? "g_off"
+                                                                : "R_on"));
+    };
+
     // ---- DC operating-point pre-charge (Layer 5 V3) ------------------
     //
     // When the user requests `start_from_dc_op = true`, compute
@@ -694,6 +728,14 @@ inline SimulationResult run_transient(
         dc_opts.enable_line_search = opts.enable_newton_line_search;
         dc_opts.enable_lm          = opts.enable_newton_lm;
 
+        if (structure.active()) {
+            check_mode(has_diodes
+                           ? combine_masks(switch_fn(opts.t_start),
+                                           diodes.current_diode_mask(),
+                                           diode_owned)
+                           : switch_fn(opts.t_start),
+                       false, opts.t_start);
+        }
         auto dc = pwl::compute_dc_operating_point(
             graph, pool, switch_fn(opts.t_start), nl_static,
             dc_opts, has_diodes ? &diodes : nullptr,
@@ -1393,6 +1435,7 @@ inline SimulationResult run_transient(
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
                 }
+                if (structure.active()) check_mode(mask, true, at_t);
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
                 // the un-hysteresed diode pair around a resonant
@@ -1758,16 +1801,12 @@ inline SimulationResult run_transient(
                             for (Size j = 0; j < ents.size(); ++j) {
                                 const auto& e = ents[j];
                                 const bool on = diodes_snap[j];
-                                const Real v1 =
-                                    stamping::read_node_voltage(x_first, e.from) -
-                                    stamping::read_node_voltage(x_first, e.to);
+                                const Real v1 = e.law_voltage(x_first, on);
                                 if (models::SwitchedDiode::decide(
                                         on, v1, e.params()) == on) {
                                     continue;
                                 }
-                                const Real v0 =
-                                    stamping::read_node_voltage(x_prev, e.from) -
-                                    stamping::read_node_voltage(x_prev, e.to);
+                                const Real v0 = e.law_voltage(x_prev, on);
                                 // Already on the far side at the start:
                                 // the crossing is at a (the rule alone).
                                 cross_scratch[j] =

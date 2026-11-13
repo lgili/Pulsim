@@ -271,6 +271,22 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### Ideal switch (branch form): opt-in, first slice
+
+`add_ideal_switch` / `add_diode(form='branch')` solve the switch current
+as an unknown, so `R_on = 0` and `g_off = 0` are representable. This
+slice runs the switch on `pwl` and `trbdf2` and the diode on `pwl`
+(`docs/known-limitations.md`, branch-form table); other engines refuse
+with `feature='branch_form'`. A mode that makes a state dependent (an
+inductor opened by an ideal switch with `g_off = 0`, two capacitors
+paralleled through `R_on = 0`) is refused with
+`feature='dependent_states'` until the re-initialisation service lands;
+an island bounded only by open ideal elements (OFF ideal diodes
+included: the gauge of D3 is not implemented) with `floating_node`; a
+loop of closed ideal elements and voltage sources with
+`ideal_voltage_loop`. On `trbdf2` the dependent-state check is static
+(any ideal element that could form one is refused up front).
+
 ### Fixed engine: first order after a discontinuity (by default)
 
 `engine='pwl'` keeps the trapezoidal derivative across a gate edge, a

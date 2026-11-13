@@ -342,7 +342,7 @@ class CircuitBuilder:
         (feature ``"theta_node"``); the message shows how to integrate the
         speed with ``add_vccs`` into a 1 F capacitor.
         """
-    def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0, V_f: float = 0.0) -> CircuitBuilder:
+    def add_diode(self, name: str, anode: str, cathode: str, g_on: float | None = None, g_off: float | None = None, V_th: float = 0.0, V_f: float = 0.0, *, form: str = 'conductance', R_on: float | None = None) -> CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
@@ -357,6 +357,10 @@ class CircuitBuilder:
     def add_hysteretic_core_inductor(self, name: str, from_node: str, to_node: str, N: float, Ae: float, le: float, lg: float, Ms: float, a: float, alpha: float, c: float, k: float, substeps_min: int = 8, M0: float = 0.0) -> CircuitBuilder:
         """
         Jiles-Atherton hysteretic core INSIDE the Newton loop: N turns on a core (Ae [m^2], le [m], TOTAL gap lg [m]) of a material (Ms, a, alpha, c, k). The magnetisation is solved at the same time level as the current with its exact tangent in the Jacobian -- no dummy source, no observer, no one-step lag. i(name) is the winding current; replay the B-H trajectory from it with pulsim.compute_bh_loop.
+        """
+    def add_ideal_switch(self, name: str, n_pos: str, n_neg: str, R_on: float = 0.0, g_off: float = 0.0) -> CircuitBuilder:
+        """
+        Add a controlled switch in BRANCH form (its own current unknown): R_on >= 0 in series when closed (0 = ideal), g_off >= 0 in parallel when open (0 = ideal). Engines and refusals: the capability table (add-branch-form-ideal-switch).
         """
     def add_ideal_transformer(self, name: str, p_from: str, p_to: str, s_from: str, s_to: str, n: float) -> CircuitBuilder:
         """
@@ -772,6 +776,10 @@ class DevicePool:
     def branch_var_id_for_source(self, branch_id: int, graph: Graph) -> int:
         """
         Resolve the state-vector index for a voltage-source branch's i_source unknown (also works for PWM/Sine/Pulse/VCVS sources, since they share the same branch-var numbering).
+        """
+    def branch_var_id_for_switch(self, branch_id: int, graph: Graph) -> int:
+        """
+        State-vector index of a branch-form switch or diode's current unknown i_s, or -1 for the conductance form (add-branch-form-ideal-switch).
         """
     def control_column(self, branch_id: int, graph: Graph) -> int:
         """
@@ -2758,6 +2766,10 @@ class _NativeCircuitBuilderAdapter:
         """
         Number of distinct masks resolved (and thus cached) so far. Useful for tests + diagnostics.
         """
+def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
+    """
+    The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
+    """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
     C++ hotpath: IPD (In-Phase Disposition) switching function. All N carriers share the same phase but sit at stacked DC offsets, so the output only switches between two adjacent levels per step. Cleaner spectrum than PS-PWM at small N.

@@ -24,6 +24,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Ideal switch in branch form (add-branch-form-ideal-switch)
 
+* **Added** (opt-in) the branch form of a switch and a diode:
+  `add_ideal_switch(name, a, b, R_on=0, g_off=0)`,
+  `add_diode(..., form='branch', R_on=0, g_off=0)`, YAML `form: branch`.
+  The switch current is an unknown (row `v − R_on·i = V_f` ON,
+  `−g_off·v + i = 0` OFF), so `R_on = 0` and `g_off = 0` are exact; the
+  sparsity pattern is the same for every mask (one symbolic analysis on a
+  16-mask bridge, residual ≤ 1e-12 with every `R_on = 0`). With
+  `R_on = 1e-3`, `g_off = 1e-9` it reproduces the conductance form within
+  1e-10 on a buck, a bridge rectifier and a three-phase inverter. An
+  ideal switch charges an RL to 9.99954600 A at 10 ms on `trbdf2`
+  (conductance form: 9.98955 A). `res.i` reads the solved current;
+  `components()` reports `R_on` and `branch_form`.
+* Runs on `pwl` (switch and diode) and `trbdf2` (switch); other engines
+  and the AC sweep refuse with `UnsupportedError(feature='branch_form')`.
+  A per-mode structural pass refuses, by name, a node bounded only by
+  open ideal elements (`floating_node`), a loop of closed ideal elements
+  and voltage sources (`ideal_voltage_loop`) and, until the
+  re-initialisation service, a mode with dependent states
+  (`dependent_states`); it runs once per mode
+  (`counters['mode_structure_checks']`) and never for the conductance
+  form. Every conductance-form result is bit-identical.
 * **BREAKING** (invalid values only) `add_switch`, `add_diode` and YAML
   `switch` / `diode` refuse at build time a `g_on` that is not finite and
   > 0, or a `g_off` that is not finite and >= 0; `add_mosfet`,

@@ -291,6 +291,9 @@ struct SimulationResult {
     // list overflowed (kMaxStepEvents or the per-step search cap).
     Size unlocated_gate_steps = 0;
     Size split_event_overflows = 0;
+    // add-branch-form-ideal-switch D3: structural passes run (one per
+    // distinct mode of a circuit with an ideal branch-form element).
+    Size mode_structure_checks = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

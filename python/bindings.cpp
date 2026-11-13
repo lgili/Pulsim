@@ -209,6 +209,22 @@ void init_module(py::module_& m) {
         "The kernel's device-kind capability table: {kind: {'class': "
         "solve class, 'pwl'|'trbdf2'|'dsed'|'bdf1'|'ac_sweep': bool}}. "
         "An engine marked False refuses the kind with UnsupportedError.");
+    m.def("_branch_form_capabilities",
+        []() {
+            py::dict out;
+            for (const auto& row : pwl::kBranchFormCaps) {
+                py::dict d;
+                for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
+                    d[py::str(std::string(pwl::kEngineNames[e]))] =
+                        row.supports(static_cast<pwl::Engine>(e));
+                }
+                out[py::str(std::string(row.name))] = d;
+            }
+            return out;
+        },
+        "The branch form's engine column (add-branch-form-ideal-switch): "
+        "{'Switch'|'Diode': {engine: bool}}; False refuses with "
+        "UnsupportedError(feature='branch_form').");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine) {
@@ -1055,11 +1071,40 @@ void init_module(py::module_& m) {
               "generated from Ampere's law by sweeping the core field "
               "through M = Ms*tanh(H/H0), with exact slopes.")
         .def("add_diode",
-              &builder::CircuitBuilder::add_diode,
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view anode, std::string_view cathode,
+                 std::optional<double> g_on, std::optional<double> g_off,
+                 double V_th, double V_f, std::string_view form,
+                 std::optional<double> R_on) -> builder::CircuitBuilder& {
+                  // add-branch-form-ideal-switch: form='branch' (R_on,
+                  // g_off default 0; a given g_on means R_on = 1/g_on).
+                  if (form == "branch") {
+                      const double r = R_on ? *R_on
+                                     : g_on ? 1.0 / *g_on : 0.0;
+                      return self.add_diode_branch(name, anode, cathode, r,
+                                                   g_off.value_or(0.0), V_th,
+                                                   V_f);
+                  }
+                  if (form != "conductance") {
+                      throw py::value_error(std::format(
+                          "add_diode(\"{}\"): form='{}'; expected "
+                          "'conductance' or 'branch'.", name, form));
+                  }
+                  if (!g_on || !g_off || R_on) {
+                      throw py::value_error(std::format(
+                          "add_diode(\"{}\"): the conductance form takes g_on "
+                          "and g_off (R_on is the branch form's: "
+                          "form='branch').", name));
+                  }
+                  return self.add_diode(name, anode, cathode, *g_on, *g_off,
+                                        V_th, V_f);
+              },
               py::arg("name"), py::arg("anode"),
-              py::arg("cathode"), py::arg("g_on"),
-              py::arg("g_off"), py::arg("V_th") = 0.0,
-              py::arg("V_f") = 0.0,
+              py::arg("cathode"), py::arg("g_on") = py::none(),
+              py::arg("g_off") = py::none(), py::arg("V_th") = 0.0,
+              py::arg("V_f") = 0.0, py::kw_only(),
+              py::arg("form") = "conductance",
+              py::arg("R_on") = py::none(),
               py::return_value_policy::reference,
               "Add a binary switched diode (V2's "
               "SwitchedDiode). g_on/g_off in siemens. "
@@ -1075,6 +1120,15 @@ void init_module(py::module_& m) {
               py::return_value_policy::reference,
               "Add a smooth-blend nonlinear diode "
               "(V3's IdealDiode, AD-driven).")
+        .def("add_ideal_switch",
+              &builder::CircuitBuilder::add_ideal_switch,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("R_on") = 0.0, py::arg("g_off") = 0.0,
+              py::return_value_policy::reference,
+              "Add a controlled switch in BRANCH form (its own current "
+              "unknown): R_on >= 0 in series when closed (0 = ideal), "
+              "g_off >= 0 in parallel when open (0 = ideal). Engines and "
+              "refusals: the capability table (add-branch-form-ideal-switch).")
         .def("add_switch",
               &builder::CircuitBuilder::add_switch,
               py::arg("name"), py::arg("n_pos"),
@@ -1314,6 +1368,10 @@ void init_module(py::module_& m) {
                               kind_str = "switch";
                               params["g_on"]  = pool.switch_g_on(bid);
                               params["g_off"] = pool.switch_g_off(bid);
+                              if (pool.is_branch_form(bid)) {
+                                  params["R_on"] = pool.branch_R_on(bid);
+                                  params["branch_form"] = 1;
+                              }
                               break;
                           }
                           case K::Capacitor: {
@@ -1337,6 +1395,10 @@ void init_module(py::module_& m) {
                               params["g_off"] = p.g_off;
                               params["V_th"]  = p.V_th;
                               params["V_f"]   = p.V_f;
+                              if (pool.is_branch_form(bid)) {
+                                  params["R_on"] = pool.branch_R_on(bid);
+                                  params["branch_form"] = 1;
+                              }
                               break;
                           }
                           case K::NonlinearDiode: {
@@ -1776,6 +1838,12 @@ void init_module(py::module_& m) {
               "(or saturable inductor) branch's i_L unknown. "
               "Throws if `branch_id` is not registered as an "
               "inductor.")
+        .def("branch_var_id_for_switch",
+              &pwl::DevicePool::branch_var_id_for_switch,
+              py::arg("branch_id"), py::arg("graph"),
+              "State-vector index of a branch-form switch or diode's "
+              "current unknown i_s, or -1 for the conductance form "
+              "(add-branch-form-ideal-switch).")
         .def("branch_var_id_for_source",
               &pwl::DevicePool::branch_var_id_for_source,
               py::arg("branch_id"), py::arg("graph"),
@@ -2517,6 +2585,7 @@ void init_module(py::module_& m) {
                 d["stage2_retry_failures"] = r.stage2_retry_failures;
                 d["unlocated_gate_steps"] = r.unlocated_gate_steps;
                 d["split_event_overflows"] = r.split_event_overflows;
+                d["mode_structure_checks"] = r.mode_structure_checks;
                 return d;
             },
             "Fixed-step loop counters (pwl engine; 0 elsewhere): "
