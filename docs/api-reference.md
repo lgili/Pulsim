@@ -179,11 +179,11 @@ add no AC excitation. `trbdf2` lands on table knots and pulse corners.
 
 | Method | Signature |
 |---|---|
-| `add_mosfet` | `(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)` — linear switch model PLUS an anti-parallel body diode `<name>_body`, ON by default. Both are switching branches, so each `add_mosfet` takes **two** bits of the `SwitchStateMask`; use `builder.switch_index_of(name)` |
-| `add_mosfet_with_body_diode` | `(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)` |
-| `add_mosfet_level1` | `(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True)` |
+| `add_mosfet` | `(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)` — linear switch model PLUS an anti-parallel body diode `<name>_body`, ON by default; `V_F` is its conduction drop (`v_SD = V_F + i/1e3 S`). Both are switching branches, so each `add_mosfet` takes **two** bits of the `SwitchStateMask`; use `builder.switch_index_of(name)` |
+| `add_mosfet_with_body_diode` | `(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)` — `V_F` is the body diode's conduction drop (`v_SD = V_F + i/g_on_diode`) |
+| `add_mosfet_level1` | `(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True, V_F=0.7)` — `V_F` is the body diode's conduction drop |
 | `add_igbt` | `(name, collector, emitter, R_on=1e-2, R_off=1e9)` (linear) |
-| `add_igbt_level1` | `(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0)` |
+| `add_igbt_level1` | `(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0, V_F=0.7)` — `V_F` is the freewheeling diode's conduction drop |
 
 ## `DevicePool`
 
@@ -255,6 +255,20 @@ opts.store_every              # int
   `simulate()` put in the step loop (`"switch_fn"`, `"b_extra_fn"`,
   `"step_observer"`, `"should_continue"`, `"closed_loops"`); `()` when the
   loop ran fully native (e.g. a `make_pwm_switch_fn` schedule)
+- `result.control_tick_counts` / `result.control_tick_jitter_max` — ticks
+  delivered per controller source, and the largest lateness on the `dt`
+  grid
+- `result.n_restart_steps` / `result.n_restart_factorizations` — SDIRK
+  restart steps taken and the factorisations they caused, with
+  `discontinuity_restart=True` (0 otherwise)
+- `result.newton` — `NewtonCounters` of the run's Newton workspace
+  (`pwl` / `trbdf2`): `solves`, `iterations`, `analyses`,
+  `factorizations`, `partial_refactors`, `lm_attempts` and
+  `iterations_per_solve` (the iteration count of every Newton call)
+- `result.newton_roundoff_accepts` / `result.newton_roundoff_omega_max` /
+  `result.newton_roundoff_row` — transient Newton solves accepted at row
+  roundoff (row-wise backward error ≤ 8 eps) instead of aborting, the
+  worst backward error and its MNA row (DC never accepts)
 
 ## Statistics over a result (time-weighted)
 
@@ -271,8 +285,8 @@ average output over 2–3 ms:
 | engine | samples | `v[t >= 2e-3].mean()` | `p.time_average(t, v, 2e-3)` |
 |---|---:|---:|---:|
 | `pwl`, `dt=2e-7` | 15001 | 6.3295 V | 6.3308 V |
-| `trbdf2`, `dt=4e-6` (ceiling) | 1775 | **3.0408 V** | 6.3298 V |
-| `auto`, no `dt` | 1297 | **5.0070 V** | 6.3300 V |
+| `trbdf2`, `dt=4e-6` (ceiling) | 1270 | **3.9677 V** | 6.3298 V |
+| `auto`, no `dt` | 1432 | **4.5746 V** | 6.3300 V |
 
 The engines agree; the sample mean does not. The same applies to
 `np.sqrt((v**2).mean())`, and to slicing by index

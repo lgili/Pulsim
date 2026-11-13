@@ -85,6 +85,11 @@ struct SimulationOptions {
     /// cascade stop 10.67 V from the right answer). Do not loosen it
     /// to get past a Newton abort — that has produced silently wrong
     /// operating points (a flyback at 3.53 V instead of 15.31 V).
+    /// One ulp of an inductor current is 2L/h·ε·|i| of residual, so at
+    /// small h this test can be out of reach: transient solves that
+    /// stagnate there are accepted on a row-wise backward error of at
+    /// most 8ε instead (pwl::NewtonRoundoffAcceptance, counted in
+    /// SimulationResult::newton_roundoff_accepts). DC never is.
     Real tol_newton_dx = Real{1e-9};
 
     /// Newton convergence tolerance on ||residual||_inf.
@@ -147,6 +152,20 @@ struct SimulationOptions {
     /// V0 corrects ONLY the first detected event per step.
     /// Default `false` to preserve V2.2 behaviour.
     bool enable_substep_state_correction = false;
+
+    /// Discontinuity restart (add-discontinuity-restart-rule). The step
+    /// containing a discontinuity — a change of the stamped mask, a
+    /// diode flip inside the step, a source jump (or a b_extra_fn jump
+    /// declared through its next-jump oracle), the first step of a run
+    /// that does not start consistent — and the next two are taken as
+    /// Alexander SDIRK(2,2) steps (γ = 1 − 1/√2, L-stable) instead of
+    /// trapezoidal ones: second order across events on the grid, no
+    /// Nyquist alternation after them, resonant modes kept. It also makes the gate mask of the
+    /// step (t_{k-1}, t_k] switch_fn(t_{k-1}) (start-sampled) and
+    /// evaluates a pulse/PWM source at its LEFT limit on a jump that
+    /// coincides with the step end. Off = the engine before the rule,
+    /// bit for bit.
+    bool discontinuity_restart = false;
 
     /// Floating-inductor freeze (post-solve guard).
     ///

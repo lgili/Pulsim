@@ -212,12 +212,16 @@ NOTEBOOKS = {
         (r"Pulsim  V_o \(mean over last [\d.]+ ms\): " + F, near(23.9874, 0.024))],
     "projects/converters/buck_boost/00_buck_boost_pulsim_validation.ipynb": [
         (r"Pulsim  \|V_o\| \(mean over last [\d.]+ ms\): " + F, near(11.9915, 0.012))],
+    # Integration (feat/core-integration): the MOSFET body-diode V_F is now a
+    # conduction drop, not a turn-on threshold; old value reproduced exactly
+    # with the old semantics.
+    # 4.5201 -> 4.5195.
     "projects/converters/forward/00_forward_pulsim_validation.ipynb": [
-        (r"Pulsim  V_o \(time average, last 1 ms\): " + F, near(4.5201, 0.0045))],
+        (r"Pulsim  V_o \(time average, last 1 ms\): " + F, near(4.5195, 0.0045))],
     "projects/converters/flyback/00_flyback_pulsim_validation.ipynb": [
-        (r"k = 0.99    : V_o = " + F, near(11.0795, 0.011))],
+        (r"k = 0.99    : V_o = " + F, near(11.0787, 0.011))],  # 11.0795 -> 11.0787, body-diode V_F (above)
     "projects/converters/half_bridge/00_half_bridge_pulsim_validation.ipynb": [
-        (r"Pulsim  V_o \(time average, last [\d.]+ ms\): " + F, near(4.6873, 0.0047))],
+        (r"Pulsim  V_o \(time average, last [\d.]+ ms\): " + F, near(4.6812, 0.0047))],  # 4.6873 -> 4.6812, body-diode V_F (above)
     "projects/converters/boost_pfc/00_boost_pfc_pulsim_validation.ipynb": [
         (r"Max envelope error\s+: " + F + "%", below(3.0))],
     "projects/inverters/vsi_3phase/00_vsi_pulsim_validation.ipynb": [
@@ -279,9 +283,11 @@ NOTEBOOKS = {
     # 57.79 -> 74.27 W: no 470 uF on rect_p any more (line PF 0.62 ->
     # 0.997) and the bridge loss counts all four diodes on the simulated
     # line current; L001 copper now within 1 % of PSIM at OP 2.3.
+    # 74.27 -> 74.18 W and P_ohm_L001 2.838 -> 2.835 W: body-diode V_F is a
+    # conduction drop after the integration merge (reproduced exactly).
     "projects/inverters/pfc_vsi_drive/00_pfc_vsi_drive_pulsim_validation.ipynb": [
-        (r"OP_2.2\s+P_total\s+" + F, near(74.27, 0.074)),
-        (r"OP_2.3\s+P_ohm_L001\s+" + F, near(2.838, 0.028)),
+        (r"OP_2.2\s+P_total\s+" + F, near(74.18, 0.074)),
+        (r"OP_2.3\s+P_ohm_L001\s+" + F, near(2.835, 0.028)),
         (r"OP_2.3\s+eta_inverter\s+" + F, near(0.956, 0.001))],
 }
 

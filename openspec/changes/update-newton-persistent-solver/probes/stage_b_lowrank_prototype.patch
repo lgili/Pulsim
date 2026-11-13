@@ -1,0 +1,178 @@
+diff --git a/core/include/pulsim/pwl/nonlinear_solve.hpp b/core/include/pulsim/pwl/nonlinear_solve.hpp
+index 956b011f..642a8858 100644
+--- a/core/include/pulsim/pwl/nonlinear_solve.hpp
++++ b/core/include/pulsim/pwl/nonlinear_solve.hpp
+@@ -38,7 +38,9 @@
+ #include <cstdint>
+ #include <format>
+ #include <memory>
++#include <cstdlib>
+ #include <optional>
++#include <span>
+ #include <functional>
+ #include <stdexcept>
+ #include <string>
+@@ -81,6 +83,22 @@ using NonlinearRefreshFn = std::function<
+ struct NewtonWorkspace {
+     sparse::Backend backend = sparse::Backend::Pulsim;
+ 
++    /// Stage B prototype: how an iteration whose linear part is unchanged
++    /// is solved. `Off`: full refactor. `Partial`: `partial_refactor` on the
++    /// columns `J_nl` touches. `Woodbury`: the factor of `J_lin` and a
++    /// rank-k correction. PROBE: read from PULSIM_NEWTON_LOWRANK.
++    enum class LowRank { Off, Partial, Woodbury };
++    LowRank low_rank = [] {
++        const char* e = std::getenv("PULSIM_NEWTON_LOWRANK");
++        if (e == nullptr) return LowRank::Off;
++        if (e[0] == 'p') return LowRank::Partial;
++        if (e[0] == 'w') return LowRank::Woodbury;
++        return LowRank::Off;
++    }();
++    std::uint64_t partial_refactors = 0;   // low-rank solves done
++    std::uint64_t lowrank_fallbacks = 0;   // low-rank refused -> full
++    std::uint64_t lin_factorizations = 0;  // Woodbury: factors of J_lin
++
+     // Counters, monotonic over the workspace's life.
+     std::uint64_t solves         = 0;   // solve_with_newton_b_extra calls
+     std::uint64_t iterations     = 0;   // Newton iterations
+@@ -97,6 +115,7 @@ struct NewtonWorkspace {
+         c.analyses = analyses;
+         c.factorizations = factorizations;
+         c.lm_attempts = lm_attempts;
++        c.partial_refactors = partial_refactors;
+         c.iterations_per_solve = std::move(iterations_per_solve);
+         return c;
+     }
+@@ -106,6 +125,21 @@ struct NewtonWorkspace {
+     sparse::Matrix J_nl_trial;           // line-search / LM refresh target
+     Vector f_nl, f_nl_trial, jx, f, neg_f, dx, x_trial, f_trial;
+     std::unique_ptr<sparse::DirectSolver> solver;   // analysed for J
++    // Stage B state.
++    std::vector<Index> n_cols, n_rows;     // columns / rows J_nl touches
++    std::vector<Real> l_last;              // J_lin values of the last full factor
++    bool have_factor = false;
++    std::unique_ptr<sparse::DirectSolver> lin_solver;   // Woodbury: J_lin
++    Eigen::MatrixXd W;                     // J_lin^-1 E_R  (n x r)
++    Eigen::MatrixXd Nt, S, WN;             // r x k, k x k, n x k
++    Vector yC, tz, ylin, unit;
++    std::vector<Index> row_pos;            // row -> position in n_rows
++
++    /// True when `L`'s values are those of the last full factor.
++    [[nodiscard]] bool lin_unchanged(const sparse::Matrix& L) const {
++        return have_factor && l_last.size() == static_cast<std::size_t>(L.nonZeros()) &&
++               std::equal(l_last.begin(), l_last.end(), L.valuePtr());
++    }
+     std::vector<Real> ls, ns;            // operands scattered on J
+ 
+     /// Write `J = L + N` (bit-equal to `L; += N` in Eigen) and return
+@@ -124,7 +158,18 @@ struct NewtonWorkspace {
+             J.makeCompressed();
+             slots_(L, l2j_);
+             slots_(N, n2j_);
++            n_cols.clear();
++            n_rows.clear();
++            for (Index j = 0; j < N.outerSize(); ++j) {
++                if (N.outerIndexPtr()[j + 1] > N.outerIndexPtr()[j]) n_cols.push_back(j);
++            }
++            n_rows.assign(N.innerIndexPtr(), N.innerIndexPtr() + N.nonZeros());
++            std::sort(n_rows.begin(), n_rows.end());
++            n_rows.erase(std::unique(n_rows.begin(), n_rows.end()), n_rows.end());
+             valid_ = true;
++            have_factor = false;
++            l_last.clear();
++            lin_solver.reset();
+         }
+         const auto nnz = static_cast<std::size_t>(J.nonZeros());
+         Real* jv = J.valuePtr();
+@@ -487,6 +532,76 @@ inline void solve_with_newton_in_place(
+                 }
+             }
+             auto& solver = w.solver;
++            const bool lin_same = w.low_rank != NewtonWorkspace::LowRank::Off &&
++                                  J_nl.nonZeros() > 0 && w.lin_unchanged(*L);
++            bool solved = false;
++            if (lin_same && w.low_rank == NewtonWorkspace::LowRank::Partial) {
++                const std::span<const Index> cols(w.n_cols);
++                if (static_cast<Real>(solver->partial_refactor_count_path(cols)) <=
++                        sparse::MAX_PATH_LENGTH_RATIO * static_cast<Real>(n) &&
++                    solver->partial_refactor(J_combined, cols)) {
++                    ++w.partial_refactors;
++                    Vector& neg_f = w.neg_f;
++                    neg_f = -f_combined;
++                    solver->solve(neg_f, dx);
++                    solved = true;
++                } else {
++                    ++w.lowrank_fallbacks;
++                    w.have_factor = false;
++                }
++            }
++            if (w.low_rank == NewtonWorkspace::LowRank::Woodbury && J_nl.nonZeros() > 0) {
++                const auto nn = static_cast<Index>(n);
++                const auto r = static_cast<Index>(w.n_rows.size());
++                const auto k = static_cast<Index>(w.n_cols.size());
++                if (!w.lin_unchanged(*L)) {
++                    if (!w.lin_solver) {
++                        w.lin_solver = sparse::make_default_solver(n, sparse::Backend::Pulsim);
++                        if (!w.lin_solver->analyze(*L)) w.lin_solver.reset();
++                    }
++                    w.have_factor = w.lin_solver && w.lin_solver->factorize(*L);
++                    ++w.lin_factorizations;
++                    if (w.have_factor) {
++                        w.l_last.assign(L->valuePtr(), L->valuePtr() + L->nonZeros());
++                        w.W.resize(nn, r);
++                        w.unit.setZero(nn);
++                        for (Index i = 0; i < r; ++i) {
++                            w.unit[w.n_rows[static_cast<std::size_t>(i)]] = Real{1};
++                            w.lin_solver->solve(w.unit, w.ylin);
++                            w.W.col(i) = w.ylin;
++                            w.unit[w.n_rows[static_cast<std::size_t>(i)]] = Real{0};
++                        }
++                        w.row_pos.assign(static_cast<std::size_t>(nn), Index{-1});
++                        for (Index i = 0; i < r; ++i)
++                            w.row_pos[static_cast<std::size_t>(w.n_rows[static_cast<std::size_t>(i)])] = i;
++                    }
++                }
++                if (w.have_factor) {
++                    w.Nt.setZero(r, k);
++                    for (Index c = 0; c < k; ++c) {
++                        const Index j = w.n_cols[static_cast<std::size_t>(c)];
++                        for (sparse::Matrix::InnerIterator it(J_nl, j); it; ++it)
++                            w.Nt(w.row_pos[static_cast<std::size_t>(it.row())], c) = it.value();
++                    }
++                    Vector& neg_f = w.neg_f;
++                    neg_f = -f_combined;
++                    w.lin_solver->solve(neg_f, w.ylin);
++                    w.S.setIdentity(k, k);
++                    for (Index a = 0; a < k; ++a)
++                        w.S.row(a).noalias() += w.W.row(w.n_cols[static_cast<std::size_t>(a)]) * w.Nt;
++                    w.yC.resize(k);
++                    for (Index a = 0; a < k; ++a) w.yC[a] = w.ylin[w.n_cols[static_cast<std::size_t>(a)]];
++                    w.tz = w.S.partialPivLu().solve(w.yC);
++                    w.WN.noalias() = w.W * w.Nt;
++                    dx = w.ylin;
++                    dx.noalias() -= w.WN * w.tz;
++                    ++w.partial_refactors;
++                    solved = true;
++                } else {
++                    ++w.lowrank_fallbacks;
++                }
++            }
++            if (!solved) {
+             ++w.factorizations;
+             if (!solver->factorize(J_combined)) {
+                 // Auto-LM promotion (GUI integration findings T1.2):
+@@ -500,9 +615,14 @@ inline void solve_with_newton_in_place(
+                 enable_lm = true;
+                 continue;
+             }
++            if (w.low_rank == NewtonWorkspace::LowRank::Partial) {
++                w.l_last.assign(L->valuePtr(), L->valuePtr() + L->nonZeros());
++                w.have_factor = true;
++            }
+             Vector& neg_f = w.neg_f;
+             neg_f = -f_combined;
+             solver->solve(neg_f, dx);
++            }
+ 
+             if (enable_line_search) {
+                 sparse::Matrix& J_nl_trial = w.J_nl_trial;

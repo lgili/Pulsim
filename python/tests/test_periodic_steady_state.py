@@ -498,3 +498,28 @@ def test_slow_mode_is_not_accepted_on_a_small_residual():
     r = p.periodic_steady_state(b, period=TP)
     assert r.floquet_radius == pytest.approx(1 - 1e-9, abs=1e-12)
     assert r.x0[0] == pytest.approx(1e-3 / (2 * np.pi / TP * 1e-6), rel=2e-2)
+
+
+@pytest.mark.parametrize("v_th", (0.0, 1e-3))
+@pytest.mark.parametrize("R,v_out,i_l", [(20.0, 24.053630, 2.098779),
+                                         (500.0, 36.594401, 0.0)])
+def test_boost_with_a_zero_band_diode_settles(v_th, R, v_out, i_l):
+    """Before add-exact-propagator-strategy this boost failed ("did not
+    settle after 64 rounds") at V_th = 0 and 1e-3. CCM (20 Ohm) and DCM
+    (500 Ohm): trbdf2 (rtol 1e-10) started from the orbit stays on it
+    for 50 periods to 1e-6 V. (A plain dsed transient of the same boost
+    is refused by the diode-law guard: the PSS map runs without event
+    projection at rtol 1e-11.)"""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L", "vin", "sw", 100e-6)
+    b.add_switch("S", "sw", "gnd", ref.GON, ref.GOFF)
+    b.add_diode("D1", "sw", "vout", ref.GON, ref.GOFF, v_th)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", R)
+    r = p.periodic_steady_state(b, period=T, switch_fn=_pwm(b, 0.5))
+    lab = r.state_labels
+    assert r.stable and r.residual < 1e-10 * v_out   # 1.14e-9 V at 36.6 V
+    assert r.x0[lab.index("v(vout)")] == pytest.approx(v_out, abs=1e-5)
+    assert r.x0[lab.index("i(L)")] == pytest.approx(i_l, abs=1e-5)
+    assert r.exact["masks"]

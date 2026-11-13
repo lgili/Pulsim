@@ -1,0 +1,55 @@
+diff --git a/core/include/pulsim/sparse/pulsim_lu_solver.hpp b/core/include/pulsim/sparse/pulsim_lu_solver.hpp
+index acd10b31..c9311eec 100644
+--- a/core/include/pulsim/sparse/pulsim_lu_solver.hpp
++++ b/core/include/pulsim/sparse/pulsim_lu_solver.hpp
+@@ -232,6 +232,7 @@ public:
+         u_col_ptr_.assign(nz + 1, Index{0});
+         u_row_idx_.clear();
+         u_values_.clear();
++        u_inv_diag_.assign(nz, Scalar{0});
+ 
+         // pinv[orig_row] = pivotal position (column that chose this row
+         // as pivot), or -1 while the row is still un-pivoted.
+@@ -365,6 +366,7 @@ public:
+             }
+             const Scalar pivot     = x[static_cast<std::size_t>(ipiv)];
+             const Scalar inv_pivot = Scalar{1} / pivot;
++            u_inv_diag_[static_cast<std::size_t>(k)] = inv_pivot;
+ 
+             // ---- Step 4: harvest U(:,k) and L(:,k) ------------------
+             for (Index p = top; p < n_; ++p) {
+@@ -563,12 +565,14 @@ private:
+         // ---- Step 3: back substitution (U upper triangular) ---------
+         // U[:, k]'s storage convention from Section 3: entries with row
+         // i < k come first (in ascending order), the diagonal entry
+-        // (row k) is the LAST slot. We divide by U[k, k] then propagate
+-        // y[k] backwards through column k's above-diagonal entries.
++        // (row k) is the LAST slot. We scale by the stored 1 / U[k, k]
++        // (update-linear-time-assembly tier 3: a multiply instead of a
++        // divide, 1.22x on the substitution at n = 1502; rounds
++        // differently from `y[k] / U[k, k]`) then propagate y[k]
++        // backwards through column k's above-diagonal entries.
+         for (Index k = n_ - 1; k >= 0; --k) {
+             const Index diag_slot = u_col_ptr_[static_cast<std::size_t>(k + 1)] - 1;
+-            const Scalar ukk      = u_values_[static_cast<std::size_t>(diag_slot)];
+-            y[k] /= ukk;
++            y[k] *= u_inv_diag_[static_cast<std::size_t>(k)];
+             const Scalar yk = y[k];
+             for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
+                  q < diag_slot; ++q) {
+@@ -810,6 +814,7 @@ public:
+                             u_row_idx_[static_cast<std::size_t>(q)])];
+                 }
+                 const Scalar inv_pivot = Scalar{1} / pivot;
++                u_inv_diag_[static_cast<std::size_t>(k)] = inv_pivot;
+                 for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
+                      q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
+                     l_values_[static_cast<std::size_t>(q)] =
+@@ -1374,6 +1379,7 @@ private:
+     // u_row_idx_ exactly.
+     std::vector<Scalar> l_values_;   // same length as l_row_idx_
+     std::vector<Scalar> u_values_;   // same length as u_row_idx_
++    std::vector<Scalar> u_inv_diag_; // 1 / U[k, k], size n (tier 3)
+ 
+     // Section 5 — path-based partial refactor state.
+     // `varying_set_` holds the union of all ORIGINAL column indices ever

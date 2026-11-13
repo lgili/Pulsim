@@ -31,6 +31,8 @@ When the high-side MOSFET opens, the inductor needs a freewheel path. Without on
 
 **Fix:** use `add_mosfet_level1(..., with_body_diode=True)` (proposal #3.1) or add an explicit anti-parallel `add_diode("Body", source, drain, ...)`.
 
+The composite body / freewheeling diodes (`add_mosfet`, `add_mosfet_with_body_diode`, `add_mosfet_level1`, `add_igbt_level1(with_fwd=True)`) take `V_F` as a **conduction drop**: `v_SD = V_F + i/g_on` while on. Up to 2.0 it was only a turn-on threshold, so a conducting body diode dropped `i/g_on` alone (10 mV at 10 A) — results that freewheel through one move. `V_F=0.0` gives a lossless ideal-ish diode; `add_diode(V_th=0.7, V_f=0)` beside a bare switch reproduces the old behaviour.
+
 #### (c) Cold start at `x = 0`
 
 Some op-amp / feedback circuits have a non-trivial DC operating point that `x = 0` is far from. Newton can wander before converging.
@@ -95,6 +97,16 @@ the snubbed flyback in `test_saturable_transformer.py` aborts at
 tol_newton_res=1e-4` it completes and reports V_out = 3.53 V, while
 `engine='pwl', dt=1e-8` gives 15.31 V.
 
+Since `add-newton-roundoff-acceptance` a transient solve that runs
+out of iterations with `||dx||` stagnated at roundoff is accepted when
+every row's residual is within 8 eps of the magnitudes that row sums
+and `||dx|| <= 1e-6·|x|`; the run warns "Newton solve(s) ran out of
+iterations ... and were accepted" and counts them in
+`result.newton_roundoff_accepts`. That is a backward-error test, not a
+looser tolerance, and the DC operating point never uses it. When it
+declines, the abort message says why (the row's backward error, the
+step ceiling, whether `||dx||` stagnated).
+
 **Fix:** look at the device the message names, and cross-check on the
 other engine. An abort at `h_min` right after a hard switching edge on
 TR-BDF2 is a known engine limitation (`KNOWN_LIMITATIONS.md`,
@@ -145,6 +157,22 @@ you build the cache yourself.
 If `dt` is too large compared to the system's smallest time constant, the trapezoidal companion can ring (overshoot a true exponential by 10-20 %).
 
 **Heuristic:** use `dt ≤ min(τ) / 10` where `τ` are the RC and L/R time constants. For switching circuits, also enforce `dt ≤ T_PWM / 200` (catch the ON/OFF edge within 1 sample even when the PWM frequency drifts).
+
+### Symptom: alternation after a switching edge, or first order with `dt`
+
+By default `engine='pwl'` carries the trapezoidal derivative across a
+gate edge, a diode flip, a source jump and the start: an idle DCM
+switch node alternates between about 0.5 V and 26 V instead of sitting
+at `v_out`, and halving `dt` only halves the error.
+
+**Fix:** `simulate(..., discontinuity_restart=True)`. The step with a
+discontinuity and the next two become SDIRK(2,2) steps (buck `i_L` error
+1.18e-2 A → 1.17e-7 A at T/50, order 2). A `b_extra_fn` that jumps must
+declare it (`fn.next_jump_after = lambda t: ...`) to be restarted. The gate of
+step `(t_{k-1}, t_k]` is then `switch_fn(t_{k-1})`: a closure with edges
+on the grid keeps its duty and moves one step; a left-continuous one
+(`t > te`) becomes one step late. Edges off the `dt` grid stay first
+order; `res.n_restart_steps` counts the restarts.
 
 ### Symptom: wall-clock time too long
 

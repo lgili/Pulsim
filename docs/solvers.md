@@ -23,12 +23,39 @@ Pulsim's transient kernel supports two **fixed-step** integrators
 - 2nd-order, A-stable, NOT L-stable.
 - Cheap: 1 sparse solve per step.
 - Used for the bread-and-butter PWM-switched-mode workflow.
+- `discontinuity_restart=True` (off by default): the step containing a
+  mask change, diode flip, source jump (or a `b_extra_fn` jump declared
+  through `next_jump_after(t)`) or inconsistent start, and the next two,
+  are Alexander SDIRK(2,2) steps (γ = 1 − 1/√2, L-stable). Each is two
+  backward-Euler-like stages of γ·dt on one factor per mask at 2γ·dt.
+  The result is order 2 across edges on the grid instead of 1, with no
+  alternation after them, and resonant modes keep their energy. The
+  gate is sampled at the step start, and a source reads its left limit
+  at a jump on the step end. `engine='trbdf2'` and `'dsed'` refuse it,
+  and so does `enable_substep_state_correction`.
 
 ### BDF1 (implicit Euler)
 
 - 1st-order, L-stable.
 - Used for stiff systems where Tustin would oscillate at large `dt`.
 - Enabled by `opts.advanced.timestep.integrator = Bdf1`.
+
+### Newton on nonlinear devices (`pwl` and `trbdf2`)
+
+Circuits with Newton devices (Shockley diodes, MOSFET Level-1,
+saturable magnetics) solve `J_lin + J_nl` each iteration. Each run keeps
+one Newton workspace: the combined Jacobian is written in place on the
+union pattern of the two operands, and one sparse-LU analysis is reused
+for as long as that pattern holds (checked after every device refresh;
+a switch state with another pattern, or the static `dt = 0` system,
+analyses again). Results are bit-identical to analysing every
+iteration (`update-newton-persistent-solver`, stage A1). Since stage
+A2 the factorisation is the in-house sparse LU, refactorised in place
+with no allocation per iteration; the DC operating point keeps
+`Eigen::SparseLU`. `result.newton` reports the run's counters
+(`iterations`, `analyses`, `factorizations`, …) and the iteration count
+of every Newton call (`iterations_per_solve`). The Levenberg-Marquardt
+fallback still factorises from scratch.
 
 ## Adaptive Runge-Kutta integrators (Phase 2.4, standalone)
 
@@ -89,6 +116,56 @@ wall-clock because each step is cheap (explicit). Radau wins
 step count because L-stability lets dt grow several orders of
 magnitude through the stiff transitions, at the cost of a
 Newton solve per step.
+
+## Variable-step transient engine (`engine='trbdf2'`)
+
+TR-BDF2 (γ = 2 − √2) with an embedded error estimate over capacitor
+voltages and inductor currents, gate edges landed exactly and diode
+crossings localised by Illinois on trial solves. Two restart rules
+after a gate edge:
+
+- **Derivative refresh.** The zero-time diode cascade at an edge
+  solves a short trapezoidal probe (`h_probe`) under the post-edge
+  mask; that probe is committed as a recorded step, so the history's
+  inductor voltages, capacitor currents and stateful-device slots are
+  post-edge values and the probe sample carries the post-edge switch
+  state for loss post-processing. At an edge settled at a step
+  boundary only the slots are replaced (the states are kept). The
+  first post-edge step is then sized by a true error estimate. Each
+  edge adds one recorded sample `h_probe` after it, so
+  `np.diff(res.times).min()` is the probe length, not a controller
+  step. Not
+  done at diode events or at the initial settle (a diode turn-off
+  leaves an inductor on a g_off-only path whose probe derivative is a
+  picosecond mode).
+- **Post-edge memory.** Per edge parity (rising/falling), the step the
+  controller proposes after the first accepted post-edge step,
+  capped at `h_max`, is where the next edge of that parity restarts.
+  It can grow as well as shrink. Diode events have no memory.
+
+Error control:
+
+- **Estimate.** The local error estimate carries the factor 2 of
+  Bank et al. (1985), so it is the true local error to leading order;
+  before, it was half of it and `rtol` meant twice itself. The Python
+  defaults (`rtol=1e-5`, `atol=1e-8`) are unchanged; doubled values
+  give the previous step density.
+- **Ceiling and floors.** The default ceiling is
+  `min(span/1000, period/20 of a periodic source, pulse width/3)`;
+  `dt` overrides it. The step floor, probe floor, probe cap, chatter
+  floor and gate-pulse floor are fixed fractions of `1000·h_max`
+  (exactly the old span fractions while the ceiling is `span/1000`),
+  so with a ceiling set by `dt` or a source the steps up to a time do
+  not depend on `t_end`. `h_max_basis`: 0 span, 1 source, 2 user.
+- **Source breakpoints.** Every corner of a pulse source (start, end
+  of rise, start and end of fall, per period) and every edge of a PWM
+  voltage source is landed like a gate edge; the landing step reads
+  the source's left limit and the engine restarts as after a gate
+  edge (`n_source_breakpoints`).
+
+`res._trbdf2_stats` reports `n_derivative_refreshes`,
+`n_refresh_probes` and `h_post_event_min` (smallest accepted first
+step after a refreshed edge).
 
 ## Tuning guide
 

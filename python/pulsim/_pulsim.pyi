@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class SimulationAborted(RuntimeError):
@@ -366,9 +366,9 @@ class CircuitBuilder:
         """
         Add an IGBT as a controlled switch (collector → emitter). Defaults: R_on=10mΩ, R_off=1GΩ. No anti-parallel diode by default.
         """
-    def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0) -> CircuitBuilder:
+    def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0, V_F: float = 0.7) -> CircuitBuilder:
         """
-        Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. Use `run_transient(..., enable_nonlinear_refresh=True)` to stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
+        Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. `V_F` is that diode's CONDUCTION DROP (v = V_F + i/1e3 S while on; it turns on at V_F). Use `run_transient(..., enable_nonlinear_refresh=True)` to stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
         """
     def add_inductor(self, name: str, n_pos: str, n_neg: str, L_henries: float, i0: float | None = None, *, esr: float = 0.0, c_par: float = 0.0, rac = None) -> 'CircuitBuilder':
         """
@@ -395,15 +395,15 @@ class CircuitBuilder:
         """
     def add_mosfet(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, body_diode: bool = True, V_F: float = 0.7) -> CircuitBuilder:
         """
-        Add an n-channel power MOSFET: a controlled switch (drain → source) PLUS its intrinsic anti-parallel body diode (source → drain), named `<name>_body`, which is on by DEFAULT. No vertical power MOSFET exists without one, and a gate-off device in an inductive path has no freewheeling route without it. Pass `body_diode=False` for an eGaN HEMT (which conducts in reverse through the channel, not a p-n junction) or for a bare switch. Defaults: R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the body diode's turn-on THRESHOLD (add_diode's V_th), not a conduction drop.
+        Add an n-channel power MOSFET: a controlled switch (drain → source) PLUS its intrinsic anti-parallel body diode (source → drain), named `<name>_body`, which is on by DEFAULT. No vertical power MOSFET exists without one, and a gate-off device in an inductive path has no freewheeling route without it. Pass `body_diode=False` for an eGaN HEMT (which conducts in reverse through the channel, not a p-n junction) or for a bare switch. Defaults: R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the body diode's CONDUCTION DROP (add_diode's V_f): v_SD = V_F + i/1e3 S while on, and it turns on at V_F.
         """
-    def add_mosfet_level1(self, name: str, drain: str, source: str, gate: str, K: float, V_T: float, lambda_: float = 0.02, kappa: float = 15.0, with_body_diode: bool = True) -> CircuitBuilder:
+    def add_mosfet_level1(self, name: str, drain: str, source: str, gate: str, K: float, V_T: float, lambda_: float = 0.02, kappa: float = 15.0, with_body_diode: bool = True, V_F: float = 0.7) -> CircuitBuilder:
         """
-        Add a 3-terminal SH1 MOSFET (Shichman-Hodges Level 1). Cutoff/triode/saturation regions blended via sigmoid for C¹-smooth Newton convergence. K [A/V²], V_T [V], lambda_ [1/V] channel-length modulation, kappa [1/V] sigmoid sharpness. Drain → source is a Nonlinear branch; gate is a node reference (no gate current — ideal gate). The intrinsic anti-parallel body diode (source→drain, named `<name>_body`) is added BY DEFAULT — it is what carries the current when the gate is off and an inductive load would otherwise have no path. Set `with_body_diode=False` for an eGaN HEMT, which has no p-n body diode. Call `run_transient` with `enable_nonlinear_refresh=True` so the Newton loop stamps the MOSFET each iteration.
+        Add a 3-terminal SH1 MOSFET (Shichman-Hodges Level 1). Cutoff/triode/saturation regions blended via sigmoid for C¹-smooth Newton convergence. K [A/V²], V_T [V], lambda_ [1/V] channel-length modulation, kappa [1/V] sigmoid sharpness. Drain → source is a Nonlinear branch; gate is a node reference (no gate current — ideal gate). The intrinsic anti-parallel body diode (source→drain, named `<name>_body`) is added BY DEFAULT — it is what carries the current when the gate is off and an inductive load would otherwise have no path. Set `with_body_diode=False` for an eGaN HEMT, which has no p-n body diode. `V_F` is the body diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while on; it turns on at V_F). Call `run_transient` with `enable_nonlinear_refresh=True` so the Newton loop stamps the MOSFET each iteration.
         """
     def add_mosfet_with_body_diode(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, V_F: float = 0.7, g_on_diode: float = 1000.0, g_off_diode: float = 1e-09) -> CircuitBuilder:
         """
-        Add an n-channel power MOSFET WITH intrinsic anti-parallel body diode. Adds TWO branches: switch (drain→source) + diode (source→drain). V_F is the body diode's turn-on THRESHOLD (add_diode's V_th), not a conduction drop.
+        Add an n-channel power MOSFET WITH intrinsic anti-parallel body diode. Adds TWO branches: switch (drain→source) + diode (source→drain). V_F is the body diode's CONDUCTION DROP (add_diode's V_f): v_SD = V_F + i/g_on_diode while on, and it turns on at V_F.
         """
     def add_multi_winding_transformer(self, name: str, windings: collections.abc.Sequence[tuple[str, str, float]], k_matrix: collections.abc.Sequence[collections.abc.Sequence[float]] = []) -> CircuitBuilder:
         """
@@ -988,6 +988,11 @@ class CacheMetrics:
         solve_at calls that had to build a fresh event solver.
         """
     @property
+    def event_evictions(self) -> int:
+        """
+        solve_at entries evicted (LRU) under the byte budget.
+        """
+    @property
     def event_hits(self) -> int:
         """
         solve_at calls served by a resident factor at the same dt.
@@ -1013,6 +1018,21 @@ class CacheMetrics:
     def segment_evictions(self) -> int:
         """
         Lazy-mode segments dropped by the byte-budget LRU.
+        """
+    @property
+    def structure_builds(self) -> int:
+        """
+        Sparse-structure (template) builds of G/C/J: one per assembly regime.
+        """
+    @property
+    def symbolic_analyses(self) -> int:
+        """
+        Symbolic analyses run: one per assembly regime, shared by every switch state.
+        """
+    @property
+    def symbolic_fallbacks(self) -> int:
+        """
+        Matrices whose pattern refused the shared analysis and were analysed privately.
         """
 class PwlStateSpaceCache:
     """
@@ -1093,6 +1113,14 @@ class SimulationOptions:
         ...
     @atol.setter
     def atol(self, arg0: float) -> None:
+        ...
+    @property
+    def discontinuity_restart(self) -> bool:
+        """
+        Fixed engine: take the step after a discontinuity (mask change, diode flip, source jump, inconsistent start) as two backward-Euler half-steps; gate mask sampled at the step start. Off = the engine before the rule, bit for bit.
+        """
+    @discontinuity_restart.setter
+    def discontinuity_restart(self, arg0: bool) -> None:
         ...
     @property
     def dt(self) -> float:
@@ -1341,6 +1369,33 @@ class CommutationEvent:
     @property
     def t_estimated(self) -> float:
         ...
+class NewtonCounters:
+    """
+    Newton linear-algebra counters of one run (update-newton-persistent-solver). All zero without Newton.
+    """
+    @property
+    def analyses(self) -> int:
+        ...
+    @property
+    def factorizations(self) -> int:
+        ...
+    @property
+    def iterations(self) -> int:
+        ...
+    @property
+    def iterations_per_solve(self) -> numpy.typing.NDArray[numpy.uint16]:
+        """
+        Iterations of each Newton call, in call order (uint16).
+        """
+    @property
+    def lm_attempts(self) -> int:
+        ...
+    @property
+    def partial_refactors(self) -> int:
+        ...
+    @property
+    def solves(self) -> int:
+        ...
 class SimulationResult:
     """
     Output of run_transient: parallel `times` and `states` arrays, plus event diagnostics.
@@ -1371,6 +1426,32 @@ class SimulationResult:
         """
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
         """
+    @property
+    def n_restart_factorizations(self) -> int:
+        """
+        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts). 0 with the rule off.
+        """
+    @property
+    def n_restart_steps(self) -> int:
+        """
+        Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
+        """
+    @property
+    def newton(self) -> NewtonCounters:
+        """
+        Newton counters of the run (NewtonCounters).
+        """
+    @property
+    def newton_roundoff_accepts(self) -> int:
+        """
+        Transient Newton solves accepted at roundoff level (stagnated dx, row backward error <= 8 eps) instead of aborting.
+        """
+    @property
+    def newton_roundoff_omega_max(self) -> float:
+        ...
+    @property
+    def newton_roundoff_row(self) -> int:
+        ...
     @property
     def states(self) -> typing.Any:
         """
@@ -1876,7 +1957,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool]]:
+    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], int]:
         ...
     def __init__(self) -> None:
         ...
@@ -1919,6 +2000,19 @@ class SolverSnapshot:
         ...
     @pmsm_history.setter
     def pmsm_history(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def restart_pending(self) -> bool:
+        """
+        True when restart_steps_left > 0.
+        """
+    @property
+    def restart_steps_left(self) -> int:
+        """
+        discontinuity_restart: SDIRK restart steps still owed when the run ended (the rule takes a discontinuity's step and the next two); a resumed run takes them first. 0 = none.
+        """
+    @restart_steps_left.setter
+    def restart_steps_left(self, arg0: int) -> None:
         ...
     @property
     def saturable_history(self) -> list[float]:
@@ -2567,6 +2661,10 @@ class _NativeCircuitBuilderAdapter:
         """
         v(from_node) − v(to_node) recovered from the reduced state `x` under the active mask (−1 is ground). The quantity a PWL diode predicate evaluates; affine in `x`, so its gradient is the predicate's recovery row (used by pulsim.periodic_steady_state for saltation).
         """
+    def reduced_initial_state(self, builder: CircuitBuilder) -> tuple[typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], float]:
+        """
+        add-exact-propagator-strategy D5: the reduced state of the current mask from a full-MNA initial vector (the builder's c0= / i0= / set_initial), and the largest capacitor-voltage adjustment the charge-conserving projection made (0 when the declared values are consistent).
+        """
     def rhs(self, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Continuous-time RHS: dx/dt = A·x + b(t).
@@ -2710,7 +2808,7 @@ def run_auto_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annota
     """
     Native PEDSimulatorAuto (per-mode RK45↔BDF2 dispatch via stiffness detector) running the C++ scheduler inner loop. Returns a dict that additionally includes n_rk45_steps + n_bdf2_steps for each mode-segment.
     """
-def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1) -> dict[typing.Any, typing.Any]:
+def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1, event_log: bool = True) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulatorAuto over a NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).
     """
@@ -2718,7 +2816,7 @@ def run_bdf2_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annota
     """
     Native PEDSimulatorBDF2 (implicit BDF2 + Crank-Nicolson bootstrap) running the C++ scheduler inner loop.
     """
-def run_bdf2_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, h_fixed: float = 1e-06, store_every: int = 1) -> dict[typing.Any, typing.Any]:
+def run_bdf2_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, h_fixed: float = 1e-06, store_every: int = 1, event_log: bool = True) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulatorBDF2 over a NativeCircuitBuilderAdapter (implicit BDF2 + CN bootstrap).
     """
@@ -2732,13 +2830,13 @@ def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotat
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
     """
-def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True) -> dict[typing.Any, typing.Any]:
+def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """
-def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
+def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
     """
-    Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True forces the chain; False with such devices raises UnsupportedError.
+    Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True forces the chain; False with such devices raises UnsupportedError.
     """
 def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_fn: collections.abc.Callable[[float], SwitchStateMask], b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None) -> SimulationResult:
     """

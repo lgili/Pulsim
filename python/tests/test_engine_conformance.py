@@ -562,8 +562,11 @@ def test_pwm2_on_trbdf2_unchanged_by_the_adapter():
         warnings.simplefilter("ignore")
         r = p.simulate(b, 10 * T, engine="trbdf2", switch_fn=fn)
     st = r._trbdf2_stats
+    # Re-pinned by update-trbdf2-post-event-restart / error-control
+    # (integration batch 5): (1104, 2254, 20) -> (1031, 2058, 20); the
+    # post-edge restart removes the post-edge step collapse; same 20 edges.
     assert (len(r.times), st["n_solves"], st["n_gate_events"]) == (
-        1104, 2254, 20)
+        1031, 2058, 20)
 
 
 # ---------------------------------------------------------------------
@@ -611,6 +614,8 @@ _REFUSED = {
                                ("trbdf2", "dsed")),
     "enable_substep_state_correction": (
         {"enable_substep_state_correction": True}, ("trbdf2", "dsed")),
+    "discontinuity_restart": (
+        {"discontinuity_restart": True}, ("trbdf2", "dsed")),
 }
 
 
@@ -634,26 +639,28 @@ def test_c_blocks_refused(engine):
     assert (ei.value.engine, ei.value.feature) == (engine, "c_blocks")
 
 
-def test_diode_drop_above_threshold_refused_on_dsed():
+@pytest.mark.parametrize("vth", (0.0, 0.7))
+def test_diode_drop_at_or_above_threshold_runs_on_dsed(vth):
     # DSED held such a diode ON through reverse bias: the sine clamp
-    # read 0.70 V for the whole negative half (10.37 V off), silently.
-    b = _clamp(lambda b: b.add_diode("Dd", "o", "gnd", 1e3, 1e-9,
-                                     0.0, 0.7))(True)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("dsed", b)
-    e = ei.value
-    assert (e.engine, e.feature, e.device, e.kind) == (
-        "dsed", "V_f", "Dd", "Diode")
+    # read 0.70 V for the whole negative half (10.37 V off). V_f > V_th
+    # was refused; V_th = V_f = 0.7 ran silently wrong (min 0.0 V, the
+    # reference -9.98 V). add-exact-propagator-strategy D4 decides the
+    # turn-off on the post-crossing side, so both now agree with pwl.
+    cell = (_clamp(lambda b: b.add_diode("Dd", "o", "gnd", 1e3, 1e-9,
+                                         vth, 0.7)),
+            "o", "Dd", 2e-3, 2e-7, False)
+    _check_cell(f"Diode V_th={vth} V_f=0.7", cell, "dsed", True)
 
 
-def test_builder_initial_conditions_refused_on_dsed():
+def test_builder_initial_conditions_honoured_on_dsed():
+    # add-exact-propagator-strategy D5: c0= maps onto the reduced
+    # state (refused by name before).
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "in", "gnd", 10.0)
     b.add_resistor("R", "in", "o", 1e3)
     b.add_capacitor("C", "o", "gnd", 100e-9, c0=2.0)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("dsed", b)
-    assert ei.value.feature == "initial_conditions"
+    r = _sim("dsed", b)
+    assert abs(np.asarray(r.v("o"))[0] - 2.0) < 1e-12
 
 
 def test_observer_on_a_cadence_is_honoured_on_trbdf2():

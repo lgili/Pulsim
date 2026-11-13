@@ -1565,6 +1565,9 @@ class SolverOptions:
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
     enable_substep_state_correction: Optional[bool] = None
+    # Fixed engine: two backward-Euler half-steps after every
+    # discontinuity, gate sampled at the step start (None = off).
+    discontinuity_restart: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1623,6 +1626,20 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     return tuple(out)
 
 
+def _carry_jumps(fn, parts):
+    """Give a composed b_extra_fn the declared jumps of its parts.
+
+    A part declares its jump instants with `next_jump_after(t)` (first
+    jump strictly after t); the composition jumps at the earliest.
+    Undeclared parts stay undeclared (the restart rule cannot see them).
+    """
+    nj = [q.next_jump_after for q in parts
+          if q is not None and hasattr(q, "next_jump_after")]
+    if nj:
+        fn.next_jump_after = lambda t, _nj=nj: min(f(t) for f in _nj)
+    return fn
+
+
 def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         label):
     """Compose an internal (observer, b_extra) pair with the user's.
@@ -1657,7 +1674,7 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         f"b_extra_fn returned shape {u.shape}, "
                         f"expected ({_n},) when composed with {_lbl}")
                 return _np.asarray(_i(t)) + u
-            b_extra_fn = _b
+            b_extra_fn = _carry_jumps(_b, (b, _u_b))
     return step_observer, b_extra_fn
 
 
@@ -1725,6 +1742,7 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    discontinuity_restart: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1873,7 +1891,11 @@ def simulate(
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
-        ``rtol=1e-6, atol=1e-9``.
+        ``rtol=1e-6, atol=1e-9``. For ``'trbdf2'`` / ``'auto'``
+        (defaults ``1e-5`` / ``1e-8``) they bound the local error
+        estimate, which since update-trbdf2-error-control is the true
+        local error (it was half of it): pass doubled values for the
+        previous step density.
     dt_init
         Initial step for the DSED PI controller (default 1e-9).
     integrator
@@ -2020,6 +2042,8 @@ def simulate(
         if enable_substep_state_correction is None:
             enable_substep_state_correction = (
                 solver.enable_substep_state_correction)
+        if discontinuity_restart is None:
+            discontinuity_restart = solver.discontinuity_restart
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -2198,6 +2222,7 @@ def simulate(
             "inductor_abs_clamp": inductor_abs_clamp is not None,
             "enable_substep_state_correction": bool(
                 enable_substep_state_correction),
+            "discontinuity_restart": bool(discontinuity_restart),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -2211,38 +2236,6 @@ def simulate(
                 "kwarg(s) if the open-loop behaviour is intended. "
                 "Observer/closed-loop support inside DSED is tracked "
                 "for v2.0 (event-synchronised controller cadence)."
-            )
-        if _ic_from_builder:
-            # The builder recorded `c0=` / `i0=` initial conditions
-            # and DSED cannot apply them. It used to START AT ZERO
-            # in silence: an inductor declared `i0=100` began its
-            # run at 0 A, the solve converged, and the trace looked
-            # like a perfectly ordinary energisation transient —
-            # the same circuit answering differently depending on
-            # which engine the router happened to pick.
-            #
-            # It is not a matter of forwarding the vector. DSED
-            # solves a REDUCED state (one entry per reactive
-            # element) while `builder.initial_state()` is a
-            # full-MNA vector, and for a FLOATING capacitor the
-            # reduced state is the congruence-transformed
-            # difference v_pos − v_neg, not the row the gather
-            # would pick up. A naive gather would therefore be
-            # right for inductors and grounded caps and quietly
-            # wrong for floating ones — which is the failure this
-            # message exists to stop. Refuse by name until the
-            # projection is built and tested.
-            raise _unsupported(
-                "dsed", "initial_conditions",
-                "simulate(engine='dsed'): this circuit declares "
-                "initial conditions (c0= / i0= / set_initial), and "
-                "the DSED engine cannot apply them yet — it would "
-                "start every state at ZERO and return a plausible "
-                "but wrong transient. Use engine='pwl' (or "
-                "'trbdf2'), which honour them, or pass "
-                "initial_state=<reduced state vector> explicitly if "
-                "you know DSED's state ordering "
-                "([v_C..., i_L...])."
             )
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
@@ -2262,7 +2255,10 @@ def simulate(
             t_start=t_start,
             switch_fn=switch_fn,
             b_extra_fn=b_extra_fn,
-            initial_state=initial_state,
+            # Builder ICs (c0= / i0=) are a full-MNA vector: the
+            # dispatcher maps them per device onto the reduced state.
+            initial_state=None if _ic_from_builder else initial_state,
+            builder_initial_state=initial_state if _ic_from_builder else None,
             progress=progress,
         )
         try:
@@ -2285,6 +2281,7 @@ def simulate(
             pass
         _auto_check_voltage_sanity(_dsed_res, builder,
                                     voltage_sanity_factor)
+        _dsed.check_diode_modes(_dsed_res, builder)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:
@@ -2313,6 +2310,7 @@ def simulate(
             on_cache=on_cache,
             enable_substep_state_correction=(
                 enable_substep_state_correction),
+            discontinuity_restart=discontinuity_restart,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -2599,7 +2597,7 @@ def simulate(
             return total if total is not None else []
 
         step_observer = _cblock_observer
-        b_extra_fn = _cblock_b_extra
+        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -2652,6 +2650,12 @@ def simulate(
                 "re-fire), silently corrupting the capacitor "
                 "bookkeeping. The ladder is disabled automatically "
                 "when mmc_arms is set; do not request it.")
+        if discontinuity_restart:
+            raise ValueError(
+                "simulate(mmc_arms=..., discontinuity_restart=True): "
+                "the restart half-steps re-solve at dt/2 with the "
+                "arm's full-dt Thevenin stamp — the dt-halving "
+                "corruption again.")
         if enable_substep_state_correction:
             raise ValueError(
                 "simulate(mmc_arms=..., "
@@ -2743,6 +2747,8 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if discontinuity_restart is not None:
+        opts.discontinuity_restart = bool(discontinuity_restart)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -3081,6 +3087,8 @@ def simulate(
             f"{first.reason[:200]}",
             stacklevel=2)
 
+    _warn_newton_roundoff(res, "simulate()")
+
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
         import warnings
@@ -3132,12 +3140,31 @@ def simulate(
     return res
 
 
+def _warn_newton_roundoff(res, eng) -> None:
+    """add-newton-roundoff-acceptance: say when a transient Newton
+    solve was accepted at roundoff level instead of aborting."""
+    n = int(getattr(res, "newton_roundoff_accepts", 0) or 0)
+    if n > 0:
+        import warnings
+        warnings.warn(
+            f"{eng}: {n} Newton solve(s) ran out of iterations with "
+            f"||dx|| stagnated at roundoff and were accepted: every "
+            f"row's residual is within "
+            f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
+            f"sums (at most 8 eps; worst at MNA row "
+            f"{res.newton_roundoff_row}). This replaces an abort that "
+            f"no tolerance could have passed; it is not a loosened "
+            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            stacklevel=3)
+
+
 def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
     import warnings
     eng = f"simulate(engine={engine_asked!r})"
+    _warn_newton_roundoff(res, eng)
     if stats.get("n_forced_accepts", 0) > 0:
         warnings.warn(
             f"{eng}: "
@@ -3313,7 +3340,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn):
+                      switch_fn, discontinuity_restart=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3381,6 +3408,9 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if enable_substep_state_correction:
         why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
                     "fixed-step commutation split"))
+    if discontinuity_restart:
+        why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
+                    "fixed-step engine's restart rule"))
     if store_every is not None and int(store_every) != 1:
         why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:

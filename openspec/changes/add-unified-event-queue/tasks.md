@@ -65,3 +65,16 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 9.1 Delete `next_edge_fn`, `observer_period`, the callable-only driver parameters and their adapters
 - [ ] 9.2 Oracle: matrix; full suite; stub check
 - [ ] 9.3 Docs: CHANGELOG, `docs/mental-model.md`, `openspec/CORE_ROADMAP.md` status
+
+<!-- Re-centred scope, 2026-11-13: groups 10–12 are appended; groups 1–9 are unchanged. -->
+
+## 10. Samples as events (re-centred scope, D9)
+- [ ] 10.1 Sample source with lowest priority at an instant; no mode change, no restart
+- [ ] 10.2 Tests: on the fixed engine, a run with `dt_out = dt` and one with `dt_out = 7·dt` give bit-identical states at the common times; on the exact strategy the event count does not depend on `dt_out`
+
+## 11. Mode selection at an instant (D10; needs `add-complementarity-mode-selection` group 6)
+- [ ] 11.1 One selection per instant after ticks, gate edges and breakpoints; re-initialisation after it; `settle` behind `mode_selection='legacy'`
+- [ ] 11.2 Tests: a gate edge and a diode crossing at the same instant in the boost give one selection; the three-phase bridge's simultaneous crossings give one selection per instant on every strategy
+
+## 12. Default flip (in the single number-changing release)
+- [ ] 12.1 Selection service default at every instant; `settle` deleted one release later with the settle loops of `add-complementarity-mode-selection` task 9.3

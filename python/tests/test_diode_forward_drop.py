@@ -451,28 +451,37 @@ _CIRCUITS = {
 # P_avg of the switch and the diodes on the parent commit (8935b2a5,
 # before V_f existed), with the diode built WITHOUT V_f. There, the
 # whole record (times, states, switch states, every summary field) was
-# bit-identical to V_f = 0.0 on this branch; boost_dcm on dsed refuses on
-# both. Pinned as numbers, not hashes, so that other platforms pass:
+# bit-identical to V_f = 0.0 on this branch; boost_dcm on dsed refused on
+# both ("did not settle"). It runs since add-exact-propagator-strategy:
+# its states match trbdf2 at rtol 1e-10 (i_L within 1e-5 A at every
+# event sample); D reads 1.2 % under trbdf2 because the loss summary
+# integrates dsed's 291 event samples. Pinned as numbers, not hashes, so that other platforms pass:
 # rel 1e-9 on the fixed grid, 1e-6 where the step sequence can move, and
 # 1e-3 on dsed — its event times go through libm, and Windows CI moved
 # these ~0.1 mW leakage losses by up to 9e-5. A lost V_f = 0 identity
 # would move them by orders of magnitude, not parts per thousand.
+# trbdf2/auto re-pinned by update-trbdf2-post-event-restart (gate-edge
+# probe committed as a step): S closer to pwl on both, D buck closer,
+# D boost_dcm 7.7e-7 -> 2.9e-6 off pwl (rel 4e-5, within the DCM error).
+# Again by update-trbdf2-error-control (estimate x2): bridge diodes
+# 3.8e-7 -> 3.4e-7 W off pwl; boost_dcm D 2.9e-6 -> 3.1e-6.
 _V_F0_REF = {
-    ("boost_dcm", "auto"): {"S": 0.0452680383528, "D": 0.0649591561202},
+    ("boost_dcm", "auto"): {"S": 0.0452787560282, "D": 0.0649630799915},
+    ("boost_dcm", "dsed"): {"S": 0.0452721300653, "D": 0.0641693129544},
     ("boost_dcm", "pwl"): {"S": 0.0452766957162, "D": 0.0649599299511},
-    ("boost_dcm", "trbdf2"): {"S": 0.0452680383528, "D": 0.0649591561202},
-    ("bridge", "auto"): {"BR__D1": 0.000138585164756, "BR__D2": 5.6813204064e-05,
-                         "BR__D3": 0.000138585164754, "BR__D4": 5.68132040543e-05},
+    ("boost_dcm", "trbdf2"): {"S": 0.0452787560282, "D": 0.0649630799915},
+    ("bridge", "auto"): {"BR__D1": 0.000138546610073, "BR__D2": 5.67807984390e-05,
+                         "BR__D3": 0.000138546610071, "BR__D4": 5.67807984293e-05},
     ("bridge", "dsed"): {"BR__D1": 0.000138571769601, "BR__D2": 5.67576669568e-05,
                          "BR__D3": 0.000138582323524, "BR__D4": 5.67838168133e-05},
     ("bridge", "pwl"): {"BR__D1": 0.000138205386016, "BR__D2": 5.66352667669e-05,
                         "BR__D3": 0.000138205386014, "BR__D4": 5.66352667572e-05},
-    ("bridge", "trbdf2"): {"BR__D1": 0.000138585164756, "BR__D2": 5.6813204064e-05,
-                           "BR__D3": 0.000138585164754, "BR__D4": 5.68132040543e-05},
-    ("buck", "auto"): {"S": 0.0035509287608, "D": 0.00533941662173},
+    ("bridge", "trbdf2"): {"BR__D1": 0.000138546610073, "BR__D2": 5.67807984390e-05,
+                           "BR__D3": 0.000138546610071, "BR__D4": 5.67807984293e-05},
+    ("buck", "auto"): {"S": 0.00355077782274, "D": 0.00533935149256},
     ("buck", "dsed"): {"S": 0.00354982022022, "D": 0.00533604800703},
     ("buck", "pwl"): {"S": 0.00354999944119, "D": 0.00533789852559},
-    ("buck", "trbdf2"): {"S": 0.0035509287608, "D": 0.00533941662173},
+    ("buck", "trbdf2"): {"S": 0.00355077782274, "D": 0.00533935149256},
 }
 
 
@@ -484,11 +493,7 @@ def test_v_f_zero_matches_the_pre_v_f_engine(circuit, engine):
     skw = {"switch_fn": _pwm(b)} if switched else {}
     if engine == "pwl":
         skw["dt"] = 1e-7 if switched else 1e-6
-    ref = _V_F0_REF.get((circuit, engine))
-    if ref is None:  # refused before V_f too
-        with pytest.raises(RuntimeError, match="did not settle"):
-            _sim(b, t_end, engine, **skw)
-        return
+    ref = _V_F0_REF[(circuit, engine)]
     r = _sim(b, t_end, engine, **skw)
     s = _loss(b, r, **({"switch_fn": skw["switch_fn"]} if switched else {}))
     got = {e["name"]: e["P_avg"] for e in s if e["name"] in ref}
@@ -518,26 +523,26 @@ def test_dsed_without_a_band_refuses_or_matches_and_never_reverses():
                                          t_from=0.08), rel=1e-3)
 
 
-def test_dsed_forced_turn_on_without_a_band_names_the_band():
-    """Pinned limitation: a capacitor charged by a current source into a
-    V_th = 0, V_f = 0.7 diode reaches V_f with zero ON current, and the
-    Jacobi settle cycles. Since add-engine-conformance-matrix dsed
-    refuses V_f > V_th up front (it held the diode ON through reverse
-    bias, 10.4 V off); the refusal must still name the band advice."""
+def test_dsed_forced_turn_on_without_a_band_runs():
+    """A capacitor charged by a current source into a V_th = 0,
+    V_f = 0.7 diode reaches V_f with zero ON current. The Jacobi settle
+    cycled, and then dsed refused V_f > V_th. Since
+    add-exact-propagator-strategy the zero band is decided on the exact
+    OFF-mode trajectory: it clamps at V_f + I/g_on = 0.7 + 10/20."""
     b = p.CircuitBuilder()
     b.add_current_source("I1", "a", "gnd", 10.0)
     b.add_diode("D1", "a", "gnd", G_ON, 1e-9, V_f=V_F)
     b.add_capacitor("C", "a", "gnd", 1e-6)
-    with pytest.raises(p.UnsupportedError, match=r"V_th = V_f \+ 1e-3") as e:
-        _sim(b, 2e-3, "dsed")
-    assert (e.value.engine, e.value.feature, e.value.device) == \
-        ("dsed", "V_f", "D1")
+    r = _sim(b, 2e-3, "dsed")
+    assert np.asarray(r.v("a"))[-1] == pytest.approx(1.2, abs=1e-12)
+    assert np.asarray(r.i("D1"))[-1] == pytest.approx(10.0, abs=1e-10)
+    assert _no_reverse(r.i("D1"))
 
 
 def test_dsed_t0_settle_with_a_drop():
     """A zero IC is strictly inside OFF when V_f > 0: the t = 0 settle
-    of a forward-driven diode passes. dsed needs the band V_th > V_f
-    (V_th = 0 is refused, see above); the drop is unchanged by it."""
+    of a forward-driven diode passes, with the band V_th > V_f here;
+    the drop is unchanged by it."""
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "s", "gnd", 12.0)
     b.add_resistor("R1", "s", "a", 10.0)

@@ -57,7 +57,92 @@ step with the engine's event iteration), `p22_cda_stateful_proto.py`
 
 ## Decisions
 
-### D1. Two backward-Euler half-steps reuse the nominal matrix
+### D0. Rework: three SDIRK(2,2) steps replace the backward-Euler pair
+
+The pair of D1 was implemented (41711488) and failed a review on
+resonant modes. Backward Euler over `h/2` damps a mode of frequency ω
+by about (ωh)²/2 per event, and a converter has two events per period.
+
+Engine, Q = 50 tank driven at resonance by a ±50 V PWM, peak current
+error against T/1600:
+
+| Variant | T/50 | T/100 |
+|---|---|---|
+| flag off | −0.855 % | −0.055 % |
+| BE pair | −11.9 % | −3.1 % |
+| SDIRK×3 | −0.730 % | −0.040 % |
+
+Ideal LC beside an electrically isolated PWM source, energy after 100
+periods: flag off 0.9961, BE pair 0.019, SDIRK×3 0.9973.
+
+**The rule now.** The step containing the discontinuity and the next
+two are Alexander SDIRK(2,2) steps, `γ = 1 − 1/√2` (L-stable, stiffly
+accurate, order 2):
+
+- stage 1: a backward-Euler-like solve of `γh` from `x0`, ending at
+  `t0 + γh`;
+- stage 2: the same solve of `γh` from the pseudo previous state
+  `x0* = x0 + c(x1 − x0)`, `c = (1 − γ)/γ`, ending at `t0 + h`. This is
+  the second SDIRK stage rewritten as a backward-Euler step: its
+  residual `x2 − x0 − h(1−γ)f1 − hγf2` with `hγf1 = x1 − x0`.
+
+Details:
+- **Factor.** The stage conductance `C/(γh)` is the trapezoidal
+  companion at `2γh`, so both stages use one factor per mask at that
+  fixed step. The cache's event table (`solve_at`, one entry per mask
+  under the segment byte budget since update-trbdf2-factor-reuse)
+  keeps them; the 8-entry LRU it replaced refactored on every restart
+  step of a VSI: 3172 builds in 3157 restart steps at dt = 1e-6. (A
+  second lazy cache served this until the integration of
+  update-trbdf2-factor-reuse; see DECISIONS.)
+- **Stateful devices.** `HistoryState` and the five devices get
+  `extrapolate_previous(x1, c)`: capacitor `v_prev`, inductor `i_prev`,
+  Coss `q_prev`, Lauritzen `q_M`, IGBT tail `Q`, PMSM `λ` (abc) and
+  saturable `λ`. Each is extrapolated from the stage-1 solution through
+  the device's own law; the flux row stays in conductance form. For
+  Jiles–Atherton the stage-1 flux is evaluated from the committed JA
+  state (an O(h) error at a loop tip, documented).
+- **Commit.** The commit is once per step, from stage 2: the
+  backward-Euler commit at `γh` from `x0*` refreshes the derivative
+  slots with `(x2 − x0*)/(γh)`, the stage-2 derivative. That is `f(x2)`
+  for a linear circuit, so the trapezoid that follows starts
+  consistent.
+- **Why three steps.** The window length is the review's decision; it
+  came from the prototype `p31_restart_sdirk_multi.py`. The step that
+  contains the jump carries the impulse. The steps after it damp what
+  is left by L-stability before the trapezoid resumes. Three meets
+  every acceptance target in the engine, including the 1 ps mode of the
+  capacitor loop at dt = 1e-9. No shorter window was re-measured in the
+  engine.
+- **Window state.** It is a counter. Each trigger sets it to 3, each
+  restart step consumes one, and a diode flip in either stage sets it
+  to `max(left, 2)`. `SolverSnapshot::restart_steps_left` carries it
+  (pickle field 12; a legacy bool `True` loads as 3).
+- **Diodes per stage, measured.** The alternative decides the diodes
+  once per step, with stage 1 solved under the old bits and the step
+  redone on a flip. On the buck it collapses: CCM `v_C` error −11.9 V,
+  DCM output 0.83 V instead of 13.3 V. Per stage: CCM `i_L` error
+  1.17e-7 A at T/50, order 2; DCM idle 0.05 %.
+- **`b_extra_fn` calls.** Called once per stage time: `t0 + γh` (off
+  the grid) and `t0 + h`, with no discarded evaluation. A callback that
+  jumps declares it with `fn.next_jump_after(t)` and is then read at
+  its left limit and restarted like a built-in source. Composed
+  callbacks (C-blocks, hooks) carry the minimum of their parts.
+  Undeclared jumps are not restarted.
+
+Engine acceptance with the flag on:
+
+| Case | BE pair | SDIRK×3 |
+|---|---|---|
+| RL edge, dt = 2 µs | −5.05e-6 A | +1.01e-6 A, order 1.98 |
+| buck CCM `i_L`, T/50 | 2.20e-5 A | 1.17e-7 A, order 2.0 |
+| RC source step, τ/10 | 2.19e-2 V | 2.63e-3 V |
+| cap loop, dt = 1e-9 | 9.821 … 10.178 A | 9.994 … 10.004 A |
+
+D1, D6 and D8 below describe the pair, kept as the record of what was
+replaced; D7 is updated in place.
+
+### D1. Two backward-Euler half-steps reuse the nominal matrix (superseded by D0)
 
 Backward Euler over an interval `h_e` reads `dX/dt ≈ (X − X_n)/h_e`.
 With `h_e = h/2`:
@@ -215,7 +300,7 @@ Prototype, 10 V step on the grid into an RC, dt = τ/10, τ/20, τ/40,
 τ/80: today 0.476, 0.244, 0.124, 0.062 V (order 0.98); with the rule
 2.19e-2, 5.85e-3, 1.51e-3, 3.84e-4 V (order 1.95).
 
-### D6. The event iteration runs per half-step
+### D6. The event iteration runs per half-step (superseded by D0: per stage)
 
 The two half-steps are not one atomic solve. If the diodes are decided
 only on the state after the second half-step, a gate that opens an
@@ -248,19 +333,21 @@ restart step.
 - **dt-retry ladder.** Unchanged in depth, sub-step sizes and
   `DtRetry` records. At level `j` the step is re-taken from the
   snapshot as `2^j` sub-steps of `dt/2^j`; if the outer step was a
-  restart step the first sub-step is a restart sub-step (two half-steps
-  of `dt/2^{j+1}` on the matrix at `dt/2^j`) and the rest are
-  trapezoidal unless they have a trigger of their own. A step that was
-  not a restart step retries exactly as today.
+  restart step EVERY sub-step is an SDIRK step of `dt/2^j` (its stages
+  on the event solver at `2γ·dt/2^j`). A flip in a trapezoidal sub-step
+  arms the window. A step that was not a restart step retries exactly
+  as today.
 - **Sub-step commutation correction**
-  (`enable_substep_state_correction`). Left as it is; it is replaced by
-  `add-fixed-step-event-splitting`. With both on, the step after a
-  corrected step restarts because the mask changed.
+  (`enable_substep_state_correction`). Refused together with the rule
+  (`std::invalid_argument` naming both): its V3 path commits a
+  trapezoidal history from an interpolated state that the SDIRK window
+  cannot see. `add-fixed-step-event-splitting` replaces it.
 - **Inductor freeze guard.** Applied to the final state of the step,
   before the commit, as today.
-- **Snapshots and resume.** `final_snapshot` gains one flag,
-  `restart_pending`. A resumed run compares its first mask with the
-  snapshot's `stamped_mask` and reads the flag; it does not restart
+- **Snapshots and resume.** `final_snapshot` gains a counter,
+  `restart_steps_left` (read-only `restart_pending` = counter > 0). A
+  resumed run compares its first mask with the snapshot's
+  `stamped_mask` and continues the window; it does not restart
   otherwise, which keeps
   `test_a_resumed_run_keeps_its_exact_first_step`.
 - **`start_from_dc_op`.** The DC solution has `i_C = 0` and `v_L = 0`
@@ -273,9 +360,12 @@ restart step.
   be consistent pays an O(h²) backward-Euler error: prototype, the
   sine-driven RL control case goes from 4.28e-7 to 4.98e-7 relative at
   dt = 4 µs and stays second order.
-- **Static path** (`cache.dt() == 0`): no dynamics, no rule.
+- **Static path** (`cache.dt() == 0`): no dynamics, so no restart, but
+  the same sampling: sample `k > 0` reads the gate at `t_{k−1}` and
+  jumping sources (and declared `b_extra_fn` jumps) at their left limit,
+  so adding a capacitor does not shift the recorded mask by one sample.
 
-### D8. One pair, as published
+### D8. One pair, as published (superseded by D0: three SDIRK steps)
 
 Marti & Lin use one pair. It removes the alternation exactly when the
 jump completes inside the first half-step. A fast mode that is finite
@@ -355,3 +445,9 @@ today's engine, bit for bit.
    decide in `fix-control-tick-semantics`?
 6. Should the consistent-initialisation solve (sample 0, exact
    derivative refresh) be opened as its own change?
+
+## Superseded rule, 2026-11-13
+
+The restart rule is three consecutive Alexander SDIRK(2,2) steps; see
+D0 and the note at the end of proposal.md. Decisions above marked
+"superseded by D0" describe the first form of the rule.

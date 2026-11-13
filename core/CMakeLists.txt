@@ -296,6 +296,8 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v1/test_dt_aware_cache.cpp
         tests/layer4_v1/test_lazy_cache.cpp      # V6 lazy
         tests/layer4_v1/test_multi_dt_cache.cpp  # V7 multi-dt
+        tests/layer4_v1/test_linear_time_assembly.cpp  # slot map + shared symbolic
+        tests/layer4_v1/test_newton_workspace.cpp  # Newton workspace (A1)
     )
     target_link_libraries(pulsim_core_layer4_v1_tests
         PRIVATE
@@ -341,6 +343,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v1/test_integration_rlc.cpp
         tests/layer5_v1/test_integration_buck.cpp
         tests/layer5_v1/test_transformer.cpp          # Layer 2 V2
+        tests/layer5_v1/test_backward_euler_stage.cpp # restart rule
     )
     target_link_libraries(pulsim_core_layer5_v1_tests
         PRIVATE

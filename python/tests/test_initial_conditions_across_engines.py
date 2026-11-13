@@ -117,19 +117,16 @@ def test_preflight_ties_do_not_desync_the_state_vector():
     assert float(np.asarray(res.v("m"))[0]) == pytest.approx(2.0, rel=1e-3)
 
 
-def test_dsed_refuses_builder_ics_by_name():
-    """DSED solves a REDUCED state (one entry per reactive element),
-    not the full-MNA vector the builder synthesises, and for a
-    floating capacitor that reduced state is the congruence-
-    transformed difference rather than any single MNA row. So the
-    vector cannot simply be forwarded. Until that projection exists,
-    the run is refused BY NAME — it used to start every state at
-    zero and return a plausible transient instead."""
+def test_dsed_honours_builder_ics():
+    """DSED solves a REDUCED state; add-exact-propagator-strategy maps
+    each declared c0= / i0= onto it (it was refused by name; before
+    that it started every state at zero, silently)."""
     b = p.CircuitBuilder()
     b.add_resistor("R", "a", "gnd", 1.0)
     b.add_inductor("L", "a", "gnd", 1e-3, i0=5.0)
-    with pytest.raises(ValueError, match="initial conditions"):
-        p.simulate(b, t_end=TAU, dt=1e-6, engine="dsed")
+    r = p.simulate(b, t_end=TAU, dt=1e-6, engine="dsed")
+    t = np.asarray(r.times)
+    assert np.max(np.abs(np.asarray(r.i("L")) - 5.0 * np.exp(-t / 1e-3))) < 1e-9
 
 
 def test_dsed_still_runs_when_no_ics_were_declared():

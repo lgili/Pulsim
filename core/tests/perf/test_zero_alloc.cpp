@@ -44,7 +44,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/pwl/nonlinear_refresh_diode.hpp"
+#include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -219,6 +222,40 @@ TEST_CASE("steady-state solve_at (same mask+dt) is allocation-free",
         REQUIRE(after - before == 0);
     }
     REQUIRE(f.cache->metrics().event_hits >= 1000);
+}
+
+
+TEST_CASE("solve_at refactor of a resident entry at a new dt is allocation-free",
+          "[v2][perf][zero_alloc]") {
+    // update-trbdf2-factor-reuse part 2: in-place J = G + (1/dt)·C on the
+    // entry's own pattern, and the LU keeps its work vectors and L/U
+    // capacity between factorisations.
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+
+    SwitchStateMask m_on(2);
+    m_on.set(0, true);
+    const auto n = static_cast<Index>(f.pool.state_size(f.g));
+    Vector b_extra = Vector::Zero(n);
+    Vector x;
+
+    f.cache->solve_at(m_on, 5e-7, b_extra, x);   // build entry
+    f.cache->solve_at(m_on, 4e-7, b_extra, x);   // first refactor
+
+    const auto refactors_before = f.cache->metrics().event_refactors;
+    Eigen::internal::set_is_malloc_allowed(false);
+    const std::size_t before = g_new_count.load();
+    Real dt = 3e-7;
+    for (int k = 0; k < 100; ++k, dt *= 1.01) {
+        f.cache->solve_at(m_on, dt, b_extra, x);
+    }
+    const std::size_t after = g_new_count.load();
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
+    REQUIRE(f.cache->metrics().event_refactors - refactors_before == 100);
 }
 
 TEST_CASE("run_transient hot loop: zero std-container allocations",
@@ -403,4 +440,57 @@ TEST_CASE("substep event correction path is allocation-free per event",
         // ... and emphatically NOT proportional to the step count.
         REQUIRE(delta < 5000 / 10);
     }
+}
+
+TEST_CASE("Newton iteration on a run workspace is allocation-free",
+          "[v2][perf][zero_alloc][newton]") {
+    // update-newton-persistent-solver 3.6 / 4.4: after the first call a
+    // Newton iteration allocates nothing — J_nl keeps its pattern, the
+    // combined Jacobian is written in place, and the in-house LU
+    // refactorises into its own L/U capacity.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "p", "gnd", 24.0);
+    b.add_switch("S", "p", "sw", 1e3, 1e-9);
+    b.add_nonlinear_diode("D", "gnd", "sw", models::IdealDiode::Params{});
+    b.add_inductor("L", "sw", "o", 1e-4);
+    b.add_capacitor("C", "o", "gnd", 4.7e-5);
+    b.add_resistor("R", "o", "gnd", 10.0);
+    PwlStateSpaceCache cache(b.graph(), b.pool());
+    cache.build_lazy(1e-7);
+    SwitchStateMask m(1);
+    m.set(0, true);
+    const auto& seg = cache.lookup(m);
+    const auto n = static_cast<Index>(seg.state_size);
+    NonlinearRefreshFn rf = [](const Vector& x, sparse::Matrix& J, Vector& f,
+                               const Graph& g, const DevicePool& p) {
+        return refresh_smooth_diodes(x, J, f, g, p);
+    };
+    NewtonWorkspace w;   // in-house LU
+    w.iterations_per_solve.reserve(4096);   // the run's trace, amortised
+    Vector x = Vector::Zero(n);
+    Vector be = Vector::Zero(n);
+    for (int k = 0; k < 3; ++k) {   // first calls size every buffer
+        be.setConstant(1e-3 * k);
+        solve_with_newton_in_place(seg, rf, b.graph(), b.pool(), x, be,
+                                   Size{50}, Real{1e-9}, Real{1e-9}, false,
+                                   false, &w);
+    }
+    const auto it0 = w.iterations;
+    Eigen::internal::set_is_malloc_allowed(false);
+    const std::size_t before = g_new_count.load();
+    for (int k = 3; k < 203; ++k) {
+        be.setConstant(1e-3 * k);
+        solve_with_newton_in_place(seg, rf, b.graph(), b.pool(), x, be,
+                                   Size{50}, Real{1e-9}, Real{1e-9}, false,
+                                   false, &w);
+    }
+    const std::size_t after = g_new_count.load();
+    Eigen::internal::set_is_malloc_allowed(true);
+    INFO("Newton iterations counted: " << (w.iterations - it0)
+         << ", operator-new calls: " << (after - before));
+    REQUIRE(w.iterations - it0 > 200);   // more than one iteration per call
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
+    REQUIRE(w.analyses == 1);
 }

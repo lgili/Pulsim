@@ -62,28 +62,6 @@ unsupported_device(const topology::Graph& graph, const pwl::DevicePool& pool,
 /// Throw `UnsupportedError` for the first branch engine `e` cannot run.
 inline void require_supported(const topology::Graph& graph,
                               const pwl::DevicePool& pool, pwl::Engine e) {
-    if (e == pwl::Engine::Dsed) {
-        // DSED keeps a PWL diode with V_f > V_th ON through reverse bias
-        // (a sine clamp read 0.70 V for the whole negative half-cycle,
-        // 10.4 V off), with no warning. Refuse until its event rule
-        // handles a drop above the threshold.
-        for (Index d = 0; d < graph.num_branches(); ++d) {
-            if (!pool.is_registered(d)
-                || pool.kind_of(d) != pwl::DevicePool::StoredKind::Diode) {
-                continue;
-            }
-            const auto& dp = pool.diode_params(d);
-            if (dp.V_f > dp.V_th) {
-                throw UnsupportedError("dsed", "V_f",
-                    std::string(graph.branch_name(d)), "Diode", std::format(
-                    "engine 'dsed' cannot simulate PWL diode '{}' with "
-                    "V_f = {} > V_th = {}: it would hold the diode ON "
-                    "through reverse bias. Pass V_th = V_f + 1e-3 (the "
-                    "drop is unchanged) or use engine='pwl' / 'trbdf2'.",
-                    graph.branch_name(d), dp.V_f, dp.V_th));
-            }
-        }
-    }
     const auto b = find_unsupported(graph, pool, e);
     if (!b) return;
     const auto kind = pwl::stored_kind_name(pool.kind_of(*b));

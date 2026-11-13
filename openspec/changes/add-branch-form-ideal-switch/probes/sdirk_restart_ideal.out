@@ -1,0 +1,31 @@
+====================================================================================================
+(1) inductor cut-set: 10 V - ideal S - 1 ohm - 1 mH; S opens at 5 ms with no other path; h = tau/20
+   restart=none     i_L steps 100..105: [0. 0. 0. 0. 0. 0.]
+                     v_a steps 100..105: [-397.307628  397.307628 -397.307628  397.307628 -397.307628  397.307628]
+   restart=be_pair  i_L steps 100..105: [0. 0. 0. 0. 0. 0.]
+                     v_a steps 100..105: [0. 0. 0. 0. 0. 0.]
+   restart=sdirk3   i_L steps 100..105: [0. 0. 0. 0. 0. 0.]
+                     v_a steps 100..105: [959.018799   0.         0.         0.         0.         0.      ]
+                     flux removed L*(i+ - i-) = -9.93096483e-03 V s (L i(t-) = 9.93096483e-03); SDIRK quadrature of v_a over the step = -9.93096483e-03 V s; energy record 1/2 L i^2 = 49.3120 mJ
+====================================================================================================
+(2) capacitor loop: 1 uF at 10 V joined to 3 uF at 2 V by an ideal switch, h = 1e-7 s
+   restart=none     v1 [4. 4. 4. 4. 4.]  v2 [4. 4. 4. 4. 4.]  i_S [ 120. -120.  120. -120.  120.]  charge moved 6.000000e-06 C  energy lost 2.400000e-05 J (exact 2.4e-05)
+   restart=be_pair  v1 [4. 4. 4. 4. 4.]  v2 [4. 4. 4. 4. 4.]  i_S [0. 0. 0. 0. 0.]  charge moved 6.000000e-06 C  energy lost 2.400000e-05 J (exact 2.4e-05)
+   restart=sdirk3   v1 [4. 4. 4. 4. 4.]  v2 [4. 4. 4. 4. 4.]  i_S [-2.897056e+02  0.000000e+00  0.000000e+00  7.105427e-15  7.105427e-15]  charge moved 6.000000e-06 C  energy lost 2.400000e-05 J (exact 2.4e-05)
+====================================================================================================
+(3) ideal DCM buck (24 V, S, D, 100 uH, 47 uF, 50 ohm, D = 0.3, 100 kHz), fixed step T/N, diode
+    turn-off located by linear interpolation of i_D and the step split there; modes by the LCP;
+    restart after every gate edge and diode event. Start on the 40-digit orbit, 300 periods.
+    rule      N     v_C(300 T) - orbit      i_L(300 T)    factorisations
+    none       50   +1.248e-03 V            +0.0e+00 A     603
+    none      100   +6.261e-04 V            +0.0e+00 A     603  order 1.00
+    none      200   +3.135e-04 V            +0.0e+00 A     603  order 1.00
+    none      400   +1.569e-04 V            +0.0e+00 A     603  order 1.00
+    be_pair    50   +1.092e-03 V            +0.0e+00 A     603
+    be_pair   100   +2.732e-04 V            +0.0e+00 A     603  order 2.00
+    be_pair   200   +6.829e-05 V            +0.0e+00 A     603  order 2.00
+    be_pair   400   +1.707e-05 V            +0.0e+00 A     603  order 2.00
+    sdirk3     50   -2.442e-06 V            +0.0e+00 A     606
+    sdirk3    100   -6.591e-07 V            +0.0e+00 A     606  order 1.89
+    sdirk3    200   -1.709e-07 V            +0.0e+00 A     606  order 1.95
+    sdirk3    400   -4.345e-08 V            +0.0e+00 A     606  order 1.98

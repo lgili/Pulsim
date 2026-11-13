@@ -143,3 +143,53 @@ Probes: `core_review_2026-11/arch/{matrix,probe3,probe5,probe7}.py`.
 - Results: bit-identical on the fixed engine and step-identical on the
   variable-step engine at the switch; nothing moves until the legacy
   drivers are deleted.
+
+## Re-centred scope, 2026-11-13
+
+> Appended; the sections above stand. Where this section disagrees
+> with them it supersedes them, and says so.
+
+The core roadmap now has two pillars, the ideal switch with
+complementarity mode selection and exact propagation
+(`openspec/CORE_ROADMAP.md`, "The centre of the roadmap"). Phase 3 is
+designed around them: the one kernel is **event-driven first**. Its
+loop is "advance exactly to the next event, then handle the event"; an
+integrator is how a segment is advanced when it cannot be propagated
+exactly, not the shape of the loop.
+
+What changes in this change's plan:
+
+- **The kernel loop**: pop the next event from the queue
+  (`add-unified-event-queue`); advance the state to it with the
+  segment's strategy; at the event, select the mode
+  (`add-complementarity-mode-selection`), re-initialise
+  (`add-branch-form-ideal-switch` D4), restart the strategy. The step
+  loop of D4 above becomes the inner loop of an implicit segment.
+- **Strategies**: the exact propagator (`add-exact-propagator-strategy`,
+  the default for linear and PWL segments); the trapezoidal rule on a
+  fixed grid with the restart rule of three consecutive Alexander
+  SDIRK(2,2) steps after every discontinuity; TR-BDF2 with error
+  control. The two implicit ones serve nonlinear segments and segments
+  the propagator declines.
+- **One mode-selection service and one re-initialisation service**,
+  called at every event by every strategy. The per-strategy event
+  policies of D4 (`IterateAtStepEnd`, `Localize`) keep their location
+  part and lose their decision part: `modes.settle` is replaced by the
+  selection service once it is the default.
+- **Engine names survive as strategy selectors**: `engine='auto'` (the
+  default: exact where eligible, TR-BDF2 elsewhere), `'exact'` (alias
+  `'dsed'`), `'pwl'` (trapezoid on a fixed grid with the SDIRK restart),
+  `'trbdf2'`; `'dsed'` and the hidden legacy names keep working for a
+  legacy period with a deprecation warning.
+- `RestartPolicy::Cda` (the backward-Euler pair) is superseded by
+  `RestartPolicy::Sdirk22x3`, the restart rule of three consecutive
+  Alexander SDIRK(2,2) steps; this supersedes the row "`Cda` —
+  `add-discontinuity-restart-rule`" of D4, D2's backward-Euler restart
+  paragraph and the spec scenario "Restart half-steps reuse the
+  nominal factor", which remain only as the legacy policy.
+
+The equality proofs of D7 (bit-identical fixed engine, step-identical
+variable-step engine) are unchanged: they are proved with the legacy
+decision and restart policies selected, before the defaults flip.
+The defaults flip in the single number-changing release of the
+roadmap.

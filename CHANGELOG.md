@@ -63,7 +63,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the V_link low-pass and the load pole); `measure_loop_gain.py`
   measures 637–692 Hz / 48–58° (inner) and 19.6–20.3 Hz / 55–63°
   (outer), where the old gains gave 21–23° on the inner loop at 220 V.
-  P_total now reads +4.8 / +13.7 / +6.3 % against PSIM, but PSIM's
+  P_total now reads +4.7 / +13.7 / +6.3 % against PSIM, but PSIM's
   OP 2.3 terms sum to 60.2 W against its stated 41.79 W (README).
 * **Fixed** (project model) every 3-φ MMC builder in
   `projects/inverters/mmc_3phase` (L0, L1, L2, both IGBT variants, the
@@ -134,6 +134,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   v(from) − v(to) for every capacitor (each group walked from ground);
   a loop of `c0` values that breaks KVL raises `ValueError`.
 
+### Integration fixes (batch 5: in-house LU Newton, TR-BDF2 error control)
+
+* **Fixed** `engine='trbdf2'` lands the corners of pulse and table
+  current sources as source breakpoints, like the voltage sources (it
+  clamped the step to them but did not count or restart on them).
+* **Changed** the Newton roundoff acceptance runs on the in-house-LU
+  workspace: its backward error reads the workspace's copy of the
+  iterate. A solve the Eigen path aborted can now converge (100 µH at
+  `tol_newton_dx` = 1e-11 completes; its test pin changed).
+* **Changed** the reference harness compares on an edge-tolerant
+  measure: source-forced nodes are dropped and the step that contains a
+  switching edge is not interpolated (`--metric interp` keeps the old
+  measure). `benchmarks/REFERENCE_STATUS.md` states which one it uses.
+  A trace that switches across more than half its span (dsed sampled at
+  the switching rate) keeps its steps. Re-frozen triage: 21 `known:`
+  cells cleared (they agree), `ll08_buck_mosfet` error → disagree.
+* **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
+  grinds to `max_steps` on the SEPIC benchmark (it ran before the
+  error-control change); the harness has no reference for it, so its
+  pwl and trbdf2 cells are `error` and not frozen.
+* **Changed** `ll16_flyback_closed_loop` completes on `pwl` with
+  roundoff warnings (it aborted at 37 µs); its state is wrong from t = 0
+  on the base tree too (I(Lm_core) ≈ 2.4e13 A). Triage keeps it `error`.
+* **Changed** pinned `trbdf2` counts and ceilings, old → new with the
+  reason in each file (`analytic.yaml`, `perf_counters.yaml`, the PWM
+  conformance step counts 1104/2254 → 1031/2058). Two ceilings are
+  looser: `hard_switched_rc` 1.098e-6 → 2.224e-6, `buck_dcm` 4.136e-7 →
+  5.635e-7; ten are tighter.
+
 ### Integration fixes (review of the integration branch, 2026-11-13)
 
 * **Fixed** `periodic_steady_state` accepted a sine, pulse or table
@@ -156,6 +185,146 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `RetiredDeviceError` that is still a `RuntimeError`.
 * **Changed** `add_inductor_coupling` refuses a winding built with
   `rac=` (it coupled only the ladder's main inductor).
+* **Fixed** (with `discontinuity_restart=True`) a pulse current source's
+  zero-rise edge is a source jump: it restarts and is read at its left
+  limit (it was integrated at first order; 1 A into 1 kΩ ∥ 1 nF, error
+  at τ 17.8 V → 0.26 V at `dt` = 100 ns). Table and sine current
+  sources are continuous and do not restart.
+* **Fixed** (with the rule) `steady_state` / `sampled_ac` dropped
+  `restart_steps_left` from the period snapshot: an edge one step before
+  the boundary drifted 2.03e-5 (now 2.7e-10). `sweep_path_aware` passes
+  `discontinuity_restart` (it was dropped).
+* **Changed** the restart stages' factors live in the cache's event
+  table (one per mask, byte budget, shared symbolic analysis), not in a
+  second cache; results bit-identical. `on_cache` parameter refactors
+  now reach the restart steps (they solved on stale factors).
+
+### Integration fixes (batch 4: harness, composite diode drop, exact propagator)
+
+* **Changed** `simulate(engine='dsed')` raises `DiodeModeInconsistentError`
+  (a `RuntimeError`) when a stored sample has an ON PWL diode carrying
+  reverse current or an OFF one forward-biased past its threshold (more
+  than 1e-3 of its peak). The exact propagator's zero-band settle returned
+  such runs silently: a boost with `V_th` = 0 held its diode ON at
+  -1.07 A (R = 50 Ω), a half-wave RL rectifier conducted -0.85 A. Give the
+  diode `V_th = 1e-2`, or use `pwl` / `trbdf2`.
+* **Fixed** `periodic_steady_state` solves a boost whose diode has
+  `V_th` = 0 or 1e-3 (CCM 20 Ω: 24.05363 V; DCM 500 Ω: 36.59440 V; trbdf2
+  started from the orbit stays on it to 1e-6 V); it failed "did not
+  settle". The event instants of `pattern` are the stepper's (the extra
+  Newton step moved them by 3e-22 s). `PeriodicSteadyStateResult.exact`
+  is the orbit's `result.exact`.
+* **Changed** `result.exact` names "a sine / pulse / table current source"
+  as the reason a mask is numeric (it said "PWM / pulse source").
+
+### Fixed engine: discontinuity restart rule (opt-in)
+
+`simulate(..., discontinuity_restart=True)` (also `SolverOptions`,
+`SimulationOptions.discontinuity_restart`) takes the step containing a
+mask change, a diode flip, a source jump or an inconsistent start, and
+the next two steps, as Alexander SDIRK(2,2) steps (γ = 1 − 1/√2,
+L-stable, second order). Each step is two backward-Euler-like stages of
+γ·dt; both use one factor per mask at 2γ·dt.
+
+Counters and state:
+- `res.n_restart_steps` counts the restart steps;
+- `res.n_restart_factorizations` counts the factorisations made for
+  them;
+- `SolverSnapshot.restart_steps_left` carries an unfinished window
+  across `resume_from` and pickle (`restart_pending` is now a read-only
+  `restart_steps_left > 0`).
+
+Off by default. With it off, every `pwl` output is bit for bit the
+previous one and `trbdf2`/`dsed` are unchanged (both refuse the flag;
+`auto` routes it to `pwl`). A first version of this rule, two
+backward-Euler half-steps, never shipped. It drained resonant modes:
+- a Q = 50 tank driven by a PWM source lost −11.9 % of its peak at T/50
+  (−0.86 % without the rule);
+- an LC beside an isolated PWM source kept 1.9 % of its energy.
+
+| Circuit (error vs exact / `expm`) | before (flag off) | `discontinuity_restart=True` |
+|---|---|---|
+| RL edge on the grid, `dt` = 4/2/1 µs | +1.21e-2 / 6.06e-3 / 3.03e-3 A, order 1 | +4.01e-6 / 1.01e-6 / 2.58e-7 A, order 1.98 |
+| Buck CCM `i_L`, T/50 … T/200 | 1.18e-2 … 2.9e-3 A, order 1.00 | 1.17e-7 … 6.6e-9 A, order 2.0 |
+| DCM idle `v(sw)` (`v_out` 13.32 V), T/100 | alternates 0.48 / 26.1 V | 13.310 … 13.323 V |
+| Hard-switched cap loop, on-current 10 A, `dt` = 1e-8 / 1e-9 | −9.8 / +29.8 A; −79 / +99 A | 9.999 A; 9.994 … 10.004 A |
+| Cap-loop conduction power (exact 0.04599 W) | 0.1968 W | 0.0459 W |
+| RC pulse, jump on the grid, `dt` = τ/10 | 0.476 V | 2.63e-3 V, order 1.9 |
+| Saturable inductor edge, `dt` = 2 µs | 1.07e-2 A, order 1 | 2.31e-5 A, order 2.00 |
+| Coss `Q/(I·t)` at sample 1 / 2 / 11 | 0.5 / 0.75 / 0.955 | 1.000000 |
+| First step, RL decay | order 1.00 | 6.66e-6 relative, order 2.00 |
+| Q = 50 tank peak, T/50 / T/100 | −0.855 % / −0.055 % | −0.730 % / −0.040 % |
+| LC beside an isolated PWM, E(100 T)/E(0) | 0.9961 | 0.9973 |
+
+* **BREAKING (with the flag on): gate sampling.** The gate of step
+  `(t_{k-1}, t_k]` is `switch_fn(t_{k-1})`, not `switch_fn(t_k)`, on the
+  static path (no L/C) too.
+  - A closure with edges on the grid (`round(t/dt) % N < Don`) keeps its
+    duty and moves one step.
+  - A left-continuous one (`t > te`) becomes one step late.
+  - The step observer keeps its `(t_k, x_{k-1})` call.
+  - A pulse/PWM source whose jump falls on the step end is read at its
+    left limit.
+  - Recover the old numbers with `discontinuity_restart=False` (the
+    default today).
+* **`b_extra_fn` jumps** are restarted only when declared:
+  - give the callable a `next_jump_after(t)` attribute (next jump
+    strictly after `t`, or `inf`);
+  - it is then read at its left limit like a built-in source;
+  - composed hooks and C-blocks carry their parts' declarations;
+  - an undeclared jump in a callback is integrated as before, first
+    order.
+  The callback is called once per stage time; a restart step calls it
+  at `t_prev + γ·dt` (off the grid) and at `t`.
+* Refused: `discontinuity_restart=True` with
+  `enable_substep_state_correction=True` (`ValueError` naming both).
+* Limits:
+  - an edge off the `dt` grid stays first order (event splitting is a
+    separate change);
+  - sample 0 of a node voltage still reads 0 V;
+  - `mmc_arms` refuses the flag;
+  - a Jiles–Atherton core extrapolates its stage-1 flux from the
+    committed state (O(h) at a loop tip).
+
+### DSED: exact propagator with a stated accuracy per mask
+
+`engine='dsed'` steps each constant-source mask with
+`V e^{Λh} V⁻¹x + hφ₁(Λh)V⁻¹b` only when energy-scaled
+`u·κ₂(V) ≤ 1e-10` (tier 1), else with a cached Padé [13/13] when
+`u·‖A·h‖₁ ≤ 1e-10` (tier 2), else numerically (tier 3, recorded).
+`result.exact` reports each mask's tier, κ₂, `‖A·h‖₁` and reason plus
+the counters `n_eig`, `n_pade`, `n_phi_cache_hits`,
+`n_predicate_evals` (add-exact-propagator-strategy, first slice).
+
+* **Fixed** a critically damped series RLC (100 µH, 100 nF, one
+  period) was 1.8e-8 off in the energy norm (1.1e-6 in one component)
+  through an ill-conditioned eigenbasis; it is 2.1e-16 (tier 2).
+* **Fixed** the DCM buck (`V_th` = 1e-9 or 0) aborted with "chatter"
+  at 0.996 ms; it runs and equals the `V_th = 1e-6` run. Four of the
+  six `L·(1 ± δ)` runs (δ = 1e-5…1e-2) aborted; all complete and
+  dv_C/dL = 1758.1255 (reference 1758.1254). A `V_th = 0` buck at rest
+  ("did not settle after 64 rounds") runs. Events are bracketed in
+  time to `max(4u|t|, 1e-12·h)` and the state at an event is past the
+  crossing; a diode whose signal is zero to rounding is decided on its
+  exact OFF-mode trajectory. DCM turn-off instant: 2.3e-13 s → 9.2e-18 s.
+* **Fixed** an LC tank driving a series diode from rest never turned
+  the diode on (v_C = 3.3e-6 V instead of 13.73 V), silently: the
+  slow-manifold projection moved the start past the turn-on crossing.
+* **Fixed** a PWL diode with `V_th = V_f` ran silently wrong on `dsed`
+  (sine clamp, `V_th = V_f = 0.7`: minimum 0.0 V, reference -9.98 V).
+  It is now correct, and `V_f > V_th` is no longer refused (it was a
+  `UnsupportedError(feature="V_f")`): a current source charging a
+  capacitor into a `V_th = 0, V_f = 0.7` diode clamps at 1.2 V
+  (0.7 + 10 A / 20 S), and the DCM boost of `test_diode_forward_drop.py`
+  ("did not settle") runs, its states within 1e-5 A of trbdf2.
+* **Added** builder initial conditions (`c0=`, `i0=`, `set_initial`)
+  on `dsed` (were refused by name); `result.initial_condition_adjustment`
+  is the largest change made to a declared capacitor voltage.
+* **Changed** `simulate(engine='dsed')` on the synchronous buck of
+  `perf/p9_dsed.py` (2000 periods): 17.4 ms → 2.8 ms (min of 5; C++
+  loop about 1 ms). The builder runners take `event_log=True` and
+  return `event_times` / `event_types`; `simulate()` exposes them as
+  `result.event_times` / `result.event_types`.
 
 ### Controller ticks: one rule on every engine
 
@@ -484,6 +653,69 @@ once, above the engine dispatch, and both engines consume that plan.
 * Not in this step: the `components()` entry, the induction machine, BLDC harmonics and flux maps
   (`openspec/changes/add-mna-native-machines/DECISIONS.md`).
 
+### BREAKING: composite MOSFET / IGBT diodes — `V_F` is a conduction drop
+
+* **Changed** `add_mosfet`, `add_mosfet_with_body_diode`,
+  `add_mosfet_level1` (body diode) and `add_igbt_level1(with_fwd=True)`
+  (freewheeling diode) build their diode as `add_diode(V_th=0, V_f=V_F)`
+  (PSIM style, the mapping `add_three_phase_vsi` uses): while on,
+  `v = V_F + i/g_on`. `V_F` used to be the turn-on threshold only, so a
+  conducting body diode dropped `i/g_on` and nothing else.
+  * 10 A through the body diode of `add_mosfet(V_F=0.7)`, gate off:
+    |v_SD| 0.010 V → 0.710 V, diode power 0.10 W → 7.10 W (`pwl`,
+    `trbdf2`, DC operating point). Gate on: unchanged (0.010 V, the
+    channel carries it).
+  * 24 V buck, D = 0.5, 100 kHz, freewheeling through a gate-off
+    `add_mosfet`: V_out 11.990 V → 11.640 V; body-diode loss over the
+    last 100 of 400 periods 3.442 W, on `pwl`, `trbdf2` and `dsed`.
+  * Level-1 diodes: the hard-coded 0.5 V threshold is gone. New keyword
+    `V_F=0.7` on `add_mosfet_level1` and `add_igbt_level1` (appended, so
+    positional calls keep working); they now turn on at 0.7 V, not 0.5 V.
+  * `V_F` must be finite and ≥ 0 when a diode is built; the error names
+    the builder, the device and `V_F`.
+  * YAML: `V_F` on `mosfet`, `mosfet_level1` (with `with_body_diode`)
+    and `igbt_level1` (with `v_knee`, `with_fwd`).
+  * Migration — the old diode was a 0.7 V threshold with no drop:
+    `b.add_switch("Q", d, s, 1/R_on, 1/R_off)` plus
+    `b.add_diode("Q_body", s, d, 1e3, 1e-9, V_th=0.7, V_f=0.0)`.
+    `V_F=0.0` gives a diode that turns on at 0 V with no drop. `add_igbt`
+    is unchanged (no diode).
+
+### Reference benchmark harness restored
+
+* **Added** a harness-only reader for the 126 `schema: pulsim-v1`
+  benchmark circuits (`benchmarks/tools/v1_reader.py`) and a triage of
+  every file (`benchmarks/manifests/v2_triage.yaml`): 107 run on
+  `engine='pwl'`, 15 are skipped by name, 4 fail on `pwl` and are
+  recorded. `benchmark_runner.py` runs on `pulsim.simulate` (the missing
+  backend module import is gone); `benchmark_ngspice.py` works again.
+* **Added** time-weighted metrics (`benchmarks/tools/metrics.py`), the
+  differential runner circuit × engine (`differential_runner.py`), 20
+  analytic reference circuits with closed-form or exact piecewise-LTI
+  solutions and per-engine ceilings (RC step: `pwl` 1.59e-3 at 10 µs,
+  `trbdf2` 2.3e-7; underdamped RLC: `pwl` 6.13e-4, `trbdf2` 9.2e-5),
+  golden checkpoints of `engine='pwl'` for 45 circuits (exact step count,
+  commutation count and switch-state digest; values within `rtol`
+  1e-9 / 1e-6), and a counter-based performance gate on the counters the
+  kernel already reports. No wall-clock assertion.
+* **CI**: job `reference-smoke` (three platforms, non-blocking until one
+  week green) and `.github/workflows/nightly-reference.yml` (full matrix
+  and ngspice, never gates a pull request). `make reference-smoke` /
+  `make reference-nightly`. The general Python job deselects marker
+  `reference`.
+
+### SPICE import: current-source sign
+
+* **Fixed** `spice_to_builder`: a SPICE current source `Iname n+ n- DC I`
+  drives `I` from `n+` through the source to `n-`, so it leaves the
+  source at `n-`. The importer passed the nodes unswapped to
+  `add_current_source` (which pushes `I` out of its first node), so
+  every imported current source had the wrong sign: `I1 0 a DC 1` into
+  `R1 a 0 1` gave v(a) = -1.000 V, now +1.000 V (ngspice: +1 V). Any
+  result of an imported netlist with a current source changes sign in
+  that source's contribution. The misleading comments on
+  `add_current_source` are corrected; the kernel is unchanged.
+
 ### Periodic steady state by Newton shooting on the true state (slice 1)
 
 * **Added** `p.periodic_steady_state(b, *, period, switch_fn=None,
@@ -568,6 +800,193 @@ once, above the engine dispatch, and both engines consume that plan.
   1.6e-5 within 0.5 V of it; VDMOS double pulse E_on +0.15 %, E_off
   +0.07 %, plateau +0.35 %; Lauritzen body diode at T_M = 0.01·TT
   against SPICE TT recovery: I_rrm −0.09 %, Q_rr +0.11 %.
+
+### Segment build: per-branch device lookups resolved once (performance)
+
+* **Changed** `SegmentAssembler` resolves each branch's device kind,
+  parameter pointer and branch-current unknown once per pool instead of
+  one `DevicePool` lookup per stamp (`update-linear-time-assembly`).
+  Bit-identical on all 19 golden cases. Per-mask eager build of the
+  switched ladder (n = 3008) 337 → 212 µs; the VSI (n = 12) is
+  unchanged within noise. Tiers 2 (first visit by `partial_refactor`)
+  and 3 (reciprocal pivots) and the low-rank Newton update were
+  measured and not landed; see the changes' DECISIONS.md.
+
+### Newton on the in-house LU, no allocation per iteration (performance)
+
+* **Changed** the engines' Newton workspace factorises the combined
+  Jacobian with the in-house Gilbert–Peierls LU (one symbolic analysis
+  per pattern, numeric refactor in place) instead of `Eigen::SparseLU`
+  (`update-newton-persistent-solver`, stage A2). Calls without a
+  workspace — the DC operating point and continuation — keep
+  `Eigen::SparseLU`. Listed as a numerical change; on the 19 golden
+  cases (every Newton case on `pwl` and `trbdf2`) states, step times,
+  switch states and the iteration count of every Newton call are
+  bit-identical to before.
+* **Changed** the device refreshers and the engines' refresh wrappers
+  zero `J_nl`'s values and keep its pattern (`sparse::zero_keep_pattern`)
+  instead of `setZero()` + re-insert. With the in-house refactor a
+  Newton iteration now performs no heap allocation after the first call
+  (was ~20 Eigen mallocs). ns/step against the previous build
+  (interleaved, best of 9): Shockley buck `pwl` 3478 → 859, `trbdf2`
+  11410 → 3186; Shockley rectifier n = 51 12153 → 4860, n = 483
+  134789 → 59458; MOSFET Level-1 3824 → 989; saturable inductor
+  3555 → 834.
+* **Added** `SimulationResult.newton` (`NewtonCounters`: `solves`,
+  `iterations`, `analyses`, `factorizations`, `partial_refactors`,
+  `lm_attempts`, and `iterations_per_solve`, the iteration count of
+  every Newton call), and `pwl::solve_with_newton_in_place`, the
+  out-parameter form of `solve_with_newton_b_extra`.
+
+### Newton: one sparse-LU analysis per run (performance, bit-identical)
+
+* **Changed** `solve_with_newton_b_extra` takes an optional
+  `NewtonWorkspace*`; `run_transient` and the TR-BDF2 engine pass one per
+  run. The combined Jacobian `J_lin + J_nl` is written in place on its
+  union pattern, the residual and step vectors are reused, and the
+  `Eigen::SparseLU` analysis is kept while the pattern holds (it was
+  rebuilt every iteration). Factors, states and iteration counts are
+  bit-identical (`update-newton-persistent-solver`, stage A1; A2 and B
+  not included). Eigen heap allocations per Newton iteration on a
+  Shockley-diode buck: 47.7 → 20.4. The workspace's line-search / LM
+  refresh target is compressed after every refill: on Eigen 3.4.x
+  (Ubuntu 24.04's `libeigen3-dev`) it otherwise grew over the run and
+  every insert copied it, which made Newton runs with line search
+  ~100–300× slower (Eigen 5 was not affected).
+
+### TR-BDF2 event solvers: byte budget and allocation-free refactor (performance, bit-identical)
+
+* **Changed** `PwlStateSpaceCache::solve_at` (every TR-BDF2 solve) keeps
+  one event solver per visited switch state, bounded by the segment byte
+  budget (`set_segment_budget_bytes`, accounted separately for this
+  table) instead of 8 entries. The three-phase VSI on `trbdf2` (20 ms)
+  now builds 87 entries — one per switch state — instead of 3,198.
+* **Changed** a refactor of a resident entry at a new `dt` writes
+  `J = G + (1/dt)·C` in place and the in-house LU reuses its work
+  vectors and L/U capacity: 0 heap allocations per refactor (was 6
+  `operator new` + 6 Eigen mallocs). Results are bit-identical
+  (`update-trbdf2-factor-reuse`, parts 1-2; the step grid of part 3 is
+  not included).
+* **Removed** `PwlStateSpaceCache::kMaxEventEntries`.
+* **Added** `CacheMetrics.event_evictions`.
+
+### Linear-time segment assembly and one symbolic analysis per circuit (performance, bit-identical)
+
+* **Changed** `PwlStateSpaceCache` builds the sparse structure of `G`,
+  `C` and `J` once per assembly regime (dynamic `dt > 0`, static
+  `dt = 0`); every later switch state stamps into that template and
+  writes `J = G + (1/dt)·C` through slot arrays. The first structure is
+  assembled with a per-column reserve, so assembly is linear in the
+  number of stamps instead of quadratic. One symbolic analysis (column
+  ordering, elimination tree) per regime is shared by every segment,
+  event entry and the rank-1 solver; a new switch state costs a numeric
+  factorisation. The cached solve forms the right-hand side inside the
+  LU's row-permutation pass. Matrices, factors and every result are
+  bit-identical (`update-linear-time-assembly`, tier 1).
+  Measured: segment build at 15,002 unknowns 123 ms → 3.9 ms (build
+  cost now grows 10.6× per 10× unknowns, was 85×); per switch state on
+  a 3008-unknown switched ladder 5.7 ms → 0.24 ms; per-step cost
+  unchanged within noise.
+* **Added** `CacheMetrics.structure_builds`, `symbolic_analyses`,
+  `symbolic_fallbacks`.
+
+### Newton roundoff acceptance (add-newton-roundoff-acceptance)
+
+* **Added** transient Newton solves (`engine='pwl'` dynamic path,
+  `'trbdf2'` / `'auto'`) that exhaust the iteration budget are accepted
+  instead of aborting when `||dx||` stagnated over the last two steps,
+  `||dx|| <= 1e-6·max(1, |x|)` and every row's residual is at most
+  8 eps of the magnitudes the row sums (Oettli–Prager backward error).
+  Two 100 µH inductors and a Shockley diode: dt = 1e-11, 1e-12, 1e-13 s
+  aborted (||dx|| 1.9e-9 … 1.2e-7 on powers of two) and now complete
+  (ω ≤ 0.75 ε) with `i_L` on the physical trend to 1e-3; 10 mH at
+  1e-9 … 1e-11 s likewise. A warning names the count;
+  `result.newton_roundoff_accepts`, `newton_roundoff_omega_max`,
+  `newton_roundoff_row`. Tolerances unchanged; the DC operating point
+  never accepts this way. A declined check is explained in the abort.
+* Not cured: the documented TR-BDF2 h_min stall (snubbed flyback with a
+  saturable transformer) now runs to 494 µs instead of 10 µs (213
+  accepted solves) and then aborts in a roundoff limit cycle that the
+  stagnation test reads as contraction (||dx|| 3.2e-7, 5.0e-7,
+  1.9e-7; ω = 0.28 ε). The known-limitations row stays. The step floor
+  `h_noise` of the design is not implemented.
+
+### TR-BDF2 error control (update-trbdf2-error-control)
+
+* **Changed (BREAKING, tolerance meaning)** `engine='trbdf2'` /
+  `'auto'`: the local error estimate gets the factor 2 of Bank et al.;
+  it was half the true local error, so `rtol` / `atol` meant twice
+  themselves. Defaults unchanged (`1e-5` / `1e-8`); pass doubled values
+  for the previous step density (measured: a diode bridge then repeats
+  its previous step sequence exactly). Up to 27 % more steps.
+* **Changed (BREAKING, step sequence)** the step floor, probe floor,
+  probe cap, chatter floor and gate-pulse floor follow the step
+  ceiling instead of `t_end − t_start` (bit-identical while the
+  ceiling is `span/1000`): with `dt` given, a buck's steps up to 39 T
+  no longer depend on `t_end`. The default ceiling is unchanged.
+  `_trbdf2_stats["h_max_basis"]`.
+* **Added** source breakpoints: pulse-source corners and PWM voltage
+  source edges are landed and restarted like gate edges. Pulse into an
+  RC: rejects 32 → 4, no accepted step below 1e-9 s before a jump
+  (1.2e-10 s before), error at rtol 1e-6 1.82e-4 → 1.16e-4 V.
+  `_trbdf2_stats["n_source_breakpoints"]`.
+* Measured against update-trbdf2-post-event-restart (default
+  tolerances, probes/trbdf2_baseline.py): buck CCM error 7.18e-5 →
+  5.98e-5 (1636 → 1651 steps); rtol 1e-8: 1.18e-6 → 7.55e-7 (9152 →
+  11628); LC tank 2.06e-1 → 1.30e-1 (2562 → 3239); MOSFET half
+  bridge 4.14e-4 → 3.12e-4 (2088 → 1692). Moved the wrong way, both
+  because the same `rtol` is now twice as strict and these two do not
+  converge monotonically in `rtol` (they did the same at `rtol/2`
+  before): Shockley rectifier 2.74e-5 → 3.73e-5, diode bridge
+  time-weighted 3.07e-2 → 5.57e-2 (1242 → 1437 steps).
+* **Fixed** a SIGSEGV in the initial diode settle when its (Newton)
+  probe failed: it read an unsized state (PMSM beside a rectifier).
+* Re-baselined, not loosened: two TR-BDF2 tests run at doubled
+  tolerances (the previous density): the Lauritzen gated buck (at the
+  new defaults it hits the known h_min stall at 15 µs, as it did
+  before at rtol 5e-6) and the kilovolt-artefact strict xfail (at
+  1e-6 the new sequence misses the spike by chance; 1897 V at the
+  defaults).
+* Not done: the Hosea–Shampine stiff filter (needs a solve on an
+  existing factor in `PwlStateSpaceCache`); `h_chatter` stays.
+
+### TR-BDF2 restart after a gate edge (update-trbdf2-post-event-restart)
+
+* **Changed (BREAKING, step sequence)** `engine='trbdf2'` / `'auto'`:
+  after a landed gate edge the edge cascade's probe (a trapezoidal
+  solve of `h_probe` under the post-edge mask) is committed as a
+  recorded step, so the companion history's derivative slots (inductor
+  voltage, capacitor current, each stateful device's slot) hold
+  post-edge values; at a boundary-settled edge only the slots are
+  re-read. The post-edge step memory stores the controller's proposal
+  instead of the accepted step. Each gate edge therefore adds one
+  recorded sample `h_probe` after the edge (not counted in `n_accept`). The first post-edge step was sized by a stale,
+  pre-edge derivative and collapsed; the memory then pinned it (the
+  buck's rising-edge step was 8.26e-13 s for a whole run). Measured,
+  24 V buck, 400 periods, default tolerances:
+
+  | | before | after |
+  |---|---|---|
+  | accepted steps (per period) | 7241 (18.1) | 1636 (4.1) |
+  | solves | 16262 | 5018 |
+  | rejects | 82 | 65 |
+  | first step after an edge | 8.26e-13 s | ≥ 1.7e-7 s |
+  | end error vs expm | 9.84e-4 | 7.18e-5 |
+  | DCM (R = 50 Ω): accepted steps, error | 15242, 2.39e-4 | 8932, 1.62e-5 |
+
+  Variable-step step counts and results move within their tolerance;
+  circuits without gate edges (a diode bridge, pulse sources) are
+  unchanged, and `engine='pwl'` is bit-identical. Not done at diode
+  events: there the probe holds a stiff L·g_off mode and the refresh
+  was measured to multiply a bridge's diode events by 260; the DCM
+  buck's post-turn-off steps (4e-14 s) therefore remain.
+  `res._trbdf2_stats` gains `n_derivative_refreshes`,
+  `n_refresh_probes` and `h_post_event_min`.
+  The trbdf2/auto conduction losses pinned by
+  `test_diode_forward_drop.py` moved by up to 2.4e-4 relative and were
+  re-pinned (boost DCM switch: 8.7e-6 → 2.3e-6 W off the fixed-step
+  value). A 3-phase VSI on RL loads takes 3998 → 1219 steps with its
+  end error 6.28e-4 → 6.73e-4 (the one circuit whose error grew).
 
 ### PWL diode forward drop (PSIM `V_f`)
 

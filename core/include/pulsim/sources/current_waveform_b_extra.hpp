@@ -17,6 +17,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/sources/source_jumps.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
@@ -46,7 +47,10 @@ namespace pulsim::sources {
 /// waveform current source's value at `t`.
 inline void compute_current_waveform_b_extra(
     const pwl::DevicePool& pool, const topology::Graph& graph, Real t,
-    Vector& out) {
+    Vector& out,
+    // > 0: a pulse source that jumps exactly at t reads its LEFT limit,
+    // value_at(t - left_by) (discontinuity_restart; 0 = right value).
+    Real left_by = Real{0}) {
     const auto n = static_cast<Index>(pool.state_size(graph));
     if (out.size() != n) {
         out = Vector::Zero(n);
@@ -59,7 +63,9 @@ inline void compute_current_waveform_b_extra(
             continue;
         }
         const auto& br = graph.branch(b_id);
-        const Real i = pool.current_waveform_value(b_id, t);
+        const Real i = pool.current_waveform_value(
+            b_id, left_by > Real{0} && source_jumps_at(pool, b_id, t)
+                      ? t - left_by : t);
         if (br.from >= 0) out[br.from] -= i;
         if (br.to >= 0) out[br.to] += i;
     }

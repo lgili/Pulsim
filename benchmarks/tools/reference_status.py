@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Regenerate benchmarks/REFERENCE_STATUS.md: the differential matrix and
+the analytic set per engine configuration.
+
+    reference_status.py [--circuits GLOB,...] [--json out.json]
+    reference_status.py --from-json out.json      # re-render only
+
+Configurations: ``pwl`` (defaults), ``pwl+restart``
+(``discontinuity_restart=True``), ``trbdf2`` and ``dsed`` (harness
+defaults). Cells are classified exactly as differential_runner.py does,
+against one reference per circuit (computed once, without the flag).
+Text below the ``## Notes`` heading of the existing file is kept.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import fnmatch
+import json
+import sys
+import warnings
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1])]
+import differential_runner as dr  # noqa: E402
+import metrics  # noqa: E402
+import v1_reader  # noqa: E402
+from analytic import CASES  # noqa: E402
+
+import pulsim  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "REFERENCE_STATUS.md"
+ANALYTIC = yaml.safe_load((ROOT / "manifests" / "analytic.yaml").read_text())["cases"]
+CONFIGS = {"pwl": ("pwl", {}), "pwl+restart": ("pwl", {"discontinuity_restart": True}),
+           "trbdf2": ("trbdf2", {}), "dsed": ("dsed", {})}
+KINDS = ("agree", "disagree", "error", "refused")
+
+
+@contextlib.contextmanager
+def extra_kwargs(kw):
+    """Inject ``kw`` into every pulsim.simulate call (the analytic cases
+    take no keyword of their own)."""
+    orig = pulsim.simulate
+    pulsim.simulate = lambda *a, **k: orig(*a, **{**k, **kw})
+    try:
+        yield
+    finally:
+        pulsim.simulate = orig
+
+
+def differential(patterns, metric="edge"):
+    triage = dr.load_triage()
+    out = []
+    for rel, entry in sorted(triage.items()):
+        if entry["status"] != "runs" or not any(fnmatch.fnmatch(rel, p) for p in patterns):
+            continue
+        case = v1_reader.load(ROOT / rel)
+        _, sw, _ = case.build()
+        switched = sw is not None or any(k in json.dumps(case._components)
+                                         for k in ('"diode"', '"pwm"', '"pulse"'))
+        cols = dr.observables_of(case, metric)
+        tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
+        ref_name, ref = dr.reference(case, cols, min(tols.values()), metric)
+        for cfg, (eng, kw) in CONFIGS.items():
+            with extra_kwargs(kw):
+                kind, res, _, msg = dr.run_cell(case, eng)
+            rec = dict(circuit=rel, config=cfg, reference=ref_name, tol=tols[eng], message=msg,
+                       known=entry.get("known", {}).get(eng))
+            if kind != "ran":
+                rec["outcome"] = kind
+            elif ref is None:
+                rec.update(outcome="error", message="no converged reference")
+            else:
+                er, em = dr.compare(dr.traces(res, cols), ref, cols, 1e-3, metric)
+                rec.update(err_rms=er, err_max=em, outcome="agree" if er <= tols[eng] else "disagree")
+            out.append(rec)
+            print(f"{rec['outcome']:9s} {cfg:12s} {rel} {rec.get('err_rms', '')}", flush=True)
+    return out
+
+
+def analytic():
+    out = []
+    for c in CASES:
+        for cfg, (eng, kw) in CONFIGS.items():
+            spec = ANALYTIC[c.id].get(eng, {})
+            rec = dict(case=c.id, config=cfg, frozen=next(
+                (f"{k}: {spec[k]}" for k in ("ceiling", "known", "refused") if k in spec), ""))
+            try:
+                with extra_kwargs(kw):
+                    r = c.run(eng)
+                e = metrics.err_rms(np.asarray(r.times), c.observe(r), c.exact,
+                                    abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
+                rec.update(err_rms=e, outcome="agree" if e <= spec.get("ceiling", 1e-3) else "disagree")
+            except dr.REFUSAL as ex:
+                rec.update(outcome="refused", message=f"{type(ex).__name__}: {ex}"[:200])
+            except Exception as ex:  # noqa: BLE001 - classified
+                rec.update(outcome="error", message=f"{type(ex).__name__}: {ex}"[:200])
+            out.append(rec)
+            print(f"{rec['outcome']:9s} {cfg:12s} {c.id} {rec.get('err_rms', '')}", flush=True)
+    return out
+
+
+def _counts(recs):
+    rows = []
+    for cfg in CONFIGS:
+        n = [sum(r["config"] == cfg and r["outcome"] == k for r in recs) for k in KINDS]
+        rows.append(f"| {cfg} | " + " | ".join(map(str, n)) + " |")
+    return ["| configuration | " + " | ".join(KINDS) + " |", "|---|---:|---:|---:|---:|", *rows]
+
+
+def _e(r):
+    return f"{r['err_rms']:.3g}" if "err_rms" in r else r["outcome"]
+
+
+def render(diff, ana, notes, metric="edge"):
+    by = {(r["circuit"], r["config"]): r for r in diff}
+    circuits = sorted({r["circuit"] for r in diff})
+    L = ["# Reference status", "",
+         "Generated by `benchmarks/tools/reference_status.py` (do not edit above",
+         "`## Notes`). Outcomes as in `differential_runner.py`: `err_rms` is the",
+         "time-weighted RMS error over the observables' span against the reference",
+         "(trbdf2 rtol 1e-8, else pwl dt/4), tolerance 2e-2 (pwl, switched) / 1e-3.",
+         f"Measure: `{metric}`" + (" (source-forced nodes dropped from the default observables;"
+                                   " the steps that contain a switching instant left out)."
+                                   if metric == "edge" else " (the previous measure)."),
+         "", f"## Differential matrix ({len(circuits)} circuits)", "", *_counts(diff), "",
+         "### Fixed engine: restart rule off vs on (circuits that do not agree with it off)", "",
+         "| circuit | tol | pwl | pwl+restart |", "|---|---:|---:|---:|"]
+    for c in circuits:
+        a, b = by[(c, "pwl")], by[(c, "pwl+restart")]
+        if a["outcome"] != "agree":
+            L.append(f"| {c.removeprefix('circuits/')} | {a['tol']:g} | {_e(a)} | {_e(b)} |")
+    L += ["", "### Every cell whose outcome differs from the frozen `known:` entry", "",
+          "| circuit | engine | frozen | now | err_rms |", "|---|---|---|---|---:|"]
+    for r in diff:
+        if r["config"] == "pwl+restart":
+            continue
+        frozen = r["known"] or "agree/refused"
+        if (r["known"] or None) != (r["outcome"] if r["outcome"] in ("disagree", "error") else None):
+            L.append(f"| {r['circuit'].removeprefix('circuits/')} | {r['config']} | {frozen} "
+                     f"| {r['outcome']} | {_e(r) if 'err_rms' in r else ''} |")
+    if L[-1].startswith("|---|---|---|---|"):
+        L.append("| (none) | | | | |")
+    L += ["", "### All cells (err_rms or outcome)", "",
+          "| circuit | " + " | ".join(CONFIGS) + " |", "|---|" + "---:|" * len(CONFIGS)]
+    for c in circuits:
+        L.append(f"| {c.removeprefix('circuits/')} | " + " | ".join(_e(by[(c, k)]) for k in CONFIGS) + " |")
+    L += ["", f"## Analytic set ({len(CASES)} cases; agree = within the frozen ceiling, 1e-3 when none)",
+          "", *_counts(ana), "", "| case | " + " | ".join(CONFIGS) + " |", "|---|" + "---:|" * len(CONFIGS)]
+    aby = {(r["case"], r["config"]): r for r in ana}
+    for c in CASES:
+        L.append(f"| {c.id} | " + " | ".join(
+            f"{_e(aby[(c.id, k)])}{' ✗' if aby[(c.id, k)]['outcome'] in ('disagree', 'error') else ''}"
+            for k in CONFIGS) + " |")
+    return "\n".join(L) + "\n\n## Notes\n" + notes
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--circuits", default="*")
+    ap.add_argument("--json", help="also write the cells to this file")
+    ap.add_argument("--from-json", help="re-render from a --json file, no runs")
+    ap.add_argument("--metric", choices=dr.METRICS, default="edge",
+                    help="differential measure (see differential_runner.py)")
+    args = ap.parse_args(argv)
+    warnings.simplefilter("ignore")
+    if args.from_json:
+        d = json.loads(Path(args.from_json).read_text())
+        diff, ana = d["differential"], d["analytic"]
+        args.metric = d.get("metric", "interp")
+    else:
+        pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in args.circuits.split(",")]
+        diff, ana = differential(pats, args.metric), analytic()
+    if args.json:
+        Path(args.json).write_text(json.dumps(dict(differential=diff, analytic=ana,
+                                                   metric=args.metric), indent=1))
+    old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    notes = old.split("\n## Notes\n", 1)[1] if "\n## Notes\n" in old else "\n(none)\n"
+    OUT.write_text(render(diff, ana, notes, args.metric), encoding="utf-8")
+    print(f"wrote {OUT}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

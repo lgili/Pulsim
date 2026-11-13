@@ -844,6 +844,7 @@ void init_module(py::module_& m) {
               py::arg("with_fwd") = false,
               py::arg("tau_tail") = 0.0,
               py::arg("k_tail")   = 0.0,
+              py::arg("V_F")      = 0.7,
               py::return_value_policy::reference,
               "Add a 3-terminal IGBT Level 1 (linear-"
               "conduction model with cutoff sigmoid). "
@@ -856,7 +857,9 @@ void init_module(py::module_& m) {
               "`with_fwd=True` for the co-packaged anti-"
               "parallel freewheeling diode, which an inductive "
               "load needs: without it there is no path for the "
-              "freewheeling current and the solve fails. Use "
+              "freewheeling current and the solve fails. `V_F` is "
+              "that diode's CONDUCTION DROP (v = V_F + i/1e3 S "
+              "while on; it turns on at V_F). Use "
               "`run_transient(..., enable_nonlinear_refresh="
               "True)` to stamp the device per Newton iteration. "
               "`tau_tail`/`k_tail` add the TURN-OFF TAIL: when the "
@@ -882,6 +885,7 @@ void init_module(py::module_& m) {
               py::arg("lambda_") = 0.02,
               py::arg("kappa")   = 15.0,
               py::arg("with_body_diode") = true,
+              py::arg("V_F") = 0.7,
               py::return_value_policy::reference,
               "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
               "Level 1). Cutoff/triode/saturation regions "
@@ -896,7 +900,9 @@ void init_module(py::module_& m) {
               "carries the current when the gate is off and an "
               "inductive load would otherwise have no path. "
               "Set `with_body_diode=False` for an eGaN HEMT, "
-              "which has no p-n body diode. Call "
+              "which has no p-n body diode. `V_F` is the body "
+              "diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while "
+              "on; it turns on at V_F). Call "
               "`run_transient` with "
               "`enable_nonlinear_refresh=True` so the Newton "
               "loop stamps the MOSFET each iteration.")
@@ -1098,8 +1104,9 @@ void init_module(py::module_& m) {
               "conducts in reverse through the channel, not a "
               "p-n junction) or for a bare switch. Defaults: "
               "R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the "
-              "body diode's turn-on THRESHOLD (add_diode's V_th), "
-              "not a conduction drop.")
+              "body diode's CONDUCTION DROP (add_diode's V_f): "
+              "v_SD = V_F + i/1e3 S while on, and it turns on at "
+              "V_F.")
         .def("add_mosfet_with_body_diode",
               &builder::CircuitBuilder::add_mosfet_with_body_diode,
               py::arg("name"), py::arg("drain"),
@@ -1114,8 +1121,8 @@ void init_module(py::module_& m) {
               "intrinsic anti-parallel body diode. Adds "
               "TWO branches: switch (drain→source) + "
               "diode (source→drain). V_F is the body diode's "
-              "turn-on THRESHOLD (add_diode's V_th), not a "
-              "conduction drop.")
+              "CONDUCTION DROP (add_diode's V_f): v_SD = V_F + "
+              "i/g_on_diode while on, and it turns on at V_F.")
         .def("add_igbt",
               &builder::CircuitBuilder::add_igbt,
               py::arg("name"), py::arg("collector"),
@@ -2001,6 +2008,22 @@ void init_module(py::module_& m) {
         .def_readonly("event_builds", &pwl::CacheMetrics::event_builds,
                        "solve_at calls that had to build a fresh "
                        "event solver.")
+        .def_readonly("event_evictions",
+                       &pwl::CacheMetrics::event_evictions,
+                       "solve_at entries evicted (LRU) under the byte "
+                       "budget.")
+        .def_readonly("structure_builds",
+                       &pwl::CacheMetrics::structure_builds,
+                       "Sparse-structure (template) builds of G/C/J: one "
+                       "per assembly regime.")
+        .def_readonly("symbolic_analyses",
+                       &pwl::CacheMetrics::symbolic_analyses,
+                       "Symbolic analyses run: one per assembly regime, "
+                       "shared by every switch state.")
+        .def_readonly("symbolic_fallbacks",
+                       &pwl::CacheMetrics::symbolic_fallbacks,
+                       "Matrices whose pattern refused the shared "
+                       "analysis and were analysed privately.")
         .def("__repr__", [](const pwl::CacheMetrics& x) {
             return std::string("CacheMetrics(evictions=") +
                    std::to_string(x.segment_evictions) +
@@ -2214,6 +2237,13 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_lm)
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("discontinuity_restart",
+                        &SimulationOptions::discontinuity_restart,
+                        "Fixed engine: take the step after a discontinuity "
+                        "(mask change, diode flip, source jump, inconsistent "
+                        "start) as two backward-Euler half-steps; gate mask "
+                        "sampled at the step start. Off = the engine before "
+                        "the rule, bit for bit.")
         .def_readwrite("inductor_freeze_di_max",
                         &SimulationOptions::inductor_freeze_di_max)
         .def_readwrite("inductor_abs_clamp",
@@ -2396,6 +2426,25 @@ void init_module(py::module_& m) {
         .def_readonly("new_state",
                        &CommutationEvent::new_state);
 
+    py::class_<solver::NewtonCounters>(m, "NewtonCounters",
+        "Newton linear-algebra counters of one run "
+        "(update-newton-persistent-solver). All zero without Newton.")
+        .def_readonly("solves", &solver::NewtonCounters::solves)
+        .def_readonly("iterations", &solver::NewtonCounters::iterations)
+        .def_readonly("analyses", &solver::NewtonCounters::analyses)
+        .def_readonly("factorizations",
+                      &solver::NewtonCounters::factorizations)
+        .def_readonly("partial_refactors",
+                      &solver::NewtonCounters::partial_refactors)
+        .def_readonly("lm_attempts", &solver::NewtonCounters::lm_attempts)
+        .def_property_readonly("iterations_per_solve",
+            [](const solver::NewtonCounters& c) {
+                return py::array_t<std::uint16_t>(
+                    static_cast<py::ssize_t>(c.iterations_per_solve.size()),
+                    c.iterations_per_solve.data());
+            },
+            "Iterations of each Newton call, in call order (uint16).");
+
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
@@ -2456,6 +2505,8 @@ void init_module(py::module_& m) {
             "Bytes held by the contiguous sample buffer.")
         .def_readonly("event_iteration_count",
                        &SimulationResult::event_iteration_count)
+        .def_readonly("newton", &SimulationResult::newton,
+                      "Newton counters of the run (NewtonCounters).")
         // Per-sample record of the STAMPED switch / diode mask
         // (result.hpp, `switch_state_bits`). Unpacked here into a
         // (num_steps, num_switches) bool array; column j is bit j of
@@ -2538,8 +2589,25 @@ void init_module(py::module_& m) {
         .def_readonly("dt_retries", &SimulationResult::dt_retries,
                        "Steps that had to be re-taken at a reduced "
                        "dt. Empty on a run that never needed one.")
+        .def_readonly("n_restart_steps", &SimulationResult::n_restart_steps,
+                       "Steps taken as SDIRK(2,2) restart steps "
+                       "(discontinuity_restart). 0 with the rule off.")
+        .def_readonly("n_restart_factorizations",
+                       &SimulationResult::n_restart_factorizations,
+                       "Factorisations made for the restart stages: one "
+                       "per mask at 2*gamma*dt (more only if the segment "
+                       "byte budget evicts). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
+        .def_readonly("newton_roundoff_accepts",
+                       &SimulationResult::newton_roundoff_accepts,
+                       "Transient Newton solves accepted at roundoff "
+                       "level (stagnated dx, row backward error <= "
+                       "8 eps) instead of aborting.")
+        .def_readonly("newton_roundoff_omega_max",
+                       &SimulationResult::newton_roundoff_omega_max)
+        .def_readonly("newton_roundoff_row",
+                       &SimulationResult::newton_roundoff_row)
         .def("num_steps", &SimulationResult::num_steps);
 
     // ---- run_transient ---------------------------------------------------
@@ -3019,6 +3087,14 @@ void init_module(py::module_& m) {
         .def_readwrite("igbt_tail_history", &SolverSnapshot::igbt_tail_history)
         .def_readwrite("pmsm_history", &SolverSnapshot::pmsm_history)
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("restart_steps_left",
+            &SolverSnapshot::restart_steps_left,
+            "discontinuity_restart: SDIRK restart steps still owed when "
+            "the run ended (the rule takes a discontinuity's step and the "
+            "next two); a resumed run takes them first. 0 = none.")
+        .def_property_readonly("restart_pending",
+            [](const SolverSnapshot& s) { return s.restart_steps_left > 0; },
+            "True when restart_steps_left > 0.")
         .def("__repr__", [](const SolverSnapshot& s) {
             std::string r = "<SolverSnapshot t=" + std::to_string(s.t)
                    + " n=" + std::to_string(s.x.size())
@@ -3041,16 +3117,20 @@ void init_module(py::module_& m) {
                     s.t, s.x, s.history, s.diode_on,
                     s.saturable_history, s.coss_history,
                     s.lauritzen_history, s.igbt_tail_history,
-                    s.pmsm_history, s.valid, s.stamped_mask);
+                    s.pmsm_history, s.valid, s.stamped_mask,
+                    s.restart_steps_left);
             },
             [](py::tuple t) {
                 // 10 fields: pickled before `stamped_mask` existed;
-                // it loads with the mask unknown.
-                if (t.size() != 10 && t.size() != 11) {
+                // it loads with the mask unknown. 11: before the
+                // restart state (loads 0). Field 12 was a bool
+                // `restart_pending` (the BE-pair rule: one step owed)
+                // before it became the SDIRK step count.
+                if (t.size() < 10 || t.size() > 12) {
                     throw std::runtime_error(
                         "SolverSnapshot: pickled state has "
                         + std::to_string(t.size())
-                        + " fields, expected 10 or 11");
+                        + " fields, expected 10, 11 or 12");
                 }
                 SolverSnapshot s;
                 s.t = t[0].cast<Real>();
@@ -3063,8 +3143,14 @@ void init_module(py::module_& m) {
                 s.igbt_tail_history = t[7].cast<std::vector<Real>>();
                 s.pmsm_history = t[8].cast<std::vector<Real>>();
                 s.valid = t[9].cast<bool>();
-                if (t.size() == 11) {
+                if (t.size() >= 11) {
                     s.stamped_mask = t[10].cast<std::vector<bool>>();
+                }
+                if (t.size() == 12) {
+                    s.restart_steps_left =
+                        py::isinstance<py::bool_>(t[11])
+                            ? (t[11].cast<bool>() ? Size{3} : Size{0})
+                            : t[11].cast<Size>();
                 }
                 return s;
             }));
@@ -3075,7 +3161,7 @@ void init_module(py::module_& m) {
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
            py::object switch_fn_obj,         // Bridge.13: was SwitchScheduleFn
-           BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
            StepObserverFn step_observer,
@@ -3087,6 +3173,20 @@ void init_module(py::module_& m) {
             // Python __call__); the detection is shared by every engine.
             const SwitchScheduleFn switch_fn =
                 pulsim_bindings_common::adapt_switch_fn(switch_fn_obj).fn;
+            // add-discontinuity-restart-rule: a b_extra_fn may DECLARE
+            // its jumps with a `next_jump_after(t)` attribute (first
+            // jump strictly after t, inf when none); the restart rule
+            // then restarts on them and reads their left limit.
+            BExtraFn b_extra_fn;
+            std::function<Real(Real)> b_extra_next_jump;
+            if (!b_extra_obj.is_none()) {
+                b_extra_fn = b_extra_obj.cast<BExtraFn>();
+                if (py::hasattr(b_extra_obj, "next_jump_after")) {
+                    b_extra_next_jump =
+                        b_extra_obj.attr("next_jump_after")
+                            .cast<std::function<Real(Real)>>();
+                }
+            }
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
             // Convert optional initial_state to a Vector pointer.
@@ -3149,13 +3249,14 @@ void init_module(py::module_& m) {
                                           observer_eff,
                                           x_init_ptr,
                                           continue_eff,
-                                          resume_ptr);
+                                          resume_ptr,
+                                          b_extra_next_jump);
             }
             return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
-        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("step_observer") = StepObserverFn{},
@@ -3170,7 +3271,12 @@ void init_module(py::module_& m) {
         "of every step BEFORE switch_fn/b_extra_fn evaluate "
         "— use it to update Python-side controller state "
         "(PI, comparator, etc.) so the next switch_fn call "
-        "reads the new duty. `enable_nonlinear_refresh`: "
+        "reads the new duty. A `b_extra_fn` may declare its jump "
+        "instants with a `next_jump_after(t)` attribute (first jump "
+        "strictly after t, inf when none): with "
+        "discontinuity_restart they restart the step and are read "
+        "at their left limit; an undeclared jump is not restarted. "
+        "`enable_nonlinear_refresh`: "
         "None (default) lets the kernel stamp the Newton "
         "devices (smooth / Shockley diode, MOSFET, IGBT) "
         "when the circuit has any; True forces the chain; "
@@ -4532,6 +4638,11 @@ void init_module(py::module_& m) {
             d["n_held_diode_redecided"] = st.n_held_diode_redecided;
             d["probe_floor_used"] = st.probe_floor_used;
             d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
+            d["h_max_basis"] = st.h_max_basis;
+            d["n_source_breakpoints"] = st.n_source_breakpoints;
+            d["n_derivative_refreshes"] = st.n_derivative_refreshes;
+            d["n_refresh_probes"] = st.n_refresh_probes;
+            d["h_post_event_min"] = st.h_post_event_min;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

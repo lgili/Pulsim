@@ -76,6 +76,11 @@ marked "proposed", else the most conservative one. Each entry: question
    2.3e-13 s (2.3e-8·T) early; the state is unaffected (the field is
    continuous there) but the spec asks the instant to 1e-9·T. →
    Reverse: report the raw logged instant.
+   **Reversed (integration batch 4, after add-exact-propagator-strategy):**
+   the stepper now brackets events in time to `max(4u|t|, 1e-12·h)`;
+   the Newton step moved the DCM turn-off by −3.1e-22 s and the DCM
+   boost's by 0, so `pattern` reports the logged instant (DCM turn-off
+   0.7998306984492 T, reference 0.7998306984445 T).
 11. **`B` in `frequency_response(dt=None)`** is a central difference of
    the true-state map in `u` (`du = 1e-5·max(1, |u0|)`, refused if it
    changes the commutation pattern): `switch_fn_of` is an opaque family,

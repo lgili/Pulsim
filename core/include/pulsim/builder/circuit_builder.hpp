@@ -169,7 +169,9 @@ public:
         Real K, Real V_T,
         Real lambda = Real{0.02},
         Real kappa  = Real{15.0},
-        bool with_body_diode = true) {
+        bool with_body_diode = true,
+        Real V_F = Real{0.7}) {
+        if (with_body_diode) require_diode_drop_("add_mosfet_level1", name, V_F);
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         const Index gate_idx   = resolve_node_(gate);
@@ -191,7 +193,9 @@ public:
         // when the GATE IS OFF, where the channel correctly
         // blocks and an inductive load would otherwise have no
         // path at all. Pass `with_body_diode = false` for an
-        // eGaN HEMT, which has no p-n body diode.
+        // eGaN HEMT, which has no p-n body diode. `V_F` is the
+        // diode's conduction DROP (v = V_F + i/g_on while on, PSIM
+        // style); it also turns on at V_F.
         if (with_body_diode) {
             const std::string body_name = std::string{name} + "_body";
             const Index body_b = add_branch_(
@@ -200,7 +204,7 @@ public:
             pool_.add_diode(body_b,
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
-                /*V_th=*/Real{0.5});
+                /*V_th=*/Real{0}, /*V_f=*/V_F);
         }
         return *this;
     }
@@ -646,7 +650,9 @@ public:
         Real v_knee   = Real{0.01},
         bool with_fwd = false,
         Real tau_tail = Real{0},
-        Real k_tail   = Real{0}) {
+        Real k_tail   = Real{0},
+        Real V_F      = Real{0.7}) {
+        if (with_fwd) require_diode_drop_("add_igbt_level1", name, V_F);
         if (!(R_CE_sat > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_igbt_level1(\"{}\"): R_CE_sat must be > 0 (got {}); a "
@@ -704,7 +710,7 @@ public:
         // during freewheeling without this — the solve fails
         // rather than quietly running the current backwards
         // through the transistor, which is the trade this model
-        // makes on purpose.
+        // makes on purpose. `V_F` is its conduction drop.
         if (with_fwd) {
             const std::string fwd_name = std::string{name} + "_fwd";
             const Index fwd_b = add_branch_(
@@ -713,7 +719,7 @@ public:
             pool_.add_diode(fwd_b,
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
-                /*V_th=*/Real{0.5});
+                /*V_th=*/Real{0}, /*V_f=*/V_F);
         }
         return *this;
     }
@@ -922,9 +928,9 @@ public:
     }
 
     /// Add a constant DC current source (Layer 2 V3).
-    /// A positive `I` (amperes) leaves the source at `from` into
-    /// the circuit and returns at `to` (10 mA into 1 kΩ from
-    /// `from` to ground reads v(from) = +10 V).
+    /// Positive `I` (amperes) leaves the source at `from` and
+    /// returns at `to`: `add_current_source("I", "a", "gnd", 1)`
+    /// into 1 Ohm gives v(a) = +1 V. (SPICE `I a 0` is the reverse.)
     ///
     /// Unlike voltage sources, current sources do NOT add a
     /// branch-current unknown to the state vector — the
@@ -1362,9 +1368,9 @@ public:
     ///
     /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ, body V_F = 0.7 V
     /// (typical for modern Si MOSFETs in SMPS applications).
-    /// `V_F` is the body diode's TURN-ON THRESHOLD (`add_diode`'s
-    /// V_th), not a conduction drop: once on it conducts as g_on
-    /// with no series offset.
+    /// `V_F` is the body diode's CONDUCTION DROP (`add_diode`'s
+    /// V_f, PSIM style): while on, v_SD = V_F + i/g_on. It turns
+    /// on at V_F. Before 2.1 it was a turn-on threshold only.
     CircuitBuilder& add_mosfet(
         std::string_view name, std::string_view drain,
         std::string_view source,
@@ -1384,9 +1390,9 @@ public:
     /// Add an n-channel power MOSFET WITH its intrinsic
     /// anti-parallel body diode. Adds two branches:
     ///   1. switch (drain → source) with R_on / R_off
-    ///   2. SwitchedDiode (source → drain) with turn-on
-    ///      threshold V_F (V_th, NOT a forward drop) that
-    ///      conducts during freewheeling intervals
+    ///   2. SwitchedDiode (source → drain) with conduction
+    ///      drop V_F (add_diode's V_f; v = V_F + i/g_on_diode)
+    ///      that conducts during freewheeling intervals
     /// Defaults model a typical Si MOSFET: R_on = 1 mΩ,
     /// R_off = 1 GΩ, body-diode V_F = 0.7 V.
     CircuitBuilder& add_mosfet_with_body_diode(
@@ -1397,6 +1403,7 @@ public:
         Real V_F         = Real{0.7},
         Real g_on_diode  = Real{1e3},
         Real g_off_diode = Real{1e-9}) {
+        require_diode_drop_("add_mosfet_with_body_diode", name, V_F);
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
@@ -1412,7 +1419,7 @@ public:
             body_name, source_idx, drain_idx,
             topology::BranchKind::Switch);
         pool_.add_diode(b_body, g_on_diode,
-                          g_off_diode, V_F);
+                          g_off_diode, /*V_th=*/Real{0}, /*V_f=*/V_F);
         (void)name;
         return *this;
     }
@@ -2039,6 +2046,16 @@ public:
     }
 
 private:
+    /// The composite builders' body / freewheeling-diode drop.
+    static void require_diode_drop_(std::string_view fn,
+                                    std::string_view name, Real V_F) {
+        if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): diode conduction drop V_F must be a finite "
+                "number >= 0 V (got {}).", fn, name, V_F));
+        }
+    }
+
     [[nodiscard]] static constexpr bool is_ground_alias_(
         std::string_view name) noexcept {
         return name == "gnd" || name == "GND" || name == "0";
