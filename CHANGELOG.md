@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Design evaluation: review fixes (integration batch 6c)
+
+* **Fixed** a gate edge taken at the next grid point under sub-step
+  correction (opaque `switch_fn`) and a trbdf2 subnet reached only
+  through switches are `failed` (`unlocated_gate_edges`,
+  `floating_subnet`), not `ok`; step retries and a polled `dsed`
+  schedule are counted (`dt_retries`, `polled_switch_fn_runs`).
+* **Fixed** the transient route's KPI window when a `dt` grid ends an
+  ulp short of `n·T` (it raised and stopped the batch).
+* **Fixed** design ids of different functions could collide (names,
+  globals, keyword-only defaults, `functools.partial`, bound methods).
+* **Fixed** a zero-valued sensitivity parameter gave NaN gradients; it
+  is refused. Near-miss events are counted in the record.
+* **Fixed** the kernel and Python extrema search missed a fast mode's
+  peak near a step start; the grid adds `h/2^m` points.
+* **Fixed** the Python `LossTable` refuses non-finite queries and axes,
+  like the kernel table; an inconsistent kernel edge log fails one
+  design instead of the batch.
+
 ### Datasheet loss tables in the kernel
 
 * **Added** `pulsim.LossTable3D` (`E(v, i, T_j)`) and
